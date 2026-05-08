@@ -12,6 +12,13 @@
  *       it is a typo fix.
  *     - Out-of-window edits bump updated_at and render the badge.
  *
+ *   isMeta (migration 0036):
+ *     - Honored only when actor.is_agent=true. Citizen edits ignore
+ *       this field (the schema accepts it; the handler drops it).
+ *     - An isMeta-only edit (no body change) is allowed and never
+ *       counts as a "visible" edit — the user-visible body is
+ *       unchanged. Always silent regardless of window.
+ *
  * Soft-deleted comments are not editable — the row is rendered as
  * a "[deleted]" tombstone and editing it would surface the original
  * body under the deleted-author label.
@@ -45,36 +52,58 @@ export async function updateCommentAsAuthor(
       createdAt: comments.createdAt,
       body: comments.body,
       deletedAt: comments.deletedAt,
+      isMeta: comments.isMeta,
     })
     .from(comments)
     .where(eq(comments.id, commentId))
     .limit(1);
   if (!existing) return { ok: false, reason: "not_found" };
-  // Soft-deleted comments stay readable as tombstones; editing one
-  // would surface the original body as if undeleted. Treat as gone.
   if (existing.deletedAt) return { ok: false, reason: "not_found" };
   if (existing.authorId !== authorId) return { ok: false, reason: "forbidden" };
 
-  const ageMs = Date.now() - existing.createdAt.getTime();
-  const withinWindow = ageMs <= EDIT_WINDOW_MS;
-  const bypassesWindow =
-    actor.isAgent || actor.role === "system" || actor.role === "staff";
-  if (!withinWindow && !bypassesWindow) {
-    return { ok: false, reason: "expired" };
-  }
-  if (input.body === existing.body) return { ok: false, reason: "noop" };
+  // isMeta is honored only for bot authors. Citizens passing it
+  // through are silently ignored — same gate as commentInputSchema.
+  const requestedIsMeta =
+    actor.isAgent && input.isMeta !== undefined ? input.isMeta : undefined;
 
-  // Visibility = function of time, not role. See header.
-  const silent = withinWindow;
+  const bodyChanged =
+    input.body !== undefined && input.body !== existing.body;
+  const metaChanged =
+    requestedIsMeta !== undefined && requestedIsMeta !== existing.isMeta;
+
+  if (!bodyChanged && !metaChanged) {
+    return { ok: false, reason: "noop" };
+  }
+
+  // Window check applies only to body changes. Bot tokens bypass
+  // anyway; this matters for citizen body-only edits.
+  if (bodyChanged) {
+    const ageMs = Date.now() - existing.createdAt.getTime();
+    const withinWindow = ageMs <= EDIT_WINDOW_MS;
+    const bypassesWindow =
+      actor.isAgent || actor.role === "system" || actor.role === "staff";
+    if (!withinWindow && !bypassesWindow) {
+      return { ok: false, reason: "expired" };
+    }
+  }
+
+  // Visibility = function of body change + time. An isMeta-only
+  // edit never bumps updatedAt — the user-visible body didn't move.
+  let silent: boolean;
+  if (!bodyChanged) {
+    silent = true;
+  } else {
+    const ageMs = Date.now() - existing.createdAt.getTime();
+    silent = ageMs <= EDIT_WINDOW_MS;
+  }
   const bumpedAt = silent ? null : new Date();
 
   // Atomic guard: re-check authorship + not-deleted in the WHERE so
-  // a concurrent delete or role-flip can't slip a write through. Omit
-  // updatedAt from .set() when silent so any prior post-window bump
-  // is preserved (defensive against future re-edit paths).
-  const updates: Partial<{ body: string; updatedAt: Date }> = {
-    body: input.body,
-  };
+  // a concurrent delete or role-flip can't slip a write through.
+  const updates: Partial<{ body: string; updatedAt: Date; isMeta: boolean }> =
+    {};
+  if (bodyChanged) updates.body = input.body!;
+  if (metaChanged) updates.isMeta = requestedIsMeta!;
   if (!silent) updates.updatedAt = bumpedAt as Date;
 
   const updated = await db

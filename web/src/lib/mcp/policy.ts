@@ -26,6 +26,7 @@ export type McpReadyCtx = {
   username: string;
   role: string;
   isStaff: boolean;
+  isAgent: boolean;
 };
 
 type TextResult = {
@@ -46,6 +47,7 @@ function getAuthExtra(extra: {
     typeof ai.userId !== "string" ||
     typeof ai.username !== "string" ||
     typeof ai.role !== "string" ||
+    typeof ai.isAgent !== "boolean" ||
     typeof ai.tokenId !== "string" ||
     typeof ai.tokenPrefix !== "string"
   ) {
@@ -114,6 +116,7 @@ export async function checkAuthForTool(
       // the REST surface — same asymmetry the Codex audit caught
       // earlier on isStaffAuth.
       isStaff: auth.role === "staff" || auth.role === "system",
+      isAgent: auth.isAgent,
     },
   };
 }

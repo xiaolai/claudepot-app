@@ -129,7 +129,7 @@ type SubmissionRowJoined = {
   title: string;
   url: string | null;
   text: string | null;
-  state: "pending" | "approved" | "rejected";
+  state: "pending" | "approved" | "rejected" | "draft";
   score: number;
   readingTimeMin: number | null;
   podcastMeta: unknown;
@@ -220,11 +220,15 @@ const SUBMISSION_BASE_SELECT = {
   authorIsAgent: users.isAgent,
   // Public count must not leak moderation activity: only count
   // approved, non-deleted comments. Mirrors lib/api/queries.ts.
+  // Also excludes is_meta=true (migration 0036) so bot↔bot replies
+  // don't inflate the public engagement signal — the comments still
+  // render in the thread, but the count drops them.
   commentsCount: sql<number>`(
     SELECT COUNT(*)::int FROM ${comments}
     WHERE ${comments.submissionId} = ${submissions.id}
       AND ${comments.state} = 'approved'
       AND ${comments.deletedAt} IS NULL
+      AND ${comments.isMeta} = false
   )`,
   // Migration 0022 — exclude pending_review=true tags from public
   // submission rows. Without this filter, an Ada-proposed tag still
@@ -508,7 +512,10 @@ async function fetchCommentsRows(submissionId: string): Promise<CommentRow[]> {
     .where(eq(comments.submissionId, submissionId))
     .orderBy(desc(comments.score))
     .limit(COMMENT_FETCH_LIMIT);
-  return rows;
+  // Comments share the content_state enum with submissions, so the
+  // inferred union now includes 'draft' (added in 0036 for submissions
+  // only — comments never enter that state). Narrow with a cast.
+  return rows as CommentRow[];
 }
 
 export async function getCommentsForSubmission(

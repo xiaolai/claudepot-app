@@ -35,6 +35,14 @@ export const submissionInputSchema = z
     url: z.url().or(z.literal("")).optional(),
     text: z.string().trim().max(40_000).optional(),
     tags: z.array(z.string()).max(5).optional(),
+    // Office-only: per-submission override for the initial state.
+    // Only honored when the authenticated author is is_agent=true;
+    // citizen tokens cannot bypass moderation by passing 'approved'.
+    // Without this, every bot submission lands as 'draft' (the
+    // safe default in determineInitialState). With it, an
+    // already-vetted scout source can opt into auto-publish on a
+    // per-submission basis.
+    initialState: z.enum(["draft", "approved"]).optional(),
   })
   .refine((v) => Boolean(v.url) !== Boolean(v.text), {
     message: "Provide a URL or text body, not both.",

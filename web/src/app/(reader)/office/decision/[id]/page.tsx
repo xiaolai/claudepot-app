@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Cpu, ExternalLink, ArrowLeft } from "lucide-react";
-import { getOfficeDecisionById } from "@/db/office-queries";
+import {
+  getDecisionsBySubmission,
+  getOfficeDecisionById,
+} from "@/db/office-queries";
 import { OFFICE_PERSONAS } from "@/lib/office-personas";
 import { relativeTime } from "@/lib/format";
 
@@ -30,6 +33,13 @@ export default async function DecisionPage({
   const failedGates = Object.entries(d.inclusionGates)
     .filter(([, v]) => !v)
     .map(([k]) => k);
+
+  // Sibling decisions on the same submission, ordered scoredAt asc
+  // per the office's 2026-05-08 ask. Excluded the current decision
+  // since it's already the page's primary subject.
+  const siblings = (await getDecisionsBySubmission(d.submissionId)).filter(
+    (s) => s.id !== d.id,
+  );
 
   const host = d.submissionUrl
     ? new URL(d.submissionUrl).hostname.replace(/^www\./, "")
@@ -81,6 +91,30 @@ export default async function DecisionPage({
           {VERDICT_PHRASE[d.routing] ?? d.routing}
         </p>
       </section>
+
+      {d.latestOverride && (
+        <section className="proto-section">
+          <h2>
+            Override applied
+            {d.latestOverride.reviewerKind === "bot"
+              ? " (bot review)"
+              : " (human review)"}
+          </h2>
+          <p className={`office-verdict office-routing-${d.latestOverride.overrideRouting}`}>
+            {VERDICT_PHRASE[d.latestOverride.overrideRouting] ??
+              d.latestOverride.overrideRouting}
+          </p>
+          <p className="office-section-lede">{d.latestOverride.reason}</p>
+          <p className="office-fineprint">
+            Filed{" "}
+            <time dateTime={d.latestOverride.createdAt.toISOString()}>
+              {relativeTime(d.latestOverride.createdAt.toISOString())}
+            </time>
+            . The original verdict above is preserved as part of the
+            audit trail.
+          </p>
+        </section>
+      )}
 
       {d.hardRejectsHit.length > 0 && (
         <section className="proto-section">
@@ -137,6 +171,43 @@ export default async function DecisionPage({
           is on their <Link href={`/office/persona/${d.appliedPersona}`}>profile</Link>.
         </p>
       </section>
+
+      {siblings.length > 0 && (
+        <section className="proto-section">
+          <h2>Other decisions on this submission</h2>
+          <p className="office-section-lede">
+            The office writes more than one decision per submission in
+            normal operation — different personas score the same
+            piece, and dissenting takes are recorded as their own
+            rows.{" "}
+            <Link href={`/office/submission/${d.submissionId}`}>
+              See the full timeline
+            </Link>
+            .
+          </p>
+          <ul className="office-list">
+            {siblings.map((s) => {
+              const sp = OFFICE_PERSONAS[s.appliedPersona];
+              const effRouting = s.latestOverride?.overrideRouting ?? s.routing;
+              return (
+                <li key={s.id}>
+                  <Link href={`/office/decision/${s.id}`}>
+                    {sp?.display ?? s.appliedPersona}
+                  </Link>
+                  {" — "}
+                  <span className={`office-routing-${effRouting}`}>
+                    {VERDICT_PHRASE[effRouting] ?? effRouting}
+                  </span>
+                  {" · "}
+                  <time dateTime={s.scoredAt.toISOString()}>
+                    {relativeTime(s.scoredAt.toISOString())}
+                  </time>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <footer className="proto-section office-decision-provenance">
         <p>

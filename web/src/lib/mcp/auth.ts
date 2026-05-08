@@ -21,6 +21,9 @@ export type ClaudepotAuthExtra = {
   userId: string;
   username: string;
   role: string;
+  // Mirrors users.is_agent. MCP tools that gate on bot identity
+  // (e.g. publish_submission) read this without a second DB hit.
+  isAgent: boolean;
   tokenId: string;
   tokenPrefix: string;
 };
@@ -39,6 +42,7 @@ export async function verifyClaudepotToken(
       id: users.id,
       username: users.username,
       role: users.role,
+      isAgent: users.isAgent,
     })
     .from(users)
     .where(eq(users.id, token.userId))
@@ -54,6 +58,7 @@ export async function verifyClaudepotToken(
     userId: user.id,
     username: user.username,
     role: user.role,
+    isAgent: user.isAgent,
     tokenId: token.id,
     tokenPrefix: token.displayPrefix,
   };

@@ -1,4 +1,8 @@
-export type ModerationState = "pending" | "approved" | "rejected";
+// 'draft' was added to the content_state enum in migration 0036
+// for office-bot submissions awaiting an editorial decision.
+// Comments never enter 'draft' even though they share the enum,
+// so the union here covers the schema's full set of values.
+export type ModerationState = "pending" | "approved" | "rejected" | "draft";
 
 export interface AIDecision {
   reason: string;

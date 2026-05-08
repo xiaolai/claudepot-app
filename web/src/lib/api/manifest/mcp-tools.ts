@@ -54,6 +54,14 @@ export const MCP_TOOLS: ReadonlyArray<McpToolSpec> = [
   { name: "get_my_decision", mirrors: "me:get_decision" },
   /* Bot self-reporting */
   { name: "report_bot_status", mirrors: "bots:report" },
+  /* Editorial-runtime (migration 0036) */
+  { name: "write_decision", mirrors: "decisions:create" },
+  { name: "override_decision", mirrors: "decisions:override" },
+  { name: "record_scout_run", mirrors: "scout_runs:create" },
+  { name: "publish_submission", mirrors: "submissions:publish" },
+  { name: "record_engagement", mirrors: "engagement:create" },
+  { name: "list_submission_decisions", mirrors: "submissions:list_decisions" },
+  { name: "list_submission_engagement", mirrors: "submissions:list_engagement" },
 ];
 
 const MCP_BY_NAME: ReadonlyMap<McpToolName, McpToolSpec> = new Map(

@@ -32,6 +32,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerReadTools } from "../read-tools";
 import { registerBotWriteTools } from "./bot-write";
 import { registerCommentWriteTools } from "./comment-write";
+import { registerEditorialWriteTools } from "./editorial-write";
 import { registerIdentityTools } from "./identity";
 import { registerNotificationTools } from "./notification";
 import { registerSubmissionWriteTools } from "./submission-write";
@@ -45,4 +46,5 @@ export function registerTools(server: McpServer): void {
   registerNotificationTools(server);
   registerIdentityTools(server);
   registerBotWriteTools(server);
+  registerEditorialWriteTools(server);
 }

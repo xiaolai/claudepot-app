@@ -87,7 +87,9 @@ type SubmissionRow = {
   title: string;
   url: string | null;
   text: string | null;
-  state: "pending" | "approved" | "rejected";
+  // 'draft' added in 0036_editorial_writes for office-bot submissions
+  // awaiting an editorial decision.
+  state: "pending" | "approved" | "rejected" | "draft";
   score: number;
   createdAt: Date;
   publishedAt: Date | null;
@@ -180,13 +182,17 @@ function submissionSelectColumns(viewerId: string) {
     voteCount: sql<number>`(SELECT COUNT(*)::int FROM ${votes} WHERE ${votes.submissionId} = ${submissions.id})`,
     saveCount: sql<number>`(SELECT COUNT(*)::int FROM ${saves} WHERE ${saves.submissionId} = ${submissions.id})`,
     // Public count must not leak moderation activity: only count
-    // approved, non-deleted comments. The same predicate is mirrored
-    // in db/queries.ts for the web feed.
+    // approved, non-deleted comments. Also excludes is_meta=true
+    // (migration 0036) so bot↔bot replies don't inflate the public
+    // engagement signal — the comments still render in the thread,
+    // but the count drops them. Mirrored in db/queries.ts for the
+    // web feed; both sides must stay in sync.
     commentCount: sql<number>`(
       SELECT COUNT(*)::int FROM ${comments}
       WHERE ${comments.submissionId} = ${submissions.id}
         AND ${comments.state} = 'approved'
         AND ${comments.deletedAt} IS NULL
+        AND ${comments.isMeta} = false
     )`,
     viewerVoteValue: sql<
       number | null
@@ -327,7 +333,10 @@ type CommentRowApi = {
   submissionId: string;
   parentId: string | null;
   body: string;
-  state: "pending" | "approved" | "rejected";
+  // Comments share content_state with submissions; 'draft' added in
+  // 0036 for submissions only — comments never enter that state, but
+  // the type union mirrors the schema's enum for assignment safety.
+  state: "pending" | "approved" | "rejected" | "draft";
   score: number;
   createdAt: Date;
   updatedAt: Date | null;

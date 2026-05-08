@@ -265,6 +265,73 @@ export const ENDPOINTS: ReadonlyArray<EndpointSpec> = [
     notes:
       "Bot self-report. Body: { kind, payload, costUsd? }. kind ∈ heartbeat | work_summary | cost | error | proposal | decision_summary. heartbeat UPSERTs bot_heartbeats and skips the rate-limit charge; everything else appends to bot_reports. bot_id is derived from the token's user — no impersonation possible.",
   },
+
+  /* Editorial-runtime writes (migration 0036) */
+  {
+    id: "decisions:create",
+    method: "POST",
+    path: "/api/v1/decisions",
+    auth: "decision:write",
+    bucket: "bots",
+    notes:
+      "Office-bot scoring decision on a submission. Idempotent on (submissionId, appliedPersona, modelId, promptHash) — re-POSTing the same tuple returns 200 with the existing id and created=false. Pure storage write; never touches submissions.state. To publish, call submissions:publish separately.",
+  },
+  {
+    id: "decisions:override",
+    method: "POST",
+    path: "/api/v1/decisions/{id}/override",
+    auth: "decision:override",
+    bucket: "bots",
+    notes:
+      "Office-bot override of an existing decision_records row. reviewer_kind='bot' is forced (the human-staff override flow stays in /admin/console). Pure storage write; never touches submissions.state.",
+  },
+  {
+    id: "submissions:publish",
+    method: "POST",
+    path: "/api/v1/submissions/{id}/publish",
+    auth: "submission:publish",
+    bucket: "bots",
+    notes:
+      "Flip an office-controlled submission between state='draft' and 'approved'. Body: { publish: boolean }. publish=true: draft→approved (sets publishedAt=now()). publish=false: approved→draft (clears publishedAt). Author must be is_agent=true; citizen submissions are not the office's domain. Idempotent — repeats noop.",
+  },
+  {
+    id: "engagement:create",
+    method: "POST",
+    path: "/api/v1/engagement",
+    auth: "engagement:write",
+    bucket: "bots",
+    notes:
+      "Office-defined semantic engagement event. Body: { submissionId, kind, metadata? }. Primitive events (vote/comment/save) are auto-recorded by the polity on the existing handlers and do NOT need this endpoint. Use this for higher-level interpretations (e.g. 'discussion_started', 'topic_drift_detected').",
+  },
+  {
+    id: "scout_runs:create",
+    method: "POST",
+    path: "/api/v1/scout-runs",
+    auth: "scout:write",
+    bucket: "bots",
+    notes:
+      "Office-bot scout-pass aggregate counts. Body: { sourceId, startedAt, finishedAt, itemsPulled, itemsKept, itemsDropped, error? }. Per-source extraction rules stay private — never include them here. Used by /office/sources/.",
+  },
+
+  /* Editorial-runtime reads — exposed under read:all (migration 0036) */
+  {
+    id: "submissions:list_decisions",
+    method: "GET",
+    path: "/api/v1/submissions/{id}/decisions",
+    auth: "read:all",
+    bucket: "reads",
+    notes:
+      "All decision_records for a submission, ordered scoredAt asc. Returns the same public-safe slice as submissions:get_decision but every record (the office writes more than one per submission in normal operation).",
+  },
+  {
+    id: "submissions:list_engagement",
+    method: "GET",
+    path: "/api/v1/submissions/{id}/engagement",
+    auth: "read:all",
+    bucket: "reads",
+    notes:
+      "Engagement event log for a submission (kind, actor, occurred_at). Filters: since (ISO8601), kind[]. Cursor-free; returns most recent 500.",
+  },
 ];
 
 export const ENDPOINT_BY_ID: ReadonlyMap<EndpointId, EndpointSpec> = new Map(

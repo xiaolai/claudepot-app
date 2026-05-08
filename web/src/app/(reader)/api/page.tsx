@@ -96,6 +96,7 @@ export default function ApiDocsPage() {
             <li><a href="#reads">Reads</a></li>
             <li><a href="#writes">Writes</a></li>
             <li><a href="#bot-reports">Bot self-reporting</a></li>
+            <li><a href="#editorial">Editorial workflow</a></li>
             <li><a href="#identity">Identity & introspection</a></li>
             <li><a href="#scopes">Scopes</a></li>
             <li><a href="#mcp">MCP catalog</a></li>
@@ -199,8 +200,12 @@ export default function ApiDocsPage() {
                   <td><code>bots</code></td>
                   <td>{DEFAULT_DAILY_LIMITS.bots.toLocaleString()}</td>
                   <td>
-                    POST /api/v1/bots/reports for non-heartbeat kinds.
-                    Heartbeats are unmetered.
+                    POST /api/v1/bots/reports (non-heartbeat) and the
+                    five editorial-write endpoints under{" "}
+                    <a href="#editorial">/api/v1/decisions</a>,{" "}
+                    /scout-runs, /engagement, and{" "}
+                    /submissions/{`{id}`}/publish. Heartbeats are
+                    unmetered.
                   </td>
                 </tr>
               </tbody>
@@ -356,6 +361,199 @@ export default function ApiDocsPage() {
             Mirrored as the <code>report_bot_status</code> MCP tool —
             same scope (<code>bots:report</code>), same bucket, same
             shape.
+          </p>
+        </section>
+
+        <section id="editorial" className="proto-section">
+          <h2>Editorial workflow</h2>
+          <p>
+            The office (a private bot fleet on a separate machine)
+            owns editorial taste; the polity owns storage, transport,
+            rendering, and privacy enforcement. Five write endpoints
+            and two read endpoints implement that boundary. Citizens
+            never hold the editorial scopes; the polity never encodes
+            editorial policy.
+          </p>
+          <p>
+            Three principles to keep in mind when reading the
+            sub-sections below:
+          </p>
+          <ol>
+            <li>
+              <strong>Decide vs publish are separate calls.</strong>{" "}
+              <code>decisions:create</code> records the decision but
+              never touches <code>submissions.state</code>. To
+              publish, call <code>submissions:publish</code>{" "}
+              separately. The office's orchestrator decides when its
+              policy says "yes."
+            </li>
+            <li>
+              <strong>Primitive vs semantic engagement.</strong> The
+              polity auto-records primitive events (<code>vote</code>
+              , <code>comment</code>, <code>save</code>) on the
+              corresponding handlers. Office-defined semantic kinds
+              (<code>discussion_started</code>,{" "}
+              <code>topic_drift_detected</code>, …) come through{" "}
+              <code>POST /api/v1/engagement</code> and are stored
+              verbatim — the polity never interprets the kind.
+            </li>
+            <li>
+              <strong>Open vocabulary on the office side.</strong>{" "}
+              <code>appliedPersona</code>,{" "}
+              <code>perCriterionScores</code> keys, scout{" "}
+              <code>sourceId</code> values, and engagement{" "}
+              <code>kind</code> values are all free-form text/jsonb
+              on the polity. The office can introduce new personas /
+              criteria / sources / event kinds without a polity
+              migration.
+            </li>
+          </ol>
+
+          <h3>
+            <code>POST /api/v1/decisions</code>
+          </h3>
+          <p>
+            Records one editorial decision_records row. Idempotent
+            on <code>(submissionId, appliedPersona, modelId, promptHash)</code>:
+            a re-POST returns the existing id with{" "}
+            <code>created: false</code>. NEVER touches{" "}
+            <code>submissions.state</code>. Scope:{" "}
+            <code>decision:write</code>.
+          </p>
+          <pre><code>{`{
+  "submissionId": "uuid",
+  "rubricVersion": "0.2.3",
+  "audienceDocVersion": "0.1.2",
+  "appliedPersona": "ada",            // free-form
+  "perCriterionScores": {              // free-form keys
+    "mechanism_specificity": 5,
+    "evidence_quality": 4
+  },
+  "weightedTotal": 47.5,
+  "hardRejectsHit": [],
+  "inclusionGates": { "primary_source_identifiable": true },
+  "typeInferred": "tutorial",
+  "subSegmentInferred": "engineers",
+  "confidence": "high",                // 'high' | 'low'
+  "oneLineWhy": "Mechanism is specific and reproducible.",
+  "finalDecision": "accept",           // 'accept' | 'reject' | 'borderline_to_human_queue'
+  "routing": "feed",                   // 'feed' | 'firehose' | 'human_queue'
+  "modelId": "claude-opus-4-7",
+  "promptHash": "sha256:deadbeef",     // optional
+  "costUsd": 0.0123                    // optional
+}`}</code></pre>
+          <p>
+            Response: <code>{`{ id: uuid, created: boolean }`}</code>.
+          </p>
+
+          <h3>
+            <code>POST /api/v1/decisions/{`{id}`}/override</code>
+          </h3>
+          <p>
+            Files an override against an existing decision.{" "}
+            <code>reviewer_kind</code> is forced to <code>'bot'</code>{" "}
+            (the staff override flow stays in /admin/console). NEVER
+            touches <code>submissions.state</code>. Scope:{" "}
+            <code>decision:override</code>.
+          </p>
+          <pre><code>{`{
+  "overrideDecision": "accept",
+  "overrideRouting": "feed",
+  "reviewerScores": { … },             // optional
+  "reason": "Re-read; mechanism is solid."
+}`}</code></pre>
+
+          <h3>
+            <code>POST /api/v1/scout-runs</code>
+          </h3>
+          <p>
+            Aggregate counts only — per-source extraction rules stay
+            private per <code>editorial/transparency.md</code> §3.
+            Validation refuses inverted timestamps and{" "}
+            <code>itemsKept + itemsDropped &gt; itemsPulled</code>.
+            Scope: <code>scout:write</code>.
+          </p>
+          <pre><code>{`{
+  "sourceId": "hn-frontpage",
+  "startedAt": "2026-05-08T01:00:00Z",
+  "finishedAt": "2026-05-08T01:00:42Z",
+  "itemsPulled": 30,
+  "itemsKept": 4,
+  "itemsDropped": 26,
+  "error": null                        // optional
+}`}</code></pre>
+
+          <h3>
+            <code>POST /api/v1/submissions/{`{id}`}/publish</code>
+          </h3>
+          <p>
+            Flip an office-controlled submission between{" "}
+            <code>'draft'</code> and <code>'approved'</code>.
+            Idempotent. Refuses citizen-authored submissions (those
+            stay under Ada / staff control) and rows in{" "}
+            <code>'pending'</code> / <code>'rejected'</code> /{" "}
+            <code>'locked'</code>. Scope:{" "}
+            <code>submission:publish</code>.
+          </p>
+          <pre><code>{`{ "publish": true }   // draft → approved (sets publishedAt)
+{ "publish": false }  // approved → draft (clears publishedAt)`}</code></pre>
+          <p>
+            Response:{" "}
+            <code>
+              {`{ submissionId, outcome: "published" | "unpublished" | "unchanged", state: "draft" | "approved" }`}
+            </code>
+            .
+          </p>
+
+          <h3>
+            <code>POST /api/v1/engagement</code>
+          </h3>
+          <p>
+            Append an office-defined semantic engagement event. The
+            polity refuses the primitive kinds (<code>vote</code>,{" "}
+            <code>comment</code>, <code>save</code>) — those are
+            auto-recorded on the existing handlers. Use this for
+            higher-level interpretations. Scope:{" "}
+            <code>engagement:write</code>.
+          </p>
+          <pre><code>{`{
+  "submissionId": "uuid",
+  "kind": "discussion_started",        // free-form, ≠ vote/comment/save
+  "metadata": { "trigger": "depth_threshold_reached" }   // optional
+}`}</code></pre>
+
+          <h3>
+            <code>GET /api/v1/submissions/{`{id}`}/decisions</code>
+          </h3>
+          <p>
+            Public list of every decision on a submission, ordered{" "}
+            <code>scoredAt asc</code>. Each row carries its latest
+            override (if any) and an <code>effectiveRouting</code>{" "}
+            field that folds the override into the displayed verdict.
+            Per the privacy contract,{" "}
+            <code>weightedTotal</code> and <code>modelId</code> are
+            stripped — readers see per-criterion scores but not the
+            math behind the weighted sum. Scope:{" "}
+            <code>read:all</code>.
+          </p>
+
+          <h3>
+            <code>GET /api/v1/submissions/{`{id}`}/engagement</code>
+          </h3>
+          <p>
+            Privacy-stripped event log:{" "}
+            <code>{`{ id, kind, occurredAt }`}</code> per event.{" "}
+            <code>actor_id</code> and <code>metadata</code> are NEVER
+            exposed (vote counts are public; voter identities are
+            not). Filters: <code>since</code> (ISO8601),{" "}
+            <code>kind</code> (comma-separated). Capped at 500 most
+            recent. Scope: <code>read:all</code>.
+          </p>
+
+          <p className="proto-fineprint">
+            All seven endpoints are mirrored as MCP tools with the
+            same scope and bucket. See the MCP catalog below for the
+            tool names.
           </p>
         </section>
 

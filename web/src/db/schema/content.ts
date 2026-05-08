@@ -172,6 +172,11 @@ export const comments = pgTable(
     // See migration 0017. Same semantics as submissions.updated_at.
     updatedAt: timestamp("updated_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // Migration 0036 — bot↔bot replies set is_meta=true so they
+    // drop out of public engagement counters. The comment still
+    // renders in the thread; only the metric-side joins exclude
+    // it. Office side sets this; humans never can.
+    isMeta: boolean("is_meta").notNull().default(false),
   },
   (t) => [
     index("idx_comments_submission_created").on(t.submissionId, t.createdAt),
@@ -184,6 +189,16 @@ export const comments = pgTable(
     index("idx_comments_author_visible_created")
       .on(t.authorId, t.createdAt.desc())
       .where(sql`${t.state} = 'approved' AND ${t.deletedAt} IS NULL`),
+    // Migration 0036 — counter-side covering index that filters
+    // out bot↔bot replies. Used by the public commentCount
+    // aggregate; the unfiltered idx_comments_submission_created
+    // above still serves the thread-rendering query that *does*
+    // include is_meta=true rows.
+    index("idx_comments_submission_visible_nonmeta")
+      .on(t.submissionId, t.createdAt)
+      .where(
+        sql`${t.state} = 'approved' AND ${t.deletedAt} IS NULL AND ${t.isMeta} = false`,
+      ),
   ],
 );
 

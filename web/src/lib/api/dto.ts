@@ -85,7 +85,7 @@ export type UserDto = {
 
 /* ── Submission ─────────────────────────────────────────────────── */
 
-export type SubmissionStateDto = ContentState; // pending | approved | rejected
+export type SubmissionStateDto = ContentState; // pending | approved | rejected | draft (0036)
 
 /**
  * Per-viewer state attached to SubmissionDto / CommentDto. Always

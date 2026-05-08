@@ -37,6 +37,7 @@
     { "idx": 32, "version": "7", "when": 1779200000000, "tag": "0032_promote_xiaolai_staff",          "breakpoints": true },
     { "idx": 33, "version": "7", "when": 1779300000000, "tag": "0033_links",                            "breakpoints": true },
     { "idx": 34, "version": "7", "when": 1779300001000, "tag": "0034_links_featured",                   "breakpoints": true },
-    { "idx": 35, "version": "7", "when": 1779300002000, "tag": "0035_links_suggested_by",               "breakpoints": true }
+    { "idx": 35, "version": "7", "when": 1779300002000, "tag": "0035_links_suggested_by",               "breakpoints": true },
+    { "idx": 36, "version": "7", "when": 1779400000000, "tag": "0036_editorial_writes",                  "breakpoints": true }
   ]
 }

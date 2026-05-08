@@ -13,6 +13,7 @@
  * editorial = taste; policy = abuse/spam/etc.
  */
 
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -21,12 +22,14 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
 import {
   aiFinalDecisionEnum,
   confidenceBandEnum,
+  reviewerKindEnum,
   routingDestinationEnum,
   submissionTypeEnum,
 } from "./enums";
@@ -63,6 +66,19 @@ export const decisionRecords = pgTable(
     index("idx_decision_records_routing").on(t.routing, t.scoredAt.desc()),
     index("idx_decision_records_persona").on(t.appliedPersona, t.scoredAt.desc()),
     index("idx_decision_records_rubric_version").on(t.rubricVersion),
+    // Migration 0036 — idempotency for POST /api/v1/decisions.
+    // Office bots retry on transient failures; the unique key is
+    // (submission, persona, model, prompt_hash). prompt_hash is
+    // nullable, so the index expression coalesces NULL → '' so two
+    // null-prompt-hash retries collide instead of bypassing the
+    // unique. The handler reads this back on conflict and returns
+    // the existing id.
+    uniqueIndex("idx_decision_records_idempotency").on(
+      t.submissionId,
+      t.appliedPersona,
+      t.modelId,
+      sql`(COALESCE(${t.promptHash}, ''))`,
+    ),
   ],
 );
 
@@ -81,6 +97,12 @@ export const overrideRecords = pgTable(
     overrideRouting: routingDestinationEnum("override_routing").notNull(),
     reviewerScores: jsonb("reviewer_scores"), // optional per-criterion re-score
     reason: text("reason").notNull(),
+    // Migration 0036 — distinguishes human-staff overrides from
+    // bot-on-bot overrides on /office/. Defaults to 'human' so all
+    // existing rows keep their semantics; POST /api/v1/decisions/
+    // [id]/override always writes 'bot' since the endpoint is
+    // PAT-authenticated and only bots hold the decision:override scope.
+    reviewerKind: reviewerKindEnum("reviewer_kind").notNull().default("human"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -110,5 +132,48 @@ export const scoutRuns = pgTable(
   (t) => [
     index("idx_scout_runs_source_started").on(t.sourceId, t.startedAt.desc()),
     index("idx_scout_runs_started").on(t.startedAt.desc()),
+  ],
+);
+
+/**
+ * engagement_records — minimal event log so /office/ has a
+ * reader-side surface for engagement-over-time. Added in
+ * 0036_editorial_writes after the office's 2026-05-08 ask flagged
+ * the table as referenced in transparency.md but never built.
+ *
+ * `kind` is a free-form text column (same convention as
+ * decision_records.applied_persona) — adding new event kinds
+ * doesn't require a migration. Examples: 'vote', 'comment',
+ * 'save', 'view', 'click_out'.
+ *
+ * `actor_id` is nullable so anonymous engagement (logged-out vote
+ * proxies, scrape views) can still record. ON DELETE SET NULL so
+ * deleting a user keeps the historical engagement count intact.
+ */
+export const engagementRecords = pgTable(
+  "engagement_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    submissionId: uuid("submission_id")
+      .notNull()
+      .references(() => submissions.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    actorId: uuid("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    metadata: jsonb("metadata"),
+  },
+  (t) => [
+    index("idx_engagement_records_submission_occurred").on(
+      t.submissionId,
+      t.occurredAt.desc(),
+    ),
+    index("idx_engagement_records_actor_occurred").on(
+      t.actorId,
+      t.occurredAt.desc(),
+    ),
   ],
 );

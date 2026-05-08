@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { db } from "@/db/client";
 import { saves, submissions, users, votes } from "@/db/schema";
+import { recordEngagement } from "@/lib/engagement";
 
 const KARMA_DOWNVOTE_THRESHOLD = 100;
 
@@ -82,6 +83,15 @@ export async function castVote(
       });
   }
 
+  // Engagement event for the office's analytics. Best-effort —
+  // never blocks or rolls back the vote write itself.
+  await recordEngagement({
+    submissionId,
+    kind: "vote",
+    actorId: userId,
+    metadata: { value },
+  });
+
   revalidatePath(`/post/${submissionId}`);
   return { ok: true, value };
 }
@@ -121,6 +131,13 @@ export async function setSave(
       .insert(saves)
       .values({ userId, submissionId: input.submissionId })
       .onConflictDoNothing();
+    // Save events are recorded; unsaves intentionally are not — the
+    // office cares about positive engagement signal, not undo noise.
+    await recordEngagement({
+      submissionId: input.submissionId,
+      kind: "save",
+      actorId: userId,
+    });
   } else {
     await db
       .delete(saves)

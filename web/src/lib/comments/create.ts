@@ -35,6 +35,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { comments, notifications, submissions } from "@/db/schema";
+import { recordEngagement } from "@/lib/engagement";
 import {
   checkBanCandidate,
   checkLadderRateLimit,
@@ -219,6 +220,10 @@ export async function createComment(
       parentAuthor = parent.authorId;
     }
 
+    // isMeta is honored only when the author is_agent=true. Citizens
+    // can't set it (or unset it) — accept the default 'false' from
+    // the column. See lib/comments/schema.ts for the contract.
+    const isMeta = ctx.isAgent ? Boolean(input.isMeta) : false;
     const [row] = await tx
       .insert(comments)
       .values({
@@ -227,6 +232,7 @@ export async function createComment(
         parentId: input.parentId ?? null,
         body: input.body,
         state: insertState,
+        isMeta,
       })
       .returning({ id: comments.id });
 
@@ -251,6 +257,25 @@ export async function createComment(
 
   if (outcome.kind === "not_found") return { ok: false, reason: "not_found" };
   if (outcome.kind === "locked") return { ok: false, reason: "locked" };
+
+  // Engagement event for the office's analytics. Only record on
+  // approved comments — a pending/rejected comment isn't engagement
+  // a reader saw, so it shouldn't tilt the engagement curve. Best
+  // effort, never blocks. Bot↔bot meta replies are still recorded;
+  // the office can filter on metadata.isMeta when reading.
+  const insertedIsMeta = ctx.isAgent ? Boolean(input.isMeta) : false;
+  if (insertState === "approved") {
+    void recordEngagement({
+      submissionId: input.submissionId,
+      kind: "comment",
+      actorId: authorId,
+      metadata: {
+        commentId: outcome.commentId,
+        parentId: input.parentId ?? null,
+        isMeta: insertedIsMeta,
+      },
+    });
+  }
 
   // Persist the first-pass verdict outside the transaction. A failure
   // here doesn't roll back the comment insert — the row is already

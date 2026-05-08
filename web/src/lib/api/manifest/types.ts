@@ -18,6 +18,8 @@ export type EndpointId =
   | "submissions:get"
   | "submissions:list_comments"
   | "submissions:get_decision"
+  | "submissions:list_decisions"
+  | "submissions:list_engagement"
   | "comments:get"
   | "users:get"
   | "users:list_submissions"
@@ -46,7 +48,16 @@ export type EndpointId =
   // Appeals against AI policy moderator decisions
   | "appeals:create"
   // Bot self-reporting (heartbeats, work, cost, errors, proposals)
-  | "bots:report";
+  | "bots:report"
+  // Editorial-runtime writes (migration 0036). Office writes
+  // these; citizens never see them in the SCOPE picker because
+  // the scopes aren't grantable through the public mint UI without
+  // staff intervention.
+  | "decisions:create"
+  | "decisions:override"
+  | "scout_runs:create"
+  | "submissions:publish"
+  | "engagement:create";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -109,7 +120,18 @@ export type McpToolName =
   | "list_my_decisions"
   | "get_my_decision"
   // Bot self-reporting
-  | "report_bot_status";
+  | "report_bot_status"
+  // Editorial-runtime tools (migration 0036). Mirror the REST
+  // endpoints under /api/v1/decisions, /scout-runs, /engagement,
+  // and /submissions/{id}/publish. Office-only scopes; citizens
+  // never see these in tools/list with a read-only token.
+  | "write_decision"
+  | "override_decision"
+  | "record_scout_run"
+  | "publish_submission"
+  | "record_engagement"
+  | "list_submission_decisions"
+  | "list_submission_engagement";
 
 export type McpToolSpec = {
   readonly name: McpToolName;

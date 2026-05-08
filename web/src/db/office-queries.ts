@@ -7,7 +7,7 @@
  * <office-host>; this file only reads.
  */
 
-import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "./client";
 import {
@@ -19,6 +19,20 @@ import {
   submissions,
   users,
 } from "./schema";
+
+/**
+ * Latest override on a single decision_records row, if any.
+ * Reviewer kind ('human' or 'bot') was added in 0036_editorial_writes
+ * so /office/ rendering can flag bot-on-bot overrides differently
+ * from staff overrides.
+ */
+export interface OfficeOverride {
+  overrideDecision: "accept" | "reject" | "borderline_to_human_queue";
+  overrideRouting: "feed" | "firehose" | "human_queue";
+  reviewerKind: "human" | "bot";
+  reason: string;
+  createdAt: Date;
+}
 
 export interface OfficeDecision {
   id: string;
@@ -41,6 +55,11 @@ export interface OfficeDecision {
   audienceDocVersion: string;
   modelId: string;
   scoredAt: Date;
+  // Latest override applied to this decision, if any. Most-recent
+  // wins (by override_records.created_at desc) so the "effective
+  // verdict" is unambiguous on /office/ pages even if the staff
+  // and a bot both filed overrides.
+  latestOverride: OfficeOverride | null;
 }
 
 const OFFICE_DECISION_SELECT = {
@@ -66,35 +85,74 @@ const OFFICE_DECISION_SELECT = {
   scoredAt: decisionRecords.scoredAt,
 };
 
-function mapRow(r: {
-  id: string;
-  submissionId: string;
-  submissionTitle: string;
-  submissionUrl: string | null;
-  submissionType: string;
-  appliedPersona: string;
-  perCriterionScores: unknown;
-  weightedTotal: string; // numeric → string
-  hardRejectsHit: unknown;
-  inclusionGates: unknown;
-  typeInferred: string;
-  subSegmentInferred: string;
-  confidence: "high" | "low";
-  oneLineWhy: string;
-  finalDecision: "accept" | "reject" | "borderline_to_human_queue";
-  routing: "feed" | "firehose" | "human_queue";
-  rubricVersion: string;
-  audienceDocVersion: string;
-  modelId: string;
-  scoredAt: Date;
-}): OfficeDecision {
+function mapRow(
+  r: {
+    id: string;
+    submissionId: string;
+    submissionTitle: string;
+    submissionUrl: string | null;
+    submissionType: string;
+    appliedPersona: string;
+    perCriterionScores: unknown;
+    weightedTotal: string; // numeric → string
+    hardRejectsHit: unknown;
+    inclusionGates: unknown;
+    typeInferred: string;
+    subSegmentInferred: string;
+    confidence: "high" | "low";
+    oneLineWhy: string;
+    finalDecision: "accept" | "reject" | "borderline_to_human_queue";
+    routing: "feed" | "firehose" | "human_queue";
+    rubricVersion: string;
+    audienceDocVersion: string;
+    modelId: string;
+    scoredAt: Date;
+  },
+  override: OfficeOverride | null,
+): OfficeDecision {
   return {
     ...r,
     weightedTotal: Number.parseFloat(r.weightedTotal),
     perCriterionScores: r.perCriterionScores as Record<string, number>,
     hardRejectsHit: r.hardRejectsHit as string[],
     inclusionGates: r.inclusionGates as Record<string, boolean>,
+    latestOverride: override,
   };
+}
+
+/**
+ * Fetch the latest override per decision id. Returns a Map keyed
+ * by decisionRecordId. Most-recent override wins
+ * (override_records.created_at DESC, id DESC as a tiebreaker).
+ */
+async function loadLatestOverrides(
+  decisionIds: string[],
+): Promise<Map<string, OfficeOverride>> {
+  if (decisionIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      decisionRecordId: overrideRecords.decisionRecordId,
+      overrideDecision: overrideRecords.overrideDecision,
+      overrideRouting: overrideRecords.overrideRouting,
+      reviewerKind: overrideRecords.reviewerKind,
+      reason: overrideRecords.reason,
+      createdAt: overrideRecords.createdAt,
+      rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${overrideRecords.decisionRecordId} ORDER BY ${overrideRecords.createdAt} DESC, ${overrideRecords.id} DESC)`,
+    })
+    .from(overrideRecords)
+    .where(inArray(overrideRecords.decisionRecordId, decisionIds));
+  const out = new Map<string, OfficeOverride>();
+  for (const r of rows) {
+    if (r.rn !== 1) continue;
+    out.set(r.decisionRecordId, {
+      overrideDecision: r.overrideDecision,
+      overrideRouting: r.overrideRouting,
+      reviewerKind: r.reviewerKind,
+      reason: r.reason,
+      createdAt: r.createdAt,
+    });
+  }
+  return out;
 }
 
 /** Recent decisions across all routings (default: accepted only). */
@@ -116,7 +174,8 @@ export async function getRecentDecisions(opts: {
     .orderBy(desc(decisionRecords.scoredAt))
     .limit(limit);
 
-  return rows.map(mapRow);
+  const overrides = await loadLatestOverrides(rows.map((r) => r.id));
+  return rows.map((r) => mapRow(r, overrides.get(r.id) ?? null));
 }
 
 export async function getOfficeDecisionById(
@@ -129,7 +188,25 @@ export async function getOfficeDecisionById(
     .where(eq(decisionRecords.id, id))
     .limit(1);
   if (rows.length === 0) return null;
-  return mapRow(rows[0]);
+  const overrides = await loadLatestOverrides([rows[0].id]);
+  return mapRow(rows[0], overrides.get(rows[0].id) ?? null);
+}
+
+/** All decisions on a single submission, ordered scoredAt asc.
+ * Used by the new POST /api/v1/decisions multi-decision read +
+ * /office/submission/[id]/ index page (the office writes more than
+ * one decision per submission in normal operation). */
+export async function getDecisionsBySubmission(
+  submissionId: string,
+): Promise<OfficeDecision[]> {
+  const rows = await db
+    .select(OFFICE_DECISION_SELECT)
+    .from(decisionRecords)
+    .innerJoin(submissions, eq(decisionRecords.submissionId, submissions.id))
+    .where(eq(decisionRecords.submissionId, submissionId))
+    .orderBy(decisionRecords.scoredAt);
+  const overrides = await loadLatestOverrides(rows.map((r) => r.id));
+  return rows.map((r) => mapRow(r, overrides.get(r.id) ?? null));
 }
 
 /** Per-persona stats: total decisions, accept rate, avg score on accepts. */

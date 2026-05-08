@@ -71,7 +71,18 @@ export const contentStateEnum = pgEnum("content_state", [
   "pending",
   "approved",
   "rejected",
+  // Added in 0036_editorial_writes — office-bot submissions land
+  // here while awaiting POST /api/v1/decisions (routing='feed') or
+  // an override to flip them to 'approved'. Citizen submissions
+  // never land here; the editorial mesh has no business gating
+  // user content.
+  "draft",
 ]);
+
+// Added in 0036_editorial_writes — distinguishes human-staff
+// overrides from bot-on-bot overrides on /office/. Defaults to
+// 'human' so existing override_records rows retain their semantics.
+export const reviewerKindEnum = pgEnum("reviewer_kind", ["human", "bot"]);
 
 export const flagStatusEnum = pgEnum("flag_status", ["open", "resolved"]);
 

@@ -455,6 +455,139 @@ export function registerReadTools(server: McpServer): void {
     },
   );
 
+  /* ── list_submission_decisions ────────────────────────────── *
+   * GET /api/v1/submissions/{id}/decisions. Office-aware read —
+   * returns every decision_records row for the submission with its
+   * latest override folded in. Public per editorial/transparency.md;
+   * privacy stripping (no weighted_total, no model_id) is enforced
+   * by the public DTO builder. */
+  server.registerTool(
+    "list_submission_decisions",
+    {
+      title: "List all editorial decisions on a submission",
+      description:
+        "Returns every decision_records row for the given submission, " +
+        "ordered scoredAt ASC. Each row includes its latest override " +
+        "(if any) and effectiveRouting (post-override). Per the " +
+        "transparency contract, weighted totals and model ids are " +
+        "stripped — readers see per-criterion scores but not the " +
+        "math behind the weighted sum. Requires read:all.",
+      inputSchema: {
+        submissionId: z.uuid(),
+      },
+    },
+    async (args, extra) => {
+      const a = await checkAuthForTool("list_submission_decisions", extra);
+      if (!a.ok) return a.result;
+      const c = await chargeForTool("list_submission_decisions", a.ctx.tokenId);
+      if (!c.ok) return c.result;
+
+      const { getDecisionsBySubmission } = await import("@/db/office-queries");
+      const { buildPublicOfficeDecisionDto } = await import(
+        "@/lib/api/office-decision-dto"
+      );
+      const decisions = await getDecisionsBySubmission(args.submissionId);
+      return textResult(
+        JSON.stringify(
+          {
+            submissionId: args.submissionId,
+            decisions: decisions.map(buildPublicOfficeDecisionDto),
+          },
+          null,
+          2,
+        ),
+      );
+    },
+  );
+
+  /* ── list_submission_engagement ───────────────────────────── *
+   * GET /api/v1/submissions/{id}/engagement. Privacy-stripped
+   * event log (kind + occurredAt only); actor and metadata are
+   * intentionally omitted to avoid per-user history leakage. */
+  server.registerTool(
+    "list_submission_engagement",
+    {
+      title: "List engagement events for a submission",
+      description:
+        "Returns the most-recent engagement events for the given " +
+        "submission, ordered occurredAt DESC. Each event carries " +
+        "{ id, kind, occurredAt }. Actor and metadata are NEVER " +
+        "exposed — vote counts are public, voter identities are not. " +
+        "Filters: since (ISO8601), kind (comma-separated). Capped at " +
+        "500 most recent. Requires read:all.",
+      inputSchema: {
+        submissionId: z.uuid(),
+        since: z.iso.datetime().optional(),
+        kind: z
+          .string()
+          .optional()
+          .describe("Comma-separated list of kind values to filter on."),
+      },
+    },
+    async (args, extra) => {
+      const a = await checkAuthForTool("list_submission_engagement", extra);
+      if (!a.ok) return a.result;
+      const c = await chargeForTool(
+        "list_submission_engagement",
+        a.ctx.tokenId,
+      );
+      if (!c.ok) return c.result;
+
+      const { db } = await import("@/db/client");
+      const { engagementRecords, submissions } = await import(
+        "@/db/schema"
+      );
+      const { and, desc, eq, gte, inArray } = await import("drizzle-orm");
+
+      const [sub] = await db
+        .select({ id: submissions.id })
+        .from(submissions)
+        .where(eq(submissions.id, args.submissionId))
+        .limit(1);
+      if (!sub) return textResult("Submission not found.", true);
+
+      const filters = [eq(engagementRecords.submissionId, args.submissionId)];
+      if (args.since) {
+        filters.push(gte(engagementRecords.occurredAt, new Date(args.since)));
+      }
+      if (args.kind) {
+        const kinds = args.kind
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0);
+        if (kinds.length > 0) {
+          filters.push(inArray(engagementRecords.kind, kinds));
+        }
+      }
+
+      const rows = await db
+        .select({
+          id: engagementRecords.id,
+          kind: engagementRecords.kind,
+          occurredAt: engagementRecords.occurredAt,
+        })
+        .from(engagementRecords)
+        .where(and(...filters))
+        .orderBy(desc(engagementRecords.occurredAt))
+        .limit(500);
+
+      return textResult(
+        JSON.stringify(
+          {
+            submissionId: args.submissionId,
+            events: rows.map((r) => ({
+              id: r.id,
+              kind: r.kind,
+              occurredAt: r.occurredAt.toISOString(),
+            })),
+          },
+          null,
+          2,
+        ),
+      );
+    },
+  );
+
   /* ── get_constitution ─────────────────────────────────────── */
   // Constitution is registered in tools.ts (alongside get_quota and me)
   // because it's grouped with the identity/introspection tools rather

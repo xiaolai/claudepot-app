@@ -52,9 +52,18 @@ export async function createSubmission(
   const ctx = await loadAuthorContext(authorId);
   if (!ctx) return { ok: false, reason: "validation", detail: "Author not found." };
 
-  const baseState = determineInitialState(ctx);
+  let baseState = determineInitialState(ctx);
   if (baseState === "locked") {
     return { ok: false, reason: "locked", detail: "Account is locked." };
+  }
+  // Office-only initialState override. Honored ONLY when the
+  // author is_agent=true; citizens passing it through are silently
+  // ignored (the schema accepts the field; the state stays
+  // determined by determineInitialState). 'pending' and 'rejected'
+  // are not selectable here — those are Ada's territory, not the
+  // office's.
+  if (ctx.isAgent && input.initialState !== undefined) {
+    baseState = input.initialState;
   }
 
   // Ban-ladder rung 3: if the author has accumulated rejects

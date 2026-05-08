@@ -68,6 +68,7 @@ function fixtureOverride(): typeof overrideRecords.$inferSelect {
     overrideRouting: "human_queue",
     reviewerScores: null,
     reason: "Source quality looks weaker on second read.",
+    reviewerKind: "human" as const,
     createdAt: new Date("2026-05-06T02:00:00Z"),
   };
 }

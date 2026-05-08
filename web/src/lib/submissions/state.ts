@@ -3,13 +3,16 @@
  *
  *   - loadAuthorContext: one fetch of the user fields the rest of
  *     the create flow needs (role, isAgent, exempt-flag).
- *   - determineInitialState: locked accounts are rejected; everyone
- *     else auto-approves and Ada (the AI policy moderator) is the
- *     post-publication gate. The previous karma gate was disabled
- *     pre-launch (no signal — no karma, no prior approvals) and
- *     never re-enabled; it's been removed rather than left as a
- *     dead `if (false)` branch. To re-introduce a karma gate, add
- *     it explicitly with concrete thresholds and a re-enable plan.
+ *   - determineInitialState: locked accounts are rejected; office
+ *     bots (isAgent=true, role!='staff') land as 'draft' so the
+ *     editorial mesh has its pre-publish review window before any
+ *     reader sees the submission; everyone else auto-approves and
+ *     Ada (the AI policy moderator) is the post-publication gate.
+ *     The previous karma gate was disabled pre-launch (no signal
+ *     — no karma, no prior approvals) and never re-enabled; it's
+ *     been removed rather than left as a dead `if (false)` branch.
+ *     To re-introduce a karma gate, add it explicitly with
+ *     concrete thresholds and a re-enable plan.
  *   - findRecentDuplicate: 30-day URL dedup window.
  */
 
@@ -41,8 +44,21 @@ export async function loadAuthorContext(
 
 export function determineInitialState(
   ctx: AuthorContext,
-): "pending" | "approved" | "locked" {
+): "pending" | "approved" | "draft" | "locked" {
   if (ctx.role === "locked") return "locked";
+  // Office bots (isAgent=true, non-staff) land their submissions as
+  // 'draft' so the editorial mesh can score them via POST
+  // /api/v1/decisions before any reader sees the row. The endpoint
+  // flips state→'approved' atomically when a decision lands with
+  // routing='feed' AND finalDecision='accept'. role='system' is
+  // included here because the eight authoring bots (alan, blair,
+  // laura, …) are role='system' AND isAgent=true (per migration
+  // 0023_bots_to_system); excluding them would defeat the gate.
+  // role='staff' bots are kept on auto-approve so internal staff
+  // automation isn't blocked on the editorial loop.
+  if (ctx.isAgent && ctx.role !== "staff") {
+    return "draft";
+  }
   return "approved";
 }
 

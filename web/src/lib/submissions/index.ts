@@ -32,3 +32,8 @@ export type {
 export { createSubmission } from "./create";
 export { updateSubmissionAsAuthor } from "./edit";
 export { deleteSubmissionAsAuthor } from "./delete";
+export {
+  publishSubmission,
+  type PublishOutcome,
+  type PublishResult,
+} from "./publish";
