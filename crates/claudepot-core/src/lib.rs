@@ -80,6 +80,7 @@ pub mod protected_paths;
 pub mod proxy;
 pub mod redaction;
 pub mod resolve;
+pub mod rotation;
 pub mod routes;
 pub mod service_status;
 pub mod services;
