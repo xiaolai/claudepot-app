@@ -1963,19 +1963,40 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
     border-bottom: var(--bw-hair) solid var(--rule-hair);
   }
 
-  /* Wide admin tables (.proto-mod-table — users, bots, decisions,
-     log, …) overflow a 375 px viewport when their 6–8 columns stay
-     in normal table layout. Letting the table itself become a
+  /* Wide tables overflow a 375 px viewport when their 6–8 columns
+     stay in normal table layout. Letting the table itself become a
      horizontal scroll container preserves the desktop column
-     alignment and adds a swipe affordance, without touching the
-     11+ call sites. The internal display: table-cell / table-row
-     semantics remain because UA stylesheet defaults still apply
-     to descendants when only the table itself is `display: block`. */
-  .proto-mod-table {
+     alignment and adds a swipe affordance, without touching call
+     sites. The internal display: table-cell / table-row semantics
+     remain because UA stylesheet defaults still apply to descendants
+     when only the table itself is `display: block`.
+     - .proto-mod-table — admin/console/* (users, bots, log, …)
+     - .proto-table — /office/costs, /admin/console/cost-reconcile
+       (the class is a marker only — there's no CSS rule for it
+       outside this mobile scroll, the desktop look is browser
+       default styled by the surrounding context)
+     - .office-scores-table — /office/rubric
+     - .office-friendly-scores — /office/decision/[id] */
+  .proto-mod-table,
+  .proto-table,
+  .office-scores-table,
+  .office-friendly-scores {
     display: block;
     overflow-x: auto;
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* Inline <code> in reading copy (post bodies, comments,
+     editorial sections) carries URLs, tokens, and long IDs that
+     have no break points. Default white-space: normal lets the
+     text wrap, but a URL like example.com/very/long/path forces
+     horizontal scroll because there's no inter-word break.
+     `overflow-wrap: anywhere` allows the browser to break inside
+     the token at any character on mobile — only on mobile because
+     desktop has the column width to absorb long strings cleanly. */
+  :where(.proto-text, .proto-comment-body, .proto-section) code {
+    overflow-wrap: anywhere;
   }
 }
 
