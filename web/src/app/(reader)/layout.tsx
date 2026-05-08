@@ -129,6 +129,21 @@ export default async function PrototypeLayout({
          */}
         <Analytics />
         <SpeedInsights />
+        {/* TOC FAB popover handlers — close on outside-tap, on Esc,
+         * and after the user taps a TOC anchor. The CSS turns the
+         * .proto-toc-details <details> into a fixed bottom-left
+         * floating button on mobile; this gives it popover-quality
+         * dismissal without dragging in a client component. The
+         * mobile media query is what makes it a popover, so the
+         * handlers are cheap on desktop too — they fire on every
+         * page but only find an [open] details when the user has
+         * actually expanded the FAB. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){function close(d){d.open=false}document.addEventListener('click',function(e){document.querySelectorAll('details.proto-toc-details[open]').forEach(function(d){if(!d.contains(e.target))close(d)})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('details.proto-toc-details[open]').forEach(close)});document.addEventListener('click',function(e){var t=e.target;if(t&&t.closest){var a=t.closest('details.proto-toc-details a[href^=\"#\"]');if(a){var d=a.closest('details.proto-toc-details');if(d)close(d)}}})})();",
+          }}
+        />
       </body>
     </html>
   );

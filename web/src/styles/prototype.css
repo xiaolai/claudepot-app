@@ -2042,12 +2042,13 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
  *     </details>
  *   </nav>
  *
- * Mobile: <details> is closed by default, summary is a tappable
- *   disclosure with a +/− glyph. Long TOCs no longer steal
- *   two screen-heights above the article.
+ * Mobile: the <nav> floats fixed at the bottom-left as a "Contents ▴"
+ *   pill button (FAB). Tap to expand the TOC into a popover anchored
+ *   above the button. Esc, click-outside, and tapping a TOC link all
+ *   close the popover (handled by inline JS in the reader layout).
  * Desktop: the UA closed-state hide is overridden so the <ul>
  *   stays visible regardless of [open]; the summary acts as a
- *   non-interactive section title (the existing visual). */
+ *   non-interactive section title (the existing inline-sidebar look). */
 .proto-toc-details > summary {
   list-style: none;
 }
@@ -2055,24 +2056,90 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 .proto-toc-details > summary::marker { content: ""; }
 
 @media (max-width: 768px) {
-  .proto-toc-details > summary {
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--sp-8) 0;
-    min-height: var(--touch-min);
+  /* :has() targets only the doc-TOC variant of .proto-page-aside-nav,
+     leaving OfficeSidebar / AccountSidebar (which share the outer
+     class but have no inner <details>) at their normal mobile
+     position. Browser support: Chrome 105+, Safari 15.4+, Firefox 121+.
+     env(safe-area-inset-bottom) keeps the button clear of the iPhone
+     home-indicator bar. */
+  .proto-page-aside-nav:has(.proto-toc-details) {
+    position: fixed;
+    bottom: max(var(--sp-16), env(safe-area-inset-bottom));
+    left: var(--sp-16);
+    z-index: var(--z-dropdown);
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: none;
   }
+
+  /* Pill button. Override the eyebrow-style .proto-page-aside-nav-title
+     desktop look (uppercase, tiny, muted) with a normal-text button
+     look. Specificity .proto-toc-details > summary.proto-page-aside-nav-title
+     = 0,2,1 beats the standalone .proto-page-aside-nav-title = 0,1,0. */
+  .proto-toc-details > summary.proto-page-aside-nav-title {
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: var(--font-body);
+    font-size: var(--fs-small);
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-8);
+    padding: 0 var(--sp-16);
+    min-height: var(--touch-min);
+    background: var(--bg);
+    border: var(--bw-hair) solid var(--border);
+    border-radius: var(--radius-full);
+    box-shadow: 0 var(--sp-4) var(--sp-12) var(--shadow-card);
+  }
+
+  /* Chevron pointing up when closed ("popover opens above"); rotates
+     to point down when open ("tap to close"). */
   .proto-toc-details > summary::after {
-    content: "+";
-    font-family: var(--font-mono);
-    font-size: var(--fs-body);
-    font-weight: 400;
+    content: "▴";
     color: var(--muted);
     transition: transform var(--transition-short);
   }
   .proto-toc-details[open] > summary::after {
-    content: "−";
+    transform: rotate(180deg);
+  }
+
+  /* Popover panel — fixed-positioned just above the button.
+     Calc: button-bottom + button-height (~touch-min, 44 px) + small
+     gap. Constrain max-height so very long TOCs scroll instead of
+     reaching the top of the viewport. */
+  .proto-toc-details[open] > ul {
+    position: fixed;
+    bottom: calc(
+      max(var(--sp-16), env(safe-area-inset-bottom))
+      + var(--touch-min)
+      + var(--sp-8)
+    );
+    left: var(--sp-16);
+    max-width: calc(100vw - 2 * var(--sp-16));
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: var(--z-dropdown);
+    margin: 0;
+    padding: var(--sp-8) var(--sp-12);
+    background: var(--bg);
+    border: var(--bw-hair) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 var(--sp-12) var(--sp-32) var(--shadow-card);
+    list-style: none;
+  }
+  /* Override the inherited negative margin on <li> that was tuned
+     for the desktop sidebar's left border-rail; in the FAB panel
+     there is no border-rail to align with. */
+  .proto-toc-details[open] > ul > li {
+    margin-left: 0;
+  }
+  .proto-toc-details[open] > ul > li > a {
+    border-left: none;
+    padding: var(--sp-8) var(--sp-12);
   }
 }
 
