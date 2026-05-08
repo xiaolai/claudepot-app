@@ -19,6 +19,7 @@ mod dto_memory;
 mod dto_migrate;
 mod dto_project;
 mod dto_project_repair;
+mod dto_rotation;
 mod dto_routes;
 mod dto_service_status;
 mod dto_session;
@@ -754,6 +755,14 @@ pub fn run() {
             commands::updates::updates_settings_set,
             commands::updates::updates_channel_set,
             commands::updates::updates_minimum_version_set,
+            commands::rotation::rotation_rules_get,
+            commands::rotation::rotation_rules_set,
+            commands::rotation::rotation_rule_validate,
+            commands::rotation::rotation_dry_run,
+            commands::rotation::rotation_audit_get,
+            commands::rotation::rotation_pending_list,
+            commands::rotation::rotation_apply_pending,
+            commands::rotation::rotation_dismiss_pending,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

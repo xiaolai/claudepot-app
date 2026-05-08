@@ -43,6 +43,7 @@ pub mod pricing;
 pub mod project;
 pub mod protected;
 pub mod repair;
+pub mod rotation;
 pub mod routes;
 pub mod service_status;
 pub mod session_index;

@@ -66,10 +66,6 @@ impl RotationOrchestrator {
         }
     }
 
-    pub fn audit_log(&self) -> Arc<RotationAuditLog> {
-        Arc::clone(&self.audit)
-    }
-
     /// Drive one rotation evaluation cycle. Called from
     /// `usage_snapshot::run_tick` after the snapshot has been written
     /// to disk. Loading the rules file on every tick is cheap (small
