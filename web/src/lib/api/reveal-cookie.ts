@@ -4,8 +4,10 @@
  * Mechanism: AES-256-GCM under a key derived from AUTH_SECRET. The
  * mint form-action calls `setRevealCookie(plaintext)` then redirects
  * to /settings/tokens/reveal; the reveal page calls
- * `consumeRevealCookie()` which returns the plaintext once and
- * immediately clears the cookie.
+ * `peekRevealCookie()` to read the plaintext (Server Component-safe,
+ * no cookie write) and renders it. A Server Action triggered by the
+ * "Done" button calls `deleteRevealCookie()` to enforce single-use.
+ * The 120-second TTL is the backstop for users who navigate away.
  *
  * Why this beats round-tripping the secret through React form state
  * (the previous implementation): the plaintext lives in the encrypted
@@ -107,21 +109,26 @@ export async function setRevealCookie(payload: RevealPayload): Promise<void> {
 }
 
 /**
- * Read and consume the reveal cookie. The cookie is deleted on every
- * call — single-use — and the payload is returned only when the
- * minting user matches `expectedUserId`. The parameter is required:
- * callers MUST resolve the current session and pass a real id, or
- * the redeem fails closed (returns null). An anonymous reveal-page
- * visit with a signed-out session returns null even if a cookie
- * exists, defending against same-browser logout-then-visit.
+ * Read the reveal cookie WITHOUT modifying it. Server Components
+ * may call this freely — Next.js 15 only forbids cookie *writes*
+ * from Server Components, not reads. Returns the payload only when
+ * the minting user matches `expectedUserId`; an anonymous reveal-
+ * page visit with a signed-out session returns null even if a
+ * cookie exists, defending against same-browser logout-then-visit.
+ *
+ * Single-use is enforced by the companion `deleteRevealCookie()`
+ * which runs from a Server Action (the "Done" button) and by the
+ * 120-second cookie TTL as a backstop. The previous shape combined
+ * read+delete in `consumeRevealCookie`, which threw under Next.js
+ * 15's "Cookies can only be modified in a Server Action or Route
+ * Handler" enforcement.
  */
-export async function consumeRevealCookie(
+export async function peekRevealCookie(
   expectedUserId: string,
 ): Promise<RevealPayload | null> {
   const jar = await cookies();
   const blob = jar.get(REVEAL_COOKIE)?.value;
   if (!blob) return null;
-  jar.delete({ name: REVEAL_COOKIE, path: COOKIE_PATH });
   const json = decrypt(blob);
   if (!json) return null;
   try {
@@ -141,4 +148,16 @@ export async function consumeRevealCookie(
   } catch {
     return null;
   }
+}
+
+/**
+ * Delete the reveal cookie. MUST be called only from a Server
+ * Action or Route Handler — Server Components throw under Next.js
+ * 15 when modifying cookies. The reveal page wires this to the
+ * "Done" button via a Server Action; the 120-second cookie TTL
+ * is the backstop for users who navigate away without clicking.
+ */
+export async function deleteRevealCookie(): Promise<void> {
+  const jar = await cookies();
+  jar.delete({ name: REVEAL_COOKIE, path: COOKIE_PATH });
 }
