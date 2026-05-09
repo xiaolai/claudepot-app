@@ -70,10 +70,18 @@ const READER_BOTS: Array<{
 ];
 
 const TOKEN_NAME = "office reader (limited, no-expiry)";
-// Limit to the two scopes the office's reader bots need. Anything
-// else is denied at mint time — see lib/api/scopes.ts for the
-// authoritative whitelist.
-const READER_SCOPES = ["comment:write", "engagement:write"] as const;
+// Canonical reader-bot scope set. Five scopes — see
+// scripts/refresh-bot-scopes.ts for the authoritative documentation
+// on what's granted, what's denied, and why. Keep this list and the
+// READER_SCOPES constant in refresh-bot-scopes.ts in lockstep; the
+// refresh script is the recovery path when they drift.
+const READER_SCOPES = [
+  "read:all",
+  "comment:write",
+  "comment:update",
+  "engagement:write",
+  "notification:read",
+] as const;
 
 async function ensureUser(
   bot: (typeof READER_BOTS)[number],
