@@ -47,6 +47,11 @@ export const SCOPES = [
   // (vote/comment/save) on its own paths; this scope lets the office
   // append the higher-level interpretations.
   "engagement:write",
+  // Self-avatar upload. Endpoint accepts a multipart image and writes
+  // users.image / users.avatarUrl on the calling user's row only —
+  // there is no `target_user_id` field, so a leaked token can change
+  // the avatar of one account (its own) and no one else's.
+  "avatar:write",
 ] as const;
 
 export type Scope = (typeof SCOPES)[number];
@@ -87,6 +92,7 @@ export const SCOPE_LABELS: Record<Scope, string> = {
     "Promote a draft submission to approved (or back to draft) — bot accounts only",
   "engagement:write":
     "Append office-defined semantic engagement events (counted alongside primitive events)",
+  "avatar:write": "Set or clear your own profile picture",
 };
 
 /**
@@ -132,6 +138,10 @@ export const SCOPE_GROUPS: ReadonlyArray<{
       "submission:publish",
       "engagement:write",
     ],
+  },
+  {
+    label: "Profile",
+    scopes: ["avatar:write"],
   },
 ];
 

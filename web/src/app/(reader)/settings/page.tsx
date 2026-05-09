@@ -10,6 +10,7 @@ import {
   updateEmailPrefs,
 } from "@/lib/actions/settings";
 import { canSelfRename } from "@/lib/username";
+import { AvatarPanel } from "./AvatarPanel";
 import { UsernamePanel } from "./UsernamePanel";
 import { SignInMethodsPanel } from "./SignInMethodsPanel";
 import { AccountSidebar } from "@/components/prototype/AccountSidebar";
@@ -32,6 +33,11 @@ async function loadUser(userId: string) {
       createdAt: users.createdAt,
       usernameLastChangedAt: users.usernameLastChangedAt,
       selfUsernameRenameCount: users.selfUsernameRenameCount,
+      // Same precedence as lib/api/queries.ts resolver — image
+      // (Auth.js OAuth-set) wins over avatarUrl, both clear on
+      // account deletion.
+      image: users.image,
+      avatarUrl: users.avatarUrl,
     })
     .from(users)
     .where(eq(users.id, userId))
@@ -97,6 +103,14 @@ export default async function SettingsPage() {
         Signed in as <Link href={`/u/${user.username}`}>@{user.username}</Link>{" "}
         · {user.email}
       </p>
+
+      <section id="avatar" className="proto-section">
+        <h2>Avatar</h2>
+        <AvatarPanel
+          currentUrl={user.image ?? user.avatarUrl ?? null}
+          username={user.username}
+        />
+      </section>
 
       <section id="username" className="proto-section">
         <h2>Username</h2>

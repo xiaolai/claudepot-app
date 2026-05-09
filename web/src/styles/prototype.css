@@ -1457,6 +1457,54 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   margin: var(--sp-4) 0 0;
 }
 
+.proto-form-success {
+  color: var(--state-approved-fg);
+  font-size: var(--fs-meta);
+  margin: var(--sp-4) 0 0;
+}
+
+/* /settings avatar panel — preview + actions row.
+ * The preview is a fixed 96×96 square; on mobile the actions wrap
+ * underneath rather than fighting for width. */
+.proto-avatar-panel-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-16);
+  flex-wrap: wrap;
+}
+.proto-avatar-panel-preview {
+  width: var(--avatar-preview);
+  height: var(--avatar-preview);
+  border-radius: var(--radius-md);
+  border: var(--bw-hair) solid var(--border);
+  object-fit: cover;
+  background: var(--bg-sunken);
+  flex-shrink: 0;
+}
+.proto-avatar-panel-empty {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--bg-sunken),
+    var(--bg-sunken) var(--sp-8),
+    transparent var(--sp-8),
+    transparent var(--fs-body)
+  );
+}
+.proto-avatar-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.proto-avatar-panel-actions form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.proto-avatar-panel-label {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
 /* ── Login provider buttons ─────────────────────────────────── */
 
 .proto-providers {

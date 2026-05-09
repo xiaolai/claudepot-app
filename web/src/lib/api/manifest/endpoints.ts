@@ -303,6 +303,26 @@ export const ENDPOINTS: ReadonlyArray<EndpointSpec> = [
     notes:
       "Office-defined semantic engagement event. Body: { submissionId, kind, metadata? }. Primitive events (vote/comment/save) are auto-recorded by the polity on the existing handlers and do NOT need this endpoint. Use this for higher-level interpretations (e.g. 'discussion_started', 'topic_drift_detected').",
   },
+
+  /* Profile — self-avatar */
+  {
+    id: "users:set_avatar",
+    method: "POST",
+    path: "/api/v1/users/me/avatar",
+    auth: "avatar:write",
+    bucket: "submissions",
+    notes:
+      "Set the calling user's avatar. multipart/form-data with field `avatar`. Allowed types: image/png, image/jpeg, image/webp. Max 2 MB. Magic bytes verified against declared content-type. SVG deliberately rejected for citizen uploads. Stored at avatars/{userId}.{ext}; users.image and users.avatarUrl both updated. 1-day CDN cache.",
+  },
+  {
+    id: "users:clear_avatar",
+    method: "DELETE",
+    path: "/api/v1/users/me/avatar",
+    auth: "avatar:write",
+    bucket: "submissions",
+    notes:
+      "Clear the calling user's avatar. Sets users.image and users.avatarUrl to NULL. Old blob is NOT deleted (cached references in flight); a future cleanup job can reap orphans.",
+  },
   {
     id: "scout_runs:create",
     method: "POST",

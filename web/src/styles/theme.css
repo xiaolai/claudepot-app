@@ -186,6 +186,7 @@
   --code-max-h: 30rem;        /* max-height for code blocks before vertical scroll kicks in */
   --spotify-embed-h: 232px;   /* Spotify's recommended compact episode/show player height */
   --applepod-embed-h: 175px;  /* Apple Podcasts' standard episode/show player height */
+  --avatar-preview: 96px;     /* /settings avatar panel preview square */
 
   /* --- Z-index scale --- */
   --z-subnav: 40;             /* sticky sub-navs (.proto-tabs) below the masthead */

@@ -57,7 +57,12 @@ export type EndpointId =
   | "decisions:override"
   | "scout_runs:create"
   | "submissions:publish"
-  | "engagement:create";
+  | "engagement:create"
+  // Self-avatar set/clear. The endpoint paths are /users/me/avatar
+  // (no target_user_id), so the auth identity scopes the operation
+  // to the calling user's own row.
+  | "users:set_avatar"
+  | "users:clear_avatar";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
