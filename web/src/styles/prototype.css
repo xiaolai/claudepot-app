@@ -3626,6 +3626,17 @@ a.proto-inbox-chip:hover {
   gap: var(--sp-8);
 }
 
+/* The global `:where(.proto-section, …) ul > li::before` rule paints
+ * a "•" bullet on every li inside a section-class list. That's the
+ * design intent for prose lists, but `.proto-method-list` is a flex-
+ * row chrome list (sign-in providers); the absolutely-positioned
+ * bullet collapses into a tiny squashed dot inside the flex layout
+ * and reads as a broken icon. Suppress it here. Same shape as the
+ * `.office-pick-list` and `.proto-bot-list` carve-outs. */
+.proto-section .proto-method-list > li::before {
+  content: none;
+}
+
 .proto-method-row {
   display: flex;
   align-items: center;
@@ -3639,6 +3650,13 @@ a.proto-inbox-chip:hover {
 .proto-method-label {
   font-size: var(--fs-body);
   color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.proto-method-label svg {
+  flex-shrink: 0;
+  color: var(--editorial-mid);
 }
 
 .proto-method-status {
