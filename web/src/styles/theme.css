@@ -187,6 +187,8 @@
   --spotify-embed-h: 232px;   /* Spotify's recommended compact episode/show player height */
   --applepod-embed-h: 175px;  /* Apple Podcasts' standard episode/show player height */
   --avatar-preview: 96px;     /* /settings avatar panel preview square */
+  --avatar-cropper-h: 320px;  /* /settings avatar cropper surface height */
+  --avatar-cropper-zoom-w: 160px; /* zoom slider width in the cropper controls */
 
   /* --- Z-index scale --- */
   --z-subnav: 40;             /* sticky sub-navs (.proto-tabs) below the masthead */

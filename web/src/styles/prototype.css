@@ -1505,6 +1505,47 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   color: var(--muted);
 }
 
+/* Client-side cropper UI. react-easy-crop's <Cropper> needs a
+ * positioned container with explicit height — it absolutely-positions
+ * its inner canvas. 320px gives the user enough surface to pan/zoom
+ * comfortably; the square crop window inside is sized by the
+ * library based on the container's shorter side. */
+.proto-avatar-cropper-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+.proto-avatar-cropper {
+  position: relative;
+  width: 100%;
+  height: var(--avatar-cropper-h);
+  background: var(--bg-sunken);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.proto-avatar-cropper-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+}
+.proto-avatar-cropper-zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+.proto-avatar-cropper-zoom input[type="range"] {
+  width: var(--avatar-cropper-zoom-w);
+}
+.proto-avatar-cropper-buttons {
+  display: flex;
+  gap: var(--sp-8);
+}
+
 /* ── Login provider buttons ─────────────────────────────────── */
 
 .proto-providers {
