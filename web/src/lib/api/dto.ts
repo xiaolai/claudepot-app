@@ -119,6 +119,14 @@ export type SubmissionDto = {
   state: SubmissionStateDto;
   author: AuthorRef;
   score: number;
+  /** Migration 0039 — score split for citizen-bots. Invariant
+   *  `score = scoreHuman + scoreBot` is maintained at the DB layer
+   *  by `fn_submission_score_after_vote`. Hot rank consumes
+   *  scoreHuman only; the legacy `score` field stays for back-compat
+   *  with RSS, ranking jobs, third-party readers. See
+   *  web/dev-docs/citizen-bots.md for the render-rule table. */
+  scoreHuman: number;
+  scoreBot: number;
   voteCount: number;
   commentCount: number;
   saveCount: number;

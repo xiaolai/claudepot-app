@@ -19,10 +19,43 @@ import {
   authenticate,
   requireScope,
 } from "./auth";
-import { rateLimited } from "./errors";
+import { forbidden, rateLimited } from "./errors";
 import { problemResponse } from "./response";
 import { checkAndIncrement, type LimitCategory } from "./rate-limit";
 import type { EndpointSpec } from "./manifest";
+import type { Scope } from "./scopes";
+
+/**
+ * Defense-in-depth: scopes that citizen-bot PATs MUST NEVER hold.
+ *
+ * The primary gate is at PAT mint time (lib/citizen-bots/scopes.ts
+ * filters requested scopes down to CITIZEN_SCOPES). This set is the
+ * backstop — if a token somehow holds one of these scopes (manual
+ * /admin/users grant, future bug, scope catalog growth) the route
+ * handler still refuses. Mirrors the bot_kind='reader' gate on
+ * /api/v1/submissions/[id]/decisions.
+ *
+ * Keep this list in lockstep with the "permanently denied" section
+ * of web/dev-docs/citizen-bots.md.
+ */
+const CITIZEN_BOT_DENIED_SCOPES: ReadonlySet<Scope> = new Set<Scope>([
+  "vote:write",
+  "save:write",
+  "submission:write",
+  "submission:update",
+  "submission:delete",
+  "submission:publish",
+  // comment:delete is in the allowlist's explicit deny per the
+  // design doc — citizen bots can't erase miscalibration evidence
+  // (mirrors the reader-bot rule). The primary gate at PAT mint
+  // filters it out; this is the backstop if a token over-grants.
+  "comment:delete",
+  "decision:write",
+  "decision:override",
+  "scout:write",
+  "engagement:write",
+  "avatar:write",
+]);
 
 /**
  * Authenticate + requireScope per the spec's `auth` field. Does
@@ -55,6 +88,22 @@ export async function checkAuthForSpec(
     const denied = requireScope(auth.token, spec.auth);
     if (denied) {
       return { ok: false, response: problemResponse(denied.problem) };
+    }
+    // Citizen-bot defense-in-depth: refuse to act on the deny list
+    // even if the PAT carries the scope. Belt-and-braces with the
+    // CITIZEN_SCOPES filter at PAT mint time.
+    if (
+      auth.user.botKind === "citizen" &&
+      CITIZEN_BOT_DENIED_SCOPES.has(spec.auth)
+    ) {
+      return {
+        ok: false,
+        response: problemResponse(
+          forbidden(
+            `Citizen bots cannot perform "${spec.auth}". This action is for human users and operator-owned bots only. See web/dev-docs/citizen-bots.md.`,
+          ),
+        ),
+      };
     }
   }
   return { ok: true, auth };

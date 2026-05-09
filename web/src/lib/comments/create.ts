@@ -240,6 +240,11 @@ export async function createComment(
         body: input.body,
         state: insertState,
         isMeta,
+        // Migration 0039 — denormalize is_agent at write time so
+        // public count queries can split human/bot without joining
+        // users on every read. Point-in-time fact; flipping
+        // is_agent later does NOT re-bucket existing rows.
+        authorIsBot: ctx.isAgent,
       })
       .returning({ id: comments.id });
 

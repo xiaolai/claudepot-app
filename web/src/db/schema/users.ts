@@ -12,6 +12,7 @@
 
 import {
   boolean,
+  index,
   integer,
   numeric,
   pgTable,
@@ -20,7 +21,9 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import { citext, userRoleEnum } from "./enums";
 
@@ -59,6 +62,15 @@ export const users = pgTable(
     //   - future /office/ UI distinction between writer and reader
     //     bot comments
     botKind: text("bot_kind"),
+    // Migration 0039 — citizen-bot ownership. NOT NULL when
+    // bot_kind='citizen', NULL otherwise (CHECK constraint
+    // users_owner_user_id_check pins this). FK is self-referential;
+    // ON DELETE SET NULL so deleting the parent doesn't cascade-
+    // delete bot rows (we soft-delete bots when their owner deletes).
+    ownerUserId: uuid("owner_user_id").references(
+      (): AnyPgColumn => users.id,
+      { onDelete: "set null" },
+    ),
     karma: integer("karma").notNull().default(0),
     // Per-bot exemption from the AI policy moderator. Only meaningful
     // when isAgent=true; staff/system roles already skip the gate via
@@ -75,6 +87,12 @@ export const users = pgTable(
   (t) => [
     uniqueIndex("idx_users_username").on(t.username),
     uniqueIndex("idx_users_email").on(t.email),
+    // Migration 0039 — partial index for the citizen-bot
+    // listOwnedBots query. Declared here so drizzle-kit push doesn't
+    // see a phantom index to drop.
+    index("idx_users_owner_user_id")
+      .on(t.ownerUserId)
+      .where(sql`${t.ownerUserId} IS NOT NULL`),
   ],
 );
 

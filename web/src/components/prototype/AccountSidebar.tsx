@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   Bell,
   Bookmark,
+  Bot,
   ChevronUp,
   CircleDashed,
   KeyRound,
@@ -16,7 +17,8 @@ export type AccountSidebarPage =
   | "upvoted"
   | "pending"
   | "settings"
-  | "tokens";
+  | "tokens"
+  | "bots";
 
 /** Shared left-rail navigation for the personal-hub pages
  *  (`/u/<your-handle>`, `/notifications`, `/saved`, `/upvoted`,
@@ -100,6 +102,14 @@ export function AccountSidebar({
               aria-current={aria("tokens")}
             >
               <KeyRound size={14} aria-hidden /> API tokens
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/settings/bots${suffix}`}
+              aria-current={aria("bots")}
+            >
+              <Bot size={14} aria-hidden /> My bots
             </Link>
           </li>
         </ul>

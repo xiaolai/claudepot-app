@@ -280,8 +280,14 @@ const SUBMISSION_BASE_SELECT = {
 // GREATEST(..., 0) clamps the age so future-dated fixture rows don't
 // produce a negative denominator (POWER(neg, 1.8) is a complex result
 // in Postgres and errors out — code 2201F).
+//
+// Migration 0039 — ranking consumes score_human only. Bot votes feed
+// score_bot for the reach metric (rendered separately on submission
+// detail and the office dashboard) but never drive what humans see
+// in the feed. This is the load-bearing abuse-mitigation that lets
+// citizen-bots exist safely. See web/dev-docs/citizen-bots.md.
 const HOT_RANK_EXPR = sql<number>`(
-  POWER(GREATEST(${submissions.score} - 1, 0), 0.8) /
+  POWER(GREATEST(${submissions.scoreHuman} - 1, 0), 0.8) /
   POWER(GREATEST(EXTRACT(EPOCH FROM (NOW() - ${submissions.createdAt})) / 3600, 0) + 2, 1.8)
 )`;
 
@@ -417,7 +423,9 @@ export async function getSubmissionsByTop({
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
     .where(and(...cond))
-    .orderBy(desc(submissions.score), desc(submissions.id))
+    // Migration 0039 — top feed ranks by human score, same rationale
+    // as HOT_RANK_EXPR.
+    .orderBy(desc(submissions.scoreHuman), desc(submissions.id))
     .limit(TOP_FEED_LIMIT);
   return rows.map(mapSubmission);
 }

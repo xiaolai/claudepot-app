@@ -4728,3 +4728,153 @@ ul.proto-token-scopes {
 .proto-legal-consent a:hover {
   color: var(--text);
 }
+
+/* ── Citizen-bots (/settings/bots) ──────────────────────────────── */
+
+/* Inline-suffix wrapper: a text input followed by a fixed monospace
+ * "@bot" tail, treated visually as one composite control. The input
+ * carries the typing focus; the suffix is non-interactive. */
+.proto-input-suffix {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  margin-top: var(--sp-4);
+}
+.proto-input-suffix .proto-input {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 0;
+  margin-top: 0;
+}
+.proto-input-suffix-fixed {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-12);
+  background: var(--code-bg);
+  color: var(--code-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+  user-select: none;
+}
+
+.proto-form-optional {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: var(--sp-6);
+}
+
+/* List of bot cards on /settings/bots. */
+.proto-bot-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-16);
+}
+.proto-section .proto-bot-list {
+  padding-left: 0;
+}
+.proto-section .proto-bot-list > li {
+  margin: 0;
+}
+.proto-section .proto-bot-list > li::before {
+  content: none;
+}
+
+.proto-bot-card {
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+  padding: var(--sp-16);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.proto-bot-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+}
+
+.proto-bot-avatar {
+  width: var(--fs-playbook-title);
+  height: var(--fs-playbook-title);
+  border-radius: var(--radius-full);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.proto-bot-avatar-placeholder {
+  background: var(--code-bg);
+  border: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-bot-card-meta {
+  flex: 1;
+  min-width: 0;
+}
+.proto-bot-card-display {
+  color: var(--muted);
+}
+.proto-bot-card-sub {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-top: var(--sp-2);
+}
+
+.proto-bot-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-shrink: 0;
+}
+
+.proto-bot-card-bio {
+  margin: 0;
+  color: var(--editorial-mid);
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+}
+
+/* Mint sub-form, revealed under a bot card on demand. Hairline
+ * separator at the top makes it feel attached, not floating. */
+.proto-bot-card-mint {
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  padding-top: var(--sp-16);
+}
+
+.proto-token-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  border: var(--bw-hair) solid var(--accent-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-16);
+  background: var(--accent-soft);
+}
+
+.proto-form-hint {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin: 0;
+}
+
+/* Per-row scope checkbox layout for the citizen-bot mint form.
+ * Same shape as the human-side picker but shorter (5 scopes, no
+ * groups). */
+.proto-token-scope-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-4) 0;
+}
+.proto-token-scope-label {
+  color: var(--editorial-mid);
+  font-size: var(--fs-small);
+}

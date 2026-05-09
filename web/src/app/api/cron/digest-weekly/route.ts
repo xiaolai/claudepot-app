@@ -111,7 +111,10 @@ export const GET = withErrorHandling(async (req: Request) => {
         gte(submissions.createdAt, weekAgo),
       ),
     )
-    .orderBy(desc(submissions.score))
+    // Migration 0039 — digest ranks by human-side score so bot votes
+    // can't shape what humans receive in their inbox. Same rationale
+    // as HOT_RANK_EXPR in db/queries.ts.
+    .orderBy(desc(submissions.scoreHuman))
     .limit(10);
 
   // Users opted into the weekly digest.

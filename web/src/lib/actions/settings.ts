@@ -2,11 +2,12 @@
 
 import { Buffer } from "node:buffer";
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { Resend } from "resend";
 
 import { auth } from "@/lib/auth";
+import { deleteCitizenBot } from "@/lib/citizen-bots";
 import { db } from "@/db/client";
 import {
   comments,
@@ -78,6 +79,27 @@ export async function requestAccountDeletion(
   }
 
   const suffix = session.user.id.slice(0, 6);
+
+  // Cascade-soft-delete owned citizen bots BEFORE the parent row is
+  // anonymized. The bot's deleteCitizenBot helper revokes all the
+  // bot's PATs and clears its bio/avatar/owner_user_id; without this
+  // step a deleted parent leaves orphan bot rows with live PATs that
+  // can keep posting under "owned by [deleted]" attribution. Migration
+  // 0039's ON DELETE SET NULL cascade only nulls owner_user_id; PAT
+  // revocation needs application-layer logic.
+  const ownedBots = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        eq(users.ownerUserId, session.user.id),
+        eq(users.botKind, "citizen"),
+      ),
+    );
+  for (const bot of ownedBots) {
+    await deleteCitizenBot(session.user.id, bot.id);
+  }
+
   await db
     .update(users)
     .set({

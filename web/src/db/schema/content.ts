@@ -67,6 +67,14 @@ export const submissions = pgTable(
     text: text("text"),
     state: contentStateEnum("state").notNull().default("pending"),
     score: integer("score").notNull().default(0),
+    // Migration 0039 — score split for citizen-bots. Maintained by
+    // fn_submission_score_after_vote: invariant
+    //   score = score_human + score_bot
+    // Hot rank uses score_human only (bots never drive feed
+    // ranking); the back-compat `score` column remains for RSS,
+    // ranking jobs that haven't migrated, and the public API.
+    scoreHuman: integer("score_human").notNull().default(0),
+    scoreBot: integer("score_bot").notNull().default(0),
     readingTimeMin: integer("reading_time_min"),
     podcastMeta: jsonb("podcast_meta"),
     toolMeta: jsonb("tool_meta"),
@@ -99,6 +107,11 @@ export const submissions = pgTable(
   (t) => [
     index("idx_submissions_state_created").on(t.state, t.createdAt.desc()),
     index("idx_submissions_state_score").on(t.state, t.score.desc()),
+    // Migration 0039 — ranking index on the human-only score. Hot
+    // rank should consume score_human (bots never drive feed
+    // ranking). The score-mixed index above stays for back-compat
+    // and any callers still on the legacy column.
+    index("idx_submissions_state_score_human").on(t.state, t.scoreHuman.desc()),
     index("idx_submissions_author").on(t.authorId),
     index("idx_submissions_source").on(t.sourceId),
   ],
@@ -168,6 +181,11 @@ export const comments = pgTable(
     body: text("body").notNull(),
     state: contentStateEnum("state").notNull().default("approved"),
     score: integer("score").notNull().default(0),
+    // Migration 0039 — same split as submissions.score. Reserved
+    // for future per-comment vote tracking; populated as 0 today
+    // until comment-vote machinery exists.
+    scoreHuman: integer("score_human").notNull().default(0),
+    scoreBot: integer("score_bot").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     // See migration 0017. Same semantics as submissions.updated_at.
     updatedAt: timestamp("updated_at", { withTimezone: true }),
@@ -177,6 +195,12 @@ export const comments = pgTable(
     // renders in the thread; only the metric-side joins exclude
     // it. Office side sets this; humans never can.
     isMeta: boolean("is_meta").notNull().default(false),
+    // Migration 0039 — denormalized from users.is_agent at insert
+    // time. Lets count queries split human vs bot comment counts
+    // without joining users on every read. Citizen-bot comments
+    // (bot_kind='citizen') have author_is_bot=true and is_meta=false
+    // — they show in public counts but in the bot column.
+    authorIsBot: boolean("author_is_bot").notNull().default(false),
   },
   (t) => [
     index("idx_comments_submission_created").on(t.submissionId, t.createdAt),
@@ -198,6 +222,19 @@ export const comments = pgTable(
       .on(t.submissionId, t.createdAt)
       .where(
         sql`${t.state} = 'approved' AND ${t.deletedAt} IS NULL AND ${t.isMeta} = false`,
+      ),
+    // Migration 0039 — split-by-author covering indexes for the
+    // human/bot comment-count queries. The is_meta=false filter
+    // matches the existing public-counter convention.
+    index("idx_comments_submission_visible_human")
+      .on(t.submissionId, t.createdAt)
+      .where(
+        sql`${t.state} = 'approved' AND ${t.deletedAt} IS NULL AND ${t.isMeta} = false AND ${t.authorIsBot} = false`,
+      ),
+    index("idx_comments_submission_visible_bot")
+      .on(t.submissionId, t.createdAt)
+      .where(
+        sql`${t.state} = 'approved' AND ${t.deletedAt} IS NULL AND ${t.isMeta} = false AND ${t.authorIsBot} = true`,
       ),
   ],
 );

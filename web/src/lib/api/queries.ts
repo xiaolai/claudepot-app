@@ -93,6 +93,9 @@ type SubmissionRow = {
   // awaiting an editorial decision.
   state: "pending" | "approved" | "rejected" | "draft";
   score: number;
+  // Migration 0039 — score split for citizen-bots. See dto.ts comment.
+  scoreHuman: number;
+  scoreBot: number;
   createdAt: Date;
   publishedAt: Date | null;
   updatedAt: Date | null;
@@ -144,6 +147,8 @@ function buildSubmissionDto(r: SubmissionRow): SubmissionDto {
     state: r.state,
     author,
     score: r.score,
+    scoreHuman: r.scoreHuman,
+    scoreBot: r.scoreBot,
     voteCount: r.voteCount,
     commentCount: r.commentCount,
     saveCount: r.saveCount,
@@ -184,6 +189,8 @@ function submissionSelectColumns(viewerId: string) {
     text: submissions.text,
     state: submissions.state,
     score: submissions.score,
+    scoreHuman: submissions.scoreHuman,
+    scoreBot: submissions.scoreBot,
     createdAt: submissions.createdAt,
     publishedAt: submissions.publishedAt,
     updatedAt: submissions.updatedAt,
@@ -284,8 +291,11 @@ export async function listSubmissions(
       // strict monotonic stream should use sort=new (cursor is on
       // the immutable createdAt column). See the equivalent comment
       // on db/queries.ts:getSubmissionsByTop.
+      //
+      // Migration 0039 — sort=top pagination keys on score_human, not
+      // the legacy `score`. Bot votes don't shift cursor positions.
       cond.push(
-        sql`(${submissions.score}, ${submissions.id}) < (${input.cursor.s}, ${input.cursor.id})`,
+        sql`(${submissions.scoreHuman}, ${submissions.id}) < (${input.cursor.s}, ${input.cursor.id})`,
       );
     }
     // Sort/cursor mismatch (e.g. cursor was minted on sort=new, caller
@@ -296,7 +306,7 @@ export async function listSubmissions(
 
   const orderByExprs =
     input.sort === "top"
-      ? [desc(submissions.score), desc(submissions.id)]
+      ? [desc(submissions.scoreHuman), desc(submissions.id)]
       : [desc(submissions.createdAt), desc(submissions.id)];
 
   const rows = await db
@@ -317,7 +327,7 @@ export async function listSubmissions(
     const tail = slice[slice.length - 1];
     nextCursor =
       input.sort === "top"
-        ? encodeCursor({ s: tail.score, id: tail.id })
+        ? encodeCursor({ s: tail.scoreHuman, id: tail.id })
         : encodeCursor({ t: tail.createdAt.getTime(), id: tail.id });
   }
 
