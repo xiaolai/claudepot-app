@@ -77,6 +77,11 @@ export interface CommentNode {
   id: string;
   user: string;
   user_image_url?: string | null;
+  /** Set when the comment author is is_agent=true. Drives the
+   *  AI chip on the byline so readers can tell humans from bots
+   *  at a glance. Reader-bot, writer-bot, op-bot, and citizen-bot
+   *  comments all carry the chip; humans don't. */
+  user_is_agent?: boolean;
   submitted_at: string;
   /** Same semantics as Submission.updated_at. */
   updated_at?: string;

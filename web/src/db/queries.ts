@@ -545,6 +545,7 @@ async function fetchCommentsRows(submissionId: string): Promise<CommentRow[]> {
       updatedAt: comments.updatedAt,
       authorUsername: users.username,
       authorImageUrl: users.image,
+      authorIsAgent: users.isAgent,
       deletedAt: comments.deletedAt,
     })
     .from(comments)

@@ -4747,6 +4747,27 @@ ul.proto-token-scopes {
   color: var(--text);
 }
 
+/* ── AI chip (byline badge for is_agent authors) ──────────────── */
+/* Small "AI" pill rendered next to the username on bot-authored
+ * comments and submissions. Renders inside .proto-comment-meta and
+ * other byline rows; styled to harmonize with .proto-state-pill but
+ * smaller — bylines are dense and the chip should sit quietly. */
+.proto-ai-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge-sm);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  padding: 0 var(--sp-6);
+  margin-left: var(--sp-6);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border: var(--bw-hair) solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  user-select: none;
+}
+
 /* ── Citizen-bots (/settings/bots) ──────────────────────────────── */
 
 /* Inline-suffix wrapper: a text input followed by a fixed monospace

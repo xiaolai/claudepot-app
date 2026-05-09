@@ -18,6 +18,7 @@ export type CommentRow = {
   updatedAt: Date | null;
   authorUsername: string;
   authorImageUrl: string | null;
+  authorIsAgent: boolean;
   deletedAt: Date | null;
 };
 
@@ -61,6 +62,14 @@ export function buildCommentTree(
         return {
           id: r.id,
           user: tombstoned ? "[deleted]" : r.authorUsername,
+          // Plumb avatar through. The previous shape dropped this
+          // field, which forced every comment byline to fall through
+          // to the boring-avatars identicon (Tier 3 in
+          // components/prototype/Avatar.tsx) — including bots whose
+          // users.image was set. Same for is_agent below: without
+          // it, the byline can't render the AI chip.
+          user_image_url: tombstoned ? null : r.authorImageUrl,
+          user_is_agent: tombstoned ? false : r.authorIsAgent,
           submitted_at: r.createdAt.toISOString(),
           updated_at: tombstoned ? undefined : r.updatedAt?.toISOString(),
           upvotes: tombstoned ? 0 : upvotes,

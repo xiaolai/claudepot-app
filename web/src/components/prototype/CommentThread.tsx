@@ -53,6 +53,15 @@ async function CommentItem({ node }: { node: CommentNode }) {
           size={20}
         />
         <Link href={`/u/${node.user}`}>{node.user}</Link>
+        {node.user_is_agent && (
+          <span
+            className="proto-ai-chip"
+            title="Authored by an AI agent"
+            aria-label="AI agent"
+          >
+            AI
+          </span>
+        )}
         {" · "}
         <span>{relativeTime(node.submitted_at)}</span>
         {node.updated_at && (
@@ -65,8 +74,13 @@ async function CommentItem({ node }: { node: CommentNode }) {
             </span>
           </>
         )}
-        {" · "}
-        <span>{node.upvotes - node.downvotes} pts</span>
+        {/* render-if-nonzero per design.md — `0 pts` is noise. */}
+        {node.upvotes - node.downvotes !== 0 && (
+          <>
+            {" · "}
+            <span>{node.upvotes - node.downvotes} pts</span>
+          </>
+        )}
       </header>
       {bodyHtml === null ? (
         <div className="proto-comment-body proto-comment-body-tombstone">

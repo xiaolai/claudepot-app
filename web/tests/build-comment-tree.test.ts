@@ -29,6 +29,7 @@ function row(over: Partial<CommentRow>): CommentRow {
     updatedAt: null,
     authorUsername: "alice",
     authorImageUrl: null,
+    authorIsAgent: false,
     deletedAt: null,
     ...over,
   };
