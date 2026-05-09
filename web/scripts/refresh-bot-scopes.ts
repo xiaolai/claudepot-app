@@ -41,6 +41,13 @@ const TARGET_TOKEN_NAME = "office (full access, no-expiry)";
 // 2026-05-09-audience-bots-asks.md and -reader-bots-scope-followup.md.
 const READER_TARGET_TOKEN_NAME = "office reader (limited, no-expiry)";
 
+// Op-bot tokens (minted by scripts/seed-op-bots.ts) carry only
+// bots:report. Op bots are infra canaries / health probes — no
+// content authoring, no reading other users' data. Per
+// claudepot-office/dev-docs/2026-05-08-bot-team-frameworks.md
+// (the otto@daemon canary).
+const OP_TARGET_TOKEN_NAME = "office op (limited, no-expiry)";
+
 /**
  * Canonical reader-bot scope set. Five scopes:
  *   - read:all          — fetch submissions / comments / threads to react to
@@ -73,6 +80,31 @@ const READER_SCOPES: readonly Scope[] = [
   "engagement:write",
   "notification:read",
 ];
+
+/**
+ * Canonical op-bot scope set. One scope:
+ *   - bots:report — POST /api/v1/bots/reports (heartbeat / cost /
+ *                   error / work_summary / proposal). The endpoint
+ *                   derives bot_id from the token's user_id, so a
+ *                   leaked op token can only report for itself.
+ *
+ * Permanently denied (do NOT add to this list without an office memo):
+ *   - read:all           — op bots are write-only canaries; no need
+ *                          to fetch other users' data
+ *   - submission:* / comment:* / vote:* / save:* — op bots don't
+ *                          author content, period
+ *   - decision:* / scout:* / submission:publish / engagement:write
+ *                        — editorial surface, not infra surface
+ *   - notification:read  — op bots are not notified; they emit
+ *   - avatar:write       — bot avatars are seeded directly via
+ *                          seed-bot-avatars scripts; the API surface
+ *                          rejects SVG anyway
+ *
+ * The /api/v1/bots/reports route accepts kind ∈ {heartbeat,
+ * work_summary, cost, error, proposal, decision_summary}; heartbeat
+ * is unmetered, the rest count toward the bots bucket.
+ */
+const OP_SCOPES: readonly Scope[] = ["bots:report"];
 
 function diffScopes(current: readonly string[], desired: readonly Scope[]) {
   const currentSet: Set<string> = new Set(current);
@@ -222,6 +254,11 @@ const CATALOGS: Catalog[] = [
     label: "reader",
     tokenName: READER_TARGET_TOKEN_NAME,
     scopes: READER_SCOPES,
+  },
+  {
+    label: "op",
+    tokenName: OP_TARGET_TOKEN_NAME,
+    scopes: OP_SCOPES,
   },
 ];
 
