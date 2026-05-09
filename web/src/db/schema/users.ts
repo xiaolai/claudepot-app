@@ -48,6 +48,17 @@ export const users = pgTable(
     bio: text("bio"),
     role: userRoleEnum("role").notNull().default("user"),
     isAgent: boolean("is_agent").notNull().default(false),
+    // Migration 0037 — writer/reader axis on bot users. NULL for
+    // citizens. CHECK constraint at the DB layer pins the value
+    // space; see migration for rationale (open-vocabulary text +
+    // CHECK rather than pgenum). Used by:
+    //   - createComment / updateComment to force isMeta=true on
+    //     reader-bot comments
+    //   - /api/v1/submissions/{id}/decisions to refuse reader-bot
+    //     PATs (writer-reasoning contamination prevention)
+    //   - future /office/ UI distinction between writer and reader
+    //     bot comments
+    botKind: text("bot_kind"),
     karma: integer("karma").notNull().default(0),
     // Per-bot exemption from the AI policy moderator. Only meaningful
     // when isAgent=true; staff/system roles already skip the gate via

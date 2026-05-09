@@ -19,7 +19,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { submissions } from "@/db/schema";
-import { notFound } from "@/lib/api/errors";
+import { forbidden, notFound } from "@/lib/api/errors";
 import { ok, preflight, problemResponse, withErrorHandling } from "@/lib/api/response";
 import { getDecisionsBySubmission } from "@/db/office-queries";
 import { isUuid } from "@/lib/api/inputs";
@@ -42,6 +42,21 @@ export const GET = withErrorHandling(async (
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
   const { auth } = policy;
+
+  // Reader-bot PATs are structurally denied this endpoint per
+  // the office's stated discipline — readers must not see writer
+  // reasoning before reacting (the feedback signal would be
+  // contaminated). The office commits to not fetching this endpoint
+  // from reader bots; this server-side gate is the structural
+  // backstop. See claudepot-office/dev-docs/2026-05-09-audience-bots-asks.md.
+  if (auth.user.botKind === "reader") {
+    return problemResponse(
+      forbidden(
+        "Reader-bot PATs cannot fetch editorial decisions for a submission. " +
+          "Reactions must be authored against the content alone, not against the writer's reasoning.",
+      ),
+    );
+  }
 
   const charge = await chargeForSpec(SPEC, auth.token.id);
   if (!charge.ok) return charge.response;

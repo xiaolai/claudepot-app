@@ -18,6 +18,12 @@ export interface AuthorContext {
   role: "user" | "staff" | "locked" | "system";
   isAgent: boolean;
   botModerationExempt: boolean;
+  // Migration 0037 — writer/reader axis on bot users. NULL for
+  // citizens. createComment forces isMeta=true on every comment
+  // authored by a reader-bot regardless of the input flag, so
+  // reader-bot reactions stay visible in the thread but stop
+  // inflating public commentCount.
+  botKind: string | null;
 }
 
 export async function loadAuthorContext(
@@ -28,6 +34,7 @@ export async function loadAuthorContext(
       role: users.role,
       isAgent: users.isAgent,
       botModerationExempt: users.botModerationExempt,
+      botKind: users.botKind,
     })
     .from(users)
     .where(eq(users.id, authorId))

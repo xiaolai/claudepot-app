@@ -220,10 +220,17 @@ export async function createComment(
       parentAuthor = parent.authorId;
     }
 
-    // isMeta is honored only when the author is_agent=true. Citizens
-    // can't set it (or unset it) — accept the default 'false' from
-    // the column. See lib/comments/schema.ts for the contract.
-    const isMeta = ctx.isAgent ? Boolean(input.isMeta) : false;
+    // isMeta gating: reader-bots (bot_kind='reader') ALWAYS write
+    // isMeta=true regardless of the input — server-side enforcement
+    // so a buggy reader-bot client can't inflate commentCount.
+    // Writer-bots / staff-bots honor the input flag. Citizens can't
+    // set it. See lib/comments/schema.ts for the contract.
+    const isMeta =
+      ctx.botKind === "reader"
+        ? true
+        : ctx.isAgent
+          ? Boolean(input.isMeta)
+          : false;
     const [row] = await tx
       .insert(comments)
       .values({
@@ -263,7 +270,14 @@ export async function createComment(
   // a reader saw, so it shouldn't tilt the engagement curve. Best
   // effort, never blocks. Bot↔bot meta replies are still recorded;
   // the office can filter on metadata.isMeta when reading.
-  const insertedIsMeta = ctx.isAgent ? Boolean(input.isMeta) : false;
+  // Mirror the in-tx isMeta gating: reader-bots always meta, writer-
+  // bots honor input, citizens always non-meta.
+  const insertedIsMeta =
+    ctx.botKind === "reader"
+      ? true
+      : ctx.isAgent
+        ? Boolean(input.isMeta)
+        : false;
   if (insertState === "approved") {
     void recordEngagement({
       submissionId: input.submissionId,

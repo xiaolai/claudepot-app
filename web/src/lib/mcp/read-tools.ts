@@ -479,6 +479,16 @@ export function registerReadTools(server: McpServer): void {
     async (args, extra) => {
       const a = await checkAuthForTool("list_submission_decisions", extra);
       if (!a.ok) return a.result;
+      // Reader-bot gate (migration 0037) — mirror the REST surface
+      // at app/api/v1/submissions/[id]/decisions. Reader bots must
+      // not see writer reasoning before reacting.
+      if (a.ctx.botKind === "reader") {
+        return textResult(
+          "Reader-bot tokens cannot fetch editorial decisions. " +
+            "Reactions must be authored against the content alone, not against the writer's reasoning.",
+          true,
+        );
+      }
       const c = await chargeForTool("list_submission_decisions", a.ctx.tokenId);
       if (!c.ok) return c.result;
 

@@ -24,6 +24,10 @@ export type ClaudepotAuthExtra = {
   // Mirrors users.is_agent. MCP tools that gate on bot identity
   // (e.g. publish_submission) read this without a second DB hit.
   isAgent: boolean;
+  // Mirrors users.bot_kind (migration 0037). NULL for citizens.
+  // Used by list_submission_decisions to refuse reader-bot PATs
+  // — same structural gate as the REST surface.
+  botKind: string | null;
   tokenId: string;
   tokenPrefix: string;
 };
@@ -43,6 +47,7 @@ export async function verifyClaudepotToken(
       username: users.username,
       role: users.role,
       isAgent: users.isAgent,
+      botKind: users.botKind,
     })
     .from(users)
     .where(eq(users.id, token.userId))
@@ -59,6 +64,7 @@ export async function verifyClaudepotToken(
     username: user.username,
     role: user.role,
     isAgent: user.isAgent,
+    botKind: user.botKind,
     tokenId: token.id,
     tokenPrefix: token.displayPrefix,
   };

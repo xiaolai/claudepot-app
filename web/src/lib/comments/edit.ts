@@ -39,7 +39,11 @@ export async function updateCommentAsAuthor(
   input: UpdateCommentInput,
 ): Promise<UpdateCommentResult> {
   const [actor] = await db
-    .select({ role: users.role, isAgent: users.isAgent })
+    .select({
+      role: users.role,
+      isAgent: users.isAgent,
+      botKind: users.botKind,
+    })
     .from(users)
     .where(eq(users.id, authorId))
     .limit(1);
@@ -61,10 +65,18 @@ export async function updateCommentAsAuthor(
   if (existing.deletedAt) return { ok: false, reason: "not_found" };
   if (existing.authorId !== authorId) return { ok: false, reason: "forbidden" };
 
-  // isMeta is honored only for bot authors. Citizens passing it
-  // through are silently ignored — same gate as commentInputSchema.
-  const requestedIsMeta =
-    actor.isAgent && input.isMeta !== undefined ? input.isMeta : undefined;
+  // isMeta gating mirrors createComment:
+  //   - reader-bots (bot_kind='reader'): always force true; the
+  //     input.isMeta is ignored (server-side enforcement).
+  //   - writer-bots (is_agent=true, bot_kind!='reader'): honor input
+  //     when present.
+  //   - citizens (is_agent=false): ignore the field entirely.
+  let requestedIsMeta: boolean | undefined;
+  if (actor.botKind === "reader") {
+    requestedIsMeta = true;
+  } else if (actor.isAgent && input.isMeta !== undefined) {
+    requestedIsMeta = input.isMeta;
+  }
 
   const bodyChanged =
     input.body !== undefined && input.body !== existing.body;

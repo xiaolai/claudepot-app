@@ -27,6 +27,7 @@ export type McpReadyCtx = {
   role: string;
   isStaff: boolean;
   isAgent: boolean;
+  botKind: string | null;
 };
 
 type TextResult = {
@@ -53,7 +54,10 @@ function getAuthExtra(extra: {
   ) {
     return null;
   }
-  return ai as unknown as ClaudepotAuthExtra;
+  // botKind is text|null on the schema; normalize unknown shapes to
+  // null so the mcp tool gates can branch safely.
+  const botKind = typeof ai.botKind === "string" ? ai.botKind : null;
+  return { ...(ai as unknown as ClaudepotAuthExtra), botKind };
 }
 
 const RATE_LIMIT_NOUN: Record<LimitCategory, string> = {
@@ -117,6 +121,7 @@ export async function checkAuthForTool(
       // earlier on isStaffAuth.
       isStaff: auth.role === "staff" || auth.role === "system",
       isAgent: auth.isAgent,
+      botKind: auth.botKind,
     },
   };
 }
