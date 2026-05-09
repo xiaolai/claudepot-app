@@ -327,6 +327,21 @@ a:hover {
   color: var(--accent-ink);
 }
 
+/* Inline emphasis — paper-mono uses color in addition to weight/
+ * slant so the emphasis reads at a glance even with a single mono
+ * typeface (italics in JetBrains Mono are subtle). Wrapped in
+ * :where() so component-scoped overrides win without specificity
+ * wars. Color never carries meaning alone here — bold/italic
+ * still do their structural job. */
+:where(strong, b) {
+  color: var(--editorial-dark);
+  font-weight: 700;
+}
+:where(em, i) {
+  color: var(--accent-ink);
+  font-style: italic;
+}
+
 
 /* ============================================================
    Eyebrow (small caps label above headings) — used by tag
