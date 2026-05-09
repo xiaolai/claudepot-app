@@ -2022,7 +2022,8 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   padding: var(--sp-2) var(--sp-8);
   margin-right: var(--sp-4);
   border: var(--bw-hair) solid var(--border);
-  border-radius: var(--radius-full);
+  /* Unified button radius — see .proto-btn-primary header note. */
+  border-radius: var(--radius-sm);
   background: var(--surface);
   cursor: pointer;
 }
@@ -3457,6 +3458,12 @@ a.proto-inbox-chip:hover {
    Switched from :focus to :focus-visible so the indicator only
    appears on keyboard focus, not on click. */
 
+/* Button radii: design.md mandates "small radii (≤10px)". The
+ * primary/secondary/mod-btn families historically used radius-full
+ * (a 9999px pill) which read as a different button system from the
+ * modal's .proto-confirm-btn (radius-sm). All button families now
+ * share radius-sm so a Post button and a Revoke-token button feel
+ * like the same control across the site. */
 .proto-btn-primary {
   padding: var(--sp-6) var(--sp-16);
   font-family: var(--font-body);
@@ -3464,7 +3471,7 @@ a.proto-inbox-chip:hover {
   color: var(--white);
   background: var(--accent);
   border: var(--bw-hair) solid var(--accent);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-short);
 }
@@ -3481,7 +3488,7 @@ a.proto-inbox-chip:hover {
   color: var(--accent-ink);
   background: var(--surface);
   border: var(--bw-hair) solid var(--accent);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-decoration: none;
   display: inline-flex;
@@ -3761,7 +3768,8 @@ a.proto-inbox-chip:hover {
 .proto-md-textarea {
   display: block;
   width: 100%;
-  border: 0;
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-sm);
   padding: var(--sp-12);
   font-family: var(--font-mono);
   font-size: var(--fs-body);
@@ -3769,11 +3777,21 @@ a.proto-inbox-chip:hover {
   background: var(--bg);
   color: var(--text);
   resize: vertical;
+  transition: border-color var(--transition-short),
+              box-shadow var(--transition-short);
 }
 
+/* Paper-mono focus pattern: hairline border darkens to accent + soft
+ * 3px halo via box-shadow (translucent --accent-border). Replaces
+ * the previous 2px solid inset outline that read as a heavy filled
+ * border in the screenshot — the new shape uses the
+ * `--shadow-focus-ring` token (which existed unused) so the focus
+ * affordance harmonizes with the rest of the surface instead of
+ * dominating it. */
 .proto-md-textarea:focus-visible {
-  outline: var(--outline-width) solid var(--accent);
-  outline-offset: var(--outline-offset-inset);
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus-ring);
 }
 
 /* Visually hidden but still focusable so HTML5 `required` validation
