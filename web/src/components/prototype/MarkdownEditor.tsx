@@ -196,7 +196,7 @@ export function MarkdownEditor({
       return;
     }
     let cancelled = false;
-    renderMarkdown(value, { allowYoutube: kind === "submission" }).then(
+    renderMarkdown(value, { allowMediaEmbeds: kind === "submission" }).then(
       (html) => {
         if (!cancelled) setPreviewHtml(html);
       },

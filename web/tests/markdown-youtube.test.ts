@@ -37,7 +37,7 @@ const ID = "dQw4w9WgXcQ";
 {
   const html = await renderMarkdown(
     `Intro.\n\nhttps://www.youtube.com/watch?v=${ID}\n\nAfter.`,
-    { allowYoutube: true },
+    { allowMediaEmbeds: true },
   );
   check("opt-in: iframe present", html.includes("<iframe"));
   check("opt-in: src is nocookie", html.includes(`youtube-nocookie.com/embed/${ID}`));
@@ -52,7 +52,7 @@ const ID = "dQw4w9WgXcQ";
 {
   const html = await renderMarkdown(
     `Intro.\n\n:youtube[${ID}]\n\nAfter.`,
-    { allowYoutube: true },
+    { allowMediaEmbeds: true },
   );
   check("directive: iframe present", html.includes("<iframe"));
   check("directive: nocookie src", html.includes(`youtube-nocookie.com/embed/${ID}`));
@@ -62,7 +62,7 @@ const ID = "dQw4w9WgXcQ";
 {
   const html = await renderMarkdown(
     `<iframe src="https://evil.com/xss"></iframe>`,
-    { allowYoutube: true },
+    { allowMediaEmbeds: true },
   );
   check("hostile iframe: dropped", !html.includes("evil.com"));
   check("hostile iframe: no iframe tag", !html.includes("<iframe"));
@@ -72,7 +72,7 @@ const ID = "dQw4w9WgXcQ";
 {
   const html = await renderMarkdown(
     `<iframe src="https://www.youtube.com/embed/${ID}"></iframe>`,
-    { allowYoutube: true },
+    { allowMediaEmbeds: true },
   );
   // NOTE: sanitize re-validates against the nocookie regex; even though
   // youtube.com/embed/ID is "real", we accept ONLY the nocookie origin
@@ -84,7 +84,7 @@ const ID = "dQw4w9WgXcQ";
 {
   const html = await renderMarkdown(
     `Watch this https://youtu.be/${ID} now.`,
-    { allowYoutube: true },
+    { allowMediaEmbeds: true },
   );
   check("inline URL: no iframe", !html.includes("<iframe"));
   check("inline URL: anchor present", html.includes("<a href"));
@@ -95,7 +95,7 @@ const ID = "dQw4w9WgXcQ";
 {
   const html = await renderMarkdown(
     `<iframe src="https://www.youtube-nocookie.com/embed/${ID}?autoplay=1"></iframe>`,
-    { allowYoutube: true },
+    { allowMediaEmbeds: true },
   );
   check("autoplay query: dropped", !html.includes("<iframe"));
 }
@@ -106,7 +106,7 @@ const ID = "dQw4w9WgXcQ";
 {
   const html = await renderMarkdown(
     `<iframe src="https://www.youtube-nocookie.com/embed/${ID}"></iframe>`,
-    { allowYoutube: true },
+    { allowMediaEmbeds: true },
   );
   check("hand-rolled valid iframe: kept", html.includes("<iframe"));
   check("hand-rolled valid iframe: sandbox restamped", html.includes("sandbox="));
@@ -118,7 +118,7 @@ const ID = "dQw4w9WgXcQ";
 //    fence content). The code block itself should still render as code.
 {
   const md = "Intro.\n\n```\nhttps://youtu.be/" + ID + "\n```\n\nAfter.";
-  const html = await renderMarkdown(md, { allowYoutube: true });
+  const html = await renderMarkdown(md, { allowMediaEmbeds: true });
   check("fenced URL: no iframe", !html.includes("<iframe"));
   check("fenced URL: stays in code block", html.includes("<pre") || html.includes("<code"));
 }

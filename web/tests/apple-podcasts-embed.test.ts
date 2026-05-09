@@ -140,14 +140,14 @@ check(
 );
 
 check(
-  "non-numeric episode i= dropped (still parses as show)",
+  "non-numeric episode i= rejects the whole URL",
   extractApplePodcastsMatch(`${SHOW_URL}?i=abc`),
-  {
-    country: "us",
-    slug: "the-tim-ferriss-show",
-    showId: "863897795",
-    episodeId: null,
-  },
+  null,
+);
+check(
+  "empty episode i= rejects the whole URL",
+  extractApplePodcastsMatch(`${SHOW_URL}?i=`),
+  null,
 );
 
 check(
@@ -189,9 +189,9 @@ checkContains(
 );
 checkContains("episode iframe is lazy-loaded", bareEpisode, `loading="lazy"`);
 checkContains(
-  "episode iframe is sandboxed",
+  "episode iframe is sandboxed (no allow-same-origin — see embed-attrs.ts)",
   bareEpisode,
-  `sandbox="allow-scripts allow-same-origin allow-popups allow-forms"`,
+  `sandbox="allow-scripts allow-popups allow-forms"`,
 );
 
 /* ── Reject contexts ──────────────────────────────────────────── */

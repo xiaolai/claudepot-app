@@ -12,6 +12,11 @@ import sanitizeHtml from "sanitize-html";
 
 import { highlightCodeToLines } from "@/lib/highlight";
 import { rewriteApplePodcastsEmbeds } from "@/lib/apple-podcasts-embed";
+import {
+  APPLE_PODCASTS_IFRAME_ATTRS,
+  SPOTIFY_IFRAME_ATTRS,
+  YT_IFRAME_ATTRS,
+} from "@/lib/embed-attrs";
 import { rewriteSpotifyEmbeds } from "@/lib/spotify-embed";
 import { rewriteYoutubeEmbeds } from "@/lib/youtube-embed";
 
@@ -31,41 +36,6 @@ const SPOTIFY_EMBED_SRC =
  *  for episode-level. */
 const APPLE_PODCASTS_EMBED_SRC =
   /^https:\/\/embed\.podcasts\.apple\.com\/[a-z]{2}\/podcast\/[^/?#]+\/id\d+(?:\?i=\d+)?$/;
-
-/** Canonical safe attribute set forced onto every surviving YouTube
- *  iframe. We re-stamp these on every iframe (even pre-pass output)
- *  so a hand-rolled iframe with the right SRC but missing or weakened
- *  sandbox/referrerpolicy/loading values gets normalised to the safe
- *  shape. */
-const YT_IFRAME_ATTRS = {
-  title: "YouTube video",
-  loading: "lazy",
-  referrerpolicy: "strict-origin-when-cross-origin",
-  sandbox: "allow-scripts allow-same-origin allow-presentation",
-  allow:
-    "accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
-  allowfullscreen: "",
-} as const;
-
-/** Canonical safe attribute set for Spotify iframes. Tighter sandbox
- *  than the Spotify default — readers don't need top-navigation. */
-const SPOTIFY_IFRAME_ATTRS = {
-  title: "Spotify embed",
-  loading: "lazy",
-  referrerpolicy: "strict-origin-when-cross-origin",
-  sandbox: "allow-scripts allow-same-origin allow-popups",
-  allow:
-    "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture",
-} as const;
-
-/** Canonical safe attribute set for Apple Podcasts iframes. */
-const APPLE_PODCASTS_IFRAME_ATTRS = {
-  title: "Apple Podcasts embed",
-  loading: "lazy",
-  referrerpolicy: "strict-origin-when-cross-origin",
-  sandbox: "allow-scripts allow-same-origin allow-popups allow-forms",
-  allow: "autoplay; encrypted-media; fullscreen",
-} as const;
 
 export const ALLOWED_TAGS = [
   "p",
@@ -506,23 +476,15 @@ export interface RenderMarkdownOptions {
    * Wire only on submission body surfaces — comments and editorial
    * docs should remain text-only so a media URL in a heated reply
    * can't visually dominate the thread.
-   *
-   * Backward-compat alias `allowYoutube` is honored — it now means
-   * "allow all three platforms" since the embed pipeline grew beyond
-   * YouTube. Prefer `allowMediaEmbeds` in new call sites.
    */
   allowMediaEmbeds?: boolean;
-  /** @deprecated Use `allowMediaEmbeds`. Kept so older call sites
-   *  don't drift; behavior is identical. */
-  allowYoutube?: boolean;
 }
 
 export async function renderMarkdown(
   source: string,
   options: RenderMarkdownOptions = {},
 ): Promise<string> {
-  const allowEmbeds =
-    options.allowMediaEmbeds === true || options.allowYoutube === true;
+  const allowEmbeds = options.allowMediaEmbeds === true;
   // Order matters: each rewriter is idempotent on its own output but
   // would re-process foreign output. YouTube's bare-URL match is
   // catch-all-shaped (any https://\S+ URL on its own line), so it

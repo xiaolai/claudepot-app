@@ -155,9 +155,9 @@ checkContains(
   `referrerpolicy="strict-origin-when-cross-origin"`,
 );
 checkContains(
-  "iframe is sandboxed",
+  "iframe is sandboxed (no allow-same-origin — see embed-attrs.ts)",
   bareEpisode,
-  `sandbox="allow-scripts allow-same-origin allow-popups"`,
+  `sandbox="allow-scripts allow-popups"`,
 );
 checkContains(
   "wrapper class set for CSS hookup",

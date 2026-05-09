@@ -953,12 +953,13 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 
 /* YouTube embed wrapper. The renderMarkdown pre-pass emits exactly
  * `<div class="proto-yt-embed"><iframe …></iframe></div>` when
- * allowMediaEmbeds=true. The post-detail UrlAutoEmbed component
- * emits the same shape directly when the submission URL is a
- * YouTube link. Aspect-ratio + 100% iframe makes the player fluid
- * inside the content column without needing JS. */
-:where(.proto-section, .proto-text, .proto-comment-body, .proto-row + *)
-  .proto-yt-embed {
+ * allowMediaEmbeds=true (lands inside .proto-text). The post-detail
+ * UrlAutoEmbed component emits the same wrapper as a direct sibling
+ * of .proto-row (NOT inside .proto-text), so the second selector
+ * matches that placement directly. Aspect-ratio + 100% iframe makes
+ * the player fluid inside the content column without needing JS. */
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-yt-embed,
+.proto-row + .proto-yt-embed {
   position: relative;
   aspect-ratio: 16 / 9;
   width: 100%;
@@ -967,8 +968,8 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   overflow: hidden;
   background: var(--bg-sunken);
 }
-:where(.proto-section, .proto-text, .proto-comment-body, .proto-row + *)
-  .proto-yt-embed iframe {
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-yt-embed iframe,
+.proto-row + .proto-yt-embed iframe {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -978,11 +979,11 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 
 /* Spotify embed wrapper. Audio embeds — fixed height, no aspect
  * ratio. The Spotify-recommended compact episode/show player
- * height lives in --spotify-embed-h. The post-detail UrlAutoEmbed
- * and the renderMarkdown pre-pass both emit
- * `<div class="proto-spotify-embed"><iframe …></iframe></div>`. */
-:where(.proto-section, .proto-text, .proto-comment-body, .proto-row + *)
-  .proto-spotify-embed {
+ * height lives in --spotify-embed-h. Two render paths same as
+ * YouTube: in-body via .proto-text, post-detail sibling of
+ * .proto-row via UrlAutoEmbed. */
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-spotify-embed,
+.proto-row + .proto-spotify-embed {
   width: 100%;
   height: var(--spotify-embed-h);
   border: var(--bw-hair) solid var(--border);
@@ -990,8 +991,8 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   overflow: hidden;
   background: var(--bg-sunken);
 }
-:where(.proto-section, .proto-text, .proto-comment-body, .proto-row + *)
-  .proto-spotify-embed iframe {
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-spotify-embed iframe,
+.proto-row + .proto-spotify-embed iframe {
   width: 100%;
   height: 100%;
   border: 0;
@@ -999,10 +1000,10 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 }
 
 /* Apple Podcasts embed wrapper. Apple's standard episode/show
- * player height lives in --applepod-embed-h. Same emit shape from
- * UrlAutoEmbed and the renderMarkdown pre-pass. */
-:where(.proto-section, .proto-text, .proto-comment-body, .proto-row + *)
-  .proto-applepod-embed {
+ * player height lives in --applepod-embed-h. Same two render paths
+ * as the others. */
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-applepod-embed,
+.proto-row + .proto-applepod-embed {
   width: 100%;
   height: var(--applepod-embed-h);
   border: var(--bw-hair) solid var(--border);
@@ -1010,8 +1011,8 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   overflow: hidden;
   background: var(--bg-sunken);
 }
-:where(.proto-section, .proto-text, .proto-comment-body, .proto-row + *)
-  .proto-applepod-embed iframe {
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-applepod-embed iframe,
+.proto-row + .proto-applepod-embed iframe {
   width: 100%;
   height: 100%;
   border: 0;

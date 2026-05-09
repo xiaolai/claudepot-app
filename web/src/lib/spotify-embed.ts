@@ -16,17 +16,15 @@
  * drops the embed entirely rather than emit a bad iframe.
  *
  * Privacy note: Spotify does not provide a nocookie-equivalent host
- * (the way YouTube does). The embed loads open.spotify.com which can
- * read Spotify's session cookies. We mitigate with sandbox +
- * referrerpolicy on the iframe; user cookies still flow to Spotify
- * if the reader is logged in there. This is the same trade-off any
- * site embedding Spotify makes.
+ * (the way YouTube does). The embed loads open.spotify.com, where
+ * the reader may have a session cookie. By dropping `allow-same-
+ * origin` from the sandbox (see lib/embed-attrs.ts) the iframe is
+ * forced into a unique opaque origin and cannot access those
+ * cookies. The player communicates with the parent via postMessage,
+ * which is cross-origin-safe.
  */
 
-/** Spotify content ID — 22-char base62 (alphanumeric).
- *  Officially documented as "alphanumeric"; in practice base62.
- *  Lock to that to avoid path-traversal-shaped values. */
-const SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
+import { SPOTIFY_IFRAME_ATTRS } from "@/lib/embed-attrs";
 
 export type SpotifyKind = "episode" | "show";
 
@@ -63,27 +61,31 @@ export function extractSpotifyMatch(url: string): SpotifyMatch | null {
   // Strip optional locale prefix (`/intl-<locale>/`) before matching.
   const path = parsed.pathname.replace(/^\/intl-[a-z-]+\//, "/");
 
-  const m = path.match(/^\/(episode|show)\/([a-zA-Z0-9]+)\/?/);
+  // End-anchored: `/episode/<id>` or `/show/<id>` with optional
+  // trailing slash, nothing after. Rejects `/episode/<id>/extra`
+  // shapes that the older non-anchored pattern silently coerced into
+  // an embed.
+  const m = path.match(/^\/(episode|show)\/([A-Za-z0-9]{22})\/?$/);
   if (!m) return null;
-  const id = m[2];
-  if (!SPOTIFY_ID.test(id)) return null;
-  return { kind: m[1] as SpotifyKind, id };
+  return { kind: m[1] as SpotifyKind, id: m[2] };
 }
 
-/** Build the iframe block for a given match. */
+/** Build the iframe block for a given match. Iframe attrs come from
+ *  lib/embed-attrs.ts so the in-body and post-detail surfaces share
+ *  one source of truth — drift between the two is the failure mode
+ *  the centralization is preventing. The wrapper carries the fixed
+ *  height in CSS (.proto-spotify-embed). */
 function buildEmbed(match: SpotifyMatch): string {
   const src = `https://open.spotify.com/embed/${match.kind}/${match.id}`;
-  // The wrapper carries the fixed height in CSS (.proto-spotify-embed)
-  // so the iframe itself can be width/height 100% and adapt to the
-  // content column.
+  const a = SPOTIFY_IFRAME_ATTRS;
   return (
     `<div class="proto-spotify-embed">` +
     `<iframe src="${src}"` +
-    ` title="Spotify embed"` +
-    ` loading="lazy"` +
-    ` referrerpolicy="strict-origin-when-cross-origin"` +
-    ` sandbox="allow-scripts allow-same-origin allow-popups"` +
-    ` allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"` +
+    ` title="${a.title}"` +
+    ` loading="${a.loading}"` +
+    ` referrerpolicy="${a.referrerpolicy}"` +
+    ` sandbox="${a.sandbox}"` +
+    ` allow="${a.allow}"` +
     `></iframe>` +
     `</div>`
   );
@@ -110,21 +112,30 @@ export function rewriteSpotifyEmbeds(source: string): string {
   const URL_LINE = /^ {0,3}(https?:\/\/\S+)[ \t]*$/;
 
   for (const line of lines) {
-    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1];
-      const ch = marker[0] as "`" | "~";
-      if (!inFence) {
+    // Fence open/close detection — see youtube-embed.ts for the
+    // CommonMark rules. Strict close (no info string) prevents
+    // a line like `~~~more` inside a fence body from closing it.
+    if (inFence) {
+      const closeMatch = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closeMatch) {
+        const marker = closeMatch[1];
+        const ch = marker[0] as "`" | "~";
+        if (ch === fenceChar && marker.length >= fenceLen) {
+          inFence = false;
+          fenceChar = null;
+          fenceLen = 0;
+          out.push(line);
+          continue;
+        }
+      }
+    } else {
+      const openMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (openMatch) {
+        const marker = openMatch[1];
+        const ch = marker[0] as "`" | "~";
         inFence = true;
         fenceChar = ch;
         fenceLen = marker.length;
-        out.push(line);
-        continue;
-      }
-      if (ch === fenceChar && marker.length >= fenceLen) {
-        inFence = false;
-        fenceChar = null;
-        fenceLen = 0;
         out.push(line);
         continue;
       }

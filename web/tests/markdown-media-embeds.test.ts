@@ -62,7 +62,7 @@ const APPLE_EPISODE = `${APPLE_SHOW}?i=1000635467219`;
   );
   check(
     "Spotify episode: sandbox attr enforced post-sanitize",
-    html.includes(`sandbox="allow-scripts allow-same-origin allow-popups"`),
+    html.includes(`sandbox="allow-scripts allow-popups"`),
   );
   check(
     "Spotify episode: wrapper class survives sanitize",
@@ -144,16 +144,18 @@ const APPLE_EPISODE = `${APPLE_SHOW}?i=1000635467219`;
   check("non-platform iframe: dropped", !html.includes("<iframe"));
 }
 
-/* ── Backward-compat: allowYoutube alias still works ────────── */
+/* ── Default behavior: no embeds without the explicit flag ──── */
 
 {
+  // Confirms the rename was tight: passing nothing leaves URLs as
+  // anchors (already covered above for Spotify/Apple separately,
+  // but explicitly retest here so a future reader sees the contract).
   const html = await renderMarkdown(
-    `Intro.\n\nhttps://open.spotify.com/episode/${SPOTIFY_EPISODE}\n\nAfter.`,
-    { allowYoutube: true },
+    `https://www.youtube.com/watch?v=dQw4w9WgXcQ\n\nhttps://open.spotify.com/episode/${SPOTIFY_EPISODE}\n\n${APPLE_SHOW}\n`,
   );
   check(
-    "allowYoutube=true now also allows Spotify (alias)",
-    html.includes("<iframe"),
+    "no flag → no iframes for any of the three platforms",
+    !html.includes("<iframe"),
   );
 }
 

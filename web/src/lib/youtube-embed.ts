@@ -22,6 +22,8 @@
  * sanitizer drops the embed entirely rather than emit a bad iframe.
  */
 
+import { YT_IFRAME_ATTRS } from "@/lib/embed-attrs";
+
 const VIDEO_ID = /^[a-zA-Z0-9_-]{11}$/;
 
 /**
@@ -70,23 +72,22 @@ export function extractYoutubeId(url: string): string | null {
   return null;
 }
 
-/** Build the iframe block for a given video id. */
+/** Build the iframe block for a given video id. Iframe attrs come
+ *  from lib/embed-attrs.ts so the in-body and post-detail surfaces
+ *  (markdown sanitizer + UrlAutoEmbed) share one source of truth.
+ *  The wrapper carries the responsive aspect-ratio in CSS
+ *  (.proto-yt-embed). */
 function buildEmbed(id: string): string {
-  const safeId = id; // already validated by VIDEO_ID
-  const src = `https://www.youtube-nocookie.com/embed/${safeId}`;
-  // The wrapper carries the responsive aspect-ratio in CSS
-  // (.proto-yt-embed) so the iframe itself can be width/height 100%
-  // and adapt to the column. allowfullscreen is a boolean attribute
-  // — sanitize-html keeps it as long as the attribute name is
-  // allowed, regardless of value.
+  const src = `https://www.youtube-nocookie.com/embed/${id}`;
+  const a = YT_IFRAME_ATTRS;
   return (
     `<div class="proto-yt-embed">` +
     `<iframe src="${src}"` +
-    ` title="YouTube video"` +
-    ` loading="lazy"` +
-    ` referrerpolicy="strict-origin-when-cross-origin"` +
-    ` sandbox="allow-scripts allow-same-origin allow-presentation"` +
-    ` allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"` +
+    ` title="${a.title}"` +
+    ` loading="${a.loading}"` +
+    ` referrerpolicy="${a.referrerpolicy}"` +
+    ` sandbox="${a.sandbox}"` +
+    ` allow="${a.allow}"` +
     ` allowfullscreen` +
     `></iframe>` +
     `</div>`
@@ -123,23 +124,32 @@ export function rewriteYoutubeEmbeds(source: string): string {
   for (const line of lines) {
     // Fence open/close detection. Per CommonMark, a fence opener is
     // a line starting with 0-3 spaces followed by 3+ backticks (or
-    // tildes) and an optional info string; the matching closer must
-    // use the same character and at least the same length.
-    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1];
-      const ch = marker[0] as "`" | "~";
-      if (!inFence) {
+    // tildes) and an optional info string. The matching closer must
+    // use the same character, at least the same length, AND carry
+    // no info string (only optional trailing spaces). Different
+    // regexes for the two states so a line like ```js inside a
+    // fence body can't accidentally close the fence.
+    if (inFence) {
+      const closeMatch = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closeMatch) {
+        const marker = closeMatch[1];
+        const ch = marker[0] as "`" | "~";
+        if (ch === fenceChar && marker.length >= fenceLen) {
+          inFence = false;
+          fenceChar = null;
+          fenceLen = 0;
+          out.push(line);
+          continue;
+        }
+      }
+    } else {
+      const openMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (openMatch) {
+        const marker = openMatch[1];
+        const ch = marker[0] as "`" | "~";
         inFence = true;
         fenceChar = ch;
         fenceLen = marker.length;
-        out.push(line);
-        continue;
-      }
-      if (ch === fenceChar && marker.length >= fenceLen) {
-        inFence = false;
-        fenceChar = null;
-        fenceLen = 0;
         out.push(line);
         continue;
       }

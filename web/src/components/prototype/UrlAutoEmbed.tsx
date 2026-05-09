@@ -11,21 +11,26 @@
  * "open in new tab" / share.
  *
  * Source data is never mutated. The component derives the iframe
- * directly from `submission.url` at render time. Edits to the URL
- * (or future changes to embed src patterns) propagate without a
- * backfill.
+ * directly from `submission.url` at render time.
+ *
+ * Iframe attribute sets are imported from lib/embed-attrs.ts — the
+ * same source the markdown sanitizer uses, so the in-body and
+ * post-detail surfaces can't drift on sandbox/referrer/allow.
  *
  * Privacy posture mirrors the in-body markdown embeds:
  *   - YouTube goes through youtube-nocookie.com.
  *   - Spotify and Apple don't have nocookie equivalents — the embeds
- *     do load each platform's session cookies if the reader is
- *     logged in there. We mitigate with sandbox + strict referrer
- *     policy. The same trade-off exists on every site embedding
- *     these platforms. See lib/markdown.ts for the parallel pattern
- *     applied to in-body URLs.
+ *     do load each platform's pages, but with allow-same-origin
+ *     dropped from the sandbox the iframe can't read those hosts'
+ *     session cookies. See lib/embed-attrs.ts for the trade-off.
  */
 
 import { extractApplePodcastsMatch } from "@/lib/apple-podcasts-embed";
+import {
+  APPLE_PODCASTS_IFRAME_ATTRS,
+  SPOTIFY_IFRAME_ATTRS,
+  YT_IFRAME_ATTRS,
+} from "@/lib/embed-attrs";
 import { extractSpotifyMatch } from "@/lib/spotify-embed";
 import { extractYoutubeId } from "@/lib/youtube-embed";
 
@@ -42,11 +47,11 @@ export function UrlAutoEmbed({ url }: Props) {
       <div className="proto-yt-embed">
         <iframe
           src={`https://www.youtube-nocookie.com/embed/${youtubeId}`}
-          title="YouTube video"
-          loading="lazy"
-          referrerPolicy="strict-origin-when-cross-origin"
-          sandbox="allow-scripts allow-same-origin allow-presentation"
-          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          title={YT_IFRAME_ATTRS.title}
+          loading={YT_IFRAME_ATTRS.loading}
+          referrerPolicy={YT_IFRAME_ATTRS.referrerpolicy}
+          sandbox={YT_IFRAME_ATTRS.sandbox}
+          allow={YT_IFRAME_ATTRS.allow}
           allowFullScreen
         />
       </div>
@@ -59,11 +64,11 @@ export function UrlAutoEmbed({ url }: Props) {
       <div className="proto-spotify-embed">
         <iframe
           src={`https://open.spotify.com/embed/${spotify.kind}/${spotify.id}`}
-          title="Spotify embed"
-          loading="lazy"
-          referrerPolicy="strict-origin-when-cross-origin"
-          sandbox="allow-scripts allow-same-origin allow-popups"
-          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          title={SPOTIFY_IFRAME_ATTRS.title}
+          loading={SPOTIFY_IFRAME_ATTRS.loading}
+          referrerPolicy={SPOTIFY_IFRAME_ATTRS.referrerpolicy}
+          sandbox={SPOTIFY_IFRAME_ATTRS.sandbox}
+          allow={SPOTIFY_IFRAME_ATTRS.allow}
         />
       </div>
     );
@@ -77,11 +82,11 @@ export function UrlAutoEmbed({ url }: Props) {
       <div className="proto-applepod-embed">
         <iframe
           src={src}
-          title="Apple Podcasts embed"
-          loading="lazy"
-          referrerPolicy="strict-origin-when-cross-origin"
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-          allow="autoplay; encrypted-media; fullscreen"
+          title={APPLE_PODCASTS_IFRAME_ATTRS.title}
+          loading={APPLE_PODCASTS_IFRAME_ATTRS.loading}
+          referrerPolicy={APPLE_PODCASTS_IFRAME_ATTRS.referrerpolicy}
+          sandbox={APPLE_PODCASTS_IFRAME_ATTRS.sandbox}
+          allow={APPLE_PODCASTS_IFRAME_ATTRS.allow}
         />
       </div>
     );
