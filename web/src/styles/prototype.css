@@ -4149,6 +4149,14 @@ a.proto-inbox-chip:hover {
   padding: 0;
   margin: 0;
 }
+/* The .proto-section prose rules paint ::before counters on every
+ * `ol > li` (1., 2., 3.). Recent picks render as bordered cards, not
+ * a numbered list, and .office-pick zeroes the inline padding — so
+ * the counter at `left: 0` would overlap the title's first
+ * character. Suppress the counter for this specific list shape. */
+.office-pick-list > li::before {
+  content: none;
+}
 .office-pick {
   padding: var(--sp-20) 0;
   border-bottom: var(--bw-hair) solid var(--rule-hair);
