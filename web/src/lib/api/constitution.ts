@@ -38,7 +38,14 @@ import type { ConstitutionDto } from "./dto";
 
 const AUDIENCE_PATH = "editorial/audience.md";
 const TRANSPARENCY_PATH = "editorial/transparency.md";
-const RUBRIC_PATH = "editorial/rubric.yml";
+// Stage 1 of the rubric-ownership handoff (2026-05-09): the polity
+// reads only the public-safe spec. The full rubric — weights,
+// thresholds, persona multipliers, scoring runtime — lives in the
+// claudepot-office private repo. Both the `rubric.yaml` and
+// `rubric.public` fields on the constitution DTO derive from this
+// single file; the previous shape exposed the full yaml verbatim,
+// which leaked the math.
+const RUBRIC_PATH = "editorial/rubric.public.yml";
 
 function readRubricYaml(): string {
   return readFileSync(resolve(process.cwd(), RUBRIC_PATH), "utf-8");

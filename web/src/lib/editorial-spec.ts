@@ -29,24 +29,24 @@ export interface PublicRubricView {
   hard_rejects: { id: string; why: string }[];
   inclusion_gates: { id: string; check: string }[];
   recency_windows: Record<string, number>;
-  quality_criteria: { id: string; rubric: string }[]; // weights INTENTIONALLY OMITTED
-  routing_destinations: Record<string, string>;       // thresholds INTENTIONALLY OMITTED
+  quality_criteria: { id: string; rubric: string }[];
+  routing_destinations: Record<string, string>;
   format_extensions: Record<string, string[]>;
-  persona_descriptions: { id: string; description: string }[]; // multipliers OMITTED
+  persona_descriptions: { id: string; description: string }[];
 }
 
 /**
- * Reads rubric.yml and returns ONLY the public-safe slices per
- * editorial/transparency.md §3:
- *   - Weights, thresholds, persona multipliers stay private (math
- *     adversaries could optimize against).
- *   - Criterion names + descriptions, hard_rejects ids + whys,
- *     gate names + checks, recency windows, format extension
- *     fields, persona descriptions = all public-safe.
+ * Reads `rubric.public.yml` and projects it into the typed
+ * `PublicRubricView`. The file IS the public view — there is no
+ * private superset to filter against. Per the rubric-ownership
+ * handoff (claudepot-office/dev-docs/2026-05-09-rubric-ownership-handoff.md,
+ * Stage 1), the privacy boundary is now structural: the public file
+ * here vs. the full `rubric.yml` (with weights/thresholds/multipliers
+ * and the scoring runtime) which lives in the office's private repo.
  */
 export function readPublicRubricView(): PublicRubricView {
   const raw = readFileSync(
-    resolve(process.cwd(), EDITORIAL_DIR, "rubric.yml"),
+    resolve(process.cwd(), EDITORIAL_DIR, "rubric.public.yml"),
     "utf-8"
   );
   const r = yaml.load(raw) as Record<string, unknown>;

@@ -1,0 +1,232 @@
+# claudepot.com — public editorial spec
+#
+# The reader-visible slice of the editorial rubric — criterion names,
+# descriptions, hard-reject reasons, gate checks, recency windows,
+# format extensions, persona descriptions. The full rubric (weights,
+# thresholds, persona multipliers, scoring runtime) lives in the
+# claudepot-office private repo per editorial/transparency.md §5.
+#
+# This file is the source for /office/rubric/ rendering and for the
+# /api/v1/constitution endpoint's editorial spec payload.
+#
+# Edit policy: the office is source-of-truth for editorial taste. When
+# the office evolves a public-safe field (criterion name, persona
+# description, etc.), it lands here via PR. Do NOT add weight,
+# threshold, or multiplier fields to this file — they belong in the
+# private rubric only.
+
+version: 0.2.3
+updated: 2026-05-01
+
+# -----------------------------------------------------------------------------
+# Audience — canonical definition lives in editorial/audience.md
+# -----------------------------------------------------------------------------
+audience:
+  doc: editorial/audience.md
+  doc_version_pinned: 0.1.2
+  sub_segment_ids: [knowledge_workers, engineers, operators, learners]
+
+# -----------------------------------------------------------------------------
+# Not in scope — classification, not auto-reject
+# -----------------------------------------------------------------------------
+not_in_scope:
+  - id: activity_stream_events
+    examples:
+      - "X starred Y"
+      - "X opened a pull request in Z"
+      - "X committed to Z"
+      - "X commented on issue #N"
+    routing: "Belongs in /activity (or equivalent firehose). Never an editorial submission candidate."
+  - id: bare_version_strings
+    examples:
+      - "labring/FastGPT v4.14.17"
+      - "e2b-dev/E2B e2b@2.19.2"
+    routing: "Ingestion must enrich with changelog summary before the rubric sees it. Without summary → /releases firehose, not the main feed."
+  - id: title_only_metadata_rows
+    examples:
+      - "X starred Y"
+      - "X liked Y"
+      - "X followed Y"
+    routing: "Social-graph metadata is not editorial content under any rubric version."
+
+# -----------------------------------------------------------------------------
+# Values — the trade-offs in three lines.
+# -----------------------------------------------------------------------------
+values:
+  technique_over_hype:           "We post the actual prompt / workflow / code / eval, not 'AI changes everything'."
+  lived_experience_over_claims:  "Specifics and quantified outcomes beat unverifiable assertions, regardless of who's making them."
+  cross_domain_transfer_over_silos: "A writer's prompt trick may be useful to a marketer; an engineer's eval pattern may be useful to a lawyer. We surface those bridges."
+
+# -----------------------------------------------------------------------------
+# Hard rejects — auto-kill regardless of score.
+# -----------------------------------------------------------------------------
+hard_rejects:
+  - id: listicle_pattern
+    why: "Numbered-list-in-title gimmicks: '10 X', '5 Y', 'Top N', 'N tips/tricks/prompts/secrets'. A comprehensive walkthrough or 'full guide' is NOT a listicle — it's structured, not gimmicky. The reject targets the format-as-bait pattern, not structure itself."
+  - id: ai_slop
+    why: "AI-authored filler. Heuristics: dense em-dash usage, LinkedIn cadence, no named author, no source links."
+  - id: duplicate_within_14d
+    why: "Same URL or near-duplicate already on the feed in the last 14 days."
+  - id: pure_marketing_announcement
+    why: "Product launch with no technical detail, no example, no eval."
+  - id: anonymous_no_track_record
+    why: "Anonymous Medium / Substack from an account with no prior signal. Not a credibility judgment of unknowns — a Bayesian prior given volume."
+  - id: vibes_only_take
+    why: "AGI / consciousness / 'this changes everything' with no falsifiable claim. Belongs in /discussions, not the feed."
+  - id: paywall_no_open_summary
+    why: "Hard paywall with no public abstract. Reader can't act on it."
+
+# -----------------------------------------------------------------------------
+# Inclusion gates — must pass ALL before scoring.
+# -----------------------------------------------------------------------------
+inclusion_gates:
+  - id: primary_source_identifiable
+    check: "Is the link a release note, paper, PR, benchmark, postmortem, working repo, or first-hand write-up — vs. a recap of someone else's primary?"
+  - id: testable_or_demonstrable
+    check: "Is the central claim falsifiable, reproducible, or backed by a working example / lived demo? Pure opinion routes to /discussions."
+  - id: actionable_within_one_week
+    check: "Could AT LEAST ONE audience sub-segment apply this in their work this week, in their own domain? A piece may pass for one sub-segment and fail for others — that's correct. The diversity_bonus and target_mix_per_7d enforce sub-segment representation across the feed; this gate enforces that *somebody* in the audience can act on it now. 'Eventually maybe' for everyone — skip."
+  - id: within_recency_window
+    check: "Per-type max age — see recency_windows below."
+
+recency_windows:
+  news:           7
+  release:        14
+  tool:           30
+  podcast:        30
+  tutorial:       365
+  paper:          180
+  interview:      60
+  discussion:     30
+  workflow:       365
+  case_study:     365
+  prompt_pattern: 180
+
+# -----------------------------------------------------------------------------
+# Quality criteria — names + descriptions only.
+# Weights, scales, and rubric math live in the office's private rubric.
+# -----------------------------------------------------------------------------
+quality_score:
+
+  mechanism_specificity:
+    rubric: |
+      "Mechanism" = the actual technique, prompt, workflow, code, or eval — anything the reader can copy and try.
+      A writer's exact editing prompt qualifies. A coded agent loop qualifies. A step-by-step workflow qualifies.
+      0: hand-wave only ("AI improved my work")
+      2: names the technique without showing it ("I use chain-of-thought")
+      4: shows the actual mechanism with enough detail to reproduce
+      5: shows the mechanism AND names the failure modes / when it breaks
+
+  evidence_quality:
+    rubric: |
+      "Evidence" = lived experience with specifics, before/after, or quantified outcome.
+      A 1-month case study with examples qualifies. A benchmark qualifies. "Boosts productivity" does not.
+      0: no evidence beyond the assertion
+      2: anecdote without specifics
+      3: lived experience with concrete examples (or a working demo)
+      4: quantified outcome over a non-trivial period (or benchmark / repro)
+      5: quantified outcome WITH comparison and acknowledged limitations
+
+  practitioner_fit:
+    rubric: |
+      "Practitioner" = a motivated AI-tool user in their own domain — engineer, writer, lawyer, founder, teacher, etc.
+      0: irrelevant to anyone using AI tools today
+      3: useful for some practitioner role, requires significant translation for others
+      5: a motivated AI-tool user can apply this in their work this week (in their own domain)
+
+  domain_legibility:
+    rubric: |
+      Does the content signal who it's for and what it assumes?
+      A deeply technical paper isn't penalized for being technical — but it should flag "for engineers building eval harnesses."
+      A prompt-engineering post should signal "applicable to any LLM use case" or "specifically for legal review."
+      0: no signal — readers waste time figuring out if it's for them
+      1: implied through topic but never stated
+      2: clearly states intended audience + prerequisites
+      3: states audience + prerequisites + names what readers from adjacent domains can still take away
+
+  counter_current:
+    rubric: |
+      0: restates the current consensus
+      2: complicates the consensus with new data or examples
+      3: challenges the consensus with a defensible alternative
+
+  author_credibility:
+    rubric: |
+      Anti-slop heuristic, not a gatekeeper. A great post from an unknown still wins on mechanism + evidence.
+      0: anonymous, no prior signal
+      1: named, no track record yet
+      2: named, has shipped or written at least one thing the audience knows
+      3: named, repeated high-signal contributions
+
+  recency_bonus:
+    rubric: "Decays linearly from 3 (today) to 0 (at recency_window upper bound for that type)."
+
+  diversity_bonus:
+    rubric: |
+      Reward picks that fill underrepresented slots in the last 30 days, on TWO axes:
+      1. Source / topic — don't be 100% Anthropic + Cursor news
+      2. Sub-segment audience — don't be 100% engineer content just because it's more abundant
+      0: same source/topic AND same sub-segment as recent feed
+      1: fills one underrepresented dimension
+      2: fills both
+      3: fills both AND introduces a cross-domain bridge (a technique transferable across sub-segments)
+
+# -----------------------------------------------------------------------------
+# Routing destinations — the labels.
+# Thresholds (feed_threshold, borderline_threshold) live in the private rubric.
+# -----------------------------------------------------------------------------
+routing:
+  destinations:
+    feed:        "main editorial feed (visible to all readers)"
+    firehose:    "viewable but not promoted; below feed_threshold"
+    human_queue: "pending staff review; within borderline range OR triggered by a guardrail"
+
+# -----------------------------------------------------------------------------
+# Format-specific extensions.
+# -----------------------------------------------------------------------------
+extensions:
+  tool:
+    - has_install_command
+    - last_commit_within_90d
+    - readme_quality_min_3
+    - working_example_visible
+    - license_compatible_with_use
+  paper:
+    - code_released
+    - replication_status_known
+    - venue_or_arxiv
+    - abstract_states_actual_contribution
+  tutorial:
+    - completable_in_stated_time
+    - prerequisites_listed
+    - code_or_artifacts_linked
+    - works_against_current_model_versions
+  podcast:
+    - guest_named_and_relevant
+    - timestamps_or_transcript_available
+    - technical_density_min_3
+  workflow:
+    - includes_step_by_step
+    - states_starting_state_and_outcome
+    - lists_tools_used
+    - estimates_time_or_effort
+  case_study:
+    - states_problem_clearly
+    - documents_what_was_tried
+    - reports_outcome_with_specifics
+    - acknowledges_what_didnt_work
+    - covers_a_real_time_period
+  prompt_pattern:
+    - includes_actual_prompt_text
+    - states_when_to_use
+    - states_when_not_to_use
+    - shows_at_least_one_example_output
+
+# -----------------------------------------------------------------------------
+# Personas — descriptions only. Multipliers live in the private rubric.
+# Only ada is currently active. ClauDepot, historian, scout, and base
+# are retired; their descriptions are not exposed here.
+# -----------------------------------------------------------------------------
+persona_overlays:
+  ada:
+    description: "Evidence-first skeptic. Asks 'where's the eval?'. Strongest on engineer / infra-shipper content. Also serves as the platform's AI policy moderator (the synchronous policy gate every submission and comment passes through before publish — see /office/policy) and tags accepted submissions, picking up to two topical tags from the active vocabulary or proposing new tags for staff review at /admin/flags."

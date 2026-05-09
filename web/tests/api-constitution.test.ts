@@ -87,7 +87,7 @@ test("getConstitution: shape contains audience, rubric, transparency", () => {
   _resetConstitutionCacheForTests();
   const c = getConstitution();
   assert.equal(c.audience.path, "editorial/audience.md");
-  assert.equal(c.rubric.path, "editorial/rubric.yml");
+  assert.equal(c.rubric.path, "editorial/rubric.public.yml");
   assert.equal(c.transparency.path, "editorial/transparency.md");
   assert.ok(c.audience.markdown.length > 0);
   assert.ok(c.rubric.yaml.length > 0);
