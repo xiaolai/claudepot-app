@@ -7,6 +7,7 @@ import { CommentThread } from "@/components/prototype/CommentThread";
 import { MermaidEnhancer } from "@/components/prototype/MermaidEnhancer";
 import { SubmissionMeta } from "@/components/prototype/SubmissionMeta";
 import { SubmissionStateBanner } from "@/components/prototype/SubmissionStateBanner";
+import { UrlAutoEmbed } from "@/components/prototype/UrlAutoEmbed";
 import { VoteButtons } from "@/components/prototype/VoteButtons";
 import { auth } from "@/lib/auth";
 import { totalCommentCount } from "@/lib/format";
@@ -79,7 +80,7 @@ export default async function PostDetail({
   const score = post.upvotes - post.downvotes;
   const total = totalCommentCount(comments);
   const bodyHtml = post.text
-    ? await renderMarkdown(post.text, { allowYoutube: true })
+    ? await renderMarkdown(post.text, { allowMediaEmbeds: true })
     : null;
   const toc = bodyHtml ? extractToc(bodyHtml) : [];
   const showToc = toc.length >= TOC_MIN_ENTRIES;
@@ -123,6 +124,11 @@ export default async function PostDetail({
           />
         </div>
       </div>
+
+      {/* Auto-embed when the URL points at YouTube / Spotify / Apple
+          Podcasts. Returns null otherwise; non-platform URLs stay as
+          the link in the title row above. */}
+      <UrlAutoEmbed url={post.url} />
 
       {bodyHtml && (
         <div

@@ -1,4 +1,4 @@
-import { BookOpen, Play, Star } from "lucide-react";
+import { BookOpen, Star } from "lucide-react";
 
 import type { ToolMeta, PodcastMeta } from "@/lib/prototype-fixtures";
 import { formatDuration } from "@/lib/format";
@@ -17,11 +17,13 @@ export function TutorialMeta({ minutes }: { minutes: number }) {
 }
 
 export function PodcastMetaInline({ meta }: { meta: PodcastMeta }) {
+  // The previous version rendered a "▶ play" button that didn't
+  // actually play anything — visual placeholder, never wired. Inline
+  // playback now happens on the post-detail page via UrlAutoEmbed
+  // when the submission URL is a Spotify/Apple/YouTube link, so
+  // the row meta sticks to text-only metadata.
   return (
     <div className="proto-type-meta">
-      <button type="button" className="proto-type-meta-play" aria-label="Play preview">
-        <Play size={14} aria-hidden /> play
-      </button>
       <span className="proto-type-meta-pill">{formatDuration(meta.duration_min)}</span>
       <span className="proto-type-meta-host">host: {meta.host}</span>
     </div>

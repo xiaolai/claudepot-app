@@ -11,6 +11,8 @@ import { marked } from "marked";
 import sanitizeHtml from "sanitize-html";
 
 import { highlightCodeToLines } from "@/lib/highlight";
+import { rewriteApplePodcastsEmbeds } from "@/lib/apple-podcasts-embed";
+import { rewriteSpotifyEmbeds } from "@/lib/spotify-embed";
 import { rewriteYoutubeEmbeds } from "@/lib/youtube-embed";
 
 /** Mirror of the iframe shape rewriteYoutubeEmbeds emits. The src
@@ -20,6 +22,15 @@ import { rewriteYoutubeEmbeds } from "@/lib/youtube-embed";
  *  tracking params. The pre-pass already emits the bare canonical
  *  form, so this never rejects pre-pass output. */
 const YT_EMBED_SRC = /^https:\/\/www\.youtube-nocookie\.com\/embed\/[a-zA-Z0-9_-]{11}$/;
+
+/** Spotify embed src pattern — bare canonical form, no query string. */
+const SPOTIFY_EMBED_SRC =
+  /^https:\/\/open\.spotify\.com\/embed\/(?:episode|show)\/[a-zA-Z0-9]{22}$/;
+
+/** Apple Podcasts embed src pattern — host swap, optional `?i=<num>`
+ *  for episode-level. */
+const APPLE_PODCASTS_EMBED_SRC =
+  /^https:\/\/embed\.podcasts\.apple\.com\/[a-z]{2}\/podcast\/[^/?#]+\/id\d+(?:\?i=\d+)?$/;
 
 /** Canonical safe attribute set forced onto every surviving YouTube
  *  iframe. We re-stamp these on every iframe (even pre-pass output)
@@ -34,6 +45,26 @@ const YT_IFRAME_ATTRS = {
   allow:
     "accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
   allowfullscreen: "",
+} as const;
+
+/** Canonical safe attribute set for Spotify iframes. Tighter sandbox
+ *  than the Spotify default — readers don't need top-navigation. */
+const SPOTIFY_IFRAME_ATTRS = {
+  title: "Spotify embed",
+  loading: "lazy",
+  referrerpolicy: "strict-origin-when-cross-origin",
+  sandbox: "allow-scripts allow-same-origin allow-popups",
+  allow:
+    "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture",
+} as const;
+
+/** Canonical safe attribute set for Apple Podcasts iframes. */
+const APPLE_PODCASTS_IFRAME_ATTRS = {
+  title: "Apple Podcasts embed",
+  loading: "lazy",
+  referrerpolicy: "strict-origin-when-cross-origin",
+  sandbox: "allow-scripts allow-same-origin allow-popups allow-forms",
+  allow: "autoplay; encrypted-media; fullscreen",
 } as const;
 
 export const ALLOWED_TAGS = [
@@ -463,17 +494,26 @@ export function extractToc(
 
 export interface RenderMarkdownOptions {
   /**
-   * Allow YouTube auto-embeds. Default false. When true:
-   *   - bare YouTube URLs sitting alone in a paragraph become an
-   *     iframe player
-   *   - `:youtube[ID]` directives on their own line become an iframe
-   *   - the iframe survives sanitize-html via a strict src allowlist
-   *     pinned to https://www.youtube-nocookie.com/embed/<11-char-id>
+   * Allow media auto-embeds (YouTube, Spotify, Apple Podcasts).
+   * Default false. When true:
+   *   - bare YouTube/Spotify/Apple-Podcasts URLs sitting alone in a
+   *     paragraph become an iframe player
+   *   - `:youtube[ID]` directives on their own line become a YouTube
+   *     iframe
+   *   - the iframes survive sanitize-html via strict per-platform src
+   *     allowlists pinned to the canonical embed origins
    *
    * Wire only on submission body surfaces — comments and editorial
-   * docs should remain text-only so a YouTube link in a heated reply
+   * docs should remain text-only so a media URL in a heated reply
    * can't visually dominate the thread.
+   *
+   * Backward-compat alias `allowYoutube` is honored — it now means
+   * "allow all three platforms" since the embed pipeline grew beyond
+   * YouTube. Prefer `allowMediaEmbeds` in new call sites.
    */
+  allowMediaEmbeds?: boolean;
+  /** @deprecated Use `allowMediaEmbeds`. Kept so older call sites
+   *  don't drift; behavior is identical. */
   allowYoutube?: boolean;
 }
 
@@ -481,10 +521,23 @@ export async function renderMarkdown(
   source: string,
   options: RenderMarkdownOptions = {},
 ): Promise<string> {
-  const allowYoutube = options.allowYoutube === true;
-  const preprocessed = allowYoutube ? rewriteYoutubeEmbeds(source) : source;
+  const allowEmbeds =
+    options.allowMediaEmbeds === true || options.allowYoutube === true;
+  // Order matters: each rewriter is idempotent on its own output but
+  // would re-process foreign output. YouTube's bare-URL match is
+  // catch-all-shaped (any https://\S+ URL on its own line), so it
+  // checks per-line whether the URL extracts to a YouTube ID — same
+  // discipline applies to Spotify and Apple. Running them in
+  // sequence is safe because each rewriter's emitted iframe block
+  // doesn't match the URL_LINE regex.
+  let preprocessed = source;
+  if (allowEmbeds) {
+    preprocessed = rewriteYoutubeEmbeds(preprocessed);
+    preprocessed = rewriteSpotifyEmbeds(preprocessed);
+    preprocessed = rewriteApplePodcastsEmbeds(preprocessed);
+  }
   const html = marked.parse(preprocessed, { gfm: true, breaks: true }) as string;
-  const allowedTags = allowYoutube
+  const allowedTags = allowEmbeds
     ? [...ALLOWED_TAGS, "iframe", "div"]
     : ALLOWED_TAGS;
   const sanitized = sanitizeHtml(html, {
@@ -514,8 +567,11 @@ export async function renderMarkdown(
     allowedClasses: {
       code: [/^language-[\w-]+$/],
       pre: [/^language-[\w-]+$/],
-      // The pre-pass emits exactly this class on the wrapper.
-      div: ["proto-yt-embed"],
+      // The three pre-passes emit exactly these classes on their
+      // wrappers. Per-platform classes let the CSS pin different
+      // dimensions (16:9 video for YouTube, fixed-height audio
+      // strips for Spotify/Apple Podcasts).
+      div: ["proto-yt-embed", "proto-spotify-embed", "proto-applepod-embed"],
     },
     allowedSchemes: ["http", "https", "mailto"],
     // Tighter scheme list for <img> than for the rest. http and
@@ -545,26 +601,35 @@ export async function renderMarkdown(
           decoding: "async",
         },
       }),
-      // Re-validate the iframe src against the YouTube-nocookie
-      // pattern AND overwrite all other attrs to the canonical safe
-      // set. Two layers of defense:
+      // Re-validate the iframe src against the per-platform pattern
+      // AND overwrite all other attrs to the canonical safe set per
+      // platform. Two layers of defense:
       //   1. SRC pattern check — if it doesn't match exactly the
-      //      bare nocookie/embed/<11> shape, drop the tag entirely
-      //      (sanitize-html maps an empty-attribs tagName change to
-      //      a div, which renders as nothing through the embed CSS).
+      //      bare canonical shape for one of the three supported
+      //      platforms, drop the tag entirely (sanitize-html maps an
+      //      empty-attribs tagName change to a div, which renders as
+      //      nothing through the embed CSS).
       //   2. Attribute restamping — even when the SRC is valid, the
       //      caller's attrs are discarded and replaced with the
       //      canonical safe set so a hand-rolled iframe can't omit
       //      sandbox/referrerpolicy or add autoplay-style query
-      //      params (the SRC regex above already drops queries).
+      //      params (the SRC regex above already drops queries —
+      //      with one documented exception: the Apple Podcasts
+      //      embed honors `?i=<numeric>` for episode-level so the
+      //      regex tolerates exactly that shape).
       iframe: (tagName, attribs) => {
-        if (!allowYoutube) return { tagName: "div", attribs: {} };
+        if (!allowEmbeds) return { tagName: "div", attribs: {} };
         const src = attribs.src ?? "";
-        if (!YT_EMBED_SRC.test(src)) return { tagName: "div", attribs: {} };
-        return {
-          tagName,
-          attribs: { src, ...YT_IFRAME_ATTRS },
-        };
+        if (YT_EMBED_SRC.test(src)) {
+          return { tagName, attribs: { src, ...YT_IFRAME_ATTRS } };
+        }
+        if (SPOTIFY_EMBED_SRC.test(src)) {
+          return { tagName, attribs: { src, ...SPOTIFY_IFRAME_ATTRS } };
+        }
+        if (APPLE_PODCASTS_EMBED_SRC.test(src)) {
+          return { tagName, attribs: { src, ...APPLE_PODCASTS_IFRAME_ATTRS } };
+        }
+        return { tagName: "div", attribs: {} };
       },
     },
   });
