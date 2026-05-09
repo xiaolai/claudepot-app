@@ -3,7 +3,7 @@ import { FeedHeader } from "@/components/prototype/FeedHeader";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { EmptyFeedState } from "@/components/prototype/EmptyFeedState";
 import { auth } from "@/lib/auth";
-import { getSubmissionsByTop } from "@/db/queries";
+import { getSubmissionsByTop, getViewerVotesForSubmissions } from "@/db/queries";
 
 const RANGES = [
   { key: "day",  label: "Today" },
@@ -32,6 +32,12 @@ export default async function TopFeed({
     range,
     viewerId: session?.user?.id ?? null,
   });
+  const viewerVotes = session?.user?.id
+    ? await getViewerVotesForSubmissions(
+        session.user.id,
+        items.map((s) => s.id),
+      )
+    : new Map<string, "up" | "down">();
 
   return (
     <div className="proto-page">
@@ -52,7 +58,12 @@ export default async function TopFeed({
           <EmptyFeedState message={`No top posts in ${range === "day" ? "the last 24 hours" : range === "week" ? "the last week" : "all time"}.`} />
         ) : (
           items.map((s, i) => (
-            <SubmissionRow key={s.id} rank={i + 1} submission={s} />
+            <SubmissionRow
+              key={s.id}
+              rank={i + 1}
+              submission={s}
+              initialVote={viewerVotes.get(s.id) ?? null}
+            />
           ))
         )}
       </ol>

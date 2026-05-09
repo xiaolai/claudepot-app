@@ -4,7 +4,7 @@ import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { FeedHeader } from "@/components/prototype/FeedHeader";
 import { EmptyFeedState } from "@/components/prototype/EmptyFeedState";
 import { auth } from "@/lib/auth";
-import { getSubmissionsByNew } from "@/db/queries";
+import { getSubmissionsByNew, getViewerVotesForSubmissions } from "@/db/queries";
 import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
 
 export default async function Home({
@@ -20,6 +20,12 @@ export default async function Home({
     viewerId: session?.user?.id ?? null,
     cursor,
   });
+  const viewerVotes = session?.user?.id
+    ? await getViewerVotesForSubmissions(
+        session.user.id,
+        items.map((s) => s.id),
+      )
+    : new Map<string, "up" | "down">();
 
   return (
     <div className="proto-page">
@@ -30,7 +36,12 @@ export default async function Home({
           <EmptyFeedState message="Nothing new yet." />
         ) : (
           items.map((s, i) => (
-            <SubmissionRow key={s.id} rank={i + 1} submission={s} />
+            <SubmissionRow
+              key={s.id}
+              rank={i + 1}
+              submission={s}
+              initialVote={viewerVotes.get(s.id) ?? null}
+            />
           ))
         )}
       </ol>

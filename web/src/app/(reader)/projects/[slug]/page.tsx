@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink, Star } from "lucide-react";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
+import { auth } from "@/lib/auth";
 import {
   getProjectBySlug,
   getProjectTags,
   getRelatedSubmissionsForProject,
+  getViewerVotesForSubmissions,
 } from "@/db/queries";
 import { renderEditorialDoc, renderProjectReadme } from "@/lib/markdown";
 import { relativeDays } from "@/lib/format";
@@ -19,10 +21,17 @@ export default async function ProjectPage({
   const project = await getProjectBySlug(slug);
   if (!project) notFound();
 
-  const [projectTags, related] = await Promise.all([
+  const [projectTags, related, session] = await Promise.all([
     getProjectTags(slug),
     getRelatedSubmissionsForProject(slug),
+    auth(),
   ]);
+  const viewerVotes = session?.user?.id
+    ? await getViewerVotesForSubmissions(
+        session.user.id,
+        related.map((s) => s.id),
+      )
+    : new Map<string, "up" | "down">();
 
   const editorialHtml = project.editorial_md
     ? renderEditorialDoc(project.editorial_md)
@@ -103,7 +112,11 @@ export default async function ProjectPage({
         {related.length > 0 ? (
           <ol className="proto-feed">
             {related.map((s) => (
-              <SubmissionRow key={s.id} submission={s} />
+              <SubmissionRow
+                key={s.id}
+                submission={s}
+                initialVote={viewerVotes.get(s.id) ?? null}
+              />
             ))}
           </ol>
         ) : projectTags.length === 0 ? (

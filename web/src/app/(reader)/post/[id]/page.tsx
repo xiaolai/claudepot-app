@@ -13,7 +13,11 @@ import { auth } from "@/lib/auth";
 import { totalCommentCount } from "@/lib/format";
 import { effectiveDecision, effectiveState } from "@/lib/moderation-fixtures";
 import { getCurrentUser, isStaff } from "@/lib/auth-shim";
-import { getCommentsForSubmission, getSubmissionById } from "@/db/queries";
+import {
+  getCommentsForSubmission,
+  getSubmissionById,
+  getViewerVoteForSubmission,
+} from "@/db/queries";
 import { extractToc, renderMarkdown } from "@/lib/markdown";
 
 // Show the on-this-page TOC sidebar only when the post has enough
@@ -79,6 +83,17 @@ export default async function PostDetail({
   const comments = await getCommentsForSubmission(id);
   const score = post.upvotes - post.downvotes;
   const total = totalCommentCount(comments);
+
+  // Look up the viewer's existing vote so VoteButtons renders with
+  // the right initialState. Without this the UI thinks every viewer
+  // is voting fresh — flipping a real vote produces a server delta
+  // of 2 but a UI delta of 1, which surfaces as the score
+  // "double-counting" by 1 on the next refresh.
+  const viewerVoteValue = session?.user?.id
+    ? await getViewerVoteForSubmission(session.user.id, id)
+    : null;
+  const initialVote: "up" | "down" | null =
+    viewerVoteValue === 1 ? "up" : viewerVoteValue === -1 ? "down" : null;
   const bodyHtml = post.text
     ? await renderMarkdown(post.text, { allowMediaEmbeds: true })
     : null;
@@ -104,7 +119,11 @@ export default async function PostDetail({
       )}
 
       <div className="proto-row proto-row-bare">
-        <VoteButtons initialScore={score} submissionId={post.id} />
+        <VoteButtons
+          initialScore={score}
+          initialState={initialVote}
+          submissionId={post.id}
+        />
         <div className="proto-row-content">
           <h1 className="proto-row-title">
             {post.url ? (

@@ -7,6 +7,7 @@ import {
   getAllTags,
   getSubmissionsByTag,
   getTagBySlug,
+  getViewerVotesForSubmissions,
   isTagFollowed,
 } from "@/db/queries";
 import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
@@ -52,6 +53,9 @@ export default async function TagPage({
     isTagFollowed(viewerId, slug),
   ]);
   const { items, nextCursor } = page;
+  const viewerVotes = viewerId
+    ? await getViewerVotesForSubmissions(viewerId, items.map((s) => s.id))
+    : new Map<string, "up" | "down">();
 
   return (
     <div className="proto-page">
@@ -75,7 +79,12 @@ export default async function TagPage({
           <li className="proto-empty">Nothing tagged {tag.name} yet.</li>
         ) : (
           items.map((s, i) => (
-            <SubmissionRow key={s.id} rank={i + 1} submission={s} />
+            <SubmissionRow
+              key={s.id}
+              rank={i + 1}
+              submission={s}
+              initialVote={viewerVotes.get(s.id) ?? null}
+            />
           ))
         )}
       </ol>

@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 
+import { auth } from "@/lib/auth";
 import { db } from "@/db/client";
 import { comments, submissions, users } from "@/db/schema";
 import { ftsTsQuery } from "@/db/search-predicate";
+import { getViewerVotesForSubmissions } from "@/db/queries";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { deriveDomain } from "@/lib/url";
 
@@ -89,7 +91,14 @@ export default async function SearchPage({
 }) {
   const sp = await searchParams;
   const q = sp.q?.trim() ?? "";
+  const session = await auth();
   const results = q ? await search(q) : [];
+  const viewerVotes = session?.user?.id
+    ? await getViewerVotesForSubmissions(
+        session.user.id,
+        results.map((s) => s.id),
+      )
+    : new Map<string, "up" | "down">();
 
   return (
     <div className="proto-page">
@@ -120,7 +129,12 @@ export default async function SearchPage({
           <li className="proto-empty">No matches.</li>
         ) : (
           results.map((s, i) => (
-            <SubmissionRow key={s.id} rank={i + 1} submission={s} />
+            <SubmissionRow
+              key={s.id}
+              rank={i + 1}
+              submission={s}
+              initialVote={viewerVotes.get(s.id) ?? null}
+            />
           ))
         )}
       </ol>

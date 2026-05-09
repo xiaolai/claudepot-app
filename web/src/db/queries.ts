@@ -11,7 +11,7 @@
  * `upvotes = max(score, 0)`, `downvotes = max(-score, 0)`.
  */
 
-import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, notInArray, sql } from "drizzle-orm";
 
 import { db } from "./client";
 import { encodeCursor, type CursorTime } from "@/lib/api/cursor";
@@ -441,6 +441,62 @@ export async function getSubmissionById(
     .where(eq(submissions.id, id))
     .limit(1);
   return row ? mapSubmission(row) : undefined;
+}
+
+/**
+ * Look up the signed-in viewer's vote on a single submission.
+ * Returns 1 (upvote), -1 (downvote), or null (no vote / signed out).
+ *
+ * Required by the post-detail page so VoteButtons can render with
+ * initialState. Without this lookup the button thinks every viewer
+ * is voting fresh; flipping a real vote produces a server delta of
+ * 2 (e.g. +1 → -1) but only a UI delta of 1, so the next page load
+ * appears to "double-count" by another point. Issue surfaced
+ * 2026-05-10 ("upvote and downvote, one click add/minus 2 points").
+ */
+export async function getViewerVoteForSubmission(
+  viewerId: string,
+  submissionId: string,
+): Promise<1 | -1 | null> {
+  if (!isUuid(submissionId)) return null;
+  const [row] = await db
+    .select({ value: votes.value })
+    .from(votes)
+    .where(and(eq(votes.userId, viewerId), eq(votes.submissionId, submissionId)))
+    .limit(1);
+  if (!row) return null;
+  if (row.value === 1) return 1;
+  if (row.value === -1) return -1;
+  return null;
+}
+
+/**
+ * Batch viewer-vote lookup for feed pages. Returns a Map keyed by
+ * submission id; missing entries mean "no vote." Empty input → empty
+ * map. Same rationale as getViewerVoteForSubmission: feeds need the
+ * viewer's existing vote so VoteButtons renders with initialState
+ * and flipping doesn't double-count by a point on the next refresh.
+ */
+export async function getViewerVotesForSubmissions(
+  viewerId: string,
+  submissionIds: string[],
+): Promise<Map<string, "up" | "down">> {
+  if (submissionIds.length === 0) return new Map();
+  const rows = await db
+    .select({ submissionId: votes.submissionId, value: votes.value })
+    .from(votes)
+    .where(
+      and(
+        eq(votes.userId, viewerId),
+        inArray(votes.submissionId, submissionIds),
+      ),
+    );
+  const out = new Map<string, "up" | "down">();
+  for (const r of rows) {
+    if (r.value === 1) out.set(r.submissionId, "up");
+    else if (r.value === -1) out.set(r.submissionId, "down");
+  }
+  return out;
 }
 
 export async function getSubmissionsByUser(

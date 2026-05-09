@@ -2,10 +2,12 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { UserAvatar } from "@/components/prototype/Avatar";
+import { auth } from "@/lib/auth";
 import {
   getCommentsByUser,
   getSubmissionsByUser,
   getUser,
+  getViewerVotesForSubmissions,
 } from "@/db/queries";
 import { relativeTime } from "@/lib/format";
 import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
@@ -51,6 +53,14 @@ export default async function ProfilePage({
     tab === "comments"
       ? await getCommentsByUser(username, { cursor })
       : { items: [], nextCursor: null as string | null };
+  const session = await auth();
+  const viewerVotes =
+    session?.user?.id && submissionsPage.items.length > 0
+      ? await getViewerVotesForSubmissions(
+          session.user.id,
+          submissionsPage.items.map((s) => s.id),
+        )
+      : new Map<string, "up" | "down">();
 
   const linkSuffix = sp.as ? `&as=${sp.as}` : "";
   const baseSuffix = sp.as ? `?as=${sp.as}` : "";
@@ -101,7 +111,11 @@ export default async function ProfilePage({
             <li className="proto-empty">No submissions yet.</li>
           ) : (
             submissionsPage.items.map((s) => (
-              <SubmissionRow key={s.id} submission={s} />
+              <SubmissionRow
+                key={s.id}
+                submission={s}
+                initialVote={viewerVotes.get(s.id) ?? null}
+              />
             ))
           ))}
         {tab === "comments" &&
