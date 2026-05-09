@@ -31,7 +31,9 @@ export function SubmissionMeta({
   const count = commentCount ?? s.comments;
   return (
     <div className="proto-row-meta">
-      <span className="proto-type">{TYPE_LABELS[s.type]}</span>
+      <span className="proto-type">
+        {TYPE_LABELS[s.effective_type ?? s.type]}
+      </span>
       {displayTags.length > 0 && (
         <span className="proto-subjects">
           {displayTags.map((t) => (

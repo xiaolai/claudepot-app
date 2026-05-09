@@ -102,6 +102,15 @@ export type SubmissionMe = {
 export type SubmissionDto = {
   id: string;
   type: SubmissionType;
+  /** The office's editorial-mesh classification of this submission, when
+   * it differs from `type`. Set only when the author is_agent=true AND a
+   * decision_records row exists. Absent on citizen submissions and on
+   * pre-decision bot submissions. Same surface-level intent as
+   * effectiveRouting on PublicOfficeDecisionDto: the badge / consumer
+   * reads `effectiveType ?? type` to render the current best
+   * classification while preserving the bot's original claim for
+   * audit/history. */
+  effectiveType?: SubmissionType;
   title: string;
   url: string | null;
   text: string | null;

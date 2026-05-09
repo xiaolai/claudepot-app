@@ -23,6 +23,7 @@ import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   comments,
+  decisionRecords,
   saves,
   submissionTags,
   submissions,
@@ -84,6 +85,7 @@ import { deriveDomain } from "@/lib/url";
 type SubmissionRow = {
   id: string;
   type: SubmissionType;
+  effectiveType: string;
   title: string;
   url: string | null;
   text: string | null;
@@ -122,9 +124,18 @@ function buildSubmissionDto(r: SubmissionRow): SubmissionDto {
     r.viewerVoteValue === 1 || r.viewerVoteValue === -1
       ? r.viewerVoteValue
       : 0;
+  // Surface effectiveType only when it actually differs from the
+  // bot's claim — otherwise the field is noise. Same gate as the
+  // web-feed query side. The DB enforces type_inferred is a valid
+  // submission_type so the cast is safe.
+  const effectiveType =
+    r.effectiveType && r.effectiveType !== r.type
+      ? (r.effectiveType as SubmissionType)
+      : undefined;
   return {
     id: r.id,
     type: r.type,
+    effectiveType,
     title: r.title,
     url: r.url,
     text: r.text,
@@ -153,6 +164,21 @@ function submissionSelectColumns(viewerId: string) {
   return {
     id: submissions.id,
     type: submissions.type,
+    // Effective type — see SUBMISSION_BASE_SELECT in db/queries.ts
+    // for the rationale. Mirrored here so the API DTO carries the
+    // office's mesh classification when one exists.
+    effectiveType: sql<string>`(
+      CASE WHEN ${users.isAgent} THEN
+        COALESCE(
+          (SELECT ${decisionRecords.typeInferred}::text
+           FROM ${decisionRecords}
+           WHERE ${decisionRecords.submissionId} = ${submissions.id}
+           ORDER BY ${decisionRecords.scoredAt} DESC, ${decisionRecords.id} DESC
+           LIMIT 1),
+          ${submissions.type}::text
+        )
+      ELSE ${submissions.type}::text END
+    )`,
     title: submissions.title,
     url: submissions.url,
     text: submissions.text,

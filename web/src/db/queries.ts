@@ -17,6 +17,7 @@ import { db } from "./client";
 import { encodeCursor, type CursorTime } from "@/lib/api/cursor";
 import {
   comments,
+  decisionRecords,
   projectTags,
   projects,
   saves,
@@ -126,6 +127,7 @@ function synthesizeVotes(score: number): { upvotes: number; downvotes: number } 
 type SubmissionRowJoined = {
   id: string;
   type: Submission["type"];
+  effectiveType: string;
   title: string;
   url: string | null;
   text: string | null;
@@ -146,11 +148,20 @@ type SubmissionRowJoined = {
 
 function mapSubmission(r: SubmissionRowJoined): Submission {
   const { upvotes, downvotes } = synthesizeVotes(r.score);
+  // The DB enforces that type_inferred is a valid submission_type, so
+  // effectiveType (when present) is always a valid SubmissionType.
+  // Surface it only when it actually differs from the bot's claim —
+  // otherwise the field is noise.
+  const effectiveType =
+    r.effectiveType && r.effectiveType !== r.type
+      ? (r.effectiveType as Submission["type"])
+      : undefined;
   return {
     id: r.id,
     user: r.authorUsername,
     user_image_url: r.authorImageUrl,
     type: r.type,
+    effective_type: effectiveType,
     tags: r.tagSlugs,
     title: r.title,
     url: r.url,
@@ -204,6 +215,27 @@ const FEED_BASE_FILTERS = () =>
 const SUBMISSION_BASE_SELECT = {
   id: submissions.id,
   type: submissions.type,
+  // Effective type — the office's editorial-mesh classification
+  // (decision_records.type_inferred) takes precedence over the bot's
+  // initial submissions.type when an editorial decision exists.
+  // Gated on author.is_agent=true so citizen submissions render
+  // their own claimed type (the office never overrides citizen
+  // metadata; that's a boundary discipline call from
+  // 2026-05-08-polity-api-replies.md). When a bot row has multiple
+  // decisions, the most-recent (scoredAt DESC, id DESC) wins —
+  // same precedence as the override surface.
+  effectiveType: sql<string>`(
+    CASE WHEN ${users.isAgent} THEN
+      COALESCE(
+        (SELECT ${decisionRecords.typeInferred}::text
+         FROM ${decisionRecords}
+         WHERE ${decisionRecords.submissionId} = ${submissions.id}
+         ORDER BY ${decisionRecords.scoredAt} DESC, ${decisionRecords.id} DESC
+         LIMIT 1),
+        ${submissions.type}::text
+      )
+    ELSE ${submissions.type}::text END
+  )`,
   title: submissions.title,
   url: submissions.url,
   text: submissions.text,

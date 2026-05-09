@@ -44,6 +44,13 @@ export interface Submission {
   user: string;
   user_image_url?: string | null;
   type: SubmissionType;
+  /** Type as classified by the office's editorial mesh (the most-recent
+   * decision_records.type_inferred for this submission). Set only when
+   * the author is is_agent=true AND a decision exists; absent for
+   * citizen submissions and for pre-decision bot submissions. The badge
+   * renders this in preference to `type` so the office's correction of
+   * a lazy initial classification is what readers see. */
+  effective_type?: SubmissionType;
   tags: string[];
   title: string;
   url: string | null;
