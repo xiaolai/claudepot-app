@@ -58,7 +58,11 @@ export function AppealForm({ decisionId }: Props) {
         placeholder="Tell us why you think the decision was wrong. 10–480 characters."
       />
       <div className="proto-appeal-form-actions">
-        <button type="submit" disabled={isPending || text.trim().length < 10}>
+        <button
+          type="submit"
+          className="proto-btn-primary"
+          disabled={isPending || text.trim().length < 10}
+        >
           {isPending ? "Submitting…" : "Submit appeal"}
         </button>
         {error ? (

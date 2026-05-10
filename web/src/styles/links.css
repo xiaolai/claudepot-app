@@ -503,19 +503,23 @@
 .suggest-form input,
 .suggest-form select {
   padding: var(--sp-8) var(--sp-12);
-  border: var(--bw-hair) solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
+  border: var(--bw-hair) solid var(--rule-hair);
+  /* Unified input radius — see .proto-input header note. */
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: inherit;
   font: inherit;
   font-size: var(--fs-body);
+  transition: border-color var(--transition-short),
+              box-shadow var(--transition-short);
 }
 
-.suggest-form input:focus,
-.suggest-form select:focus {
+/* Paper-mono focus halo — matches .proto-input / .proto-form input. */
+.suggest-form input:focus-visible,
+.suggest-form select:focus-visible {
   outline: none;
-  box-shadow: var(--shadow-focus-ring);
   border-color: var(--accent);
+  box-shadow: var(--shadow-focus-ring);
 }
 
 .suggest-form-actions {
@@ -528,7 +532,8 @@
 .suggest-form-actions button {
   padding: var(--sp-8) var(--sp-20);
   border: var(--bw-hair) solid var(--accent);
-  border-radius: var(--radius-md);
+  /* Unified button radius — see .proto-btn-primary header note. */
+  border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent-ink);
   font: inherit;

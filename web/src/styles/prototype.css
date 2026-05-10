@@ -1407,17 +1407,30 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   font-family: var(--font-body);
   font-size: var(--fs-body);
   padding: var(--sp-8) var(--sp-12);
-  border: var(--bw-hair) solid var(--border);
+  border: var(--bw-hair) solid var(--rule-hair);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
+  transition: border-color var(--transition-short),
+              box-shadow var(--transition-short);
 }
 
-/* Focus indicator: inherit the global :focus-visible outline from
-   theme.css. Don't recolor the input's border — that conflates
-   "input is focused" with "input has a state-coloured edge" and
-   reads as visual noise inside reading copy. The outline lives
-   outside the box, so layout doesn't shift on focus either. */
+/* Focus indicator: paper-mono halo. Border darkens to --accent and a
+ * 3px translucent ring extends outside the box via box-shadow. Mirrors
+ * .proto-md-textarea / .suggest-form so every text input across the
+ * site shares the same focus shape — see commit 303ddf8 for the
+ * paper-mono halo rationale. The global solid-accent outline from
+ * theme.css would otherwise win and read as a heavy filled border.
+ * border-radius is repeated explicitly so the global focus rule's
+ * --radius-xs override doesn't snap the corners 2px tighter. */
+.proto-form input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.proto-form select:focus-visible,
+.proto-form textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-focus-ring);
+}
 
 .proto-form textarea { min-height: var(--sp-48); resize: vertical; }
 
@@ -1426,27 +1439,32 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   color: var(--muted);
 }
 
-.proto-form button[type="submit"],
-.proto-form .proto-button-primary {
+/* Auto-style for bare <button type="submit"> inside .proto-form.
+ * Mirrors .proto-btn-primary exactly (radius-sm, hairline accent
+ * border) so a form submit and an out-of-form .proto-btn-primary read
+ * as the same control — see commit 303ddf8 for the radius unification.
+ * The only form-context addition is align-self: start, which keeps the
+ * button hugging its own intrinsic width inside the column-flex
+ * .proto-form layout. */
+.proto-form button[type="submit"] {
   background: var(--accent);
   color: var(--white);
-  border: 0;
+  border: var(--bw-hair) solid var(--accent);
   padding: var(--sp-6) var(--sp-16);
   font-family: var(--font-body);
   font-size: var(--fs-body);
-  font-weight: 500;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   align-self: start;
 }
 
-.proto-form button[type="submit"]:hover,
-.proto-form .proto-button-primary:hover {
+.proto-form button[type="submit"]:hover {
   background: var(--accent-ink);
 }
 
-.proto-form button[type="submit"]:disabled,
-.proto-form .proto-button-primary:disabled {
+.proto-form button[type="submit"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -1564,7 +1582,8 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   font-size: var(--fs-body);
   padding: var(--sp-6) var(--sp-16);
   border: var(--bw-hair) solid var(--border);
-  border-radius: var(--radius-full);
+  /* Unified button radius — see .proto-btn-primary header note. */
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   text-decoration: none;
@@ -2703,11 +2722,11 @@ a.proto-inbox-chip:hover {
 .proto-inbox-cheat {
   position: fixed;
   inset: 0;
-  background: var(--scrim, rgba(0, 0, 0, 0.4));
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: var(--z-modal, 50);
+  z-index: var(--z-modal);
 }
 
 .proto-inbox-cheat-panel {
@@ -3419,9 +3438,26 @@ a.proto-inbox-chip:hover {
   background: var(--surface);
   border: var(--bw-hair) solid var(--rule-hair);
   border-radius: var(--radius-sm);
+  transition: border-color var(--transition-short),
+              box-shadow var(--transition-short);
+}
+
+/* Paper-mono focus halo — see the matching rule under .proto-form. */
+.proto-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus-ring);
 }
 
 .proto-input-wide { flex: 1 1 100%; }
+
+/* Compact-width variant for short numeric / coded inputs (e.g. the
+ * /admin bot-cap field). Caps the visible width so the input doesn't
+ * stretch to fill its flex parent — without this the cap input
+ * sprawls across the row alongside its tiny Save button. ch units so
+ * the cap tracks the input's own font size; 10ch fits a value like
+ * "1000.00" with breathing room. */
+.proto-input-narrow { max-width: var(--nav-height); width: 100%; }
 
 /* Inline input variant for in-row editing (e.g., /admin/flags tag rows).
    Smaller padding so the input fits a table cell without inflating row
@@ -3473,6 +3509,8 @@ a.proto-inbox-chip:hover {
   border: var(--bw-hair) solid var(--accent);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   transition: background var(--transition-short);
 }
 
@@ -4538,23 +4576,18 @@ ul.proto-token-scopes {
   gap: var(--sp-2);
 }
 
-.proto-token-flash {
+/* Vertical rhythm for the standalone /settings/tokens/reveal page. The
+ * bots-mint reveal nests these elements inside .proto-token-reveal, which
+ * supplies flex gap; the standalone reveal page lives directly under
+ * .proto-page-narrow (no gap), so the code block + button row stack flush
+ * by default. This wrapper restores that spacing without dragging in the
+ * accent-soft card chrome of .proto-token-reveal. */
+.proto-token-reveal-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-12);
-  border: var(--bw-rule) solid var(--accent);
-  border-radius: var(--radius-md);
-  padding: var(--sp-16);
-  background: var(--accent-soft);
+  gap: var(--sp-16);
 }
-/* The Copy + Done pair sits inside .proto-form-inline, which uses
- * sp-8 (8px) for compact form-field rows. Too tight between two
- * full-size pill buttons; sp-24 reads as too far apart. sp-20 sits
- * on the component-internal tier — appropriate for inter-control
- * spacing within a contained surface. */
-.proto-token-flash .proto-form-inline {
-  gap: var(--sp-20);
-}
+
 /* Read-only display of the plaintext token. Not an input, not focusable;
  * a single click anywhere in the box selects the whole string for copying.
  * No border / focus ring — the element is intentionally not interactive

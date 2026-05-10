@@ -50,21 +50,23 @@ export default async function TokenRevealPage() {
   return (
     <div className="proto-page-narrow">
       <h1>Token minted</h1>
-      <p className="proto-form-flash proto-form-flash-ok">
-        Token <strong>{payload.tokenName}</strong> ({payload.displayPrefix}…)
-        minted. Copy it now — it cannot be shown again after you click
-        Done.
-      </p>
-      <code className="proto-token-plaintext" id="token-plaintext">
-        {payload.plaintext}
-      </code>
-      <div className="proto-form-inline">
-        <CopyButton plaintext={payload.plaintext} />
-        <form action={dismissReveal}>
-          <button type="submit" className="proto-btn-secondary">
-            Done
-          </button>
-        </form>
+      <div className="proto-token-reveal-stack">
+        <p className="proto-form-flash proto-form-flash-ok">
+          Token <strong>{payload.tokenName}</strong> ({payload.displayPrefix}…)
+          minted. Copy it now — it cannot be shown again after you click
+          Done.
+        </p>
+        <code className="proto-token-plaintext" id="token-plaintext">
+          {payload.plaintext}
+        </code>
+        <div className="proto-form-inline">
+          <CopyButton plaintext={payload.plaintext} />
+          <form action={dismissReveal}>
+            <button type="submit" className="proto-btn-secondary">
+              Done
+            </button>
+          </form>
+        </div>
       </div>
       <p className="proto-empty proto-empty-spaced">
         Treat this string like a password. Anyone with it can act as

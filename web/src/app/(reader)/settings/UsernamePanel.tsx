@@ -113,7 +113,7 @@ export function UsernamePanel({
       <div className="proto-form-actions">
         <button
           type="submit"
-          className="proto-button-primary"
+          className="proto-btn-primary"
           disabled={
             isPending ||
             value.length < 3 ||

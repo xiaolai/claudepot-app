@@ -363,6 +363,13 @@ a:hover {
    Global focus styles
    ============================================================ */
 
+/* Global focus indicator. Inputs/selects/textareas opt into the
+ * paper-mono halo via per-class :focus-visible overrides (see
+ * .proto-form / .proto-input / .proto-md-textarea / .suggest-form);
+ * everything else falls through to this solid accent ring. The old
+ * border-radius: var(--radius-xs) override on focus has been removed
+ * — it snapped focused elements from their idle radius (sm = 4px)
+ * down to xs (2px), creating a subtle but jarring corner shift. */
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
@@ -371,7 +378,6 @@ select:focus-visible,
 [tabindex]:focus-visible {
   outline: var(--outline-width) solid var(--accent);
   outline-offset: var(--outline-offset);
-  border-radius: var(--radius-xs);
 }
 
 

@@ -236,16 +236,17 @@
   flex-wrap: wrap;
 }
 
-/* CTAs match the reader's design language: pill-shaped accent button
- * (mirrors .proto-button-primary) for the primary action; outlined
+/* CTAs match the reader's design language: small-radius accent button
+ * (mirrors .proto-btn-primary) for the primary action; outlined
  * accent for the secondary. Same shape, same weight, same family —
- * the only difference is fill vs stroke. */
+ * the only difference is fill vs stroke. Radius unified at sp-sm
+ * across the site (see commit 303ddf8 in prototype.css). */
 
 .docs-cta-primary,
 .docs-cta-secondary {
   display: inline-block;
   padding: var(--sp-8) var(--sp-20);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   font-family: var(--font-body);
   font-size: var(--fs-body);
   font-weight: 500;

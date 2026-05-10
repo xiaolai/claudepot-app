@@ -165,7 +165,7 @@ export function AvatarPanel({ currentUrl, username }: Props) {
             />
           )}
           <div className="proto-avatar-panel-actions">
-            <label htmlFor={fieldId} className="btn">
+            <label htmlFor={fieldId} className="proto-btn-secondary">
               Pick image
             </label>
             <input
@@ -195,7 +195,7 @@ export function AvatarPanel({ currentUrl, username }: Props) {
                     setClearPending(false);
                   }
                 }}
-                className="btn"
+                className="proto-btn-secondary"
               >
                 {clearPending ? "Clearing…" : "Clear avatar"}
               </button>
@@ -237,7 +237,7 @@ export function AvatarPanel({ currentUrl, username }: Props) {
               <button
                 type="button"
                 onClick={reset}
-                className="btn"
+                className="proto-btn-secondary"
                 disabled={pending || croppingPending}
               >
                 Cancel
@@ -245,7 +245,7 @@ export function AvatarPanel({ currentUrl, username }: Props) {
               <button
                 type="submit"
                 disabled={pending || croppingPending || !pixelCrop}
-                className="btn primary"
+                className="proto-btn-primary"
               >
                 {croppingPending
                   ? "Cropping…"

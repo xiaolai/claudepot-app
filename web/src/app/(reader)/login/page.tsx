@@ -84,7 +84,7 @@ export default async function LoginPage({
                 We&rsquo;ll email you a one-click sign-in link. No password.
               </span>
             </label>
-            <button type="submit" className="proto-button-primary">
+            <button type="submit" className="proto-btn-primary">
               Send magic link
             </button>
           </form>
