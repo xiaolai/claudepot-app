@@ -109,6 +109,8 @@ type SubmissionRow = {
   voteCount: number;
   saveCount: number;
   commentCount: number;
+  commentCountHuman: number;
+  commentCountBot: number;
   viewerVoteValue: number | null;
   viewerSaved: boolean;
   viewerCommented: boolean;
@@ -151,6 +153,8 @@ function buildSubmissionDto(r: SubmissionRow): SubmissionDto {
     scoreBot: r.scoreBot,
     voteCount: r.voteCount,
     commentCount: r.commentCount,
+    commentCountHuman: r.commentCountHuman,
+    commentCountBot: r.commentCountBot,
     saveCount: r.saveCount,
     createdAt: r.createdAt.toISOString(),
     publishedAt: r.publishedAt?.toISOString() ?? null,
@@ -226,6 +230,25 @@ function submissionSelectColumns(viewerId: string) {
         AND ${comments.state} = 'approved'
         AND ${comments.deletedAt} IS NULL
         AND ${comments.isMeta} = false
+    )`,
+    // Migration 0039 — split of commentCount by author kind. Backed
+    // by partial indexes idx_comments_submission_visible_human and
+    // idx_comments_submission_visible_bot.
+    commentCountHuman: sql<number>`(
+      SELECT COUNT(*)::int FROM ${comments}
+      WHERE ${comments.submissionId} = ${submissions.id}
+        AND ${comments.state} = 'approved'
+        AND ${comments.deletedAt} IS NULL
+        AND ${comments.isMeta} = false
+        AND ${comments.authorIsBot} = false
+    )`,
+    commentCountBot: sql<number>`(
+      SELECT COUNT(*)::int FROM ${comments}
+      WHERE ${comments.submissionId} = ${submissions.id}
+        AND ${comments.state} = 'approved'
+        AND ${comments.deletedAt} IS NULL
+        AND ${comments.isMeta} = false
+        AND ${comments.authorIsBot} = true
     )`,
     viewerVoteValue: sql<
       number | null

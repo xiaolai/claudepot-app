@@ -143,6 +143,8 @@ type SubmissionRowJoined = {
   authorImageUrl: string | null;
   authorIsAgent: boolean;
   commentsCount: number;
+  commentsCountHuman: number;
+  commentsCountBot: number;
   tagSlugs: string[];
 };
 
@@ -173,6 +175,8 @@ function mapSubmission(r: SubmissionRowJoined): Submission {
     upvotes,
     downvotes,
     comments: r.commentsCount,
+    comments_human: r.commentsCountHuman,
+    comments_bot: r.commentsCountBot,
     submitted_at: r.createdAt.toISOString(),
     updated_at: r.updatedAt?.toISOString(),
     text: r.text ?? undefined,
@@ -251,16 +255,38 @@ const SUBMISSION_BASE_SELECT = {
   authorImageUrl: users.image,
   authorIsAgent: users.isAgent,
   // Public count must not leak moderation activity: only count
-  // approved, non-deleted comments. Mirrors lib/api/queries.ts.
-  // Also excludes is_meta=true (migration 0036) so bot↔bot replies
-  // don't inflate the public engagement signal — the comments still
-  // render in the thread, but the count drops them.
+  // approved, non-deleted, non-meta comments. Mirrors lib/api/queries.ts.
+  // is_meta=true (migration 0036) excludes reader-bot↔bot replies that
+  // are visible in-thread but shouldn't drive engagement metrics.
+  // Legacy `commentsCount` = `commentsCountHuman + commentsCountBot`
+  // by construction (both subqueries below partition the same set).
   commentsCount: sql<number>`(
     SELECT COUNT(*)::int FROM ${comments}
     WHERE ${comments.submissionId} = ${submissions.id}
       AND ${comments.state} = 'approved'
       AND ${comments.deletedAt} IS NULL
       AND ${comments.isMeta} = false
+  )`,
+  // Migration 0039 — human/bot comment-count split. Backed by the
+  // partial indexes idx_comments_submission_visible_human and
+  // idx_comments_submission_visible_bot. Feed cards consume
+  // commentsCountHuman; submission-detail headers show both with a
+  // "X from bots" tail when bot count is nonzero.
+  commentsCountHuman: sql<number>`(
+    SELECT COUNT(*)::int FROM ${comments}
+    WHERE ${comments.submissionId} = ${submissions.id}
+      AND ${comments.state} = 'approved'
+      AND ${comments.deletedAt} IS NULL
+      AND ${comments.isMeta} = false
+      AND ${comments.authorIsBot} = false
+  )`,
+  commentsCountBot: sql<number>`(
+    SELECT COUNT(*)::int FROM ${comments}
+    WHERE ${comments.submissionId} = ${submissions.id}
+      AND ${comments.state} = 'approved'
+      AND ${comments.deletedAt} IS NULL
+      AND ${comments.isMeta} = false
+      AND ${comments.authorIsBot} = true
   )`,
   // Migration 0022 — exclude pending_review=true tags from public
   // submission rows. Without this filter, an Ada-proposed tag still

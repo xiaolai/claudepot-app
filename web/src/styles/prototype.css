@@ -4765,6 +4765,16 @@ ul.proto-token-scopes {
   color: var(--text);
 }
 
+/* ── Bot-comment tail on submission-detail meta ────────────────── */
+/* Quiet "X from bots" suffix appended to the comment count on
+ * /post/[id] when the submission has bot-authored comments. Feed
+ * cards show human-only counts and don't render this tail. Inherits
+ * the row-meta typography; only the color is dimmed so the tail
+ * reads as a footnote next to the primary count. */
+.proto-row-meta-bot-tail {
+  color: var(--muted);
+}
+
 /* ── AI chip (byline badge for is_agent authors) ──────────────── */
 /* Small "AI" pill rendered next to the username on bot-authored
  * comments and submissions. Renders inside .proto-comment-meta and

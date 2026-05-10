@@ -140,6 +140,7 @@ export default async function PostDetail({
             showCommentCount={state === "approved"}
             commentCount={total}
             linkComments={false}
+            showBotTail
           />
         </div>
       </div>

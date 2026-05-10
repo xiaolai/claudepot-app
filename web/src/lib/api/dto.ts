@@ -129,6 +129,12 @@ export type SubmissionDto = {
   scoreBot: number;
   voteCount: number;
   commentCount: number;
+  /** Migration 0039 — split of commentCount by author kind. Invariant:
+   *  `commentCount = commentCountHuman + commentCountBot`. Each side
+   *  excludes is_meta=true (reader-bot↔bot replies) so neither
+   *  partition includes back-channel noise. */
+  commentCountHuman: number;
+  commentCountBot: number;
   saveCount: number;
   createdAt: string;
   publishedAt: string | null;

@@ -7,10 +7,18 @@ interface Props {
   submission: Submission;
   /** Whether to render the comment count. Hide it on pending/rejected items. */
   showCommentCount: boolean;
-  /** Override the cached count — post-detail uses a recursive tree count. */
+  /** Override the cached count — post-detail uses a recursive tree count.
+   *  When omitted, the meta uses `comments_human` (humans only) and falls
+   *  back to legacy `comments` only when the human count isn't set. */
   commentCount?: number;
   /** Whether the comment count is a link to /post/[id]. Default true. */
   linkComments?: boolean;
+  /** Render a "X from bots" tail when the submission has bot-authored
+   *  comments. Per dev-docs/citizen-bots.md the post-detail header shows
+   *  this; feed cards stay clean. Default false. */
+  showBotTail?: boolean;
+  /** Override the cached bot count — post-detail uses a recursive tree count. */
+  botCommentCount?: number;
   /** Tag override — used when showing AI-proposed tags for pending items. */
   tags?: string[];
 }
@@ -25,10 +33,17 @@ export function SubmissionMeta({
   showCommentCount,
   commentCount,
   linkComments = true,
+  showBotTail = false,
+  botCommentCount,
   tags,
 }: Props) {
   const displayTags = tags ?? s.tags;
-  const count = commentCount ?? s.comments;
+  // Default to comments_human (the design rule — feed cards show
+  // human-only counts so bot reactions don't drive engagement
+  // signals). Fall back to legacy `comments` when the split isn't
+  // populated (older fixtures, RSS / cron jobs that haven't migrated).
+  const count = commentCount ?? s.comments_human ?? s.comments;
+  const botCount = botCommentCount ?? s.comments_bot ?? 0;
   return (
     <div className="proto-row-meta">
       <span className="proto-type">
@@ -79,6 +94,15 @@ export function SubmissionMeta({
             <Link href={`/post/${s.id}`}>{count} comments</Link>
           ) : (
             <span>{count} comments</span>
+          )}
+          {/* Bot-tail: only on detail surfaces, only when nonzero
+              (render-if-nonzero per design.md). Reader-bot meta-comments
+              are already excluded from comments_bot by the predicate. */}
+          {showBotTail && botCount > 0 && (
+            <span className="proto-row-meta-bot-tail">
+              {" · "}
+              {botCount} from bot{botCount === 1 ? "" : "s"}
+            </span>
           )}
         </>
       )}

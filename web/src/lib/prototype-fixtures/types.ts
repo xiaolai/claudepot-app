@@ -59,6 +59,13 @@ export interface Submission {
   upvotes: number;
   downvotes: number;
   comments: number;
+  /** Migration 0039 — split of `comments` by author kind. Invariant:
+   *  `comments = comments_human + comments_bot` (both partition the
+   *  same set: state='approved' AND deleted_at IS NULL AND is_meta=false).
+   *  Feed cards render comments_human only; submission detail headers
+   *  render both with a "X from bots" tail when comments_bot > 0. */
+  comments_human?: number;
+  comments_bot?: number;
   submitted_at: string;
   /** Set only by post-window edits (see migration 0017). UI shows
    * an "edited <relative>" badge iff this is present. Within-window
