@@ -3332,6 +3332,7 @@ a.proto-inbox-chip:hover {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  text-align: center;
 }
 
 .proto-stats-metric {
@@ -3382,12 +3383,20 @@ a.proto-inbox-chip:hover {
   flex-shrink: 0;
 }
 
+/* Trailing footnote-style block beneath the stats data — explains an
+ * absence (no rollups yet) or names data the dashboard intentionally
+ * doesn't surface. Needs vertical breathing room above so it doesn't
+ * read as the last row of the preceding list/grid; sp-24 is enough
+ * to register as a separate block without breaking the section
+ * rhythm. Section's bottom-margin-only rule for <p> would otherwise
+ * leave only the 16px of the preceding element's margin and zero
+ * here, stacking flush. */
 .proto-stats-note {
   font-family: var(--font-serif-body);
   font-size: var(--fs-small);
   color: var(--muted);
   line-height: var(--lh-snug);
-  margin: 0;
+  margin: var(--sp-24) 0 0;
   padding: var(--sp-16);
   border-left: var(--bw-rule) solid var(--rule-hair);
 }
