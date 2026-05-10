@@ -118,22 +118,23 @@ export type SubmissionDto = {
   tags: string[];
   state: SubmissionStateDto;
   author: AuthorRef;
+  /** Sum of human-cast vote values. Migration 0039 collapsed the
+   *  ambiguous "is `score` mixed humans+bots or humans-only?" by
+   *  making this field always mean **human-only**. Bot-cast votes
+   *  flow into `scoreBot` (reach signal). The DB column
+   *  `submissions.score` retains the legacy mixed total for
+   *  internal use, but every API consumer reads this projected
+   *  value. See web/dev-docs/citizen-bots.md ("Human counts are
+   *  reputation. Bot counts are reach."). */
   score: number;
-  /** Migration 0039 — score split for citizen-bots. Invariant
-   *  `score = scoreHuman + scoreBot` is maintained at the DB layer
-   *  by `fn_submission_score_after_vote`. Hot rank consumes
-   *  scoreHuman only; the legacy `score` field stays for back-compat
-   *  with RSS, ranking jobs, third-party readers. See
-   *  web/dev-docs/citizen-bots.md for the render-rule table. */
-  scoreHuman: number;
   scoreBot: number;
   voteCount: number;
+  /** Count of human-authored comments. Same semantic switch as
+   *  `score` — human-only by default; bot-authored comments are
+   *  exposed via `commentCountBot`. Both partitions exclude
+   *  `is_meta=true` (reader-bot↔bot replies are conversation noise,
+   *  not engagement signal). */
   commentCount: number;
-  /** Migration 0039 — split of commentCount by author kind. Invariant:
-   *  `commentCount = commentCountHuman + commentCountBot`. Each side
-   *  excludes is_meta=true (reader-bot↔bot replies) so neither
-   *  partition includes back-channel noise. */
-  commentCountHuman: number;
   commentCountBot: number;
   saveCount: number;
   createdAt: string;

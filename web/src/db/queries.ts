@@ -133,6 +133,8 @@ type SubmissionRowJoined = {
   text: string | null;
   state: "pending" | "approved" | "rejected" | "draft";
   score: number;
+  scoreHuman: number;
+  scoreBot: number;
   readingTimeMin: number | null;
   podcastMeta: unknown;
   toolMeta: unknown;
@@ -149,7 +151,12 @@ type SubmissionRowJoined = {
 };
 
 function mapSubmission(r: SubmissionRowJoined): Submission {
-  const { upvotes, downvotes } = synthesizeVotes(r.score);
+  // upvotes/downvotes are derived from the human-only score so feed
+  // surfaces, RSS, and any downstream consumer that reads
+  // .upvotes - .downvotes get the human-side number by default. Bot
+  // votes are accounted in score_bot (DB column) and surfaced through
+  // SubmissionDto.scoreBot when callers need the reach signal.
+  const { upvotes, downvotes } = synthesizeVotes(r.scoreHuman);
   // The DB enforces that type_inferred is a valid submission_type, so
   // effectiveType (when present) is always a valid SubmissionType.
   // Surface it only when it actually differs from the bot's claim —
@@ -174,7 +181,11 @@ function mapSubmission(r: SubmissionRowJoined): Submission {
     subjects: [],
     upvotes,
     downvotes,
-    comments: r.commentsCount,
+    // `comments` is the human-only count by API convention (see
+    // lib/api/dto.ts and web/dev-docs/citizen-bots.md). comments_human
+    // is kept as an explicit alias for callers that prefer the
+    // self-documenting name; comments_bot exposes the reach signal.
+    comments: r.commentsCountHuman,
     comments_human: r.commentsCountHuman,
     comments_bot: r.commentsCountBot,
     submitted_at: r.createdAt.toISOString(),
@@ -245,6 +256,8 @@ const SUBMISSION_BASE_SELECT = {
   text: submissions.text,
   state: submissions.state,
   score: submissions.score,
+  scoreHuman: submissions.scoreHuman,
+  scoreBot: submissions.scoreBot,
   readingTimeMin: submissions.readingTimeMin,
   podcastMeta: submissions.podcastMeta,
   toolMeta: submissions.toolMeta,

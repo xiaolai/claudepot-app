@@ -148,12 +148,15 @@ function buildSubmissionDto(r: SubmissionRow): SubmissionDto {
     tags: r.tagSlugs ?? [],
     state: r.state,
     author,
-    score: r.score,
-    scoreHuman: r.scoreHuman,
+    // score / commentCount are *projected* human-only — see dto.ts.
+    // The DB columns `submissions.score` and the legacy mixed-total
+    // count subquery are still selected into the row (for internal
+    // consumers that need them), but the API surface always exposes
+    // the human partition by default.
+    score: r.scoreHuman,
     scoreBot: r.scoreBot,
     voteCount: r.voteCount,
-    commentCount: r.commentCount,
-    commentCountHuman: r.commentCountHuman,
+    commentCount: r.commentCountHuman,
     commentCountBot: r.commentCountBot,
     saveCount: r.saveCount,
     createdAt: r.createdAt.toISOString(),
