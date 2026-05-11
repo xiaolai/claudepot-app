@@ -9,6 +9,7 @@ mod dto;
 mod dto_account;
 mod dto_activity;
 mod dto_activity_cards;
+mod dto_cc_doctor;
 mod dto_cc_tips;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
@@ -29,6 +30,7 @@ mod dto_session_prune;
 mod dto_templates;
 mod dto_updates;
 mod dto_usage;
+mod cc_doctor_watcher;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
@@ -451,6 +453,11 @@ pub fn run() {
             // for the MemoryPane.
             memory_watch::spawn(app.handle().clone(), memory_log_for_watcher.clone());
 
+            // Background `claude doctor` scrape on a 5 min cadence so
+            // the tray Health row stays current when the window is
+            // closed. See `cc_doctor_watcher.rs` for cadence rationale.
+            cc_doctor_watcher::spawn(app.handle().clone());
+
             Ok(())
         })
         .manage(state::LoginState::default())
@@ -472,6 +479,8 @@ pub fn run() {
             state::LiveSessionState::new(svc)
         })
         .manage(ops::RunningOps::new())
+        .manage(commands::cc_doctor::CcDoctorState::new())
+        .manage(state::TrayHealthState::default())
         .manage(state::TrayAlertState::default())
         .manage(state::UpdatesAlertState::default())
         .manage(preferences::PreferencesState::new(prefs))
@@ -747,6 +756,8 @@ pub fn run() {
             commands::notification::notification_log_mark_all_read,
             commands::notification::notification_log_clear,
             commands::notification::notification_log_unread_count,
+            commands::cc_doctor::cc_doctor_snapshot,
+            commands::cc_doctor::cc_doctor_open_parse_failures_log,
             commands::updates::updates_status_get,
             commands::updates::updates_check_now,
             commands::updates::updates_cli_install,

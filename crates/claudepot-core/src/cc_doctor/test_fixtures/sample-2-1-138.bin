@@ -1,0 +1,36 @@
+spawn claude doctor
+7[r8[?25h[?25l[?2004h[?1004h[?2031h[<u[>1u[>4;2m[>0q[c[?2026h
+[38;2;153;153;153m────────────────────────────────────────────────────────────────────────────────[39m
+[2C[38;2;255;255;255m·[1C[38;2;153;153;153m Checking[1Cinstallation[1Cstatus…[39m
+[?2026l[?2026h[2C[1A[1mDiagnostics[22m[K
+[2C[38;2;153;153;153m├[1C[39mCurrently[1Crunning:[1Cnative[1C(2.1.138)
+[2C[38;2;153;153;153m├[1C[39mCommit:[1Cd6d494651eb4
+[2C[38;2;153;153;153m├[1C[39mPlatform:[1Cdarwin-arm64
+[2C[38;2;153;153;153m├[1C[39mPath:[1C/Users/joker/.local/share/claude/versions/2.1.138
+[2C[38;2;153;153;153m├[1C[39mConfig[1Cinstall[1Cmethod:[1Cnative
+[2C[38;2;153;153;153m└[1C[39mSearch:[1COK[1C(bundled)
+
+[2C[1mUpdates[22m
+[2C[38;2;153;153;153m├[1C[39mAuto-updates:[1Cenabled
+[2C[38;2;153;153;153m├[1C[39mAuto-update[1Cchannel:[1Clatest
+[2C[38;2;153;153;153m└[1CChecking[1Cfor[1Cupdates…[39m
+
+[2C[1mVersion[1Clocks[22m
+[2C[38;2;153;153;153m├[1C[39m2.1.138:[1CPID[1C37263[1C(running)
+[2C[38;2;153;153;153m└[1C[39m2.1.128:[1CPID[1C17744[1C(running)
+
+[2C[38;2;255;107;128m✘[1C[39m[1mPlugin[1Cerrors[22m
+[2C[38;2;153;153;153m└[1C[38;2;255;107;128m4[1Cplugin[1Cerror(s)[1Cdetected:[39m
+[4C[38;2;153;153;153m├[1Cnlpm@xiaolai[1C[nlpm]:[1CPlugin[1C"nlpm"[1Cnot[1Ccached[1Cat[1C(not[1Crecorded)[1C—[1Crun[39m
+[6C[38;2;153;153;153m/plugins[1Cto[1Crefresh[39m
+[4C[38;2;153;153;153m├[1Cloc-guardian@xiaolai[1C[loc-guardian]:[1CPlugin[1C"loc-guardian"[1Cnot[1Ccached[1Cat[39m
+[6C[38;2;153;153;153m (not[1Crecorded)[1C—[1Crun[1C/plugins[1Cto[1Crefresh[39m
+[4C[38;2;153;153;153m├[1Cgrill@xiaolai[1C[grill]:[1CPlugin[1C"grill"[1Cnot[1Ccached[1Cat[1C(not[1Crecorded)[1C—[1Crun[39m
+[6C[38;2;153;153;153m /plugins[1Cto[1Crefresh[39m
+[4C[38;2;153;153;153m└[1Ctdd-guardian@xiaolai[1C[tdd-guardian]:[1CPlugin[1C"tdd-guardian"[1Cnot[1Ccached[1Cat[39m
+[6C[38;2;153;153;153m (not[1Crecorded)[1C—[1Crun[1C/plugins[1Cto[1Crefresh[39m
+
+[2C[38;2;153;153;153mStill[1Chaving[1Cissues?[1CRun[1C/feedback[1Cto[1Creport[1Cdetails.[39m
+
+[2C[38;2;153;153;153m[3mEnter[1Cto[1Ccontinue[1C·[1Cf[1Cto[1Cfix[1Cwith[1CClaude[23m[39m
+[?2026l[<u[>1u[>4;2m[?2026h[?25h[?2026l[?1006l[?1003l[?1002l[?1000l[>4m[<u[?1004l[?2031l[?2004l[?25h7[r8]9;4;0;[?25h[>4m[<u[?1004l[?2031l[?2004l[?25h

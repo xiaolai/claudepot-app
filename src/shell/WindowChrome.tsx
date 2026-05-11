@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
+import { HealthPill } from "./HealthPill";
 import { NotificationBell } from "./NotificationBell";
 
 interface WindowChromeProps {
@@ -130,6 +131,13 @@ export function WindowChrome({
           unaware of its internals so the chrome can keep being the
           dumb framing component it is. */}
       <NotificationBell onMouseDown={stopDrag} />
+
+      {/* CC self-diagnostic indicator. Sits between the bell and the
+          theme toggle so the secondary-action cluster reads
+          left-to-right as: notifications → CC health → display
+          preference. Click in Cut 1 is dev-console only; a Settings
+          → Health pane will wire this up in Cut 2. */}
+      <HealthPill onMouseDown={stopDrag} />
 
       <IconButton
         glyph={theme === "dark" ? NF.sun : NF.moon}

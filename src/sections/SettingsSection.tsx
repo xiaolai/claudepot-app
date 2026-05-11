@@ -20,6 +20,7 @@ import {
 } from "../lib/notify";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
+import { HealthPane } from "./settings/HealthPane";
 import { NetworkPane } from "./settings/NetworkPane";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { RotationPane } from "./settings/RotationPane";
@@ -40,6 +41,7 @@ type Tab =
   | "notifications"
   | "network"
   | "rotation"
+  | "health"
   | "cleanup"
   | "protected"
   | "github"
@@ -64,6 +66,12 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "notifications", label: "Notifications", glyph: NF.bell,     group: "core" },
   { id: "network",     label: "Network",        glyph: NF.globe,    group: "core" },
   { id: "rotation",    label: "Rotation",       glyph: NF.refresh,  group: "core" },
+  // Health = CC self-diagnostic (scrapes `claude doctor`). Sits in
+  // "core" because the pill in WindowChrome points here directly;
+  // hiding it under Advanced would make the deep-link surface
+  // inconsistent. Distinct from "Diagnostics" below, which is
+  // Claudepot's own self-check (platform, accounts, data dir).
+  { id: "health",      label: "Health",         glyph: NF.shield,   group: "core" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
@@ -144,6 +152,7 @@ export function SettingsSection() {
           {tab === "notifications" && <NotificationsPane pushToast={pushToast} />}
           {tab === "network" && <NetworkPane pushToast={pushToast} />}
           {tab === "rotation" && <RotationPane pushToast={pushToast} />}
+          {tab === "health" && <HealthPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupTabPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "github" && <GithubPane pushToast={pushToast} />}

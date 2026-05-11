@@ -212,3 +212,63 @@ impl UpdatesAlertState {
         }
     }
 }
+
+/// Last-known severity from the `claude doctor` scrape. Surfaced in
+/// the tray menu so a closed window still gets a glanceable CC
+/// health signal. Separate from [`TrayAlertState`] / [`UpdatesAlertState`]
+/// because the policy is different — health does NOT escalate the
+/// alert-template tray icon (the dot template is owned by alerting
+/// sessions / available updates), only the menu copy. Cut 3 scope:
+/// menu entry only; an icon variant for health is a follow-up.
+///
+/// Initial state is `Unknown`, not `Healthy` — we don't want the
+/// menu to claim "All systems go" until the first scrape returns a
+/// verdict. The first refresh arrives within seconds via the
+/// renderer's pill; the background poller in `cc_doctor_watcher`
+/// is the closed-window fallback.
+pub struct TrayHealthState(pub Mutex<HealthRecord>);
+
+#[derive(Clone, Copy)]
+pub struct HealthRecord {
+    pub kind: HealthRecordKind,
+    /// Count of sections flagged at warning/error. Lets the menu
+    /// copy say "Health: 4 issues" without re-reading the snapshot.
+    pub flagged_sections: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HealthRecordKind {
+    Unknown,
+    Healthy,
+    Warning,
+    Error,
+}
+
+impl Default for TrayHealthState {
+    fn default() -> Self {
+        Self(Mutex::new(HealthRecord {
+            kind: HealthRecordKind::Unknown,
+            flagged_sections: 0,
+        }))
+    }
+}
+
+impl TrayHealthState {
+    pub fn get(&self) -> HealthRecord {
+        match self.0.lock() {
+            Ok(g) => *g,
+            Err(p) => *p.into_inner(),
+        }
+    }
+
+    pub fn set(&self, kind: HealthRecordKind, flagged_sections: u32) {
+        let rec = HealthRecord {
+            kind,
+            flagged_sections,
+        };
+        match self.0.lock() {
+            Ok(mut g) => *g = rec,
+            Err(p) => *p.into_inner() = rec,
+        }
+    }
+}

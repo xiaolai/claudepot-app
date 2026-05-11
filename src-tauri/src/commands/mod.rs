@@ -28,6 +28,7 @@ pub mod activity_cards;
 pub mod artifact_lifecycle;
 pub mod artifact_usage;
 pub mod automations;
+pub mod cc_doctor;
 pub mod cc_tips;
 pub mod cli;
 pub mod config;

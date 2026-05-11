@@ -24,6 +24,7 @@ keyring.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 dirs.workspace = true
+portable-pty.workspace = true
 sysinfo.workspace = true
 libc.workspace = true
 async-trait.workspace = true

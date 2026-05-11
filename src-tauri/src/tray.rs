@@ -13,10 +13,10 @@
 
 use crate::dto::AccountSummary;
 use crate::tray_icons::{
-    icon_item, ICON_BADGE_CHECK, ICON_HOME, ICON_LAYERS, ICON_POWER, ICON_REFRESH, ICON_SLIDERS,
-    ICON_USER_PLUS, ID_ACTIVITIES, ID_ADD, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR, ID_DESKTOP_LAUNCH,
-    ID_DESKTOP_RECONCILE, ID_QUIT, ID_SETTINGS, ID_SHOW, ID_SYNC, ID_USAGE_REFRESH, ID_VERIFY_ALL,
-    PREFIX_CLI, PREFIX_DESKTOP, PREFIX_LIVE,
+    icon_item, ICON_BADGE_CHECK, ICON_HOME, ICON_LAYERS, ICON_POWER, ICON_REFRESH, ICON_SHIELD,
+    ICON_SLIDERS, ICON_USER_PLUS, ID_ACTIVITIES, ID_ADD, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR,
+    ID_DESKTOP_LAUNCH, ID_DESKTOP_RECONCILE, ID_HEALTH, ID_QUIT, ID_SETTINGS, ID_SHOW, ID_SYNC,
+    ID_USAGE_REFRESH, ID_VERIFY_ALL, PREFIX_CLI, PREFIX_DESKTOP, PREFIX_LIVE,
 };
 use crate::tray_menu::{
     build_active_items, build_cli_submenu, build_desktop_submenu, build_live_submenu,
@@ -172,6 +172,12 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     // the today/month dashboard. Reuses the existing
     // `app-menu:nav:events` listener in App.tsx.
     let activities_item = icon_item(app, ID_ACTIVITIES, "Open Activities", ICON_LAYERS)?;
+    // Health row — reflects the last cc_doctor scrape. Label
+    // depends on TrayHealthState so closed-window users still get
+    // a glanceable verdict. Unknown reads as "checking…" — never
+    // "healthy" until we've actually confirmed.
+    let health_label = compose_health_label(app);
+    let health_item = icon_item(app, ID_HEALTH, &health_label, ICON_SHIELD)?;
     let settings_item = icon_item(app, ID_SETTINGS, "Settings…", ICON_SLIDERS)?;
 
     // Quit carries a power glyph for column consistency with the
@@ -228,6 +234,7 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
         .item(&sep2)
         .item(&show_item)
         .item(&activities_item)
+        .item(&health_item)
         .item(&settings_item)
         .item(&quit_item)
         .build()
@@ -349,6 +356,44 @@ fn compose_tooltip(
     }
 }
 
+/// Build the human label for the tray's Health row. Reads
+/// [`crate::state::TrayHealthState`] which the cc_doctor command +
+/// background poller keep current. State may be unmanaged in test
+/// builds; fall through to `"Health"` (no suffix) in that case.
+fn compose_health_label(app: &AppHandle) -> String {
+    use crate::state::HealthRecordKind;
+    let Some(state) = app.try_state::<crate::state::TrayHealthState>() else {
+        return "Health".to_string();
+    };
+    let rec = state.get();
+    match rec.kind {
+        HealthRecordKind::Unknown => "Health: checking…".to_string(),
+        HealthRecordKind::Healthy => "Health: ok".to_string(),
+        HealthRecordKind::Warning => {
+            if rec.flagged_sections == 0 {
+                "Health: warnings".to_string()
+            } else {
+                format!(
+                    "Health: {} warning{}",
+                    rec.flagged_sections,
+                    if rec.flagged_sections == 1 { "" } else { "s" }
+                )
+            }
+        }
+        HealthRecordKind::Error => {
+            if rec.flagged_sections == 0 {
+                "Health: errors".to_string()
+            } else {
+                format!(
+                    "Health: {} issue{}",
+                    rec.flagged_sections,
+                    if rec.flagged_sections == 1 { "" } else { "s" }
+                )
+            }
+        }
+    }
+}
+
 /// Handle a tray menu item click. The app_menu module handles any id
 /// starting with `app-menu:`; the rest live here.
 pub fn handle_menu_event(app: &AppHandle, id: &str) {
@@ -396,6 +441,16 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
         show_window(app);
         if let Err(e) = app.emit("app-menu", "app-menu:account:verify-all") {
             tracing::warn!("emit verify-all failed: {e}");
+        }
+    } else if id == ID_HEALTH {
+        // Open the window and route to Settings → Health. The
+        // app-menu nav handler in App.tsx parses the subtab segment
+        // and calls triggerSettingsTab("health"), which works for
+        // both cold-mount (sessionStorage) and hot-mount (live
+        // listener) cases.
+        show_window(app);
+        if let Err(e) = app.emit("app-menu", "app-menu:nav:settings:health") {
+            tracing::warn!("emit nav-health failed: {e}");
         }
     } else if id == ID_ACTIVITIES {
         // Activities's section id is `events` in the registry (kept

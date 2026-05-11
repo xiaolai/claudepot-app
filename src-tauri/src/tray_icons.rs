@@ -37,6 +37,11 @@ pub const ICON_BADGE_CHECK: &[u8] = include_bytes!("../icons/menu/badge-check.pn
 // Lucide `Layers`, so the tray uses the same glyph for the same
 // destination.
 pub const ICON_LAYERS: &[u8] = include_bytes!("../icons/menu/layers.png");
+// `Health` — CC self-diagnostic surface. Lucide `shield` rasterized
+// at 144×144 to match the rest of the menu glyph set. AppKit treats
+// any monochrome glyph in an IconMenuItem the same way regardless
+// of color depth; the alpha channel does the work.
+pub const ICON_SHIELD: &[u8] = include_bytes!("../icons/menu/shield.png");
 // Per-row glyphs. Usage rows carry a single account-identity anchor
 // (circle-user); Live/Activity rows vary by status so the user can
 // scan "what's actually happening" from the tray without opening
@@ -67,6 +72,7 @@ pub const ID_ACTIVE_DISPLAY_DESKTOP: &str = "tray:active-display:desktop";
 pub const ID_USAGE_REFRESH: &str = "tray:usage:refresh";
 pub const ID_VERIFY_ALL: &str = "tray:verify-all";
 pub const ID_ACTIVITIES: &str = "tray:open-activities";
+pub const ID_HEALTH: &str = "tray:open-health";
 
 // Prefixes for dynamic per-account / per-session menu items.
 pub const PREFIX_CLI: &str = "tray:cli-switch:";

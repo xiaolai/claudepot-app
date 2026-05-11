@@ -345,8 +345,21 @@ function AppShell() {
     const unlistenPromise = listen<string>("app-menu", (event) => {
       const cmd = event.payload;
       if (cmd.startsWith("app-menu:nav:")) {
-        const sub = cmd.substring("app-menu:nav:".length).split(":")[0];
-        if (sectionIds.includes(sub)) setSection(sub);
+        // Format: `app-menu:nav:<section>` or
+        // `app-menu:nav:<section>:<subtab>`. The optional subtab
+        // applies to sections that expose subtabs internally (today
+        // only Settings); routing it via `triggerSettingsTab` keeps
+        // the cold/hot-mount machinery in one place. Tray Health
+        // entry uses this form to land on Settings → Health.
+        const parts = cmd.substring("app-menu:nav:".length).split(":");
+        const section = parts[0];
+        if (section && sectionIds.includes(section)) {
+          setSection(section);
+          const subtab = parts[1];
+          if (section === "settings" && subtab) {
+            triggerSettingsTab(subtab);
+          }
+        }
         return;
       }
       if (cmd === "app-menu:view:toggle-theme") {
