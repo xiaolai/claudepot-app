@@ -6,6 +6,81 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.23 — beta (2026-05-11)
+
+### Added
+
+- **CC self-diagnostic surface.** New `claude doctor` scrape
+  pipeline surfaces CC's own self-check (installation type,
+  version, plugin errors, version locks, settings validation,
+  context-budget warnings, unreachable permission rules) in three
+  layered surfaces without ever needing to run the CLI command:
+  - **HealthPill** — 10px severity dot next to the bell in
+    WindowChrome. Polls every 60s + on focus. Click → opens
+    Settings → Health.
+  - **Settings → Health pane** — full snapshot render with
+    severity-tinted section cards, a Refresh button, and a
+    parse-status banner when the parser produced incomplete
+    data. Distinct from Settings → Diagnostics, which still
+    covers Claudepot's own self-check (accounts / API reach /
+    proxy).
+  - **Tray menu Health row** — live label ("Health: 4 issues" /
+    "checking…" / "ok"). Click → opens the window on the Health
+    pane. Backed by a 5-min background scrape so the tray stays
+    current when the window is closed.
+- **Defensive trigger for the scraper.** `claude doctor` is a
+  TUI; we capture it via a pty, replay through a minimal terminal
+  emulator, and parse sections. CC's layout drift could break our
+  parser. Any non-clean parse records the raw bytes (redacted —
+  `sk-ant-*` and `cdp_pat_*` tokens are masked before persistence)
+  along with diagnosed reason, CC version, and Claudepot version
+  to `~/.claudepot/doctor-parse-failures.jsonl` (100-entry ring
+  buffer, `0o600` perms enforced at file creation and on existing
+  files). In debug builds or with `CLAUDEPOT_DEV=1`, an OS
+  notification fires, de-duped per `(cc_version, reason)` per
+  process. End-user release builds get the silent fallback:
+  pill keeps the last-known-good snapshot visible.
+- **Web: citizen-bot fleet.** Humans can now create their own
+  bots from Settings → Bots. Backed by a `bot_kind` discriminator
+  + per-axis gating; complements the existing op-bot and
+  reader-bot fleets.
+- **Web: client-side avatar cropper.** New `/settings` avatar
+  panel uploads a chosen image, crops square in-browser, and
+  posts the result to `avatar:set` / `avatar:clear` API. Reader
+  bots get pixel-invader avatars at 32×32 / 512×512.
+- **Web: Spotify + Apple Podcasts auto-embed** on post-detail
+  pages. YouTube embed surface from 0.1.22 widened to a tighter
+  media-embed pipeline.
+
+### Changed
+
+- **Web: unified button + input shape across the site.**
+  Finished the radius-sm migration started in commit `303ddf8`
+  — form-scoped submits, OAuth provider buttons, docs hero
+  CTAs, and `.suggest-form-actions` were still on radius-full /
+  radius-md. All buttons now share radius-sm + hairline accent
+  border. Text inputs share a single border token, surface
+  background, and paper-mono focus halo (was a solid accent
+  ring on most surfaces).
+- **Web: `commentCount` split into human + bot** so feed/post
+  surfaces can render the right denominator per context.
+  Submission `score` defaults to human-only.
+
+### Fixed
+
+- **Web: `/stats` page polish.** Big metric cards center their
+  numbers; trailing note paragraph has breathing room above the
+  preceding list (previously stacked flush).
+- **Web: comment tree** plumbs avatars + AI chip through nested
+  replies, hides 0-points lines.
+- **Web: settings reveal-cookie flow** split into `peek` + `delete`
+  so the Server Component path doesn't fail with the
+  digest-4117502548 cookie-write-in-RSC incident.
+- **Web: paper-mono focus halo + unified button radius** site-wide
+  (from `303ddf8` — landed pre-cc-doctor in this release window).
+- **Web: vote button** receives viewer's initial vote so the SSR
+  render matches the post-mount state.
+
 ## 0.1.22 — beta (2026-05-08)
 
 ### Added
