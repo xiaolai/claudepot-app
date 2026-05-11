@@ -49,18 +49,21 @@ const READER_TARGET_TOKEN_NAME = "office reader (limited, no-expiry)";
 const OP_TARGET_TOKEN_NAME = "office op (limited, no-expiry)";
 
 /**
- * Canonical reader-bot scope set. Five scopes:
+ * Canonical reader-bot scope set. Six scopes:
  *   - read:all          — fetch submissions / comments / threads to react to
  *   - comment:write     — post 1-3 sentence reactions
  *   - comment:update    — refine a past reaction (after seeing replies);
  *                         updatedAt bumps so revisions are auditable
+ *   - comment:delete    — retract a reaction. The delete endpoint
+ *                         soft-deletes (tombstone preserved) when the
+ *                         comment has replies and hard-deletes only
+ *                         leaves, so the miscalibration audit trail
+ *                         is partially preserved structurally.
  *   - engagement:write  — semantic vote-substitute kinds
  *   - notification:read — see replies for the discuss cadence + reactions
  *                         to a reader's own comments
  *
  * Permanently denied (do NOT add to this list without an office memo):
- *   - comment:delete    — readers can't erase miscalibration evidence;
- *                         that's the load-bearing feedback signal
  *   - vote:write        — primitive vote endpoint must not pollute
  *                         public voteCount with bot reactions
  *   - save:write        — irrelevant to a reader's role
@@ -77,6 +80,7 @@ const READER_SCOPES: readonly Scope[] = [
   "read:all",
   "comment:write",
   "comment:update",
+  "comment:delete",
   "engagement:write",
   "notification:read",
 ];

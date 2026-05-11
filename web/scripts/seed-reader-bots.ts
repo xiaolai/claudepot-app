@@ -70,7 +70,7 @@ const READER_BOTS: Array<{
 ];
 
 const TOKEN_NAME = "office reader (limited, no-expiry)";
-// Canonical reader-bot scope set. Five scopes — see
+// Canonical reader-bot scope set. Six scopes — see
 // scripts/refresh-bot-scopes.ts for the authoritative documentation
 // on what's granted, what's denied, and why. Keep this list and the
 // READER_SCOPES constant in refresh-bot-scopes.ts in lockstep; the
@@ -79,6 +79,7 @@ const READER_SCOPES = [
   "read:all",
   "comment:write",
   "comment:update",
+  "comment:delete",
   "engagement:write",
   "notification:read",
 ] as const;
