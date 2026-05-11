@@ -1094,24 +1094,43 @@ mod tests {
     // refreshes into the right counters.
     // -----------------------------------------------------------------
 
+    /// Format a timestamp `n` seconds before "now" as RFC3339 UTC.
+    /// Test fixtures used to hard-code `2026-04-10T10:00:00Z`, which
+    /// silently bit-rotted: the refresh path GCs usage events older
+    /// than 30 days inside the same write transaction, so fixtures
+    /// older than the cliff insert-then-vanish and the tests start
+    /// failing on a date-dependent schedule. Using relative offsets
+    /// off `chrono::Utc::now()` keeps the timestamps inside the
+    /// retention window regardless of when CI runs. Seconds-scale
+    /// offsets are arbitrary — anything sub-30-day works.
+    fn recent_ts(seconds_ago: i64) -> String {
+        let t = chrono::Utc::now() - chrono::Duration::seconds(seconds_ago);
+        t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
     fn artifact_session_lines(cwd: &str, sid: &str) -> Vec<String> {
         // Five lines: hello user, slash command, invoked_skills attachment,
         // hook_success attachment, an Agent tool_use.
+        let ts0 = recent_ts(60);
+        let ts1 = recent_ts(59);
+        let ts2 = recent_ts(58);
+        let ts3 = recent_ts(57);
+        let ts4 = recent_ts(56);
         vec![
             format!(
-                r#"{{"type":"user","message":{{"role":"user","content":"hi"}},"timestamp":"2026-04-10T10:00:00Z","cwd":"{cwd}","sessionId":"{sid}"}}"#
+                r#"{{"type":"user","message":{{"role":"user","content":"hi"}},"timestamp":"{ts0}","cwd":"{cwd}","sessionId":"{sid}"}}"#
             ),
             format!(
-                r#"{{"type":"user","message":{{"role":"user","content":"<command-name>/foo:bar</command-name>"}},"timestamp":"2026-04-10T10:00:01Z","cwd":"{cwd}","sessionId":"{sid}"}}"#
+                r#"{{"type":"user","message":{{"role":"user","content":"<command-name>/foo:bar</command-name>"}},"timestamp":"{ts1}","cwd":"{cwd}","sessionId":"{sid}"}}"#
             ),
             format!(
-                r#"{{"type":"attachment","timestamp":"2026-04-10T10:00:02Z","sessionId":"{sid}","attachment":{{"type":"invoked_skills","skills":[{{"name":"x","path":"plugin:foo:x"}}]}}}}"#
+                r#"{{"type":"attachment","timestamp":"{ts2}","sessionId":"{sid}","attachment":{{"type":"invoked_skills","skills":[{{"name":"x","path":"plugin:foo:x"}}]}}}}"#
             ),
             format!(
-                r#"{{"type":"attachment","timestamp":"2026-04-10T10:00:03Z","sessionId":"{sid}","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":42,"exitCode":0}}}}"#
+                r#"{{"type":"attachment","timestamp":"{ts3}","sessionId":"{sid}","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":42,"exitCode":0}}}}"#
             ),
             format!(
-                r#"{{"type":"assistant","timestamp":"2026-04-10T10:00:04Z","sessionId":"{sid}","message":{{"content":[{{"type":"tool_use","id":"toolu_X","name":"Agent","input":{{"subagent_type":"Explore"}}}}]}}}}"#
+                r#"{{"type":"assistant","timestamp":"{ts4}","sessionId":"{sid}","message":{{"content":[{{"type":"tool_use","id":"toolu_X","name":"Agent","input":{{"subagent_type":"Explore"}}}}]}}}}"#
             ),
         ]
     }
@@ -1161,9 +1180,12 @@ mod tests {
         idx.refresh(cfg.path()).unwrap();
         let first = count_usage_rows(&idx);
 
-        // Append one more event line to trigger re-scan.
+        // Append one more event line to trigger re-scan. Recent ts
+        // so it stays inside the 30-day retention window — see
+        // `recent_ts` for the bit-rot rationale.
+        let extra_ts = recent_ts(50);
         let extra = format!(
-            r#"{{"type":"attachment","timestamp":"2026-04-10T10:00:05Z","sessionId":"S1","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":51,"exitCode":0}}}}"#
+            r#"{{"type":"attachment","timestamp":"{extra_ts}","sessionId":"S1","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":51,"exitCode":0}}}}"#
         );
         let mut f = std::fs::OpenOptions::new()
             .append(true)
@@ -1367,10 +1389,15 @@ mod tests {
         let cfg = TempDir::new().unwrap();
         // JSONL is strictly one event per line — keep these as
         // single physical lines so the streaming parser sees them.
+        // Relative timestamps so the 30-day refresh GC doesn't
+        // evict the events on a date-dependent schedule.
+        let ts0 = recent_ts(120);
+        let ts1 = recent_ts(119);
+        let ts2 = recent_ts(118);
         let lines = vec![
-            r#"{"type":"assistant","timestamp":"2026-04-10T10:00:00Z","sessionId":"S1","message":{"content":[{"type":"tool_use","id":"toolu_OK","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","id":"toolu_BAD","name":"Agent","input":{"subagent_type":"Explore"}}]}}"#.to_string(),
-            r#"{"type":"user","timestamp":"2026-04-10T10:00:01Z","sessionId":"S1","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_BAD","is_error":true,"content":"boom"}]}}"#.to_string(),
-            r#"{"type":"user","timestamp":"2026-04-10T10:00:02Z","sessionId":"S1","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_OK","is_error":false,"content":"ok"}]}}"#.to_string(),
+            format!(r#"{{"type":"assistant","timestamp":"{ts0}","sessionId":"S1","message":{{"content":[{{"type":"tool_use","id":"toolu_OK","name":"Agent","input":{{"subagent_type":"Explore"}}}},{{"type":"tool_use","id":"toolu_BAD","name":"Agent","input":{{"subagent_type":"Explore"}}}}]}}}}"#),
+            format!(r#"{{"type":"user","timestamp":"{ts1}","sessionId":"S1","message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_BAD","is_error":true,"content":"boom"}}]}}}}"#),
+            format!(r#"{{"type":"user","timestamp":"{ts2}","sessionId":"S1","message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_OK","is_error":false,"content":"ok"}}]}}}}"#),
         ];
         write_session(cfg.path(), "-a", "S1", &lines);
         idx.refresh(cfg.path()).unwrap();
