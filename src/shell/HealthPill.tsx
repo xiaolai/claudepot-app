@@ -52,7 +52,14 @@ export function HealthPill({ onMouseDown }: HealthPillProps) {
     try {
       const s = await api.ccDoctorSnapshot(force);
       setSnapshot(s);
-      if (s.parseStatus.kind !== "failed") {
+      // Only promote a fully-clean parse to "last-known-good".
+      // Stashing degraded snapshots here would mean a later failed
+      // parse falls back to already-incomplete data — the whole
+      // point of the cache is to step back to TRUSTED state. A
+      // degraded snapshot can still render (via `display` below) on
+      // its own turn, but it should never inherit the lastGood
+      // slot from a prior clean parse.
+      if (s.parseStatus.kind === "ok") {
         lastGood.current = s;
       }
     } catch {

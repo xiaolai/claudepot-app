@@ -146,8 +146,8 @@ pub enum ParseStatus {
 pub fn scrape_doctor() -> DoctorSnapshot {
     let captured_at_ms = Utc::now().timestamp_millis();
 
-    let raw = match spawn_and_capture(SCRAPE_TIMEOUT) {
-        Ok(b) => b,
+    let capture = match spawn_and_capture(SCRAPE_TIMEOUT) {
+        Ok(c) => c,
         Err(e) => {
             let reason = format!("pty spawn/capture: {e}");
             let snap = DoctorSnapshot {
@@ -167,11 +167,20 @@ pub fn scrape_doctor() -> DoctorSnapshot {
         }
     };
 
-    let raw_bytes = raw.len();
-    let grid = render(&raw);
+    let raw_bytes = capture.bytes.len();
+    let grid = render(&capture.bytes);
     let lines = grid_to_lines(&grid);
     let (sections, parse_status) = parse_lines(&lines);
     let (cc_version, install_type, install_path) = extract_install_info(&sections);
+
+    // Force-degrade the parse status if the capture didn't run to
+    // completion. Without this, a timeout or truncation that
+    // happened to leave a parseable Diagnostics section in the
+    // buffer would surface as ParseStatus::Ok — a silent
+    // false-healthy that hides the real "we never saw the rest of
+    // the output" problem.
+    let parse_status = downgrade_for_incomplete_capture(parse_status, &capture);
+
     let severity = aggregate_severity(&sections, &parse_status);
 
     let snapshot = DoctorSnapshot {
@@ -190,15 +199,115 @@ pub fn scrape_doctor() -> DoctorSnapshot {
             ParseStatus::Degraded { reason } | ParseStatus::Failed { reason } => reason.clone(),
             ParseStatus::Ok => unreachable!(),
         };
-        record_parse_failure(&snapshot, &raw, &reason);
+        record_parse_failure(&snapshot, &capture.bytes, &reason);
     }
 
     snapshot
 }
 
+fn downgrade_for_incomplete_capture(status: ParseStatus, cap: &CaptureResult) -> ParseStatus {
+    // Already non-Ok? Keep the more-informative original reason.
+    if !matches!(status, ParseStatus::Ok) {
+        return status;
+    }
+    if cap.saw_ready_prompt {
+        // Capture ended cleanly at the ready-prompt; a clean Ok is
+        // honest signal.
+        return status;
+    }
+    if cap.timed_out {
+        return ParseStatus::Degraded {
+            reason: format!(
+                "capture timed out after {}s with no ready-prompt marker",
+                SCRAPE_TIMEOUT.as_secs()
+            ),
+        };
+    }
+    if cap.truncated {
+        return ParseStatus::Degraded {
+            reason: format!(
+                "capture truncated at {MAX_CAPTURE_BYTES} bytes with no ready-prompt marker"
+            ),
+        };
+    }
+    // Child exited / pty EOF'd before the ready prompt — could be a
+    // normal-but-fast exit, but more often means CC bailed early
+    // (e.g., missing config). Mark as degraded so the snapshot
+    // doesn't pretend it had the full picture.
+    ParseStatus::Degraded {
+        reason: "capture ended before ready-prompt marker".to_string(),
+    }
+}
+
 // ─── Spawn + capture ─────────────────────────────────────────────
 
-fn spawn_and_capture(timeout: Duration) -> std::io::Result<Vec<u8>> {
+/// Outcome of one capture pass. Bytes + flags describing HOW the
+/// capture ended — surfaces "we got partial data" cases that look
+/// like clean parses if you only inspect the bytes.
+#[derive(Debug)]
+struct CaptureResult {
+    bytes: Vec<u8>,
+    /// True when the ready-prompt marker appeared in the buffer
+    /// before the capture loop exited. Implies the full doctor
+    /// render landed and we wrote `\r` to dismiss it.
+    saw_ready_prompt: bool,
+    /// True when we hit the wall-clock cap before seeing the
+    /// ready prompt.
+    timed_out: bool,
+    /// True when we hit the byte cap before seeing the ready
+    /// prompt.
+    truncated: bool,
+}
+
+/// Locate the `claude` binary across install methods Tauri-on-macOS
+/// might not see through `$PATH`. Three tiers:
+///
+/// 1. Shared `find_claude_binary` (covers `~/.local/bin`,
+///    `/usr/local/bin`, `/usr/bin`, Windows AppData) — same surface
+///    `services::doctor_service` uses.
+/// 2. Doctor-specific extras: `/opt/homebrew/bin/claude` (Apple
+///    Silicon brew), `/usr/local/Homebrew/bin/claude` (Intel brew),
+///    npm-global via `~/.npm-global/bin` or system `node` prefix.
+/// 3. None — caller treats this as a missing-CC failure.
+///
+/// The doctor-specific layer lives here, not in `fs_utils`, because
+/// extending the shared helper would change behavior for every
+/// other caller (CLI's `claudepot doctor`, `currentCcIdentity`,
+/// etc.). Adding paths is a unidirectional change — easy to widen
+/// later if real install distribution data justifies it.
+fn resolve_claude_binary() -> Option<std::path::PathBuf> {
+    if let Some(p) = crate::fs_utils::find_claude_binary() {
+        return Some(p);
+    }
+    // The Homebrew cask `claude-code` installs the binary as
+    // `claude-code` (not `claude`) — see
+    // `crate::updates::detect::detect_cli_installs` which probes
+    // exactly these paths. The doctor subcommand works against
+    // either name; CC dispatches on argv[1] regardless of argv[0].
+    let mut candidates: Vec<std::path::PathBuf> = vec![
+        // Apple Silicon Homebrew (cask `claude-code`).
+        std::path::PathBuf::from("/opt/homebrew/bin/claude-code"),
+        // Intel Homebrew (cask `claude-code`).
+        std::path::PathBuf::from("/usr/local/bin/claude-code"),
+        // Same brew-cask binary under the Cellar shim path on Intel.
+        std::path::PathBuf::from("/usr/local/Homebrew/bin/claude-code"),
+        // Apple Silicon Homebrew formula installing `claude`
+        // directly (less common; future-proofed).
+        std::path::PathBuf::from("/opt/homebrew/bin/claude"),
+        // Common Linux distro npm-global prefix.
+        std::path::PathBuf::from("/usr/local/lib/node_modules/.bin/claude"),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        // User-local npm prefix; common when users `npm config set
+        // prefix ~/.npm-global` to avoid `sudo npm install -g`.
+        candidates.push(home.join(".npm-global/bin/claude"));
+        // Volta shim.
+        candidates.push(home.join(".volta/bin/claude"));
+    }
+    candidates.into_iter().find(|p| p.exists())
+}
+
+fn spawn_and_capture(timeout: Duration) -> std::io::Result<CaptureResult> {
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -209,7 +318,16 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<Vec<u8>> {
         })
         .map_err(|e| std::io::Error::other(format!("openpty: {e}")))?;
 
-    let cmd = CommandBuilder::new("claude");
+    // Resolve the binary explicitly. Tauri apps on macOS launched
+    // from Finder don't inherit the user's shell PATH; relying on
+    // `CommandBuilder::new("claude")` would silently fail there.
+    let claude_bin = resolve_claude_binary().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "claude binary not found in canonical install locations",
+        )
+    })?;
+    let cmd = CommandBuilder::new(claude_bin);
     let mut child = pair
         .slave
         .spawn_command({
@@ -221,14 +339,17 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<Vec<u8>> {
 
     // Reader thread drains the pty master into a Vec<u8>. Polling
     // from the main thread would block on read() and prevent the
-    // timeout from firing.
+    // timeout from firing. Keep the JoinHandle so we can wait
+    // for the reader to finish on the exit path — this is what
+    // turns "thread leaks until process exit" into "thread joins
+    // within one read-block cycle of the pty closing".
     let mut reader = pair
         .master
         .try_clone_reader()
         .map_err(|e| std::io::Error::other(format!("clone pty reader: {e}")))?;
 
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
-    std::thread::spawn(move || {
+    let reader_handle = std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
@@ -246,8 +367,12 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<Vec<u8>> {
     let start = Instant::now();
     let mut captured: Vec<u8> = Vec::new();
     let mut sent_continue = false;
+    let mut saw_ready_prompt = false;
+    let mut timed_out = false;
+    let mut truncated = false;
     loop {
         if start.elapsed() >= timeout {
+            timed_out = !saw_ready_prompt;
             break;
         }
         match rx.recv_timeout(Duration::from_millis(250)) {
@@ -255,6 +380,7 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<Vec<u8>> {
                 captured.extend_from_slice(&chunk);
                 if captured.len() > MAX_CAPTURE_BYTES {
                     captured.truncate(MAX_CAPTURE_BYTES);
+                    truncated = !saw_ready_prompt;
                     break;
                 }
                 // Once we see Ink's ready-prompt marker, the
@@ -263,6 +389,7 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<Vec<u8>> {
                 // our timeout (also avoids a 15s blocking wait
                 // every refresh).
                 if !sent_continue && contains_marker(&captured, READY_PROMPT_MARKER) {
+                    saw_ready_prompt = true;
                     if let Ok(mut writer) = pair.master.take_writer() {
                         let _ = std::io::Write::write_all(&mut writer, b"\r");
                     }
@@ -283,8 +410,21 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<Vec<u8>> {
     if let Ok(None) = child.try_wait() {
         let _ = child.kill();
     }
+    // Drop the master end so the reader's `read()` returns EOF and
+    // the spawned thread exits. Without this drop, the reader can
+    // sit on a blocking read for the lifetime of the pty pair.
+    drop(pair.master);
+    drop(pair.slave);
+    // Join the reader thread so its handle doesn't leak. Best-effort
+    // (a panicked reader thread shouldn't tank the scrape).
+    let _ = reader_handle.join();
 
-    Ok(captured)
+    Ok(CaptureResult {
+        bytes: captured,
+        saw_ready_prompt,
+        timed_out,
+        truncated,
+    })
 }
 
 fn contains_marker(buf: &[u8], needle: &str) -> bool {
@@ -828,6 +968,90 @@ mod tests {
         let (sections, status) = parse_lines(&lines);
         assert!(sections.is_empty());
         assert!(matches!(status, ParseStatus::Failed { .. }));
+    }
+
+    #[test]
+    fn downgrade_keeps_ok_when_capture_completed_cleanly() {
+        let cap = CaptureResult {
+            bytes: vec![],
+            saw_ready_prompt: true,
+            timed_out: false,
+            truncated: false,
+        };
+        let out = downgrade_for_incomplete_capture(ParseStatus::Ok, &cap);
+        assert!(matches!(out, ParseStatus::Ok));
+    }
+
+    #[test]
+    fn downgrade_forces_degraded_on_timeout_without_ready() {
+        let cap = CaptureResult {
+            bytes: vec![],
+            saw_ready_prompt: false,
+            timed_out: true,
+            truncated: false,
+        };
+        let out = downgrade_for_incomplete_capture(ParseStatus::Ok, &cap);
+        match out {
+            ParseStatus::Degraded { reason } => {
+                assert!(reason.contains("timed out"), "got: {reason}");
+            }
+            other => panic!("expected Degraded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn downgrade_forces_degraded_on_truncate_without_ready() {
+        let cap = CaptureResult {
+            bytes: vec![],
+            saw_ready_prompt: false,
+            timed_out: false,
+            truncated: true,
+        };
+        let out = downgrade_for_incomplete_capture(ParseStatus::Ok, &cap);
+        match out {
+            ParseStatus::Degraded { reason } => {
+                assert!(reason.contains("truncated"), "got: {reason}");
+            }
+            other => panic!("expected Degraded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn downgrade_forces_degraded_when_pty_eofs_early() {
+        let cap = CaptureResult {
+            bytes: vec![],
+            saw_ready_prompt: false,
+            timed_out: false,
+            truncated: false,
+        };
+        let out = downgrade_for_incomplete_capture(ParseStatus::Ok, &cap);
+        match out {
+            ParseStatus::Degraded { reason } => {
+                assert!(
+                    reason.contains("ended before ready-prompt"),
+                    "got: {reason}"
+                );
+            }
+            other => panic!("expected Degraded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn downgrade_preserves_non_ok_status_reason() {
+        let cap = CaptureResult {
+            bytes: vec![],
+            saw_ready_prompt: false,
+            timed_out: true,
+            truncated: false,
+        };
+        let original = ParseStatus::Degraded {
+            reason: "original".into(),
+        };
+        let out = downgrade_for_incomplete_capture(original, &cap);
+        match out {
+            ParseStatus::Degraded { reason } => assert_eq!(reason, "original"),
+            other => panic!("expected Degraded passthrough, got {other:?}"),
+        }
     }
 
     #[test]
