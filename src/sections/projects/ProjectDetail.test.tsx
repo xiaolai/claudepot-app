@@ -6,10 +6,24 @@ import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../type
 
 const showSpy = vi.fn();
 const revealSpy = vi.fn();
+// Cost-display dependencies. Default to a null price table and an
+// empty session index so the existing list/move/reveal tests don't
+// have to thread cost data — the cost trailer simply doesn't render.
+// Cost-aware tests override these per-call before render().
+// `Promise<unknown>` so per-test overrides can return either a real
+// `PriceTableDto` / `SessionRow[]` or the default `null` / `[]`.
+// `vi.fn()` so tests can `waitFor` on call-count for sync points that
+// matter when asserting absence (e.g. "no cost trailer rendered").
+const pricingImpl = { fn: vi.fn(() => Promise.resolve(null as unknown)) };
+const sessionListImpl = {
+  fn: vi.fn(() => Promise.resolve([] as unknown[])),
+};
 vi.mock("../../api", () => ({
   api: {
     projectShow: (...args: unknown[]) => showSpy(...args),
     revealInFinder: (...args: unknown[]) => revealSpy(...args),
+    pricingGet: () => pricingImpl.fn(),
+    sessionListAll: () => sessionListImpl.fn(),
   },
 }));
 // Stub the app-state provider so ProjectDetail's useAppState() returns
@@ -59,6 +73,10 @@ describe("ProjectDetail", () => {
   beforeEach(() => {
     showSpy.mockReset();
     revealSpy.mockReset();
+    // Restore cost-stub defaults — individual tests that exercise
+    // the cost UI override these before render().
+    pricingImpl.fn = vi.fn(() => Promise.resolve(null));
+    sessionListImpl.fn = vi.fn(() => Promise.resolve([]));
   });
 
   it("refetches when refreshSignal changes even if path is unchanged", async () => {
@@ -338,5 +356,196 @@ describe("ProjectDetail", () => {
     await user.click(await screen.findByRole("button", { name: /^finder$/i }));
     await waitFor(() => expect(onError).toHaveBeenCalled());
     expect(onError.mock.calls[0][0]).toMatch(/permission denied/);
+  });
+
+  it("renders per-session cost + total at API rates when sessions are priceable", async () => {
+    // Two priceable sessions on the same model. Sonnet input price is
+    // arbitrary here — the test verifies the wire-up (does the cost
+    // reach the row + heading?), not the cost arithmetic, which has
+    // its own tests under `src/costs.test.ts`.
+    showSpy.mockResolvedValue(
+      mkDetail([
+        { id: "aaaa0000-0000-0000-0000-000000000000", size: 100 },
+        { id: "bbbb0000-0000-0000-0000-000000000000", size: 200 },
+      ]),
+    );
+    pricingImpl.fn = vi.fn(() =>
+      Promise.resolve({
+        models: {
+          "claude-sonnet-4-6": {
+            input_per_mtok: 3,
+            output_per_mtok: 15,
+            cache_write_per_mtok: 3.75,
+            cache_read_per_mtok: 0.3,
+          },
+        },
+        source: { kind: "bundled", timestamp: "2026-01-01", url: "" },
+        last_fetch_error: null,
+      }),
+    );
+    sessionListImpl.fn = vi.fn(() =>
+      Promise.resolve([
+        {
+          session_id: "aaaa0000-0000-0000-0000-000000000000",
+          slug: "-p",
+          file_path: "/tmp/claudepot-test/.claude/projects/-p/a.jsonl",
+          file_size_bytes: 100,
+          last_modified_ms: null,
+          project_path: "/p",
+          project_from_transcript: true,
+          first_ts: null,
+          last_ts: null,
+          event_count: 0,
+          message_count: 0,
+          user_message_count: 0,
+          assistant_message_count: 0,
+          first_user_prompt: null,
+          models: ["claude-sonnet-4-6"],
+          tokens: {
+            input: 1_000_000,
+            output: 200_000,
+            cache_creation: 0,
+            cache_read: 0,
+            total: 1_200_000,
+          },
+          git_branch: null,
+          cc_version: null,
+          display_slug: null,
+          has_error: false,
+          is_sidechain: false,
+        },
+        {
+          session_id: "bbbb0000-0000-0000-0000-000000000000",
+          slug: "-p",
+          file_path: "/tmp/claudepot-test/.claude/projects/-p/b.jsonl",
+          file_size_bytes: 200,
+          last_modified_ms: null,
+          project_path: "/p",
+          project_from_transcript: true,
+          first_ts: null,
+          last_ts: null,
+          event_count: 0,
+          message_count: 0,
+          user_message_count: 0,
+          assistant_message_count: 0,
+          first_user_prompt: null,
+          models: ["claude-sonnet-4-6"],
+          tokens: {
+            input: 500_000,
+            output: 100_000,
+            cache_creation: 0,
+            cache_read: 0,
+            total: 600_000,
+          },
+          git_branch: null,
+          cc_version: null,
+          display_slug: null,
+          has_error: false,
+          is_sidechain: false,
+        },
+      ]),
+    );
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    // Heading shows the project total — 1M·$3 + 200k·$15 + 500k·$3 +
+    // 100k·$15 = 3 + 3 + 1.5 + 1.5 = $9.00, which `formatUsd` renders
+    // as "$9.00" (>= $0.01 path).
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: /Sessions · 2 · \$9\.00/ }),
+      ).toBeInTheDocument(),
+    );
+    // Per-row cost rendered as $6.00 and $3.00 respectively. Match on
+    // the dollar value rather than the row container so the test
+    // doesn't lock in the surrounding `· · ·` formatting.
+    expect(screen.getByText(/\$6\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/\$3\.00/)).toBeInTheDocument();
+  });
+
+  it("suppresses the cost trailer when no session matches the price table", async () => {
+    showSpy.mockResolvedValue(
+      mkDetail([{ id: "aaaa0000-0000-0000-0000-000000000000", size: 100 }]),
+    );
+    // Price table covers a different model — the session uses a model
+    // that doesn't resolve, so `sessionCostEstimate` returns null and
+    // the UI must render NO cost trailer (not "$0.00").
+    pricingImpl.fn = vi.fn(() =>
+      Promise.resolve({
+        models: {
+          "claude-opus-4-7": {
+            input_per_mtok: 15,
+            output_per_mtok: 75,
+            cache_write_per_mtok: 18.75,
+            cache_read_per_mtok: 1.5,
+          },
+        },
+        source: { kind: "bundled", timestamp: "2026-01-01", url: "" },
+        last_fetch_error: null,
+      }),
+    );
+    sessionListImpl.fn = vi.fn(() =>
+      Promise.resolve([
+        {
+          session_id: "aaaa0000-0000-0000-0000-000000000000",
+          slug: "-p",
+          file_path: "/tmp/claudepot-test/.claude/projects/-p/a.jsonl",
+          file_size_bytes: 100,
+          last_modified_ms: null,
+          project_path: "/p",
+          project_from_transcript: true,
+          first_ts: null,
+          last_ts: null,
+          event_count: 0,
+          message_count: 0,
+          user_message_count: 0,
+          assistant_message_count: 0,
+          first_user_prompt: null,
+          models: ["claude-sonnet-4-6"],
+          tokens: {
+            input: 1_000_000,
+            output: 200_000,
+            cache_creation: 0,
+            cache_read: 0,
+            total: 1_200_000,
+          },
+          git_branch: null,
+          cc_version: null,
+          display_slug: null,
+          has_error: false,
+          is_sidechain: false,
+        },
+      ]),
+    );
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    // The cost pipeline calls BOTH endpoints — wait until each has
+    // been invoked so the test can't pass before the cost effect ran.
+    // Otherwise an early `queryByText(/\$/)` would tautologically pass
+    // even if suppression were broken.
+    await waitFor(() => expect(sessionListImpl.fn).toHaveBeenCalled());
+    await waitFor(() => expect(pricingImpl.fn).toHaveBeenCalled());
+    // Flush one more microtask cycle so the useMemo + setState that
+    // would emit a trailer (if one were going to) has a chance to run.
+    await Promise.resolve();
+    await Promise.resolve();
+    // The heading must NOT carry the cost trailer for unpriced sessions.
+    expect(
+      screen.getByRole("heading", { name: /^Sessions · 1$/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });
 });

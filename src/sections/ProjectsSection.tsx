@@ -31,6 +31,28 @@ import { ImportBundleModal } from "./projects/ImportBundleModal";
 import { MaintenanceView } from "./projects/MaintenanceView";
 import { OrphanBanner } from "./projects/OrphanBanner";
 import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
+import { formatUsd } from "../costs";
+
+/**
+ * Strip trailing `/` or `\` so the cost-map join survives the
+ * difference between a canonicalized `original_path` and a raw JSONL
+ * `cwd` that the user typed with a trailing slash. Preserves Unix
+ * root (`/`) and Windows drive root (`C:\`); stopping when the next
+ * char to strip is the final separator after a drive letter avoids
+ * folding `C:\` into the same key as the (nonexistent) drive-letter-
+ * only path `C:`.
+ */
+function normalizePath(p: string): string {
+  let s = p;
+  while (
+    s.length > 1 &&
+    (s.endsWith("/") || s.endsWith("\\")) &&
+    !/^[A-Za-z]:[/\\]$/.test(s)
+  ) {
+    s = s.slice(0, -1);
+  }
+  return s;
+}
 
 
 /**
@@ -64,6 +86,16 @@ export function ProjectsSection({
 }) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [orphans, setOrphans] = useState<OrphanedProject[]>([]);
+  /**
+   * Hypothetical API-rate cost per project (key = `original_path`).
+   * Populated by `local_usage_aggregate` on every refresh. Empty until
+   * the first round-trip completes; a stale-but-present map is
+   * preferred over a thrash-clearing on refresh start.
+   */
+  const [costByPath, setCostByPath] = useState<Map<string, number | null>>(
+    () => new Map(),
+  );
+  const [totalCost, setTotalCost] = useState<number | null>(null);
   const [adoptOpen, setAdoptOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +248,33 @@ export function ProjectsSection({
         if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
         setOrphans([]);
       });
+    // Per-project API-rate cost. Independent of `project_list` — the
+    // aggregate walks the session index and joins via the bundled
+    // price table. Failure leaves the prior map intact so the UI
+    // doesn't flicker between "has cost" and "no cost" on transient
+    // index refresh hiccups.
+    //
+    // Keys are normalized via `normalizePath` so the join survives the
+    // most common spelling drifts between `ProjectInfo.original_path`
+    // (canonicalized by the Rust `resolve_path`) and
+    // `ProjectUsageRow.project_path` (raw JSONL `cwd`) — e.g. trailing
+    // slashes from `cd dir/`. Case-fold on macOS still bites if a
+    // user types the parent in a different case than the directory's
+    // recorded case, but that's rare enough we don't pay for it here.
+    api
+      .localUsageAggregate({ kind: "all" })
+      .then((report) => {
+        if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
+        const next = new Map<string, number | null>();
+        for (const row of report.rows) {
+          next.set(normalizePath(row.project_path), row.cost_usd);
+        }
+        setCostByPath(next);
+        setTotalCost(report.totals.cost_usd);
+      })
+      .catch(() => {
+        // Swallow — costs are an at-a-glance overlay, not load-bearing.
+      });
   }, []);
 
   useEffect(() => {
@@ -279,21 +338,25 @@ export function ProjectsSection({
     if (total === 0) {
       return "No CC projects yet — run `claude` in any directory to create one.";
     }
+    const costTrailer =
+      typeof totalCost === "number" && totalCost > 0
+        ? ` · ${formatUsd(totalCost)} at API rates`
+        : "";
     const narrowed =
       (nameFilter.trim() !== "" || filter !== "all") &&
       shownProjects.length !== total;
     if (narrowed) {
-      return `${shownProjects.length} of ${total} project${total === 1 ? "" : "s"} shown`;
+      return `${shownProjects.length} of ${total} project${total === 1 ? "" : "s"} shown${costTrailer}`;
     }
     const actionable = counts.orphan + counts.unreachable + counts.empty;
     if (actionable === 0) {
-      return `${total} project${total === 1 ? "" : "s"} · all healthy`;
+      return `${total} project${total === 1 ? "" : "s"} · all healthy${costTrailer}`;
     }
     const pieces: string[] = [];
     if (counts.orphan) pieces.push(`${counts.orphan} orphan`);
     if (counts.unreachable) pieces.push(`${counts.unreachable} offline`);
     if (counts.empty) pieces.push(`${counts.empty} empty`);
-    return `${total} project${total === 1 ? "" : "s"} · ${pieces.join(" · ")}`;
+    return `${total} project${total === 1 ? "" : "s"} · ${pieces.join(" · ")}${costTrailer}`;
   })();
 
   return (
@@ -430,6 +493,7 @@ export function ProjectsSection({
               selectedPath={selectedPath}
               onSelect={setSelectedPath}
               onContextMenu={handleContextMenu}
+              costByPath={costByPath}
             />
           </div>
 

@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import { fileManagerName } from "../../lib/platformLabels";
 import { useAppState } from "../../providers/AppStateProvider";
-import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
+import type {
+  ProjectDetail as ProjectDetailData,
+  ProjectInfo,
+  SessionRow,
+} from "../../types";
 import { classifyProject } from "./projectStatus";
 import { formatRelativeTime, formatSize } from "./format";
 import { MoveSessionModal } from "./MoveSessionModal";
+import { sessionCostEstimate, formatUsd, usePriceTable } from "../../costs";
 
 /**
  * Build the on-disk path of a session transcript given the containing
@@ -90,6 +95,12 @@ export function ProjectDetail({
   >(null);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
   const { status: appStatus } = useAppState();
+  // Token + model data for per-session cost. `null` until the first
+  // `session_list_all` resolves; `[]` when the index has no rows for
+  // this project. Failure leaves it `null` so the UI falls back to
+  // size-only rows rather than rendering "$0.00" misleadingly.
+  const [sessionRows, setSessionRows] = useState<SessionRow[] | null>(null);
+  const { table: priceTable } = usePriceTable();
 
   const onSessionContextMenu = useCallback(
     (e: React.MouseEvent, sessionId: string) => {
@@ -132,6 +143,60 @@ export function ProjectDetail({
       cancelled = true;
     };
   }, [path, refreshSignal]);
+
+  // Pull the session index once per (project, refresh). Filtering by
+  // slug here keeps the join exact even when an old transcript's
+  // `cwd` differs slightly from the canonicalized `original_path`
+  // (case-folded on macOS, trailing-slash differences, etc.).
+  //
+  // Clear `sessionRows` synchronously before each fetch so the heading
+  // total + per-row costs never render against a previous project's
+  // data during the in-flight window. The useMemo below treats `null`
+  // as "no cost yet" — rows render without a $ trailer, which is the
+  // honest state during a refetch.
+  const sanitizedName = detail?.info.sanitized_name;
+  useEffect(() => {
+    if (!sanitizedName) return;
+    setSessionRows(null);
+    let cancelled = false;
+    api
+      .sessionListAll()
+      .then((rows) => {
+        if (cancelled) return;
+        setSessionRows(rows.filter((r) => r.slug === sanitizedName));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSessionRows(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sanitizedName, refreshSignal]);
+
+  // Per-session cost map keyed by session_id, plus a project total.
+  // `null` cost = priced model unknown for that session — render
+  // nothing rather than $0.00. `null` total = no priceable sessions.
+  const { costBySessionId, sessionTotal } = useMemo(() => {
+    const map = new Map<string, number | null>();
+    if (!sessionRows) {
+      return { costBySessionId: map, sessionTotal: null as number | null };
+    }
+    let sum = 0;
+    let priced = 0;
+    for (const r of sessionRows) {
+      const c = sessionCostEstimate(priceTable, r.models, r.tokens);
+      map.set(r.session_id, c);
+      if (c != null) {
+        sum += c;
+        priced += 1;
+      }
+    }
+    return {
+      costBySessionId: map,
+      sessionTotal: priced > 0 ? sum : null,
+    };
+  }, [sessionRows, priceTable]);
 
   if (loading && !detail) {
     return (
@@ -288,6 +353,8 @@ export function ProjectDetail({
       {sessions.length > 0 && (
         <SessionListPane
           sessions={sessions}
+          costBySessionId={costBySessionId}
+          totalCost={sessionTotal}
           onOpen={
             onOpenSession
               ? (sid) => {
@@ -402,11 +469,24 @@ const PAGE_SIZE = 20;
  */
 function SessionListPane({
   sessions,
+  costBySessionId,
+  totalCost,
   onOpen,
   onContextMenu,
   onMenuButton,
 }: {
   sessions: ProjectDetailData["sessions"];
+  /**
+   * Hypothetical API-rate cost per session, keyed by session_id.
+   * Missing key = not yet computed (or session index hasn't reached
+   * this transcript yet) → row shows no cost. `null` value = the
+   * session's models couldn't be priced → row also shows no cost
+   * rather than $0.00.
+   */
+  costBySessionId?: Map<string, number | null>;
+  /** Sum of all priceable sessions in this project. `null` when no
+   *  session was priceable; render nothing rather than $0.00. */
+  totalCost?: number | null;
   /**
    * Click-to-open: fires when the user picks a session row to view
    * its transcript inline. `null` disables the primary click (row
@@ -441,7 +521,20 @@ function SessionListPane({
   return (
     <section className="detail-section">
       <div className="session-list-header">
-        <h3>Sessions · {sessions.length}</h3>
+        <h3>
+          Sessions · {sessions.length}
+          {typeof totalCost === "number" && totalCost > 0 && (
+            <>
+              {" · "}
+              <span
+                className="muted"
+                title="Sum of hypothetical Anthropic API cost across every session in this project. Real billing depends on your plan."
+              >
+                {formatUsd(totalCost)} at API rates
+              </span>
+            </>
+          )}
+        </h3>
         <input
           type="search"
           className="session-filter mono"
@@ -458,7 +551,9 @@ function SessionListPane({
         <p className="muted small">No sessions match that filter.</p>
       ) : (
         <ul className="session-list" role="listbox" aria-label="Sessions">
-          {visible.map((s) => (
+          {visible.map((s) => {
+            const cost = costBySessionId?.get(s.session_id);
+            return (
             <li
               key={s.session_id}
               className="session-row"
@@ -479,6 +574,9 @@ function SessionListPane({
                   {s.last_modified_ms != null && (
                     <>{" · "}{formatRelativeTime(s.last_modified_ms)}</>
                   )}
+                  {typeof cost === "number" && cost > 0 && (
+                    <>{" · "}{formatUsd(cost)}</>
+                  )}
                 </span>
               </div>
               <button
@@ -494,7 +592,8 @@ function SessionListPane({
                 <Icon name="more-vertical" size={12} />
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
       {hiddenCount > 0 && (

@@ -6,6 +6,22 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.24 — beta (unreleased)
+
+### Added
+
+- **Per-project + per-session cost in the Projects rail.** The left
+  rail's project rows now carry a hypothetical Anthropic API-rate
+  cost ("$12.34") computed from the same `local_usage_aggregate`
+  pipeline that powers the Cost tab. Inside each project, the
+  Sessions list shows a per-session cost in the meta line and a
+  project total in the section heading ("Sessions · 7 · $4.21 at
+  API rates"). Unpriceable sessions (model not in the price table)
+  render no `$` rather than `$0.00`. The section subtitle gains an
+  install-wide total ("47 projects · all healthy · $128.50 at API
+  rates"). The label "at API rates" disambiguates from actual
+  Max-plan billing.
+
 ## 0.1.23 — beta (2026-05-11)
 
 ### Added

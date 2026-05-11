@@ -2,6 +2,26 @@ import type { MouseEvent } from "react";
 import type { ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
 import { formatRelativeTime, formatSize } from "./format";
+import { formatUsd } from "../../costs";
+
+/**
+ * Mirror of `ProjectsSection::normalizePath` — the cost-map producer
+ * normalizes its keys, so the consumer has to too. Both copies must
+ * stay byte-for-byte equivalent. Kept in-file rather than promoted to
+ * a util module because these are the only two call sites and a util
+ * adds an import-graph node for a four-line function.
+ */
+function normalizePath(p: string): string {
+  let s = p;
+  while (
+    s.length > 1 &&
+    (s.endsWith("/") || s.endsWith("\\")) &&
+    !/^[A-Za-z]:[/\\]$/.test(s)
+  ) {
+    s = s.slice(0, -1);
+  }
+  return s;
+}
 
 /**
  * Compact project list for the Projects section's left rail. Mirrors
@@ -22,11 +42,20 @@ export function ProjectsList({
   selectedPath,
   onSelect,
   onContextMenu,
+  costByPath,
 }: {
   projects: ProjectInfo[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, project: ProjectInfo) => void;
+  /**
+   * Hypothetical API-rate cost per project, keyed by `original_path`.
+   * `undefined` (key missing) = not yet computed → render no cost.
+   * `null` = project has sessions but every model was unpriced →
+   * render nothing rather than $0.00 to avoid misleading the eye.
+   * Number = sum across all sessions in this project.
+   */
+  costByPath?: Map<string, number | null>;
 }) {
   if (projects.length === 0) {
     return (
@@ -62,6 +91,7 @@ export function ProjectsList({
           selected={p.original_path === selectedPath}
           onSelect={onSelect}
           onContextMenu={onContextMenu}
+          cost={costByPath?.get(normalizePath(p.original_path))}
         />
       ))}
     </ul>
@@ -73,11 +103,13 @@ function ProjectRow({
   selected,
   onSelect,
   onContextMenu,
+  cost,
 }: {
   project: ProjectInfo;
   selected: boolean;
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, project: ProjectInfo) => void;
+  cost: number | null | undefined;
 }) {
   const status = classifyProject(project);
   const name =
@@ -100,6 +132,7 @@ function ProjectRow({
     parts.push(formatSize(project.total_size_bytes));
   }
   if (lastTouched) parts.push(lastTouched);
+  if (typeof cost === "number" && cost > 0) parts.push(formatUsd(cost));
   const subtitle = parts.join(" · ");
 
   return (
