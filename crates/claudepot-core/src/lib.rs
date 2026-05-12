@@ -57,6 +57,7 @@ pub mod memory_view;
 pub mod migrate;
 pub mod migrations;
 pub mod notification_log;
+pub mod notifications;
 pub mod oauth;
 pub mod onboard;
 pub mod path_utils;

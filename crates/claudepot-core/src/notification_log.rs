@@ -39,6 +39,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::fs_utils::atomic_write;
+use crate::notifications::{Category, Priority, Surface};
 
 /// Hard ring-buffer cap. 500 × ~200 B = ~100 KB on disk in the worst
 /// case. Bump if traffic grows past one notification per minute on a
@@ -82,6 +83,24 @@ pub enum NotificationKind {
 /// the React `key`. `target` mirrors the renderer's
 /// `NotificationTarget` discriminator so a click on a logged entry
 /// can route the user the same way a fresh notification would.
+///
+/// **Schema evolution (Phase 0 of the refactor).** Three fields were
+/// added for the routing redesign — each with serde `default` so
+/// pre-migration entries round-trip cleanly:
+///
+/// - `category` / `priority` — the routing axes recorded by the new
+///   `emit()` facade. Pre-migration entries have `None`; the bell
+///   popover treats those as "Other / Legacy" at filter time.
+/// - `surfaces_requested` — the surface set the dispatcher asked for,
+///   computed after user-pref filtering but before delivery gates.
+/// - `surfaces_delivered` — the surfaces that actually rendered.
+///   Toasts always deliver if requested; OS banners can be dropped
+///   by focus/permission/rate gate.
+///
+/// The legacy `source` field stays for read-only interpretation of
+/// pre-migration entries. New code MUST NOT set it; new entries
+/// carry their surface in `surfaces_*` instead. See the bell
+/// filter's source-compat shim for how legacy rows are matched.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationEntry {
     /// Monotonic per-process id. Reset to (max + 1) on load so newly
@@ -91,7 +110,13 @@ pub struct NotificationEntry {
     /// display; the back end never compares two entries by ts (use
     /// `id` instead).
     pub ts_ms: i64,
-    pub source: NotificationSource,
+    /// **Deprecated** in favor of `surfaces_requested` /
+    /// `surfaces_delivered`. Set to `Some(_)` on pre-Phase-0
+    /// entries; new code writes `None` and uses the explicit
+    /// surface vectors instead. Kept as `Option<_>` so the on-disk
+    /// JSON of pre-migration installs round-trips.
+    #[serde(default)]
+    pub source: Option<NotificationSource>,
     pub kind: NotificationKind,
     pub title: String,
     /// Empty string when the surface didn't carry a body.
@@ -104,6 +129,21 @@ pub struct NotificationEntry {
     /// click target.
     #[serde(default)]
     pub target: serde_json::Value,
+    /// Routing category. `None` on pre-Phase-0 entries.
+    #[serde(default)]
+    pub category: Option<Category>,
+    /// Routing priority. `None` on pre-Phase-0 entries.
+    #[serde(default)]
+    pub priority: Option<Priority>,
+    /// Surfaces routing asked for AFTER pref filtering, BEFORE
+    /// delivery gates. Empty vec when the category was muted or
+    /// when the entry predates Phase 0.
+    #[serde(default)]
+    pub surfaces_requested: Vec<Surface>,
+    /// Surfaces that actually rendered. Filled after dispatch.
+    /// Empty vec for pre-Phase-0 entries.
+    #[serde(default)]
+    pub surfaces_delivered: Vec<Surface>,
 }
 
 /// Filter applied to [`NotificationLog::list`]. All fields are
@@ -272,10 +312,19 @@ impl NotificationLog {
         })
     }
 
-    /// Append a new entry. Assigns `id` and `ts_ms` server-side so the
-    /// renderer can't lie about ordering. Returns the assigned `id`
-    /// for the renderer to thread back into "did the dispatch I just
-    /// fired actually land?" if it cares.
+    /// Append a new entry via the legacy single-surface API. Assigns
+    /// `id` and `ts_ms` server-side so the renderer can't lie about
+    /// ordering. Returns the assigned `id` for the renderer to thread
+    /// back into "did the dispatch I just fired actually land?" if it
+    /// cares.
+    ///
+    /// **Migration note (Phase 0):** New code should prefer
+    /// [`NotificationLog::append_routed`] which records the routing
+    /// metadata (category, priority, surfaces requested/delivered).
+    /// This shape exists for back-compat — every call from the
+    /// renderer's old `notificationLogAppend` IPC and the
+    /// `service_status_watcher` direct path still works unchanged.
+    /// Phase 1 introduces the new path; Phase 3 retires this one.
     pub fn append(
         &self,
         source: NotificationSource,
@@ -291,17 +340,87 @@ impl NotificationLog {
         g.entries.push_back(NotificationEntry {
             id,
             ts_ms,
-            source,
+            source: Some(source),
             kind,
             title,
             body,
             target,
+            category: None,
+            priority: None,
+            surfaces_requested: Vec::new(),
+            surfaces_delivered: Vec::new(),
         });
         while g.entries.len() > MAX_ENTRIES {
             g.entries.pop_front();
         }
         Self::persist_locked(&g)?;
         Ok(id)
+    }
+
+    /// Append a new entry recording full routing metadata. The
+    /// Phase 1 [`crate::notifications::route`] pipeline calls this
+    /// after computing `surfaces_requested` and (optionally) after
+    /// the OS dispatcher has reported `surfaces_delivered`.
+    ///
+    /// Legacy `source` is set to `None` — new entries are
+    /// authoritatively described by `surfaces_*`, and the bell
+    /// filter treats legacy rows (`source: Some`) and new rows
+    /// (`source: None`, `surfaces_*` populated) symmetrically.
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_routed(
+        &self,
+        category: Category,
+        priority: Priority,
+        kind: NotificationKind,
+        title: String,
+        body: String,
+        target: serde_json::Value,
+        surfaces_requested: Vec<Surface>,
+        surfaces_delivered: Vec<Surface>,
+    ) -> std::io::Result<u64> {
+        let mut g = lock_inner(&self.inner);
+        let id = g.next_id;
+        g.next_id = g.next_id.saturating_add(1);
+        let ts_ms = chrono::Utc::now().timestamp_millis();
+        g.entries.push_back(NotificationEntry {
+            id,
+            ts_ms,
+            source: None,
+            kind,
+            title,
+            body,
+            target,
+            category: Some(category),
+            priority: Some(priority),
+            surfaces_requested,
+            surfaces_delivered,
+        });
+        while g.entries.len() > MAX_ENTRIES {
+            g.entries.pop_front();
+        }
+        Self::persist_locked(&g)?;
+        Ok(id)
+    }
+
+    /// Mark a previously-appended entry as delivered on `surface`.
+    /// Used by the OS dispatcher to report back after a focus / rate
+    /// gate decision. Best-effort: if `id` is no longer in the ring
+    /// buffer (evicted by a burst), this returns `Ok(false)` and the
+    /// caller doesn't care — the dispatch already happened. Returns
+    /// `Ok(true)` when the entry was updated.
+    pub fn mark_delivered(&self, id: u64, surface: Surface) -> std::io::Result<bool> {
+        let mut g = lock_inner(&self.inner);
+        let entry = g.entries.iter_mut().find(|e| e.id == id);
+        let Some(entry) = entry else {
+            return Ok(false);
+        };
+        if entry.surfaces_delivered.contains(&surface) {
+            // Idempotent; no persist needed.
+            return Ok(true);
+        }
+        entry.surfaces_delivered.push(surface);
+        Self::persist_locked(&g)?;
+        Ok(true)
     }
 
     /// Return entries matching `filter`, in `order`. Cap the result
@@ -327,7 +446,25 @@ impl NotificationLog {
                 return false;
             }
             if let Some(s) = filter.source {
-                if e.source != s {
+                // Legacy entries carry the surface in `e.source`;
+                // post-Phase-0 entries carry it in
+                // `e.surfaces_requested` / `e.surfaces_delivered`.
+                // Match a filter against EITHER place so legacy and
+                // routed rows participate symmetrically. The
+                // mapping below treats `surfaces_*` Toast/OsBanner
+                // as evidence the row was a Toast/Os entry.
+                let legacy_match = e.source == Some(s);
+                let routed_match = match s {
+                    NotificationSource::Toast => {
+                        e.surfaces_requested.contains(&Surface::Toast)
+                            || e.surfaces_delivered.contains(&Surface::Toast)
+                    }
+                    NotificationSource::Os => {
+                        e.surfaces_requested.contains(&Surface::OsBanner)
+                            || e.surfaces_delivered.contains(&Surface::OsBanner)
+                    }
+                };
+                if !legacy_match && !routed_match {
                     return false;
                 }
             }
@@ -726,5 +863,183 @@ mod tests {
             None,
         );
         assert_eq!(r[0].target, target);
+    }
+
+    // ── Phase 0 schema-evolution tests ─────────────────────────────
+
+    #[test]
+    fn test_legacy_entry_format_roundtrips_without_new_fields() {
+        // A pre-Phase-0 entry on disk has `source: "toast"` and lacks
+        // category/priority/surfaces_*. The serde defaults must make
+        // it readable; the new fields must be empty/None.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notifications.json");
+        let legacy = serde_json::json!({
+            "last_seen_id": 0u64,
+            "entries": [{
+                "id": 1u64,
+                "ts_ms": 1_700_000_000_000i64,
+                "source": "os",
+                "kind": "notice",
+                "title": "legacy banner",
+                "body": "",
+                "target": null,
+            }]
+        });
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let log = NotificationLog::open(path).unwrap();
+        let r = log.list(
+            &NotificationLogFilter::default(),
+            SortOrder::NewestFirst,
+            None,
+        );
+        assert_eq!(r.len(), 1);
+        let e = &r[0];
+        assert_eq!(e.title, "legacy banner");
+        assert_eq!(e.source, Some(NotificationSource::Os));
+        assert_eq!(e.category, None);
+        assert_eq!(e.priority, None);
+        assert!(e.surfaces_requested.is_empty());
+        assert!(e.surfaces_delivered.is_empty());
+    }
+
+    #[test]
+    fn test_append_routed_populates_new_fields() {
+        use crate::notifications::{Category, Priority, Surface};
+        let (_d, log) = tmp_log();
+        let id = log
+            .append_routed(
+                Category::UsageThreshold,
+                Priority::P1Stalled,
+                NotificationKind::Notice,
+                "Near cap".into(),
+                "90% of weekly cap".into(),
+                serde_json::Value::Null,
+                vec![Surface::OsBanner],
+                vec![Surface::OsBanner],
+            )
+            .unwrap();
+        let r = log.list(
+            &NotificationLogFilter::default(),
+            SortOrder::NewestFirst,
+            None,
+        );
+        let e = r.iter().find(|e| e.id == id).unwrap();
+        assert_eq!(e.source, None);
+        assert_eq!(e.category, Some(Category::UsageThreshold));
+        assert_eq!(e.priority, Some(Priority::P1Stalled));
+        assert_eq!(e.surfaces_requested, vec![Surface::OsBanner]);
+        assert_eq!(e.surfaces_delivered, vec![Surface::OsBanner]);
+    }
+
+    #[test]
+    fn test_append_routed_persists_and_reloads_cleanly() {
+        use crate::notifications::{Category, Priority, Surface};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notifications.json");
+        {
+            let log = NotificationLog::open(path.clone()).unwrap();
+            log.append_routed(
+                Category::ProjectRenamed,
+                Priority::P2Acknowledge,
+                NotificationKind::Info,
+                "Renamed".into(),
+                "old → new".into(),
+                serde_json::Value::Null,
+                vec![Surface::Toast],
+                vec![Surface::Toast],
+            )
+            .unwrap();
+        }
+        let log = NotificationLog::open(path).unwrap();
+        let r = log.list(
+            &NotificationLogFilter::default(),
+            SortOrder::NewestFirst,
+            None,
+        );
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].category, Some(Category::ProjectRenamed));
+        assert_eq!(r[0].surfaces_requested, vec![Surface::Toast]);
+    }
+
+    #[test]
+    fn test_mark_delivered_appends_surface_once() {
+        use crate::notifications::{Category, Priority, Surface};
+        let (_d, log) = tmp_log();
+        let id = log
+            .append_routed(
+                Category::UsageThreshold,
+                Priority::P1Stalled,
+                NotificationKind::Notice,
+                "x".into(),
+                String::new(),
+                serde_json::Value::Null,
+                vec![Surface::OsBanner],
+                Vec::new(), // start undelivered
+            )
+            .unwrap();
+        assert!(log.mark_delivered(id, Surface::OsBanner).unwrap());
+        // Idempotent on second call.
+        assert!(log.mark_delivered(id, Surface::OsBanner).unwrap());
+        let r = log.list(
+            &NotificationLogFilter::default(),
+            SortOrder::NewestFirst,
+            None,
+        );
+        let e = r.iter().find(|e| e.id == id).unwrap();
+        assert_eq!(e.surfaces_delivered, vec![Surface::OsBanner]);
+    }
+
+    #[test]
+    fn test_mark_delivered_unknown_id_returns_false() {
+        use crate::notifications::Surface;
+        let (_d, log) = tmp_log();
+        // No entries yet — id=42 cannot exist.
+        assert!(!log.mark_delivered(42, Surface::Toast).unwrap());
+    }
+
+    #[test]
+    fn test_legacy_and_routed_coexist_in_same_log() {
+        // Mixed-mode log: a pre-Phase-0 entry plus a Phase-0 routed
+        // entry. Both must list, both round-trip; the bell-popover
+        // source filter is the next layer and stays out of scope
+        // here.
+        use crate::notifications::{Category, Priority, Surface};
+        let (_d, log) = tmp_log();
+        // Legacy-style append.
+        log.append(
+            NotificationSource::Toast,
+            NotificationKind::Info,
+            "legacy".into(),
+            String::new(),
+            serde_json::Value::Null,
+        )
+        .unwrap();
+        // Routed append.
+        log.append_routed(
+            Category::ProjectRenamed,
+            Priority::P2Acknowledge,
+            NotificationKind::Info,
+            "routed".into(),
+            String::new(),
+            serde_json::Value::Null,
+            vec![Surface::Toast],
+            vec![Surface::Toast],
+        )
+        .unwrap();
+        let r = log.list(
+            &NotificationLogFilter::default(),
+            SortOrder::OldestFirst,
+            None,
+        );
+        assert_eq!(r.len(), 2);
+        // First row is legacy: source set, category absent.
+        assert_eq!(r[0].title, "legacy");
+        assert_eq!(r[0].source, Some(NotificationSource::Toast));
+        assert_eq!(r[0].category, None);
+        // Second row is routed: source absent, category set.
+        assert_eq!(r[1].title, "routed");
+        assert_eq!(r[1].source, None);
+        assert_eq!(r[1].category, Some(Category::ProjectRenamed));
     }
 }
