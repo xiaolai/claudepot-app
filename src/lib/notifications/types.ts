@@ -64,6 +64,7 @@ export type Category =
   | "configEdited"
   | "automationRan"
   | "rotationApplied"
+  | "rotationFailed"
   | "bannerResolved"
   // P3 — Ambient
   | "memoryChanged"
@@ -100,6 +101,7 @@ export const CATEGORY_NAMES: readonly Category[] = [
   "configEdited",
   "automationRan",
   "rotationApplied",
+  "rotationFailed",
   "bannerResolved",
   "memoryChanged",
   "configTreePatched",
@@ -171,6 +173,25 @@ export interface NotificationEvent {
   /** Dedupe key for primitive-level coalescing. The dispatcher
    *  forwards it to the OS dispatcher's token-bucket. */
   dedupeKey?: string;
+  /**
+   * Optional interactive callback rendered on the toast surface.
+   * Maps to `pushToast`'s `onUndo` slot — same primitive, different
+   * label. Used by categories whose primary in-app surface is an
+   * actionable toast (e.g. `rotationSuggested` offering a "Switch"
+   * button). OS-banner / log surfaces ignore this field.
+   *
+   * `onPress` fires when the user clicks the button. `onCommit`
+   * fires iff the toast auto-dismisses without the user pressing
+   * the button — for "deferred action" semantics. `timeoutMs`
+   * overrides the auto-dismiss window (default 3 s, matching
+   * `pushToast(onUndo)`).
+   */
+  toastAction?: {
+    label: string;
+    onPress: () => void;
+    onCommit?: () => void;
+    timeoutMs?: number;
+  };
 }
 
 /**
@@ -194,6 +215,14 @@ export function route(
     ctx.rotationMode === "auto"
   ) {
     s.toast = false;
+  }
+  // RotationSuggested is P1 (os_banner default), but the in-app
+  // toast carries the "Switch" action — it must render regardless
+  // of focus state. P1 default + this override = toast + os_banner,
+  // with the OS dispatcher's focus gate suppressing the banner when
+  // the window is focused (so the user sees the toast only).
+  if (event.category === "rotationSuggested") {
+    s.toast = true;
   }
   return s;
 }
@@ -225,6 +254,7 @@ export function priorityForCategory(category: Category): Priority {
     case "configEdited":
     case "automationRan":
     case "rotationApplied":
+    case "rotationFailed":
     case "bannerResolved":
       return "p2Acknowledge";
     case "memoryChanged":

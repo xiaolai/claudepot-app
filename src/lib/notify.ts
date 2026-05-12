@@ -187,7 +187,7 @@ export type NotificationTarget =
     }
   | { kind: "info" };
 
-interface DispatchOpts {
+export interface DispatchOpts {
   /** Bypass the `document.hasFocus()` gate. Use only for fatal-class
    *  alerts where the OS-level prominence is the point (auth rejected,
    *  keychain locked). Default false: in-app channels handle the
@@ -239,6 +239,13 @@ interface DispatchOpts {
    *  dispatch (the OS picks the visual). Defaults to `notice` —
    *  banners are by definition not routine. */
   kind?: OsNotificationKind;
+  /** Internal migration shim. The `emit()` facade in
+   *  `src/lib/notifications/dispatch.ts` owns logging during the
+   *  Phase 1 → Phase 3 migration window. When `emit()` calls this
+   *  function it passes `_suppressLog: true` so we don't double-log.
+   *  Direct call sites continue to log themselves until Phase 3
+   *  removes the shim. */
+  _suppressLog?: boolean;
 }
 
 // Token-bucket state: per-key list of recent dispatch timestamps
@@ -384,20 +391,22 @@ export async function dispatchOsNotification(
   //     of OS banners, not out of in-app history. The log is the
   //     in-app surface; gating it on permission would conflate two
   //     opt-ins.
-  void notificationApi
-    .notificationLogAppend({
-      source: "os",
-      kind: opts.kind ?? "notice",
-      title,
-      body,
-      target: opts.target ?? null,
-    })
-    .then(() => {
-      window.dispatchEvent(new Event("claudepot:notification-logged"));
-    })
-    .catch(() => {
-      /* swallow — log persistence is advisory, never load-bearing */
-    });
+  if (!opts._suppressLog) {
+    void notificationApi
+      .notificationLogAppend({
+        source: "os",
+        kind: opts.kind ?? "notice",
+        title,
+        body,
+        target: opts.target ?? null,
+      })
+      .then(() => {
+        window.dispatchEvent(new Event("claudepot:notification-logged"));
+      })
+      .catch(() => {
+        /* swallow — log persistence is advisory, never load-bearing */
+      });
+  }
 
   // ── Step 2: OS-banner pipeline ───────────────────────────────
 

@@ -459,7 +459,7 @@ function AppShell() {
   // Auto-rotation events. Confirm-mode rules surface as a toast
   // with a Switch action; auto-mode swaps surface as info toasts;
   // failures as errors. See src/hooks/useRotationEvents.ts.
-  useRotationEvents(pushToast);
+  useRotationEvents();
 
   // Notification-click router. The Tauri 2 desktop notification plugin
   // doesn't surface body-click events to JS (verified by reading

@@ -25,6 +25,7 @@ use claudepot_core::notification_log::{
     NotificationEntry, NotificationKind, NotificationLog, NotificationLogFilter,
     NotificationSource, SortOrder,
 };
+use claudepot_core::notifications::{Category, CategoryMeta, Priority, Surface};
 
 /// Tauri-managed handle to the open notification log. Cheap to clone
 /// (single Arc); construction is the single file read on app boot.
@@ -203,4 +204,87 @@ pub async fn notification_log_unread_count(
     tokio::task::spawn_blocking(move || Ok(log.unread_count()))
         .await
         .map_err(|e| format!("notification_log_unread_count join: {e}"))?
+}
+
+// ─── Phase 1: routed-emit surface ──────────────────────────────────
+//
+// The `emit()` facade in `src/lib/notifications/dispatch.ts` is the
+// only TS path that should call these IPCs. Old `notification_log_append`
+// stays for the migration-shim window (Phase 1 → Phase 3) so unmigrated
+// sites keep their bell entries.
+
+/// DTO for `notification_log_append_routed`. Carries the full routing
+/// metadata the new `emit()` facade computed before dispatch.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationLogAppendRoutedArgs {
+    pub category: Category,
+    pub priority: Priority,
+    pub kind: NotificationKind,
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub target: serde_json::Value,
+    pub surfaces_requested: Vec<Surface>,
+    /// Surfaces already known-delivered at append time. Toast and
+    /// Banner are renderer-side and always delivered if requested,
+    /// so callers populate this with `[toast]` / `[toast, banner]`
+    /// at emit time. OS-banner delivery comes back through
+    /// `notification_log_mark_delivered` after the OS dispatcher
+    /// resolves its focus / permission / rate gates.
+    pub surfaces_delivered: Vec<Surface>,
+}
+
+/// Append a routed entry. Returns the assigned id so the renderer
+/// can call `notification_log_mark_delivered` later when the OS
+/// dispatcher reports a delivery outcome.
+#[tauri::command]
+pub async fn notification_log_append_routed(
+    args: NotificationLogAppendRoutedArgs,
+    state: tauri::State<'_, NotificationLogState>,
+) -> Result<u64, String> {
+    let log = std::sync::Arc::clone(&state.log);
+    tokio::task::spawn_blocking(move || {
+        log.append_routed(
+            args.category,
+            args.priority,
+            args.kind,
+            args.title,
+            args.body,
+            args.target,
+            args.surfaces_requested,
+            args.surfaces_delivered,
+        )
+        .map_err(|e| format!("notification_log append_routed failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("notification_log_append_routed join: {e}"))?
+}
+
+/// Mark an entry as delivered on `surface`. Used by the OS dispatcher
+/// to post-confirm after focus / rate gates resolve. Idempotent.
+/// Returns `true` when the entry was updated; `false` if the id is no
+/// longer in the ring buffer (evicted by a burst) — caller can ignore.
+#[tauri::command]
+pub async fn notification_log_mark_delivered(
+    id: u64,
+    surface: Surface,
+    state: tauri::State<'_, NotificationLogState>,
+) -> Result<bool, String> {
+    let log = std::sync::Arc::clone(&state.log);
+    tokio::task::spawn_blocking(move || {
+        log.mark_delivered(id, surface)
+            .map_err(|e| format!("notification_log mark_delivered failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("notification_log_mark_delivered join: {e}"))?
+}
+
+/// Return the full category metadata table for the Settings pane.
+/// Source-of-truth lives in `claudepot_core::notifications::Category::display_meta`;
+/// the renderer reads this at mount and renders one row per entry.
+#[tauri::command]
+pub async fn notification_categories_metadata() -> Result<Vec<CategoryMeta>, String> {
+    Ok(Category::all().iter().map(|c| c.display_meta()).collect())
 }

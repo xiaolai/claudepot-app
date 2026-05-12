@@ -57,6 +57,11 @@ pub enum Category {
     ConfigEdited,
     AutomationRan,
     RotationApplied,
+    /// Auto-rotation swap attempt failed. The audit log has the full
+    /// reason; the toast carries a concise summary. Separate from
+    /// `RotationApplied` so a user can mute success-acks while still
+    /// hearing about failures.
+    RotationFailed,
     /// Paired "resolved" event emitted when a banner clears. Lets the
     /// bell timeline show "auth-rejected → resolved" instead of just
     /// "auth-rejected appeared one hour ago, presumably still bad."
@@ -198,7 +203,7 @@ impl Category {
             // P2 — Acknowledge
             AccountVerified | AccountSwitched | ProjectRenamed | ProjectRepaired
             | SessionPruned | KeyCopied | KeyAdded | KeyRemoved | ConfigEdited
-            | AutomationRan | RotationApplied | BannerResolved => P2Acknowledge,
+            | AutomationRan | RotationApplied | RotationFailed | BannerResolved => P2Acknowledge,
 
             // P3 — Ambient
             MemoryChanged | ConfigTreePatched | ServiceStatusChanged
@@ -238,6 +243,7 @@ impl Category {
             ConfigEdited => ("Config edited", "Actions", true),
             AutomationRan => ("Automation ran", "Actions", true),
             RotationApplied => ("Account rotation applied", "Actions", true),
+            RotationFailed => ("Account rotation failed", "Actions", true),
             BannerResolved => ("Banner resolved", "Actions", true),
 
             MemoryChanged => ("CLAUDE.md changed externally", "Background", true),
@@ -283,6 +289,7 @@ impl Category {
             ConfigEdited,
             AutomationRan,
             RotationApplied,
+            RotationFailed,
             BannerResolved,
             MemoryChanged,
             ConfigTreePatched,
@@ -358,6 +365,15 @@ pub fn route(event: EventView, ctx: &DispatchContext) -> SurfaceSet {
         Category::RotationApplied if ctx.rotation_mode == Some(RotationMode::Auto) => {
             s.toast = false;
         }
+        // RotationSuggested is P1 (os_banner default), but the
+        // in-app toast carries the "Switch" action — it must
+        // render regardless of focus state. P1 default + this
+        // override = toast + os_banner, with the OS dispatcher's
+        // focus gate suppressing the banner when the window is
+        // focused.
+        Category::RotationSuggested => {
+            s.toast = true;
+        }
         _ => {}
     }
 
@@ -389,7 +405,7 @@ mod tests {
         // Synthetic exhaustive match: this fails to compile if a new
         // variant is added without updating `all()`. Update the
         // counter and the match arms in lockstep with the enum.
-        const EXPECTED: usize = 28;
+        const EXPECTED: usize = 29;
         let actual = Category::all().len();
         assert_eq!(
             actual, EXPECTED,
@@ -463,6 +479,23 @@ mod tests {
         assert!(!s.toast);
         assert!(!s.os_banner);
         assert!(!s.banner);
+        assert!(s.log);
+    }
+
+    #[test]
+    fn test_rotation_suggested_routes_toast_plus_os_banner() {
+        // Category override: P1 default (os_banner only) + toast
+        // forced on so the interactive Switch action always
+        // renders in-app.
+        let s = route(
+            EventView {
+                category: Category::RotationSuggested,
+            },
+            &DispatchContext::default(),
+        );
+        assert!(s.toast, "RotationSuggested must show toast (Switch action)");
+        assert!(s.os_banner, "RotationSuggested keeps P1 os_banner");
+        assert!(!s.ignore_focus);
         assert!(s.log);
     }
 

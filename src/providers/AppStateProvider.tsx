@@ -17,6 +17,7 @@ import { useDismissedIssues } from "../hooks/useDismissedIssues";
 import { useBusy } from "../hooks/useBusy";
 import { useActions } from "../hooks/useActions";
 import { useOperations } from "../hooks/useOperations";
+import { buildEmit, type EmitFn } from "../lib/notifications/dispatch";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
 interface AppStateValue {
@@ -24,6 +25,18 @@ interface AppStateValue {
   toasts: Toast[];
   pushToast: ReturnType<typeof useToasts>["pushToast"];
   dismissToast: (id: number) => void;
+  /**
+   * Unified notification dispatcher. Call sites pass a typed event;
+   * the facade picks surfaces from routing, writes one log entry,
+   * and fans out to primitives with the in-place migration shim
+   * suppressing double-logs. See
+   * `src/lib/notifications/dispatch.ts` and
+   * `dev-docs/notification-system-plan.md` (Phase 1).
+   *
+   * Direct `pushToast` calls still work during the migration window
+   * (Phase 1 → Phase 3). New code should prefer `emit({...})`.
+   */
+  emit: EmitFn;
   /**
    * Last toast that fully dismissed. The status bar reads this and
    * echoes the message for a few seconds so the user can re-read what
@@ -146,6 +159,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     openOpModal,
   });
 
+  // Build the unified emit dispatcher. Re-built only when pushToast
+  // changes — the toast hook keeps it stable across renders, so this
+  // memo lands once per AppStateProvider lifetime in practice.
+  const emit = useMemo<EmitFn>(() => buildEmit({ pushToast }), [pushToast]);
+
   const [splitBrainPending, setSplitBrainPending] =
     useState<AccountSummary | null>(null);
 
@@ -221,6 +239,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     () => ({
       toasts,
       pushToast,
+      emit,
       dismissToast,
       lastDismissed,
       clearLastDismissed,
@@ -256,6 +275,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [
       toasts,
       pushToast,
+      emit,
       dismissToast,
       lastDismissed,
       clearLastDismissed,
@@ -295,6 +315,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       {children}
     </AppStateContext.Provider>
   );
+}
+
+/**
+ * Convenience hook returning just the `emit()` dispatcher. New
+ * notification call sites should prefer this over reading
+ * `pushToast` directly so the migration to per-category prefs and
+ * unified logging (Phase 1.5+) only touches the dispatcher.
+ */
+export function useEmit(): EmitFn {
+  return useAppState().emit;
 }
 
 export function useAppState(): AppStateValue {

@@ -11,6 +11,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { NotificationTarget } from "../lib/notify";
+import type {
+  Category,
+  Priority,
+  Surface,
+} from "../lib/notifications/types";
 
 /** Origin surface of a logged notification. Toasts and OS banners are
  *  dispatched independently — focus state determines which one(s)
@@ -27,16 +32,35 @@ export type NotificationKind = "info" | "notice" | "error";
 /** One persisted entry. `id` and `tsMs` are assigned server-side so
  *  the renderer cannot mis-order itself. `target` is the renderer's
  *  own `NotificationTarget` shape, round-tripped through Rust as an
- *  opaque JSON value. */
+ *  opaque JSON value.
+ *
+ *  Phase 0 of the refactor added optional routing metadata —
+ *  `category`, `priority`, `surfaces_requested`, `surfaces_delivered`.
+ *  Pre-Phase-0 entries on disk carry only the legacy `source` field;
+ *  post-Phase-1 entries (from `emit()`) populate the new fields and
+ *  leave `source` null. Filters in the bell popover treat both shapes
+ *  symmetrically. */
 export interface NotificationEntry {
   id: number;
   ts_ms: number;
-  source: NotificationSource;
+  /** Legacy surface tag, populated only on pre-Phase-0 entries.
+   *  New entries from `emit()` carry surface info in
+   *  `surfaces_requested` / `surfaces_delivered`. */
+  source: NotificationSource | null;
   kind: NotificationKind;
   title: string;
   body: string;
   /** Renderer-defined click target; null when the surface had none. */
   target: NotificationTarget | null;
+  /** Routing category, when the entry came through the `emit()`
+   *  facade. `null` on legacy entries. */
+  category: Category | null;
+  /** Routing priority. `null` on legacy entries. */
+  priority: Priority | null;
+  /** Surfaces the dispatcher asked for BEFORE delivery gates fired. */
+  surfaces_requested: Surface[];
+  /** Surfaces that actually rendered. */
+  surfaces_delivered: Surface[];
 }
 
 /** Filter shape mirrored from `claudepot_core::notification_log`.
@@ -58,6 +82,33 @@ export interface NotificationLogAppendArgs {
   title: string;
   body?: string;
   target?: NotificationTarget | null;
+}
+
+/** Args for the routed-emit IPC introduced in Phase 1. Mirrors the
+ *  Rust DTO; the `emit()` facade is the only producer of these. */
+export interface NotificationLogAppendRoutedArgs {
+  category: Category;
+  priority: Priority;
+  kind: NotificationKind;
+  title: string;
+  body?: string;
+  target?: NotificationTarget | null;
+  surfacesRequested: Surface[];
+  /** Surfaces already known-delivered at append time (toast + banner
+   *  are always delivered if requested). OS-banner delivery is
+   *  reported via `notificationLogMarkDelivered` after the OS
+   *  dispatcher resolves. */
+  surfacesDelivered: Surface[];
+}
+
+/** Category metadata returned by `notification_categories_metadata`.
+ *  Drives the Settings → Notifications pane in Phase 4. */
+export interface CategoryMeta {
+  id: Category;
+  label: string;
+  group: string;
+  priority: Priority;
+  defaultEnabled: boolean;
 }
 
 export const notificationApi = {
@@ -111,4 +162,21 @@ export const notificationApi = {
   /** Current unread count. Drives the bell badge. */
   notificationLogUnreadCount: () =>
     invoke<number>("notification_log_unread_count"),
+
+  /** Phase 1: append an entry that came through the `emit()` facade.
+   *  Records full routing metadata. Returns the assigned id so the
+   *  caller can post `notificationLogMarkDelivered` after the OS
+   *  dispatcher resolves. */
+  notificationLogAppendRouted: (args: NotificationLogAppendRoutedArgs) =>
+    invoke<number>("notification_log_append_routed", { args }),
+
+  /** Phase 1: report OS-banner delivery after focus / permission /
+   *  rate gates resolve. Idempotent. */
+  notificationLogMarkDelivered: (id: number, surface: Surface) =>
+    invoke<boolean>("notification_log_mark_delivered", { id, surface }),
+
+  /** Phase 1: return the live category metadata table. The Settings
+   *  pane mirrors Rust at runtime by reading this on mount. */
+  notificationCategoriesMetadata: () =>
+    invoke<CategoryMeta[]>("notification_categories_metadata"),
 };
