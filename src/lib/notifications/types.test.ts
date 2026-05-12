@@ -192,7 +192,34 @@ describe("category → priority bindings", () => {
 // expectation; the Rust side has its own
 // `test_priority_exhaustive_for_every_category` and
 // `test_all_returns_every_variant` to guard the source-of-truth.
-describe("Rust metadata mirror via IPC stub", () => {
+describe("Rust metadata mirror via fixture", () => {
+  it("CATEGORY_NAMES + priorityForCategory agree with the checked-in Rust-side fixture", async () => {
+    // Audit-fix Low #17 (full close): the fixture file is the
+    // canonical cross-language source of truth, validated by Rust
+    // (`test_categories_fixture_matches_rust`) and by us here.
+    // Drift on either side fails the relevant test.
+    const fixture = (await import(
+      "./__fixtures__/categories.fixture.json"
+    )) as {
+      categories: ReadonlyArray<{
+        id: Category;
+        priority: Priority;
+        group: string;
+        defaultEnabled: boolean;
+      }>;
+    };
+    const ids = fixture.categories.map((c) => c.id);
+    // Set equality: every Rust category appears in the TS mirror,
+    // and vice versa.
+    expect(new Set(ids)).toEqual(new Set(CATEGORY_NAMES));
+    // Per-entry priority alignment: a future Rust commit that
+    // changes a category's priority without updating TS fails
+    // here even before the renderer ships a real IPC call.
+    for (const c of fixture.categories) {
+      expect(priorityForCategory(c.id)).toBe(c.priority);
+    }
+  });
+
   it("the renderer can consume a synthetic IPC payload and round-trips through priorityForCategory", async () => {
     type RuntimeMeta = {
       id: Category;

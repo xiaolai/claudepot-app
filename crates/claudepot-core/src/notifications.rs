@@ -555,4 +555,76 @@ mod tests {
         let json = serde_json::to_string(&Surface::OsBanner).unwrap();
         assert_eq!(json, "\"osBanner\"");
     }
+
+    /// Audit-fix Low #17 (full close): the checked-in fixture at
+    /// `src/lib/notifications/__fixtures__/categories.fixture.json`
+    /// is the canonical cross-language source of truth. Both sides
+    /// validate against it:
+    ///
+    ///   - Rust: this test asserts Category::all().iter().map(display_meta())
+    ///     serializes to the same shape.
+    ///   - TS: vitest reads the fixture and compares against
+    ///     CATEGORY_NAMES + priorityForCategory.
+    ///
+    /// Any drift on either side fails the relevant test before it
+    /// surfaces as a user-visible bug. To intentionally update the
+    /// fixture after a Rust change: set `CLAUDEPOT_REGEN_FIXTURES=1`
+    /// and re-run; the test writes the new shape and you commit it.
+    #[test]
+    fn test_categories_fixture_matches_rust() {
+        use std::path::PathBuf;
+        let fixture_path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("src")
+            .join("lib")
+            .join("notifications")
+            .join("__fixtures__")
+            .join("categories.fixture.json");
+
+        // Build the canonical shape from the Rust enum.
+        let live: Vec<serde_json::Value> = Category::all()
+            .iter()
+            .map(|c| {
+                let meta = c.display_meta();
+                serde_json::json!({
+                    "id": meta.id,
+                    "priority": meta.priority,
+                    "group": meta.group,
+                    "defaultEnabled": meta.default_enabled,
+                })
+            })
+            .collect();
+
+        // Regen mode: env var lets contributors rewrite the fixture
+        // after a deliberate Rust change. Default mode: asserts.
+        if std::env::var("CLAUDEPOT_REGEN_FIXTURES").is_ok() {
+            let doc = serde_json::json!({
+                "_schema": "Canonical snapshot of `Category::all().iter().map(|c| c.display_meta())` from claudepot-core. Both sides validate against this file: cargo test `test_categories_fixture_matches_rust` asserts the Rust source produces this JSON; vitest `Rust metadata mirror via fixture` asserts the TS mirror agrees. Update by running `cargo test --workspace -- categories_fixture` (writes the file when CLAUDEPOT_REGEN_FIXTURES=1) and committing the diff.",
+                "categories": live,
+            });
+            let pretty = serde_json::to_string_pretty(&doc).unwrap();
+            std::fs::write(&fixture_path, pretty).expect("write fixture");
+            return;
+        }
+
+        // Read the on-disk fixture.
+        let bytes = std::fs::read(&fixture_path)
+            .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
+        let doc: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("fixture is valid JSON");
+        let on_disk = doc
+            .get("categories")
+            .and_then(|v| v.as_array())
+            .expect("fixture has `categories` array")
+            .clone();
+
+        assert_eq!(
+            on_disk, live,
+            "Category fixture drift detected. Re-generate with \
+             `CLAUDEPOT_REGEN_FIXTURES=1 cargo test -p claudepot-core categories_fixture` \
+             and commit the diff. Mirror also requires updating CATEGORY_NAMES in \
+             src/lib/notifications/types.ts."
+        );
+    }
 }
