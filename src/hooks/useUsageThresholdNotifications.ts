@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { dispatchOsNotification } from "../lib/notify";
+import { useEmit } from "../providers/AppStateProvider";
 
 /**
  * `useUsageThresholdNotifications` — listens for the
  * `usage-threshold-crossed` event emitted by the Rust-side
- * `usage_watcher` task and turns each crossing into a single OS
- * toast.
+ * `usage_watcher` task and routes each crossing through the
+ * notification facade as `usageThreshold` (P1).
  *
  * The Rust side already enforces "fire once per (account × window
  * × threshold) per reset cycle" — the persisted `fired` set in
@@ -20,6 +20,12 @@ import { dispatchOsNotification } from "../lib/notify";
  * Click target: the Accounts section, deep-linked to the email
  * whose usage crossed. The shell consumer translates this into
  * focusing Claudepot and switching to that section.
+ *
+ * Phase 3 migration: previously called `dispatchOsNotification`
+ * directly. Now routes through `emit()` so user prefs (the
+ * `usageThreshold` CategoryPrefs toggle) gate dispatch and the
+ * bell records a single routed log row rather than the legacy
+ * `source: "os"` shape.
  */
 interface CrossingPayload {
   accountUuid: string;
@@ -32,6 +38,8 @@ interface CrossingPayload {
 }
 
 export function useUsageThresholdNotifications(): void {
+  const emit = useEmit();
+
   useEffect(() => {
     let active = true;
     let unlisten: UnlistenFn | null = null;
@@ -41,17 +49,15 @@ export function useUsageThresholdNotifications(): void {
       const p = ev.payload;
       const title = `${p.accountEmail ?? "Account"} — ${p.windowLabel} at ${p.thresholdPct}%`;
       const body = formatBody(p.utilizationPct, p.resetsAtIso);
-      void dispatchOsNotification(title, body, {
+      void emit({
+        category: "usageThreshold",
+        title,
+        body,
         // dedupeKey grain: account × window × threshold guarantees
         // two distinct legitimate crossings (e.g. 80% then 90% in
         // the same cycle) don't compete for the same bucket and
         // suppress each other.
         dedupeKey: `usage:${p.accountUuid}:${p.window}:${p.thresholdPct}`,
-        // group: per-account so two windows crossing in the same
-        // cycle thread into one expandable banner per account on
-        // macOS, rather than stacking blindly.
-        group: `usage:${p.accountUuid}`,
-        sound: "default",
         target: p.accountEmail
           ? {
               kind: "app",
@@ -72,7 +78,7 @@ export function useUsageThresholdNotifications(): void {
       active = false;
       if (unlisten) unlisten();
     };
-  }, []);
+  }, [emit]);
 }
 
 function formatBody(utilizationPct: number, resetsAtIso: string | null): string {
