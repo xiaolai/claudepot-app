@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -18,6 +19,7 @@ import { useBusy } from "../hooks/useBusy";
 import { useActions } from "../hooks/useActions";
 import { useOperations } from "../hooks/useOperations";
 import { buildEmit, type EmitFn } from "../lib/notifications/dispatch";
+import { hydrateCategoryPrefs } from "../lib/notifications/prefs";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
 interface AppStateValue {
@@ -163,6 +165,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // changes — the toast hook keeps it stable across renders, so this
   // memo lands once per AppStateProvider lifetime in practice.
   const emit = useMemo<EmitFn>(() => buildEmit({ pushToast }), [pushToast]);
+
+  // Hydrate the CategoryPrefs cache once on mount so emit() reads
+  // real user preferences. Fire-and-forget — emit() falls back to
+  // sensible defaults until the cache lands.
+  useEffect(() => {
+    void hydrateCategoryPrefs();
+  }, []);
 
   const [splitBrainPending, setSplitBrainPending] =
     useState<AccountSummary | null>(null);

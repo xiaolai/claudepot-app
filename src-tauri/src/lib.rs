@@ -626,6 +626,8 @@ pub fn run() {
             commands::protected::protected_paths_remove,
             commands::protected::protected_paths_reset,
             commands::preferences::preferences_get,
+            commands::preferences::preferences_category_prefs_get,
+            commands::preferences::preferences_category_pref_set,
             commands::preferences::preferences_set_hide_dock_icon,
             commands::preferences::preferences_set_show_window_on_startup,
             commands::keys::key_api_list,

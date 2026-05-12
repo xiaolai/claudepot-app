@@ -40,6 +40,11 @@ function makeDeps(overrides?: {
       windowFocused: overrides?.windowFocused ?? false,
       rotationMode: overrides?.rotationMode,
     }),
+    // Tests default to "enabled + priority default OS" so the
+    // existing routing assertions hold without referencing the
+    // global prefs cache. Category-pref behavior gets its own
+    // suite below with explicit overrides.
+    getPref: () => ({ enabled: true, osOverride: null }),
   };
   return {
     deps,
@@ -212,6 +217,60 @@ describe("category overrides via DispatchContext", () => {
       title: "Applied",
     });
     expect(pushToast).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CategoryPrefs gating", () => {
+  it("enabled=false produces a log-only row (no toast, no OS)", async () => {
+    const { deps, pushToast, dispatchOs, logAppendRouted } = makeDeps();
+    deps.getPref = () => ({ enabled: false, osOverride: null });
+    const emit = buildEmit(deps);
+    await emit({ category: "projectRenamed", title: "Renamed" });
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(dispatchOs).not.toHaveBeenCalled();
+    // Log still lands — bell records the forensic trail of
+    // suppressed notifications.
+    expect(logAppendRouted).toHaveBeenCalledTimes(1);
+    expect(logAppendRouted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surfacesRequested: [],
+        surfacesDelivered: [],
+      }),
+    );
+  });
+
+  it("osOverride=false suppresses OS even when priority wants it", async () => {
+    const { deps, dispatchOs, logAppendRouted } = makeDeps();
+    deps.getPref = () => ({ enabled: true, osOverride: false });
+    const emit = buildEmit(deps);
+    await emit({ category: "usageThreshold", title: "Near cap" });
+    expect(dispatchOs).not.toHaveBeenCalled();
+    expect(logAppendRouted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surfacesRequested: [],
+        surfacesDelivered: [],
+      }),
+    );
+  });
+
+  it("osOverride=true forces OS even on P2 (toast-only) categories", async () => {
+    const { deps, dispatchOs, pushToast } = makeDeps();
+    deps.getPref = () => ({ enabled: true, osOverride: true });
+    const emit = buildEmit(deps);
+    await emit({ category: "projectRenamed", title: "Renamed" });
+    // P2 default surfaces toast; override flips OS on.
+    expect(pushToast).toHaveBeenCalledTimes(1);
+    expect(dispatchOs).toHaveBeenCalledTimes(1);
+  });
+
+  it("osOverride=null follows category priority default", async () => {
+    const { deps, dispatchOs, pushToast } = makeDeps();
+    deps.getPref = () => ({ enabled: true, osOverride: null });
+    const emit = buildEmit(deps);
+    // P1 default: os only
+    await emit({ category: "usageThreshold", title: "Near cap" });
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(dispatchOs).toHaveBeenCalledTimes(1);
   });
 });
 

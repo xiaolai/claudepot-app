@@ -197,6 +197,47 @@ pub async fn preferences_set_service_status(
     Ok(snapshot)
 }
 
+/// Read every category's effective preference. The Settings pane
+/// (Phase 4) reads this once on mount; emit() reads it via the
+/// regular `preferences_get` snapshot. Includes implicit defaults
+/// for categories that aren't yet in the persisted map.
+#[tauri::command]
+pub async fn preferences_category_prefs_get(
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+) -> Result<
+    std::collections::HashMap<claudepot_core::notifications::Category, crate::preferences::CategoryPrefs>,
+    String,
+> {
+    let p = state
+        .0
+        .lock()
+        .map_err(|e| format!("preferences lock: {e}"))?;
+    let mut out = p.category_prefs.clone();
+    for c in claudepot_core::notifications::Category::all() {
+        out.entry(*c).or_default();
+    }
+    Ok(out)
+}
+
+/// Update a single category's preference. Mirrors any legacy scalar
+/// (`notify_on_*`) that maps to the same category — see
+/// `Preferences::set_category_pref`. Persists and returns the
+/// refreshed `CategoryPrefs` for the renderer to mirror locally.
+#[tauri::command]
+pub async fn preferences_category_pref_set(
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+    category: claudepot_core::notifications::Category,
+    prefs: crate::preferences::CategoryPrefs,
+) -> Result<crate::preferences::CategoryPrefs, String> {
+    let mut p = state
+        .0
+        .lock()
+        .map_err(|e| format!("preferences lock: {e}"))?;
+    p.set_category_pref(category, prefs);
+    p.save()?;
+    Ok(p.category_pref(category))
+}
+
 /// Toggle the dock-icon visibility (macOS only). On non-macOS platforms
 /// the call still persists the boolean so the UI round-trips cleanly,
 /// but the activation policy is a no-op.

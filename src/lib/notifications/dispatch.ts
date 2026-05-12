@@ -31,6 +31,8 @@ import {
   route,
 } from "./types";
 import { notificationApi } from "../../api/notification";
+import { getCategoryPref } from "./prefs";
+import type { CategoryPrefs } from "../../api/settings";
 
 // ─── Toast primitive surface ──────────────────────────────────────
 //
@@ -80,6 +82,10 @@ export interface EmitDeps {
   /** Provider of the current dispatch context. Defaults to a focus-
    *  reading impl. Override in tests / when rotation mode matters. */
   getContext?: () => DispatchContext;
+  /** Pref reader. Defaults to the renderer-side cache in `prefs.ts`.
+   *  Tests inject a stub to isolate the dispatch invariants from
+   *  the cache hydration state. */
+  getPref?: (category: Category) => CategoryPrefs;
 }
 
 /** What `emit()` returns to the caller — mostly for tests, since
@@ -142,12 +148,29 @@ export function buildEmit(deps: EmitDeps): EmitFn {
       windowFocused:
         typeof document !== "undefined" ? document.hasFocus() : false,
     }));
+  const getPref = deps.getPref ?? getCategoryPref;
 
   return async (event: NotificationEvent): Promise<EmitResult> => {
     const ctx = getCtx();
     const priority = priorityForCategory(event.category);
-    const surfaces = route(event, ctx);
+    const routed = route(event, ctx);
     const kind = event.kind ?? defaultKindForPriority(priority);
+
+    // Apply user prefs to the routed set. `enabled: false` mutes
+    // every surface (log still lands so the bell records a
+    // forensic trail of suppressed events — the audit's intent
+    // recording principle). `osOverride` forces the OS surface
+    // on or off regardless of category default.
+    const pref = getPref(event.category);
+    const surfaces: SurfaceSet = pref.enabled
+      ? {
+          ...routed,
+          osBanner:
+            pref.osOverride === null
+              ? routed.osBanner
+              : pref.osOverride,
+        }
+      : { toast: false, osBanner: false, banner: false, log: true, ignoreFocus: false };
 
     // Surfaces toast + banner are renderer-side and always deliver
     // when requested (banner Phase 5 adds the state-machine layer).

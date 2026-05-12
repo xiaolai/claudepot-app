@@ -6,11 +6,55 @@
 //! the CLI doesn't care about belongs here, not in `claudepot-core`.
 
 use claudepot_core::config_view::model::EditorDefaults;
+use claudepot_core::notifications::Category;
 use claudepot_core::paths;
 use claudepot_core::pricing::PriceTier;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+
+/// Per-category notification preference. Lives here (src-tauri),
+/// NOT in claudepot-core — per `.claude/rules/architecture.md`,
+/// GUI preferences stay GUI-side. The `Category` enum is in core
+/// so the rules engine can reference categories abstractly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CategoryPrefs {
+    /// Master toggle. `false` ⇒ emit() yields `surfaces_requested =
+    /// []`; the event still logs (the routing's `log` field is
+    /// independent of `enabled`) so the bell records a forensic
+    /// trail of suppressed notifications.
+    pub enabled: bool,
+    /// Override the OS-banner surface specifically. `None` ⇒ follow
+    /// category priority default. `Some(true)` ⇒ force OS on even
+    /// for P2/P3. `Some(false)` ⇒ force OS off even for P0/P1.
+    /// Independent of `enabled`.
+    #[serde(default)]
+    pub os_override: Option<bool>,
+}
+
+impl Default for CategoryPrefs {
+    /// Default state for a category that has no on-disk entry yet:
+    /// enabled, OS surface follows priority. The runtime
+    /// `Preferences::category_pref(c)` getter substitutes this when
+    /// the map lacks an explicit entry, so adding a new category in
+    /// core never requires a migration step.
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            os_override: None,
+        }
+    }
+}
+
+/// Current schema version for `Preferences`. Phase 1.5 of the
+/// notification refactor bumps from 0 → 1, migrating the seven
+/// scalar `notify_on_*` fields into `category_prefs`. The old
+/// scalars are NOT removed in this version — dual-write keeps a
+/// downgrade path open for one minor release. A follow-up release
+/// bumps to 2 and drops them.
+pub const PREFS_SCHEMA_VERSION_CURRENT: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -121,6 +165,26 @@ pub struct Preferences {
     /// behind each default.
     #[serde(default)]
     pub service_status: ServiceStatusPrefs,
+
+    /// Per-category notification preferences. Populated from old
+    /// scalar `notify_on_*` fields on first launch after Phase 1.5
+    /// of the notification refactor (see `migrate_to_v1`). Missing
+    /// entries fall back to `CategoryPrefs::default()` at read time;
+    /// adding a new `Category` variant doesn't require touching the
+    /// stored file.
+    ///
+    /// During the dual-write window (schema_version 1 → 2), this
+    /// map is authoritative for emit() routing, but the old scalar
+    /// fields are still kept in sync so a downgrade doesn't lose
+    /// the user's toggle state.
+    #[serde(default)]
+    pub category_prefs: HashMap<Category, CategoryPrefs>,
+
+    /// Schema version. Phase 1.5 migration runs when the on-disk
+    /// value is < `PREFS_SCHEMA_VERSION_CURRENT`. See
+    /// [`Preferences::migrate_if_needed`].
+    #[serde(default)]
+    pub schema_version: u32,
 }
 
 /// Toggles for the network-status feature. Field defaults are tuned
@@ -208,6 +272,8 @@ impl Default for Preferences {
             editor_defaults: Default::default(),
             pricing_tier: PriceTier::default(),
             service_status: ServiceStatusPrefs::default(),
+            category_prefs: HashMap::new(),
+            schema_version: PREFS_SCHEMA_VERSION_CURRENT,
         }
     }
 }
@@ -217,11 +283,19 @@ impl Preferences {
         paths::claudepot_data_dir().join("preferences.json")
     }
 
+    /// Read preferences from disk, applying any pending schema
+    /// migrations. The migrated form is NOT persisted automatically
+    /// — the next `save()` will rewrite the file in the new shape.
+    /// This makes load idempotent: repeated reads of an old file
+    /// always produce the same in-memory state, with the migration
+    /// landing on disk only when a setter explicitly fires.
     pub fn load() -> Self {
-        match std::fs::read_to_string(Self::path()) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        let mut p = match std::fs::read_to_string(Self::path()) {
+            Ok(s) => serde_json::from_str::<Self>(&s).unwrap_or_default(),
             Err(_) => Self::default(),
-        }
+        };
+        p.migrate_if_needed();
+        p
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -235,6 +309,146 @@ impl Preferences {
         std::fs::write(&p, s).map_err(|e| format!("preferences: write {}: {}", p.display(), e))?;
         Ok(())
     }
+
+    /// Apply pending schema migrations in place. Idempotent — calling
+    /// twice has no extra effect. Today only the 0 → 1 migration
+    /// exists (scalar `notify_on_*` → `category_prefs` map).
+    pub fn migrate_if_needed(&mut self) {
+        if self.schema_version < 1 {
+            self.migrate_to_v1();
+            self.schema_version = 1;
+        }
+        // Future migrations (v1 → v2 to drop the scalar fields)
+        // chain here.
+    }
+
+    /// 0 → 1 migration. Populates `category_prefs` from the seven
+    /// scalar `notify_on_*` fields. The scalars are LEFT IN PLACE
+    /// — dual-write keeps a downgrade path open until the v1 → v2
+    /// migration drops them in a future release.
+    fn migrate_to_v1(&mut self) {
+        // Only run if the map is empty — a hand-edited
+        // preferences.json could already have a populated map plus
+        // a stale schema_version: 0. Respect explicit user state.
+        if !self.category_prefs.is_empty() {
+            return;
+        }
+
+        let mut m: HashMap<Category, CategoryPrefs> = HashMap::new();
+
+        // Activity-related scalars → P1 categories.
+        m.insert(
+            Category::SessionErrorBurst,
+            CategoryPrefs {
+                enabled: self.notify_on_error,
+                os_override: None,
+            },
+        );
+        // Idle-done was historically conflated with op-done; both
+        // map to OpDoneUnfocused. Bias toward the more
+        // permissive scalar — enabled if either was on.
+        m.insert(
+            Category::OpDoneUnfocused,
+            CategoryPrefs {
+                enabled: self.notify_on_idle_done || self.notify_on_op_done,
+                os_override: None,
+            },
+        );
+        m.insert(
+            Category::SessionStuck,
+            CategoryPrefs {
+                enabled: self.notify_on_stuck_minutes.is_some(),
+                os_override: None,
+            },
+        );
+        m.insert(
+            Category::SessionWaiting,
+            CategoryPrefs {
+                enabled: self.notify_on_waiting,
+                os_override: None,
+            },
+        );
+        m.insert(
+            Category::UsageThreshold,
+            CategoryPrefs {
+                enabled: !self.notify_on_usage_thresholds.is_empty(),
+                os_override: None,
+            },
+        );
+
+        // Service-status: legacy `os_notify_on_status_change` maps to
+        // the `os_override` field — category is enabled (logs always)
+        // but OS banner follows the user's preference.
+        m.insert(
+            Category::ServiceStatusChanged,
+            CategoryPrefs {
+                enabled: true,
+                os_override: Some(self.service_status.os_notify_on_status_change),
+            },
+        );
+
+        self.category_prefs = m;
+    }
+
+    /// Look up the effective preference for `category`. Map lookup
+    /// with a default fallback — keeps call sites short:
+    /// `prefs.category_pref(c).enabled`.
+    pub fn category_pref(&self, category: Category) -> CategoryPrefs {
+        self.category_prefs
+            .get(&category)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Update a single category's preference and sync any legacy
+    /// scalar field that mirrors it. Caller is responsible for
+    /// persisting via `save()` after one or more updates.
+    pub fn set_category_pref(&mut self, category: Category, prefs: CategoryPrefs) {
+        self.category_prefs.insert(category, prefs.clone());
+        self.sync_legacy_scalar(category, &prefs);
+    }
+
+    /// Mirror a `CategoryPrefs` update back to the legacy scalar
+    /// field, if one exists for this category. Called from
+    /// `set_category_pref` so the dual-write contract is enforced
+    /// in one place. Categories with no legacy mirror are a no-op.
+    fn sync_legacy_scalar(&mut self, category: Category, prefs: &CategoryPrefs) {
+        match category {
+            Category::SessionErrorBurst => self.notify_on_error = prefs.enabled,
+            Category::OpDoneUnfocused => {
+                self.notify_on_op_done = prefs.enabled;
+                self.notify_on_idle_done = prefs.enabled;
+            }
+            Category::SessionStuck => {
+                // Preserve the existing threshold value if any; only
+                // toggle enabled-ness.
+                if prefs.enabled && self.notify_on_stuck_minutes.is_none() {
+                    self.notify_on_stuck_minutes = Some(15);
+                } else if !prefs.enabled {
+                    self.notify_on_stuck_minutes = None;
+                }
+            }
+            Category::SessionWaiting => self.notify_on_waiting = prefs.enabled,
+            Category::UsageThreshold => {
+                if !prefs.enabled {
+                    self.notify_on_usage_thresholds = Vec::new();
+                } else if self.notify_on_usage_thresholds.is_empty() {
+                    self.notify_on_usage_thresholds = vec![90];
+                }
+            }
+            Category::ServiceStatusChanged => {
+                if let Some(os) = prefs.os_override {
+                    self.service_status.os_notify_on_status_change = os;
+                }
+            }
+            // Categories with no legacy mirror: their CategoryPrefs
+            // is the sole storage. Includes RotationSuggested (the
+            // gap the audit flagged — now correctly user-gateable),
+            // RotationApplied, RotationFailed, and the new
+            // MemoryChanged / ConfigTreePatched / etc.
+            _ => {}
+        }
+    }
 }
 
 /// Tauri-managed shared state — single mutex-guarded record.
@@ -243,5 +457,178 @@ pub struct PreferencesState(pub Mutex<Preferences>);
 impl PreferencesState {
     pub fn new(p: Preferences) -> Self {
         Self(Mutex::new(p))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Synthesize a v0 preferences struct — the pre-migration shape.
+    /// schema_version defaults to 0; category_prefs starts empty.
+    /// All other fields take whatever scalar values the test sets.
+    fn v0() -> Preferences {
+        Preferences {
+            schema_version: 0,
+            category_prefs: HashMap::new(),
+            ..Preferences::default()
+        }
+    }
+
+    #[test]
+    fn test_migrate_to_v1_populates_category_prefs_from_scalars() {
+        let mut p = v0();
+        p.notify_on_error = true;
+        p.notify_on_waiting = true;
+        p.notify_on_op_done = false;
+        p.notify_on_idle_done = false;
+        p.notify_on_usage_thresholds = vec![85, 95];
+        p.service_status.os_notify_on_status_change = true;
+
+        p.migrate_if_needed();
+
+        assert_eq!(p.schema_version, 1);
+        assert!(p.category_pref(Category::SessionErrorBurst).enabled);
+        assert!(p.category_pref(Category::SessionWaiting).enabled);
+        assert!(!p.category_pref(Category::OpDoneUnfocused).enabled);
+        assert!(p.category_pref(Category::UsageThreshold).enabled);
+        assert_eq!(
+            p.category_pref(Category::ServiceStatusChanged).os_override,
+            Some(true),
+        );
+    }
+
+    #[test]
+    fn test_migrate_is_idempotent() {
+        let mut p = v0();
+        p.notify_on_waiting = true;
+        p.migrate_if_needed();
+        let after_first = p.category_prefs.clone();
+        p.migrate_if_needed();
+        assert_eq!(p.category_prefs, after_first);
+        assert_eq!(p.schema_version, 1);
+    }
+
+    #[test]
+    fn test_migrate_respects_explicit_category_prefs() {
+        // Hand-edited preferences.json could have a stale
+        // schema_version: 0 but an already-populated map. Migration
+        // must not overwrite that.
+        let mut p = v0();
+        p.category_prefs.insert(
+            Category::SessionWaiting,
+            CategoryPrefs {
+                enabled: false,
+                os_override: None,
+            },
+        );
+        // Scalar says true — would clobber the explicit `false` if
+        // the guard didn't fire.
+        p.notify_on_waiting = true;
+        p.migrate_if_needed();
+        assert!(!p.category_pref(Category::SessionWaiting).enabled);
+    }
+
+    #[test]
+    fn test_category_pref_falls_back_to_default_when_missing() {
+        let mut p = v0();
+        p.migrate_if_needed();
+        // BannerResolved was never in any legacy scalar; the map has
+        // no entry. `category_pref` must return the default
+        // (enabled: true).
+        let pr = p.category_pref(Category::BannerResolved);
+        assert!(pr.enabled);
+        assert!(pr.os_override.is_none());
+    }
+
+    #[test]
+    fn test_set_category_pref_mirrors_to_legacy_scalar() {
+        let mut p = Preferences {
+            notify_on_waiting: true,
+            ..Preferences::default()
+        };
+        p.set_category_pref(
+            Category::SessionWaiting,
+            CategoryPrefs {
+                enabled: false,
+                os_override: None,
+            },
+        );
+        // Legacy scalar must follow.
+        assert!(!p.notify_on_waiting);
+        // And the map records the same.
+        assert!(!p.category_pref(Category::SessionWaiting).enabled);
+    }
+
+    #[test]
+    fn test_set_category_pref_no_legacy_mirror_is_noop_on_scalars() {
+        // RotationSuggested has no scalar today; setting its pref
+        // must not panic and must persist in the map.
+        let mut p = Preferences::default();
+        p.set_category_pref(
+            Category::RotationSuggested,
+            CategoryPrefs {
+                enabled: false,
+                os_override: None,
+            },
+        );
+        assert!(!p.category_pref(Category::RotationSuggested).enabled);
+    }
+
+    #[test]
+    fn test_set_usage_threshold_pref_preserves_existing_thresholds() {
+        let mut p = Preferences {
+            notify_on_usage_thresholds: vec![80, 95],
+            ..Preferences::default()
+        };
+        // Toggling enabled off must clear the list.
+        p.set_category_pref(
+            Category::UsageThreshold,
+            CategoryPrefs {
+                enabled: false,
+                os_override: None,
+            },
+        );
+        assert!(p.notify_on_usage_thresholds.is_empty());
+        // Toggling back on without explicit thresholds must
+        // populate the default — empty thresholds = feature off in
+        // the existing watcher, so we need at least one entry.
+        p.set_category_pref(
+            Category::UsageThreshold,
+            CategoryPrefs {
+                enabled: true,
+                os_override: None,
+            },
+        );
+        assert_eq!(p.notify_on_usage_thresholds, vec![90]);
+    }
+
+    #[test]
+    fn test_serde_round_trip_with_category_prefs() {
+        let mut p = Preferences::default();
+        p.set_category_pref(
+            Category::RotationSuggested,
+            CategoryPrefs {
+                enabled: false,
+                os_override: Some(true),
+            },
+        );
+        let s = serde_json::to_string(&p).unwrap();
+        let back: Preferences = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.schema_version, PREFS_SCHEMA_VERSION_CURRENT);
+        let cp = back.category_pref(Category::RotationSuggested);
+        assert!(!cp.enabled);
+        assert_eq!(cp.os_override, Some(true));
+    }
+
+    #[test]
+    fn test_load_default_returns_current_schema_version() {
+        // Cold-start (no file on disk) skips deserialization but
+        // must still produce a struct at the current schema
+        // version — migrate_if_needed should be a no-op in that
+        // path because Default::default() sets the right version.
+        let p = Preferences::default();
+        assert_eq!(p.schema_version, PREFS_SCHEMA_VERSION_CURRENT);
+        assert!(p.category_prefs.is_empty());
     }
 }

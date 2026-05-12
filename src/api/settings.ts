@@ -7,6 +7,19 @@ import type {
   Preferences,
   ProtectedPath,
 } from "../types";
+import type { Category } from "../lib/notifications/types";
+
+/**
+ * Per-category notification preference. Mirrors
+ * `src-tauri::preferences::CategoryPrefs`. The Settings pane reads
+ * the whole map and exposes one row per category; `emit()` reads
+ * an individual entry before dispatching to filter `surfaces_requested`.
+ */
+export interface CategoryPrefs {
+  enabled: boolean;
+  /** null = follow category priority default; true/false = force on/off. */
+  osOverride: boolean | null;
+}
 
 export const settingsApi = {
   // ---------- Protected paths (Settings → Protected pane) ----------
@@ -51,4 +64,26 @@ export const settingsApi = {
   preferencesSetShowWindowOnStartup: (show: boolean) =>
     invoke<void>("preferences_set_show_window_on_startup", { show }),
 
+  /**
+   * Read every category's effective notification preference. The
+   * backend always returns a complete map — categories without an
+   * explicit on-disk entry come back with their defaults filled in.
+   */
+  preferencesCategoryPrefsGet: () =>
+    invoke<Record<Category, CategoryPrefs>>("preferences_category_prefs_get"),
+
+  /**
+   * Update one category's preference. The backend mirrors any
+   * legacy scalar that maps to the same category (the dual-write
+   * contract from Phase 1.5) so a downgrade keeps user state.
+   * Returns the refreshed entry so the renderer's cache can sync.
+   */
+  preferencesCategoryPrefSet: (
+    category: Category,
+    prefs: CategoryPrefs,
+  ) =>
+    invoke<CategoryPrefs>("preferences_category_pref_set", {
+      category,
+      prefs,
+    }),
 };
