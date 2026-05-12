@@ -6,7 +6,29 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.1.24 — beta (unreleased)
+## 0.1.25 — beta (unreleased)
+
+### Added
+
+- **Copy buttons on every session-detail bubble + tool viewer.** Each
+  user/assistant/thinking/tool-call/tool-result/summary bubble grows
+  a small copy icon in its header. Tool viewers carry their own copy
+  buttons too: Bash copies `$ cmd\nstdout\n[stderr]…`, Edit copies a
+  unified-diff-shaped text, Read copies the file content with CC's
+  line-number prefix stripped, Write copies what was written, the
+  generic fallback copies `[input]…\n\n[result]…`. Payloads are
+  always run through `redactSecrets` — the clipboard never carries a
+  secret the screen wouldn't show.
+- **Collapsible left sidebar (⌘\\).** A chevron at the bottom of the
+  sidebar (and a `PanelLeft` toggle at the far-left of the status bar)
+  flips the sidebar between full width and a 52px icon-only rail.
+  Persisted under `cp-sidebar-collapsed` in localStorage; ⌘\\ is the
+  global keyboard shortcut. In collapsed mode swap-targets and the
+  activity strip hide, primary nav becomes glyph-only with a presence
+  dot in the corner for badged sections, and tooltips carry the
+  hidden labels for keyboard/AT users.
+
+## 0.1.24 — beta (2026-05-11)
 
 ### Added
 

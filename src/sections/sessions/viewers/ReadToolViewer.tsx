@@ -1,6 +1,7 @@
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
+import { CopyButton } from "../../../components/CopyButton";
 import { redactSecrets } from "./redact";
 import { parseToolInput, type ReadInput } from "./toolInput";
 
@@ -65,6 +66,12 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
         .map((text, i) => ({ lineNumber: firstLineNumber + i, text }));
   const totalLines = (parsed ?? body.split("\n")).length;
   const hidden = Math.max(0, totalLines - displayLines.length);
+  // Clipboard payload: the file content WITHOUT CC's line-number-+-tab
+  // prefix when we parsed it, so the user gets paste-ready source.
+  // Falls back to the raw body when the prefix wasn't present.
+  const copyText = parsed
+    ? parsed.map((l) => l.text).join("\n")
+    : body;
 
   return (
     <div
@@ -117,6 +124,9 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
           >
             error
           </span>
+        )}
+        {copyText.length > 0 && (
+          <CopyButton text={copyText} ariaLabel="Copy file contents" />
         )}
       </header>
       {body.length === 0 ? (

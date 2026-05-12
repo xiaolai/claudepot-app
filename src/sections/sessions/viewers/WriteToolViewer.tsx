@@ -1,6 +1,7 @@
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
+import { CopyButton } from "../../../components/CopyButton";
 import { redactSecrets } from "./redact";
 import { parseToolInput, type WriteInput } from "./toolInput";
 
@@ -67,6 +68,9 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
           >
             error
           </span>
+        )}
+        {content.length > 0 && (
+          <CopyButton text={content} ariaLabel="Copy file contents" />
         )}
       </header>
       <pre

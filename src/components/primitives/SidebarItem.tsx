@@ -13,6 +13,13 @@ interface SidebarItemProps {
   /** Optional trailing widget (chevron, dot). */
   trailing?: ReactNode;
   title?: string;
+  /**
+   * Icon-only rendering for the rail-width collapsed sidebar. Hides
+   * the label and trailing widget, centers the glyph, and renders a
+   * numeric badge as a small dot instead of a number. The `title`
+   * becomes the hover/screen-reader label (callers should pass it).
+   */
+  collapsed?: boolean;
 }
 
 /**
@@ -29,13 +36,37 @@ export function SidebarItem({
   indent = 0,
   trailing,
   title,
+  collapsed = false,
 }: SidebarItemProps) {
   const [hover, setHover] = useState(false);
   const indentPad = indent > 0 ? `calc(var(--sp-10) + var(--sp-14) * ${indent})` : "var(--sp-10)";
+  // In collapsed mode the row centers a single glyph at rail width.
+  // A numeric badge collapses to a small dot — the count isn't legible
+  // at this width, but presence-of-badge still is.
+  const hasBadge = badge != null && badge !== false;
   return (
     <button
       type="button"
-      title={title}
+      title={collapsed ? (title ?? label) : title}
+      // Collapsed: the label is hidden so screen-reader users need it
+      // via aria-label. Surface the badge content too — the corner dot
+      // is aria-hidden and the expanded-mode badge is read out, so AT
+      // users would otherwise lose the signal entirely.
+      //
+      // For primitive badges (numbers, strings) we include the literal
+      // value — `Accounts (3)` is honest. For arbitrary ReactNode
+      // badges (a chip with a glyph, say) we fall back to a neutral
+      // `(badge)` suffix rather than guessing semantics; phrasings
+      // like `has updates` over-promise when the badge is just a count.
+      aria-label={
+        collapsed
+          ? hasBadge
+            ? typeof badge === "string" || typeof badge === "number"
+              ? `${label} (${badge})`
+              : `${label} (badge)`
+            : label
+          : undefined
+      }
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -45,9 +76,10 @@ export function SidebarItem({
         width: "100%",
         display: "flex",
         alignItems: "center",
+        justifyContent: collapsed ? "center" : undefined,
         gap: "var(--sp-10)",
         height: "var(--row-height)",
-        padding: `0 var(--sp-10) 0 ${indentPad}`,
+        padding: collapsed ? 0 : `0 var(--sp-10) 0 ${indentPad}`,
         margin: "var(--sp-px) 0",
         fontSize: "var(--fs-sm)",
         fontWeight: active ? 600 : 500,
@@ -69,22 +101,25 @@ export function SidebarItem({
         transition:
           "background var(--dur-fast) var(--ease-linear), color var(--dur-fast) var(--ease-linear)",
         cursor: "pointer",
+        position: "relative",
       }}
     >
       {glyph && (
         <Glyph g={glyph} color={active ? "var(--accent)" : "currentColor"} />
       )}
-      <span
-        style={{
-          flex: 1,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {label}
-      </span>
-      {badge != null && (
+      {!collapsed && (
+        <span
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {label}
+        </span>
+      )}
+      {!collapsed && hasBadge && (
         <span
           style={{
             fontSize: "var(--fs-2xs)",
@@ -95,7 +130,24 @@ export function SidebarItem({
           {badge}
         </span>
       )}
-      {trailing}
+      {collapsed && hasBadge && (
+        // Presence-only badge — a 6px accent dot in the top-right
+        // corner. Real counts (numbers, "Off" chips) are unreadable
+        // at this width; a dot still tells the user "something here".
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: "var(--sp-6)",
+            right: "var(--sp-6)",
+            width: "var(--sp-6)",
+            height: "var(--sp-6)",
+            borderRadius: "var(--r-pill)",
+            background: "var(--accent)",
+          }}
+        />
+      )}
+      {!collapsed && trailing}
     </button>
   );
 }

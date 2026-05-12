@@ -8,6 +8,7 @@ import { useActivityPrefs } from "../../hooks/useActivityPrefs";
 import { Body, Bubble, Divider } from "./components/transcriptAtoms";
 import { formatTokens, modelBadge } from "./format";
 import { redactSecrets } from "../../lib/redactSecrets";
+import { CopyButton } from "../../components/CopyButton";
 
 const MESSAGE_CLAMP = 4000;
 const CODE_CLAMP = 4000;
@@ -53,29 +54,48 @@ export function SessionEventView({
   );
 
   switch (event.kind) {
-    case "userText":
+    case "userText": {
+      // Copy redacted text — the on-screen body is also redacted, so
+      // the clipboard payload matches what the user can read. Same
+      // principle below for every bubble that shows redactSecrets(...)
+      // content; we never put raw secrets on the clipboard.
+      const copyText = redactSecrets(event.text);
       return (
         <Bubble side="left" tone="sunken">
-          {header("You")}
+          {header(
+            "You",
+            <CopyButton text={copyText} ariaLabel="Copy your message" />,
+          )}
           <Body
-            text={redactSecrets(event.text)}
+            text={copyText}
             searchTerm={searchTerm}
             clamp={MESSAGE_CLAMP}
           />
         </Bubble>
       );
+    }
 
-    case "userToolResult":
+    case "userToolResult": {
+      const copyText = redactSecrets(event.content);
       return (
         <Bubble side="left" tone="faint" mono>
           {header(
             event.is_error ? "Tool result · error" : "Tool result",
-            <span className="mono" style={{ color: "var(--fg-ghost)" }}>
-              {event.tool_use_id.slice(0, 8)}
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "var(--sp-6)",
+              }}
+            >
+              <span className="mono" style={{ color: "var(--fg-ghost)" }}>
+                {event.tool_use_id.slice(0, 8)}
+              </span>
+              <CopyButton text={copyText} ariaLabel="Copy tool result" />
             </span>,
           )}
           <Body
-            text={redactSecrets(event.content)}
+            text={copyText}
             searchTerm={searchTerm}
             mono
             clamp={CODE_CLAMP}
@@ -83,6 +103,7 @@ export function SessionEventView({
           />
         </Bubble>
       );
+    }
 
     case "assistantText": {
       const usageBits: string[] = [];
@@ -93,6 +114,7 @@ export function SessionEventView({
       if (event.stop_reason && event.stop_reason !== "end_turn") {
         usageBits.push(event.stop_reason);
       }
+      const copyText = redactSecrets(event.text);
       return (
         <Bubble side="right" tone="accent">
           {header(
@@ -114,10 +136,11 @@ export function SessionEventView({
                   {usageBits.join(" · ")}
                 </span>
               )}
+              <CopyButton text={copyText} ariaLabel="Copy assistant message" />
             </span>,
           )}
           <Body
-            text={redactSecrets(event.text)}
+            text={copyText}
             searchTerm={searchTerm}
             clamp={MESSAGE_CLAMP}
           />
@@ -125,13 +148,23 @@ export function SessionEventView({
       );
     }
 
-    case "assistantToolUse":
+    case "assistantToolUse": {
+      const copyText = redactSecrets(event.input_full);
       return (
         <Bubble side="right" tone="faint" mono>
           {header(
             `Tool call · ${event.tool_name}`,
-            <span className="mono" style={{ color: "var(--fg-ghost)" }}>
-              {event.tool_use_id.slice(0, 8)}
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "var(--sp-6)",
+              }}
+            >
+              <span className="mono" style={{ color: "var(--fg-ghost)" }}>
+                {event.tool_use_id.slice(0, 8)}
+              </span>
+              <CopyButton text={copyText} ariaLabel="Copy tool call input" />
             </span>,
           )}
           <Body
@@ -142,33 +175,42 @@ export function SessionEventView({
           />
         </Bubble>
       );
+    }
 
-    case "assistantThinking":
+    case "assistantThinking": {
+      const copyText = redactSecrets(event.text);
       return (
         <Bubble side="right" tone="ghost">
-          {header("Thinking")}
+          {header(
+            "Thinking",
+            <CopyButton text={copyText} ariaLabel="Copy thinking block" />,
+          )}
           <ThinkingBody
-            text={redactSecrets(event.text)}
+            text={copyText}
             searchTerm={searchTerm}
             hideByDefault={prefs.hideThinking}
           />
         </Bubble>
       );
+    }
 
-    case "summary":
+    case "summary": {
+      const copyText = redactSecrets(event.text);
       return (
         <Divider>
           <Tag tone="accent" glyph={NF.archive}>
             Compacted
           </Tag>
+          <CopyButton text={copyText} ariaLabel="Copy compaction summary" />
           <Body
-            text={redactSecrets(event.text)}
+            text={copyText}
             searchTerm={searchTerm}
             clamp={MESSAGE_CLAMP}
             tone="ghost"
           />
         </Divider>
       );
+    }
 
     case "system":
       return (

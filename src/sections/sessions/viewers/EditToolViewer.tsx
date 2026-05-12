@@ -1,6 +1,8 @@
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
+import { CopyButton } from "../../../components/CopyButton";
+import { redactSecrets } from "./redact";
 import { computeDiff, parseToolInput, type EditInput } from "./toolInput";
 
 /**
@@ -20,6 +22,17 @@ export function EditToolViewer({ tool }: { tool: LinkedTool }) {
     return <RawFallback tool={tool} rawInput={tool.input_preview} />;
   }
   const diff = computeDiff(old_string, new_string);
+  // Clipboard payload: a unified-diff-shaped text so the user can paste
+  // into a code review tool or `patch -p0` if they wanted. Markers
+  // match what's rendered on screen.
+  const copyText = [
+    `--- ${file_path}`,
+    `+++ ${file_path}`,
+    ...diff.map((line) => {
+      const m = line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " ";
+      return `${m}${redactSecrets(line.text)}`;
+    }),
+  ].join("\n");
 
   return (
     <div
@@ -79,6 +92,7 @@ export function EditToolViewer({ tool }: { tool: LinkedTool }) {
             error
           </span>
         )}
+        <CopyButton text={copyText} ariaLabel="Copy diff" />
       </header>
       <div
         className="mono"

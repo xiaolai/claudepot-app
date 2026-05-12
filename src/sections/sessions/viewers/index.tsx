@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
+import { CopyButton } from "../../../components/CopyButton";
 import { BashToolViewer } from "./BashToolViewer";
 import { EditToolViewer } from "./EditToolViewer";
 import { ReadToolViewer } from "./ReadToolViewer";
@@ -33,6 +34,16 @@ export function ToolExecutionView({ tool }: { tool: LinkedTool }) {
 }
 
 function GenericToolView({ tool }: { tool: LinkedTool }) {
+  // Clipboard payload: input on top, result below, separated by a
+  // visual rule. Mirrors what's rendered in the card so the user gets
+  // the same content they can read.
+  const copyPieces: string[] = [];
+  const input = redactSecrets(tool.input_preview);
+  if (input) copyPieces.push(`[input]\n${input}`);
+  if (tool.result_content != null) {
+    copyPieces.push(`[result]\n${redactSecrets(tool.result_content)}`);
+  }
+  const copyText = copyPieces.join("\n\n");
   return (
     <div
       data-testid={`tool-viewer-${tool.tool_name.toLowerCase()}`}
@@ -83,6 +94,9 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
           >
             orphan
           </span>
+        )}
+        {copyText.length > 0 && (
+          <CopyButton text={copyText} ariaLabel="Copy tool input and result" />
         )}
       </header>
       <div

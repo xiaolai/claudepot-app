@@ -100,6 +100,7 @@ import { useRunningOps } from "./hooks/useRunningOps";
 import { bindingFrom } from "./hooks/useAccounts";
 import { useStatusIssues } from "./hooks/useStatusIssues";
 import { useTheme } from "./hooks/useTheme";
+import { useSidebarCollapsed } from "./hooks/useSidebarCollapsed";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { UpdateProvider } from "./providers/UpdateProvider";
@@ -222,6 +223,8 @@ function AppShell() {
     confirmRemoveAccount,
   } = useAppState();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } =
+    useSidebarCollapsed();
 
   // Binding derived from the same source of truth AccountsSection
   // uses — the active flags on each account. When the user binds via
@@ -1144,6 +1147,8 @@ function AppShell() {
           synced
           data-sidebar-root
           onOpenLiveSession={openLiveSession}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={toggleSidebar}
         />
 
         <main
@@ -1281,6 +1286,8 @@ function AppShell() {
         pendingSummary={onRepairSubview ? null : pendingSummary}
         onOpenRepair={() => setSection("projects", "repair")}
         onOpenLive={() => setSection("events")}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={toggleSidebar}
       />
 
       {activeOp && (

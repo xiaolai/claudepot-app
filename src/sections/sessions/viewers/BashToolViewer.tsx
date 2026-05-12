@@ -2,6 +2,7 @@ import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
 import { redactSecrets } from "./redact";
+import { CopyButton } from "../../../components/CopyButton";
 import {
   bashCommand,
   parseToolInput,
@@ -32,6 +33,14 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
   );
   const exit = result.ok ? result.value.exit_code : undefined;
   const interrupted = result.ok ? result.value.interrupted : undefined;
+  // Clipboard payload mirrors what's rendered: a shell prompt followed
+  // by stdout (and stderr, prefixed when present). Matches how a user
+  // would paste into a terminal to share or replay the invocation.
+  const copyPieces: string[] = [];
+  if (cmd) copyPieces.push(`$ ${cmd}`);
+  if (stdout) copyPieces.push(stdout);
+  if (stderr) copyPieces.push(`[stderr]\n${stderr}`);
+  const copyText = copyPieces.join("\n");
 
   return (
     <div
@@ -102,6 +111,9 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
           >
             error
           </span>
+        )}
+        {copyText.length > 0 && (
+          <CopyButton text={copyText} ariaLabel="Copy command and output" />
         )}
       </header>
       {input.description && (

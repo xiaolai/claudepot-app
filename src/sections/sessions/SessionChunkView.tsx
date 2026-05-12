@@ -12,6 +12,7 @@ import { ToolExecutionView } from "./viewers";
 import { redactSecrets } from "./viewers/redact";
 import { formatTokens, modelBadge } from "./format";
 import { stripLocalCommandStdout } from "./localCommandStdout";
+import { CopyButton } from "../../components/CopyButton";
 
 const TEXT_CLAMP = 4000;
 
@@ -38,11 +39,16 @@ export function SessionChunkView({
       const ev = events[chunk.event_index];
       const text = ev && "text" in ev && typeof ev.text === "string" ? ev.text : "";
       const ts = ev && "ts" in ev ? ev.ts : null;
+      const copyText = redactSecrets(text);
       return (
         <Bubble side="left" tone="sunken">
-          {renderHeader("You", ts)}
+          {renderHeader(
+            "You",
+            ts,
+            <CopyButton text={copyText} ariaLabel="Copy your message" />,
+          )}
           <Body
-            text={redactSecrets(text)}
+            text={copyText}
             searchTerm={searchTerm}
             clamp={TEXT_CLAMP}
           />
@@ -56,7 +62,11 @@ export function SessionChunkView({
       const ts = ev && "ts" in ev ? ev.ts : null;
       return (
         <Bubble side="left" tone="faint" mono>
-          {renderHeader("System output", ts)}
+          {renderHeader(
+            "System output",
+            ts,
+            <CopyButton text={text} ariaLabel="Copy system output" />,
+          )}
           <Body
             text={text}
             searchTerm={searchTerm}
@@ -70,13 +80,15 @@ export function SessionChunkView({
     case "compact": {
       const ev = events[chunk.event_index];
       const text = ev && "text" in ev && typeof ev.text === "string" ? ev.text : "";
+      const copyText = redactSecrets(text);
       return (
         <Divider>
           <Tag tone="accent" glyph={NF.archive}>
             Compacted
           </Tag>
+          <CopyButton text={copyText} ariaLabel="Copy compaction summary" />
           <Body
-            text={redactSecrets(text)}
+            text={copyText}
             searchTerm={searchTerm}
             clamp={TEXT_CLAMP}
             tone="ghost"
@@ -127,13 +139,38 @@ function AiChunkView({
       `${chunk.metrics.thinking_count} think${chunk.metrics.thinking_count === 1 ? "" : "s"}`,
     );
   }
+  // Concatenated text payload for the chunk-level copy button. We
+  // include assistant text + thinking (in order) — tool calls have
+  // their own per-card copy buttons further down, so duplicating
+  // their input/result here would bloat the clipboard for marginal
+  // benefit. Empty when the chunk is pure tool-calls.
+  const copyText = chunk.event_indices
+    .map((idx) => {
+      const ev = events[idx];
+      if (!ev) return "";
+      if (ev.kind === "assistantText") return redactSecrets(ev.text);
+      if (ev.kind === "assistantThinking")
+        return `[thinking]\n${redactSecrets(ev.text)}`;
+      return "";
+    })
+    .filter((s) => s.length > 0)
+    .join("\n\n");
 
   return (
     <Bubble side="right" tone="accent">
       {renderHeader(
         "Claude",
         chunk.start_ts,
-        usageBits.length > 0 ? usageBits.join(" · ") : null,
+        <>
+          {usageBits.length > 0 && (
+            <span style={{ color: "var(--fg-faint)" }}>
+              {usageBits.join(" · ")}
+            </span>
+          )}
+          {copyText.length > 0 && (
+            <CopyButton text={copyText} ariaLabel="Copy Claude's turn" />
+          )}
+        </>,
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
         {chunk.event_indices.map((idx) => {
@@ -266,7 +303,7 @@ function EventInlineView({
 function renderHeader(
   label: string,
   ts: string | null | undefined,
-  extra?: string | null,
+  extra?: React.ReactNode,
 ) {
   return (
     <div
@@ -283,7 +320,18 @@ function renderHeader(
     >
       <span>{label}</span>
       {ts && <span title={ts}>{new Date(ts).toLocaleString()}</span>}
-      {extra && <span style={{ marginLeft: "auto" }}>{extra}</span>}
+      {extra && (
+        <span
+          style={{
+            marginLeft: "auto",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "var(--sp-6)",
+          }}
+        >
+          {extra}
+        </span>
+      )}
     </div>
   );
 }

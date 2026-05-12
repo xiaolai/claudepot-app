@@ -36,6 +36,15 @@ interface AppSidebarProps {
    * The parent routes to the Sessions deep-link (M1) or the live
    * pane (M2+). Optional so existing callers needn't change. */
   onOpenLiveSession?: (session: LiveSessionSummary) => void;
+
+  /**
+   * Rail-width state. When true the sidebar shrinks to icon-only
+   * (~52 px). Swap-targets, activity, and sync strips hide; nav rows
+   * become glyph-only. Toggle is the chevron at the very bottom.
+   */
+  collapsed?: boolean;
+  /** Called when the user clicks the collapse/expand chevron. */
+  onToggleCollapsed?: () => void;
 }
 
 /**
@@ -54,6 +63,8 @@ export function AppSidebar({
   version,
   synced = true,
   onOpenLiveSession,
+  collapsed = false,
+  onToggleCollapsed,
 }: AppSidebarProps) {
   const targets = [
     { id: "cli" as const, label: "CLI", glyph: NF.terminal },
@@ -62,51 +73,66 @@ export function AppSidebar({
 
   return (
     <aside
+      data-collapsed={collapsed || undefined}
       style={{
-        width: "var(--sidebar-width)",
+        width: collapsed ? "var(--rail-max-width)" : "var(--sidebar-width)",
         flexShrink: 0,
         borderRight: "var(--bw-hair) solid var(--line)",
         background: "var(--bg)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        transition: "width var(--dur-fast) var(--ease-out)",
       }}
     >
-      {/* two swap targets — CLI + Desktop */}
-      <div
-        style={{
-          padding: "var(--sp-14) var(--sp-10) var(--sp-10)",
-        }}
-      >
-        <SectionLabel
-          style={{ padding: "0 var(--sp-4) var(--sp-6)" }}
-        >
-          Swap targets
-        </SectionLabel>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--sp-4)",
-          }}
-        >
-          {targets.map((t) => (
-            <SidebarTargetSwitcher
-              key={t.id}
-              target={t}
-              accounts={accounts}
-              boundUuid={binding[t.id]}
-              onBind={onBind}
-              onManage={() => onSelect("accounts")}
-            />
-          ))}
-        </div>
-      </div>
-
-      <Divider style={{ margin: "var(--sp-4) var(--sp-12)" }} />
+      {/* Swap targets — full picker when expanded, hidden when
+          collapsed. The dropdowns need their email labels to be
+          useful at all; reducing them to two unlabelled glyphs would
+          hide which account is currently bound, which is the whole
+          point of the panel. */}
+      {!collapsed && (
+        <>
+          <div
+            style={{
+              padding: "var(--sp-14) var(--sp-10) var(--sp-10)",
+            }}
+          >
+            <SectionLabel
+              style={{ padding: "0 var(--sp-4) var(--sp-6)" }}
+            >
+              Swap targets
+            </SectionLabel>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--sp-4)",
+              }}
+            >
+              {targets.map((t) => (
+                <SidebarTargetSwitcher
+                  key={t.id}
+                  target={t}
+                  accounts={accounts}
+                  boundUuid={binding[t.id]}
+                  onBind={onBind}
+                  onManage={() => onSelect("accounts")}
+                />
+              ))}
+            </div>
+          </div>
+          <Divider style={{ margin: "var(--sp-4) var(--sp-12)" }} />
+        </>
+      )}
 
       {/* primary nav */}
-      <div style={{ padding: "var(--sp-4) var(--sp-8)" }}>
+      <div
+        style={{
+          padding: collapsed
+            ? "var(--sp-14) var(--sp-4) var(--sp-4)"
+            : "var(--sp-4) var(--sp-8)",
+        }}
+      >
         {sections.map((s) => (
           <SidebarItem
             key={s.id}
@@ -115,30 +141,39 @@ export function AppSidebar({
             active={active === s.id}
             badge={badges?.[s.id] ?? undefined}
             onClick={() => onSelect(s.id)}
+            collapsed={collapsed}
+            title={collapsed ? s.label : undefined}
           />
         ))}
       </div>
 
-      <Divider style={{ margin: "var(--sp-8) var(--sp-12)" }} />
+      {!collapsed && (
+        <Divider style={{ margin: "var(--sp-8) var(--sp-12)" }} />
+      )}
 
       {/* Live Activity strip — render-if-nonzero, so the divider
-          and label disappear together when no sessions are active. */}
-      {onOpenLiveSession && (
+          and label disappear together when no sessions are active.
+          Hidden in collapsed mode since session previews need width. */}
+      {!collapsed && onOpenLiveSession && (
         <SidebarLiveStrip onOpenSession={onOpenLiveSession} />
       )}
 
       <div style={{ flex: 1 }} />
 
-      {/* sync strip */}
+      {/* Sync + collapse strip. Expanded: dot · "synced" · version ·
+          chevron. Collapsed: dot + chevron stacked, no text. */}
       <div
         style={{
-          padding: "var(--sp-10) var(--sp-14)",
+          padding: collapsed
+            ? "var(--sp-8) var(--sp-4)"
+            : "var(--sp-10) var(--sp-14)",
           borderTop: "var(--bw-hair) solid var(--line)",
           fontSize: "var(--fs-xs)",
           color: "var(--fg-faint)",
           display: "flex",
+          flexDirection: collapsed ? "column" : "row",
           alignItems: "center",
-          gap: "var(--sp-8)",
+          gap: collapsed ? "var(--sp-6)" : "var(--sp-8)",
         }}
       >
         <Glyph
@@ -146,9 +181,46 @@ export function AppSidebar({
           color={synced ? "var(--ok)" : "var(--warn)"}
           style={{ fontSize: "var(--fs-4xs)" }}
         />
-        <span>{synced ? "synced" : "syncing…"}</span>
-        <span style={{ flex: 1 }} />
-        {version && <span>{version}</span>}
+        {!collapsed && (
+          <>
+            <span>{synced ? "synced" : "syncing…"}</span>
+            <span style={{ flex: 1 }} />
+            {version && <span>{version}</span>}
+          </>
+        )}
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            title={
+              collapsed
+                ? "Expand sidebar (⌘\\)"
+                : "Collapse sidebar (⌘\\)"
+            }
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+            className="pm-focus"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "var(--sp-22)",
+              height: "var(--sp-22)",
+              padding: 0,
+              marginLeft: collapsed ? 0 : "var(--sp-4)",
+              background: "transparent",
+              border: "var(--bw-hair) solid transparent",
+              borderRadius: "var(--r-1)",
+              color: "var(--fg-muted)",
+              cursor: "pointer",
+            }}
+          >
+            <Glyph
+              g={collapsed ? NF.chevronR : NF.chevronL}
+              style={{ fontSize: "var(--fs-xs)" }}
+            />
+          </button>
+        )}
       </div>
     </aside>
   );

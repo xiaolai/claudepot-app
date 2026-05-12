@@ -58,6 +58,8 @@ import {
   Moon,
   MoreVertical,
   Package,
+  PanelLeft,
+  PanelLeftClose,
   Pin,
   Play,
   Plus,
@@ -128,6 +130,12 @@ export const NF = {
   ellipsis:   MoreVertical,
   arrowR:     ArrowRight,
   arrowUpR:   ArrowUpRight,
+  /** Sidebar toggle — `sidebarOpen` shows a closed panel (chevron pointing
+   *  out) inviting the user to expand; `sidebarClose` shows the panel
+   *  open inviting them to collapse. Lucide names are `PanelLeft` /
+   *  `PanelLeftClose`. */
+  sidebarOpen:  PanelLeft,
+  sidebarClose: PanelLeftClose,
   copy:       Copy,
   trash:      Trash2,
   edit:       Edit,

@@ -4,6 +4,8 @@ import { useAppState } from "../providers/AppStateProvider";
 import { RunningOpsChip } from "../components/RunningOpsChip";
 import { PendingJournalsChip } from "../components/PendingJournalsChip";
 import { ServiceStatusDot } from "./ServiceStatusDot";
+import { Glyph } from "../components/primitives/Glyph";
+import { NF } from "../icons";
 import type {
   LiveSessionSummary,
   PendingJournalsSummary,
@@ -40,6 +42,11 @@ export interface AppStatusBarProps {
   onOpenRepair?: () => void;
   /** Click target for the live-sessions segment — typically jumps to Activity. */
   onOpenLive?: () => void;
+  /** Current sidebar-collapse state — drives the leftmost toggle's glyph
+   *  and aria-label. Omitting the prop hides the toggle entirely. */
+  sidebarCollapsed?: boolean;
+  /** Toggle the sidebar's collapsed/expanded state. */
+  onToggleSidebar?: () => void;
 }
 
 /**
@@ -68,6 +75,8 @@ export function AppStatusBar({
   pendingSummary,
   onOpenRepair,
   onOpenLive,
+  sidebarCollapsed,
+  onToggleSidebar,
 }: AppStatusBarProps) {
   const live = useSessionLive();
   const liveSegment = formatLiveSegment(live);
@@ -141,6 +150,51 @@ export function AppStatusBar({
         textTransform: "uppercase",
       }}
     >
+      {onToggleSidebar && (
+        // Sidebar toggle anchored at the bar's far-left. Duplicates
+        // the chevron in the sidebar itself so the affordance is
+        // reachable even when the sidebar is collapsed to a rail
+        // and the user's pointer is nowhere near it. Tooltip and
+        // aria-label flip with state; the ⌘\ hint stays so the
+        // keyboard shortcut is discoverable from here too.
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          title={
+            sidebarCollapsed
+              ? "Expand sidebar (⌘\\)"
+              : "Collapse sidebar (⌘\\)"
+          }
+          aria-label={
+            sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+          }
+          aria-pressed={sidebarCollapsed === true}
+          className="pm-focus"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "var(--sp-20)",
+            height: "var(--sp-20)",
+            padding: 0,
+            background: "transparent",
+            border: "var(--bw-hair) solid transparent",
+            borderRadius: "var(--r-1)",
+            color: "var(--fg-muted)",
+            cursor: "pointer",
+            // Pull the button slightly left so it sits against the
+            // bar's left edge inset, matching where a status-bar
+            // platform glyph usually anchors.
+            marginLeft: "calc(var(--sp-4) * -1)",
+          }}
+        >
+          <Glyph
+            g={sidebarCollapsed ? NF.sidebarOpen : NF.sidebarClose}
+            style={{ fontSize: "var(--fs-xs)" }}
+          />
+        </button>
+      )}
+
       {liveSegment && (
         <LiveSegment text={liveSegment} onClick={onOpenLive} />
       )}
