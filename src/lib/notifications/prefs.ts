@@ -14,6 +14,52 @@
 import { settingsApi, type CategoryPrefs } from "../../api/settings";
 import type { Category } from "./types";
 
+/**
+ * Per-category cold-start defaults. Must match
+ * `claudepot_core::notifications::Category::display_meta().default_enabled`
+ * — categories that default OFF in Rust (notify_on_error,
+ * notify_on_op_done, notify_on_stuck_minutes) must default OFF here
+ * too, otherwise the brief window before the prefs cache hydrates
+ * would dispatch notifications the user has not opted into.
+ *
+ * Update in lockstep when adding a category. The
+ * `CATEGORY_NAMES.length` mirror test in types.test.ts catches
+ * missing entries.
+ */
+const COLD_START_ENABLED_BY_DEFAULT: ReadonlyArray<Category> = [
+  // P0 — always on (blocking by definition)
+  "accountAuthRejected",
+  "keychainLocked",
+  "ccSlotDrift",
+  "desktopDrift",
+  "repairConflict",
+  // P1 — opt-in by default (audit-validated activity policy)
+  "sessionWaiting",
+  "rotationSuggested",
+  "usageThreshold",
+  "updateInstallReady",
+  // P2 — acknowledgements default on
+  "accountVerified",
+  "accountSwitched",
+  "projectRenamed",
+  "projectRepaired",
+  "sessionPruned",
+  "keyCopied",
+  "keyAdded",
+  "keyRemoved",
+  "configEdited",
+  "automationRan",
+  "rotationApplied",
+  "rotationFailed",
+  "bannerResolved",
+  // P3 — ambient default on (they're log-only by route)
+  "memoryChanged",
+  "configTreePatched",
+  "serviceStatusChanged",
+  "updateAvailable",
+];
+const COLD_START_ENABLED_SET = new Set<Category>(COLD_START_ENABLED_BY_DEFAULT);
+
 let cache: Partial<Record<Category, CategoryPrefs>> = {};
 let hydrated = false;
 const subscribers = new Set<() => void>();
@@ -29,11 +75,16 @@ function notify() {
 }
 
 /** Read the effective preference for `category`. Falls back to the
- *  cold-start default when the cache hasn't hydrated yet — the
- *  default is "enabled, OS follows priority", which matches the
- *  Rust side. */
+ *  category-aware cold-start default when the cache hasn't hydrated
+ *  yet — mirrors Rust's `default_prefs_for()` so categories that
+ *  ship default-off (sessionStuck, sessionErrorBurst,
+ *  opDoneUnfocused) stay off during the hydration window. */
 export function getCategoryPref(category: Category): CategoryPrefs {
-  return cache[category] ?? { enabled: true, osOverride: null };
+  if (cache[category]) return cache[category]!;
+  return {
+    enabled: COLD_START_ENABLED_SET.has(category),
+    osOverride: null,
+  };
 }
 
 /** Subscribe to cache changes. Returns an unsubscribe. */

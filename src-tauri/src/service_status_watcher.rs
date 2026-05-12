@@ -143,26 +143,34 @@ fn record_transition(
     let (title, body) = transition_message(prev, new, summary);
 
     // Phase 2 fix for audit issue #2: this watcher used to write
-    // `source: Toast` even though no toast ever rendered (the
-    // transition was logged solely for the bell popover; the OS
-    // banner is gated by `os_notify_on_change`). The result was a
-    // misleading source filter — entries tagged Toast that the
-    // user had no chance to see.
+    // `source: Toast` even though no toast ever rendered.
     //
-    // The fix routes through `append_routed` with explicit surface
-    // vectors: `surfaces_requested = [OsBanner]` iff the OS toggle
-    // is on (else empty), and `surfaces_delivered` reflects the
-    // actual OS dispatch outcome.
-    let surfaces_requested: Vec<Surface> = if settings.os_notify_on_change {
-        vec![Surface::OsBanner]
-    } else {
-        Vec::new()
+    // Audit-fix High #6: surfaces_requested is now derived from the
+    // CategoryPrefs map (via `effective_os_surface`) rather than
+    // the legacy `os_notify_on_status_change` scalar alone, so the
+    // routing matches what the renderer's emit() would compute for
+    // the same category. The settings.os_notify_on_change scalar
+    // is the "wants_os" priority default; `os_override` flips it.
+    // P3 categories normally don't want OS, but
+    // ServiceStatusChanged opts in via the scalar.
+    let surfaces_requested: Vec<Surface> = {
+        let prefs_state = app.state::<crate::preferences::PreferencesState>();
+        let guard = prefs_state
+            .0
+            .lock()
+            .expect("preferences mutex poisoned");
+        crate::preferences::effective_os_surface(
+            &guard,
+            Category::ServiceStatusChanged,
+            settings.os_notify_on_change,
+        )
     };
+    let should_dispatch_os = surfaces_requested.contains(&Surface::OsBanner);
 
     // Attempt the OS dispatch first when requested, so we can record
     // the delivered outcome in the same append.
     let mut surfaces_delivered: Vec<Surface> = Vec::new();
-    if settings.os_notify_on_change {
+    if should_dispatch_os {
         use tauri_plugin_notification::NotificationExt;
         match app
             .notification()
@@ -178,8 +186,11 @@ fn record_transition(
         }
     }
 
+    // Audit-fix Medium #11: propagate persistence failures rather
+    // than discarding them with `let _ =`. Caller already handles
+    // `Result<(), String>` and the top-level tick logs any error.
     if let Some(log) = app.try_state::<NotificationLogState>() {
-        let _ = log.log.append_routed(
+        if let Err(e) = log.log.append_routed(
             Category::ServiceStatusChanged,
             Priority::P3Ambient,
             NotificationKind::Notice,
@@ -190,7 +201,10 @@ fn record_transition(
             serde_json::Value::Null,
             surfaces_requested,
             surfaces_delivered,
-        );
+        ) {
+            tracing::warn!(error = %e, "service_status_watcher: log append failed");
+            return Err(format!("notification_log append failed: {e}"));
+        }
     }
 
     Ok(())

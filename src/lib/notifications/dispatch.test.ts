@@ -74,7 +74,9 @@ describe("emit() single-row logging invariant", () => {
     expect(logAppendRouted).toHaveBeenCalledWith(
       expect.objectContaining({
         category: "projectRenamed",
-        priority: "p2Acknowledge",
+        // Audit-fix High #7: priority is derived server-side; the
+        // IPC arg no longer carries it. The Rust enum is the
+        // single source-of-truth for category→priority.
         surfacesRequested: ["toast"],
         surfacesDelivered: ["toast"],
       }),

@@ -190,11 +190,15 @@ export function buildEmit(deps: EmitDeps): EmitFn {
     // watcher persists first, the renderer just dispatches and
     // marks delivered against the existing id.
     let logId: number | null = event.preexistingLogId ?? null;
-    if (logId === null) {
+    if (logId === null && surfaces.log) {
       try {
+        // Audit-fix High #7 / Low #16: priority is derived server-
+        // side from category; we drop the field from the IPC arg.
+        // Also: only append when `surfaces.log` is true — future
+        // categories that opt out of logging (e.g. spam-class events)
+        // now have a clean opt-out instead of being silently logged.
         logId = await logAppend({
           category: event.category,
-          priority,
           kind,
           title: event.title,
           body: event.body ?? "",
@@ -225,6 +229,11 @@ export function buildEmit(deps: EmitDeps): EmitFn {
           undoLabel: action?.label,
           undoMs: action?.timeoutMs,
           onCommit: action?.onCommit,
+          // Audit-fix Medium #9: forward toastDurationMs so callers
+          // that previously passed `durationMs` directly to pushToast
+          // (e.g. sticky error toasts that need to stay visible) keep
+          // their behavior after the wrap migration.
+          durationMs: event.toastDurationMs,
         },
       );
     }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEmit } from "../providers/AppStateProvider";
 import type { EmitFn } from "../lib/notifications/dispatch";
+import { redactSecrets } from "../lib/redactSecrets";
 
 /**
  * `useOpDoneNotifications` — fires through `emit()` when a long-
@@ -45,13 +46,21 @@ function dispatchPayload(emit: EmitFn, payload: OpTerminalWire): void {
     payload.status === "error"
       ? `Operation failed: ${payload.label}`
       : payload.label;
-  // Trim error detail to a one-liner — the backend already
-  // redacts sk-ant-* upstream, but the body should still stay
-  // readable in a tray-corner banner. Truncate at 200 chars.
+  // Defense-in-depth secret redaction. The backend redacts sk-ant-*
+  // upstream in most paths, but a panic backtrace or third-party
+  // crate error string could still surface a raw token. Redact
+  // client-side before persisting to the bell log or rendering an
+  // OS banner — `.claude/rules/design.md` non-negotiable: credentials
+  // never rendered.
+  const redactedError = payload.error
+    ? redactSecrets(payload.error)
+    : payload.error;
+  // Trim error detail to a one-liner — keep the toast readable in
+  // a tray-corner banner. Truncate at 200 chars.
   const errBody =
-    payload.error && payload.error.length > 200
-      ? `${payload.error.slice(0, 199)}…`
-      : payload.error;
+    redactedError && redactedError.length > 200
+      ? `${redactedError.slice(0, 199)}…`
+      : redactedError;
   const body =
     payload.status === "error" && errBody
       ? errBody

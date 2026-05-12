@@ -35,16 +35,66 @@ pub struct CategoryPrefs {
 }
 
 impl Default for CategoryPrefs {
-    /// Default state for a category that has no on-disk entry yet:
-    /// enabled, OS surface follows priority. The runtime
-    /// `Preferences::category_pref(c)` getter substitutes this when
-    /// the map lacks an explicit entry, so adding a new category in
-    /// core never requires a migration step.
+    /// Generic fallback — kept for serde compatibility with hand-
+    /// edited preferences.json entries that lack the `enabled`
+    /// field. The runtime `category_pref()` getter uses the
+    /// category-aware [`default_prefs_for`] instead so each
+    /// category honors its `display_meta().default_enabled` policy
+    /// (e.g. `SessionStuck`, `OpDoneUnfocused`, and
+    /// `SessionErrorBurst` default OFF per the audit-validated
+    /// activity-feature contract).
     fn default() -> Self {
         Self {
             enabled: true,
             os_override: None,
         }
+    }
+}
+
+/// Build the canonical default `CategoryPrefs` for `category`.
+/// Reads `Category::display_meta().default_enabled` so the runtime
+/// fallback honors each category's documented default policy.
+pub fn default_prefs_for(category: Category) -> CategoryPrefs {
+    CategoryPrefs {
+        enabled: category.display_meta().default_enabled,
+        os_override: None,
+    }
+}
+
+/// Effective surface request set for `category` under the current
+/// user preferences. Audit-fix High #6: Rust-originated watchers
+/// (usage_watcher, service_status_watcher) used to construct
+/// `surfaces_requested` from a sub-set of legacy scalars, bypassing
+/// `CategoryPrefs.enabled` and the `os_override` toggle that the
+/// renderer-side emit() honors.
+///
+/// This helper centralizes the policy so both paths agree:
+///
+///   * `category_prefs(c).enabled == false` ⇒ `[]` (log-only).
+///   * `enabled == true` and `wants_os` is true OR
+///     `category_prefs(c).os_override == Some(true)` ⇒ `[OsBanner]`.
+///   * `enabled == true` and OS is off ⇒ `[]`.
+///
+/// `wants_os` reflects the priority default the watcher would
+/// otherwise apply (e.g. P1 categories want OS by default; P3
+/// categories don't). The user's `os_override` flips it.
+pub fn effective_os_surface(
+    prefs: &Preferences,
+    category: Category,
+    wants_os: bool,
+) -> Vec<claudepot_core::notifications::Surface> {
+    let cp = prefs.category_pref(category);
+    if !cp.enabled {
+        return Vec::new();
+    }
+    let os = match cp.os_override {
+        Some(v) => v,
+        None => wants_os,
+    };
+    if os {
+        vec![claudepot_core::notifications::Surface::OsBanner]
+    } else {
+        Vec::new()
     }
 }
 
@@ -306,7 +356,13 @@ impl Preferences {
         }
         let s = serde_json::to_string_pretty(self)
             .map_err(|e| format!("preferences: serialize: {e}"))?;
-        std::fs::write(&p, s).map_err(|e| format!("preferences: write {}: {}", p.display(), e))?;
+        // Audit-fix Low #14: use the shared atomic-write helper so
+        // a crash mid-write doesn't leave preferences.json
+        // partially serialized and reset the user's settings on
+        // next launch. Same temp-then-rename pattern every other
+        // persisted file in the project uses.
+        claudepot_core::fs_utils::atomic_write(&p, s.as_bytes())
+            .map_err(|e| format!("preferences: atomic_write {}: {}", p.display(), e))?;
         Ok(())
     }
 
@@ -390,14 +446,17 @@ impl Preferences {
         self.category_prefs = m;
     }
 
-    /// Look up the effective preference for `category`. Map lookup
-    /// with a default fallback — keeps call sites short:
-    /// `prefs.category_pref(c).enabled`.
+    /// Look up the effective preference for `category`. Falls back
+    /// to the category-aware default (reading
+    /// `display_meta().default_enabled`) when no explicit entry
+    /// exists — so a fresh install with an empty map still honors
+    /// per-category default policy (e.g. `SessionStuck`,
+    /// `OpDoneUnfocused`, `SessionErrorBurst` default off).
     pub fn category_pref(&self, category: Category) -> CategoryPrefs {
         self.category_prefs
             .get(&category)
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_else(|| default_prefs_for(category))
     }
 
     /// Update a single category's preference and sync any legacy
@@ -534,11 +593,87 @@ mod tests {
         let mut p = v0();
         p.migrate_if_needed();
         // BannerResolved was never in any legacy scalar; the map has
-        // no entry. `category_pref` must return the default
-        // (enabled: true).
+        // no entry. `category_pref` must return the category-aware
+        // default — BannerResolved's display_meta is enabled-by-default.
         let pr = p.category_pref(Category::BannerResolved);
         assert!(pr.enabled);
         assert!(pr.os_override.is_none());
+    }
+
+    #[test]
+    fn test_category_pref_default_honors_display_meta_per_category() {
+        // Audit-fix High #2: categories that ship default-OFF in
+        // display_meta() (notify_on_error, notify_on_op_done,
+        // notify_on_stuck_minutes families) must NOT be treated as
+        // enabled when their map entry is missing. A plain
+        // `CategoryPrefs::default()` would have flipped them all to
+        // `true` regardless of display_meta — the bug this fix
+        // closes.
+        let p = Preferences {
+            schema_version: PREFS_SCHEMA_VERSION_CURRENT,
+            category_prefs: HashMap::new(),
+            ..Preferences::default()
+        };
+        // SessionStuck / SessionErrorBurst / OpDoneUnfocused ship
+        // default-off in display_meta (matching audit-validated
+        // activity defaults).
+        assert!(!p.category_pref(Category::SessionStuck).enabled);
+        assert!(!p.category_pref(Category::SessionErrorBurst).enabled);
+        assert!(!p.category_pref(Category::OpDoneUnfocused).enabled);
+        // SessionWaiting / UsageThreshold ship default-on.
+        assert!(p.category_pref(Category::SessionWaiting).enabled);
+        assert!(p.category_pref(Category::UsageThreshold).enabled);
+    }
+
+    #[test]
+    fn test_effective_os_surface_honors_enabled_and_override() {
+        // Audit-fix High #6 helper: drives both watchers.
+        let mut p = Preferences::default();
+        // Disabled category yields empty surface regardless of
+        // wants_os.
+        p.set_category_pref(
+            Category::UsageThreshold,
+            CategoryPrefs {
+                enabled: false,
+                os_override: None,
+            },
+        );
+        assert!(effective_os_surface(&p, Category::UsageThreshold, true).is_empty());
+        // Enabled + os_override=Some(false) → no OS even if priority
+        // wants it.
+        p.set_category_pref(
+            Category::UsageThreshold,
+            CategoryPrefs {
+                enabled: true,
+                os_override: Some(false),
+            },
+        );
+        assert!(effective_os_surface(&p, Category::UsageThreshold, true).is_empty());
+        // Enabled + os_override=Some(true) → OS even when wants_os=false.
+        p.set_category_pref(
+            Category::UsageThreshold,
+            CategoryPrefs {
+                enabled: true,
+                os_override: Some(true),
+            },
+        );
+        assert_eq!(
+            effective_os_surface(&p, Category::UsageThreshold, false),
+            vec![claudepot_core::notifications::Surface::OsBanner],
+        );
+        // Enabled + os_override=None → follows wants_os.
+        p.set_category_pref(
+            Category::UsageThreshold,
+            CategoryPrefs {
+                enabled: true,
+                os_override: None,
+            },
+        );
+        assert_eq!(
+            effective_os_surface(&p, Category::UsageThreshold, true),
+            vec![claudepot_core::notifications::Surface::OsBanner],
+        );
+        assert!(effective_os_surface(&p, Category::UsageThreshold, false).is_empty());
     }
 
     #[test]

@@ -89,10 +89,12 @@ export interface NotificationLogAppendArgs {
 }
 
 /** Args for the routed-emit IPC introduced in Phase 1. Mirrors the
- *  Rust DTO; the `emit()` facade is the only producer of these. */
+ *  Rust DTO; the `emit()` facade is the only producer of these.
+ *
+ *  `priority` is derived server-side from `category` (audit-fix
+ *  High #7) so a TS drift can't persist impossible rows. */
 export interface NotificationLogAppendRoutedArgs {
   category: Category;
-  priority: Priority;
   kind: NotificationKind;
   title: string;
   body?: string;

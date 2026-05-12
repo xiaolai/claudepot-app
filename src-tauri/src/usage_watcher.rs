@@ -218,32 +218,42 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
         }
     };
 
-    // 4. Detect crossings. `kinds` reflects the user's
-    //    sub-window opt-in; `apply_crossings` coalesces multi-
-    //    threshold crossings within a single window/poll to one
-    //    Crossing for the highest threshold.
-    let crossings = state.apply_crossings(account_uuid, &resp, &thresholds, &kinds);
+    // 4. Detect crossings on a CLONE of the state so a save failure
+    //    doesn't poison the in-memory fired-set (audit-fix High #5).
+    //    Before this fix, `apply_crossings` mutated `state` in place;
+    //    when the subsequent save errored, the in-memory copy still
+    //    showed the crossings as fired, so the next tick wouldn't
+    //    re-detect them and the alert was permanently lost.
+    //    The new shape: clone → detect → save the clone → commit to
+    //    `state` only when save succeeds.
+    let mut candidate_state = state.clone();
+    let crossings =
+        candidate_state.apply_crossings(account_uuid, &resp, &thresholds, &kinds);
     if crossings.is_empty() {
         return;
     }
 
-    // 5. Persist updated fired-sets BEFORE emitting events. The order
+    // 5. Persist the updated fired-sets BEFORE emitting events. Order
     //    matters: when persistence fails, we MUST NOT emit, because
     //    the in-memory fired-set is the next-launch dedupe and a
     //    successful emit + failed save means the user gets a
     //    duplicate toast on the next cold start.
     //
     //    Trade-off when save fails: the user silently misses this
-    //    cycle's alert, but they don't get spammed on restart. The
-    //    failure path is rare (disk full or ~/.claudepot/ permissions
-    //    are unusual), and the journal warning gives ops a recovery
-    //    breadcrumb. The previous version logged JoinError but
-    //    silently dropped real I/O failures AND emitted anyway,
-    //    which guaranteed dupe-on-restart with no diagnostic.
-    let save_state = state.clone();
+    //    cycle's alert, but they don't get spammed on restart AND
+    //    the unmodified `state` will re-detect the crossing on the
+    //    next tick. Failure path is rare (disk full or
+    //    ~/.claudepot/ permissions are unusual); the journal warning
+    //    gives ops a recovery breadcrumb.
+    let save_state = candidate_state.clone();
     let save_outcome = tauri::async_runtime::spawn_blocking(move || save_state.save()).await;
     match save_outcome {
-        Ok(Ok(())) => {}
+        Ok(Ok(())) => {
+            // Commit the in-memory update only AFTER save succeeded.
+            // If we reach here without this commit, the next tick
+            // would re-detect (and re-fire) the same crossings.
+            *state = candidate_state;
+        }
         Ok(Err(e)) => {
             tracing::warn!(
                 error = %e,
@@ -269,6 +279,23 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
     //    The pre-persist runs BEFORE the emit so a renderer that
     //    actually IS alive doesn't process the event with a stale
     //    "no log entry yet" view.
+    // Read effective CategoryPrefs ONCE per tick. The watcher honors
+    // `UsageThreshold.enabled` AND `os_override` so the
+    // Rust-originated entry agrees with what the renderer's emit()
+    // would compute for the same category. Audit-fix High #6.
+    let surfaces_requested: Vec<Surface> = {
+        let prefs_state = app.state::<crate::preferences::PreferencesState>();
+        let guard = prefs_state
+            .0
+            .lock()
+            .expect("preferences mutex poisoned");
+        crate::preferences::effective_os_surface(
+            &guard,
+            Category::UsageThreshold,
+            true, // P1 default
+        )
+    };
+
     let log_state = app.try_state::<NotificationLogState>();
     for c in crossings {
         let log_id = log_state.as_ref().and_then(|log| {
@@ -287,7 +314,7 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
                     title,
                     body,
                     serde_json::Value::Null,
-                    vec![Surface::OsBanner],
+                    surfaces_requested.clone(),
                     Vec::new(),
                 )
                 .ok()

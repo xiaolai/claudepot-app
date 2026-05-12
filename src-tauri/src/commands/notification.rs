@@ -25,7 +25,46 @@ use claudepot_core::notification_log::{
     NotificationEntry, NotificationKind, NotificationLog, NotificationLogFilter,
     NotificationSource, SortOrder,
 };
-use claudepot_core::notifications::{Category, CategoryMeta, Priority, Surface};
+use claudepot_core::notifications::{Category, CategoryMeta, Surface};
+
+/// Per-field byte caps for notification log entries. The ring
+/// buffer holds 500 entries; without per-field caps a renderer bug
+/// could persist multi-megabyte titles/bodies and make every list
+/// IPC O(n × MB). Audit-fix Medium #12.
+const MAX_TITLE_LEN: usize = 256;
+const MAX_BODY_LEN: usize = 2048;
+/// Target JSON cap — serialized form. We bound the input string
+/// length post-serialize so the renderer's `NotificationTarget`
+/// shapes (small discriminated unions) easily fit.
+const MAX_TARGET_BYTES: usize = 4096;
+
+/// Truncate `s` to `max` bytes on a char boundary, appending an
+/// ellipsis when truncated. Cheap defense against a renderer bug
+/// flooding the ring buffer with huge strings.
+fn cap_string(s: String, max: usize) -> String {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = s[..end].to_string();
+    out.push('…');
+    out
+}
+
+/// Drop oversize JSON targets to `null`. The bell-popover click
+/// route doesn't degrade when this happens — it just doesn't have a
+/// click destination for that one entry.
+fn cap_target(t: serde_json::Value) -> serde_json::Value {
+    let serialized_len = serde_json::to_string(&t).map(|s| s.len()).unwrap_or(0);
+    if serialized_len > MAX_TARGET_BYTES {
+        serde_json::Value::Null
+    } else {
+        t
+    }
+}
 
 /// Tauri-managed handle to the open notification log. Cheap to clone
 /// (single Arc); construction is the single file read on app boot.
@@ -139,8 +178,11 @@ pub async fn notification_log_append(
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let log = std::sync::Arc::clone(&state.log);
+    let title = cap_string(args.title, MAX_TITLE_LEN);
+    let body = cap_string(args.body, MAX_BODY_LEN);
+    let target = cap_target(args.target);
     let id = tokio::task::spawn_blocking(move || {
-        log.append(args.source, args.kind, args.title, args.body, args.target)
+        log.append(args.source, args.kind, title, body, target)
             .map_err(|e| format!("notification_log append failed: {e}"))
     })
     .await
@@ -223,13 +265,18 @@ pub async fn notification_log_unread_count(
 // stays for the migration-shim window (Phase 1 → Phase 3) so unmigrated
 // sites keep their bell entries.
 
-/// DTO for `notification_log_append_routed`. Carries the full routing
+/// DTO for `notification_log_append_routed`. Carries the routing
 /// metadata the new `emit()` facade computed before dispatch.
+///
+/// Audit-fix High #7: `priority` is NOT in this DTO. The server
+/// derives it from `category` via `Category::priority()` so a
+/// renderer drift can't persist impossible rows (e.g. a P3 category
+/// tagged P0). Same applies to `surfaces_delivered` — entries
+/// outside `surfaces_requested` are filtered in `append_routed`.
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationLogAppendRoutedArgs {
     pub category: Category,
-    pub priority: Priority,
     pub kind: NotificationKind,
     pub title: String,
     #[serde(default)]
@@ -256,14 +303,22 @@ pub async fn notification_log_append_routed(
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let log = std::sync::Arc::clone(&state.log);
+    // Derive priority server-side (audit-fix High #7) so a renderer
+    // drift can never persist an impossible row. The Rust enum's
+    // exhaustive `Category::priority()` binding is the
+    // single source-of-truth.
+    let priority = args.category.priority();
+    let title = cap_string(args.title, MAX_TITLE_LEN);
+    let body = cap_string(args.body, MAX_BODY_LEN);
+    let target = cap_target(args.target);
     let id = tokio::task::spawn_blocking(move || {
         log.append_routed(
             args.category,
-            args.priority,
+            priority,
             args.kind,
-            args.title,
-            args.body,
-            args.target,
+            title,
+            body,
+            target,
             args.surfaces_requested,
             args.surfaces_delivered,
         )

@@ -188,6 +188,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               timeoutMs: opts?.undoMs,
             }
           : undefined,
+        // Audit-fix Medium #9: forward durationMs through to the
+        // primitive — callers that pass it (e.g. sticky error
+        // toasts the user must dismiss manually) silently regressed
+        // to the default before this fix.
+        toastDurationMs: opts?.durationMs,
       });
     },
     [emit],

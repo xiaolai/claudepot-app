@@ -40,6 +40,7 @@ use std::sync::Mutex;
 
 use crate::fs_utils::atomic_write;
 use crate::notifications::{Category, Priority, Surface};
+use crate::session_export::redact_secrets;
 
 /// Hard ring-buffer cap. 500 × ~200 B = ~100 KB on disk in the worst
 /// case. Bump if traffic grows past one notification per minute on a
@@ -333,6 +334,14 @@ impl NotificationLog {
         body: String,
         target: serde_json::Value,
     ) -> std::io::Result<u64> {
+        // Defense-in-depth: redact `sk-ant-*` tokens before they
+        // touch the persistent log. The renderer also redacts at
+        // emit time, but a panic backtrace or third-party crate's
+        // error string can route around the renderer (Rust-side
+        // direct writes from service_status_watcher /
+        // usage_watcher). `.claude/rules/design.md` non-negotiable.
+        let title = redact_secrets(&title);
+        let body = redact_secrets(&body);
         let mut g = lock_inner(&self.inner);
         let id = g.next_id;
         g.next_id = g.next_id.saturating_add(1);
@@ -378,6 +387,21 @@ impl NotificationLog {
         surfaces_requested: Vec<Surface>,
         surfaces_delivered: Vec<Surface>,
     ) -> std::io::Result<u64> {
+        // Defense-in-depth redaction at the persistence boundary —
+        // same rationale as `append()`. See that fn for the policy.
+        let title = redact_secrets(&title);
+        let body = redact_secrets(&body);
+        // Reject `surfaces_delivered` entries that weren't in
+        // `surfaces_requested` — drops the bug class where a renderer
+        // marks a surface as delivered when it was never requested.
+        // We trim defensively rather than erroring so a borderline
+        // race (e.g. renderer asks for OS, dispatcher reports
+        // delivery, pref toggle flipped mid-flight) still records the
+        // best truth we have.
+        let surfaces_delivered: Vec<Surface> = surfaces_delivered
+            .into_iter()
+            .filter(|s| surfaces_requested.contains(s))
+            .collect();
         let mut g = lock_inner(&self.inner);
         let id = g.next_id;
         g.next_id = g.next_id.saturating_add(1);
@@ -414,6 +438,15 @@ impl NotificationLog {
         let Some(entry) = entry else {
             return Ok(false);
         };
+        // Reject delivery marks for surfaces that weren't in
+        // `surfaces_requested` — a renderer bug or malicious IPC
+        // shouldn't be able to claim "we delivered on this surface"
+        // when routing never asked for it. Caller treats `false` as
+        // "entry not updated"; the dispatcher already swallows that
+        // outcome (best-effort post-confirmation).
+        if !entry.surfaces_requested.contains(&surface) {
+            return Ok(false);
+        }
         if entry.surfaces_delivered.contains(&surface) {
             // Idempotent; no persist needed.
             return Ok(true);

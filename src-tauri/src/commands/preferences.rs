@@ -97,36 +97,99 @@ pub async fn preferences_set_notifications(
     // the guard, then hand the disk write to a blocking task so the
     // IPC worker doesn't sit on a `write_all` while every other
     // preferences read contends for the same mutex.
+    use claudepot_core::notifications::Category;
     let snapshot = {
         let mut prefs = state
             .0
             .lock()
             .map_err(|e| format!("preferences lock: {e}"))?;
+        // Mirror every scalar setter back into `category_prefs` via
+        // `set_category_pref` so the new routing pipeline sees the
+        // change immediately. Without this, the emit() facade keeps
+        // reading the stale CategoryPrefs map and toggles "applied"
+        // by the user via this legacy IPC have no behavioral effect
+        // on dispatch. (Audit-fix High #3.)
+        //
+        // We snapshot the existing os_override BEFORE calling
+        // set_category_pref so the borrow checker is happy (one
+        // mutable borrow at a time on `prefs`).
         if let Some(v) = on_error {
-            prefs.notify_on_error = v;
+            let os_override = prefs.category_pref(Category::SessionErrorBurst).os_override;
+            prefs.set_category_pref(
+                Category::SessionErrorBurst,
+                crate::preferences::CategoryPrefs {
+                    enabled: v,
+                    os_override,
+                },
+            );
         }
         if let Some(v) = on_idle_done {
             prefs.notify_on_idle_done = v;
+            // OpDoneUnfocused maps to both idle-done and op-done
+            // scalars; only flip the category to disabled if BOTH
+            // scalars are off (matches migrate_to_v1's OR semantics).
+            let combined = v || prefs.notify_on_op_done;
+            let os_override = prefs.category_pref(Category::OpDoneUnfocused).os_override;
+            prefs.set_category_pref(
+                Category::OpDoneUnfocused,
+                crate::preferences::CategoryPrefs {
+                    enabled: combined,
+                    os_override,
+                },
+            );
         }
         if let Some(v) = on_stuck_minutes {
             prefs.notify_on_stuck_minutes = v;
+            let os_override = prefs.category_pref(Category::SessionStuck).os_override;
+            prefs.set_category_pref(
+                Category::SessionStuck,
+                crate::preferences::CategoryPrefs {
+                    enabled: v.is_some(),
+                    os_override,
+                },
+            );
         }
         if let Some(v) = on_op_done {
             prefs.notify_on_op_done = v;
+            let combined = v || prefs.notify_on_idle_done;
+            let os_override = prefs.category_pref(Category::OpDoneUnfocused).os_override;
+            prefs.set_category_pref(
+                Category::OpDoneUnfocused,
+                crate::preferences::CategoryPrefs {
+                    enabled: combined,
+                    os_override,
+                },
+            );
         }
         if let Some(v) = on_waiting {
-            prefs.notify_on_waiting = v;
+            let os_override = prefs.category_pref(Category::SessionWaiting).os_override;
+            prefs.set_category_pref(
+                Category::SessionWaiting,
+                crate::preferences::CategoryPrefs {
+                    enabled: v,
+                    os_override,
+                },
+            );
         }
         if let Some(mut v) = on_usage_thresholds {
             // Normalize: clamp to 1..=100, sort ascending, dedupe.
-            // 0 is a no-op (always crossed), 100 is unreachable on the
-            // server-reported utilization scale, so trim both ends to
-            // the meaningful range. Empty vec is allowed (= feature
-            // off) and survives the normalization unchanged.
+            // 0 is a no-op (always crossed); 100 is the upper bound
+            // the watcher will actually fire when usage saturates,
+            // so include it in the meaningful range. Empty vec is
+            // allowed (= feature off) and survives the
+            // normalization unchanged.
             v.retain(|&t| (1..=100).contains(&t));
             v.sort_unstable();
             v.dedup();
-            prefs.notify_on_usage_thresholds = v;
+            prefs.notify_on_usage_thresholds = v.clone();
+            let os_override = prefs.category_pref(Category::UsageThreshold).os_override;
+            prefs.set_category_pref(
+                Category::UsageThreshold,
+                crate::preferences::CategoryPrefs {
+                    enabled: !v.is_empty(),
+                    os_override,
+                },
+            );
         }
         if let Some(v) = on_sub_windows {
             prefs.notify_on_sub_windows = v;
@@ -150,12 +213,22 @@ pub async fn preferences_set_show_window_on_startup(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
     show: bool,
 ) -> Result<(), String> {
-    let mut p = state
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock: {e}"))?;
-    p.show_window_on_startup = show;
-    p.save()
+    // Audit-fix Medium #13: snapshot under the lock, drop the
+    // guard, then persist on a blocking thread so the std::sync
+    // mutex isn't held across the disk write. Matches the pattern
+    // used by `preferences_set_activity` /
+    // `preferences_set_notifications` etc.
+    let snapshot = {
+        let mut p = state
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock: {e}"))?;
+        p.show_window_on_startup = show;
+        p.clone()
+    };
+    tokio::task::spawn_blocking(move || snapshot.save())
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))?
 }
 
 /// Set fields on the `service_status` preference block. Same
@@ -183,7 +256,20 @@ pub async fn preferences_set_service_status(
             prefs.service_status.poll_interval_minutes = v.clamp(2, 60);
         }
         if let Some(v) = os_notify_on_status_change {
+            // Mirror into the routed CategoryPrefs map: the OS
+            // banner gate for ServiceStatusChanged is honored
+            // via `os_override`, so emit() / the watcher both
+            // see the toggle. Audit-fix High #3.
             prefs.service_status.os_notify_on_status_change = v;
+            let cat = claudepot_core::notifications::Category::ServiceStatusChanged;
+            let enabled = prefs.category_pref(cat).enabled;
+            prefs.set_category_pref(
+                cat,
+                crate::preferences::CategoryPrefs {
+                    enabled,
+                    os_override: Some(v),
+                },
+            );
         }
         if let Some(v) = probe_latency_on_focus {
             prefs.service_status.probe_latency_on_focus = v;
@@ -213,8 +299,13 @@ pub async fn preferences_category_prefs_get(
         .lock()
         .map_err(|e| format!("preferences lock: {e}"))?;
     let mut out = p.category_prefs.clone();
+    // Backfill missing categories with their per-category defaults
+    // (reads `display_meta().default_enabled`). Plain
+    // `.or_default()` would clobber the policy and treat every
+    // category as enabled.
     for c in claudepot_core::notifications::Category::all() {
-        out.entry(*c).or_default();
+        out.entry(*c)
+            .or_insert_with(|| crate::preferences::default_prefs_for(*c));
     }
     Ok(out)
 }
@@ -229,13 +320,23 @@ pub async fn preferences_category_pref_set(
     category: claudepot_core::notifications::Category,
     prefs: crate::preferences::CategoryPrefs,
 ) -> Result<crate::preferences::CategoryPrefs, String> {
-    let mut p = state
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock: {e}"))?;
-    p.set_category_pref(category, prefs);
-    p.save()?;
-    Ok(p.category_pref(category))
+    // Audit-fix Medium #13: snapshot under the lock, drop, persist
+    // on a blocking task. The std::sync mutex MUST NOT be held
+    // across the disk write — every other preferences reader
+    // contends on the same lock.
+    let (snapshot, refreshed) = {
+        let mut p = state
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock: {e}"))?;
+        p.set_category_pref(category, prefs);
+        let refreshed = p.category_pref(category);
+        (p.clone(), refreshed)
+    };
+    tokio::task::spawn_blocking(move || snapshot.save())
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))??;
+    Ok(refreshed)
 }
 
 /// Toggle the dock-icon visibility (macOS only). On non-macOS platforms
@@ -257,10 +358,16 @@ pub async fn preferences_set_hide_dock_icon(
         app.set_activation_policy(policy)
             .map_err(|e| format!("set_activation_policy: {e}"))?;
     }
-    let mut p = state
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock: {e}"))?;
-    p.hide_dock_icon = hide;
-    p.save()
+    let snapshot = {
+        let mut p = state
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock: {e}"))?;
+        p.hide_dock_icon = hide;
+        p.clone()
+    };
+    // Audit-fix Medium #13: persist off the std::sync mutex.
+    tokio::task::spawn_blocking(move || snapshot.save())
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))?
 }

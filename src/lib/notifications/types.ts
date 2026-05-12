@@ -193,6 +193,15 @@ export interface NotificationEvent {
     timeoutMs?: number;
   };
   /**
+   * Optional override for the toast auto-dismiss timer when no
+   * `toastAction` is set. Maps to `pushToast`'s `durationMs` opt:
+   * pass a finite ms value to control how long the toast stays
+   * visible, or `Infinity` for sticky toasts the user must close.
+   * Default depends on `kind` — error toasts are sticky, info
+   * toasts auto-dismiss at 10 s. Audit-fix Medium #9.
+   */
+  toastDurationMs?: number;
+  /**
    * Boot-race fix for events that Rust-side watchers logged before
    * the renderer mounted. When set, emit() skips the
    * `notificationLogAppendRouted` IPC and uses this id for any

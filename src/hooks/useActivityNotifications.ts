@@ -158,8 +158,15 @@ export function useActivityNotifications(): number {
             : kind === "idle-done"
               ? "opDoneUnfocused"
               : "sessionWaiting";
+      // Audit-fix Medium #8: tag the dispatch kind as `error` for
+      // bursts and `notice` for stuck/idle/waiting transitions.
+      // The default-priority mapping in dispatch.ts would render
+      // every P1 event as `notice`, which misrepresents an
+      // error-burst in the bell.
+      const dispatchKind = kind === "error" ? "error" : "notice";
       void emitRef.current({
         category,
+        kind: dispatchKind,
         title,
         body: `${body} @ ${title}`,
         dedupeKey: `session:${sessionId}:${kind}`,
@@ -186,24 +193,30 @@ export function useActivityNotifications(): number {
 
       const project = labels.get(s.cwd) ?? projectBasename(s.cwd);
 
-      // Error-burst transition. Coalescing now lives in the shared
-      // dispatcher's token bucket — the per-session canFire check
-      // that used to live here was a hand-rolled rate-limit; one
-      // policy is easier to reason about than three.
-      if (
-        prefs.notify_on_error &&
-        s.errored &&
-        !(prev?.lastErrored ?? false)
-      ) {
-        dispatch(s.session_id, s.cwd, "error", project, "multiple errors in the last minute");
+      // Audit-fix High #4: the legacy `prefs.notify_on_*` early-
+      // returns used to short-circuit dispatch entirely, defeating
+      // the routed-log "forensic trail of suppressed events"
+      // contract. emit() now reads CategoryPrefs synchronously and
+      // produces a log-only entry when the category is disabled, so
+      // we always call dispatch() and let routing decide. Only
+      // transitions that genuinely fire get an emit; the surface
+      // gating happens inside.
+
+      // Error-burst transition.
+      if (s.errored && !(prev?.lastErrored ?? false)) {
+        dispatch(
+          s.session_id,
+          s.cwd,
+          "error",
+          project,
+          "multiple errors in the last minute",
+        );
       }
 
-      // Stuck transition
-      if (
-        prefs.notify_on_stuck_minutes != null &&
-        s.stuck &&
-        !(prev?.lastStuck ?? false)
-      ) {
+      // Stuck transition. The threshold value is still used for the
+      // notification copy (the user-facing minutes count); CategoryPrefs
+      // gates whether the surface fires.
+      if (s.stuck && !(prev?.lastStuck ?? false)) {
         dispatch(
           s.session_id,
           s.cwd,
@@ -215,7 +228,6 @@ export function useActivityNotifications(): number {
 
       // Idle-after-work transition (user-facing copy: "task finished")
       if (
-        prefs.notify_on_idle_done &&
         s.status === "idle" &&
         prev?.lastStatus === "busy" &&
         prev.busyStartedMs != null &&
@@ -234,8 +246,8 @@ export function useActivityNotifications(): number {
       // Waiting transition. Fires when the session enters Waiting from
       // any non-Waiting status, OR when the same session is still
       // Waiting but with a different `waiting_for` reason (CC re-arms
-      // for a fresh approval). Same reason repeating is suppressed both
-      // here (lastWaitingReason memo) and downstream (dispatcher
+      // for a fresh approval). Same reason repeating is suppressed
+      // both here (lastWaitingReason memo) and downstream (dispatcher
       // token bucket on `session:<sid>:waiting`).
       const reason = s.waiting_for ?? null;
       const enteredWaiting =
@@ -250,7 +262,7 @@ export function useActivityNotifications(): number {
       if (s.status !== "waiting") {
         waitingReasonForMemo = null;
       }
-      if (prefs.notify_on_waiting && (enteredWaiting || reasonChanged)) {
+      if (enteredWaiting || reasonChanged) {
         dispatch(
           s.session_id,
           s.cwd,
@@ -260,8 +272,9 @@ export function useActivityNotifications(): number {
         );
         waitingReasonForMemo = reason;
       } else if (s.status === "waiting" && waitingReasonForMemo === null) {
-        // Track that we saw the entry even when the toggle was off,
-        // so flipping it on later doesn't replay an old waiting state.
+        // Track that we saw the entry even when no transition fired,
+        // so a later real transition doesn't replay an old waiting
+        // state.
         waitingReasonForMemo = reason;
       }
 
