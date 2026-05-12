@@ -1,6 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { NfIcon } from "../icons";
 import { api } from "../api";
+import type { CategoryMeta } from "../api/notification";
+import type { CategoryPrefs as CategoryPrefsType } from "../api/settings";
+import type { Category } from "../lib/notifications/types";
+import {
+  setCategoryPrefLocal,
+  updateCategoryPref,
+} from "../lib/notifications/prefs";
 import { Button } from "../components/primitives/Button";
 import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
@@ -1602,7 +1616,169 @@ function NotificationsPane({
           </Button>
         </Row>
       </SettingsGroup>
+
+      {/*
+        Phase 4 — per-category notification toggles. Surfaces the
+        full Category enum from the Rust side via the
+        `notification_categories_metadata` IPC. Categories that
+        also have a legacy scalar (notify_on_*) are covered by the
+        toggles above; this section surfaces the rest so the user
+        can mute / unmute rotation, memory changes, banner
+        transitions, and other categories that previously had no
+        UI. The dual-write contract from Phase 1.5 keeps both
+        forms in sync, so toggling above and toggling here both
+        persist correctly.
+      */}
+      <CategoryPrefsListGroup pushToast={pushToast} />
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*           Per-category notification toggles (Phase 4)         */
+/* ──────────────────────────────────────────────────────────── */
+
+/**
+ * Reads the live `Category` metadata from the Rust side and
+ * renders one row per category, grouped by priority tier. Each
+ * row has an `enabled` toggle; clicking persists via
+ * `preferencesCategoryPrefSet` and updates the local prefs cache
+ * (which `emit()` reads on the next dispatch).
+ *
+ * Categories with legacy scalar mirrors (notify_on_*) are hidden
+ * by default — they're already covered by the toggles above. A
+ * disclosure expands the full list for users who want to see
+ * everything.
+ */
+function CategoryPrefsListGroup({
+  pushToast,
+}: {
+  pushToast: (k: "info" | "error", t: string) => void;
+}) {
+  const [meta, setMeta] = useState<CategoryMeta[] | null>(null);
+  const [prefs, setPrefs] = useState<Record<string, CategoryPrefsType> | null>(
+    null,
+  );
+  const [showLegacy, setShowLegacy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      api.notificationCategoriesMetadata(),
+      api.preferencesCategoryPrefsGet(),
+    ])
+      .then(([m, p]) => {
+        if (cancelled) return;
+        setMeta(m);
+        setPrefs(p as Record<string, CategoryPrefsType>);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        pushToast("error", `Notification categories failed to load: ${e}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pushToast]);
+
+  // Categories already represented by a scalar toggle above —
+  // these stay hidden unless the user expands "show all".
+  const legacyCategories = useMemo(
+    () =>
+      new Set<Category>([
+        "sessionErrorBurst",
+        "opDoneUnfocused",
+        "sessionStuck",
+        "sessionWaiting",
+        "usageThreshold",
+        "serviceStatusChanged",
+      ]),
+    [],
+  );
+
+  const rows = useMemo(() => {
+    if (!meta) return [];
+    return meta.filter((c) => showLegacy || !legacyCategories.has(c.id));
+  }, [meta, showLegacy, legacyCategories]);
+
+  const grouped = useMemo(() => {
+    const g: Record<string, typeof rows> = {};
+    for (const r of rows) {
+      g[r.group] = g[r.group] ?? [];
+      g[r.group].push(r);
+    }
+    return g;
+  }, [rows]);
+
+  const setEnabled = useCallback(
+    async (id: Category, next: boolean) => {
+      const cur = prefs?.[id] ?? { enabled: true, osOverride: null };
+      const optimistic = { ...cur, enabled: next };
+      setPrefs((p) => ({ ...(p ?? {}), [id]: optimistic }));
+      setCategoryPrefLocal(id, optimistic);
+      try {
+        const confirmed = await updateCategoryPref(id, optimistic);
+        setPrefs((p) => ({ ...(p ?? {}), [id]: confirmed }));
+      } catch (e) {
+        // Revert on failure.
+        setPrefs((p) => ({ ...(p ?? {}), [id]: cur }));
+        setCategoryPrefLocal(id, cur);
+        pushToast("error", `Toggle failed: ${e}`);
+      }
+    },
+    [prefs, pushToast],
+  );
+
+  if (!meta || !prefs) {
+    return (
+      <SettingsGroup desc="More notification categories — loading…">
+        <div />
+      </SettingsGroup>
+    );
+  }
+
+  return (
+    <SettingsGroup desc="More notification categories. Categories already covered by the toggles above (Error, Stuck, Waiting, Op done, Usage, Service status) are hidden by default — flip the bottom toggle to reveal them.">
+      {Object.entries(grouped).map(([group, items]) => (
+        <Fragment key={group}>
+          <div
+            style={{
+              gridColumn: "1 / -1",
+              fontSize: "var(--fs-xs)",
+              color: "var(--fg-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "var(--ls-wide)",
+              marginTop: "var(--sp-12)",
+            }}
+          >
+            {group}
+          </div>
+          {items.map((c) => {
+            const p = prefs[c.id] ?? { enabled: true, osOverride: null };
+            return (
+              <Row
+                key={c.id}
+                label={c.label}
+                hint={`${c.priority.replace(/([A-Z])/g, " $1").trim()} — ${
+                  legacyCategories.has(c.id) ? "(also above)" : ""
+                }`}
+              >
+                <Toggle
+                  on={p.enabled}
+                  onChange={(next) => void setEnabled(c.id, next)}
+                />
+              </Row>
+            );
+          })}
+        </Fragment>
+      ))}
+      <Row
+        label="Show all categories"
+        hint="Include those already covered by the toggles above."
+      >
+        <Toggle on={showLegacy} onChange={setShowLegacy} />
+      </Row>
+    </SettingsGroup>
   );
 }
 
