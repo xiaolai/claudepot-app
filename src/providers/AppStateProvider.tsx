@@ -135,7 +135,7 @@ const AppStateContext = createContext<AppStateValue | null>(null);
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const {
     toasts,
-    pushToast,
+    pushToast: pushToastPrimitive,
     dismissToast,
     lastDismissed,
     clearLastDismissed,
@@ -150,21 +150,55 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     ccIdentity,
     verifying,
     refresh,
-  } = useRefresh(pushToast);
+  } = useRefresh(pushToastPrimitive);
   const { isDismissed, dismiss, clear, knownKeys } = useDismissedIssues();
   const busy = useBusy();
   const { open: openOpModal } = useOperations();
+
+  // Build the unified emit dispatcher. Re-built only when the toast
+  // primitive identity changes (it's stable across renders, so this
+  // memo lands once per AppStateProvider lifetime in practice).
+  const emit = useMemo<EmitFn>(
+    () => buildEmit({ pushToast: pushToastPrimitive }),
+    [pushToastPrimitive],
+  );
+
+  // Public `pushToast` — wraps emit() with `category: configEdited`
+  // so every legacy call site automatically routes through the
+  // unified pipeline. Sites that want a specific category should
+  // call `emit({...})` directly; everything else gets a sane
+  // P2-acknowledge default that the Settings → Notifications pane
+  // can mute via the `configEdited` toggle.
+  //
+  // Same call signature as `useToasts.pushToast` so consumers don't
+  // need to change. Returns void (matches the primitive); errors
+  // inside emit() are swallowed there.
+  const pushToast = useCallback<typeof pushToastPrimitive>(
+    (kind, text, onUndo, opts) => {
+      void emit({
+        category: "configEdited",
+        kind: kind === "error" ? "error" : "info",
+        title: text,
+        dedupeKey: opts?.dedupeKey,
+        toastAction: onUndo
+          ? {
+              label: opts?.undoLabel ?? "Undo",
+              onPress: onUndo,
+              onCommit: opts?.onCommit,
+              timeoutMs: opts?.undoMs,
+            }
+          : undefined,
+      });
+    },
+    [emit],
+  );
+
   const actions = useActions({
     pushToast,
     refresh,
     withBusy: busy.withBusy,
     openOpModal,
   });
-
-  // Build the unified emit dispatcher. Re-built only when pushToast
-  // changes — the toast hook keeps it stable across renders, so this
-  // memo lands once per AppStateProvider lifetime in practice.
-  const emit = useMemo<EmitFn>(() => buildEmit({ pushToast }), [pushToast]);
 
   // Hydrate the CategoryPrefs cache once on mount so emit() reads
   // real user preferences. Fire-and-forget — emit() falls back to

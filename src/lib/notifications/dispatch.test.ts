@@ -112,8 +112,8 @@ describe("emit() single-row logging invariant", () => {
   });
 });
 
-describe("primitive shim — _suppressLog", () => {
-  it("every primitive call carries _suppressLog: true", async () => {
+describe("primitive call shape", () => {
+  it("primitives no longer carry _suppressLog (Phase 3 wrap retired the shim)", async () => {
     const { deps, pushToast, dispatchOs } = makeDeps();
     const emit = buildEmit(deps);
     await emit({
@@ -121,19 +121,17 @@ describe("primitive shim — _suppressLog", () => {
       title: "x",
       toastAction: { label: "Go", onPress: vi.fn() },
     });
-    // pushToast: 4th arg is opts; _suppressLog must be true
-    expect(pushToast).toHaveBeenCalledWith(
-      "info",
-      "x",
-      expect.any(Function),
-      expect.objectContaining({ _suppressLog: true }),
-    );
-    // dispatchOs: 3rd arg is opts
-    expect(dispatchOs).toHaveBeenCalledWith(
-      "x",
-      "",
-      expect.objectContaining({ _suppressLog: true }),
-    );
+    // pushToast: kind, text, onUndo, opts — _suppressLog isn't part
+    // of the opts shape anymore. Logging is owned exclusively by
+    // emit().
+    const toastOpts = pushToast.mock.calls[0]?.[3] as
+      | { _suppressLog?: boolean }
+      | undefined;
+    expect(toastOpts?._suppressLog).toBeUndefined();
+    const osOpts = dispatchOs.mock.calls[0]?.[2] as
+      | { _suppressLog?: boolean }
+      | undefined;
+    expect(osOpts?._suppressLog).toBeUndefined();
   });
 });
 

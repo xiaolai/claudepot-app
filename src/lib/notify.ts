@@ -26,7 +26,6 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { notificationApi } from "../api/notification";
 
 /** Severity passed through to the notification log. Toasts pick
  *  `info` / `error`; OS dispatchers usually pick `notice` (non-error
@@ -239,13 +238,6 @@ export interface DispatchOpts {
    *  dispatch (the OS picks the visual). Defaults to `notice` —
    *  banners are by definition not routine. */
   kind?: OsNotificationKind;
-  /** Internal migration shim. The `emit()` facade in
-   *  `src/lib/notifications/dispatch.ts` owns logging during the
-   *  Phase 1 → Phase 3 migration window. When `emit()` calls this
-   *  function it passes `_suppressLog: true` so we don't double-log.
-   *  Direct call sites continue to log themselves until Phase 3
-   *  removes the shim. */
-  _suppressLog?: boolean;
 }
 
 // Token-bucket state: per-key list of recent dispatch timestamps
@@ -391,22 +383,10 @@ export async function dispatchOsNotification(
   //     of OS banners, not out of in-app history. The log is the
   //     in-app surface; gating it on permission would conflate two
   //     opt-ins.
-  if (!opts._suppressLog) {
-    void notificationApi
-      .notificationLogAppend({
-        source: "os",
-        kind: opts.kind ?? "notice",
-        title,
-        body,
-        target: opts.target ?? null,
-      })
-      .then(() => {
-        window.dispatchEvent(new Event("claudepot:notification-logged"));
-      })
-      .catch(() => {
-        /* swallow — log persistence is advisory, never load-bearing */
-      });
-  }
+  // Logging removed in Phase 3: emit() in src/lib/notifications/
+  // dispatch.ts owns the routed log entry. This dispatcher is now
+  // purely the OS-banner pipeline; it returns a boolean indicating
+  // delivery so emit() can post mark_delivered.
 
   // ── Step 2: OS-banner pipeline ───────────────────────────────
 

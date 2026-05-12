@@ -225,7 +225,6 @@ export function buildEmit(deps: EmitDeps): EmitFn {
           undoLabel: action?.label,
           undoMs: action?.timeoutMs,
           onCommit: action?.onCommit,
-          _suppressLog: true,
         },
       );
     }
@@ -238,7 +237,6 @@ export function buildEmit(deps: EmitDeps): EmitFn {
           dedupeKey: event.dedupeKey,
           target: event.target,
           kind: kind === "info" ? "info" : kind === "error" ? "error" : "notice",
-          _suppressLog: true,
         });
         if (fired) {
           delivered.push("osBanner");

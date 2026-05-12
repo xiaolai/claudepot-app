@@ -117,7 +117,6 @@ import { useRotationEvents } from "./hooks/useRotationEvents";
 import { useBackgroundChangeEmits } from "./hooks/useBackgroundChangeEmits";
 import {
   consumeRecentTarget,
-  dispatchOsNotification,
   type NotificationTarget,
 } from "./lib/notify";
 import { listen } from "@tauri-apps/api/event";
@@ -205,6 +204,7 @@ function AppShell() {
     toasts,
     dismissToast,
     pushToast,
+    emit,
     isDismissed,
     dismiss,
     clearDismissed,
@@ -747,13 +747,15 @@ function AppShell() {
   const accountsRef = useRef(accounts);
   const actionsRef = useRef(actions);
   const pushToastRef = useRef(pushToast);
+  const emitRef = useRef(emit);
   const refreshAccountsRef = useRef(refreshAccounts);
   useEffect(() => {
     accountsRef.current = accounts;
     actionsRef.current = actions;
     pushToastRef.current = pushToast;
+    emitRef.current = emit;
     refreshAccountsRef.current = refreshAccounts;
-  }, [accounts, actions, pushToast, refreshAccounts]);
+  }, [accounts, actions, pushToast, emit, refreshAccounts]);
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | null = null;
@@ -790,24 +792,21 @@ function AppShell() {
             void actionsRef.current.useCli(prev, true);
           }
         : undefined;
-      pushToastRef.current(
-        "info",
-        `CLI → ${p.to_email}${caveat}`,
-        undoFn,
-        { undoLabel: "Undo", undoMs: 10_000 },
-      );
-
-      void dispatchOsNotification(
-        `CLI switched to ${p.to_email}`,
-        p.cc_was_running
+      // Tray-driven CLI switch: route through emit() so the bell
+      // records a routed entry. accountSwitched (P2) toasts
+      // in-app; we add osOverride=true via the kind contract by
+      // setting category=accountSwitched and letting routing apply.
+      void emitRef.current({
+        category: "accountSwitched",
+        title: `CLI → ${p.to_email}${caveat}`,
+        body: p.cc_was_running
           ? "Restart Claude Code to apply. Open Claudepot to undo."
           : "Open Claudepot within 10 s to undo.",
-        {
-          target: { kind: "app", route: { section: "accounts" } },
-          group: "claudepot.cli-switch",
-          sound: "default",
-        },
-      );
+        target: { kind: "app", route: { section: "accounts" } },
+        toastAction: undoFn
+          ? { label: "Undo", onPress: undoFn, timeoutMs: 10_000 }
+          : undefined,
+      });
     })
       .then((fn) => {
         if (!active) fn();
@@ -833,10 +832,12 @@ function AppShell() {
         typeof ev?.payload === "string" && ev.payload.length > 0
           ? ev.payload
           : "unknown";
-      pushToast("error", `Switch failed: ${detail}`);
-      void dispatchOsNotification("CLI switch failed", detail, {
+      void emitRef.current({
+        category: "accountSwitched",
+        kind: "error",
+        title: "CLI switch failed",
+        body: detail,
         target: { kind: "app", route: { section: "accounts" } },
-        group: "claudepot.cli-switch",
       });
     })
       .then((fn) => {

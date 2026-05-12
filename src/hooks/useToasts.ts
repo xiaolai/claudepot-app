@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { notificationApi } from "../api/notification";
 
 export type Toast = {
   id: number;
@@ -113,13 +112,12 @@ export function useToasts() {
    *     schedule a deferred action: the commit and the dismissal are
    *     the same event, so "Undo is clickable ↔ action hasn't fired".
    *     Clicking Undo cancels the commit.
-   *   - `_suppressLog` — internal migration shim. The `emit()` facade
-   *     in `src/lib/notifications/dispatch.ts` owns logging during the
-   *     Phase 1 → Phase 3 migration. When `emit()` calls this hook it
-   *     passes `_suppressLog: true` so we don't double-log. Direct
-   *     call sites (every unmigrated `pushToast()`) keep their
-   *     implicit log behavior. Removed in Phase 3 once every site is
-   *     on `emit()`.
+   *
+   * **Visual primitive only.** Logging is owned by `emit()` in
+   * `src/lib/notifications/dispatch.ts`. The public `pushToast`
+   * exposed by `AppStateProvider` wraps emit() with a default
+   * `category=configEdited`; this hook's `pushToast` is the
+   * internal toast-rendering primitive that emit() drives.
    */
   const pushToast = useCallback(
     (
@@ -132,7 +130,6 @@ export function useToasts() {
         undoLabel?: string;
         onCommit?: () => void;
         dedupeKey?: string;
-        _suppressLog?: boolean;
       },
     ) => {
       toastCounter += 1;
@@ -172,35 +169,10 @@ export function useToasts() {
           dedupeKey: opts?.dedupeKey,
         },
       ]);
-      // Persist into the notification-log ring buffer so the
-      // bell-icon popover can show this toast after it auto-dismisses.
-      // Fire-and-forget — log writes are advisory and must never
-      // affect the in-app surface. The Rust handler tolerates being
-      // called with a no-op state (the boot-fallback path) and simply
-      // returns Err that we discard here.
-      //
-      // `emit()` (Phase 1) owns logging for migrated sites and passes
-      // `_suppressLog: true`. Direct callers still hit this path until
-      // Phase 3 retires the shim.
-      if (!opts?._suppressLog) {
-        void notificationApi
-          .notificationLogAppend({
-            source: "toast",
-            kind,
-            title: text,
-            body: "",
-            target: null,
-          })
-          .then(() => {
-            // Same-process signal so the bell badge updates without
-            // waiting for the 8 s poll. See notify.ts for the matching
-            // OS-side dispatcher.
-            window.dispatchEvent(new Event("claudepot:notification-logged"));
-          })
-          .catch(() => {
-            /* swallow — log persistence is advisory, never load-bearing */
-          });
-      }
+      // Logging removed in Phase 3: emit() in src/lib/notifications/
+      // dispatch.ts owns the routed log entry. The public pushToast
+      // exposed by AppStateProvider wraps emit() with a default
+      // category; every notification flows through that pipeline.
       // Auto-dismiss policy:
       //   onUndo  → short (undoMs, default 3 s) — undo is an action
       //             commit timer, not a notification.
