@@ -40,6 +40,15 @@ async function renderApp(
     repair_status_summary: () => ({ pending: 0, stale: 0, running: 0 }),
     running_ops_list: () => [],
     protected_paths_list: () => [],
+    // Phase 1.5 — CategoryPrefs cache hydration on mount.
+    preferences_category_prefs_get: () => ({}),
+    // Phase 1 — routed log append from emit().
+    notification_log_append_routed: () => 0,
+    notification_log_mark_delivered: () => true,
+    // Phase 4 — Settings pane metadata fetch (not used at App
+    // shell level but the pushToast wrapper -> emit() -> log path
+    // can incidentally hit it during boot).
+    notification_categories_metadata: () => [],
     ...handlers,
     ...(wrappedAccountList ? { account_list: wrappedAccountList } : {}),
   };

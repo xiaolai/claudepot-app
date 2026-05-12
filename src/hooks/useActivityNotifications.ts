@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
-import { dispatchOsNotification } from "../lib/notify";
+import { useEmit } from "../providers/AppStateProvider";
 import { useSessionLive } from "./useSessionLive";
 import type { LiveSessionSummary, Preferences } from "../types";
+import type { Category } from "../lib/notifications/types";
 
 /**
  * `useActivityNotifications` — observe aggregate transitions and
@@ -62,6 +63,9 @@ export function useActivityNotifications(): number {
   const sessions = useSessionLive();
   const memoRef = useRef(new Map<string, SessionMemo>());
   const prefsRef = useRef<Preferences | null>(null);
+  const emit = useEmit();
+  const emitRef = useRef(emit);
+  emitRef.current = emit;
   // Bumped on every successful preferencesGet() resolve so the
   // notification effect re-runs when prefs first load — without this,
   // transitions that arrive before the first prefsGet round-trip are
@@ -140,13 +144,25 @@ export function useActivityNotifications(): number {
       // too. macOS stacks notifications by `threadId` and renders only
       // the body line in the collapsed/Notification-Center summary,
       // so a stand-alone "task finished (3m)" loses its project
-      // attribution the moment two finish near each other. The small
-      // redundancy in the expanded banner is the price for unambiguous
-      // identification when stacked.
-      void dispatchOsNotification(title, `${body} @ ${title}`, {
+      // attribution the moment two finish near each other.
+      //
+      // Phase 3 migration: routes through emit() with per-transition
+      // categories so the CategoryPrefs toggles control which
+      // transitions reach the OS banner. emit() honors the prefs
+      // synchronously — no in-hook gating needed (audit issue #5 fix).
+      const category: Category =
+        kind === "error"
+          ? "sessionErrorBurst"
+          : kind === "stuck"
+            ? "sessionStuck"
+            : kind === "idle-done"
+              ? "opDoneUnfocused"
+              : "sessionWaiting";
+      void emitRef.current({
+        category,
+        title,
+        body: `${body} @ ${title}`,
         dedupeKey: `session:${sessionId}:${kind}`,
-        group: `session:${sessionId}`,
-        sound: "default",
         target: { kind: "host", session_id: sessionId, cwd },
       });
     };

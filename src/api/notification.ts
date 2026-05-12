@@ -6,8 +6,12 @@
 //   1. Click routing (`notificationActivateHostForSession`) — see the
 //      detailed docstring below.
 //   2. Notification log (`notificationLog*`) — the persistent
-//      ring-buffer shown in the bell-icon popover. Every
-//      `dispatchOsNotification` and `pushToast` call appends here.
+//      ring-buffer shown in the bell-icon popover. After the Phase 3
+//      migration, the renderer-side path is exclusively
+//      `notificationLogAppendRouted` (called by emit()); the legacy
+//      `notificationLogAppend` lives on for pre-migration entries
+//      reading off-disk and as a backward-compat IPC the Rust
+//      service_status_watcher used to call directly.
 
 import { invoke } from "@tauri-apps/api/core";
 import type { NotificationTarget } from "../lib/notify";

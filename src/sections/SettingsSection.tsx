@@ -1575,6 +1575,12 @@ function NotificationsPane({
             variant="ghost"
             onClick={async () => {
               try {
+                // Intentional direct call: this button tests the OS
+                // dispatcher specifically. It bypasses emit() because
+                // its purpose is to verify permissions and the
+                // OS-banner pipeline, not to route through the
+                // category-prefs gate (which would suppress the test
+                // banner if the user had configEdited disabled).
                 const ok = await dispatchOsNotification(
                   "Claudepot test",
                   "If you see this, notifications are working.",
