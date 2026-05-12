@@ -20,7 +20,8 @@
 
 use std::time::Duration;
 
-use claudepot_core::notification_log::{NotificationKind, NotificationSource};
+use claudepot_core::notification_log::NotificationKind;
+use claudepot_core::notifications::{Category, Priority, Surface};
 use claudepot_core::service_status as core;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -141,31 +142,55 @@ fn record_transition(
 ) -> Result<(), String> {
     let (title, body) = transition_message(prev, new, summary);
 
-    // Append to the in-app notification log unconditionally — the bell
-    // popover is the persistent record. OS banner is gated.
-    if let Some(log) = app.try_state::<NotificationLogState>() {
-        let _ = log.log.append(
-            NotificationSource::Toast,
-            NotificationKind::Notice,
-            title.clone(),
-            body.clone(),
-            // No click target — clicking the entry doesn't navigate.
-            // Wiring this to "Open Settings → Network" is a future polish.
-            serde_json::Value::Null,
-        );
-    }
+    // Phase 2 fix for audit issue #2: this watcher used to write
+    // `source: Toast` even though no toast ever rendered (the
+    // transition was logged solely for the bell popover; the OS
+    // banner is gated by `os_notify_on_change`). The result was a
+    // misleading source filter — entries tagged Toast that the
+    // user had no chance to see.
+    //
+    // The fix routes through `append_routed` with explicit surface
+    // vectors: `surfaces_requested = [OsBanner]` iff the OS toggle
+    // is on (else empty), and `surfaces_delivered` reflects the
+    // actual OS dispatch outcome.
+    let surfaces_requested: Vec<Surface> = if settings.os_notify_on_change {
+        vec![Surface::OsBanner]
+    } else {
+        Vec::new()
+    };
 
+    // Attempt the OS dispatch first when requested, so we can record
+    // the delivered outcome in the same append.
+    let mut surfaces_delivered: Vec<Surface> = Vec::new();
     if settings.os_notify_on_change {
         use tauri_plugin_notification::NotificationExt;
-        if let Err(e) = app
+        match app
             .notification()
             .builder()
             .title(&title)
             .body(&body)
             .show()
         {
-            tracing::warn!(error = %e, "service_status_watcher: OS notification failed");
+            Ok(_) => surfaces_delivered.push(Surface::OsBanner),
+            Err(e) => {
+                tracing::warn!(error = %e, "service_status_watcher: OS notification failed");
+            }
         }
+    }
+
+    if let Some(log) = app.try_state::<NotificationLogState>() {
+        let _ = log.log.append_routed(
+            Category::ServiceStatusChanged,
+            Priority::P3Ambient,
+            NotificationKind::Notice,
+            title.clone(),
+            body.clone(),
+            // No click target — clicking the entry doesn't navigate.
+            // Wiring this to "Open Settings → Network" is a future polish.
+            serde_json::Value::Null,
+            surfaces_requested,
+            surfaces_delivered,
+        );
     }
 
     Ok(())

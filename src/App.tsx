@@ -113,6 +113,7 @@ import { useCardNotifications } from "./sections/events/useCardNotifications";
 import { useOpDoneNotifications } from "./hooks/useOpDoneNotifications";
 import { useUsageThresholdNotifications } from "./hooks/useUsageThresholdNotifications";
 import { useRotationEvents } from "./hooks/useRotationEvents";
+import { useBackgroundChangeEmits } from "./hooks/useBackgroundChangeEmits";
 import {
   consumeRecentTarget,
   dispatchOsNotification,
@@ -460,6 +461,12 @@ function AppShell() {
   // with a Switch action; auto-mode swaps surface as info toasts;
   // failures as errors. See src/hooks/useRotationEvents.ts.
   useRotationEvents();
+
+  // Phase 2 audit fix: route `memory:changed` and `config-tree-patch`
+  // events into the notification log so they reach the bell popover
+  // regardless of which section the user is currently viewing.
+  // P3 ambient — log-only, no toast/banner spray.
+  useBackgroundChangeEmits();
 
   // Notification-click router. The Tauri 2 desktop notification plugin
   // doesn't surface body-click events to JS (verified by reading
