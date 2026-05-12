@@ -183,26 +183,34 @@ export function buildEmit(deps: EmitDeps): EmitFn {
     //    out so we can post mark_delivered after the OS dispatcher
     //    resolves. Log writes are advisory — failure here must not
     //    block dispatch.
-    let logId: number | null = null;
-    try {
-      logId = await logAppend({
-        category: event.category,
-        priority,
-        kind,
-        title: event.title,
-        body: event.body ?? "",
-        target: event.target ?? null,
-        surfacesRequested: requestedSurfaces(surfaces),
-        surfacesDelivered: delivered,
-      });
-      // Same-process signal so the bell badge updates without
-      // waiting for the 8 s poll. Matches the legacy
-      // notificationLogAppend's behavior.
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("claudepot:notification-logged"));
+    //
+    // `preexistingLogId` short-circuits the append IPC when a
+    // Rust-side watcher already wrote the entry. Used by the
+    // boot-race fix (see `useUsageThresholdNotifications`): the
+    // watcher persists first, the renderer just dispatches and
+    // marks delivered against the existing id.
+    let logId: number | null = event.preexistingLogId ?? null;
+    if (logId === null) {
+      try {
+        logId = await logAppend({
+          category: event.category,
+          priority,
+          kind,
+          title: event.title,
+          body: event.body ?? "",
+          target: event.target ?? null,
+          surfacesRequested: requestedSurfaces(surfaces),
+          surfacesDelivered: delivered,
+        });
+        // Same-process signal so the bell badge updates without
+        // waiting for the 8 s poll. Matches the legacy
+        // notificationLogAppend's behavior.
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("claudepot:notification-logged"));
+        }
+      } catch {
+        /* swallow — log persistence is advisory */
       }
-    } catch {
-      /* swallow — log persistence is advisory */
     }
 
     // 2. Toast surface (synchronous push into the in-app queue).

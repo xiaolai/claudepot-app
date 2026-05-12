@@ -136,14 +136,18 @@ impl From<NotificationLogOrderArg> for SortOrder {
 pub async fn notification_log_append(
     args: NotificationLogAppendArgs,
     state: tauri::State<'_, NotificationLogState>,
+    app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let log = std::sync::Arc::clone(&state.log);
-    tokio::task::spawn_blocking(move || {
+    let id = tokio::task::spawn_blocking(move || {
         log.append(args.source, args.kind, args.title, args.body, args.target)
             .map_err(|e| format!("notification_log append failed: {e}"))
     })
     .await
-    .map_err(|e| format!("notification_log_append join: {e}"))?
+    .map_err(|e| format!("notification_log_append join: {e}"))??;
+    // Refresh the tray badge so a fresh entry lights up the dot.
+    crate::tray::refresh_alert_chrome(&app);
+    Ok(id)
 }
 
 /// List entries matching `filter`, in `order`, capped at `limit` (or
@@ -169,6 +173,7 @@ pub async fn notification_log_list(
 #[tauri::command]
 pub async fn notification_log_mark_all_read(
     state: tauri::State<'_, NotificationLogState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let log = std::sync::Arc::clone(&state.log);
     tokio::task::spawn_blocking(move || {
@@ -176,7 +181,9 @@ pub async fn notification_log_mark_all_read(
             .map_err(|e| format!("notification_log mark_all_read failed: {e}"))
     })
     .await
-    .map_err(|e| format!("notification_log_mark_all_read join: {e}"))?
+    .map_err(|e| format!("notification_log_mark_all_read join: {e}"))??;
+    crate::tray::refresh_alert_chrome(&app);
+    Ok(())
 }
 
 /// Wipe every entry and reset the id counter. The popover surfaces
@@ -184,6 +191,7 @@ pub async fn notification_log_mark_all_read(
 #[tauri::command]
 pub async fn notification_log_clear(
     state: tauri::State<'_, NotificationLogState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let log = std::sync::Arc::clone(&state.log);
     tokio::task::spawn_blocking(move || {
@@ -191,7 +199,9 @@ pub async fn notification_log_clear(
             .map_err(|e| format!("notification_log clear failed: {e}"))
     })
     .await
-    .map_err(|e| format!("notification_log_clear join: {e}"))?
+    .map_err(|e| format!("notification_log_clear join: {e}"))??;
+    crate::tray::refresh_alert_chrome(&app);
+    Ok(())
 }
 
 /// Return the current unread count — entries with `id > last_seen_id`.
@@ -243,9 +253,10 @@ pub struct NotificationLogAppendRoutedArgs {
 pub async fn notification_log_append_routed(
     args: NotificationLogAppendRoutedArgs,
     state: tauri::State<'_, NotificationLogState>,
+    app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let log = std::sync::Arc::clone(&state.log);
-    tokio::task::spawn_blocking(move || {
+    let id = tokio::task::spawn_blocking(move || {
         log.append_routed(
             args.category,
             args.priority,
@@ -259,7 +270,9 @@ pub async fn notification_log_append_routed(
         .map_err(|e| format!("notification_log append_routed failed: {e}"))
     })
     .await
-    .map_err(|e| format!("notification_log_append_routed join: {e}"))?
+    .map_err(|e| format!("notification_log_append_routed join: {e}"))??;
+    crate::tray::refresh_alert_chrome(&app);
+    Ok(id)
 }
 
 /// Mark an entry as delivered on `surface`. Used by the OS dispatcher

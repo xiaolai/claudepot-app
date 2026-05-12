@@ -288,6 +288,19 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
 pub fn refresh_alert_chrome(app: &AppHandle) {
     // Sum both alert sources so the badge survives whichever channel
     // last wrote. See `state::UpdatesAlertState` doc-comment.
+    //
+    // Phase 5: include unread P0/P1/P2 entries from the notification
+    // log too. A window-closed user with a 90% usage alert in the
+    // log now sees the tray badge; P3 ambient writes (memory/config
+    // patches) are excluded so the badge doesn't flicker on every
+    // CC write to CLAUDE.md.
+    let bell_unread = app
+        .try_state::<crate::commands::notification::NotificationLogState>()
+        .map(|s| {
+            s.log
+                .unread_count_at_or_above(claudepot_core::notifications::Priority::P2Acknowledge)
+        })
+        .unwrap_or(0);
     let alert_count = app
         .try_state::<crate::state::TrayAlertState>()
         .map(|s| s.get())
@@ -295,7 +308,8 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
         + app
             .try_state::<crate::state::UpdatesAlertState>()
             .map(|s| s.get())
-            .unwrap_or(0);
+            .unwrap_or(0)
+        + bell_unread;
     let Some(tray) = app.tray_by_id("main") else {
         return;
     };

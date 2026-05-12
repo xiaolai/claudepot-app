@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../../api";
-import { dispatchOsNotification } from "../../lib/notify";
-import type { LiveSessionSummary, Preferences } from "../../types";
+import { useEmit } from "../../providers/AppStateProvider";
+import type { LiveSessionSummary } from "../../types";
 
 /**
  * `useCardNotifications` — fires native OS notifications when the
@@ -31,45 +31,19 @@ export function useCardNotifications() {
   // subscribe call is idempotent, but holding a JS-side listener
   // per session keeps the unsubscribe story clean.
   const subscriptions = useRef<Map<string, UnlistenFn>>(new Map());
-  const enabledRef = useRef(false);
+  const emit = useEmit();
+  // Stash the emit dispatcher in a ref so handleDelta (defined
+  // inside the effect) doesn't capture a stale closure when the
+  // dispatcher rebuilds.
+  const emitRef = useRef(emit);
+  emitRef.current = emit;
 
-  // Fetch preference once on mount + listen for changes via the
-  // cp-prefs-changed event whose payload IS the new Preferences. No
-  // second preferencesGet() round-trip on each event, no ordering
-  // race between back-to-back setters. Default-off until we hear
-  // from the backend (fail-closed: no notifications without consent).
-  useEffect(() => {
-    // active-flag pattern: cleanup may run before listen() resolves
-    // (StrictMode double-mount, fast unmount). Without the flag the
-    // returned unlisten gets stashed into a stale closure and the
-    // listener leaks for the page lifetime.
-    let active = true;
-    let aliveU: UnlistenFn | null = null;
-    void api
-      .preferencesGet()
-      .then((p) => {
-        if (active) enabledRef.current = !!p.notify_on_error;
-      })
-      .catch(() => {
-        /* non-tauri env */
-      });
-    void listen<Preferences>("cp-prefs-changed", (ev) => {
-      if (active && ev.payload) {
-        enabledRef.current = !!ev.payload.notify_on_error;
-      }
-    })
-      .then((u) => {
-        if (!active) u();
-        else aliveU = u;
-      })
-      .catch(() => {
-        /* non-tauri env */
-      });
-    return () => {
-      active = false;
-      if (aliveU) aliveU();
-    };
-  }, []);
+  // Phase 3 migration: legacy hook tracked `notify_on_error` via a
+  // ref and fail-closed-defaulted until preferencesGet resolved.
+  // Now routes through emit() with `category=sessionErrorBurst`;
+  // the CategoryPrefs cache (hydrated by AppStateProvider on
+  // mount) is read synchronously and the dual-write contract
+  // keeps it in sync with the legacy scalar.
 
   useEffect(() => {
     // Mount-guard for the whole bootstrap chain. Cleanup may run
@@ -148,7 +122,6 @@ export function useCardNotifications() {
     }
 
     function handleDelta(payload: LiveDeltaWire) {
-      if (!enabledRef.current) return;
       if (payload.kind !== "card_emitted") return;
       const card = payload as unknown as CardEmittedWire;
       const sev = card.severity;
@@ -159,12 +132,6 @@ export function useCardNotifications() {
       // dedupeKey grain: kind+title — identical failures produce
       // identical titles (e.g. "Hook failed: PostToolUse:Edit") so
       // they land in the same bucket and stop after `maxBurst`.
-      // group: full cwd — macOS threads notifications about the
-      // same project regardless of which template fired, which is
-      // what users actually care about ("what's wrong in foo?").
-      // Using the full cwd (not the basename) prevents two different
-      // projects with the same basename (e.g. ~/work/foo and
-      // ~/personal/foo) from threading into one banner.
       const project = shortCwd(card.cwd);
       // Click intent: send the user back to the host terminal of
       // this session. The CardEmittedWire carries the wrapping
@@ -176,10 +143,12 @@ export function useCardNotifications() {
         sid && card.cwd
           ? ({ kind: "host" as const, session_id: sid, cwd: card.cwd })
           : ({ kind: "info" as const });
-      void dispatchOsNotification(card.title, project, {
+      void emitRef.current({
+        category: "sessionErrorBurst",
+        kind: sev === "ERROR" ? "error" : "notice",
+        title: card.title,
+        body: project,
         dedupeKey: `card:${card.card_kind}::${card.title}`,
-        group: `project:${card.cwd}`,
-        sound: "default",
         target,
       });
     }

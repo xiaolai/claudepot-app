@@ -29,6 +29,8 @@
 
 use std::time::Duration;
 
+use claudepot_core::notification_log::NotificationKind;
+use claudepot_core::notifications::{Category, Priority, Surface};
 use claudepot_core::services::usage_alerts::{Crossing, UsageAlertState, UsageWindowKind};
 // `Vec<UsageWindowKind>` is built per-tick from the user's
 // `notify_on_sub_windows` preference; the umbrella `seven_day` and
@@ -37,6 +39,8 @@ use claudepot_core::services::usage_cache::UsageCache;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
+
+use crate::commands::notification::NotificationLogState;
 
 /// Production poll interval. Anthropic's `/usage` endpoint is cheap
 /// (no token spend), so a tighter cadence costs little; 5 min keeps
@@ -89,6 +93,14 @@ pub struct UsageThresholdCrossedPayload {
     /// ISO-8601 reset time, when known. The renderer formats it as
     /// "resets in 2h 14m" using the local clock.
     pub resets_at_iso: Option<String>,
+    /// Rust-side notification-log entry id, when the watcher
+    /// pre-persisted the routed entry. Threaded through to
+    /// `emit()` as `preexistingLogId` so the renderer skips a
+    /// second append IPC — fixes audit issue #4 (boot-race) by
+    /// guaranteeing the bell shows the entry even if the renderer
+    /// wasn't listening when the event fired. `None` only when the
+    /// log state wasn't reachable (boot-fallback path).
+    pub log_id: Option<u64>,
 }
 
 /// Spawn the poll loop. Called once from `setup()`; the spawned task
@@ -248,11 +260,40 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
         }
     }
 
-    // 6. Emit one event per crossing. The dispatcher on the JS side
-    //    applies its own dedupe key, focus gate, and OS-permission
-    //    check — we don't gate any of that here.
+    // 6. For each crossing: pre-persist the routed log entry so the
+    //    bell records the event even when the renderer isn't
+    //    listening (audit issue #4 — boot-race). Then emit the
+    //    event with the resulting `log_id` so the renderer's
+    //    emit() short-circuits its own append.
+    //
+    //    The pre-persist runs BEFORE the emit so a renderer that
+    //    actually IS alive doesn't process the event with a stale
+    //    "no log entry yet" view.
+    let log_state = app.try_state::<NotificationLogState>();
     for c in crossings {
-        let payload = make_payload(&c, account_email.as_deref());
+        let log_id = log_state.as_ref().and_then(|log| {
+            let title = format!(
+                "{} — {} at {}%",
+                account_email.as_deref().unwrap_or("Account"),
+                c.window.label(),
+                c.threshold_pct,
+            );
+            let body = format!("at {:.1}%", c.utilization_pct);
+            log.log
+                .append_routed(
+                    Category::UsageThreshold,
+                    Priority::P1Stalled,
+                    NotificationKind::Notice,
+                    title,
+                    body,
+                    serde_json::Value::Null,
+                    vec![Surface::OsBanner],
+                    Vec::new(),
+                )
+                .ok()
+        });
+        let mut payload = make_payload(&c, account_email.as_deref());
+        payload.log_id = log_id;
         if let Err(e) = app.emit("usage-threshold-crossed", payload) {
             tracing::warn!(error = %e, "usage_watcher: emit failed");
         }
@@ -288,5 +329,6 @@ fn make_payload(c: &Crossing, account_email: Option<&str>) -> UsageThresholdCros
         threshold_pct: c.threshold_pct,
         utilization_pct: c.utilization_pct,
         resets_at_iso: c.resets_at.map(|t| t.to_rfc3339()),
+        log_id: None,
     }
 }

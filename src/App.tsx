@@ -99,6 +99,7 @@ import { usePendingJournals } from "./hooks/usePendingJournals";
 import { useRunningOps } from "./hooks/useRunningOps";
 import { bindingFrom } from "./hooks/useAccounts";
 import { useStatusIssues } from "./hooks/useStatusIssues";
+import { useStatusBannerEmits } from "./hooks/useStatusBannerEmits";
 import { useTheme } from "./hooks/useTheme";
 import { useSidebarCollapsed } from "./hooks/useSidebarCollapsed";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
@@ -1049,6 +1050,12 @@ function AppShell() {
     () => rawIssues.filter((i) => !(i.dismissable && isDismissed(i.id))),
     [rawIssues, isDismissed],
   );
+
+  // Phase 5: banner state machine. Watches the visible-issues list
+  // and emits a routing event when an id appears (P0 category per
+  // banner type) or leaves (P2 bannerResolved). Memory-only state;
+  // see useStatusBannerEmits header for the design rationale.
+  useStatusBannerEmits(visibleIssues);
 
   // Snooze auto-clear: when an issue id is no longer present in
   // `rawIssues`, the underlying condition has resolved. Drop its

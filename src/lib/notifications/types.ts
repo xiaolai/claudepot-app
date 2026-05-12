@@ -192,6 +192,23 @@ export interface NotificationEvent {
     onCommit?: () => void;
     timeoutMs?: number;
   };
+  /**
+   * Boot-race fix for events that Rust-side watchers logged before
+   * the renderer mounted. When set, emit() skips the
+   * `notificationLogAppendRouted` IPC and uses this id for any
+   * `mark_delivered` call instead.
+   *
+   * The watcher writes the routed log entry FIRST (so the bell
+   * shows the entry even if the renderer is dead), then emits the
+   * Tauri event with the resulting id. The renderer's listener
+   * threads it through here. Result: zero dupes in the alive case,
+   * zero misses in the dead-renderer case.
+   *
+   * Used by `useUsageThresholdNotifications`. Other hooks can opt
+   * in by mirroring the pattern: Rust-side append_routed, emit
+   * event with `logId`, renderer forwards as `preexistingLogId`.
+   */
+  preexistingLogId?: number;
 }
 
 /**

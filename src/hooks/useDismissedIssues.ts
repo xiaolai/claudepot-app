@@ -2,6 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 
 const KEY = "claudepot.dismissedIssues";
 const SNOOZE_MS = 24 * 60 * 60 * 1000;
+/** Interval for the periodic expiry sweep. Audit issue #8 fix:
+ *  pre-fix the store was purged only on mount; a long-lived
+ *  session could accumulate stale keys for hours. Hourly is
+ *  conservative — the snooze window is 24 h, so even one sweep
+ *  per cycle keeps the store bounded. The sweep is O(n) over
+ *  dismissed-issue count (typically single digits). */
+const PURGE_INTERVAL_MS = 60 * 60 * 1000;
 
 interface Payload {
   [id: string]: number; // unix ms when dismissed
@@ -49,20 +56,28 @@ export function useDismissedIssues(): {
 } {
   const [store, setStore] = useState<Payload>(() => readStore());
 
-  // Purge expired entries on mount so the store doesn't grow forever.
+  // Purge expired entries on mount AND periodically thereafter so
+  // long-lived sessions don't accumulate stale keys (audit issue
+  // #8 fix). The mount sweep handles state carried from prior
+  // renderer lifetimes; the interval sweep handles ongoing decay.
   useEffect(() => {
-    const now = Date.now();
-    const pruned: Payload = {};
-    let changed = false;
-    for (const [id, ts] of Object.entries(store)) {
-      if (now - ts < SNOOZE_MS) pruned[id] = ts;
-      else changed = true;
-    }
-    if (changed) {
-      writeStore(pruned);
-      setStore(pruned);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const sweep = () => {
+      const now = Date.now();
+      setStore((prev) => {
+        let changed = false;
+        const pruned: Payload = {};
+        for (const [id, ts] of Object.entries(prev)) {
+          if (now - ts < SNOOZE_MS) pruned[id] = ts;
+          else changed = true;
+        }
+        if (!changed) return prev;
+        writeStore(pruned);
+        return pruned;
+      });
+    };
+    sweep();
+    const handle = setInterval(sweep, PURGE_INTERVAL_MS);
+    return () => clearInterval(handle);
   }, []);
 
   const isDismissed = useCallback(

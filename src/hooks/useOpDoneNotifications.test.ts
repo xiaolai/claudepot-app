@@ -1,15 +1,14 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { renderHook } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
 
-// Hoist mock factories so vi.mock() is allowed to reference them.
-const sendNotificationMock = vi.fn();
-const isPermissionGrantedMock = vi.fn();
-const requestPermissionMock = vi.fn();
-
-vi.mock("@tauri-apps/plugin-notification", () => ({
-  isPermissionGranted: (...args: unknown[]) => isPermissionGrantedMock(...args),
-  requestPermission: (...args: unknown[]) => requestPermissionMock(...args),
-  sendNotification: (...args: unknown[]) => sendNotificationMock(...args),
+// Hoist mock for emit() — the dispatcher the migrated hook calls.
+const emitMock = vi.fn();
+vi.mock("../providers/AppStateProvider", () => ({
+  useEmit: () => emitMock,
+  // Tests don't render <AppStateProvider/>; useEmit returns the mock
+  // directly so the renderHook wrapper can stay null.
+  useAppState: () => ({}),
 }));
 
 const listenMock = vi.fn();
@@ -17,17 +16,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => listenMock(...args),
 }));
 
-// `api` is consumed for `preferencesGet`. Stub it to a controllable spy so
-// the hook can flip `enabledRef` without going through Tauri.
-const preferencesGetMock = vi.fn();
-vi.mock("../api", () => ({
-  api: {
-    preferencesGet: () => preferencesGetMock(),
-  },
-}));
-
 import { useOpDoneNotifications } from "./useOpDoneNotifications";
-import { __resetForTests } from "../lib/notify";
 
 type Listener = (ev: { payload?: unknown }) => void;
 
@@ -48,230 +37,107 @@ function setupTauriEventBus() {
   };
 }
 
-describe("useOpDoneNotifications", () => {
+describe("useOpDoneNotifications — emit() routing", () => {
   beforeEach(() => {
-    sendNotificationMock.mockReset();
-    isPermissionGrantedMock.mockReset().mockResolvedValue(true);
-    requestPermissionMock.mockReset().mockResolvedValue("granted");
-    preferencesGetMock.mockReset();
+    emitMock.mockReset().mockResolvedValue({
+      logId: 1,
+      surfaces: {
+        toast: false,
+        osBanner: true,
+        banner: false,
+        log: true,
+        ignoreFocus: false,
+      },
+      delivered: ["osBanner"],
+    });
     listenMock.mockReset();
-    __resetForTests();
-    // Default: window is unfocused so the focus gate is permissive.
-    vi.spyOn(document, "hasFocus").mockReturnValue(false);
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+  function wrapper({ children }: { children: ReactNode }) {
+    return children as ReactElement;
+  }
 
-  it("does nothing when notify_on_op_done is false", async () => {
-    preferencesGetMock.mockResolvedValue({
-      notify_on_op_done: false,
-      notify_on_error: false,
-      notify_on_idle_done: false,
-      notify_on_stuck_minutes: null,
-      notify_on_waiting: false,
-    });
-    const bus = setupTauriEventBus();
-    renderHook(() => useOpDoneNotifications());
-    await waitFor(() => expect(bus.has("cp-op-terminal")).toBe(true));
-
-    act(() => {
-      bus.fire("cp-op-terminal", {
-        op_id: "op-1",
-        kind: "verify_all",
-        status: "complete",
-        label: "Verified 4 accounts",
-      });
-    });
-
-    expect(sendNotificationMock).not.toHaveBeenCalled();
-  });
-
-  it("fires sendNotification on a complete event when enabled", async () => {
-    preferencesGetMock.mockResolvedValue({
-      notify_on_op_done: true,
-      notify_on_error: false,
-      notify_on_idle_done: false,
-      notify_on_stuck_minutes: null,
-      notify_on_waiting: false,
-    });
-    const bus = setupTauriEventBus();
-    renderHook(() => useOpDoneNotifications());
-
-    // Wait both for the listener to be wired AND for the
-    // preferencesGet promise to flush — `enabledRef` flips inside the
-    // `.then` callback, which resolves on the next microtask.
-    await waitFor(() => expect(bus.has("cp-op-terminal")).toBe(true));
-    await waitFor(() => expect(preferencesGetMock).toHaveBeenCalled());
-    // Allow microtasks to run so applyPrefs() has settled.
-    await Promise.resolve();
-    await Promise.resolve();
-
-    act(() => {
-      bus.fire("cp-op-terminal", {
-        op_id: "op-1",
-        kind: "verify_all",
-        status: "complete",
-        label: "Verified 4 accounts",
-      });
-    });
-
-    await waitFor(() => expect(sendNotificationMock).toHaveBeenCalled());
-    expect(sendNotificationMock).toHaveBeenCalledWith({
-      title: "Verified 4 accounts",
-      body: "Done.",
-      group: "op:verify_all",
-      sound: "default",
-    });
-  });
-
-  it("includes error detail in the body on a failed terminal event", async () => {
-    preferencesGetMock.mockResolvedValue({
-      notify_on_op_done: true,
-      notify_on_error: false,
-      notify_on_idle_done: false,
-      notify_on_stuck_minutes: null,
-      notify_on_waiting: false,
-    });
-    const bus = setupTauriEventBus();
-    renderHook(() => useOpDoneNotifications());
-
-    await waitFor(() => expect(bus.has("cp-op-terminal")).toBe(true));
-    await waitFor(() => expect(preferencesGetMock).toHaveBeenCalled());
-    await Promise.resolve();
-    await Promise.resolve();
-
-    act(() => {
-      bus.fire("cp-op-terminal", {
-        op_id: "op-2",
-        kind: "move_project",
-        status: "error",
-        label: "Renamed proj-a → proj-b",
-        error: "filesystem busy",
-      });
-    });
-
-    await waitFor(() => expect(sendNotificationMock).toHaveBeenCalled());
-    expect(sendNotificationMock).toHaveBeenCalledWith({
-      title: "Operation failed: Renamed proj-a → proj-b",
-      body: "filesystem busy",
-      group: "op:move_project",
-      sound: "default",
-    });
-  });
-
-  it("buffers terminal events that arrive before prefsGet resolves and flushes them once enabled", async () => {
-    // Reproduce the startup race: the cp-op-terminal listener attaches
-    // before the initial preferencesGet() round-trip lands. A user
-    // triggering an op-end in those first few hundred ms used to be
-    // dropped because enabledRef defaulted to false. The buffer must
-    // hold until prefs say "enabled = true", then flush.
-    let resolvePrefs: (p: unknown) => void = () => {};
-    preferencesGetMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolvePrefs = resolve;
-        }),
+  it("subscribes to the cp-op-terminal channel", () => {
+    setupTauriEventBus();
+    renderHook(() => useOpDoneNotifications(), { wrapper });
+    expect(listenMock).toHaveBeenCalledWith(
+      "cp-op-terminal",
+      expect.any(Function),
     );
+  });
+
+  it("fires emit() with category=opDoneUnfocused on terminal event", async () => {
     const bus = setupTauriEventBus();
-    renderHook(() => useOpDoneNotifications());
-
-    await waitFor(() => expect(bus.has("cp-op-terminal")).toBe(true));
-    // Fire BEFORE prefs resolve.
-    act(() => {
-      bus.fire("cp-op-terminal", {
-        op_id: "op-buffered",
-        kind: "verify_all",
-        status: "complete",
-        label: "Verified accounts",
-      });
+    renderHook(() => useOpDoneNotifications(), { wrapper });
+    // listen returns a promise that resolves after mount; wait a tick.
+    await Promise.resolve();
+    bus.fire("cp-op-terminal", {
+      op_id: "op-1",
+      kind: "verify_all",
+      status: "complete",
+      label: "Verified 3 accounts",
     });
-    // Nothing yet — buffered.
-    expect(sendNotificationMock).not.toHaveBeenCalled();
-
-    // Now prefs resolve with enabled = true. Buffer must flush.
-    act(() => {
-      resolvePrefs({
-        notify_on_op_done: true,
-        notify_on_error: false,
-        notify_on_idle_done: false,
-        notify_on_stuck_minutes: null,
-      });
-    });
-    await waitFor(() => expect(sendNotificationMock).toHaveBeenCalled());
-    expect(sendNotificationMock).toHaveBeenCalledWith(
+    expect(emitMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Verified accounts",
-        body: "Done.",
+        category: "opDoneUnfocused",
+        title: "Verified 3 accounts",
+        dedupeKey: "op:op-1",
       }),
     );
   });
 
-  it("drops buffered events when prefs load with toggle off", async () => {
-    let resolvePrefs: (p: unknown) => void = () => {};
-    preferencesGetMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolvePrefs = resolve;
-        }),
-    );
+  it("renders error status with kind=error and the error body", async () => {
     const bus = setupTauriEventBus();
-    renderHook(() => useOpDoneNotifications());
-
-    await waitFor(() => expect(bus.has("cp-op-terminal")).toBe(true));
-    act(() => {
-      bus.fire("cp-op-terminal", {
-        op_id: "op-buffered-off",
-        kind: "verify_all",
-        status: "complete",
-        label: "Verified accounts",
-      });
-    });
-    act(() => {
-      resolvePrefs({
-        notify_on_op_done: false,
-        notify_on_error: false,
-        notify_on_idle_done: false,
-        notify_on_stuck_minutes: null,
-      });
-    });
-    // Drain microtasks; nothing should fire.
+    renderHook(() => useOpDoneNotifications(), { wrapper });
     await Promise.resolve();
-    await Promise.resolve();
-    expect(sendNotificationMock).not.toHaveBeenCalled();
+    bus.fire("cp-op-terminal", {
+      op_id: "op-2",
+      kind: "session_prune",
+      status: "error",
+      label: "Pruning",
+      error: "disk full",
+    });
+    expect(emitMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "opDoneUnfocused",
+        kind: "error",
+        title: "Operation failed: Pruning",
+        body: "disk full",
+      }),
+    );
   });
 
-  it("suppresses dispatch when the window is focused", async () => {
-    (document.hasFocus as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    preferencesGetMock.mockResolvedValue({
-      notify_on_op_done: true,
-      notify_on_error: false,
-      notify_on_idle_done: false,
-      notify_on_stuck_minutes: null,
-      notify_on_waiting: false,
-    });
+  it("truncates error bodies past 200 chars (matches legacy contract)", async () => {
     const bus = setupTauriEventBus();
-    renderHook(() => useOpDoneNotifications());
-
-    await waitFor(() => expect(bus.has("cp-op-terminal")).toBe(true));
-    await waitFor(() => expect(preferencesGetMock).toHaveBeenCalled());
+    renderHook(() => useOpDoneNotifications(), { wrapper });
     await Promise.resolve();
-    await Promise.resolve();
-
-    act(() => {
-      bus.fire("cp-op-terminal", {
-        op_id: "op-3",
-        kind: "verify_all",
-        status: "complete",
-        label: "Verified accounts",
-      });
+    bus.fire("cp-op-terminal", {
+      op_id: "op-3",
+      kind: "x",
+      status: "error",
+      label: "X",
+      error: "y".repeat(300),
     });
+    const call = emitMock.mock.calls[0][0];
+    expect(call.body.length).toBeLessThanOrEqual(200);
+    expect(call.body.endsWith("…")).toBe(true);
+  });
 
-    // Focus gate suppresses sendNotification but the listener still
-    // fires; assert no OS dispatch happened.
+  it("does NOT buffer events — emit() reads prefs synchronously", async () => {
+    // Audit issue #5 fix: legacy hook had a buffer that flushed once
+    // on preferencesGet. After migration, emit() reads CategoryPrefs
+    // from a cache that hydrates separately, so there's nothing to
+    // buffer. Events dispatch immediately regardless of "pref-load"
+    // state.
+    const bus = setupTauriEventBus();
+    renderHook(() => useOpDoneNotifications(), { wrapper });
     await Promise.resolve();
-    await Promise.resolve();
-    expect(sendNotificationMock).not.toHaveBeenCalled();
+    bus.fire("cp-op-terminal", {
+      op_id: "op-4",
+      kind: "x",
+      status: "complete",
+      label: "Done",
+    });
+    expect(emitMock).toHaveBeenCalledTimes(1);
   });
 });

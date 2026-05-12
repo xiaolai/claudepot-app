@@ -525,6 +525,30 @@ impl NotificationLog {
         g.entries.iter().filter(|e| e.id > g.last_seen_id).count() as u32
     }
 
+    /// Phase 5: count of unread entries at-or-above the given
+    /// priority. Used by the tray badge so a window-closed user
+    /// sees the icon light up when a P0 / P1 / P2 entry lands —
+    /// without P3 ambient writes from CC overwriting CLAUDE.md
+    /// flooding the badge.
+    ///
+    /// Legacy entries (pre-Phase-0) have `priority: None`. They're
+    /// treated as P2-equivalent (the historical "matters to the
+    /// user" tier) so the badge doesn't go silent for installs
+    /// that haven't yet generated any routed entries.
+    pub fn unread_count_at_or_above(&self, min: Priority) -> u32 {
+        let g = lock_inner(&self.inner);
+        let rank = priority_rank;
+        let threshold = rank(min);
+        g.entries
+            .iter()
+            .filter(|e| e.id > g.last_seen_id)
+            .filter(|e| {
+                let p = e.priority.unwrap_or(Priority::P2Acknowledge);
+                rank(p) <= threshold
+            })
+            .count() as u32
+    }
+
     /// Total entry count.
     pub fn len(&self) -> usize {
         let g = lock_inner(&self.inner);
@@ -557,6 +581,17 @@ impl NotificationLog {
             )
         })?;
         atomic_write(&g.path, &bytes)
+    }
+}
+
+/// Internal: rank priorities so "at-or-above" comparisons work.
+/// Lower rank = higher urgency. P0 = 0, P3 = 3.
+fn priority_rank(p: Priority) -> u32 {
+    match p {
+        Priority::P0Blocking => 0,
+        Priority::P1Stalled => 1,
+        Priority::P2Acknowledge => 2,
+        Priority::P3Ambient => 3,
     }
 }
 
@@ -996,6 +1031,81 @@ mod tests {
         let (_d, log) = tmp_log();
         // No entries yet — id=42 cannot exist.
         assert!(!log.mark_delivered(42, Surface::Toast).unwrap());
+    }
+
+    #[test]
+    fn test_unread_count_at_or_above_filters_by_priority() {
+        // Tray badge driver: P3 ambient entries (memory writes,
+        // config patches) must NOT inflate the badge. Only P0/P1/P2
+        // should count when min=P2.
+        use crate::notifications::{Category, Priority, Surface};
+        let (_d, log) = tmp_log();
+        log.append_routed(
+            Category::MemoryChanged,
+            Priority::P3Ambient,
+            NotificationKind::Info,
+            "memory write".into(),
+            String::new(),
+            serde_json::Value::Null,
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        log.append_routed(
+            Category::UsageThreshold,
+            Priority::P1Stalled,
+            NotificationKind::Notice,
+            "90%".into(),
+            String::new(),
+            serde_json::Value::Null,
+            vec![Surface::OsBanner],
+            vec![Surface::OsBanner],
+        )
+        .unwrap();
+        log.append_routed(
+            Category::ProjectRenamed,
+            Priority::P2Acknowledge,
+            NotificationKind::Info,
+            "renamed".into(),
+            String::new(),
+            serde_json::Value::Null,
+            vec![Surface::Toast],
+            vec![Surface::Toast],
+        )
+        .unwrap();
+        // All three are unread (no mark_all_read).
+        assert_eq!(log.unread_count(), 3);
+        // P2-and-above excludes the P3 memory entry.
+        assert_eq!(
+            log.unread_count_at_or_above(Priority::P2Acknowledge),
+            2
+        );
+        // P1-and-above keeps just the usage threshold.
+        assert_eq!(log.unread_count_at_or_above(Priority::P1Stalled), 1);
+        // P0-and-above: none of these are blocking.
+        assert_eq!(log.unread_count_at_or_above(Priority::P0Blocking), 0);
+    }
+
+    #[test]
+    fn test_unread_count_at_or_above_treats_legacy_entries_as_p2() {
+        // Legacy entries (no `priority` field) should count toward the
+        // P2 threshold so the tray badge doesn't silently zero out
+        // for installs that haven't generated routed entries yet.
+        use crate::notifications::Priority;
+        let (_d, log) = tmp_log();
+        log.append(
+            NotificationSource::Toast,
+            NotificationKind::Info,
+            "legacy".into(),
+            String::new(),
+            serde_json::Value::Null,
+        )
+        .unwrap();
+        assert_eq!(log.unread_count_at_or_above(Priority::P2Acknowledge), 1);
+        // Legacy entries do NOT count toward P1+ — they could be
+        // anything, and rolling them up to "urgent" would defeat
+        // the priority filter.
+        assert_eq!(log.unread_count_at_or_above(Priority::P1Stalled), 0);
     }
 
     #[test]

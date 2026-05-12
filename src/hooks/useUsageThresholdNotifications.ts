@@ -35,6 +35,15 @@ interface CrossingPayload {
   thresholdPct: number;
   utilizationPct: number;
   resetsAtIso: string | null;
+  /**
+   * Boot-race fix: Rust-side log entry id (the watcher pre-persists
+   * the routed entry before emitting this event, so the bell shows
+   * the threshold even when the renderer wasn't listening). We
+   * forward as `preexistingLogId` so emit() doesn't write a second
+   * entry. `null` only when the boot-fallback log state was
+   * unreachable, in which case emit() writes one fresh entry.
+   */
+  logId: number | null;
 }
 
 export function useUsageThresholdNotifications(): void {
@@ -64,6 +73,9 @@ export function useUsageThresholdNotifications(): void {
               route: { section: "accounts", email: p.accountEmail },
             }
           : { kind: "info" },
+        // Forward the Rust-side log id when the watcher already
+        // persisted the entry — boot-race fix for audit #4.
+        preexistingLogId: p.logId ?? undefined,
       });
     })
       .then((fn) => {

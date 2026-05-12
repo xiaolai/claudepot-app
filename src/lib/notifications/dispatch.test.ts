@@ -220,6 +220,32 @@ describe("category overrides via DispatchContext", () => {
   });
 });
 
+describe("preexistingLogId — boot-race fix", () => {
+  it("skips logAppend when preexistingLogId is set", async () => {
+    const { deps, logAppendRouted, logMarkDelivered } = makeDeps();
+    const emit = buildEmit(deps);
+    await emit({
+      category: "usageThreshold",
+      title: "Near cap",
+      preexistingLogId: 999,
+    });
+    expect(logAppendRouted).not.toHaveBeenCalled();
+    // mark_delivered still fires against the pre-existing id when OS
+    // banner dispatch succeeded.
+    expect(logMarkDelivered).toHaveBeenCalledWith(999, "osBanner");
+  });
+
+  it("calls logAppend normally when preexistingLogId is absent", async () => {
+    const { deps, logAppendRouted } = makeDeps();
+    const emit = buildEmit(deps);
+    await emit({
+      category: "usageThreshold",
+      title: "Near cap",
+    });
+    expect(logAppendRouted).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("CategoryPrefs gating", () => {
   it("enabled=false produces a log-only row (no toast, no OS)", async () => {
     const { deps, pushToast, dispatchOs, logAppendRouted } = makeDeps();
