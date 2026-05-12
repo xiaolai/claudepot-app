@@ -59,6 +59,11 @@ export function NotificationLogPopover({
   const [windowKey, setWindowKey] = useState<string>("all");
   const [query, setQuery] = useState<string>("");
   const [order, setOrder] = useState<NotificationLogOrder>("newestFirst");
+  // Phase 5: P3 ambient entries (memory:changed, config-tree-patch,
+  // service-status, update-available) flood the bell once Phase 2
+  // routed them in. Default-hide them so the user opens the popover
+  // and sees what matters; flip the chip to surface everything.
+  const [showAmbient, setShowAmbient] = useState(false);
 
   // Filter object excludes the time-window — that's resolved at
   // refresh time so "Last 1h" means relative-to-NOW on every fetch.
@@ -82,6 +87,17 @@ export function NotificationLogPopover({
     if (windowKey === "all") return null;
     return parseInt(windowKey, 10);
   }, [windowKey]);
+
+  // Client-side ambient filter. The Rust filter doesn't yet know
+  // about priority, so we hide P3 entries here. This is cheap —
+  // entries is capped at 500 — and keeps the Rust filter shape
+  // unchanged until a future change wants priority filtering for
+  // the tray badge too.
+  const visibleEntries = useMemo(() => {
+    if (showAmbient) return entries;
+    return entries.filter((e) => e.priority !== "p3Ambient");
+  }, [entries, showAmbient]);
+  const hiddenAmbientCount = entries.length - visibleEntries.length;
 
   // Anchor by viewport-right so the panel never clips off-screen on a
   // narrow window. We push the popover in from the right edge by the
@@ -298,21 +314,58 @@ export function NotificationLogPopover({
             <EmptyHint>Loading…</EmptyHint>
           ) : error ? (
             <EmptyHint danger>{error}</EmptyHint>
-          ) : entries.length === 0 ? (
+          ) : visibleEntries.length === 0 ? (
             <EmptyHint>
-              {hasFilter(filter, windowMs)
-                ? "No matches. Adjust the filter or clear it."
+              {hasFilter(filter, windowMs) || hiddenAmbientCount > 0
+                ? hiddenAmbientCount > 0
+                  ? `No matches. ${hiddenAmbientCount} ambient entr${hiddenAmbientCount === 1 ? "y" : "ies"} hidden — click "Show ambient" to reveal.`
+                  : "No matches. Adjust the filter or clear it."
                 : "No notifications yet. Toasts and OS banners will collect here."}
             </EmptyHint>
           ) : (
             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-              {entries.map((e) => (
+              {visibleEntries.map((e) => (
                 <NotificationLogEntry
                   key={e.id}
                   entry={e}
                   onClick={() => onEntryClick(e)}
                 />
               ))}
+              {hiddenAmbientCount > 0 && (
+                <li
+                  style={{
+                    padding: "var(--sp-8) var(--sp-12)",
+                    borderTop: "var(--bw-hair) solid var(--line)",
+                    fontSize: "var(--fs-xs)",
+                    color: "var(--fg-muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "var(--sp-8)",
+                  }}
+                >
+                  <span>
+                    {hiddenAmbientCount} ambient entr
+                    {hiddenAmbientCount === 1 ? "y" : "ies"} hidden
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAmbient(true)}
+                    style={{
+                      padding: "var(--sp-2) var(--sp-8)",
+                      fontFamily: "inherit",
+                      fontSize: "var(--fs-xs)",
+                      borderRadius: "var(--r-1)",
+                      border: "var(--bw-hair) solid var(--line-strong)",
+                      background: "var(--bg-raised)",
+                      color: "var(--fg)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Show ambient
+                  </button>
+                </li>
+              )}
             </ul>
           )}
         </div>
