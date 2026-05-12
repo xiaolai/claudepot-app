@@ -153,12 +153,21 @@ fn record_transition(
     // is the "wants_os" priority default; `os_override` flips it.
     // P3 categories normally don't want OS, but
     // ServiceStatusChanged opts in via the scalar.
+    // Mutex-poison recovery — see usage_watcher's equivalent block
+    // for the rationale. Long-lived watcher tasks must not panic
+    // on a poisoned lock; notification routing is advisory.
     let surfaces_requested: Vec<Surface> = {
         let prefs_state = app.state::<crate::preferences::PreferencesState>();
-        let guard = prefs_state
-            .0
-            .lock()
-            .expect("preferences mutex poisoned");
+        let guard = match prefs_state.0.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!(
+                    "service_status_watcher: preferences mutex was poisoned by an earlier panic; \
+                     recovering with under-lock data"
+                );
+                poisoned.into_inner()
+            }
+        };
         crate::preferences::effective_os_surface(
             &guard,
             Category::ServiceStatusChanged,

@@ -283,12 +283,25 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
     // `UsageThreshold.enabled` AND `os_override` so the
     // Rust-originated entry agrees with what the renderer's emit()
     // would compute for the same category. Audit-fix High #6.
+    //
+    // Mutex-poison recovery: this watcher runs every 5 minutes for
+    // the app's lifetime; panicking the task on poison would break
+    // future ticks too. Recover via `into_inner` and continue;
+    // notification routing is advisory state, never correctness-
+    // critical. Matches the policy in
+    // `claudepot_core::notification_log::lock_inner`.
     let surfaces_requested: Vec<Surface> = {
         let prefs_state = app.state::<crate::preferences::PreferencesState>();
-        let guard = prefs_state
-            .0
-            .lock()
-            .expect("preferences mutex poisoned");
+        let guard = match prefs_state.0.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!(
+                    "usage_watcher: preferences mutex was poisoned by an earlier panic; \
+                     recovering with under-lock data"
+                );
+                poisoned.into_inner()
+            }
+        };
         crate::preferences::effective_os_surface(
             &guard,
             Category::UsageThreshold,

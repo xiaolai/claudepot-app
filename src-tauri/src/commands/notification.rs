@@ -311,6 +311,54 @@ pub async fn notification_log_append_routed(
     let title = cap_string(args.title, MAX_TITLE_LEN);
     let body = cap_string(args.body, MAX_BODY_LEN);
     let target = cap_target(args.target);
+    // Audit-fix High #7 (server-side surface validation): trim the
+    // renderer-supplied `surfaces_requested` so it can't claim more
+    // than the priority default plus the `os_override` policy. A
+    // renderer bug or malicious IPC shouldn't be able to mark e.g.
+    // a P3 category as having requested `[Toast, OsBanner, Banner]`.
+    //
+    // The rules:
+    //   - P0Blocking allows {toast, osBanner, banner} per route().
+    //   - P1Stalled allows {toast (override), osBanner, banner (override)}.
+    //   - P2Acknowledge allows {toast, osBanner (override)}.
+    //   - P3Ambient allows {} by default; `os_override = Some(true)`
+    //     lets osBanner in, but nothing else.
+    // For simplicity we apply the priority's MAX set: every surface
+    // the priority could allow under any context override. Anything
+    // outside that envelope is impossible by construction.
+    let allowed: std::collections::HashSet<claudepot_core::notifications::Surface> =
+        match priority {
+            claudepot_core::notifications::Priority::P0Blocking => [
+                claudepot_core::notifications::Surface::Toast,
+                claudepot_core::notifications::Surface::OsBanner,
+                claudepot_core::notifications::Surface::Banner,
+            ]
+            .into_iter()
+            .collect(),
+            claudepot_core::notifications::Priority::P1Stalled => [
+                claudepot_core::notifications::Surface::Toast,
+                claudepot_core::notifications::Surface::OsBanner,
+                claudepot_core::notifications::Surface::Banner,
+            ]
+            .into_iter()
+            .collect(),
+            claudepot_core::notifications::Priority::P2Acknowledge => [
+                claudepot_core::notifications::Surface::Toast,
+                claudepot_core::notifications::Surface::OsBanner,
+            ]
+            .into_iter()
+            .collect(),
+            claudepot_core::notifications::Priority::P3Ambient => [
+                claudepot_core::notifications::Surface::OsBanner,
+            ]
+            .into_iter()
+            .collect(),
+        };
+    let surfaces_requested: Vec<claudepot_core::notifications::Surface> = args
+        .surfaces_requested
+        .into_iter()
+        .filter(|s| allowed.contains(s))
+        .collect();
     let id = tokio::task::spawn_blocking(move || {
         log.append_routed(
             args.category,
@@ -319,7 +367,7 @@ pub async fn notification_log_append_routed(
             title,
             body,
             target,
-            args.surfaces_requested,
+            surfaces_requested,
             args.surfaces_delivered,
         )
         .map_err(|e| format!("notification_log append_routed failed: {e}"))

@@ -206,10 +206,43 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   });
 
   // Hydrate the CategoryPrefs cache once on mount so emit() reads
-  // real user preferences. Fire-and-forget — emit() falls back to
-  // sensible defaults until the cache lands.
+  // real user preferences. Re-hydrate when ANY preference setter
+  // fires (audit-fix #3): the legacy scalar setters
+  // (`preferences_set_notifications`,
+  // `preferences_set_service_status`, `preferences_set_activity`)
+  // now mirror into `category_prefs` server-side, but the renderer
+  // cache only knew about updates made through
+  // `preferences_category_pref_set`. Without this listener, toggling
+  // via Settings → Notifications' legacy scalar rows would leave
+  // emit() reading stale category state.
+  //
+  // Fire-and-forget — emit() falls back to sensible defaults until
+  // the cache lands. Module-level dynamic import on @tauri-apps so
+  // non-Tauri test environments don't blow up.
   useEffect(() => {
     void hydrateCategoryPrefs();
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen("cp-prefs-changed", () => {
+          void hydrateCategoryPrefs();
+        }),
+      )
+      .then((fn) => {
+        if (cancelled) {
+          if (typeof fn === "function") fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch(() => {
+        /* non-tauri env */
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const [splitBrainPending, setSplitBrainPending] =
