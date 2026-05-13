@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 
 import { loadCategoryPage } from "@/lib/links/queries";
 import { LinkEntry } from "../../_components/LinkEntry";
@@ -9,9 +10,11 @@ export const revalidate = 3600;
 
 type Props = { params: Promise<{ slug: string }> };
 
+const loadCachedCategoryPage = cache((slug: string) => loadCategoryPage(slug));
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const data = await loadCategoryPage(slug);
+  const data = await loadCachedCategoryPage(slug);
   if (!data) return { title: "Not found" };
   return {
     title: `${data.category.name} · Links`,
@@ -21,7 +24,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function CategoryPage({ params }: Props) {
   const { slug } = await params;
-  const data = await loadCategoryPage(slug);
+  const data = await loadCachedCategoryPage(slug);
   if (!data) notFound();
 
   const { category, parent, children, links } = data;

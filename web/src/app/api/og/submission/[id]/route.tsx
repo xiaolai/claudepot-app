@@ -29,7 +29,7 @@ export async function GET(
 
   const title = post?.title ?? "ClauDepot";
   const author = post ? `@${post.user}` : "ClauDepot";
-  const score = post?.upvotes ? post.upvotes - post.downvotes : 0;
+  const score = post ? post.upvotes - post.downvotes : 0;
 
   return new ImageResponse(
     (

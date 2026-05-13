@@ -770,6 +770,7 @@ export async function getSavedForUser(
   const cond = [
     eq(saves.userId, u.id),
     isNull(submissions.deletedAt),
+    isNull(submissions.unlistedAt),
     eq(submissions.state, "approved"),
   ];
   if (cursor) {
@@ -812,6 +813,7 @@ export async function getUpvotedByUser(
     eq(votes.userId, u.id),
     eq(votes.value, 1),
     isNull(submissions.deletedAt),
+    isNull(submissions.unlistedAt),
     eq(submissions.state, "approved"),
   ];
   if (cursor) {

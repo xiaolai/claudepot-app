@@ -22,9 +22,9 @@ export function registerNotificationTools(server: McpServer): void {
     {
       title: "List your notifications",
       description:
-        "Returns the calling user's notifications, newest first. " +
-        "Use `since` to do incremental polling. Requires the " +
-        "notification:read scope.",
+        "Returns the calling user's notifications. Initial fetches come " +
+        "newest first; `since` polls are chronological so callers can " +
+        "drain overflow windows safely. Requires the notification:read scope.",
       inputSchema: {
         unreadOnly: z.boolean().optional(),
         since: z.iso.datetime().optional(),

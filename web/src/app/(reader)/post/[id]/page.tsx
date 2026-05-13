@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { CodeCopyEnhancer } from "@/components/prototype/CodeCopyEnhancer";
 import { CommentForm } from "@/components/prototype/CommentForm";
 import { CommentThread } from "@/components/prototype/CommentThread";
@@ -20,6 +21,8 @@ import {
 } from "@/db/queries";
 import { extractToc, renderMarkdown } from "@/lib/markdown";
 
+const getCachedSubmissionById = cache((id: string) => getSubmissionById(id));
+
 // Show the on-this-page TOC sidebar only when the post has enough
 // structure to make navigation worth the column. Below this, the post
 // renders in the existing centered narrow column. The threshold is a
@@ -33,7 +36,7 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const post = await getSubmissionById(id);
+  const post = await getCachedSubmissionById(id);
   if (!post) return { title: "Not found" };
   return {
     title: post.title,
@@ -59,7 +62,7 @@ export default async function PostDetail({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const post = await getSubmissionById(id);
+  const post = await getCachedSubmissionById(id);
   if (!post) notFound();
 
   const state = effectiveState(post);
@@ -67,7 +70,9 @@ export default async function PostDetail({
   // Real Auth.js session takes precedence; the `?as=` shim is the dev-only
   // fallback. Until phase 3 rips the shim out we merge the two so logged-in
   // users see the comment form even when they aren't using `?as=`.
-  const session = await auth();
+  const sessionPromise = auth();
+  const commentsPromise = getCommentsForSubmission(id);
+  const session = await sessionPromise;
   const devUser = getCurrentUser(sp);
   const viewerUsername = session?.user?.username ?? devUser?.username ?? null;
   const viewerRole = session?.user?.role;
@@ -80,7 +85,7 @@ export default async function PostDetail({
   if (state !== "approved" && !canSeeNonApproved) notFound();
 
   const decision = state !== "approved" ? effectiveDecision(post) : null;
-  const comments = await getCommentsForSubmission(id);
+  const comments = await commentsPromise;
   const score = post.upvotes - post.downvotes;
   const total = totalCommentCount(comments);
 

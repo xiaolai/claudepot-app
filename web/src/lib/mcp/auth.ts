@@ -38,48 +38,52 @@ export async function verifyClaudepotToken(
 ): Promise<AuthInfo | undefined> {
   if (!bearerToken) return undefined;
 
-  const token = await findActiveTokenByPlaintext(bearerToken).catch(() => null);
-  if (!token) return undefined;
+  try {
+    const token = await findActiveTokenByPlaintext(bearerToken);
+    if (!token) return undefined;
 
-  const [user] = await db
-    .select({
-      id: users.id,
-      username: users.username,
-      role: users.role,
-      isAgent: users.isAgent,
-      botKind: users.botKind,
-    })
-    .from(users)
-    .where(eq(users.id, token.userId))
-    .limit(1);
+    const [user] = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        role: users.role,
+        isAgent: users.isAgent,
+        botKind: users.botKind,
+      })
+      .from(users)
+      .where(eq(users.id, token.userId))
+      .limit(1);
 
-  if (!user || user.role === "locked") return undefined;
+    if (!user || user.role === "locked") return undefined;
 
-  // Best-effort last-used bump. MCP requests can fan out to many tool
-  // calls per session — the bump still happens once per authenticate.
-  await markTokenUsed(token.id).catch(() => {});
+    // Best-effort last-used bump. MCP requests can fan out to many tool
+    // calls per session — the bump still happens once per authenticate.
+    await markTokenUsed(token.id).catch(() => {});
 
-  const extra: ClaudepotAuthExtra = {
-    userId: user.id,
-    username: user.username,
-    role: user.role,
-    isAgent: user.isAgent,
-    botKind: user.botKind,
-    tokenId: token.id,
-    tokenPrefix: token.displayPrefix,
-  };
+    const extra: ClaudepotAuthExtra = {
+      userId: user.id,
+      username: user.username,
+      role: user.role,
+      isAgent: user.isAgent,
+      botKind: user.botKind,
+      tokenId: token.id,
+      tokenPrefix: token.displayPrefix,
+    };
 
-  return {
-    // AuthInfo.token is intentionally redacted. The plaintext was already
-    // verified upstream; tool handlers never need it. Keeping it out of
-    // AuthInfo eliminates a leak surface (accidental serialization,
-    // future tool that logs `extra.authInfo`, etc.).
-    token: "redacted",
-    clientId: user.id, // MCP convention: the principal id for the client
-    scopes: token.scopes,
-    expiresAt: token.expiresAt
-      ? Math.floor(token.expiresAt.getTime() / 1000)
-      : undefined,
-    extra: extra as unknown as Record<string, unknown>,
-  };
+    return {
+      // AuthInfo.token is intentionally redacted. The plaintext was already
+      // verified upstream; tool handlers never need it. Keeping it out of
+      // AuthInfo eliminates a leak surface (accidental serialization,
+      // future tool that logs `extra.authInfo`, etc.).
+      token: "redacted",
+      clientId: user.id, // MCP convention: the principal id for the client
+      scopes: token.scopes,
+      expiresAt: token.expiresAt
+        ? Math.floor(token.expiresAt.getTime() / 1000)
+        : undefined,
+      extra: extra as unknown as Record<string, unknown>,
+    };
+  } catch {
+    return undefined;
+  }
 }

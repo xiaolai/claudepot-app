@@ -14,7 +14,7 @@
  * userId they're given.
  */
 
-import { and, count, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -64,9 +64,9 @@ export type ListNotificationsResult = {
   items: NotificationDto[];
   unreadCount: number;
   /**
-   * True iff there are more rows beyond the returned page. Polling
-   * bots should re-poll with `since` advanced to the oldest item's
-   * createdAt to drain the rest before treating the inbox as caught up.
+   * True iff there are more rows beyond the returned page. When the
+   * caller is polling with `since`, advance it to the newest returned
+   * item's createdAt and re-poll until hasMore=false.
    */
   hasMore: boolean;
 };
@@ -83,13 +83,14 @@ export async function listNotificationsForUser(
     conditions.push(inArray(notifications.kind, input.kinds));
   }
 
-  // ORDER BY DESC + LIMIT N+1 lets us return the newest N items
-  // plus a `hasMore` flag. Bots polling with `since` can keep
-  // draining (advancing the next poll's `since` to the oldest item
-  // they've seen and re-polling) until hasMore=false. Without
-  // hasMore, a poll that overflowed `limit` would silently miss
-  // every event older than the newest `limit` returned — the cursor
-  // would advance past the gap on the next poll.
+  // Two order modes:
+  //   - Initial fetch (no `since`): newest first for inbox UX.
+  //   - Incremental polling (`since` present): oldest first so a
+  //     caller can advance `since` to the newest returned item and
+  //     deterministically drain an overflowed window across polls.
+  //
+  // Both modes use LIMIT N+1 to surface `hasMore` without a second
+  // count query.
   const rowsPlusOne = await db
     .select({
       id: notifications.id,
@@ -100,7 +101,11 @@ export async function listNotificationsForUser(
     })
     .from(notifications)
     .where(and(...conditions))
-    .orderBy(desc(notifications.createdAt))
+    .orderBy(
+      ...(input.since
+        ? [asc(notifications.createdAt), asc(notifications.id)]
+        : [desc(notifications.createdAt), desc(notifications.id)]),
+    )
     .limit(limit + 1);
   const hasMore = rowsPlusOne.length > limit;
   const rows = hasMore ? rowsPlusOne.slice(0, limit) : rowsPlusOne;
@@ -187,4 +192,3 @@ export async function markAllReadForUser(userId: string): Promise<number> {
   const { updated } = await markNotificationsReadForUser(userId, { all: true });
   return updated;
 }
-
