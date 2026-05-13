@@ -381,7 +381,7 @@ pub async fn clear(ctx: &AppContext, keep_snapshot: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn launch(_ctx: &AppContext) -> Result<()> {
+pub async fn launch(ctx: &AppContext) -> Result<()> {
     use claudepot_core::desktop_backend;
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| anyhow::anyhow!("Desktop not supported on this platform"))?;
@@ -389,11 +389,15 @@ pub async fn launch(_ctx: &AppContext) -> Result<()> {
         .launch()
         .await
         .map_err(|e| anyhow::anyhow!("launch failed: {e}"))?;
-    println!("Launch requested.");
+    if ctx.json {
+        println!("{}", serde_json::json!({ "launched": true }));
+    } else {
+        println!("Launch requested.");
+    }
     Ok(())
 }
 
-pub async fn quit(_ctx: &AppContext) -> Result<()> {
+pub async fn quit(ctx: &AppContext) -> Result<()> {
     use claudepot_core::desktop_backend;
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| anyhow::anyhow!("Desktop not supported on this platform"))?;
@@ -402,7 +406,13 @@ pub async fn quit(_ctx: &AppContext) -> Result<()> {
             .quit()
             .await
             .map_err(|e| anyhow::anyhow!("quit failed: {e}"))?;
-        println!("Desktop quit.");
+        if ctx.json {
+            println!("{}", serde_json::json!({ "quit": true }));
+        } else {
+            println!("Desktop quit.");
+        }
+    } else if ctx.json {
+        println!("{}", serde_json::json!({ "quit": false }));
     } else {
         println!("Desktop was not running.");
     }

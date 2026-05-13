@@ -28,7 +28,6 @@ pub async fn export_cmd(
     use claudepot_core::session_export_delivery::{
         default_export_filename, deliver, extension_for, DeliveryReceipt, ExportDestination,
     };
-    let _ = ctx;
     let detail = resolve_detail(target)?;
     let fmt = match format {
         "md" | "markdown" => claudepot_core::session_export::ExportFormat::Markdown,
@@ -64,14 +63,46 @@ pub async fn export_cmd(
     .await?;
     match receipt {
         DeliveryReceipt::File { path, bytes } => {
-            eprintln!("Wrote {bytes} bytes to {}", path.display());
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "destination": "file",
+                        "path": path,
+                        "bytes": bytes,
+                    }))?
+                );
+            } else {
+                eprintln!("Wrote {bytes} bytes to {}", path.display());
+            }
         }
         DeliveryReceipt::Clipboard { bytes } => {
-            eprintln!("Copied {bytes} bytes to clipboard");
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "destination": "clipboard",
+                        "bytes": bytes,
+                    }))?
+                );
+            } else {
+                eprintln!("Copied {bytes} bytes to clipboard");
+            }
         }
         DeliveryReceipt::Gist { result, .. } => {
-            eprintln!("Uploaded to {}", result.url);
-            println!("{}", result.url);
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "destination": "gist",
+                        "url": result.url,
+                        "id": result.id,
+                    }))?
+                );
+            } else {
+                eprintln!("Uploaded to {}", result.url);
+                println!("{}", result.url);
+            }
         }
     }
     Ok(())
