@@ -23,7 +23,9 @@ export function readTransparencyMd(): string {
   return readFileSync(resolve(process.cwd(), EDITORIAL_DIR, "transparency.md"), "utf-8");
 }
 
-export function readTutorialMd(slug: "formats" | "principles"): string {
+export function readTutorialMd(
+  slug: "formats" | "principles" | "workspace",
+): string {
   return readFileSync(
     resolve(process.cwd(), EDITORIAL_DIR, "tutorials", `${slug}.md`),
     "utf-8",

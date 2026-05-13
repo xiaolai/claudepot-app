@@ -7,6 +7,7 @@ import {
   DollarSign,
   GraduationCap,
   Compass,
+  FolderCog,
 } from "lucide-react";
 
 export type OfficeSidebarPage =
@@ -17,7 +18,8 @@ export type OfficeSidebarPage =
   | "policy"
   | "costs"
   | "learn-formats"
-  | "learn-principles";
+  | "learn-principles"
+  | "learn-workspace";
 
 /** Shared left-rail navigation for the /office area pages.
  *  Pass the current page key so the active link gets aria-current="page"
@@ -83,6 +85,14 @@ export function OfficeSidebar({ current }: { current: OfficeSidebarPage }) {
               aria-current={ariaCurrent("learn-principles")}
             >
               <GraduationCap size={14} aria-hidden /> Principles
+            </Link>
+          </li>
+          <li>
+            <Link
+              href="/office/learn/workspace"
+              aria-current={ariaCurrent("learn-workspace")}
+            >
+              <FolderCog size={14} aria-hidden /> Workspace
             </Link>
           </li>
         </ul>

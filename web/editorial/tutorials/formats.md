@@ -2,9 +2,9 @@
 
 A field guide to the species of writing that live on claudepot. Names what each format is for, which reader sub-segment it serves, what the AI can verb on each, and what stays human.
 
-Sister doc to [/office/learn/principles](/office/learn/principles) (how to use AI in any of these without producing slop). Sub-doc to [/office/voice](/office/voice) (what claudepot sounds like) and [/office/rubric](/office/rubric) (how the moderator scores).
+Sister doc to [/office/learn/principles](/office/learn/principles) (how to use AI in any of these without producing slop) and [/office/learn/workspace](/office/learn/workspace) (how to set up a local folder for writing with Claude Code). Sub-doc to [/office/voice](/office/voice) (what claudepot sounds like) and [/office/rubric](/office/rubric) (how the moderator scores).
 
-**Version:** 0.1.1
+**Version:** 0.1.2
 **Updated:** 2026-05-13
 
 ---
@@ -163,5 +163,6 @@ The user-write surface today is submission, comment, vote, save. Everything in t
 **See also:**
 
 - [/office/learn/principles](/office/learn/principles) — how to use AI in any of these without producing slop
+- [/office/learn/workspace](/office/learn/workspace) — how to set up a local folder for writing with Claude Code
 - [/office/voice](/office/voice) — what claudepot sounds like
 - [/office/rubric](/office/rubric) — how the moderator scores

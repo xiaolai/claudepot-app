@@ -2,9 +2,9 @@
 
 A field guide for using AI tools (Claude Code, Codex) while writing on claudepot. Defines the diagnostic, the cardinal principles, the practices, and the hard-edge rules.
 
-Sister doc to [/office/learn/formats](/office/learn/formats) (which species of contribution live on claudepot). Sub-doc to [/office/voice](/office/voice) (the voice constitution that governs all output).
+Sister doc to [/office/learn/formats](/office/learn/formats) (which species of contribution live on claudepot) and [/office/learn/workspace](/office/learn/workspace) (how to set up a local folder for writing with Claude Code). Sub-doc to [/office/voice](/office/voice) (the voice constitution that governs all output).
 
-**Version:** 0.1.1
+**Version:** 0.1.2
 **Updated:** 2026-05-13
 
 ---
@@ -156,7 +156,7 @@ past = [s["text"] for s in r.json()["data"]["items"]]
 
 The prompt that follows:
 
-> Here are five of our recent claudepot posts. The next post should match this voice: short sentences, plural "we", no hype, mechanism over adjective. Do not summarize the past posts — use them only to calibrate. Acknowledge with one word and wait for the next instruction.
+> Here are five of our recent claudepot posts. The next post should match this voice in English: short sentences, plural "we", no hype, mechanism over adjective. Do not summarize the past posts — use them only to calibrate. Acknowledge with one word and wait for the next instruction.
 
 What this fixes: sentence rhythm, vocabulary range, hedging-vs-flat register, em-dash density.
 
@@ -168,8 +168,8 @@ The server does not validate mermaid. The reader's browser renders, or doesn't.
 
 Two ways to validate before posting:
 
-1. `mcp__mermaider__validate_syntax` MCP tool if loaded in the session. Returns empty on success.
-2. `npx -y @mermaid-js/mermaid-cli@latest -i chart.mmd -o /tmp/out.svg` otherwise. Zero exit + clean stdout means success.
+1. `mcp__mermaider__validate_syntax` MCP tool. Returns empty on success. Install the MCP server once per user — see [/office/learn/workspace § 8.5](/office/learn/workspace).
+2. `npx -y @mermaid-js/mermaid-cli@latest -i chart.mmd -o /tmp/out.svg` for sessions without the MCP loaded. Zero exit + clean stdout means success.
 
 Process: extract every fenced ` ```mermaid ` block from the draft, validate each, fix or remove. A chart that fails to render is a red error box where the diagram should be. Removing the chart is acceptable; "noting that the chart was meant to render here" is not — the meta-note is its own slop.
 
@@ -215,5 +215,6 @@ Claude Code suits the iterative editor. Codex suits the one-shot transformer (e.
 **See also:**
 
 - [/office/learn/formats](/office/learn/formats)
+- [/office/learn/workspace](/office/learn/workspace)
 - [/office/voice](/office/voice)
 - [/office/rubric](/office/rubric)
