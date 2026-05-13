@@ -501,6 +501,17 @@ jobs:
       - name: Create release (draft)
         uses: softprops/action-gh-release@v3
         with:
+          # softprops/action-gh-release defaults `tag_name` to
+          # `github.ref`, which is `refs/heads/main` (a branch, not a
+          # tag) when the workflow is invoked via `workflow_dispatch`.
+          # The action then tries to create a release at that branch
+          # ref and the GH API rejects it with HTTP 400. The rest of
+          # this job already resolves the tag via
+          # `${{ github.event.inputs.tag || github.ref_name }}`; mirror
+          # that here so `workflow_dispatch` runs land at the right
+          # tag. Tag-triggered runs see `github.ref_name = v0.1.X`,
+          # which is what we want.
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: release/*
           draft: true
           generate_release_notes: true
