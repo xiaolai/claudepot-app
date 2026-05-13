@@ -6,6 +6,89 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.29 — beta (unreleased)
+
+Mini audit-fix sweep across both the desktop app and `claudepot.com`.
+26 medium-severity findings; 25 fixed in this release, 1 deferred
+(`migrate_export.sign_password` zeroize gap — needs a core API change).
+
+### Fixed
+
+- **Secret zeroization.** Both CC and private-storage keychain writers
+  now wrap the hex-encoded credential and the `security -i` command
+  string in `SecretString`, so the bytes are scrubbed on every exit
+  path. Route validation paths (Gateway / Bedrock / Foundry) likewise
+  zeroize their secret-bearing inputs on every early-return error
+  branch (empty region, missing auth, invalid base URLs); the secret
+  no longer appears in the user-facing error message and no partial
+  route lands in the store.
+- **Template path scoping.** `within_home` validation now walks up to
+  the nearest existing ancestor, canonicalizes through the
+  Windows-aware helper, and rejoins the tail — closing a
+  symlink-escape gap on missing leaf paths. `canonicalize_glob_prefix`
+  preserves UNC prefixes and routes through `canonicalize_simplified`
+  instead of bare `std::fs::canonicalize`.
+- **CLI `--json` invariants.** `memory view`, `desktop launch`,
+  `desktop quit`, and `session export` previously printed
+  human-readable lines regardless of `--json`. They now emit
+  structured JSON when the flag is set (one shape per destination for
+  `session export`: `file`, `clipboard`, `gist`).
+- **xtask error propagation.** `verify-cc-parity` silently dropped
+  `read_dir` entry errors via `.flatten()` and could exit 0 when
+  `--only` matched nothing. Errors now propagate, zero-match `--only`
+  fails loudly, and `policy` entries are validated for shape so broken
+  fixtures don't pass silently.
+- **`UsageView` / `UpdatesPanel` listen rejections.** Tauri
+  `listen()` promises now `.catch()` so a non-Tauri / failed-listen
+  environment doesn't surface as an unhandled promise rejection;
+  `UpdatesPanel` cleanup optional-chains `fn?.()` for the same
+  reason.
+- **`CopyButton` clipboard handling.** Guards `navigator.clipboard?
+  .writeText` typeof so the fallback path runs on platforms missing
+  the API, and clears the reset timer on unmount.
+- **Web — duplicate per-request DB reads.** `/post/[id]` and
+  `/links/c/[slug]` each loaded the same row twice (once in
+  `generateMetadata`, once in the page body). Wrapped the loaders in
+  React `cache()` and parallelized independent fetches.
+- **Web — visibility filter gap.** `getSavedForUser` and
+  `getUpvotedByUser` filtered `deleted_at` but not `unlisted_at`, so
+  staff-unlisted submissions surfaced in those personal feeds. Added
+  the missing filter.
+- **Web — OG image score guard.** The OG image route guarded score
+  with a falsy check on `post?.upvotes`, so a post with 0 upvotes and
+  a negative net score rendered `0 points`. Now guards on post
+  existence only.
+- **Web — MCP auth fail-closed.** `verifyClaudepotToken` wraps the
+  lookup chain in try/catch so a transient DB failure returns
+  `undefined` and the auth adapter fails closed instead of throwing.
+
+### Changed
+
+- **Notifications drain order when polling.**
+  `listNotificationsForUser` returns newest-first for one-shot fetches
+  and oldest-first when polling with `since`, so callers can advance
+  the cursor to the newest returned item and deterministically drain
+  an overflowed window. The MCP tool description is updated; the REST
+  shape (`/api/v1/notifications`) is unchanged but bots that
+  hard-coded "newest-first while polling" will see the new order.
+- **Usage scans off the IPC worker.** `local_usage_aggregate` and
+  `top_costly_prompts` now run their filesystem walks + session-index
+  refresh + pricing-table work in
+  `tauri::async_runtime::spawn_blocking` so the Tokio IPC worker
+  isn't pinned during a large scan.
+- **Focus rings on custom buttons.** Several shell and Settings
+  buttons (palette pill, health pill, service-status dot, sidebar
+  target switcher rows, Settings nav / theme / threshold-chip /
+  toggle) now carry the `pm-focus` class so the documented
+  `:focus-visible` ring renders for keyboard users.
+
+### Infrastructure
+
+- **CI clippy: `--all-targets`.** The Linux clippy gate now includes
+  `--all-targets`, catching test-code lints that drifted silently
+  between Rust 1.92 and 1.95 (`useless_format`,
+  `cloned_ref_to_slice_refs`, `iter_nth_zero`, …).
+
 ## 0.1.28 — beta (2026-05-13)
 
 ### Added
