@@ -109,11 +109,15 @@ clippy commits in v0.0.18 prompted this setup:
 - **`<runner-a>`** (internal validator network, Ubuntu aarch64) —
   runs the same command as CI's `Format / Clippy (Linux)` job:
   ```bash
-  cargo clippy -p claudepot-core -p claudepot-cli -- -D warnings
+  cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings
   ```
   Catches new-clippy-version lints (1.95 added `io_other_error`,
-  `manual_pattern_char_comparison`) and `cfg(target_os = "macos")`-only
-  items that the macOS-local clippy never sees.
+  `manual_pattern_char_comparison`; 1.92 added `useless_format`,
+  `cloned_ref_to_slice_refs`, `iter_nth_zero`) and
+  `cfg(target_os = "macos")`-only items that the macOS-local clippy
+  never sees. `--all-targets` covers test-code lints too — without
+  it, test-only drift accumulated silently between 1.92 and 1.95
+  and surfaced as a 7-lint backlog on 2026-05-13.
 
 - **`<runner-b>`** (internal validator network, Win 11 MSVC x86_64) —
   runs the same compile-step as CI's `Tests (windows-latest)` job:

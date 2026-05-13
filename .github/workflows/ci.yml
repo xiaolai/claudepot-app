@@ -41,8 +41,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check -p claudepot-core -p claudepot-cli
 
-      - name: Clippy (core + cli)
-        run: cargo clippy -p claudepot-core -p claudepot-cli -- -D warnings
+      - name: Clippy (core + cli, all targets)
+        # `--all-targets` lints test code too. Without it, test-only
+        # lints accumulate silently between Rust releases and surface
+        # as a wall of errors at the next local clippy run (see the
+        # 2026-05-13 cleanup commit for the 7-lint backlog this gate
+        # would have caught at the source).
+        run: cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings
 
   test:
     name: Tests (${{ matrix.os }})
