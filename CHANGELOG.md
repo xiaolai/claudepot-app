@@ -6,7 +6,51 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.1.29 — beta (unreleased)
+## 0.1.30 — beta (unreleased)
+
+Small follow-up to the 0.1.29 audit sweep — UI fixes for two
+copy/paste-blocking surfaces and two release-workflow bugs that
+surfaced when 0.1.29's manual dispatch path was used for the first
+time.
+
+### Fixed
+
+- **Settings → Cleanup is now usable at narrow widths.** The
+  `CleanupPane | TrashDrawer` row had a fixed 2:1 split with no
+  reflow, so a ~1000-px window squeezed the trash drawer's header
+  buttons and entry rows into a ~150-px column. Stacked the sections
+  vertically with hair-line top borders (same treatment the
+  artifact-lifecycle pane below already used). Every section now
+  gets the full content width.
+- **Error and diagnostic text is selectable.** Plugin errors, scan
+  failures, preview failures, and cc-doctor entry rows could not be
+  selected for copy/paste — the global `body { user-select: none }`
+  rule was silently winning over inline `userSelect: "text"` in
+  WKWebView (React doesn't emit the `-webkit-` prefix). Opted ARIA
+  `role="alert"` / `role="status"` surfaces back into
+  text-selectable globally, plus `<code>` / `<pre>`; this catches
+  every toast and banner across the app. Three bare error divs
+  (ConfigSection's scan and preview failures, AutomationsSection's
+  load error) got the proper `role="alert"` added.
+
+### Infrastructure
+
+- **Release workflow now ships correctly via `workflow_dispatch`.**
+  `softprops/action-gh-release` was defaulting `tag_name` to
+  `github.ref`, which is `refs/heads/main` (a branch ref, not a
+  tag) when invoked manually. The action hit HTTP 400 and the job
+  failed with "Too many retries." Pass
+  `${{ github.event.inputs.tag || github.ref_name }}` explicitly so
+  manual re-dispatches land at the right tag. Tag-triggered runs
+  (the normal path) are unaffected.
+- **`-Force` on PowerShell `Compress-Archive` in the Windows CLI
+  packaging step.** A re-dispatch picks up the previous run's
+  `target/release` from the cargo cache, including
+  `claudepot-x86_64-windows.zip` — `Compress-Archive` refuses to
+  overwrite by default. Caught when re-dispatching 0.1.29 to test
+  the `tag_name` fix above.
+
+## 0.1.29 — beta (2026-05-13)
 
 Mini audit-fix sweep across both the desktop app and `claudepot.com`.
 26 medium-severity findings; 25 fixed in this release, 1 deferred
