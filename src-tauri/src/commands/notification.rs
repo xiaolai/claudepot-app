@@ -326,34 +326,34 @@ pub async fn notification_log_append_routed(
     // For simplicity we apply the priority's MAX set: every surface
     // the priority could allow under any context override. Anything
     // outside that envelope is impossible by construction.
-    let allowed: std::collections::HashSet<claudepot_core::notifications::Surface> =
-        match priority {
-            claudepot_core::notifications::Priority::P0Blocking => [
-                claudepot_core::notifications::Surface::Toast,
-                claudepot_core::notifications::Surface::OsBanner,
-                claudepot_core::notifications::Surface::Banner,
-            ]
-            .into_iter()
-            .collect(),
-            claudepot_core::notifications::Priority::P1Stalled => [
-                claudepot_core::notifications::Surface::Toast,
-                claudepot_core::notifications::Surface::OsBanner,
-                claudepot_core::notifications::Surface::Banner,
-            ]
-            .into_iter()
-            .collect(),
-            claudepot_core::notifications::Priority::P2Acknowledge => [
-                claudepot_core::notifications::Surface::Toast,
-                claudepot_core::notifications::Surface::OsBanner,
-            ]
-            .into_iter()
-            .collect(),
-            claudepot_core::notifications::Priority::P3Ambient => [
-                claudepot_core::notifications::Surface::OsBanner,
-            ]
-            .into_iter()
-            .collect(),
-        };
+    let allowed: std::collections::HashSet<claudepot_core::notifications::Surface> = match priority
+    {
+        claudepot_core::notifications::Priority::P0Blocking => [
+            claudepot_core::notifications::Surface::Toast,
+            claudepot_core::notifications::Surface::OsBanner,
+            claudepot_core::notifications::Surface::Banner,
+        ]
+        .into_iter()
+        .collect(),
+        claudepot_core::notifications::Priority::P1Stalled => [
+            claudepot_core::notifications::Surface::Toast,
+            claudepot_core::notifications::Surface::OsBanner,
+            claudepot_core::notifications::Surface::Banner,
+        ]
+        .into_iter()
+        .collect(),
+        claudepot_core::notifications::Priority::P2Acknowledge => [
+            claudepot_core::notifications::Surface::Toast,
+            claudepot_core::notifications::Surface::OsBanner,
+        ]
+        .into_iter()
+        .collect(),
+        claudepot_core::notifications::Priority::P3Ambient => {
+            [claudepot_core::notifications::Surface::OsBanner]
+                .into_iter()
+                .collect()
+        }
+    };
     let surfaces_requested: Vec<claudepot_core::notifications::Surface> = args
         .surfaces_requested
         .into_iter()

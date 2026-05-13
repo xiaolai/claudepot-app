@@ -53,15 +53,14 @@ async fn tick(app: &AppHandle) {
     // probes still give us cc_version + install identity so the
     // tray label reads "Health: ok" instead of "Health: 1 issue"
     // (the old aggregate_severity's forced-Warning behavior).
-    let snapshot = match tokio::task::spawn_blocking(claudepot_core::cc_doctor::scrape_with_probes)
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("cc_doctor_watcher: blocking task join failed: {e}");
-            return;
-        }
-    };
+    let snapshot =
+        match tokio::task::spawn_blocking(claudepot_core::cc_doctor::scrape_with_probes).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("cc_doctor_watcher: blocking task join failed: {e}");
+                return;
+            }
+        };
 
     // Mirror what the IPC command does, in the same order: update
     // the cache so the next IPC call doesn't repeat the work, then

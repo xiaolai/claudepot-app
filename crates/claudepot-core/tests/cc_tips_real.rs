@@ -14,7 +14,11 @@ fn extracts_from_real_cc_binary() {
     let tips = extract_from_binary(&bin).expect("extract");
     eprintln!("extracted {} tips from {}", tips.len(), bin.display());
     for t in &tips {
-        eprintln!("  {}: {}", t.id, &t.prose.chars().take(60).collect::<String>());
+        eprintln!(
+            "  {}: {}",
+            t.id,
+            &t.prose.chars().take(60).collect::<String>()
+        );
         if let Some(b) = &t.prose_b {
             eprintln!("    [variant_b] {}", b.chars().take(60).collect::<String>());
         }

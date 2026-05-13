@@ -250,8 +250,7 @@ pub async fn local_usage_aggregate(
 
     tauri::async_runtime::spawn_blocking(move || {
         let config_dir = claudepot_core::paths::claude_config_dir();
-        let sessions =
-            list_all_sessions(&config_dir).map_err(|e| format!("session index: {e}"))?;
+        let sessions = list_all_sessions(&config_dir).map_err(|e| format!("session index: {e}"))?;
         let bundled = pricing::load();
         let table = bundled.with_tier(tier);
         let pricing_source = format_pricing_source(&table);
@@ -412,8 +411,8 @@ pub async fn top_costly_prompts(
                 .refresh(&config_dir)
                 .map_err(|e| format!("session index refresh: {e}"))?;
         }
-        let turns =
-            top_costly_turns(&index, &table, window, n).map_err(|e| format!("top_costly_turns: {e}"))?;
+        let turns = top_costly_turns(&index, &table, window, n)
+            .map_err(|e| format!("top_costly_turns: {e}"))?;
         Ok(TopCostlyPromptsDto {
             turns: turns.into_iter().map(Into::into).collect(),
             pricing_tier,

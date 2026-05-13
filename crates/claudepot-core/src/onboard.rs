@@ -28,8 +28,7 @@ const STDERR_TAIL_LINES: usize = 12;
 /// buffered lines after the child process exits or is killed. Long
 /// enough to catch the final line a healthy child writes before
 /// exiting; short enough that a stuck pipe can't hang the login flow.
-const STDERR_DRAIN_GRACE: std::time::Duration =
-    std::time::Duration::from_millis(150);
+const STDERR_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_millis(150);
 
 type StderrTail = Arc<Mutex<VecDeque<String>>>;
 
@@ -143,9 +142,7 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
     // pipe FD closes.
     match outcome {
         Ok(()) => Ok(()),
-        Err(OnboardError::AuthLoginCancelled) => {
-            Err(OnboardError::AuthLoginCancelled)
-        }
+        Err(OnboardError::AuthLoginCancelled) => Err(OnboardError::AuthLoginCancelled),
         Err(OnboardError::AuthLoginFailed(code, _)) => {
             if let Some(handle) = stderr_handle {
                 let _ = tokio::time::timeout(STDERR_DRAIN_GRACE, handle).await;
@@ -417,8 +414,7 @@ mod tests {
     /// exit code.
     #[test]
     fn test_auth_login_stderr_tail_is_appended_to_error() {
-        let tail = "Error: keychain item not found\nfailed at step 3"
-            .to_string();
+        let tail = "Error: keychain item not found\nfailed at step 3".to_string();
         let err = OnboardError::AuthLoginFailed(1, Some(tail.clone()));
         let msg = err.to_string();
         assert!(
@@ -456,10 +452,7 @@ mod tests {
     /// tail from the killed child would just confuse.
     #[test]
     fn test_auth_login_timeout_ignores_stderr_tail() {
-        let err = OnboardError::AuthLoginFailed(
-            -2,
-            Some("partial output before kill".into()),
-        );
+        let err = OnboardError::AuthLoginFailed(-2, Some("partial output before kill".into()));
         let msg = err.to_string();
         assert!(msg.contains("timed out"), "got: {msg}");
         assert!(

@@ -1389,9 +1389,15 @@ mod tests {
         let ts1 = recent_ts(119);
         let ts2 = recent_ts(118);
         let lines = vec![
-            format!(r#"{{"type":"assistant","timestamp":"{ts0}","sessionId":"S1","message":{{"content":[{{"type":"tool_use","id":"toolu_OK","name":"Agent","input":{{"subagent_type":"Explore"}}}},{{"type":"tool_use","id":"toolu_BAD","name":"Agent","input":{{"subagent_type":"Explore"}}}}]}}}}"#),
-            format!(r#"{{"type":"user","timestamp":"{ts1}","sessionId":"S1","message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_BAD","is_error":true,"content":"boom"}}]}}}}"#),
-            format!(r#"{{"type":"user","timestamp":"{ts2}","sessionId":"S1","message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_OK","is_error":false,"content":"ok"}}]}}}}"#),
+            format!(
+                r#"{{"type":"assistant","timestamp":"{ts0}","sessionId":"S1","message":{{"content":[{{"type":"tool_use","id":"toolu_OK","name":"Agent","input":{{"subagent_type":"Explore"}}}},{{"type":"tool_use","id":"toolu_BAD","name":"Agent","input":{{"subagent_type":"Explore"}}}}]}}}}"#
+            ),
+            format!(
+                r#"{{"type":"user","timestamp":"{ts1}","sessionId":"S1","message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_BAD","is_error":true,"content":"boom"}}]}}}}"#
+            ),
+            format!(
+                r#"{{"type":"user","timestamp":"{ts2}","sessionId":"S1","message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_OK","is_error":false,"content":"ok"}}]}}}}"#
+            ),
         ];
         write_session(cfg.path(), "-a", "S1", &lines);
         idx.refresh(cfg.path()).unwrap();

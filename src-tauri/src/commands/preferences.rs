@@ -291,7 +291,10 @@ pub async fn preferences_set_service_status(
 pub async fn preferences_category_prefs_get(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
 ) -> Result<
-    std::collections::HashMap<claudepot_core::notifications::Category, crate::preferences::CategoryPrefs>,
+    std::collections::HashMap<
+        claudepot_core::notifications::Category,
+        crate::preferences::CategoryPrefs,
+    >,
     String,
 > {
     let p = state

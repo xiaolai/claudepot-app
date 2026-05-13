@@ -101,12 +101,10 @@ pub async fn cc_doctor_snapshot(
                 // returning. Probe runs on a blocking thread so a
                 // hung subprocess can't pin the IPC worker — but
                 // we cap at the probe's internal timeout (3s).
-                let probe = tokio::task::spawn_blocking(
-                    claudepot_core::cc_doctor::probe_version,
-                )
-                .await
-                .ok()
-                .flatten();
+                let probe = tokio::task::spawn_blocking(claudepot_core::cc_doctor::probe_version)
+                    .await
+                    .ok()
+                    .flatten();
                 let version_drifted = cache_should_invalidate(
                     snapshot.cc_version.as_deref(),
                     probe.as_ref().map(|p| p.version.as_str()),

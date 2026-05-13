@@ -21,9 +21,7 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use claudepot_core::cli_backend;
 use claudepot_core::rotation::{
-    audit::{
-        entry_for, AuditMode, RotationAuditEntry, RotationAuditLog, RotationOutcome,
-    },
+    audit::{entry_for, AuditMode, RotationAuditEntry, RotationAuditLog, RotationOutcome},
     eval::{evaluate, NoCandidateReason, PendingSwap, RuleDecision, SkipReason, SkipReasonRecord},
     rules::RotationRulesFile,
     store as rotation_store,
@@ -78,12 +76,7 @@ impl RotationOrchestrator {
     /// `usage_snapshot::run_tick` after the snapshot has been written
     /// to disk. Loading the rules file on every tick is cheap (small
     /// file, infrequent edits) — saves wiring a file watcher.
-    pub async fn tick(
-        &self,
-        app: &AppHandle,
-        snapshot: &UsageSnapshot,
-        active_uuid: Uuid,
-    ) {
+    pub async fn tick(&self, app: &AppHandle, snapshot: &UsageSnapshot, active_uuid: Uuid) {
         // Real I/O failures (permission denied, transient FS error)
         // skip this tick rather than silently treating the failure
         // as "no rules" — silent default would be invisible to the
@@ -159,9 +152,7 @@ impl RotationOrchestrator {
         // SkippedCcRunning every tick for the same wait, we record
         // the first deferral and only audit-log the transition (and
         // the eventual resolve), not every check.
-        if pending.skip_when_cc_running
-            && cli_backend::swap::is_cc_process_running_public().await
-        {
+        if pending.skip_when_cc_running && cli_backend::swap::is_cc_process_running_public().await {
             let mut g = match self.inner.lock() {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
@@ -336,11 +327,7 @@ impl RotationOrchestrator {
     /// pending entry in the stash so the user can retry — a
     /// transient error (token refresh hiccup, identity-gate flap)
     /// shouldn't silently lose the suggestion.
-    pub async fn apply_confirmed(
-        &self,
-        app: &AppHandle,
-        queued: QueuedSwap,
-    ) -> Result<(), String> {
+    pub async fn apply_confirmed(&self, app: &AppHandle, queued: QueuedSwap) -> Result<(), String> {
         match perform_swap(queued.pending.from_uuid, queued.pending.to_uuid).await {
             Ok(()) => {
                 let entry = entry_for(
@@ -528,4 +515,3 @@ fn window_kind_str(k: claudepot_core::services::usage_alerts::UsageWindowKind) -
         W::SevenDaySonnet => "seven_day_sonnet".into(),
     }
 }
-

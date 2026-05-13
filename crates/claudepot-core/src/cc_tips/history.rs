@@ -70,10 +70,7 @@ pub fn read_tips_history(global_config_path: Option<PathBuf>) -> TipsResult<Tips
             path: path.to_string_lossy().into_owned(),
             source,
         })?;
-    let num_startups = v
-        .get("numStartups")
-        .and_then(|x| x.as_u64())
-        .unwrap_or(0) as u32;
+    let num_startups = v.get("numStartups").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
     let mut tips_history: BTreeMap<String, u32> = BTreeMap::new();
     if let Some(map) = v.get("tipsHistory").and_then(|x| x.as_object()) {
         for (k, val) in map {

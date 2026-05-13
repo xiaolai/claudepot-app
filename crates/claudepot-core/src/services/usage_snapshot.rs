@@ -139,7 +139,10 @@ pub fn build(accounts: &[Account], outcomes: &HashMap<Uuid, UsageOutcome>) -> Us
         let Some(outcome) = outcomes.get(&a.uuid) else {
             continue;
         };
-        entries.insert(a.uuid.to_string(), AccountSnapshot::from_outcome(a, outcome, now));
+        entries.insert(
+            a.uuid.to_string(),
+            AccountSnapshot::from_outcome(a, outcome, now),
+        );
     }
     UsageSnapshot {
         schema_version: 1,
@@ -270,7 +273,9 @@ mod tests {
         outcomes.insert(b.uuid, UsageOutcome::Expired);
         outcomes.insert(
             c.uuid,
-            UsageOutcome::RateLimited { retry_after_secs: 30 },
+            UsageOutcome::RateLimited {
+                retry_after_secs: 30,
+            },
         );
         outcomes.insert(d.uuid, UsageOutcome::Error("network down".into()));
         outcomes.insert(
@@ -280,7 +285,10 @@ mod tests {
                 age_secs: 120,
             },
         );
-        let snap = build(&[a.clone(), b.clone(), c.clone(), d.clone(), e.clone()], &outcomes);
+        let snap = build(
+            &[a.clone(), b.clone(), c.clone(), d.clone(), e.clone()],
+            &outcomes,
+        );
         assert_eq!(
             snap.accounts.get(&a.uuid.to_string()).unwrap().status,
             AccountStatus::NoCredentials
@@ -323,7 +331,14 @@ mod tests {
         assert_eq!(entry.email, "round@example.com");
         assert_eq!(entry.status, AccountStatus::Ok);
         assert_eq!(
-            entry.usage.as_ref().unwrap().five_hour.as_ref().unwrap().utilization,
+            entry
+                .usage
+                .as_ref()
+                .unwrap()
+                .five_hour
+                .as_ref()
+                .unwrap()
+                .utilization,
             81.0
         );
     }

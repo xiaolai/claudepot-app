@@ -1109,10 +1109,7 @@ mod tests {
         // All three are unread (no mark_all_read).
         assert_eq!(log.unread_count(), 3);
         // P2-and-above excludes the P3 memory entry.
-        assert_eq!(
-            log.unread_count_at_or_above(Priority::P2Acknowledge),
-            2
-        );
+        assert_eq!(log.unread_count_at_or_above(Priority::P2Acknowledge), 2);
         // P1-and-above keeps just the usage threshold.
         assert_eq!(log.unread_count_at_or_above(Priority::P1Stalled), 1);
         // P0-and-above: none of these are blocking.

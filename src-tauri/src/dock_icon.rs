@@ -51,8 +51,7 @@ pub fn override_application_icon() {
     let app = NSApplication::sharedApplication(mtm);
 
     let data = NSData::with_bytes(DOCK_ICON_PNG);
-    let Some(image): Option<Retained<NSImage>> =
-        NSImage::initWithData(NSImage::alloc(), &data)
+    let Some(image): Option<Retained<NSImage>> = NSImage::initWithData(NSImage::alloc(), &data)
     else {
         // Fall through silently — the .icns fallback still renders
         // *something*, and a panic on cold launch is much worse

@@ -1,20 +1,20 @@
 mod app_menu;
+mod cc_doctor_watcher;
 mod commands;
 mod config_dto;
 mod config_watch;
 mod config_watch_types;
 #[cfg(target_os = "macos")]
 mod dock_icon;
-mod traffic_light;
 mod dto;
 mod dto_account;
 mod dto_activity;
 mod dto_activity_cards;
-mod dto_cc_doctor;
-mod dto_cc_tips;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
 mod dto_automations;
+mod dto_cc_doctor;
+mod dto_cc_tips;
 mod dto_desktop;
 mod dto_keys;
 mod dto_memory;
@@ -31,7 +31,6 @@ mod dto_session_prune;
 mod dto_templates;
 mod dto_updates;
 mod dto_usage;
-mod cc_doctor_watcher;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
@@ -39,6 +38,7 @@ mod preferences;
 mod rotation_orchestrator;
 mod service_status_watcher;
 mod state;
+mod traffic_light;
 mod tray;
 mod tray_icons;
 mod tray_menu;
@@ -317,11 +317,9 @@ pub fn run() {
                 // where both emits beat the listener.
                 let win_for_boot = window.clone();
                 tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(300))
-                        .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                     traffic_light::emit(&win_for_boot);
-                    tokio::time::sleep(std::time::Duration::from_millis(1000))
-                        .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
                     traffic_light::emit(&win_for_boot);
                 });
             }

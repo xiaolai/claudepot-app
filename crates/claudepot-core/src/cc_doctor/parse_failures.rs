@@ -393,10 +393,9 @@ mod tests {
             raw_bytes: 64,
             reason: "test".into(),
             // What the production path encodes: the scrubbed text.
-            raw_b64: base64::engine::general_purpose::STANDARD
-                .encode(scrub_pat_tokens(&redact_secrets(
-                    "doctor saw sk-ant-oat01-AbCdEfGhIjKlMnOpQr in env\n",
-                ))),
+            raw_b64: base64::engine::general_purpose::STANDARD.encode(scrub_pat_tokens(
+                &redact_secrets("doctor saw sk-ant-oat01-AbCdEfGhIjKlMnOpQr in env\n"),
+            )),
         };
         append_entry(&path, &entry).unwrap();
         let loaded = load_all(&path).unwrap();

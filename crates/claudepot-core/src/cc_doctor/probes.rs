@@ -273,10 +273,7 @@ mod tests {
 
     #[test]
     fn parse_version_line_extracts_when_no_trailing_label() {
-        assert_eq!(
-            parse_version_line("2.0.0\n"),
-            Some("2.0.0".to_string())
-        );
+        assert_eq!(parse_version_line("2.0.0\n"), Some("2.0.0".to_string()));
     }
 
     #[test]
@@ -342,7 +339,9 @@ mod tests {
         // also contains `node_modules` somewhere upstream. The
         // native check must run first because it's the more
         // specific signal.
-        let p = PathBuf::from("/Users/me/.local/share/claude/versions/2.1.140/node_modules/.bin/claude");
+        let p = PathBuf::from(
+            "/Users/me/.local/share/claude/versions/2.1.140/node_modules/.bin/claude",
+        );
         assert_eq!(classify_install_path(&p), Some("native".to_string()));
     }
 

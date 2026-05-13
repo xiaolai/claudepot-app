@@ -7,10 +7,10 @@
 //! `${...}` interpolations against the user's keybindings (default
 //! shortcuts when no override).
 
-use crate::cc_tips::categories::{Category, category_for, spinner_override_prose};
+use crate::cc_tips::categories::{category_for, spinner_override_prose, Category};
 use crate::cc_tips::error::{TipsError, TipsResult};
-use crate::cc_tips::extract::{RawTip, extract_from_binary, resolve_cc_binary};
-use crate::cc_tips::history::{LastSeen, SnapshotLog, read_tips_history};
+use crate::cc_tips::extract::{extract_from_binary, resolve_cc_binary, RawTip};
+use crate::cc_tips::history::{read_tips_history, LastSeen, SnapshotLog};
 use crate::cc_tips::triggers::{default_shortcut, known_id_count, trigger_for};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -90,7 +90,8 @@ pub fn ensure_catalog(force_refresh: bool) -> TipsResult<CatalogSnapshot> {
     if let Some(parent) = cache_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let body = serde_json::to_vec_pretty(&snap).map_err(|source| TipsError::CatalogParse { source })?;
+    let body =
+        serde_json::to_vec_pretty(&snap).map_err(|source| TipsError::CatalogParse { source })?;
     std::fs::write(&cache_path, body).map_err(|source| TipsError::CatalogIo {
         path: cache_path.to_string_lossy().into_owned(),
         source,
@@ -156,12 +157,11 @@ pub struct TipsCounts {
 /// against the user's keybindings (or defaults).
 pub fn render_tips(force_refresh: bool) -> TipsResult<TipsRender> {
     let snap = ensure_catalog(force_refresh)?;
-    let history = read_tips_history(None).unwrap_or_else(|_| {
-        crate::cc_tips::history::TipsHistoryRead {
+    let history =
+        read_tips_history(None).unwrap_or_else(|_| crate::cc_tips::history::TipsHistoryRead {
             num_startups: 0,
             tips_history: BTreeMap::new(),
-        }
-    });
+        });
     let snap_log = SnapshotLog::at(SnapshotLog::default_path()?);
     let now = now_ms();
 

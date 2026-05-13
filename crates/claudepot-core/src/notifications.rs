@@ -193,8 +193,9 @@ impl Category {
         use Priority::*;
         match self {
             // P0 — Blocking
-            AccountAuthRejected | KeychainLocked | CcSlotDrift | DesktopDrift
-            | RepairConflict => P0Blocking,
+            AccountAuthRejected | KeychainLocked | CcSlotDrift | DesktopDrift | RepairConflict => {
+                P0Blocking
+            }
 
             // P1 — Stalled
             SessionWaiting | SessionStuck | SessionErrorBurst | OpDoneUnfocused
@@ -202,12 +203,11 @@ impl Category {
 
             // P2 — Acknowledge
             AccountVerified | AccountSwitched | ProjectRenamed | ProjectRepaired
-            | SessionPruned | KeyCopied | KeyAdded | KeyRemoved | ConfigEdited
-            | AutomationRan | RotationApplied | RotationFailed | BannerResolved => P2Acknowledge,
+            | SessionPruned | KeyCopied | KeyAdded | KeyRemoved | ConfigEdited | AutomationRan
+            | RotationApplied | RotationFailed | BannerResolved => P2Acknowledge,
 
             // P3 — Ambient
-            MemoryChanged | ConfigTreePatched | ServiceStatusChanged
-            | UpdateAvailable => P3Ambient,
+            MemoryChanged | ConfigTreePatched | ServiceStatusChanged | UpdateAvailable => P3Ambient,
         }
     }
 
@@ -611,8 +611,7 @@ mod tests {
         // Read the on-disk fixture.
         let bytes = std::fs::read(&fixture_path)
             .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
-        let doc: serde_json::Value =
-            serde_json::from_slice(&bytes).expect("fixture is valid JSON");
+        let doc: serde_json::Value = serde_json::from_slice(&bytes).expect("fixture is valid JSON");
         let on_disk = doc
             .get("categories")
             .and_then(|v| v.as_array())

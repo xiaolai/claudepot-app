@@ -486,7 +486,7 @@ fn render(bytes: &[u8]) -> Grid {
             '\r' => grid.carriage_return(),
             '\n' => grid.newline(),
             '\x08' => grid.cursor_back(1),
-            '\x07' => {} // bell
+            '\x07' => {}              // bell
             c if c.is_control() => {} // drop other C0
             c => grid.put(c),
         }
@@ -530,7 +530,7 @@ fn handle_escape(chars: &mut std::iter::Peekable<std::str::Chars>, grid: &mut Gr
         }
         '7' | '8' => {} // DECSC / DECRC — save/restore cursor; ignore
         c if c.is_ascii_alphanumeric() => {} // single-char escape
-        _ => {} // best-effort drop
+        _ => {}         // best-effort drop
     }
 }
 

@@ -227,8 +227,7 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
     //    The new shape: clone → detect → save the clone → commit to
     //    `state` only when save succeeds.
     let mut candidate_state = state.clone();
-    let crossings =
-        candidate_state.apply_crossings(account_uuid, &resp, &thresholds, &kinds);
+    let crossings = candidate_state.apply_crossings(account_uuid, &resp, &thresholds, &kinds);
     if crossings.is_empty() {
         return;
     }

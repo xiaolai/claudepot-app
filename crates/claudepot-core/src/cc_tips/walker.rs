@@ -239,8 +239,7 @@ impl<'a> Walker<'a> {
                 } else if c == b'/' && !in_class {
                     self.pos += 1;
                     // Skip flags
-                    while self.pos < self.bytes.len()
-                        && self.bytes[self.pos].is_ascii_alphabetic()
+                    while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_alphabetic()
                     {
                         self.pos += 1;
                     }
@@ -435,7 +434,10 @@ impl<'a> Walker<'a> {
     }
 
     fn peek_is_digit(&self, i: usize) -> bool {
-        self.bytes.get(i).map(|b| b.is_ascii_digit()).unwrap_or(false)
+        self.bytes
+            .get(i)
+            .map(|b| b.is_ascii_digit())
+            .unwrap_or(false)
     }
 
     /// Slice the source bytes for a span.

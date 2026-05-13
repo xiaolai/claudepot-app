@@ -105,14 +105,12 @@ fn build_provider(
             }
             // Validate the optional override URL when present.
             let validated_base = match empty_to_none(b.base_url) {
-                Some(url) => Some(
-                    validate_base_url(&url).map_err(|e| {
-                        if let Some(token) = bearer.as_mut() {
-                            token.zeroize();
-                        }
-                        format!("invalid Bedrock base URL: {e}")
-                    })?,
-                ),
+                Some(url) => Some(validate_base_url(&url).map_err(|e| {
+                    if let Some(token) = bearer.as_mut() {
+                        token.zeroize();
+                    }
+                    format!("invalid Bedrock base URL: {e}")
+                })?),
                 None => None,
             };
             Ok(RouteProvider::Bedrock(BedrockConfig {
@@ -165,14 +163,12 @@ fn build_provider(
                 ));
             }
             let validated_base = match base {
-                Some(url) => Some(
-                    validate_base_url(&url).map_err(|e| {
-                        if let Some(key) = api_key.as_mut() {
-                            key.zeroize();
-                        }
-                        format!("invalid Foundry base URL: {e}")
-                    })?,
-                ),
+                Some(url) => Some(validate_base_url(&url).map_err(|e| {
+                    if let Some(key) = api_key.as_mut() {
+                        key.zeroize();
+                    }
+                    format!("invalid Foundry base URL: {e}")
+                })?),
                 None => None,
             };
             Ok(RouteProvider::Foundry(FoundryConfig {

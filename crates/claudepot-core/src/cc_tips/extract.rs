@@ -111,10 +111,8 @@ pub fn extract_from_binary(bin_path: &Path) -> TipsResult<Vec<RawTip>> {
 /// Pure function — extract tips from an in-memory byte slice. Safe
 /// to call on synthetic fixtures.
 pub fn extract_from_bytes(bytes: &[u8]) -> Vec<RawTip> {
-    let anchor = Regex::new(
-        r#"id:"([a-z][a-z0-9-]+)",(?:providerAgnostic:!0,)?content:async"#,
-    )
-    .expect("static regex compiles");
+    let anchor = Regex::new(r#"id:"([a-z][a-z0-9-]+)",(?:providerAgnostic:!0,)?content:async"#)
+        .expect("static regex compiles");
 
     let mut out: Vec<RawTip> = Vec::new();
     let mut seen_ids: std::collections::HashSet<String> = Default::default();
@@ -227,7 +225,9 @@ fn parse_tip_body(body: &[u8]) -> Option<ParsedFields> {
             if name == "async" {
                 if let Tok::Ident = t {
                     // Already consumed; treat current as method name.
-                    let real_name = std::str::from_utf8(w.slice(span_of_prev(&w))).unwrap_or("").to_string();
+                    let real_name = std::str::from_utf8(w.slice(span_of_prev(&w)))
+                        .unwrap_or("")
+                        .to_string();
                     consume_method_body(&mut w, &real_name, &mut out);
                 } else {
                     break;
@@ -261,7 +261,11 @@ fn read_field_name(w: &mut Walker) -> Option<String> {
         Tok::StringLit => {
             // Strip quotes.
             if bytes.len() >= 2 {
-                Some(std::str::from_utf8(&bytes[1..bytes.len() - 1]).ok()?.to_string())
+                Some(
+                    std::str::from_utf8(&bytes[1..bytes.len() - 1])
+                        .ok()?
+                        .to_string(),
+                )
             } else {
                 None
             }
@@ -424,10 +428,7 @@ fn unescape_template(b: &[u8]) -> String {
             k = j;
         } else {
             // Find next `${` or end.
-            let next = out[k..]
-                .find("${")
-                .map(|p| k + p)
-                .unwrap_or(out.len());
+            let next = out[k..].find("${").map(|p| k + p).unwrap_or(out.len());
             let segment = &out[k..next];
             final_out.push_str(&unescape_js(segment.as_bytes()));
             k = next;
@@ -767,7 +768,9 @@ fn top_level_index(bytes: &[u8], target: u8) -> Option<usize> {
 fn label_for_condition(cond: &str, branch_true: bool) -> String {
     let c = cond.trim();
     if let Some((_, terminal_lit)) = c.split_once("===") {
-        let lit = terminal_lit.trim().trim_matches(|x: char| x == '"' || x == '\'');
+        let lit = terminal_lit
+            .trim()
+            .trim_matches(|x: char| x == '"' || x == '\'');
         if c.contains("terminal") {
             return if branch_true {
                 format!("When terminal is {lit}")

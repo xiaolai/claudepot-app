@@ -101,9 +101,7 @@ fn compute<R: Runtime>(_win: &WebviewWindow<R>) -> Option<TrafficLightMetrics> {
 /// `traffic-light-metrics` event first, then invokes this once in case
 /// the boot-time emit fired before the listener was attached.
 #[tauri::command]
-pub fn traffic_light_metrics<R: Runtime>(
-    window: WebviewWindow<R>,
-) -> Option<TrafficLightMetrics> {
+pub fn traffic_light_metrics<R: Runtime>(window: WebviewWindow<R>) -> Option<TrafficLightMetrics> {
     compute(&window)
 }
 

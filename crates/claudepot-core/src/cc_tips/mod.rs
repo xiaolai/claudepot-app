@@ -27,8 +27,8 @@ pub mod triggers;
 pub mod walker;
 
 pub use catalog::{CatalogSnapshot, RenderedTip, TipsRender};
-pub use categories::{Category, category_for};
+pub use categories::{category_for, Category};
 pub use error::TipsError;
-pub use extract::{RawTip, extract_from_binary, resolve_cc_binary};
-pub use history::{LastSeen, Snapshot, SnapshotLog, read_tips_history};
-pub use triggers::{TriggerInfo, trigger_for};
+pub use extract::{extract_from_binary, resolve_cc_binary, RawTip};
+pub use history::{read_tips_history, LastSeen, Snapshot, SnapshotLog};
+pub use triggers::{trigger_for, TriggerInfo};

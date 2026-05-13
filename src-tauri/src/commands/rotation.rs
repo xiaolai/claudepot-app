@@ -16,8 +16,7 @@ use claudepot_core::services::usage_snapshot;
 use tauri::{AppHandle, State};
 
 use crate::dto_rotation::{
-    PendingSwapDto, RotationAuditEntryDto, RotationDryRunDto, RotationRuleDto,
-    RotationRulesFileDto,
+    PendingSwapDto, RotationAuditEntryDto, RotationDryRunDto, RotationRuleDto, RotationRulesFileDto,
 };
 use crate::rotation_orchestrator::RotationOrchestrator;
 
@@ -144,12 +143,8 @@ pub async fn rotation_dry_run(
 /// strings instead of `{:?}` on internal enums.
 fn skip_reason_user_text(r: &SkipReason) -> String {
     match r {
-        SkipReason::NoActiveSnapshot => {
-            "active account has no usage data yet".into()
-        }
-        SkipReason::NoWindowData => {
-            "the trigger window has no data on the active account".into()
-        }
+        SkipReason::NoActiveSnapshot => "active account has no usage data yet".into(),
+        SkipReason::NoWindowData => "the trigger window has no data on the active account".into(),
         SkipReason::MinIntervalNotElapsed { secs_since_last } => {
             format!("min-interval guard ({secs_since_last}s since last swap)")
         }
@@ -165,15 +160,11 @@ fn skip_reason_user_text(r: &SkipReason) -> String {
 
 fn no_candidate_user_text(r: &NoCandidateReason) -> &'static str {
     match r {
-        NoCandidateReason::OnlyActive => {
-            "only the active account matched the candidate list"
-        }
+        NoCandidateReason::OnlyActive => "only the active account matched the candidate list",
         NoCandidateReason::AllAboveThreshold => {
             "every alternate candidate is also at or above the threshold"
         }
-        NoCandidateReason::UnknownEmails => {
-            "no candidate email matches a registered account"
-        }
+        NoCandidateReason::UnknownEmails => "no candidate email matches a registered account",
         NoCandidateReason::ActiveNotInList => {
             "active account is not in the round-robin candidate list"
         }

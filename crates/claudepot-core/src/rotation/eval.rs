@@ -253,7 +253,7 @@ fn evaluate_one(
                 trigger: trigger_summary.clone(),
                 from_email: from_email.to_string(),
                 to_email: None,
-                    mode: rule.mode.into(),
+                mode: rule.mode.into(),
             }),
         };
     }
@@ -533,8 +533,7 @@ fn select_explicit(
     active_uuid: Uuid,
     email: &str,
 ) -> Result<(Uuid, String), NoCandidateReason> {
-    let u = resolve_email_to_uuid(snapshot, email)
-        .ok_or(NoCandidateReason::UnknownEmails)?;
+    let u = resolve_email_to_uuid(snapshot, email).ok_or(NoCandidateReason::UnknownEmails)?;
     if u == active_uuid {
         return Err(NoCandidateReason::OnlyActive);
     }
@@ -634,17 +633,20 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(89.9), Some(40.0), true)),
-            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+            (
+                active,
+                snap_account("a@x.com", Some(89.9), Some(40.0), true),
+            ),
+            (
+                other,
+                snap_account("b@x.com", Some(20.0), Some(10.0), false),
+            ),
         ]);
         let rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
         let decisions = evaluate(&[rule], &snap, active, &[], fixed_now());
         assert_eq!(decisions.len(), 1);
         match &decisions[0] {
-            RuleDecision::Skip {
-                reason: None,
-                ..
-            } => {}
+            RuleDecision::Skip { reason: None, .. } => {}
             d => panic!("expected silent skip, got {d:?}"),
         }
     }
@@ -655,7 +657,10 @@ mod tests {
         let target_low = Uuid::new_v4();
         let target_mid = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(91.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(91.0), Some(40.0), true),
+            ),
             (
                 target_low,
                 snap_account("low@x.com", Some(10.0), Some(5.0), false),
@@ -688,7 +693,10 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
             (
                 other,
                 snap_account("b@x.com", Some(92.0), Some(45.0), false),
@@ -712,7 +720,10 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
             (
                 other,
                 snap_account("b@x.com", Some(20.0), Some(10.0), false),
@@ -757,7 +768,10 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
             (
                 other,
                 snap_account("b@x.com", Some(20.0), Some(10.0), false),
@@ -810,8 +824,14 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
-            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
+            (
+                other,
+                snap_account("b@x.com", Some(20.0), Some(10.0), false),
+            ),
         ]);
         let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
         rule.guards.max_swaps_per_window = 1;
@@ -840,13 +860,7 @@ mod tests {
             outcome: RotationOutcome::Applied,
             reason: "".into(),
         };
-        let decisions = evaluate(
-            &[rule],
-            &snap,
-            active,
-            &[old_in_lookback],
-            fixed_now(),
-        );
+        let decisions = evaluate(&[rule], &snap, active, &[old_in_lookback], fixed_now());
         // Old cycle's swap should not count → fires.
         assert!(matches!(decisions[0], RuleDecision::Fire(_)));
     }
@@ -858,8 +872,14 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
-            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
+            (
+                other,
+                snap_account("b@x.com", Some(20.0), Some(10.0), false),
+            ),
         ]);
         let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
         rule.guards.max_swaps_per_window = 1;
@@ -890,7 +910,9 @@ mod tests {
         let decisions = evaluate(&[rule.clone()], &snap, active, &audit, fixed_now());
         // Cap=1, one applied swap in same cycle → blocked.
         match &decisions[0] {
-            RuleDecision::Skip { reason: Some(rec), .. } => {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => {
                 assert!(matches!(rec.reason, SkipReason::MaxSwapsHit { .. }));
             }
             d => panic!("expected MaxSwapsHit skip, got {d:?}"),
@@ -906,7 +928,10 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
             (
                 other,
                 snap_account("b@x.com", Some(20.0), Some(10.0), false),
@@ -977,7 +1002,10 @@ mod tests {
         let b = Uuid::new_v4();
         let snap = build_snapshot(vec![
             (a, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
-            (b, snap_account("overflow@x.com", Some(5.0), Some(2.0), false)),
+            (
+                b,
+                snap_account("overflow@x.com", Some(5.0), Some(2.0), false),
+            ),
         ]);
         let rule = RotationRule {
             id: "exp".into(),
