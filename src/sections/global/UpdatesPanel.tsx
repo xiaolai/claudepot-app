@@ -779,10 +779,10 @@ export function UpdatesPanel() {
       if (active) {
         void refresh(false);
       }
-    });
+    }).catch(() => null);
     return () => {
       active = false;
-      void unlisten.then((fn) => fn());
+      void unlisten.then((fn) => fn?.());
     };
   }, [refresh]);
 

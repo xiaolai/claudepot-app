@@ -93,6 +93,7 @@ export function WindowChrome({
         onClick={onCmdK}
         onMouseDown={stopDrag}
         aria-label="Open command palette"
+        className="pm-focus"
         style={{
           display: "flex",
           alignItems: "center",

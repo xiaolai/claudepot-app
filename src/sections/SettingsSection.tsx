@@ -233,6 +233,7 @@ function SettingsNav({
                 type="button"
                 onClick={() => onSelect(t.id)}
                 aria-current={isActive ? "page" : undefined}
+                className="pm-focus"
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -463,6 +464,7 @@ function AppearancePane() {
                 type="button"
                 onClick={() => setMode(opt.value)}
                 aria-pressed={current}
+                className="pm-focus"
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -1821,6 +1823,7 @@ function UsageThresholdChips({
             type="button"
             onClick={() => onToggle(t)}
             aria-pressed={on}
+            className="pm-focus"
             style={{
               padding: "var(--sp-2) var(--sp-8)",
               fontFamily: "inherit",
@@ -2158,6 +2161,7 @@ function Toggle({
       aria-disabled={disabled || undefined}
       disabled={disabled}
       onClick={disabled ? undefined : () => onChange(!on)}
+      className="pm-focus"
       style={{
         width: "var(--toggle-track-w)",
         height: "var(--toggle-track-h)",

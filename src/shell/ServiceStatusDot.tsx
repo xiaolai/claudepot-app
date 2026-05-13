@@ -92,6 +92,7 @@ export function ServiceStatusDot() {
         onClick={() => void probeNow()}
         aria-label={`${label}. Click to refresh.`}
         title={`${label} — click to refresh.`}
+        className="pm-focus"
         style={{
           width: "var(--icon-btn-sm)",
           height: "var(--icon-btn-sm)",

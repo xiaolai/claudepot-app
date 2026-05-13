@@ -124,6 +124,7 @@ export function HealthPill({ onMouseDown }: HealthPillProps) {
       onMouseDown={onMouseDown}
       title={tooltip}
       aria-label={ariaLabel}
+      className="pm-focus"
       style={{
         // Bare circle — no chip chrome, no border. Sized to match
         // the bell's visual weight at this scale (the bell icon

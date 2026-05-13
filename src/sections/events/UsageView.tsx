@@ -75,7 +75,7 @@ export function UsageView({ registerRefresh }: UsageViewProps = {}) {
       } else {
         unlisten = u;
       }
-    });
+    }).catch(() => {});
     return () => {
       cancelled = true;
       window.clearInterval(interval);

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
 /**
@@ -20,6 +20,13 @@ export function CopyButton({
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  useEffect(
+    () => () => {
+      clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
   // Render nothing for empty payloads. Otherwise the user clicks a
   // button expecting to copy a bubble's content and instead overwrites
   // whatever they had on the clipboard with `""`. Every call site
@@ -29,6 +36,10 @@ export function CopyButton({
   const copy = async () => {
     clearTimeout(timerRef.current);
     try {
+      const writeText = navigator.clipboard?.writeText;
+      if (typeof writeText !== "function") {
+        throw new Error("clipboard API unavailable");
+      }
       await navigator.clipboard.writeText(text);
       setState("copied");
     } catch (_e) {

@@ -69,6 +69,7 @@ export function SidebarTargetSwitcher({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
+        className="pm-focus"
         style={{
           width: "100%",
           display: "flex",
@@ -225,6 +226,7 @@ export function SidebarTargetSwitcher({
                 onManage();
                 setOpen(false);
               }}
+              className="pm-focus"
               style={{
                 width: "100%",
                 display: "flex",
@@ -274,6 +276,7 @@ function TargetSwitchOption({
       aria-current={current || undefined}
       aria-disabled={disabled || undefined}
       title={disabled ? disabledReason : undefined}
+      className="pm-focus"
       style={{
         width: "100%",
         display: "flex",
