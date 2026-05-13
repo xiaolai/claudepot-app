@@ -786,7 +786,7 @@ async fn activity_classifier_runs_on_live_tail() {
 
     // Append a fresh `hook_non_blocking_error` and tick again so the
     // tail-derived path (not just the attach seed) gets exercised.
-    let appended = format!("{body}");
+    let appended = body.to_string();
     append_transcript(&f.projects_dir, "/Users/x/proj", "sess1", &appended);
     f.runtime.tick().await.unwrap();
 

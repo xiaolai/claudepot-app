@@ -313,7 +313,7 @@ mod tests {
                 age_secs: 5,
             },
         );
-        let snap = build(&[a.clone()], &outcomes);
+        let snap = build(std::slice::from_ref(&a), &outcomes);
         write(&path, &snap).unwrap();
         let read = std::fs::read_to_string(&path).unwrap();
         let parsed: UsageSnapshot = serde_json::from_str(&read).unwrap();

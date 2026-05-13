@@ -834,9 +834,7 @@ mod tests {
 
         // Append a new user line. Different size AND mtime, so the
         // guard trips either way.
-        let extra = format!(
-            r#"{{"type":"user","message":{{"role":"user","content":"second turn"}},"timestamp":"2026-04-10T10:01:00Z","cwd":"/a","sessionId":"S1"}}"#
-        );
+        let extra = r#"{"type":"user","message":{"role":"user","content":"second turn"},"timestamp":"2026-04-10T10:01:00Z","cwd":"/a","sessionId":"S1"}"#.to_string();
         let mut f = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
@@ -894,12 +892,8 @@ mod tests {
         let (idx, _tmp) = open_index();
         let cfg = TempDir::new().unwrap();
         // S1 at 2026-04-01, S2 at 2026-04-20 — S2 should come first.
-        let older = format!(
-            r#"{{"type":"user","message":{{"role":"user","content":"old"}},"timestamp":"2026-04-01T00:00:00Z","cwd":"/a","sessionId":"S1"}}"#
-        );
-        let newer = format!(
-            r#"{{"type":"user","message":{{"role":"user","content":"new"}},"timestamp":"2026-04-20T00:00:00Z","cwd":"/b","sessionId":"S2"}}"#
-        );
+        let older = r#"{"type":"user","message":{"role":"user","content":"old"},"timestamp":"2026-04-01T00:00:00Z","cwd":"/a","sessionId":"S1"}"#.to_string();
+        let newer = r#"{"type":"user","message":{"role":"user","content":"new"},"timestamp":"2026-04-20T00:00:00Z","cwd":"/b","sessionId":"S2"}"#.to_string();
         write_session(cfg.path(), "-a", "S1", &[older]);
         write_session(cfg.path(), "-b", "S2", &[newer]);
 

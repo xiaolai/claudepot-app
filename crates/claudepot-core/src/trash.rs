@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn batch_id_has_parseable_timestamp() {
-        let id = format!("20260422T153045Z-deadbeef");
+        let id = "20260422T153045Z-deadbeef".to_string();
         let ms = batch_ms(&id).unwrap();
         // Sanity: this millisecond value corresponds to 2026 April.
         let dt = DateTime::<Utc>::from_timestamp_millis(ms).unwrap();

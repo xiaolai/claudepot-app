@@ -865,7 +865,7 @@ mod tests {
         let bytes = b"X\x1b[3CY";
         let g = render(bytes);
         let row: String = g.rows[0].iter().map(|c| c.ch).collect();
-        assert_eq!(row.chars().nth(0), Some('X'));
+        assert_eq!(row.chars().next(), Some('X'));
         assert_eq!(row.chars().nth(4), Some('Y'));
     }
 
