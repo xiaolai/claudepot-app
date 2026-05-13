@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.1.28 — beta (unreleased)
+## 0.1.28 — beta (2026-05-13)
 
 ### Added
 
@@ -47,7 +47,7 @@ Versioning scheme:
   remaining partials and a checked-in cross-language fixture for the
   final Low item.
 
-## 0.1.27 — beta (unreleased)
+## 0.1.27 — beta (2026-05-13)
 
 ### Added
 
@@ -102,7 +102,7 @@ Versioning scheme:
   `duplicated_attributes` in `dock_icon.rs`) — small one-line
   fixes that were blocking the CI Linux clippy gate.
 
-## 0.1.25 — beta (unreleased)
+## 0.1.25 — beta (2026-05-12)
 
 ### Added
 
