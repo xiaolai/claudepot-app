@@ -4,8 +4,25 @@ A field guide for setting up a local folder that lets us write claudepot posts w
 
 Sister doc to [/office/learn/formats](/office/learn/formats) (which species of contribution live on claudepot) and [/office/learn/principles](/office/learn/principles) (how to use AI in any of these without producing slop). Sub-doc to [/office/voice](/office/voice).
 
-**Version:** 0.1.0
+**Version:** 0.2.0
 **Updated:** 2026-05-13
+
+---
+
+## Fast path — one prompt
+
+If you want the rough version, make an empty folder, open Claude Code in it, and paste the prompt below. It scaffolds the minimum workspace and walks you through minting a PAT in one pass. The long-form sections that follow explain what each piece does and when to promote it.
+
+```bash
+mkdir claudepot-workspace && cd claudepot-workspace
+claude
+```
+
+Then, at the Claude Code prompt:
+
+> Read https://claudepot.com/office/learn/workspace, scaffold the current folder per §3 (minimum: `.env.example`, `.gitignore`, `CLAUDE.md`, `posts/`, `notes/`), then walk me through minting a `CLAUDEPOT_PAT` at `/settings/tokens` — name the scopes I should check (`read:all`, `submission:write`, `comment:write`), wait while I paste it back, and write it to `.env`. Pause for confirmation before each file write.
+
+The prompt names the scopes by their exact slug so Claude can point at the right checkboxes without re-reading § 2, and it pins § 3 as the layout reference so the scaffold matches what the rest of this page assumes. `.claude/rules/`, `.claude/skills/`, `.claude/commands/` are deliberately not in the minimum — they're promoted into existence as in-session patterns repeat (see § 9's graduation rule), not scaffolded blank.
 
 ---
 
@@ -24,7 +41,7 @@ Two credentials gate the writing loop.
 | `ANTHROPIC_API_KEY` | Direct API access for Claude calls outside Claude Code | `.env`, never committed |
 | `CLAUDEPOT_PAT` | Posting + reading our submissions via the claudepot API | `.env`, never committed |
 
-`ANTHROPIC_API_KEY` is optional if we use Claude Code's subscription auth — `claude login` once, no key needed. The API key matters when scripts outside Claude Code (the voice-priming fetch, batch jobs) need direct access. `CLAUDEPOT_PAT` is created at [claudepot.com/settings](/settings) with scopes scoped to what we actually use — typically `read:all` for fetching past posts plus `submission:write` and `comment:write` if scripts also post.
+`ANTHROPIC_API_KEY` is optional if we use Claude Code's subscription auth — `claude login` once, no key needed. The API key matters when scripts outside Claude Code (the voice-priming fetch, batch jobs) need direct access. `CLAUDEPOT_PAT` is created at [claudepot.com/settings/tokens](/settings/tokens) with scopes scoped to what we actually use — typically `read:all` for fetching past posts plus `submission:write` and `comment:write` if scripts also post.
 
 The `.env`:
 
@@ -47,14 +64,14 @@ The anti-pattern: keys in `CLAUDE.md`. `CLAUDE.md` is loaded into model context 
 
 ## 3. The folder layout
 
-A workspace is a flat folder with one config tree and one or two content trees.
+A workspace is a flat folder with one config tree and one or two content trees. The tree below is the *full* shape — the minimum-viable bootstrap is just the four files and two content dirs marked with `[min]`. Everything else is added when an in-session pattern repeats often enough to earn its file (see § 9's graduation rule).
 
 ```
 claudepot-workspace/
-  .env                  # credentials, gitignored
-  .env.example          # the shape, committed
-  .gitignore
-  CLAUDE.md             # project instructions, always-loaded
+  .env                  # [min] credentials, gitignored
+  .env.example          # [min] the shape, committed
+  .gitignore            # [min]
+  CLAUDE.md             # [min] project instructions, always-loaded
   .claude/
     rules/
       mermaid.md        # path-scoped rules
@@ -64,8 +81,8 @@ claudepot-workspace/
         SKILL.md        # reusable workflows
     commands/
       slop-flag.md      # one-shot transformations
-  posts/                # drafts in progress
-  notes/                # working scratch, not for publish
+  posts/                # [min] drafts in progress
+  notes/                # [min] working scratch, not for publish
 ```
 
 `posts/` and `notes/` are the only content directories that survive across sessions. Everything else is configuration that Claude Code reads.
@@ -322,7 +339,7 @@ The workspace is invisible most of the time. We notice it when something it caug
 
 A workspace drifts. Three habits keep it useful.
 
-- **Rotate `CLAUDEPOT_PAT` on a 90-day cadence**, or sooner if it leaks (committed to a public repo, pasted into a chat, screenshot-shared). Revoke at [claudepot.com/settings](/settings), create a fresh one, update `.env`.
+- **Rotate `CLAUDEPOT_PAT` on a 90-day cadence**, or sooner if it leaks (committed to a public repo, pasted into a chat, screenshot-shared). Revoke at [claudepot.com/settings/tokens](/settings/tokens), create a fresh one, update `.env`.
 - **Review `CLAUDE.md` monthly**. Voice drifts in both directions — ours and the model's. If `CLAUDE.md` cites a section in [/office/voice](/office/voice) that no longer reads the same way, reconcile.
 - **Split when a skill grows past 50 lines**. A long skill is two skills sharing a folder, or a skill that should have split into a skill plus a rule. Split early; merging back is cheaper than reading a 200-line `SKILL.md` every time.
 - **Two files saying the same thing means one is stale**. Reconcile or delete; never let both live.
