@@ -230,10 +230,8 @@ fn relative_when(unix_secs: u64) -> String {
 ///
 /// Async because `list_all_sessions` walks the filesystem (refresh
 /// pass against the index cache) and pricing load may touch the
-/// disk-cached file. Both are cheap enough to run on a worker
-/// thread; declaring `async fn` keeps the IPC dispatcher off the
-/// main thread per the threading-policy comment in
-/// `commands.rs`.
+/// disk-cached file. The actual aggregation runs on the blocking
+/// pool so those sync scans do not pin a Tokio IPC worker.
 #[tauri::command]
 pub async fn local_usage_aggregate(
     spec: WindowSpec,
@@ -241,13 +239,6 @@ pub async fn local_usage_aggregate(
 ) -> Result<LocalUsageReportDto, String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
-
-    let config_dir = claudepot_core::paths::claude_config_dir();
-    let sessions = list_all_sessions(&config_dir).map_err(|e| format!("session index: {e}"))?;
-
-    // Read the user's pricing tier from preferences. The lock is
-    // released immediately — we only need the enum value, not a live
-    // reference, and the aggregation that follows is the slow part.
     let tier = {
         let guard = prefs
             .0
@@ -255,19 +246,26 @@ pub async fn local_usage_aggregate(
             .map_err(|e| format!("preferences lock poisoned: {e}"))?;
         guard.pricing_tier
     };
+    let tier_str = tier.as_str().to_string();
 
-    let bundled = pricing::load();
-    let table = bundled.with_tier(tier);
-    let pricing_source = format_pricing_source(&table);
-    let pricing_error = table.last_fetch_error.clone();
-
-    let report = aggregate_from_rows(sessions, &table, window);
-    Ok(report_to_dto(
-        report,
-        tier.as_str().to_string(),
-        pricing_source,
-        pricing_error,
-    ))
+    tauri::async_runtime::spawn_blocking(move || {
+        let config_dir = claudepot_core::paths::claude_config_dir();
+        let sessions =
+            list_all_sessions(&config_dir).map_err(|e| format!("session index: {e}"))?;
+        let bundled = pricing::load();
+        let table = bundled.with_tier(tier);
+        let pricing_source = format_pricing_source(&table);
+        let pricing_error = table.last_fetch_error.clone();
+        let report = aggregate_from_rows(sessions, &table, window);
+        Ok(report_to_dto(
+            report,
+            tier_str,
+            pricing_source,
+            pricing_error,
+        ))
+    })
+    .await
+    .map_err(|e| format!("local_usage_aggregate join: {e}"))?
 }
 
 /// Update the user's pricing tier. The wire form is the lowercase
@@ -393,7 +391,6 @@ pub async fn top_costly_prompts(
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
     let n = final_n.min(50);
-
     let tier = {
         let guard = prefs
             .0
@@ -401,29 +398,29 @@ pub async fn top_costly_prompts(
             .map_err(|e| format!("preferences lock poisoned: {e}"))?;
         guard.pricing_tier
     };
+    let refresh_index = refresh_index.unwrap_or(true);
+    let pricing_tier = tier.as_str().to_string();
 
-    let bundled = pricing::load();
-    let table = bundled.with_tier(tier);
-
-    // The session index lives in the on-disk DB; opening it is cheap
-    // (idempotent + lazy). Skip the refresh when the caller signals
-    // they've already done one — see the doc-comment above.
-    let config_dir = claudepot_core::paths::claude_config_dir();
-    let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
-    let index = SessionIndex::open(&db_path).map_err(|e| format!("session index open: {e}"))?;
-    if refresh_index.unwrap_or(true) {
-        index
-            .refresh(&config_dir)
-            .map_err(|e| format!("session index refresh: {e}"))?;
-    }
-
-    let turns = top_costly_turns(&index, &table, window, n)
-        .map_err(|e| format!("top_costly_turns: {e}"))?;
-
-    Ok(TopCostlyPromptsDto {
-        turns: turns.into_iter().map(Into::into).collect(),
-        pricing_tier: tier.as_str().to_string(),
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundled = pricing::load();
+        let table = bundled.with_tier(tier);
+        let config_dir = claudepot_core::paths::claude_config_dir();
+        let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+        let index = SessionIndex::open(&db_path).map_err(|e| format!("session index open: {e}"))?;
+        if refresh_index {
+            index
+                .refresh(&config_dir)
+                .map_err(|e| format!("session index refresh: {e}"))?;
+        }
+        let turns =
+            top_costly_turns(&index, &table, window, n).map_err(|e| format!("top_costly_turns: {e}"))?;
+        Ok(TopCostlyPromptsDto {
+            turns: turns.into_iter().map(Into::into).collect(),
+            pricing_tier,
+        })
     })
+    .await
+    .map_err(|e| format!("top_costly_prompts join: {e}"))?
 }
 
 #[cfg(test)]

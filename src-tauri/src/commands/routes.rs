@@ -49,6 +49,17 @@ fn parse_auth_scheme(s: &str) -> AuthScheme {
     }
 }
 
+fn secret_empty_to_none(mut s: String) -> Option<String> {
+    let trimmed = s.trim();
+    let out = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    };
+    s.zeroize();
+    out
+}
+
 fn build_provider(
     kind: ProviderKind,
     gateway: Option<GatewayInputDto>,
@@ -58,9 +69,14 @@ fn build_provider(
 ) -> Result<RouteProvider, String> {
     match kind {
         ProviderKind::Gateway => {
-            let g = gateway.ok_or_else(|| String::from("gateway config missing"))?;
-            let base = validate_base_url(&g.base_url)
-                .map_err(|e| format!("invalid gateway base URL: {e}"))?;
+            let mut g = gateway.ok_or_else(|| String::from("gateway config missing"))?;
+            let base = match validate_base_url(&g.base_url) {
+                Ok(base) => base,
+                Err(e) => {
+                    g.api_key.zeroize();
+                    return Err(format!("invalid gateway base URL: {e}"));
+                }
+            };
             Ok(RouteProvider::Gateway(GatewayConfig {
                 base_url: base,
                 api_key: g.api_key,
@@ -73,11 +89,16 @@ fn build_provider(
             let b = bedrock.ok_or_else(|| String::from("bedrock config missing"))?;
             let region = b.region.trim();
             if region.is_empty() {
+                let mut bearer = b.bearer_token;
+                bearer.zeroize();
                 return Err(String::from("AWS region is required"));
             }
-            let bearer = empty_to_none(b.bearer_token);
+            let mut bearer = secret_empty_to_none(b.bearer_token);
             let profile = empty_to_none(b.aws_profile);
             if !b.skip_aws_auth && bearer.is_none() && profile.is_none() {
+                if let Some(token) = bearer.as_mut() {
+                    token.zeroize();
+                }
                 return Err(String::from(
                     "Bedrock needs a bearer token, AWS profile, or skip_aws_auth set",
                 ));
@@ -85,8 +106,12 @@ fn build_provider(
             // Validate the optional override URL when present.
             let validated_base = match empty_to_none(b.base_url) {
                 Some(url) => Some(
-                    validate_base_url(&url)
-                        .map_err(|e| format!("invalid Bedrock base URL: {e}"))?,
+                    validate_base_url(&url).map_err(|e| {
+                        if let Some(token) = bearer.as_mut() {
+                            token.zeroize();
+                        }
+                        format!("invalid Bedrock base URL: {e}")
+                    })?,
                 ),
                 None => None,
             };
@@ -122,25 +147,36 @@ fn build_provider(
             let f = foundry.ok_or_else(|| String::from("foundry config missing"))?;
             let base = empty_to_none(f.base_url);
             let resource = empty_to_none(f.resource);
+            let mut api_key = secret_empty_to_none(f.api_key);
             if base.is_none() && resource.is_none() {
+                if let Some(key) = api_key.as_mut() {
+                    key.zeroize();
+                }
                 return Err(String::from(
                     "Foundry needs either a base URL or a resource name",
                 ));
             }
             if base.is_some() && resource.is_some() {
+                if let Some(key) = api_key.as_mut() {
+                    key.zeroize();
+                }
                 return Err(String::from(
                     "Foundry: choose base URL OR resource name, not both",
                 ));
             }
             let validated_base = match base {
                 Some(url) => Some(
-                    validate_base_url(&url)
-                        .map_err(|e| format!("invalid Foundry base URL: {e}"))?,
+                    validate_base_url(&url).map_err(|e| {
+                        if let Some(key) = api_key.as_mut() {
+                            key.zeroize();
+                        }
+                        format!("invalid Foundry base URL: {e}")
+                    })?,
                 ),
                 None => None,
             };
             Ok(RouteProvider::Foundry(FoundryConfig {
-                api_key: empty_to_none(f.api_key),
+                api_key,
                 base_url: validated_base,
                 resource,
                 skip_azure_auth: f.skip_azure_auth,
