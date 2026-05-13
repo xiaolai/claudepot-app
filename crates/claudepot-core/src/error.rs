@@ -152,11 +152,20 @@ pub enum OnboardError {
     #[error("claude CLI not found at {0}")]
     CliBinaryNotFound(String),
 
-    #[error("{}", match *.0 {
-        -2 => "login timed out — close the Claudepot window and try again, or complete the browser flow faster".to_string(),
-        code => format!("`claude auth login` exited with code {code}"),
+    // Second tuple field is the captured stderr tail from the
+    // `claude auth login` subprocess (last N lines, redacted of
+    // `sk-ant-*` tokens). When present, it's appended to the rendered
+    // error so the GUI dialog shows the actual failure reason —
+    // network error, keychain perm denied, OAuth state mismatch, etc.
+    // — instead of just the exit code. Issue #16.
+    #[error("{}", match (*.0, .1.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty())) {
+        (-2, _) => "login timed out — close the Claudepot window and try again, or complete the browser flow faster".to_string(),
+        (code, Some(tail)) => format!(
+            "`claude auth login` exited with code {code}\n\nclaude stderr (last lines):\n{tail}"
+        ),
+        (code, None) => format!("`claude auth login` exited with code {code}"),
     })]
-    AuthLoginFailed(i32),
+    AuthLoginFailed(i32, Option<String>),
 
     #[error("login cancelled")]
     AuthLoginCancelled,

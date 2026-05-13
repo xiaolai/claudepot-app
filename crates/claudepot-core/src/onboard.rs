@@ -4,13 +4,46 @@
 //! After login, imports the credential from the hashed keychain item or file.
 
 use crate::error::OnboardError;
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Hard timeout for `claude auth login` — generous enough that slow
 /// readers completing OAuth in the browser finish in time, tight enough
 /// that a user who closed the browser or walked away doesn't leave the
 /// GUI stuck on a spinner forever. Matches Kannon's 10-minute window.
 pub const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// How many trailing stderr lines from `claude auth login` to keep
+/// for inclusion in the user-facing error message. The whole stream
+/// still goes to `tracing` for log inspection; this cap just limits
+/// what gets stuffed into the dialog so a runaway child can't bloat
+/// memory or render unreadable. Issue #16: the previous behaviour
+/// dropped stderr entirely on failure, leaving users with only the
+/// exit code.
+const STDERR_TAIL_LINES: usize = 12;
+
+/// Bounded grace window for the stderr drain task to flush remaining
+/// buffered lines after the child process exits or is killed. Long
+/// enough to catch the final line a healthy child writes before
+/// exiting; short enough that a stuck pipe can't hang the login flow.
+const STDERR_DRAIN_GRACE: std::time::Duration =
+    std::time::Duration::from_millis(150);
+
+type StderrTail = Arc<Mutex<VecDeque<String>>>;
+
+fn new_stderr_tail() -> StderrTail {
+    Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES + 1)))
+}
+
+async fn drain_stderr_tail(tail: &StderrTail) -> Option<String> {
+    let buf = tail.lock().await;
+    if buf.is_empty() {
+        return None;
+    }
+    Some(buf.iter().cloned().collect::<Vec<_>>().join("\n"))
+}
 
 /// Cancellable variant: pass a shared `Notify`; when another task calls
 /// `notify.notify_one()`, the subprocess is killed and this function
@@ -53,13 +86,21 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
 
     // Drain stdout / stderr into tracing so logs from the child surface
     // when the GUI is launched without a terminal. Tasks are aborted
-    // automatically when the parent `child` is dropped.
+    // automatically when the parent `child` is dropped. The stderr
+    // pipe additionally feeds a bounded ring buffer so the failure
+    // path can include the actual reason in `OnboardError::AuthLoginFailed`
+    // rather than just the exit code (issue #16).
+    let stderr_tail = new_stderr_tail();
     if let Some(stdout) = child.stdout.take() {
-        tokio::spawn(pipe_to_tracing(stdout, "claude-stdout"));
+        tokio::spawn(pipe_to_tracing(stdout, "claude-stdout", None));
     }
-    if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(pipe_to_tracing(stderr, "claude-stderr"));
-    }
+    let stderr_handle = child.stderr.take().map(|stderr| {
+        tokio::spawn(pipe_to_tracing(
+            stderr,
+            "claude-stderr",
+            Some(stderr_tail.clone()),
+        ))
+    });
 
     let cancel_fut = async {
         match cancel.as_ref() {
@@ -69,11 +110,14 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
         }
     };
 
-    tokio::select! {
+    let outcome = tokio::select! {
         exit = child.wait() => {
             match exit {
                 Ok(status) if status.success() => Ok(()),
-                Ok(status) => Err(OnboardError::AuthLoginFailed(status.code().unwrap_or(-1))),
+                Ok(status) => Err(OnboardError::AuthLoginFailed(
+                    status.code().unwrap_or(-1),
+                    None,
+                )),
                 Err(e) => Err(OnboardError::Io(e)),
             }
         }
@@ -83,19 +127,42 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
                 LOGIN_TIMEOUT.as_secs()
             );
             let _ = child.kill().await;
-            Err(OnboardError::AuthLoginFailed(-2))
+            Err(OnboardError::AuthLoginFailed(-2, None))
         }
         _ = cancel_fut => {
             tracing::info!("login cancelled by user — killing child");
             let _ = child.kill().await;
             Err(OnboardError::AuthLoginCancelled)
         }
+    };
+
+    // On failure paths only, give the stderr drain task a small grace
+    // window to flush whatever's still buffered before we read the
+    // tail. The successful and cancel paths don't need the tail, so
+    // we skip the wait and let the task wind down on its own when the
+    // pipe FD closes.
+    match outcome {
+        Ok(()) => Ok(()),
+        Err(OnboardError::AuthLoginCancelled) => {
+            Err(OnboardError::AuthLoginCancelled)
+        }
+        Err(OnboardError::AuthLoginFailed(code, _)) => {
+            if let Some(handle) = stderr_handle {
+                let _ = tokio::time::timeout(STDERR_DRAIN_GRACE, handle).await;
+            }
+            Err(OnboardError::AuthLoginFailed(
+                code,
+                drain_stderr_tail(&stderr_tail).await,
+            ))
+        }
+        Err(other) => Err(other),
     }
 }
 
 async fn pipe_to_tracing<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
     reader: R,
     stream_name: &'static str,
+    tail: Option<StderrTail>,
 ) {
     use tokio::io::{AsyncBufReadExt, BufReader};
     let mut lines = BufReader::new(reader).lines();
@@ -108,6 +175,19 @@ async fn pipe_to_tracing<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
         // See `.claude/rules/rust-conventions.md` §Security.
         let safe = crate::session_export::redact_secrets(&line);
         tracing::info!(target: "claudepot::onboard", stream = stream_name, "{}", safe);
+        if let Some(tail) = tail.as_ref() {
+            // Same redacted line goes into the bounded ring buffer that
+            // backs the user-facing error tail. Lock-and-push happens
+            // per line — the lock is uncontended in practice (only this
+            // task and the failure-path drainer touch it) and lines
+            // arrive at most as fast as `claude auth login` writes,
+            // which is well below contention threshold.
+            let mut buf = tail.lock().await;
+            buf.push_back(safe);
+            while buf.len() > STDERR_TAIL_LINES {
+                buf.pop_front();
+            }
+        }
     }
 }
 
@@ -170,13 +250,20 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
 
     // Mirror run_auth_login_in_place_cancellable's drain-to-tracing
     // pattern. Stdout/stderr piped so a closed terminal doesn't lose
-    // diagnostic output.
+    // diagnostic output. Stderr also feeds a bounded ring buffer so
+    // failures surface the actual reason in the user-facing error
+    // (issue #16).
+    let stderr_tail = new_stderr_tail();
     if let Some(stdout) = child.stdout.take() {
-        tokio::spawn(pipe_to_tracing(stdout, "claude-stdout"));
+        tokio::spawn(pipe_to_tracing(stdout, "claude-stdout", None));
     }
-    if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(pipe_to_tracing(stderr, "claude-stderr"));
-    }
+    let stderr_handle = child.stderr.take().map(|stderr| {
+        tokio::spawn(pipe_to_tracing(
+            stderr,
+            "claude-stderr",
+            Some(stderr_tail.clone()),
+        ))
+    });
 
     let cancel_fut = async {
         match cancel.as_ref() {
@@ -191,6 +278,7 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
                 Ok(status) if status.success() => Ok(()),
                 Ok(status) => Err(OnboardError::AuthLoginFailed(
                     status.code().unwrap_or(-1),
+                    None,
                 )),
                 Err(e) => Err(OnboardError::Io(e)),
             }
@@ -201,13 +289,30 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
                 LOGIN_TIMEOUT.as_secs()
             );
             let _ = child.kill().await;
-            Err(OnboardError::AuthLoginFailed(-2))
+            Err(OnboardError::AuthLoginFailed(-2, None))
         }
         _ = cancel_fut => {
             tracing::info!("browser login cancelled by user — killing child");
             let _ = child.kill().await;
             Err(OnboardError::AuthLoginCancelled)
         }
+    };
+
+    // Resolve the tail BEFORE we hand back the result so the caller
+    // sees a fully-rendered Display. See the parallel block in
+    // `run_auth_login_in_place_cancellable_with_binary` for the
+    // rationale; same grace window.
+    let outcome = match outcome {
+        Err(OnboardError::AuthLoginFailed(code, _)) => {
+            if let Some(handle) = stderr_handle {
+                let _ = tokio::time::timeout(STDERR_DRAIN_GRACE, handle).await;
+            }
+            Err(OnboardError::AuthLoginFailed(
+                code,
+                drain_stderr_tail(&stderr_tail).await,
+            ))
+        }
+        other => other,
     };
 
     match outcome {
@@ -285,7 +390,7 @@ mod tests {
     /// guide the user instead of displaying a cryptic exit code.
     #[test]
     fn test_auth_login_timeout_error_message() {
-        let err = OnboardError::AuthLoginFailed(-2);
+        let err = OnboardError::AuthLoginFailed(-2, None);
         let msg = err.to_string();
         assert!(
             msg.contains("timed out"),
@@ -301,8 +406,66 @@ mod tests {
     fn test_auth_login_non_timeout_exit_code_is_reported() {
         // Any non-(-2) exit code should include the actual code so the
         // user can diagnose (e.g. 1 = generic CC failure).
-        let err = OnboardError::AuthLoginFailed(1);
+        let err = OnboardError::AuthLoginFailed(1, None);
         assert!(err.to_string().contains("1"));
+    }
+
+    /// Issue #16: when `claude auth login` exits non-zero, the captured
+    /// stderr tail must be appended to the rendered error so the GUI
+    /// dialog tells the user the actual reason (network error, OAuth
+    /// state mismatch, keychain perm denied, …) instead of just the
+    /// exit code.
+    #[test]
+    fn test_auth_login_stderr_tail_is_appended_to_error() {
+        let tail = "Error: keychain item not found\nfailed at step 3"
+            .to_string();
+        let err = OnboardError::AuthLoginFailed(1, Some(tail.clone()));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exited with code 1"),
+            "exit code still surfaces; got: {msg}"
+        );
+        assert!(
+            msg.contains("claude stderr"),
+            "stderr tail should be labelled; got: {msg}"
+        );
+        assert!(
+            msg.contains("keychain item not found"),
+            "actual stderr line should be in the message; got: {msg}"
+        );
+    }
+
+    /// An empty / whitespace-only stderr tail must not produce a
+    /// dangling "claude stderr (last lines):" header in the message.
+    /// Otherwise a child that exits non-zero without writing to
+    /// stderr renders an awkward two-line error with nothing under
+    /// the label.
+    #[test]
+    fn test_auth_login_empty_stderr_tail_is_omitted() {
+        let err = OnboardError::AuthLoginFailed(1, Some("   \n  ".into()));
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("claude stderr"),
+            "blank tail should not render the label; got: {msg}"
+        );
+        assert_eq!(msg, "`claude auth login` exited with code 1");
+    }
+
+    /// Timeout sentinel takes precedence over any captured tail —
+    /// the timeout message is the actionable one; a partial stderr
+    /// tail from the killed child would just confuse.
+    #[test]
+    fn test_auth_login_timeout_ignores_stderr_tail() {
+        let err = OnboardError::AuthLoginFailed(
+            -2,
+            Some("partial output before kill".into()),
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("timed out"), "got: {msg}");
+        assert!(
+            !msg.contains("partial output"),
+            "tail should be suppressed for the timeout sentinel; got: {msg}"
+        );
     }
 
     /// Smoke test for the cancel path. The real `claude` binary isn't
