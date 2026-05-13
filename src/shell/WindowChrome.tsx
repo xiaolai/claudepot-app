@@ -23,7 +23,17 @@ interface WindowChromeProps {
  * propagating so they behave as buttons, not drag seeds. The
  * breadcrumb inherits drag from the parent without needing its own
  * attribute, so the text stays selectable.
- * Left padding clears the OS traffic lights via `--chrome-inset-left`.
+ * Left padding clears the OS traffic lights via `--chrome-inset-left`,
+ * which `src/lib/trafficLights.ts` rewrites at runtime to track the
+ * OS-placed cluster's actual right edge.
+ *
+ * Vertical alignment uses `--traffic-light-center-y` (set by the
+ * runtime sync) so the breadcrumb pins to the OS centerline rather
+ * than the chrome's geometric centre — see
+ * `~/.claude/skills/tauri/SKILL.md` for why hardcoding the offset
+ * drifts on every Tauri / macOS bump. The `calc()` collapses to 0
+ * when the var isn't set (non-macOS, pre-mount), so the chrome falls
+ * back to flex centering.
  */
 export function WindowChrome({
   cwd,
@@ -32,28 +42,43 @@ export function WindowChrome({
   onCmdK,
 }: WindowChromeProps) {
   const stopDrag = (e: MouseEvent) => e.stopPropagation();
+  // Pin every chrome child onto the OS-reported traffic-light
+  // centerline. Defaulted to 0 (no shift) when the var isn't set —
+  // non-macOS or pre-mount.
+  const trafficLightOffset =
+    "calc(var(--traffic-light-center-y, calc(var(--chrome-height) / 2)) - var(--chrome-height) / 2)";
   return (
     <div
       data-tauri-drag-region
       style={{
         height: "var(--chrome-height)",
-        display: "flex",
-        alignItems: "center",
-        // The hairline border-bottom eats 1px from the content box
-        // under `box-sizing: border-box`; mirroring it with
-        // padding-top restores a symmetric content box so
-        // `alignItems: center` lands on the true chrome centerline
-        // (y=19 in a 38px strip) — which is where the OS centers
-        // the traffic lights via `trafficLightPosition.y`.
-        padding:
-          "var(--bw-hair) var(--sp-12) 0 var(--chrome-inset-left)",
         borderBottom: "var(--bw-hair) solid var(--line)",
         background: "var(--bg)",
         flexShrink: 0,
-        gap: "var(--sp-14)",
         userSelect: "none",
       }}
     >
+      {/* Inner wrapper carries the flex layout AND the single
+          translateY that pins every chrome child onto the OS-
+          reported traffic-light centerline. Drag region is inherited
+          from the outer `data-tauri-drag-region` so the wrapper
+          itself doesn't need it. */}
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          // The hairline border-bottom on the outer eats 1px from
+          // the content box under `box-sizing: border-box`; mirror
+          // it with padding-top so flex centering lands on the true
+          // chrome midline before the translateY below shifts the
+          // whole row onto the lights.
+          padding:
+            "var(--bw-hair) var(--sp-12) 0 var(--chrome-inset-left)",
+          gap: "var(--sp-14)",
+          transform: `translateY(${trafficLightOffset})`,
+        }}
+      >
       {/* breadcrumb / cwd — drag inherits from the outer strip */}
       <div
         style={{
@@ -155,6 +180,7 @@ export function WindowChrome({
         // restores the prior half-of-button proportion.
         style={{ fontSize: "var(--fs-md)" }}
       />
+      </div>
     </div>
   );
 }

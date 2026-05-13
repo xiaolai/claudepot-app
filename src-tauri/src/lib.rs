@@ -5,6 +5,7 @@ mod config_watch;
 mod config_watch_types;
 #[cfg(target_os = "macos")]
 mod dock_icon;
+mod traffic_light;
 mod dto;
 mod dto_account;
 mod dto_activity;
@@ -281,13 +282,47 @@ pub fn run() {
                     let _ = window.hide();
                 }
                 let win_for_handler = window.clone();
+                let win_for_tl = window.clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    use tauri::WindowEvent;
+                    if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         if let Err(e) = win_for_handler.hide() {
                             tracing::warn!("close-button: hide failed: {e}");
                         }
                     }
+                    // Re-emit traffic-light metrics whenever AppKit
+                    // could have moved the buttons. ScaleFactorChanged
+                    // covers a monitor swap; Focused covers the
+                    // bring-to-front path where the lights re-tint
+                    // and AppKit re-lays-out the standard window
+                    // buttons.
+                    if matches!(
+                        event,
+                        WindowEvent::Resized(_)
+                            | WindowEvent::Moved(_)
+                            | WindowEvent::Focused(true)
+                            | WindowEvent::ScaleFactorChanged { .. }
+                    ) {
+                        traffic_light::emit(&win_for_tl);
+                    }
+                });
+
+                // Two-stage initial emit: the first runs after the
+                // renderer has surely mounted its listener, the
+                // second after AppKit's first-paint shuffle of the
+                // standard window buttons has settled. The renderer
+                // also pulls once via `traffic_light_metrics` IPC at
+                // mount time as a belt-and-suspenders for the case
+                // where both emits beat the listener.
+                let win_for_boot = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(300))
+                        .await;
+                    traffic_light::emit(&win_for_boot);
+                    tokio::time::sleep(std::time::Duration::from_millis(1000))
+                        .await;
+                    traffic_light::emit(&win_for_boot);
                 });
             }
 
@@ -536,6 +571,7 @@ pub fn run() {
             commands::updater_supported,
             commands::quit_now,
             commands::tray_set_alert_count,
+            traffic_light::traffic_light_metrics,
             commands::cli::sync_from_current_cc,
             commands::unlock_keychain,
             commands::reveal_in_finder,

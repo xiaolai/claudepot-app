@@ -120,6 +120,7 @@ import {
   type NotificationTarget,
 } from "./lib/notify";
 import { listen } from "@tauri-apps/api/event";
+import { installTrafficLightSync } from "./lib/trafficLights";
 import type { LiveSessionSummary, RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
 import { APP_VERSION } from "./version";
@@ -252,6 +253,27 @@ function AppShell() {
   // time useSection's idle callback swaps to it. Runs once per mount.
   useEffect(() => {
     preloadSavedSection();
+  }, []);
+
+  // Sync the OS-placed traffic-light row to a CSS custom property so
+  // the WindowChrome breadcrumb / ⌘K pill can pin themselves onto
+  // the lights' actual centerline (which AppKit puts a few px below
+  // the chrome's geometric center). See
+  // `~/.claude/skills/tauri/SKILL.md` and `src/lib/trafficLights.ts`.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void installTrafficLightSync().then((un) => {
+      if (cancelled) {
+        un();
+        return;
+      }
+      unlisten = un;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // Shell-level keyboard shortcuts: ⌘, opens Settings, ⌘K opens the

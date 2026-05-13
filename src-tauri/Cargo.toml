@@ -59,8 +59,22 @@ hex.workspace = true
 # lets Lanczos handle the downsample, preserving crispness at any
 # Dock size. See `dock_icon.rs`.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
-objc2-foundation = { version = "0.3", features = ["NSData"] }
+# NSApplication + NSImage: dock_icon.rs overrides the dock icon.
+# NSWindow + NSResponder + NSView + NSButton + NSControl: traffic_light.rs
+# reads `standardWindowButton(.closeButton).frame` for runtime intro
+# of the traffic-light row's position.
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSImage",
+    "NSWindow",
+    "NSResponder",
+    "NSView",
+    "NSButton",
+    "NSControl",
+] }
+# NSData: dock_icon.rs decodes the embedded PNG.
+# NSGeometry: traffic_light.rs reads NSRect / NSPoint / NSSize.
+objc2-foundation = { version = "0.3", features = ["NSData", "NSGeometry"] }
 
 [dev-dependencies]
 tempfile.workspace = true
