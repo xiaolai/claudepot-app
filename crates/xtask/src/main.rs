@@ -67,7 +67,9 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
 
     let entries: Vec<PathBuf> = std::fs::read_dir(&fixtures_dir)
         .context("read fixtures dir")?
-        .flatten()
+        .collect::<std::io::Result<Vec<_>>>()
+        .context("read fixtures dir entry")?
+        .into_iter()
         .filter(|e| e.path().is_dir())
         .map(|e| e.path())
         .collect();
@@ -82,6 +84,7 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
     }
 
     let mut ok = 0usize;
+    let mut matched = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();
     for fixture in &sorted {
         let name = fixture
@@ -93,6 +96,7 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
                 continue;
             }
         }
+        matched += 1;
         match run_fixture(fixture) {
             Ok(()) => {
                 eprintln!("✓ {name}");
@@ -105,10 +109,14 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
         }
     }
 
+    if only.is_some() && matched == 0 {
+        bail!("no fixture matched --only filter");
+    }
+
     eprintln!(
         "\n{ok} passed, {} failed (of {} fixtures)",
         failed.len(),
-        sorted.len()
+        matched
     );
     if !failed.is_empty() {
         std::process::exit(1);
@@ -211,24 +219,30 @@ fn parse_input(v: &serde_json::Value) -> Result<ParsedBundle> {
             .and_then(|x| if x.is_null() { None } else { Some(x.clone()) })
     };
 
-    let policy = obj
-        .get("policy")
-        .and_then(|x| x.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|el| {
-                    let origin = el.get("origin")?.as_str()?.to_string();
-                    let value = el.get("value").cloned();
-                    let value = match value {
-                        Some(v) if v.is_null() => None,
-                        Some(v) => Some(v),
-                        None => None,
-                    };
-                    Some((origin, value))
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let policy = match obj.get("policy") {
+        None => Vec::new(),
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .enumerate()
+            .map(|(idx, el)| {
+                let entry = el
+                    .as_object()
+                    .ok_or_else(|| anyhow!("policy[{idx}] must be an object"))?;
+                let origin = entry
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("policy[{idx}].origin must be a string"))?
+                    .to_string();
+                let value = match entry.get("value").cloned() {
+                    Some(v) if v.is_null() => None,
+                    Some(v) => Some(v),
+                    None => None,
+                };
+                Ok((origin, value))
+            })
+            .collect::<Result<Vec<_>>>()?,
+        Some(_) => bail!("policy must be an array"),
+    };
 
     Ok(ParsedBundle {
         plugin_base: take("plugin_base"),
