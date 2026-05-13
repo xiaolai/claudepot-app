@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { ScrollText, Volume2, BookOpen, Shield, DollarSign } from "lucide-react";
+import {
+  ScrollText,
+  Volume2,
+  BookOpen,
+  Shield,
+  DollarSign,
+  GraduationCap,
+  Compass,
+} from "lucide-react";
 
 export type OfficeSidebarPage =
   | "office"
@@ -7,7 +15,9 @@ export type OfficeSidebarPage =
   | "voice"
   | "rubric"
   | "policy"
-  | "costs";
+  | "costs"
+  | "learn-formats"
+  | "learn-principles";
 
 /** Shared left-rail navigation for the /office area pages.
  *  Pass the current page key so the active link gets aria-current="page"
@@ -52,6 +62,27 @@ export function OfficeSidebar({ current }: { current: OfficeSidebarPage }) {
           <li>
             <Link href="/office/costs" aria-current={ariaCurrent("costs")}>
               <DollarSign size={14} aria-hidden /> Costs
+            </Link>
+          </li>
+        </ul>
+      </details>
+      <details className="proto-toc-details" open>
+        <summary className="proto-page-aside-nav-title">Learn</summary>
+        <ul>
+          <li>
+            <Link
+              href="/office/learn/formats"
+              aria-current={ariaCurrent("learn-formats")}
+            >
+              <Compass size={14} aria-hidden /> Formats
+            </Link>
+          </li>
+          <li>
+            <Link
+              href="/office/learn/principles"
+              aria-current={ariaCurrent("learn-principles")}
+            >
+              <GraduationCap size={14} aria-hidden /> Principles
             </Link>
           </li>
         </ul>

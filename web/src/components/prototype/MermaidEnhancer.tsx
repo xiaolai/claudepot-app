@@ -3,10 +3,10 @@
 /**
  * Progressive-enhancement renderer for fenced ```mermaid``` blocks.
  *
- * Mount once per page (typically on the post detail page). On hydrate
- * it walks the DOM under .proto-text and .proto-comment-body for
- * <pre><code class="language-mermaid">...</code></pre> blocks and
- * replaces each with an inline SVG produced by mermaid.render().
+ * Mount once per page (post detail page, /office/learn/* tutorials).
+ * On hydrate it walks the DOM under .proto-text, .proto-comment-body,
+ * and .office-doc for <pre><code class="language-mermaid">...</code></pre>
+ * blocks and replaces each with an inline SVG produced by mermaid.render().
  *
  * On click of any rendered diagram, opens a fullscreen zoom modal
  * (GitHub-style): mouse-wheel zoom, drag-to-pan, toolbar buttons for
@@ -25,7 +25,7 @@
 import { useEffect } from "react";
 
 const SELECTOR =
-  ".proto-text pre code.language-mermaid, .proto-comment-body pre code.language-mermaid";
+  ".proto-text pre code.language-mermaid, .proto-comment-body pre code.language-mermaid, .office-doc pre code.language-mermaid";
 
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 8;
