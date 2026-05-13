@@ -255,7 +255,11 @@ function SectionCard({ section }: { section: DoctorSection }) {
           {section.entries.map((e, i) => (
             <li key={i} style={entryRowStyle}>
               <span aria-hidden style={treePrefixStyle}>{e.treePrefix}</span>
-              <span style={entryTextStyle}>{e.text}</span>
+              {/* `.selectable` because users paste plugin / install /
+                  parse error text into an LLM chat for help. An inline
+                  `userSelect: "text"` doesn't work here — see
+                  `styles/components/base.css` for the why. */}
+              <span className="selectable" style={entryTextStyle}>{e.text}</span>
             </li>
           ))}
         </ul>
@@ -412,7 +416,9 @@ const entryTextStyle: React.CSSProperties = {
   fontSize: "var(--fs-sm)",
   color: "var(--fg)",
   fontFamily: "var(--font)",
-  userSelect: "text",
+  // user-select handled via the `.selectable` class on the consumer
+  // (see the spot in `SectionCard`). React doesn't emit the webkit
+  // prefix from `userSelect`, and WKWebView needs it.
   wordBreak: "break-word",
 };
 

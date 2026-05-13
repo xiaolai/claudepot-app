@@ -47,6 +47,27 @@ body {
   user-select: text;
 }
 
+/* Error and status surfaces are copy-worthy by default. Users paste
+ * them into an LLM chat to ask for a fix, so the text has to be
+ * selectable. The global `body { user-select: none }` rule above
+ * blocks the default; opt these back in by ARIA role.
+ *
+ * `code` and `pre` carry literal commands and paths that users
+ * copy constantly; same opt-in for the same reason.
+ *
+ * Note: an inline `userSelect: "text"` style on a React element
+ * does NOT win here, because React emits only `user-select: text`
+ * — not the webkit-prefixed property — and WKWebView reads
+ * `-webkit-user-select` first. Use this CSS rule or the
+ * `.selectable` class instead. */
+[role="alert"],
+[role="status"],
+code,
+pre {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* ---------- nerd-font icons ---------- */
 /* Icons are glyphs in the body mono font (JetBrainsMono NF Mono). Size
    set via font-size inline from the <Icon size={n}> component; color

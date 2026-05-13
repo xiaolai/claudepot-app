@@ -212,6 +212,7 @@ export function AutomationsSection() {
 
       {loadError && (
         <div
+          role="alert"
           style={{
             padding: "var(--sp-8) var(--sp-12)",
             border: "var(--bw-hair) solid var(--danger)",

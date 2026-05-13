@@ -1306,6 +1306,7 @@ function ConfigTreePane({
   if (loadError) {
     return (
       <div
+        role="alert"
         style={{
           padding: "var(--sp-20)",
           fontSize: "var(--fs-sm)",
@@ -2029,6 +2030,7 @@ function FilePreview({
       >
         {previewError ? (
           <div
+            role="alert"
             style={{
               padding: "var(--sp-16) var(--sp-20)",
               color: "var(--danger)",
