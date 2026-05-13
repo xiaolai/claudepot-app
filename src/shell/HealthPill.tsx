@@ -98,7 +98,9 @@ export function HealthPill({ onMouseDown }: HealthPillProps) {
         ? "healthy"
         : display.severity === "warning"
           ? "has warnings"
-          : "has errors";
+          : display.severity === "error"
+            ? "has errors"
+            : "status unknown";
     return `Claude CLI health: ${lvl}`;
   }, [display]);
 
@@ -142,8 +144,10 @@ export function HealthPill({ onMouseDown }: HealthPillProps) {
 function dotColor(severity: DoctorSeverity | "loading"): string {
   // Tokens guaranteed by src/styles/tokens.css — no literal
   // fallbacks (those'd diverge from the source of truth if the
-  // tokens ever shift). `loading` reuses --fg-faint for the
-  // initial-mount state where we don't know the verdict yet.
+  // tokens ever shift). `loading` and `unknown` both reuse
+  // --fg-faint: same surface meaning ("no verdict yet"), different
+  // provenance (loading = pre-first-scrape; unknown = scrape ran
+  // and produced no signal).
   switch (severity) {
     case "healthy":
       return "var(--ok)";
@@ -151,6 +155,7 @@ function dotColor(severity: DoctorSeverity | "loading"): string {
       return "var(--warn)";
     case "error":
       return "var(--danger)";
+    case "unknown":
     case "loading":
     default:
       return "var(--fg-faint)";
@@ -170,13 +175,29 @@ function buildTooltip(
 
   const lines: string[] = [];
   if (display) {
-    const v = display.ccVersion ?? "version unknown";
-    const t = display.installType ? ` (${display.installType})` : "";
-    lines.push(`claude ${v}${t}`);
+    // Differentiate "we have a version" from "we don't" so the
+    // tooltip is honest. Without the cc_version, the previous
+    // "claude version unknown" copy invited the reader to think
+    // CC itself was broken — but the truth is we couldn't measure.
+    if (display.ccVersion) {
+      const t = display.installType ? ` (${display.installType})` : "";
+      lines.push(`claude ${display.ccVersion}${t}`);
+    } else {
+      lines.push("Couldn’t read claude doctor");
+    }
 
-    const flagged = display.sections.filter((s) => s.severity !== "healthy");
-    if (flagged.length === 0) {
+    const flagged = display.sections.filter(
+      (s) => s.severity !== "healthy" && s.severity !== "unknown",
+    );
+    // "No issues reported." is a positive claim — only emit it when
+    // the scrape actually completed cleanly. A probe-backed snapshot
+    // with an empty sections list and `parseStatus.kind !== "ok"`
+    // means we never measured the issues, not that there are none.
+    const parseOk = display.parseStatus.kind === "ok";
+    if (display.ccVersion && parseOk && flagged.length === 0) {
       lines.push("No issues reported.");
+    } else if (!parseOk && flagged.length === 0) {
+      lines.push("(health check incomplete — refresh to retry)");
     } else {
       for (const s of flagged) {
         const dot = s.severity === "error" ? "✘" : "⚠";

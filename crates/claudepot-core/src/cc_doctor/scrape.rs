@@ -61,6 +61,13 @@ const READY_PROMPT_MARKER: &str = "Enter to continue";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DoctorSeverity {
+    /// The scrape failed AND no probe could fill in a fallback —
+    /// we have no signal about CC's health. Distinct from `Healthy`:
+    /// "we measured and everything is fine" vs. "we couldn't measure."
+    /// Rendered grey, not green/yellow/red. Reserved for the
+    /// metrology-failed case so a parser bug doesn't masquerade as
+    /// a real warning.
+    Unknown,
     Healthy,
     Warning,
     Error,
@@ -259,54 +266,6 @@ struct CaptureResult {
     truncated: bool,
 }
 
-/// Locate the `claude` binary across install methods Tauri-on-macOS
-/// might not see through `$PATH`. Three tiers:
-///
-/// 1. Shared `find_claude_binary` (covers `~/.local/bin`,
-///    `/usr/local/bin`, `/usr/bin`, Windows AppData) — same surface
-///    `services::doctor_service` uses.
-/// 2. Doctor-specific extras: `/opt/homebrew/bin/claude` (Apple
-///    Silicon brew), `/usr/local/Homebrew/bin/claude` (Intel brew),
-///    npm-global via `~/.npm-global/bin` or system `node` prefix.
-/// 3. None — caller treats this as a missing-CC failure.
-///
-/// The doctor-specific layer lives here, not in `fs_utils`, because
-/// extending the shared helper would change behavior for every
-/// other caller (CLI's `claudepot doctor`, `currentCcIdentity`,
-/// etc.). Adding paths is a unidirectional change — easy to widen
-/// later if real install distribution data justifies it.
-fn resolve_claude_binary() -> Option<std::path::PathBuf> {
-    if let Some(p) = crate::fs_utils::find_claude_binary() {
-        return Some(p);
-    }
-    // The Homebrew cask `claude-code` installs the binary as
-    // `claude-code` (not `claude`) — see
-    // `crate::updates::detect::detect_cli_installs` which probes
-    // exactly these paths. The doctor subcommand works against
-    // either name; CC dispatches on argv[1] regardless of argv[0].
-    let mut candidates: Vec<std::path::PathBuf> = vec![
-        // Apple Silicon Homebrew (cask `claude-code`).
-        std::path::PathBuf::from("/opt/homebrew/bin/claude-code"),
-        // Intel Homebrew (cask `claude-code`).
-        std::path::PathBuf::from("/usr/local/bin/claude-code"),
-        // Same brew-cask binary under the Cellar shim path on Intel.
-        std::path::PathBuf::from("/usr/local/Homebrew/bin/claude-code"),
-        // Apple Silicon Homebrew formula installing `claude`
-        // directly (less common; future-proofed).
-        std::path::PathBuf::from("/opt/homebrew/bin/claude"),
-        // Common Linux distro npm-global prefix.
-        std::path::PathBuf::from("/usr/local/lib/node_modules/.bin/claude"),
-    ];
-    if let Some(home) = dirs::home_dir() {
-        // User-local npm prefix; common when users `npm config set
-        // prefix ~/.npm-global` to avoid `sudo npm install -g`.
-        candidates.push(home.join(".npm-global/bin/claude"));
-        // Volta shim.
-        candidates.push(home.join(".volta/bin/claude"));
-    }
-    candidates.into_iter().find(|p| p.exists())
-}
-
 fn spawn_and_capture(timeout: Duration) -> std::io::Result<CaptureResult> {
     let pty_system = NativePtySystem::default();
     let pair = pty_system
@@ -321,7 +280,10 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<CaptureResult> {
     // Resolve the binary explicitly. Tauri apps on macOS launched
     // from Finder don't inherit the user's shell PATH; relying on
     // `CommandBuilder::new("claude")` would silently fail there.
-    let claude_bin = resolve_claude_binary().ok_or_else(|| {
+    // The resolver lives in [`super::probes::resolve_claude_binary`]
+    // so this surface and the cheap version probe both see the same
+    // install candidates (notably the brew-cask `claude-code` path).
+    let claude_bin = super::probes::resolve_claude_binary().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "claude binary not found in canonical install locations",
@@ -856,27 +818,37 @@ fn extract_install_info(
 }
 
 fn aggregate_severity(sections: &[DoctorSection], status: &ParseStatus) -> DoctorSeverity {
-    match status {
-        ParseStatus::Failed { .. } => return DoctorSeverity::Warning,
-        ParseStatus::Degraded { .. } => {}
-        ParseStatus::Ok => {}
+    // A failed parse with no sections is a measurement failure, not
+    // a health verdict — return `Unknown` so the UI surfaces "we
+    // couldn't read this" in grey rather than a misleading yellow
+    // dot. The probe-overlay layer in [`super::compose`] is what
+    // promotes Unknown back to a real verdict when probes succeed
+    // despite the scrape failure.
+    if matches!(status, ParseStatus::Failed { .. }) && sections.is_empty() {
+        return DoctorSeverity::Unknown;
     }
+    // Degraded/Failed-with-some-sections: report the worst section
+    // severity we actually observed. We do NOT add a Warning floor
+    // for partial parses — the parser tripping over Ink's redraw
+    // does not mean CC is sick. The parse-status banner in the
+    // pane carries the "metrology imperfect" signal separately.
     let mut worst = DoctorSeverity::Healthy;
     for s in sections {
         worst = max_severity(worst, s.severity);
-    }
-    if matches!(status, ParseStatus::Degraded { .. }) {
-        worst = max_severity(worst, DoctorSeverity::Warning);
     }
     worst
 }
 
 fn max_severity(a: DoctorSeverity, b: DoctorSeverity) -> DoctorSeverity {
     use DoctorSeverity::*;
+    // Order: Error > Warning > Healthy > Unknown. Unknown is the
+    // bottom of the lattice because *any* concrete observation is
+    // more informative than "we don't know".
     match (a, b) {
         (Error, _) | (_, Error) => Error,
         (Warning, _) | (_, Warning) => Warning,
-        _ => Healthy,
+        (Healthy, _) | (_, Healthy) => Healthy,
+        _ => Unknown,
     }
 }
 

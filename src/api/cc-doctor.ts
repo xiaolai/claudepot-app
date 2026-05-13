@@ -5,7 +5,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-export type DoctorSeverity = "healthy" | "warning" | "error";
+// "unknown" = we couldn't measure (parser failed AND no probe filled in
+// fallback identity). Distinct from "healthy" so the UI renders grey,
+// not green. The "Couldn't measure" vs "is sick" separation in
+// HealthPane depends on this distinction.
+export type DoctorSeverity = "unknown" | "healthy" | "warning" | "error";
 
 export interface SectionEntry {
   text: string;

@@ -46,7 +46,15 @@ pub fn spawn(app: AppHandle) {
 }
 
 async fn tick(app: &AppHandle) {
-    let snapshot = match tokio::task::spawn_blocking(claudepot_core::cc_doctor::scrape_doctor).await
+    // `scrape_with_probes` over bare `scrape_doctor`: the watcher's
+    // verdict feeds the tray menu copy, which is closed-window
+    // users' only health signal. If the TUI parser breaks (and the
+    // renderer's pane isn't open to surface the failure), the
+    // probes still give us cc_version + install identity so the
+    // tray label reads "Health: ok" instead of "Health: 1 issue"
+    // (the old aggregate_severity's forced-Warning behavior).
+    let snapshot = match tokio::task::spawn_blocking(claudepot_core::cc_doctor::scrape_with_probes)
+        .await
     {
         Ok(s) => s,
         Err(e) => {

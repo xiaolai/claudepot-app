@@ -123,14 +123,37 @@ function HeaderRow({
   onRefresh: () => void;
 }) {
   const captured = new Date(snapshot.capturedAtMs);
+  // Three states for the header:
+  // - "measured":  we have a cc_version (from probe or scrape). Show
+  //   the real severity dot + version line + path. Normal layout.
+  // - "unmeasured": no cc_version AND severity === "unknown". The
+  //   pty scrape failed AND the probe didn't find a binary either.
+  //   Render in grey with "Couldn't read claude doctor" copy. Refresh
+  //   is the primary affordance.
+  // The reason this matters: rendering "claude version unknown" with
+  // a colored severity dot conflates a metrology failure with a
+  // health verdict. The Unknown severity + parse-status banner pair
+  // separates those signals so the user knows which to act on.
+  const unmeasured =
+    snapshot.ccVersion === null && snapshot.severity === "unknown";
+
   return (
     <div style={headerRowStyle}>
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-10)" }}>
           <SeverityDot severity={snapshot.severity} />
-          <span style={{ fontSize: "var(--fs-base)", fontWeight: 600 }}>
-            claude {snapshot.ccVersion ?? "version unknown"}
-            {snapshot.installType ? ` · ${snapshot.installType}` : ""}
+          <span
+            style={{
+              fontSize: "var(--fs-base)",
+              fontWeight: 600,
+              color: unmeasured ? "var(--fg-muted)" : "var(--fg)",
+            }}
+          >
+            {unmeasured
+              ? "Couldn’t read claude doctor"
+              : `claude ${snapshot.ccVersion}${
+                  snapshot.installType ? ` · ${snapshot.installType}` : ""
+                }`}
           </span>
         </div>
         {snapshot.installPath ? (
@@ -139,7 +162,9 @@ function HeaderRow({
           </code>
         ) : null}
         <span style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
-          Captured {captured.toLocaleTimeString()} · {snapshot.rawBytes.toLocaleString()} B
+          {unmeasured
+            ? `Captured ${captured.toLocaleTimeString()} · refresh to retry`
+            : `Captured ${captured.toLocaleTimeString()} · ${snapshot.rawBytes.toLocaleString()} B`}
         </span>
       </div>
       <Button
@@ -283,6 +308,12 @@ function LoadingSkeleton() {
 
 function colorForSeverity(s: DoctorSeverity): string {
   switch (s) {
+    // Neutral grey, same as the WindowChrome pill's loading state.
+    // The intent is "we don't know" — never "this is fine" (green)
+    // or "watch out" (yellow). The parse-failure banner carries the
+    // actionable detail so this dot only has to convey absence.
+    case "unknown":
+      return "var(--fg-faint)";
     case "healthy":
       return "var(--ok)";
     case "warning":
@@ -297,6 +328,7 @@ function borderForSeverity(s: DoctorSeverity): string {
   // turning the whole card into a colored block. Default lines for
   // healthy keeps the unsurprising sections visually quiet.
   switch (s) {
+    case "unknown":
     case "healthy":
       return "var(--line)";
     case "warning":

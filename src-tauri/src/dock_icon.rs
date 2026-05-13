@@ -27,8 +27,11 @@
 //! UPSCALE that loses too much. Using the 512 source means every
 //! Dock size is a downsample (or 1:1), which is the regime where
 //! Cocoa's filtering looks best.
-
-#![cfg(target_os = "macos")]
+//!
+//! The `cfg(target_os = "macos")` gate lives on the `mod dock_icon`
+//! declaration in `lib.rs`; the duplicate inner attribute that used
+//! to sit here was redundant (clippy's `duplicated_attributes` lint
+//! caught it in Rust 1.92).
 
 use objc2::{rc::Retained, AllocAnyThread, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSImage};

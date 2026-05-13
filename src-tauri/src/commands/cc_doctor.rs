@@ -62,6 +62,18 @@ impl CcDoctorState {
 /// The pty scrape is blocking — we run it on a tokio blocking thread
 /// so the Tauri command worker isn't tied up for the 6–10 s scrape
 /// window.
+///
+/// ### Version-mismatch invalidation
+///
+/// Before honoring the cache TTL, this runs the cheap
+/// [`claudepot_core::cc_doctor::probe_version`] probe (~50 ms,
+/// non-pty) and compares its version to the cached snapshot's
+/// `cc_version`. If they differ — the most likely cause is a
+/// CC self-update between captures — the cache is discarded and a
+/// fresh scrape runs. Without this gate, the renderer can show a
+/// "claude version unknown" + "PATH not in env" snapshot for up to
+/// 60 s after CC has already updated itself and resolved both
+/// problems.
 #[tauri::command]
 pub async fn cc_doctor_snapshot(
     force_refresh: Option<bool>,
@@ -72,13 +84,41 @@ pub async fn cc_doctor_snapshot(
     let force = force_refresh.unwrap_or(false);
 
     if !force {
-        let g = state
-            .cache
-            .lock()
-            .map_err(|_| "cc_doctor cache mutex poisoned".to_string())?;
-        if let Some(c) = g.as_ref() {
-            if c.captured_at.elapsed() < CACHE_TTL {
-                return Ok(c.snapshot.clone().into());
+        // Read the cached snapshot first WITHOUT holding the lock
+        // across the probe — the probe is a fork-exec that takes
+        // ~50 ms; we don't want to gate every other consumer on it.
+        let cached: Option<(std::time::Instant, DoctorSnapshot)> = {
+            let g = state
+                .cache
+                .lock()
+                .map_err(|_| "cc_doctor cache mutex poisoned".to_string())?;
+            g.as_ref().map(|c| (c.captured_at, c.snapshot.clone()))
+        };
+
+        if let Some((captured_at, snapshot)) = cached {
+            if captured_at.elapsed() < CACHE_TTL {
+                // TTL says fresh; check version drift before
+                // returning. Probe runs on a blocking thread so a
+                // hung subprocess can't pin the IPC worker — but
+                // we cap at the probe's internal timeout (3s).
+                let probe = tokio::task::spawn_blocking(
+                    claudepot_core::cc_doctor::probe_version,
+                )
+                .await
+                .ok()
+                .flatten();
+                let version_drifted = cache_should_invalidate(
+                    snapshot.cc_version.as_deref(),
+                    probe.as_ref().map(|p| p.version.as_str()),
+                );
+                if !version_drifted {
+                    return Ok(snapshot.into());
+                }
+                tracing::info!(
+                    "cc_doctor: version drift detected (cached={:?}, live={:?}) — invalidating cache",
+                    snapshot.cc_version,
+                    probe.as_ref().map(|p| &p.version),
+                );
             }
         }
     }
@@ -89,7 +129,12 @@ pub async fn cc_doctor_snapshot(
     // the pill is the only caller in Cut 1), and the last write
     // wins. Worth the simplicity over a singleflight gate at this
     // size.
-    let snapshot = tokio::task::spawn_blocking(claudepot_core::cc_doctor::scrape_doctor)
+    //
+    // Use `scrape_with_probes` instead of bare `scrape_doctor` so
+    // the snapshot has the probe overlay applied — when the TUI
+    // parser fails, the identity fields still come back populated
+    // (see `cc_doctor::compose` for the merge rules).
+    let snapshot = tokio::task::spawn_blocking(claudepot_core::cc_doctor::scrape_with_probes)
         .await
         .map_err(|e| format!("cc_doctor blocking-task join: {e}"))?;
 
@@ -128,9 +173,18 @@ pub fn push_to_tray_health(state: &TrayHealthState, snapshot: &DoctorSnapshot) {
     let flagged = snapshot
         .sections
         .iter()
-        .filter(|s| !matches!(s.severity, DoctorSeverity::Healthy))
+        .filter(|s| {
+            !matches!(
+                s.severity,
+                DoctorSeverity::Healthy | DoctorSeverity::Unknown
+            )
+        })
         .count() as u32;
     let kind = match snapshot.severity {
+        // Both the scrape's "we couldn't measure" verdict and the
+        // tray state's pre-scrape default map to the same Unknown
+        // cell — same surface (grey "checking…" copy in the tray).
+        DoctorSeverity::Unknown => HealthRecordKind::Unknown,
         DoctorSeverity::Healthy => HealthRecordKind::Healthy,
         DoctorSeverity::Warning => HealthRecordKind::Warning,
         DoctorSeverity::Error => HealthRecordKind::Error,
@@ -159,4 +213,76 @@ pub async fn cc_doctor_open_parse_failures_log() -> Result<(), String> {
         claudepot_core::paths::claudepot_data_dir()
     };
     crate::commands::reveal_in_finder(target.display().to_string()).await
+}
+
+/// Pure predicate that decides whether a fresh-by-TTL cache entry
+/// should be discarded because the running CC version has drifted.
+///
+/// Inputs:
+/// - `cached`: the version string we recorded when the cache was
+///   filled (may be `None` if the cached scrape couldn't parse a
+///   version at the time)
+/// - `probe`: the version we just read live from `claude --version`
+///   (may be `None` if the probe couldn't locate a binary or the
+///   subprocess timed out)
+///
+/// Returns `true` to invalidate. Decision table:
+///
+/// | cached  | probe   | drift? | rationale                          |
+/// |---------|---------|--------|------------------------------------|
+/// | Some(a) | Some(b) | a != b | versions disagree — rescrape       |
+/// | Some(a) | Some(a) | false  | equal — cache is correct           |
+/// | Some(_) | None    | false  | probe failed; can't detect drift   |
+/// | None    | Some(_) | true   | cache predates a known install     |
+/// | None    | None    | false  | nothing to compare                 |
+///
+/// The `(None, None)` and `(Some, None)` cases honor the cache so a
+/// flaky probe doesn't trigger a 6–10s rescrape every TTL window.
+fn cache_should_invalidate(cached: Option<&str>, probe: Option<&str>) -> bool {
+    match (cached, probe) {
+        (Some(c), Some(p)) => c != p,
+        (None, Some(_)) => true,
+        (_, None) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalidate_when_versions_differ() {
+        assert!(cache_should_invalidate(Some("2.1.128"), Some("2.1.140")));
+    }
+
+    #[test]
+    fn keep_when_versions_match() {
+        assert!(!cache_should_invalidate(Some("2.1.140"), Some("2.1.140")));
+    }
+
+    #[test]
+    fn keep_when_probe_failed_with_cached_version() {
+        // Probe down (subprocess hang, binary removed, etc.) — we
+        // can't tell whether drift happened, so honor the cache.
+        // Forcing a rescrape on every probe failure would burn the
+        // 6–10s pty cost during transient subprocess flakiness.
+        assert!(!cache_should_invalidate(Some("2.1.140"), None));
+    }
+
+    #[test]
+    fn invalidate_when_cache_has_no_version_but_probe_does() {
+        // The previously cached snapshot couldn't parse a version
+        // (scrape failed without the probe overlay populating
+        // cc_version, or pre-overlay history). A fresh probe with
+        // a version is strictly more information — rescrape.
+        assert!(cache_should_invalidate(None, Some("2.1.140")));
+    }
+
+    #[test]
+    fn keep_when_both_unknown() {
+        // Nothing to compare; the cache and probe agree on "no
+        // signal". Don't spin a rescrape that would also yield no
+        // signal.
+        assert!(!cache_should_invalidate(None, None));
+    }
 }

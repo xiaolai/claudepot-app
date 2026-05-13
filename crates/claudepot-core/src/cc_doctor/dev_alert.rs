@@ -139,8 +139,7 @@ fn escape_applescript(s: &str) -> String {
     // one logical line.
     s.replace('\\', "\\\\")
         .replace('"', "\\\"")
-        .replace('\n', " ")
-        .replace('\r', " ")
+        .replace(['\n', '\r'], " ")
 }
 
 #[cfg(test)]

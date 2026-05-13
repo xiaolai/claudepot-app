@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DoctorSeverityDto {
+    Unknown,
     Healthy,
     Warning,
     Error,
@@ -21,6 +22,7 @@ pub enum DoctorSeverityDto {
 impl From<DoctorSeverity> for DoctorSeverityDto {
     fn from(s: DoctorSeverity) -> Self {
         match s {
+            DoctorSeverity::Unknown => Self::Unknown,
             DoctorSeverity::Healthy => Self::Healthy,
             DoctorSeverity::Warning => Self::Warning,
             DoctorSeverity::Error => Self::Error,
