@@ -6,6 +6,61 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.27 — beta (unreleased)
+
+### Added
+
+- **`DoctorSeverity::Unknown`** — new "we couldn't measure" state in
+  the Health pane, distinct from healthy/warning/error. The
+  window-chrome pill goes grey (never green or yellow) when the
+  `claude doctor` parser can't read CC's TUI output, so a parser
+  hiccup no longer masquerades as a real health alert. The pane
+  separately shows a parse-failure banner with a link to the
+  forensic log.
+- **Direct probes back up the pty scrape.** A new
+  `cc_doctor::probes::probe_version()` runs `claude --version`
+  (~50 ms, no pty) and resolves the install path via
+  `fs::canonicalize`, so the Health pane still shows
+  `claude X.Y.Z · native` and the install path even when the TUI
+  scraper trips on an Ink redraw. Brew-cask `claude-code`,
+  npm-global, and Volta layouts are all covered.
+
+### Changed
+
+- **Health snapshot invalidates on CC version drift.** Before
+  honoring its 60 s cache, the snapshot command now compares the
+  cached `cc_version` to a fresh `claude --version` probe. If CC
+  self-updated mid-cache, the stale snapshot is discarded and a
+  fresh scrape runs — eliminating the "claude version unknown" +
+  "PATH not set" panel that lingered for up to a minute after a
+  self-update.
+- **`aggregate_severity` no longer forces a Warning floor on
+  partial parses.** A scrape that returns sections + a degraded
+  parse status reports the worst observed section severity, not
+  Warning by default. Empty sections + failed parse → Unknown
+  (grey dot, not yellow). The metrology signal (parse_status)
+  drives the banner; the health signal (severity) drives the dot.
+  Two distinct surfaces, two distinct meanings.
+- Health-pill tooltip and Health-pane header surface three distinct
+  states cleanly: fully measured (colored dot + sections), identity-
+  only (version header + grey dot + parse-failure banner), and
+  fully unmeasured ("Couldn't read claude doctor — refresh to
+  retry" copy in grey).
+
+### Fixed
+
+- Health-pill tooltip no longer claims "No issues reported." when
+  the scrape parser failed — it now says "(health check incomplete
+  — refresh to retry)" so a parser failure can't read as a clean
+  bill of health.
+- `classify_install_path` normalizes `\` → `/` before matching, so
+  the Homebrew + `node_modules` rules fire on Windows-canonicalized
+  paths too (per `.claude/rules/paths.md`).
+- Two pre-existing Rust 1.92 clippy lints
+  (`collapsible_str_replace` in `dev_alert.rs`,
+  `duplicated_attributes` in `dock_icon.rs`) — small one-line
+  fixes that were blocking the CI Linux clippy gate.
+
 ## 0.1.25 — beta (unreleased)
 
 ### Added
