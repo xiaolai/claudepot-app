@@ -400,7 +400,9 @@ jobs:
       - name: Package CLI
         run: |
           cd target/release
-          Compress-Archive -Path claudepot.exe -DestinationPath claudepot-x86_64-windows.zip
+          # `-Force` so a re-dispatch picks up a cached `target/release`
+          # without tripping over a stale zip from the previous run.
+          Compress-Archive -Path claudepot.exe -DestinationPath claudepot-x86_64-windows.zip -Force
 
       # Stage CLI for tauri.conf.json `bundle.externalBin`. Tauri's
       # Windows convention requires the `.exe` extension on the
