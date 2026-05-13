@@ -315,6 +315,7 @@ fn normalize_separators(s: &str) -> String {
 /// pattern. Used to make scope checks stable on platforms with
 /// symlinked roots.
 fn canonicalize_glob_prefix(pattern: &str) -> String {
+    let is_unc = pattern.starts_with(r"\\") || pattern.starts_with("//");
     // Split on either separator so Windows-shaped patterns also
     // work. The output is forward-slash-shaped so it pairs with
     // the haystack normalization below.
@@ -327,27 +328,27 @@ fn canonicalize_glob_prefix(pattern: &str) -> String {
             break;
         }
         if i == 0 && seg.is_empty() {
+            if is_unc {
+                continue;
+            }
             // Leading "/" — start absolute (Unix only). On
             // Windows the first segment is the drive letter or
             // empty for UNC; either way Path::push handles it.
             prefix.push("/");
+        } else if is_unc && i == 1 && seg.is_empty() {
+            continue;
         } else {
             prefix.push(seg);
         }
     }
-    let canonical = match std::fs::canonicalize(&prefix) {
-        Ok(p) => {
-            // On Windows canonicalize returns the verbatim
-            // `\\?\C:\…` form. Strip it so user-friendly paths
-            // still compare equal — this is the rule documented
-            // in `.claude/rules/paths.md`.
-            let s = p.display().to_string();
-            let simplified = crate::path_utils::simplify_windows_path(&s);
-            PathBuf::from(simplified)
-        }
+    let canonical = match crate::path_utils::canonicalize_simplified(&prefix) {
+        Ok(p) => p,
         Err(_) => prefix,
     };
     let mut out = normalize_separators(&canonical.display().to_string());
+    if is_unc && !out.starts_with("//") {
+        out = format!("//{}", out.trim_start_matches('/'));
+    }
     if wild_idx < segments.len() {
         out.push('/');
         out.push_str(&segments[wild_idx..].join("/"));
@@ -527,6 +528,12 @@ mod tests {
             r"C:\Users\joker\Downloads\**",
             r"C:\Users\joker\Downloads\sub\file.txt",
         ));
+    }
+
+    #[test]
+    fn canonicalize_glob_prefix_preserves_unc_prefix() {
+        let got = canonicalize_glob_prefix(r"\\server\share\workspace\**");
+        assert_eq!(got, "//server/share/workspace/**");
     }
 
     #[test]

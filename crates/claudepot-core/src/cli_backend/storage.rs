@@ -150,6 +150,7 @@ fn validate_keychain_attr(value: &str) -> std::io::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
+    use age::secrecy::{ExposeSecret, SecretString};
     use std::io::Write as _;
     use std::process::{Command, Stdio};
 
@@ -172,10 +173,11 @@ fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
     //   2. Pass blob via `-X <hex>` over stdin to `security -i` so the
     //      blob never appears in argv (argv is world-readable on macOS
     //      via `ps`/`lsof`).
-    let hex_value = hex::encode(blob.as_bytes());
-    let command_line = format!(
-        "add-generic-password -U -a \"{account}\" -s \"{KEYCHAIN_SERVICE}\" -X \"{hex_value}\"\n"
-    );
+    let hex_value = SecretString::from(hex::encode(blob.as_bytes()));
+    let command_line = SecretString::from(format!(
+        "add-generic-password -U -a \"{account}\" -s \"{KEYCHAIN_SERVICE}\" -X \"{}\"\n",
+        hex_value.expose_secret()
+    ));
 
     let mut child = Command::new("/usr/bin/security")
         .args(["-i"])
@@ -187,7 +189,7 @@ fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
-            .write_all(command_line.as_bytes())
+            .write_all(command_line.expose_secret().as_bytes())
             .map_err(|e| KeychainErr::Other(format!("stdin write: {e}")))?;
         // Closing stdin signals end-of-input to `security -i`.
         drop(stdin);

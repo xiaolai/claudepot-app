@@ -21,6 +21,8 @@
 //! `AutomationBinary::Route { route_id }`.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -519,8 +521,8 @@ fn validate_path_placeholder(
                 "cannot resolve home directory for `within_home` validation",
             )
         })?;
-        let canonical = path.canonicalize().unwrap_or(path.clone());
-        let canonical_home = home.canonicalize().unwrap_or(home);
+        let canonical = resolve_for_home_check(&path);
+        let canonical_home = resolve_for_home_check(&home);
         if !canonical.starts_with(&canonical_home) {
             return Err(TemplateError::malformed(
                 blueprint.id().0.clone(),
@@ -565,6 +567,46 @@ fn validate_path_placeholder(
     Ok(())
 }
 
+fn resolve_for_home_check(path: &Path) -> PathBuf {
+    if let Ok(canon) = crate::path_utils::canonicalize_simplified(path) {
+        return normalize_path(canon);
+    }
+
+    let mut tail: Vec<OsString> = Vec::new();
+    let mut cursor = path.to_path_buf();
+    loop {
+        if let Ok(canon) = crate::path_utils::canonicalize_simplified(&cursor) {
+            let mut resolved = canon;
+            for piece in tail.iter().rev() {
+                resolved.push(piece);
+            }
+            return normalize_path(resolved);
+        }
+        match cursor.file_name() {
+            Some(name) => tail.push(name.to_os_string()),
+            None => return normalize_path(path.to_path_buf()),
+        }
+        match cursor.parent() {
+            Some(parent) if parent != cursor => cursor = parent.to_path_buf(),
+            _ => return normalize_path(path.to_path_buf()),
+        }
+    }
+}
+
+fn normalize_path(path: PathBuf) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 fn expand_user(raw: &str) -> std::path::PathBuf {
     if let Some(rest) = raw.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -607,6 +649,7 @@ fn substitute(template: &str, values: &BTreeMap<String, String>) -> String {
 mod tests {
     use super::*;
     use crate::templates::registry::TemplateRegistry;
+    use tempfile::TempDir;
 
     fn morning() -> Blueprint {
         let r = TemplateRegistry::load_bundled().unwrap();
@@ -798,5 +841,83 @@ mod tests {
         let inst = instance(ScheduleDto::Manual);
         let resolved = instantiate(&bp, &inst).unwrap();
         assert_eq!(resolved.trigger_kind, "manual");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn within_home_rejects_missing_path_beneath_symlinked_ancestor() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path().join("home");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, home.join("escape")).unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+
+        let blueprint = Blueprint::from_toml(
+            r#"
+id              = "it.x"
+schema_version  = 1
+version         = 1
+name            = "Test"
+tagline         = "Test."
+description     = "Test."
+category        = "it-health"
+icon            = "x"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+recommended_class     = "fast"
+cost_class            = "trivial"
+
+prompt = "Prompt {target}."
+
+[scope]
+reads        = "X"
+writes       = "Y"
+could_change = "Nothing."
+network      = "None."
+
+[schedule]
+default        = "0 8 * * *"
+default_label  = "Each morning"
+allowed_shapes = ["daily"]
+
+[output]
+path_template = "/tmp/x.md"
+format        = "markdown"
+
+[[placeholders]]
+name  = "target"
+label = "Target"
+type  = "path"
+
+[placeholders.validation]
+within_home = true
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash"]
+"#,
+        )
+        .unwrap();
+
+        let mut values = BTreeMap::new();
+        values.insert(
+            "target".into(),
+            PlaceholderValue::Path {
+                value: "~/escape/new-file.txt".into(),
+            },
+        );
+        let err = resolve_placeholders(&blueprint, &values).unwrap_err();
+
+        match old_home {
+            Some(old) => std::env::set_var("HOME", old),
+            None => std::env::remove_var("HOME"),
+        }
+
+        assert!(err.to_string().contains("must be within $HOME"));
     }
 }

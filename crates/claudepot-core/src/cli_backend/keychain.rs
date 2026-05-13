@@ -5,6 +5,7 @@
 //! directly. See reference.md §I.6 for why this is non-negotiable.
 
 use crate::error::SwapError;
+use age::secrecy::{ExposeSecret, SecretString};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -99,7 +100,7 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
     let user = std::env::var("USER").unwrap_or_else(|_| whoami::username());
     validate_security_input(&user, "USER")?;
     validate_security_input(service, "service")?;
-    let hex_value = hex::encode(blob.as_bytes());
+    let hex_value = SecretString::from(hex::encode(blob.as_bytes()));
     tracing::info!(
         target: "claudepot::keychain_write",
         service = %service,
@@ -108,8 +109,10 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
         blob_digest = %blob_digest(blob),
         "writing to CC keychain via `security -i add-generic-password -U`"
     );
-    let command_line =
-        format!("add-generic-password -U -a \"{user}\" -s \"{service}\" -X \"{hex_value}\"\n");
+    let command_line = SecretString::from(format!(
+        "add-generic-password -U -a \"{user}\" -s \"{service}\" -X \"{}\"\n",
+        hex_value.expose_secret()
+    ));
 
     let output = tokio::time::timeout(TIMEOUT, async {
         let mut child = Command::new(SECURITY_BIN)
@@ -122,7 +125,7 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
 
         if let Some(mut stdin) = child.stdin.take() {
             stdin
-                .write_all(command_line.as_bytes())
+                .write_all(command_line.expose_secret().as_bytes())
                 .await
                 .map_err(|e| SwapError::KeychainError(format!("stdin write failed: {e}")))?;
             drop(stdin);
