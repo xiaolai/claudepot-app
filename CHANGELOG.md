@@ -6,6 +6,47 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.28 — beta (unreleased)
+
+### Added
+
+- **Category/Priority/Surface schema for notifications.** Every event
+  routed through `emit()` now declares a Category (job, threshold,
+  status, rotation, …), a Priority (P0–P3), and a Surface (toast,
+  banner, bell, os). The schema is enforced at the type system, so a
+  new emit site must classify itself — opaque toast strings are no
+  longer accepted.
+- **Per-category Settings → Notifications pane.** Each category can
+  be muted independently with a per-surface toggle (e.g. silence the
+  OS banner for rotation events but keep the bell entry). Persisted
+  under `CategoryPrefs` and migrated forward on first launch.
+- **Bell popover hides P3 ambient by default.** The notification
+  history dropdown filters Priority 3 (ambient/informational) entries
+  out of the default view, with a "Show all" toggle. P0–P2 always
+  visible; the rule is intentional — the bell is the "what should I
+  know about right now?" surface, not the firehose.
+
+### Changed
+
+- **Single `emit()` facade replaces scattered notification sites.**
+  `useUsageThresholdNotifications`, `useActivityNotifications`,
+  `useOpDoneNotifications`, `useRotationEvents`,
+  `useStatusBannerEmits`, and `useBackgroundChangeEmits` all funnel
+  through one dispatch path. Toast wrapping (`pushToast`), bell-log
+  append, and OS notification dispatch are decided in one place from
+  the event's Category/Priority/Surface — not by each hook.
+- **`pushToast` is wrapped, not bypassed.** The `_suppressLog` shim
+  that let hooks opt out of bell logging is gone; emit() decides
+  whether a toast also lands in the bell based on category rules.
+  New surfaces plug into the same dispatch.
+
+### Fixed
+
+- Four rounds of Codex audit closed across the refactor: 1 Critical,
+  6 High, 6 Medium, 4 Low findings — plus follow-up rounds for the
+  remaining partials and a checked-in cross-language fixture for the
+  final Low item.
+
 ## 0.1.27 — beta (unreleased)
 
 ### Added
