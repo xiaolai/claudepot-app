@@ -1216,6 +1216,13 @@ function CleanupTabPane({
   // we don't bump on the drawer's own onChange (the drawer already
   // refreshes itself after restore/empty).
   const [trashTick, setTrashTick] = useState(0);
+  // Single-column stack. The previous 2:1 row (CleanupPane | TrashDrawer)
+  // had no reflow, so a narrow settings content column (~480px on a
+  // 1000px window after sidebar + nav) squeezed the trash drawer's
+  // header buttons and entry rows into an unusable strip. Stacking
+  // gives every section the full content width and matches the
+  // ArtifactLifecyclePane treatment below — hair-line top borders as
+  // section separators, no padding-left guttering.
   return (
     <div
       style={{
@@ -1224,40 +1231,28 @@ function CleanupTabPane({
         gap: "var(--sp-32)",
       }}
     >
+      <CleanupPane
+        onTrashChanged={() => setTrashTick((n) => n + 1)}
+        setToast={setToast}
+      />
+
+      {/* `key={trashTick}` forces a remount whenever CleanupPane
+          dispatches a prune so the drawer picks up the newly-
+          trashed entries. We deliberately do NOT pass `onChange`
+          here — the drawer already calls its own refresh() after
+          restore / empty actions, so wiring it back to setTrashTick
+          would double-bump and remount the drawer mid-action. */}
       <div
         style={{
-          display: "flex",
-          gap: "var(--sp-24)",
-          alignItems: "flex-start",
+          borderTop: "var(--bw-hair) solid var(--line)",
+          paddingTop: "var(--sp-16)",
         }}
       >
-        <div style={{ flex: 2, minWidth: 0 }}>
-          <CleanupPane
-            onTrashChanged={() => setTrashTick((n) => n + 1)}
-            setToast={setToast}
-          />
-        </div>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            borderLeft: "var(--bw-hair) solid var(--line)",
-            paddingLeft: "var(--sp-16)",
-          }}
-        >
-          {/* `key={trashTick}` forces a remount whenever CleanupPane
-              dispatches a prune so the drawer picks up the newly-
-              trashed entries. We deliberately do NOT pass `onChange`
-              here — the drawer already calls its own refresh() after
-              restore / empty actions, so wiring it back to setTrashTick
-              would double-bump and remount the drawer mid-action. */}
-          <TrashDrawer key={trashTick} />
-        </div>
+        <TrashDrawer key={trashTick} />
       </div>
 
       {/* Artifact lifecycle (Disable + Trash for skills/agents/
-          commands). Lives below the session cleanup row so it shares
-          the same nav slot but doesn't crowd the existing layout. */}
+          commands). */}
       <div
         style={{
           borderTop: "var(--bw-hair) solid var(--line)",
