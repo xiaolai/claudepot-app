@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
 import { api } from "../api";
@@ -115,13 +116,23 @@ export function NotificationBell({ onMouseDown }: NotificationBellProps) {
           </span>
         )}
       </div>
-      {open && (
-        <NotificationLogPopover
-          anchorRef={buttonRef}
-          onClose={() => setOpen(false)}
-          onCountMaybeChanged={refreshUnread}
-        />
-      )}
+      {/* Portal to document.body so the popover escapes WindowChrome's
+       *  inner transform wrapper (added in 0.1.31 for the
+       *  traffic-light alignment). A `transform` value on an ancestor
+       *  — even an identity matrix — creates a new stacking context;
+       *  the popover's `z-index: var(--z-modal)` would otherwise be
+       *  scoped to the chrome's local context and main-content
+       *  painting would render on top of it. The bell button itself
+       *  stays in-place; only the popover panel portals out. */}
+      {open &&
+        createPortal(
+          <NotificationLogPopover
+            anchorRef={buttonRef}
+            onClose={() => setOpen(false)}
+            onCountMaybeChanged={refreshUnread}
+          />,
+          document.body,
+        )}
     </>
   );
 }
