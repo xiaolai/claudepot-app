@@ -6,12 +6,13 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.1.30 — beta (unreleased)
+## 0.1.31 — beta (2026-05-14)
 
-Small follow-up to the 0.1.29 audit sweep — UI fixes for two
-copy/paste-blocking surfaces and two release-workflow bugs that
-surfaced when 0.1.29's manual dispatch path was used for the first
-time.
+Bundles the unreleased 0.1.30 payload (UI fixes + release-workflow
+fixes) with a follow-up batch: principled fix for the long-standing
+chrome / traffic-light alignment drift, full stderr surfaced when
+`claude auth login` fails (issue #16), and a rustfmt cleanup that
+returns CI to green.
 
 ### Fixed
 
@@ -32,6 +33,36 @@ time.
   every toast and banner across the app. Three bare error divs
   (ConfigSection's scan and preview failures, AutomationsSection's
   load error) got the proper `role="alert"` added.
+- **Window-chrome breadcrumb now pins to the OS-reported
+  traffic-light centerline** — not the chrome's geometric center.
+  AppKit doesn't place the standard window buttons at chrome
+  midpoint; the actual visible center depends on macOS version,
+  button height, the configured `trafficLightPosition.y`, and
+  AppKit's autoresizing during first paint. Hardcoded `translateY`
+  compensation drifts on every Tauri / macOS bump (this repo's
+  `trafficLightPosition.y` went 14 → 21 → 22 across three months
+  chasing the moving target, then drifted again under Tauri 2.11).
+  New `src-tauri/src/traffic_light.rs` reads the live
+  `NSWindow.standardWindowButton(.closeButton).frame` via objc2-app-kit
+  and emits a `traffic-light-metrics` event with the center y +
+  cluster right edge. The frontend writes those as CSS custom
+  properties (`--traffic-light-center-y`, `--traffic-light-right`,
+  and overrides the static `--chrome-inset-left`); `WindowChrome`'s
+  inner wrapper carries a single `transform: translateY(calc(...))`
+  pinned to the OS line. Re-emits on Resize / Move / Focus /
+  ScaleFactorChanged so multi-monitor + DPR changes track. The
+  `calc()` collapses to 0 on non-macOS / pre-mount, falling back to
+  flex centering.
+- **`claude auth login` failures now surface the actual stderr** in
+  the dialog (issue #16). The error variant
+  (`OnboardError::AuthLoginFailed`) carries the last 12 redacted
+  stderr lines from the subprocess. The dialog used to show only
+  `exited with code 1`; users can now see the actual reason —
+  network error, OAuth state mismatch, keychain perm denied, etc.
+  Combined with the `role="alert"` selectability fix above, the
+  text is copy-pasteable so users can share it in a bug report.
+  The timeout sentinel (`-2`) keeps its existing recovery message;
+  blank/whitespace tails suppress the label.
 
 ### Infrastructure
 
@@ -49,6 +80,18 @@ time.
   `claudepot-x86_64-windows.zip` — `Compress-Archive` refuses to
   overwrite by default. Caught when re-dispatching 0.1.29 to test
   the `tag_name` fix above.
+- **rustfmt drift absorbed.** `cargo fmt --all` against modern
+  rustfmt (Rust 1.95+) reformatted 27 files (mostly width-wrapping
+  changes accumulated since 1.92). The `Format / Clippy (Linux)`
+  job has been red on every release commit since v0.1.27 because of
+  this; main is back to green from this commit forward. Behaviour-
+  only — no logic edits.
+
+### Notes
+
+`v0.1.30` was tagged but never released. The tag was deleted from
+origin so the timeline jumps cleanly v0.1.29 → v0.1.31. Everything
+that would have been in 0.1.30 ships here.
 
 ## 0.1.29 — beta (2026-05-13)
 
