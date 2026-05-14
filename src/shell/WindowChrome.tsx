@@ -71,8 +71,13 @@ export function WindowChrome({
           // The hairline border-bottom on the outer eats 1px from
           // the content box under `box-sizing: border-box`; mirror
           // it with padding-top so flex centering lands on the true
-          // chrome midline before the translateY below shifts the
-          // whole row onto the lights.
+          // chrome midline. The translateY below then nudges the
+          // whole row by however much the OS-placed traffic-light
+          // cluster differs from chrome midline. With the calibrated
+          // `trafficLightPosition.y` in `tauri.conf.json` the OS
+          // centerline matches chrome midline and the translate
+          // collapses to 0 — the runtime intro is still in place to
+          // pick up any drift on future Tauri / macOS updates.
           padding:
             "var(--bw-hair) var(--sp-12) 0 var(--chrome-inset-left)",
           gap: "var(--sp-14)",

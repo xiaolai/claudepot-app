@@ -6,6 +6,26 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.32 — beta (2026-05-14)
+
+Single-fix follow-up to 0.1.31: traffic-light cluster + chrome
+content now sit on the chrome's geometric center, not 1 px below
+it.
+
+### Fixed
+
+- **Window-chrome row exactly centered.** 0.1.31's runtime intro
+  pinned the breadcrumb to wherever AppKit placed the lights, but
+  the lights themselves were at y=20 in a 38-px chrome (1 px below
+  the geometric center y=19) because `trafficLightPosition.y` in
+  `tauri.conf.json` was 22 — Tauri 2.11 maps that to a close-button
+  center of 20 (config-y minus 2). Drop the config to `y: 21` so
+  AppKit places the close button at y=19 exactly. The runtime intro
+  picks up the new center, the chrome's `translateY(calc(...))`
+  collapses to 0 px, and both the lights and the breadcrumb land on
+  the chrome midline. Verified live: close-button center y=19,
+  breadcrumb center y=19, inner transform `matrix(1, 0, 0, 1, 0, 0)`.
+
 ## 0.1.31 — beta (2026-05-14)
 
 Bundles the unreleased 0.1.30 payload (UI fixes + release-workflow
