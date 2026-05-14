@@ -612,12 +612,21 @@ mod tests {
     }
 
     // --- async slow-path tests (fake fetcher, no network) ---
+    //
+    // These fixtures are consumed only by `test_slow_path_returns_
+    // decrypted_identity` below, which is `#[cfg(target_os = "macos")]`
+    // because it exercises the macOS-only `desktop_backend::crypto::
+    // macos::derive_key` path. Cfg-gate the fixtures with the same
+    // condition so they don't trip `dead_code` on Linux + Windows
+    // (`-D warnings` in CI's Format/Clippy job blocks the merge).
 
+    #[cfg(target_os = "macos")]
     struct FixedFetcher {
         email: String,
         org_uuid: String,
     }
 
+    #[cfg(target_os = "macos")]
     #[async_trait::async_trait]
     impl super::ProfileFetcher for FixedFetcher {
         async fn fetch(&self, _: &str) -> Result<super::ProfileResponse, String> {
@@ -628,11 +637,13 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     struct SlowPathFake {
         data_dir: std::path::PathBuf,
         secret: Vec<u8>,
     }
 
+    #[cfg(target_os = "macos")]
     #[async_trait::async_trait]
     impl DesktopPlatform for SlowPathFake {
         fn data_dir(&self) -> Option<std::path::PathBuf> {
