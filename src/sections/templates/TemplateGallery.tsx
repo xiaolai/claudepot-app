@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { Modal } from "../../components/primitives/Modal";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
+import { useAppState } from "../../providers/AppStateProvider";
 import type {
   TemplateCategory,
   TemplateSummaryDto,
@@ -23,7 +24,6 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onInstalled: () => void;
-  onError: (msg: string) => void;
   onOpenThirdParties: () => void;
 }
 
@@ -37,33 +37,36 @@ export function TemplateGallery({
   open,
   onClose,
   onInstalled,
-  onError,
   onOpenThirdParties,
 }: Props) {
+  const { pushToast } = useAppState();
   const [templates, setTemplates] = useState<TemplateSummaryDto[] | null>(null);
   const [filter, setFilter] = useState<TemplateCategory | "all">("all");
   const [installTarget, setInstallTarget] = useState<string | null>(null);
 
-  // Parent callsites pass inline lambdas, so onError changes
-  // identity on every parent render. Keep the latest in a ref so
-  // the fetch effect only fires on `open` transitions — otherwise
-  // every parent re-render (toast, runsRefreshKey, etc.) reset
-  // installTarget to null and snapped the install view back to
-  // the gallery mid-transition.
-  const onErrorRef = useRef(onError);
-  useEffect(() => {
-    onErrorRef.current = onError;
-  }, [onError]);
-
+  // The fetch effect keys on `open` only — re-running it would clear
+  // `installTarget` and snap the install view back to the gallery
+  // mid-transition. `pushToast` comes from context and is stable, so
+  // it can sit in the dep array honestly without triggering re-runs.
   useEffect(() => {
     if (!open) return;
     setTemplates(null);
     setInstallTarget(null);
+    let cancelled = false;
     api
       .templatesList()
-      .then(setTemplates)
-      .catch((e: unknown) => onErrorRef.current(String(e)));
-  }, [open]);
+      .then((t) => {
+        if (!cancelled) setTemplates(t);
+      })
+      .catch((e: unknown) => {
+        // Guarded: if the gallery closed while the list was in
+        // flight, don't write stale state or fire a hidden toast.
+        if (!cancelled) pushToast("error", String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, pushToast]);
 
   const visible = useMemo(
     () =>
@@ -96,7 +99,6 @@ export function TemplateGallery({
             onInstalled();
             onClose();
           }}
-          onError={onError}
           onOpenThirdParties={onOpenThirdParties}
           backLabel="Back"
         />

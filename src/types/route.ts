@@ -8,6 +8,14 @@ export type RouteProviderKind = "gateway" | "bedrock" | "vertex" | "foundry";
 export type RouteAuthScheme = "bearer" | "basic";
 
 /**
+ * Whether `~/.claudepot/bin` (where CLI wrappers land) is on the
+ * user's interactive-shell PATH. `"unknown"` means the probe could
+ * not determine it — the UI must not claim "on PATH" in that case.
+ * Mirrors `routes::PathStatus`.
+ */
+export type PathStatus = "on_path" | "not_on_path" | "unknown";
+
+/**
  * Outbound projection. Carries no full secrets — `api_key_preview`
  * is a `sk-or-…xyz`-shape truncation; the full key never crosses
  * outward over IPC. See dto_routes.rs header.

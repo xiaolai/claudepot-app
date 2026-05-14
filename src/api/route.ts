@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  PathStatus,
   RouteCreateDto,
   RouteDetailsDto,
   RouteSettingsDto,
@@ -46,6 +47,19 @@ export const routeApi = {
     invoke<RouteSummaryDto>("routes_use_cli", { id }),
   routesUnuseCli: (id: string) =>
     invoke<RouteSummaryDto>("routes_unuse_cli", { id }),
+
+  /**
+   * Whether `~/.claudepot/bin` is on the interactive shell's PATH.
+   * A written wrapper (`installed_on_cli`) is not the same as a
+   * reachable one — this probes the user's login shell to tell.
+   */
+  routesPathStatus: () => invoke<PathStatus>("routes_path_status"),
+  /**
+   * Append the wrapper-dir `export PATH` line to the user's shell
+   * rc file (`.zshrc` / `.bash_profile`). Idempotent. Resolves to
+   * the rc file path that was written.
+   */
+  routesAddToPath: () => invoke<string>("routes_add_to_path"),
 
   /**
    * Mirror this route's keys into Claude Desktop's

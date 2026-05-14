@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/primitives/Modal";
 import { api } from "../../api";
+import { useAppState } from "../../providers/AppStateProvider";
 import type {
   RouteCreateDto,
   RouteDetailsDto,
@@ -13,15 +14,10 @@ interface AddRouteModalProps {
   open: boolean;
   onClose: () => void;
   onCreated: (route: RouteSummaryDto) => void;
-  onError: (msg: string) => void;
 }
 
-export function AddRouteModal({
-  open,
-  onClose,
-  onCreated,
-  onError,
-}: AddRouteModalProps) {
+export function AddRouteModal({ open, onClose, onCreated }: AddRouteModalProps) {
+  const { pushToast } = useAppState();
   return (
     <Modal open={open} onClose={onClose} width="lg" aria-labelledby="add-route-title">
       <div
@@ -66,7 +62,10 @@ export function AddRouteModal({
               onCreated(created);
               onClose();
             } catch (e) {
-              onError(`Add route failed: ${e instanceof Error ? e.message : e}`);
+              pushToast(
+                "error",
+                `Add route failed: ${e instanceof Error ? e.message : e}`,
+              );
               throw e;
             }
           }}
@@ -87,7 +86,6 @@ export interface EditRouteModalProps {
   initialSummary: RouteSummaryDto | null;
   onClose: () => void;
   onSaved: (route: RouteSummaryDto) => void;
-  onError: (msg: string) => void;
 }
 
 export function EditRouteModal({
@@ -95,13 +93,27 @@ export function EditRouteModal({
   initialSummary,
   onClose,
   onSaved,
-  onError,
 }: EditRouteModalProps) {
+  const { pushToast } = useAppState();
   const [details, setDetails] = useState<RouteDetailsDto | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // `onClose` is recreated on every parent render (ThirdPartySection
+  // re-renders on a timer via the live Activity strip). It must NOT
+  // be a fetch-effect dep: re-running the effect flips `loading`
+  // true, which unmounts RouteForm and remounts it on refetch —
+  // discarding the user's edits and scroll position. `onClose` is a
+  // genuine parent-owned action the effect must still be able to
+  // invoke (on load failure), so hold it in a ref — the correct
+  // primitive for a non-reactive callback used inside an effect.
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
-    if (!open || !initialSummary) {
+    onCloseRef.current = onClose;
+  });
+
+  const routeId = initialSummary?.id ?? null;
+  useEffect(() => {
+    if (!open || !routeId) {
       setDetails(null);
       setLoading(false);
       return;
@@ -109,7 +121,7 @@ export function EditRouteModal({
     let cancelled = false;
     setLoading(true);
     void api
-      .routesGet(initialSummary.id)
+      .routesGet(routeId)
       .then((d) => {
         if (!cancelled) {
           setDetails(d);
@@ -119,16 +131,17 @@ export function EditRouteModal({
       .catch((e) => {
         if (!cancelled) {
           setLoading(false);
-          onError(
+          pushToast(
+            "error",
             `Failed to load route: ${e instanceof Error ? e.message : e}`,
           );
-          onClose();
+          onCloseRef.current();
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [open, initialSummary, onClose, onError]);
+  }, [open, routeId, pushToast]);
 
   if (!initialSummary) return null;
 
@@ -181,7 +194,10 @@ export function EditRouteModal({
                 onSaved(updated);
                 onClose();
               } catch (e) {
-                onError(`Edit failed: ${e instanceof Error ? e.message : e}`);
+                pushToast(
+                  "error",
+                  `Edit failed: ${e instanceof Error ? e.message : e}`,
+                );
                 throw e;
               }
             }}

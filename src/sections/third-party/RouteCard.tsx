@@ -4,11 +4,17 @@ import { Tag } from "../../components/primitives/Tag";
 import { Glyph } from "../../components/primitives/Glyph";
 import { CopyButton } from "../../components/CopyButton";
 import { NF } from "../../icons";
-import type { RouteSummaryDto } from "../../types";
+import type { PathStatus, RouteSummaryDto } from "../../types";
 
 interface RouteCardProps {
   route: RouteSummaryDto;
   busy: boolean;
+  /**
+   * Whether `~/.claudepot/bin` is on the shell PATH. Global state,
+   * passed down so every card's wrapper indicator stays honest —
+   * "wrapper written" is not "wrapper reachable".
+   */
+  pathStatus: PathStatus;
   onUseCli: (id: string) => void;
   onUnuseCli: (id: string) => void;
   onUseDesktop: (id: string) => void;
@@ -20,6 +26,7 @@ interface RouteCardProps {
 export function RouteCard({
   route,
   busy,
+  pathStatus,
   onUseCli,
   onUnuseCli,
   onUseDesktop,
@@ -128,25 +135,10 @@ export function RouteCard({
         <dt style={{ color: "var(--fg-faint)" }}>Wrapper</dt>
         <dd style={{ margin: 0, color: "var(--fg)" }}>
           <code>{route.wrapper_name}</code>
-          {route.installed_on_cli ? (
-            <span
-              style={{
-                marginLeft: "var(--sp-8)",
-                color: "var(--fg-faint)",
-              }}
-            >
-              <Glyph g={NF.check} /> on PATH
-            </span>
-          ) : (
-            <span
-              style={{
-                marginLeft: "var(--sp-8)",
-                color: "var(--fg-faint)",
-              }}
-            >
-              not installed
-            </span>
-          )}
+          <WrapperStatus
+            installed={route.installed_on_cli}
+            pathStatus={pathStatus}
+          />
         </dd>
       </dl>
 
@@ -226,4 +218,42 @@ export function RouteCard({
       </footer>
     </article>
   );
+}
+
+/**
+ * The wrapper indicator. Reflects two independent facts: whether the
+ * wrapper file was written (`installed`) and whether its directory is
+ * actually on PATH (`pathStatus`). The old indicator conflated them —
+ * it claimed "on PATH" the moment the file existed, even when the
+ * shell couldn't resolve it.
+ */
+function WrapperStatus({
+  installed,
+  pathStatus,
+}: {
+  installed: boolean;
+  pathStatus: PathStatus;
+}) {
+  const base = { marginLeft: "var(--sp-8)" } as const;
+
+  if (!installed) {
+    return <span style={{ ...base, color: "var(--fg-faint)" }}>not installed</span>;
+  }
+  if (pathStatus === "on_path") {
+    return (
+      <span style={{ ...base, color: "var(--fg-faint)" }}>
+        <Glyph g={NF.check} /> on PATH
+      </span>
+    );
+  }
+  if (pathStatus === "not_on_path") {
+    return (
+      <span style={{ ...base, color: "var(--warn)" }}>
+        <Glyph g={NF.warn} /> installed · not on PATH
+      </span>
+    );
+  }
+  // "unknown" — wrapper exists, but the PATH probe was inconclusive.
+  // Don't claim either way.
+  return <span style={{ ...base, color: "var(--fg-faint)" }}>installed</span>;
 }

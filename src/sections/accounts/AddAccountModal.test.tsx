@@ -32,6 +32,13 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: () => Promise.resolve(() => {}),
 }));
 
+// Error-toasting is a context concern: the modal calls
+// `useAppState().pushToast` directly rather than taking an onError prop.
+const pushToastSpy = vi.fn();
+vi.mock("../../providers/AppStateProvider", () => ({
+  useAppState: () => ({ pushToast: pushToastSpy }),
+}));
+
 // Re-import after the mock is set up so test bodies can poke at the mocks.
 // eslint-disable-next-line import/first
 import { api } from "../../api";
@@ -52,6 +59,7 @@ beforeEach(() => {
   mockApi.accountRegisterFromBrowserStart.mockReset();
   mockApi.accountLoginStatus.mockReset();
   mockApi.accountLoginCancel.mockReset();
+  pushToastSpy.mockClear();
   // Neutral preflight — no current CC session, so Import is disabled and
   // the browser login is the only active button.
   mockApi.currentCcIdentity.mockResolvedValue({ email: null, error: null });
@@ -79,7 +87,6 @@ describe("AddAccountModal — browser login (async start)", () => {
         open
         onClose={onClose}
         onAdded={() => {}}
-        onError={() => {}}
         accounts={[]}
         onAdoptDesktop={() => Promise.resolve(true)}
       />,
@@ -128,7 +135,6 @@ describe("AddAccountModal — browser login (async start)", () => {
           open
           onClose={() => {}}
           onAdded={() => {}}
-          onError={() => {}}
           accounts={[]}
           onAdoptDesktop={() => Promise.resolve(true)}
         />
@@ -147,18 +153,16 @@ describe("AddAccountModal — browser login (async start)", () => {
     );
   });
 
-  it("surfaces non-cancel errors via onError when the start call rejects", async () => {
+  it("surfaces non-cancel errors via pushToast when the start call rejects", async () => {
     mockApi.accountRegisterFromBrowserStart.mockRejectedValue(
       new Error("register failed: claude binary not found"),
     );
-    const onError = vi.fn();
 
     renderWithOps(
       <AddAccountModal
         open
         onClose={() => {}}
         onAdded={() => {}}
-        onError={onError}
         accounts={[]}
         onAdoptDesktop={() => Promise.resolve(true)}
       />,
@@ -168,7 +172,8 @@ describe("AddAccountModal — browser login (async start)", () => {
     await userEvent.click(loginBtn);
 
     await waitFor(() =>
-      expect(onError).toHaveBeenCalledWith(
+      expect(pushToastSpy).toHaveBeenCalledWith(
+        "error",
         expect.stringMatching(/claude binary not found/),
       ),
     );
@@ -180,14 +185,12 @@ describe("AddAccountModal — browser login (async start)", () => {
         "register failed: claude auth login was cancelled by the user",
       ),
     );
-    const onError = vi.fn();
 
     renderWithOps(
       <AddAccountModal
         open
         onClose={() => {}}
         onAdded={() => {}}
-        onError={onError}
         accounts={[]}
         onAdoptDesktop={() => Promise.resolve(true)}
       />,
@@ -199,6 +202,6 @@ describe("AddAccountModal — browser login (async start)", () => {
     await waitFor(() =>
       expect(mockApi.accountRegisterFromBrowserStart).toHaveBeenCalledOnce(),
     );
-    expect(onError).not.toHaveBeenCalled();
+    expect(pushToastSpy).not.toHaveBeenCalled();
   });
 });

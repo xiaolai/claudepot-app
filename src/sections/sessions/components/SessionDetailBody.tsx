@@ -1,4 +1,3 @@
-import type { RefObject } from "react";
 import { Button } from "../../../components/primitives/Button";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { Input } from "../../../components/primitives/Input";
@@ -166,9 +165,9 @@ export function SessionDetailBody({
   chunksFiltered: SessionChunk[] | null;
   search: string;
   setSearch: (q: string) => void;
-  /** Sentinel that the parent's `useReachTop` observes to auto-page
-   * older chunks. */
-  topSentinelRef: RefObject<HTMLDivElement | null>;
+  /** Callback ref from the parent's `useReachTop` — attached to the
+   * sentinel it observes to auto-page older chunks. */
+  topSentinelRef: (el: HTMLElement | null) => void;
   /** Callback ref the parent attaches to observe transcript scroll —
    * powers the auto-compact session header. Optional so older callers
    * don't have to wire it. */

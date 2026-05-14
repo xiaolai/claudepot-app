@@ -14,6 +14,7 @@ const getSpy = vi.fn();
 const routesSpy = vi.fn();
 const installSpy = vi.fn();
 const sampleSpy = vi.fn();
+const pushToastSpy = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
@@ -22,6 +23,12 @@ vi.mock("../../api", () => ({
     templatesInstall: (...a: unknown[]) => installSpy(...a),
     templatesSampleReport: (...a: unknown[]) => sampleSpy(...a),
   },
+}));
+
+// Error-toasting is a context concern: the view calls
+// `useAppState().pushToast` directly rather than taking an onError prop.
+vi.mock("../../providers/AppStateProvider", () => ({
+  useAppState: () => ({ pushToast: pushToastSpy }),
 }));
 
 function makeDetails(overrides: Partial<TemplateDetailsDto> = {}): TemplateDetailsDto {
@@ -67,7 +74,6 @@ function setup(opts: {
   templateId?: string;
   details?: Partial<TemplateDetailsDto>;
   routes?: TemplateRouteSummaryDto[];
-  onError?: (m: string) => void;
   onInstalled?: () => void;
   onBack?: () => void;
 } = {}) {
@@ -75,7 +81,6 @@ function setup(opts: {
   routesSpy.mockResolvedValue(opts.routes ?? []);
   sampleSpy.mockResolvedValue("# Sample\n\nbody");
 
-  const onError = opts.onError ?? vi.fn();
   const onInstalled = opts.onInstalled ?? vi.fn();
   const onBack = opts.onBack ?? vi.fn();
   const onOpenThirdParties = vi.fn();
@@ -85,11 +90,10 @@ function setup(opts: {
       templateId={opts.templateId ?? "it.morning-health-check"}
       onBack={onBack}
       onInstalled={onInstalled}
-      onError={onError}
       onOpenThirdParties={onOpenThirdParties}
     />,
   );
-  return { ...utils, onError, onInstalled, onBack, onOpenThirdParties };
+  return { ...utils, onInstalled, onBack, onOpenThirdParties };
 }
 
 describe("TemplateInstallView — initial load", () => {
@@ -98,6 +102,7 @@ describe("TemplateInstallView — initial load", () => {
     routesSpy.mockReset();
     installSpy.mockReset();
     sampleSpy.mockReset();
+    pushToastSpy.mockClear();
   });
 
   it("renders the loading state until details + routes resolve", async () => {
@@ -115,7 +120,6 @@ describe("TemplateInstallView — initial load", () => {
         templateId="t.x"
         onBack={() => {}}
         onInstalled={() => {}}
-        onError={() => {}}
         onOpenThirdParties={() => {}}
       />,
     );
@@ -157,6 +161,7 @@ describe("TemplateInstallView — install action", () => {
     routesSpy.mockReset();
     installSpy.mockReset();
     sampleSpy.mockReset();
+    pushToastSpy.mockClear();
   });
 
   it("posts a TemplateInstanceDto with blueprint id, version, default schedule, no route", async () => {
@@ -196,16 +201,17 @@ describe("TemplateInstallView — install action", () => {
     resolveInstall({} as AutomationSummaryDto);
   });
 
-  it("propagates an install error via onError without unmounting", async () => {
+  it("surfaces an install error via pushToast without unmounting", async () => {
     const user = userEvent.setup();
-    const onError = vi.fn();
     installSpy.mockRejectedValue(new Error("scheduler missing"));
-    setup({ onError });
+    setup();
     await screen.findByRole("button", { name: "Install" });
     await user.click(screen.getByRole("button", { name: "Install" }));
-    await waitFor(() => expect(onError).toHaveBeenCalled());
-    const msg = String(onError.mock.calls[0][0]);
-    expect(msg).toMatch(/scheduler missing/);
+    await waitFor(() => expect(pushToastSpy).toHaveBeenCalled());
+    expect(pushToastSpy).toHaveBeenCalledWith(
+      "error",
+      expect.stringMatching(/scheduler missing/),
+    );
     // Button is back to the idle state — view still mounted.
     expect(screen.getByRole("button", { name: "Install" })).toBeEnabled();
   });
@@ -249,7 +255,7 @@ describe("TemplateInstallView — install action", () => {
   });
 });
 
-describe("TemplateInstallView — onError ref-stash (regression: parent re-render must not refire effect)", () => {
+describe("TemplateInstallView — regression: parent re-render must not refire the fetch effect", () => {
   beforeEach(() => {
     getSpy.mockReset();
     routesSpy.mockReset();
@@ -257,29 +263,25 @@ describe("TemplateInstallView — onError ref-stash (regression: parent re-rende
     getSpy.mockResolvedValue(makeDetails());
     routesSpy.mockResolvedValue([]);
     sampleSpy.mockResolvedValue("");
+    pushToastSpy.mockClear();
   });
 
-  it("does not re-fetch details when only the onError callback identity changes", async () => {
+  it("does not re-fetch details when the parent re-renders", async () => {
     function Wrapper() {
       const [tick, setTick] = useState(0);
-      // Inline lambda — fresh identity every render. Mirrors the
-      // `onError={(msg) => setToast(...)}` shape used by
-      // AutomationsSection. The fix in `a730205` ref-stashes
-      // onError so the fetch effect does NOT refire.
+      // Parent re-renders on every poke. The fetch effect keys on
+      // `templateId` only — `onError` is gone (the view pulls
+      // `pushToast` from stable context), so nothing unstable can
+      // sneak into the dep array and refire the fetch.
       return (
         <>
           <button data-testid="poke" onClick={() => setTick(tick + 1)}>
-            poke
+            poke {tick}
           </button>
           <TemplateInstallView
             templateId="t.x"
             onBack={() => {}}
             onInstalled={() => {}}
-            onError={(msg) => {
-              // identity changes every render
-              void msg;
-              void tick;
-            }}
             onOpenThirdParties={() => {}}
           />
         </>
@@ -293,7 +295,7 @@ describe("TemplateInstallView — onError ref-stash (regression: parent re-rende
     await user.click(screen.getByTestId("poke"));
     await user.click(screen.getByTestId("poke"));
 
-    // Still one fetch — the ref-stash kept the effect from refiring.
+    // Still one fetch — the effect did not refire on parent renders.
     expect(getSpy).toHaveBeenCalledTimes(1);
   });
 });
@@ -323,7 +325,6 @@ describe("TemplateInstallView — sticky action bar layout", () => {
         templateId="t.x"
         onBack={() => {}}
         onInstalled={() => {}}
-        onError={() => {}}
         onOpenThirdParties={() => {}}
         backLabel="Back"
       />,

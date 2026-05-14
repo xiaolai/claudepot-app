@@ -5,6 +5,7 @@ import {
   ModalHeader,
 } from "../../components/primitives/Modal";
 import { api } from "../../api";
+import { useAppState } from "../../providers/AppStateProvider";
 import type {
   AutomationCreateDto,
   AutomationDetailsDto,
@@ -21,7 +22,6 @@ interface AddProps {
   capabilities: SchedulerCapabilitiesDto | null;
   onClose: () => void;
   onCreated: (a: AutomationSummaryDto) => void;
-  onError: (msg: string) => void;
 }
 
 export function AddAutomationModal({
@@ -30,8 +30,8 @@ export function AddAutomationModal({
   capabilities,
   onClose,
   onCreated,
-  onError,
 }: AddProps) {
+  const { pushToast } = useAppState();
   const [busy, setBusy] = useState(false);
 
   async function submit(dto: AutomationCreateDto) {
@@ -41,7 +41,7 @@ export function AddAutomationModal({
       onCreated(created);
       onClose();
     } catch (e) {
-      onError(String(e));
+      pushToast("error", String(e));
     } finally {
       setBusy(false);
     }
@@ -81,7 +81,6 @@ interface EditProps {
   capabilities: SchedulerCapabilitiesDto | null;
   onClose: () => void;
   onUpdated: (a: AutomationSummaryDto) => void;
-  onError: (msg: string) => void;
 }
 
 export function EditAutomationModal({
@@ -91,8 +90,8 @@ export function EditAutomationModal({
   capabilities,
   onClose,
   onUpdated,
-  onError,
 }: EditProps) {
+  const { pushToast } = useAppState();
   const [details, setDetails] = useState<AutomationDetailsDto | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -107,13 +106,16 @@ export function EditAutomationModal({
         const d = await api.automationsGet(target.id);
         if (!cancelled) setDetails(d);
       } catch (e) {
-        onError(String(e));
+        // Guard the toast too: if the modal closed (or the target
+        // switched) while the fetch was in flight, a late rejection
+        // must not fire a stray error toast.
+        if (!cancelled) pushToast("error", String(e));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, target, onError]);
+  }, [open, target, pushToast]);
 
   async function submit(dto: AutomationCreateDto) {
     if (!target) return;
@@ -146,7 +148,7 @@ export function EditAutomationModal({
       onUpdated(updated);
       onClose();
     } catch (e) {
-      onError(String(e));
+      pushToast("error", String(e));
     } finally {
       setBusy(false);
     }

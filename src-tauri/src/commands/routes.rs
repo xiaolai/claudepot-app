@@ -9,11 +9,12 @@
 //! `api_key_preview` is sent back.
 
 use claudepot_core::routes::{
-    activate_desktop, clear_desktop_active, delete_helpers, delete_keychain_for_route,
-    delete_library_profile, delete_wrapper, derive_wrapper_slug, sanitize_wrapper_name,
-    store_keychain_secret, validate_base_url, write_helper, write_library_profile, write_wrapper,
-    AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route, RouteError,
-    RouteId, RouteProvider, RouteStore, SecretField, VertexConfig,
+    activate_desktop, add_wrapper_dir_to_path, clear_desktop_active, delete_helpers,
+    delete_keychain_for_route, delete_library_profile, delete_wrapper, derive_wrapper_slug,
+    normalize_gateway_base_url, sanitize_wrapper_name, store_keychain_secret, validate_base_url,
+    wrapper_dir_path_status, write_helper, write_library_profile, write_wrapper, AuthScheme,
+    BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route, RouteError, RouteId,
+    RouteProvider, RouteStore, SecretField, VertexConfig,
 };
 use uuid::Uuid;
 use zeroize::Zeroize;
@@ -70,7 +71,10 @@ fn build_provider(
     match kind {
         ProviderKind::Gateway => {
             let mut g = gateway.ok_or_else(|| String::from("gateway config missing"))?;
-            let base = match validate_base_url(&g.base_url) {
+            // Normalize, not just validate: a trailing `/v1` is stripped
+            // here because Claude Code's SDK appends `/v1/messages`
+            // itself — see `normalize_gateway_base_url`.
+            let base = match normalize_gateway_base_url(&g.base_url) {
                 Ok(base) => base,
                 Err(e) => {
                     g.api_key.zeroize();
@@ -803,6 +807,26 @@ pub async fn routes_unuse_cli(id: String) -> Result<RouteSummaryDto, String> {
         .get(id)
         .ok_or_else(|| String::from("route disappeared after persist"))?;
     Ok(project_summary(r))
+}
+
+/// Whether `~/.claudepot/bin` (where CLI wrappers land) is on the
+/// user's interactive-shell PATH. Returns `"on_path"`,
+/// `"not_on_path"`, or `"unknown"` — see `routes::PathStatus`. The
+/// Third-party UI uses this to render an honest wrapper indicator
+/// instead of assuming "wrapper written" means "wrapper reachable".
+#[tauri::command]
+pub async fn routes_path_status() -> Result<String, String> {
+    Ok(wrapper_dir_path_status().await.as_str().to_string())
+}
+
+/// Append the wrapper-dir `export PATH` line to the user's shell rc
+/// file (`.zshrc` / `.bash_profile`). Idempotent. Returns the path
+/// of the rc file that was written so the UI can name it. Errors on
+/// shells whose config syntax we don't auto-edit (e.g. fish).
+#[tauri::command]
+pub async fn routes_add_to_path() -> Result<String, String> {
+    let rc = add_wrapper_dir_to_path().map_err(map_err)?;
+    Ok(rc.display().to_string())
 }
 
 #[tauri::command]

@@ -20,6 +20,7 @@ mod desktop;
 mod error;
 mod helper;
 mod keychain;
+mod path_setup;
 mod slug;
 mod store;
 mod types;
@@ -36,13 +37,14 @@ pub use keychain::{
     delete_all_for_route as delete_keychain_for_route, delete_secret as delete_keychain_secret,
     read_secret as read_keychain_secret, store_secret as store_keychain_secret, SecretField,
 };
+pub use path_setup::{add_wrapper_dir_to_path, wrapper_dir_path_status, PathStatus};
 pub use slug::{derive_wrapper_slug, sanitize_wrapper_name, WrapperNameError};
 pub use store::RouteStore;
 pub use types::{
     AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route, RouteId,
     RouteProvider, RouteSummary, VertexConfig,
 };
-pub use url::{validate_base_url, BaseUrlError};
+pub use url::{normalize_gateway_base_url, validate_base_url, BaseUrlError};
 pub use wrapper::{delete_wrapper, wrapper_dir, wrapper_path, write_wrapper};
 
 /// Marker stamped on every Claudepot-written wrapper script and

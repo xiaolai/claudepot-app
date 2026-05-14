@@ -441,7 +441,6 @@ export function AccountsSection({
           await refresh();
           pushToast("info", "Account added.");
         }}
-        onError={(msg) => pushToast("error", msg)}
         onAdoptDesktop={(a) => actions.adoptDesktop(a)}
       />
 

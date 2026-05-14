@@ -10,6 +10,7 @@ const getSpy = vi.fn();
 const routesSpy = vi.fn();
 const installSpy = vi.fn();
 const sampleSpy = vi.fn();
+const pushToastSpy = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
@@ -19,6 +20,12 @@ vi.mock("../../api", () => ({
     templatesInstall: (...a: unknown[]) => installSpy(...a),
     templatesSampleReport: (...a: unknown[]) => sampleSpy(...a),
   },
+}));
+
+// Error-toasting is a context concern: the gallery + install view
+// call `useAppState().pushToast` directly rather than taking onError.
+vi.mock("../../providers/AppStateProvider", () => ({
+  useAppState: () => ({ pushToast: pushToastSpy }),
 }));
 
 function tplSummary(overrides: Partial<TemplateSummaryDto>): TemplateSummaryDto {
@@ -61,7 +68,6 @@ function tplDetails(summary: TemplateSummaryDto) {
 function setup(opts: {
   open?: boolean;
   templates?: TemplateSummaryDto[];
-  onError?: (m: string) => void;
   onClose?: () => void;
   onInstalled?: () => void;
 } = {}) {
@@ -83,7 +89,6 @@ function setup(opts: {
   sampleSpy.mockResolvedValue("");
 
   const onClose = opts.onClose ?? vi.fn();
-  const onError = opts.onError ?? vi.fn();
   const onInstalled = opts.onInstalled ?? vi.fn();
   const onOpenThirdParties = vi.fn();
 
@@ -92,11 +97,10 @@ function setup(opts: {
       open={opts.open ?? true}
       onClose={onClose}
       onInstalled={onInstalled}
-      onError={onError}
       onOpenThirdParties={onOpenThirdParties}
     />,
   );
-  return { ...utils, onClose, onError, onInstalled, onOpenThirdParties };
+  return { ...utils, onClose, onInstalled, onOpenThirdParties };
 }
 
 describe("TemplateGallery — initial render", () => {
@@ -115,7 +119,6 @@ describe("TemplateGallery — initial render", () => {
         open={false}
         onClose={() => {}}
         onInstalled={() => {}}
-        onError={() => {}}
         onOpenThirdParties={() => {}}
       />,
     );
@@ -213,7 +216,6 @@ describe("TemplateGallery — single Modal swap to install view (regression: no 
         open
         onClose={() => {}}
         onInstalled={() => {}}
-        onError={() => {}}
         onOpenThirdParties={() => {}}
       />,
     );
@@ -252,7 +254,6 @@ describe("TemplateGallery — single Modal swap to install view (regression: no 
         open
         onClose={() => {}}
         onInstalled={() => {}}
-        onError={() => {}}
         onOpenThirdParties={() => {}}
       />,
     );
@@ -274,15 +275,16 @@ describe("TemplateGallery — single Modal swap to install view (regression: no 
   });
 });
 
-describe("TemplateGallery — onError ref-stash (regression: parent re-renders must not refire fetch)", () => {
+describe("TemplateGallery — regression: parent re-renders must not refire fetch", () => {
   beforeEach(() => {
     listSpy.mockReset();
     getSpy.mockReset();
     routesSpy.mockReset();
     sampleSpy.mockReset();
+    pushToastSpy.mockClear();
   });
 
-  it("does not re-fetch the catalog when the parent re-renders with a fresh onError lambda", async () => {
+  it("does not re-fetch the catalog when the parent re-renders", async () => {
     const user = userEvent.setup();
     listSpy.mockResolvedValue([
       tplSummary({ id: "t.a", name: "A" }),
@@ -290,21 +292,19 @@ describe("TemplateGallery — onError ref-stash (regression: parent re-renders m
 
     function Wrapper() {
       const [tick, setTick] = useState(0);
-      // Inline lambda — fresh identity every render. The fix in
-      // commit a730205 stashes onError in a ref so this DOES NOT
-      // retrigger the fetch effect.
+      // Parent re-renders on every poke. The fetch effect keys on
+      // `open` only — `onError` is no longer a prop (the gallery
+      // pulls `pushToast` from stable context), so no unstable
+      // callback can sneak into the dep array and refire the fetch.
       return (
         <>
           <button data-testid="poke" onClick={() => setTick(tick + 1)}>
-            poke
+            poke {tick}
           </button>
           <TemplateGallery
             open
             onClose={() => {}}
             onInstalled={() => {}}
-            onError={(_msg) => {
-              void tick;
-            }}
             onOpenThirdParties={() => {}}
           />
         </>
@@ -320,7 +320,7 @@ describe("TemplateGallery — onError ref-stash (regression: parent re-renders m
     expect(listSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does not snap install→gallery on parent re-render (the regression that motivated the ref-stash)", async () => {
+  it("does not snap install→gallery on parent re-render", async () => {
     const user = userEvent.setup();
     const tpl = tplSummary({ id: "t.x", name: "T X" });
     listSpy.mockResolvedValue([tpl]);
@@ -333,15 +333,12 @@ describe("TemplateGallery — onError ref-stash (regression: parent re-renders m
       return (
         <>
           <button data-testid="poke" onClick={() => setTick(tick + 1)}>
-            poke
+            poke {tick}
           </button>
           <TemplateGallery
             open
             onClose={() => {}}
             onInstalled={() => {}}
-            onError={() => {
-              void tick;
-            }}
             onOpenThirdParties={() => {}}
           />
         </>
@@ -353,8 +350,8 @@ describe("TemplateGallery — onError ref-stash (regression: parent re-renders m
     await screen.findByRole("heading", { name: "T X", level: 2 });
 
     // Bang on parent re-render mid-install. Pre-fix, this snapped
-    // back to the gallery because the gallery's effect re-ran with
-    // a fresh onError ref and reset installTarget=null.
+    // back to the gallery because the gallery's fetch effect re-ran
+    // with a fresh onError lambda and reset installTarget=null.
     await user.click(screen.getByTestId("poke"));
     await user.click(screen.getByTestId("poke"));
     await user.click(screen.getByTestId("poke"));

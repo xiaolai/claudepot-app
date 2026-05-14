@@ -261,7 +261,6 @@ export function AutomationsSection() {
           refresh();
           pushToast("info", "Automation created.");
         }}
-        onError={(msg) => pushToast("error", msg)}
       />
 
       <TemplateGallery
@@ -271,7 +270,6 @@ export function AutomationsSection() {
           refresh();
           pushToast("info", "Template installed.");
         }}
-        onError={(msg) => pushToast("error", msg)}
         onOpenThirdParties={() => {
           // Best-effort deep-link: dispatch a custom event the
           // sidebar/router listens to. If nothing handles it,
@@ -293,7 +291,6 @@ export function AutomationsSection() {
           refresh();
           pushToast("info", "Automation updated.");
         }}
-        onError={(msg) => pushToast("error", msg)}
       />
 
       {removeTarget && (

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { NfIcon } from "../../icons";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
@@ -13,6 +13,7 @@ import { Tag } from "../../components/primitives/Tag";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { useOperations } from "../../hooks/useOperations";
 import { redactSecrets } from "../../lib/redactSecrets";
+import { useAppState } from "../../providers/AppStateProvider";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
 import { ActionCard } from "./ActionCard";
@@ -24,7 +25,6 @@ interface AddAccountModalProps {
   open: boolean;
   onClose: () => void;
   onAdded: (email: string) => void;
-  onError: (message: string) => void;
   /** Registered accounts — used to flag the "known" state. */
   accounts: AccountSummary[];
   /** Shared Desktop adopt action — the shell owns toasts/refresh/tray.
@@ -58,16 +58,28 @@ export function AddAccountModal({
   open,
   onClose,
   onAdded,
-  onError,
   accounts,
   onAdoptDesktop,
 }: AddAccountModalProps) {
+  const { pushToast } = useAppState();
   const [importing, setImporting] = useState(false);
   const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
   const [preflight, setPreflight] = useState<Preflight>({ kind: "checking" });
   const trapRef = useFocusTrap<HTMLDivElement>();
   const titleId = useId();
   const { open: openOpModal } = useOperations();
+
+  // `accounts` is recreated on every account-list refresh, and the
+  // parent re-renders on its own polling. It must NOT be an effect
+  // dep: re-running the preflight resets `preflight` to "checking"
+  // and `importing` to false — flashing the modal back mid-flow and,
+  // worse, clearing the importing flag during an in-flight import.
+  // The preflight only needs the *current* accounts once per open,
+  // so read them from a ref.
+  const accountsRef = useRef(accounts);
+  useEffect(() => {
+    accountsRef.current = accounts;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -93,7 +105,7 @@ export function AddAccountModal({
           setPreflight({ kind: "empty" });
           return;
         }
-        const known = accounts.find(
+        const known = accountsRef.current.find(
           (a) => a.email.toLowerCase() === identity.email!.toLowerCase(),
         );
         if (known) {
@@ -123,7 +135,7 @@ export function AddAccountModal({
     return () => {
       cancelled = true;
     };
-  }, [open, accounts]);
+  }, [open]);
 
   const handleImport = async () => {
     setImporting(true);
@@ -133,7 +145,7 @@ export function AddAccountModal({
       onClose();
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
-      onError(redactSecrets(raw));
+      pushToast("error", redactSecrets(raw));
     } finally {
       setImporting(false);
     }
@@ -177,7 +189,7 @@ export function AddAccountModal({
         onError: (detail) => {
           const msg = detail ?? "";
           if (!/cancel/i.test(msg)) {
-            onError(msg ? redactSecrets(msg) : "register failed");
+            pushToast("error", msg ? redactSecrets(msg) : "register failed");
           }
         },
       });
@@ -188,7 +200,7 @@ export function AddAccountModal({
       // case — the user just clicked Cancel, they don't need a warning.
       const msg = e instanceof Error ? e.message : String(e);
       if (!/cancel/i.test(msg)) {
-        onError(redactSecrets(msg));
+        pushToast("error", redactSecrets(msg));
       }
     } finally {
       setBrowserLoggingIn(false);

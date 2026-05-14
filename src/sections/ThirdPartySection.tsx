@@ -5,7 +5,7 @@ import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
 import { useAppState } from "../providers/AppStateProvider";
-import type { RouteSettingsDto, RouteSummaryDto } from "../types";
+import type { PathStatus, RouteSettingsDto, RouteSummaryDto } from "../types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddRouteModal, EditRouteModal } from "./third-party/AddRouteModal";
 import { RouteCard } from "./third-party/RouteCard";
@@ -47,8 +47,21 @@ export function ThirdPartySection() {
     "needed" | "applied" | "none"
   >("none");
   const [restartingDesktop, setRestartingDesktop] = useState(false);
+  // Whether `~/.claudepot/bin` is on the shell PATH. Global state —
+  // a wrapper that's been written is still unreachable until its
+  // directory is on PATH. Probed by the login shell, not the GUI
+  // process's own (minimal) env.
+  const [pathStatus, setPathStatus] = useState<PathStatus>("unknown");
+  const [addingToPath, setAddingToPath] = useState(false);
 
   const refresh = useCallback(async () => {
+    // The shell PATH probe is supplementary and can be slow — keep it
+    // off the critical path so it can neither fail nor stall the
+    // whole section. Kicked off in parallel; its rejection collapses
+    // to "unknown" instead of failing routes/settings.
+    const pathStatusP = api
+      .routesPathStatus()
+      .catch((): PathStatus => "unknown");
     try {
       const [list, s] = await Promise.all([
         api.routesList(),
@@ -60,6 +73,7 @@ export function ThirdPartySection() {
     } catch (e) {
       setLoadError(`Load failed: ${e instanceof Error ? e.message : e}`);
     }
+    setPathStatus(await pathStatusP);
   }, []);
 
   useEffect(() => {
@@ -89,19 +103,41 @@ export function ThirdPartySection() {
   const handleUseCli = async (id: string) => {
     setBusy(id, true);
     try {
-      await api.routesUseCli(id);
+      const r = await api.routesUseCli(id);
       await refresh();
-      const r = (await api.routesList()).find((x) => x.id === id);
-      pushToast(
-        "info",
-        r
-          ? `Wrapper installed: \`${r.wrapper_name}\`. Add ~/.claudepot/bin to PATH if you haven't already.`
-          : "Wrapper installed.",
-      );
+      // The PATH banner (below) carries setup guidance when the
+      // wrapper dir isn't reachable — keep the toast to the fact.
+      pushToast("info", `Wrapper installed: \`${r.wrapper_name}\`.`);
     } catch (e) {
       pushToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
+    }
+  };
+
+  const handleAddToPath = async () => {
+    setAddingToPath(true);
+    try {
+      const rc = await api.routesAddToPath();
+      pushToast(
+        "info",
+        `Added ~/.claudepot/bin to PATH in ${rc}. Restart your terminal (or run \`source ${rc}\`) for open shells to pick it up.`,
+      );
+      // Re-probe to refresh the indicator. Best-effort: a probe
+      // failure here does not undo the successful rc write, so it
+      // must not surface as "Add to PATH failed".
+      try {
+        setPathStatus(await api.routesPathStatus());
+      } catch {
+        setPathStatus("unknown");
+      }
+    } catch (e) {
+      pushToast(
+        "error",
+        `Add to PATH failed: ${e instanceof Error ? e.message : e}`,
+      );
+    } finally {
+      setAddingToPath(false);
     }
   };
 
@@ -292,6 +328,39 @@ export function ThirdPartySection() {
           </div>
         )}
 
+        {pathStatus === "not_on_path" &&
+          routes?.some((r) => r.installed_on_cli) && (
+            <div
+              role="status"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "var(--sp-12)",
+                padding: "var(--sp-10) var(--sp-14)",
+                border: "var(--bw-hair) solid var(--warn)",
+                background: "var(--warn-weak)",
+                color: "var(--fg)",
+                borderRadius: "var(--r-2)",
+                fontSize: "var(--fs-sm)",
+              }}
+            >
+              <span>
+                Installed CLI wrappers won&rsquo;t resolve —{" "}
+                <code>~/.claudepot/bin</code> is not on your shell PATH.
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleAddToPath}
+                disabled={addingToPath}
+                glyph={NF.terminal}
+              >
+                {addingToPath ? "Adding…" : "Add to PATH"}
+              </Button>
+            </div>
+          )}
+
         {settings && (
           <label
             style={{
@@ -330,6 +399,7 @@ export function ThirdPartySection() {
                 key={r.id}
                 route={r}
                 busy={busyIds.has(r.id)}
+                pathStatus={pathStatus}
                 onUseCli={handleUseCli}
                 onUnuseCli={handleUnuseCli}
                 onUseDesktop={handleUseDesktop}
@@ -355,7 +425,6 @@ export function ThirdPartySection() {
           void refresh();
           pushToast("info", "Route added.");
         }}
-        onError={(msg) => pushToast("error", msg)}
       />
       <EditRouteModal
         open={editTarget !== null}
@@ -365,7 +434,6 @@ export function ThirdPartySection() {
           void refresh();
           pushToast("info", "Route updated.");
         }}
-        onError={(msg) => pushToast("error", msg)}
       />
       {removeTarget && (
         <ConfirmDialog

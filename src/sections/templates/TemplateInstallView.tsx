@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { FieldBlock } from "../../components/primitives/modalParts";
+import { useAppState } from "../../providers/AppStateProvider";
 import type {
   ScheduleDto,
   ScheduleShapeName,
@@ -20,7 +21,6 @@ interface Props {
    *  gallery or close the modal). */
   onBack: () => void;
   onInstalled: () => void;
-  onError: (msg: string) => void;
   onOpenThirdParties: () => void;
   /** Optional label for the back/cancel button. Defaults to
    *  "Cancel" — when rendered inside the gallery it's overridden
@@ -46,10 +46,10 @@ export function TemplateInstallView({
   templateId,
   onBack,
   onInstalled,
-  onError,
   onOpenThirdParties,
   backLabel = "Cancel",
 }: Props) {
+  const { pushToast } = useAppState();
   const [details, setDetails] = useState<TemplateDetailsDto | null>(null);
   const [routes, setRoutes] = useState<TemplateRouteSummaryDto[]>([]);
   const [routeId, setRouteId] = useState<string | null>(null);
@@ -57,16 +57,10 @@ export function TemplateInstallView({
   const [sampleOpen, setSampleOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Parent callsites pass inline `(msg) => setToast(...)` lambdas
-  // for onError, so the identity flips on every parent render.
-  // Keep the latest in a ref and depend only on `templateId`,
-  // otherwise the fetch effect would refire mid-load and reset
-  // local state — visible as a flash back to the loading state.
-  const onErrorRef = useRef(onError);
-  useEffect(() => {
-    onErrorRef.current = onError;
-  }, [onError]);
-
+  // The fetch effect keys on `templateId` only — refiring it would
+  // reset local state mid-load (a visible flash back to "Loading").
+  // `pushToast` is stable (context-provided), so it sits in the dep
+  // array honestly without causing a re-run.
   useEffect(() => {
     let cancelled = false;
     setDetails(null);
@@ -87,12 +81,12 @@ export function TemplateInstallView({
         setSchedule(initialSchedule(d.allowed_schedule_shapes, d));
       })
       .catch((e: unknown) => {
-        if (!cancelled) onErrorRef.current(String(e));
+        if (!cancelled) pushToast("error", String(e));
       });
     return () => {
       cancelled = true;
     };
-  }, [templateId]);
+  }, [templateId, pushToast]);
 
   const ready = details !== null && schedule !== null;
 
@@ -108,11 +102,14 @@ export function TemplateInstallView({
     };
     try {
       await api.templatesInstall(instance);
+      // Clear `busy` *before* onInstalled() — that callback can
+      // unmount this view, so a setState after it would land on a
+      // gone component.
+      setBusy(false);
       onInstalled();
     } catch (e: unknown) {
-      onError(String(e));
-    } finally {
       setBusy(false);
+      pushToast("error", String(e));
     }
   }
 

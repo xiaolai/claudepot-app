@@ -752,6 +752,8 @@ pub fn run() {
             commands::routes::routes_remove,
             commands::routes::routes_use_cli,
             commands::routes::routes_unuse_cli,
+            commands::routes::routes_path_status,
+            commands::routes::routes_add_to_path,
             commands::routes::routes_use_desktop,
             commands::routes::routes_unuse_desktop,
             commands::routes::routes_derive_slug,

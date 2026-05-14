@@ -85,7 +85,6 @@ export function SessionDetail({
   // boundary contract.
   const compact = useScrollCompact(scrollEl);
   const tokenRef = useRef(0);
-  const topSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const myToken = ++tokenRef.current;
@@ -186,8 +185,7 @@ export function SessionDetail({
     !!chunksFiltered &&
     !!visibleChunksList &&
     chunksFiltered.length > visibleChunksList.length;
-  useReachTop(
-    topSentinelRef.current,
+  const topSentinelRef = useReachTop(
     viewMode === "chunks" && hasMoreChunks,
     () => setVisibleChunks((n) => n + CHUNK_PAGE),
   );
