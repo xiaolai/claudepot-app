@@ -8,9 +8,7 @@ Versioning scheme:
 
 ## 0.1.32 — beta (2026-05-14)
 
-Single-fix follow-up to 0.1.31: traffic-light cluster + chrome
-content now sit on the chrome's geometric center, not 1 px below
-it.
+Two follow-ups to 0.1.31's chrome fix:
 
 ### Fixed
 
@@ -25,6 +23,19 @@ it.
   collapses to 0 px, and both the lights and the breadcrumb land on
   the chrome midline. Verified live: close-button center y=19,
   breadcrumb center y=19, inner transform `matrix(1, 0, 0, 1, 0, 0)`.
+- **Notification bell popover renders opaquely over main content
+  again** (regression from 0.1.31). The chrome's inner wrapper
+  (added in 0.1.31 for the traffic-light translateY) carries a
+  `transform` value, which creates a new CSS stacking context —
+  even an identity matrix does. The popover's `z-index: 200` was
+  scoped to the chrome's local context instead of the document, so
+  main-content painting ended up on top of the popover and you'd
+  see Settings / Health pane content showing through. Render the
+  popover via `createPortal` to `document.body` so it escapes the
+  chrome's stacking context entirely. Bell button stays in-place;
+  only the popover panel portals out. Verified live:
+  `elementsFromPoint` at the popover-overlap point now returns the
+  popover dialog as topmost (was returning the cc_doctor `<p>`).
 
 ## 0.1.31 — beta (2026-05-14)
 
