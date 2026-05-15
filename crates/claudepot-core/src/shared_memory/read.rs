@@ -166,8 +166,15 @@ fn resolve_line_bounds(
     }
 
     // No bounds available; cap at 100 000 lines so we don't
-    // accidentally slurp a multi-GB transcript. The byte cap below
-    // is the real safety.
+    // accidentally slurp a multi-GB transcript. The byte cap in
+    // `read_lines` is the real safety; if both ceilings fire the
+    // byte cap wins (it's nearly always reached first). L8 — log
+    // when this fallback kicks in so an operator chasing
+    // "why does my read stop at line 100000" finds the answer.
+    tracing::debug!(
+        ?loc.file_path,
+        "read_locator: no line bounds; falling back to file-level read (capped at 100 000 lines / max_bytes)"
+    );
     Ok((1, 100_000))
 }
 

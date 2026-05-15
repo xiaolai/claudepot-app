@@ -199,6 +199,14 @@ fn walk_dir_recursive(
     // Cap depth so a runaway symlink doesn't recurse forever.
     // Codex's layout is sessions/YYYY/MM/DD/file.jsonl → depth 4.
     if depth > 8 {
+        // L7 — surface the depth cap as a warn log so a future
+        // Codex layout that pushes past the cap doesn't silently
+        // drop files.
+        tracing::warn!(
+            depth,
+            dir = %dir.display(),
+            "codex_session indexer: depth cap reached; subdirectories skipped"
+        );
         return;
     }
     let read = match fs::read_dir(dir) {
@@ -267,7 +275,24 @@ fn inode_of(meta: &fs::Metadata) -> i64 {
     meta.ino() as i64
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn inode_of(meta: &fs::Metadata) -> i64 {
+    // L11 — Windows has no inode in the POSIX sense, but
+    // MetadataExt::file_index() returns the NTFS file id (the
+    // closest analog). Wraps to i64 — if the high bit is set the
+    // cast becomes negative, which is fine for equality
+    // comparison (the only consumer is the staleness triple
+    // check, which doesn't care about ordering or sign).
+    //
+    // file_index() returns Some(u64) for files on volumes that
+    // support it; we fall back to 0 only if the platform returns
+    // None (rare — basically only ReFS in some pre-Server-2019
+    // builds).
+    use std::os::windows::fs::MetadataExt;
+    meta.file_index().map(|n| n as i64).unwrap_or(0)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn inode_of(_meta: &fs::Metadata) -> i64 {
     0
 }
@@ -508,9 +533,13 @@ fn write_codex_conversation(
 
         for tc in &ex.tool_calls {
             let tc_ts = tc.timestamp.map(|t| t.timestamp_millis());
-            // Tool call id stable across reparse:
-            //   <exchange_id>:<call_id>
-            let tc_id = format!("{}:{}", ex.id, tc.call_id);
+            // Tool call id stable across reparse. L3 — use ASCII
+            // unit-separator (U+001F) instead of `:` so the
+            // composite key is unambiguous even if Codex emits a
+            // call_id containing `:`. Unit-separator is in the
+            // legacy ASCII control range and won't appear in any
+            // Codex-generated identifier (which is hex / printable).
+            let tc_id = format!("{}\u{001f}{}", ex.id, tc.call_id);
             tx.execute(
                 "INSERT INTO tool_calls (
                     id, exchange_id, tool_name, tool_input_json,
@@ -774,7 +803,9 @@ mod tests {
         let tc_id: String = db
             .query_row("SELECT id FROM tool_calls", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(tc_id, "01-tools:0:call-a");
+        // L3 — composite key uses unit-separator (U+001F), not `:`.
+        // Format: <session_id>:<turn_index>\u{001f}<call_id>.
+        assert_eq!(tc_id, "01-tools:0\u{001f}call-a");
         let tc_name: String = db
             .query_row("SELECT tool_name FROM tool_calls", [], |r| r.get(0))
             .unwrap();

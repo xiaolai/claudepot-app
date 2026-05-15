@@ -141,8 +141,13 @@ pub fn search(
         next_idx += 1;
     }
     if let Some(ref pp) = query.project_path {
-        sql.push_str(&format!(" AND s.project_path LIKE ?{}", next_idx));
-        binds.push(Value::Text(format!("%{}%", pp)));
+        // L5 — escape LIKE wildcards (`%`, `_`, `\`) in user input
+        // so a search for `project_path: "_"` doesn't silently
+        // become a single-character wildcard. Pair with an
+        // explicit ESCAPE clause so SQLite honors our backslash
+        // as the escape character.
+        sql.push_str(&format!(" AND s.project_path LIKE ?{} ESCAPE '\\'", next_idx));
+        binds.push(Value::Text(format!("%{}%", escape_like(pp))));
         next_idx += 1;
     }
     if let Some(ref gb) = query.git_branch {
@@ -151,8 +156,8 @@ pub fn search(
         next_idx += 1;
     }
     if let Some(ref mdl) = query.model {
-        sql.push_str(&format!(" AND s.models_json LIKE ?{}", next_idx));
-        binds.push(Value::Text(format!("%{}%", mdl)));
+        sql.push_str(&format!(" AND s.models_json LIKE ?{} ESCAPE '\\'", next_idx));
+        binds.push(Value::Text(format!("%{}%", escape_like(mdl))));
         next_idx += 1;
     }
     if let Some(since) = query.since_ms {
@@ -217,10 +222,22 @@ pub fn search(
 /// Result is always wrapped in quotes — even single-word inputs
 /// pass through this function so the FTS5 parser uses phrase mode
 /// uniformly.
+///
+/// L6 — also strips ASCII control characters (`\0` through `\x1f`
+/// except `\t`, `\n`, `\r`) defensively. FTS5's tokenizer doesn't
+/// document explicit handling for these and a future tokenizer
+/// change could surprise us; stripping them at the input boundary
+/// is cheap and removes the corner case from the threat model.
 pub fn escape_phrase(input: &str) -> String {
     let mut out = String::with_capacity(input.len() + 2);
     out.push('"');
     for c in input.chars() {
+        // Strip ASCII control chars except tab/newline/carriage
+        // return (which whitespace-segment the phrase but otherwise
+        // don't perturb the tokenizer).
+        if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') {
+            continue;
+        }
         if c == '"' {
             out.push('"');
             out.push('"');
@@ -229,6 +246,24 @@ pub fn escape_phrase(input: &str) -> String {
         }
     }
     out.push('"');
+    out
+}
+
+/// Escape `%`, `_`, and `\` inside a string destined for a LIKE
+/// pattern. Paired with `ESCAPE '\\'` on the SQL side so the
+/// escape character is unambiguous. Used by the project_path and
+/// model filters in `search`.
+fn escape_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for c in input.chars() {
+        match c {
+            '\\' | '%' | '_' => {
+                out.push('\\');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
     out
 }
 

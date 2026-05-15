@@ -59,7 +59,13 @@ CREATE TABLE IF NOT EXISTS exchanges (
 );
 
 CREATE INDEX IF NOT EXISTS idx_exchanges_file        ON exchanges(file_path);
-CREATE INDEX IF NOT EXISTS idx_exchanges_project_ts  ON exchanges(file_path, timestamp_ms);
+-- L2 fix: drop the misleadingly-named idx_exchanges_project_ts
+-- (it was on (file_path, timestamp_ms), not project_path) and
+-- recreate under a name that matches its columns. EXPLAIN QUERY
+-- PLAN now reads truthfully. Safe to drop on every migration:
+-- DROP INDEX IF EXISTS is idempotent and the recreate is too.
+DROP INDEX IF EXISTS idx_exchanges_project_ts;
+CREATE INDEX IF NOT EXISTS idx_exchanges_file_ts     ON exchanges(file_path, timestamp_ms);
 
 -- ─── exchange_fts (external-content) ──────────────────────────
 -- Text columns only. Metadata filters (source_kind, project_path,

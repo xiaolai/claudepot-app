@@ -11,6 +11,27 @@
 //! `claude-code`, `user:xiaolai`). The transcript-derived
 //! `source_kind` column lives on `exchanges`, never on these
 //! durable tables.
+//!
+//! ## Rate-limiting and duplicate detection (L13)
+//!
+//! The schema deliberately does NOT enforce a UNIQUE constraint on
+//! `(scope, project_path, content)` for memories. Legitimate use
+//! cases include the same fact captured by different agents on
+//! different days, or by the user explicitly reaffirming a
+//! preference — both should land as distinct rows for audit
+//! purposes. The trade-off: a misbehaving agent can write
+//! unlimited duplicates.
+//!
+//! Mitigation lives one layer up:
+//!   * MCP boundary: future per-session rate limit on `remember`
+//!     and `log_decision` calls (not in this slice — track via the
+//!     dedup-counter in `claudepot mcp memory-server` once we see
+//!     real misbehavior).
+//!   * UI: "duplicates of X exist" surfacing in the Shared Memory
+//!     section so the user can prune.
+//!
+//! Application layer remains responsible for noticing
+//! pathological patterns; the data layer is permissive.
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
