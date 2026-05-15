@@ -1,0 +1,8 @@
+{"timestamp":"2026-05-15T11:30:00.000Z","type":"session_meta","payload":{"id":"01-tool","timestamp":"2026-05-15T11:30:00.000Z","cwd":"/Users/jane/proj","originator":"codex_cli","cli_version":"0.44.0"}}
+{"timestamp":"2026-05-15T11:30:00.100Z","type":"turn_context","payload":{"cwd":"/Users/jane/proj","approval_policy":"on-request","sandbox_policy":{"mode":"workspace-write"}}}
+{"timestamp":"2026-05-15T11:30:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>be helpful</user_instructions>"}]}}
+{"timestamp":"2026-05-15T11:30:00.210Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>cwd: /Users/jane/proj</environment_context>"}]}}
+{"timestamp":"2026-05-15T11:30:00.300Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run the test suite"}]}}
+{"timestamp":"2026-05-15T11:30:01.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"bash\",\"-lc\",\"pnpm test\"]}","call_id":"call_abc"}}
+{"timestamp":"2026-05-15T11:30:05.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_abc","output":"{\"output\":\"all green\\n\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":3.8}}"}}
+{"timestamp":"2026-05-15T11:30:06.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"tests passed"}]}}

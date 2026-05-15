@@ -1,0 +1,2 @@
+{"timestamp":"2026-05-15T11:30:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"orphan turn"}]}}
+{"timestamp":"2026-05-15T11:30:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"orphan reply"}]}}

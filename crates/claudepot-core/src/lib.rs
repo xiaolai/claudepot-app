@@ -42,6 +42,7 @@ pub mod blob;
 pub mod cc_doctor;
 pub mod cc_tips;
 pub mod cli_backend;
+pub mod codex_session;
 pub mod config_view;
 pub mod desktop_backend;
 pub mod desktop_identity;

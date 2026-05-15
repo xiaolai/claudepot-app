@@ -1,0 +1,6 @@
+{"timestamp":"2026-05-15T11:30:00.000Z","type":"session_meta","payload":{"id":"01-fwd","cwd":"/x","originator":"codex_cli","cli_version":"0.44.0"}}
+{"timestamp":"2026-05-15T11:30:00.050Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":4.0}}}}
+{"timestamp":"2026-05-15T11:30:00.100Z","type":"turn_context","payload":{"cwd":"/x","approval_policy":"on-request","sandbox_policy":{"mode":"workspace-write"}}}
+{"timestamp":"2026-05-15T11:30:00.200Z","type":"hypothetical_future_v2_event","payload":{"version":2}}
+{"timestamp":"2026-05-15T11:30:00.300Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello v2"}]}}
+{"timestamp":"2026-05-15T11:30:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}}
