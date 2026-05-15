@@ -245,6 +245,27 @@ enum McpAction {
         #[arg(long)]
         db: Option<std::path::PathBuf>,
     },
+    /// Print the recommended Claude Code / Codex agent
+    /// instruction snippet to stdout. The snippet tells the
+    /// agent when to call the MCP tools (search before
+    /// asking, remember durable facts, log decisions, submit
+    /// evidence). Use this when you want to paste the content
+    /// into your AGENTS.md / CLAUDE.md manually.
+    PrintSnippet,
+    /// Write the agent instruction snippet to a managed file
+    /// (default `~/.claude/claudepot-mcp-instructions.md`). The
+    /// user adds a single `@include` line to their CLAUDE.md /
+    /// AGENTS.md — narrow edit surface, the file can be
+    /// regenerated safely.
+    InstallSnippet {
+        /// Override the output path.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Print the recommended `@include` line for CLAUDE.md
+        /// / AGENTS.md after writing.
+        #[arg(long, default_value_t = true)]
+        print_include: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1236,6 +1257,10 @@ async fn main() -> Result<()> {
         },
         Commands::Mcp { action } => match action {
             McpAction::MemoryServer { db } => commands::mcp::run(db).await?,
+            McpAction::PrintSnippet => commands::mcp::print_snippet()?,
+            McpAction::InstallSnippet { out, print_include } => {
+                commands::mcp::install_snippet(out, print_include)?
+            }
         },
         Commands::Codex { action } => match action {
             CodexAction::Index {
