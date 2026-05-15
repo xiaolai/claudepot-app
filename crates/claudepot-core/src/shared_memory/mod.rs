@@ -16,6 +16,7 @@
 //! the full plan.
 
 pub mod indexer;
+pub mod read;
 pub mod schema;
 pub mod search;
 
