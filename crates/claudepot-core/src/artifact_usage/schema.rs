@@ -31,7 +31,15 @@
 ///     unchanged transcripts would never produce per-turn rows and the
 ///     `top_costly_turns` query would silently return only fresh-after-
 ///     this-release sessions.
-pub const SCHEMA_VERSION: &str = "3";
+///   - v4: Shared Memory tables (`exchanges`, `tool_calls`,
+///     `exchange_fts` + triggers, `memories`, `decisions`,
+///     `evidence_records`, `memory_links`) plus `source_kind` column
+///     on `sessions`. Bumping forces re-scan so the new `exchanges`
+///     table populates for every existing transcript. PRAGMA
+///     foreign_keys is also enabled on every connection as part of
+///     this version — the existing v3 schema's by-convention FKs
+///     finally start enforcing.
+pub const SCHEMA_VERSION: &str = "4";
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS usage_event (

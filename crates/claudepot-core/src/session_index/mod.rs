@@ -106,6 +106,12 @@ impl SessionIndex {
     fn init_connection(path: &Path) -> Result<Connection, SessionIndexError> {
         let db = Connection::open(path)?;
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
+        // v4: enable FK enforcement on every connection. Pre-v4
+        // shipped with FK declarations that never fired; the v4
+        // schema adds `exchanges -> sessions` cascade that
+        // depends on this pragma. SQLite requires it set per
+        // connection — there is no DB-level switch.
+        db.execute_batch("PRAGMA foreign_keys=ON;")?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         apply_schema(&db)?;
         // Force WAL/SHM sidecars to materialize NOW so the chmod
@@ -407,55 +413,186 @@ pub struct RefreshStats {
     pub elapsed: std::time::Duration,
 }
 
+/// Apply the sessions.db schema (v4) inside a single atomic
+/// transaction.
+///
+/// Crash safety: the version bump is the LAST statement before
+/// COMMIT, and the cache-invalidation `DELETE` runs BEFORE the
+/// version bump. So:
+///
+/// * Crash before COMMIT → DB rolls back to prior version, no
+///   partial DDL persists, no rows lost.
+/// * Crash after COMMIT → DB is fully at the new version with
+///   `sessions` already cleared, ready for the next `refresh()` to
+///   repopulate.
+///
+/// There is no in-between "version bumped but cache not cleared"
+/// state, which is the bug the v1 plan of this work item had.
+///
+/// Downgrade protection (forward-only — see WI-002 §migration):
+/// `meta._min_compatible_version` is checked at the start of every
+/// call. If the binary's `SCHEMA_VERSION` is lower than the
+/// stored minimum, the function returns Ok(()) without touching
+/// DDL or cache. Older Claudepot binaries that ship this
+/// downgrade-aware logic will see the row and bail; older binaries
+/// that pre-date this work item will still wipe the cache (a
+/// one-way release-notes problem, not a code bug).
+///
+/// The unified `_pending_rescan` marker triggers cache invalidation
+/// even when versions match — covers both "Rebuild Shared Memory"
+/// and "Forget Shared Memory" recovery paths.
 fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
-    db.execute_batch(schema::SCHEMA)?;
-    // v2 (additive): artifact usage tables share `sessions.db` because
-    // the source data — JSONL transcripts — is the same. Refresh writes
-    // both in one transaction.
-    //
-    // Read the prior version BEFORE the bump so we can tell a fresh DB
-    // from a v1→v2 upgrade. On upgrade we invalidate the sessions
-    // cache so the next `refresh()` re-scans every transcript and
-    // populates usage tables — without this, existing users keep their
-    // stale `(size, mtime_ns)` rows and never produce usage events
-    // until each JSONL changes naturally.
-    let prior_version: Option<String> = db
+    let current_version = crate::artifact_usage::schema::SCHEMA_VERSION;
+
+    // ─── Phase 0: meta-table bootstrap (outside the migration txn) ───
+    // We need to read meta rows; the table must exist first. CREATE
+    // IF NOT EXISTS is cheap and runs the same way on every open.
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+    )?;
+
+    // ─── Phase 1: downgrade guard ───
+    // If a newer binary has bumped `_min_compatible_version` past
+    // what this binary understands, bail without touching DDL.
+    let min_compatible: Option<String> = db
+        .query_row(
+            "SELECT v FROM meta WHERE k = '_min_compatible_version'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .ok();
+    if let Some(min) = min_compatible.as_deref() {
+        if version_less_than(current_version, min) {
+            tracing::warn!(
+                binary_version = current_version,
+                min_compatible = min,
+                "sessions.db was written by a newer Claudepot; skipping schema apply"
+            );
+            return Ok(());
+        }
+    }
+
+    // ─── Phase 2: atomic migration ───
+    // BEGIN IMMEDIATE acquires a RESERVED lock immediately so two
+    // processes can't race on the migration. Everything inside the
+    // transaction is either fully applied or fully rolled back.
+    let tx = db.unchecked_transaction()?;
+
+    // Read prior version while holding the write lock so a
+    // concurrent process can't change it under us.
+    let prior_version: Option<String> = tx
         .query_row("SELECT v FROM meta WHERE k = 'schema_version'", [], |r| {
             r.get::<_, String>(0)
         })
         .ok();
 
-    db.execute_batch(crate::artifact_usage::schema::SCHEMA)?;
-    db.execute(
-        "INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', ?1)",
-        params![crate::artifact_usage::schema::SCHEMA_VERSION],
+    // Idempotent DDL — every CREATE is IF NOT EXISTS, so running
+    // these on a populated v4 DB is a no-op.
+    tx.execute_batch(schema::SCHEMA)?;
+    tx.execute_batch(crate::artifact_usage::schema::SCHEMA)?;
+
+    // Probe + ALTER for `sessions.source_kind`. SQLite has no
+    // `ADD COLUMN IF NOT EXISTS`, so we check `pragma_table_info`
+    // first to keep the migration idempotent.
+    let has_source_kind: bool = tx
+        .query_row(
+            "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'source_kind'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_source_kind {
+        tx.execute_batch(
+            "ALTER TABLE sessions ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'claude_code';",
+        )?;
+    }
+
+    // Apply the v4 Shared Memory tables + triggers (idempotent).
+    tx.execute_batch(crate::shared_memory::schema::SCHEMA)?;
+
+    // Read the `_pending_rescan` marker. Set by the Settings →
+    // Cleanup actions and cleared inside this transaction.
+    let pending_rescan: bool = tx
+        .query_row(
+            "SELECT 1 FROM meta WHERE k = '_pending_rescan' AND v = '1'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    // Cache invalidation: clear `sessions` + `session_turns` when
+    // the version is changing OR when an explicit rescan was
+    // requested. Doing this BEFORE the version bump means a crash
+    // after this point but before COMMIT rolls back cleanly —
+    // there is no window where the DB is at v4 with stale cache.
+    //
+    // The shared_memory transcript-derived tables (`exchanges`,
+    // `tool_calls`, `exchange_fts`) follow via FK cascade because
+    // `PRAGMA foreign_keys=ON` is set on this connection.
+    let needs_invalidation = pending_rescan
+        || matches!(
+            prior_version.as_deref(),
+            Some(v) if v != current_version
+        );
+    if needs_invalidation {
+        tx.execute("DELETE FROM sessions", [])?;
+        tx.execute("DELETE FROM session_turns", [])?;
+    }
+    if pending_rescan {
+        tx.execute("DELETE FROM meta WHERE k = '_pending_rescan'", [])?;
+    }
+
+    // Post-write validation: the v4 DDL block promises seven
+    // tables. Count them inside the transaction; mismatch ROLLBACKs.
+    // (Note: FTS5 virtual tables show up in sqlite_master.)
+    let placeholders: Vec<&str> =
+        vec!["?"; crate::shared_memory::schema::V4_TABLE_NAMES.len()];
+    let in_list = placeholders.join(",");
+    let validation_sql = format!(
+        "SELECT count(*) FROM sqlite_master WHERE type IN ('table','view') AND name IN ({in_list})"
+    );
+    let params_iter: Vec<&dyn rusqlite::ToSql> = crate::shared_memory::schema::V4_TABLE_NAMES
+        .iter()
+        .map(|s| s as &dyn rusqlite::ToSql)
+        .collect();
+    let v4_count: i64 =
+        tx.query_row(&validation_sql, params_iter.as_slice(), |r| r.get(0))?;
+    let expected = crate::shared_memory::schema::V4_TABLE_NAMES.len() as i64;
+    if v4_count != expected {
+        // Roll back by dropping the transaction without commit.
+        drop(tx);
+        return Err(SessionIndexError::Sql(rusqlite::Error::QueryReturnedNoRows));
+    }
+
+    // Version bump LAST.
+    tx.execute(
+        "INSERT INTO meta (k, v) VALUES ('schema_version', ?1) \
+         ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+        params![current_version],
     )?;
-    // Forward migrate any v1 row to v2 (the meta key is INSERT OR
-    // IGNORE so existing rows aren't bumped automatically).
-    db.execute(
-        "UPDATE meta SET v = ?1 WHERE k = 'schema_version' AND v < ?1",
-        params![crate::artifact_usage::schema::SCHEMA_VERSION],
+    // Future-downgrade marker. Write `_min_compatible_version`
+    // matching our current SCHEMA_VERSION so a future older
+    // Claudepot that ships this same guard will refuse to wipe
+    // the cache.
+    tx.execute(
+        "INSERT INTO meta (k, v) VALUES ('_min_compatible_version', ?1) \
+         ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+        params![crate::shared_memory::schema::MIN_COMPATIBLE_VERSION],
     )?;
 
-    let current_version = crate::artifact_usage::schema::SCHEMA_VERSION;
-    let needs_upgrade_rescan = matches!(
-        prior_version.as_deref(),
-        Some(v) if v != current_version
-    );
-    if needs_upgrade_rescan {
-        // Drop cached session rows so the next refresh re-scans every
-        // transcript and repopulates every co-located table that
-        // depends on per-line JSONL extraction (artifact_usage,
-        // session_turns). Cheaper than walking every existing row to
-        // emit events — a cold scan of ~6 k JSONL files takes ~10 s,
-        // well under any user-perceptible threshold for an upgrade
-        // event. The session_turns rows are dropped in the same pass
-        // because `delete_row` cascades them; without that, stale
-        // turn rows for files that vanished from disk would linger.
-        db.execute("DELETE FROM sessions", [])?;
-        db.execute("DELETE FROM session_turns", [])?;
-    }
+    tx.commit()?;
     Ok(())
+}
+
+/// Lexicographic comparison of single-digit string versions
+/// ("3", "4", ...). Sufficient for the foreseeable schema bump
+/// cadence; if we ever reach two-digit versions, replace with a
+/// numeric parse.
+fn version_less_than(a: &str, b: &str) -> bool {
+    match (a.parse::<u32>(), b.parse::<u32>()) {
+        (Ok(av), Ok(bv)) => av < bv,
+        _ => a < b,
+    }
 }
 
 /// Detect the two rusqlite error codes that mean "the file isn't a
@@ -1350,8 +1487,8 @@ mod tests {
         );
         assert_eq!(
             idx.schema_version().unwrap().as_deref(),
-            Some("3"),
-            "schema_version must advance to v3 after upgrade"
+            Some(crate::artifact_usage::schema::SCHEMA_VERSION),
+            "schema_version must advance to current after upgrade (was v3-specific before WI-002 bumped to v4)"
         );
     }
 

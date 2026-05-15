@@ -111,6 +111,7 @@ pub mod session_subagents;
 pub mod session_tool_link;
 pub mod session_worktree;
 pub mod settings_writer;
+pub mod shared_memory;
 pub mod templates;
 pub mod trash;
 pub mod updates;
