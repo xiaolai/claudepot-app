@@ -33,6 +33,7 @@
 //! the full plan and `grill-report-2026-05-15.md` for the audit
 //! history that produced the current shape.
 
+pub mod claude_exchanges;
 pub mod durable;
 pub mod indexer;
 pub mod read;

@@ -402,6 +402,24 @@ enum SessionAction {
     /// `~/.claudepot/sessions.db`. Next list/GUI refresh rebuilds it
     /// from scratch. Safe — no transcripts or credentials are touched.
     RebuildIndex,
+    /// Backfill `exchanges` + `tool_calls` rows for every indexed
+    /// Claude transcript. Required for cross-harness search to
+    /// surface Claude content via `claudepot mcp memory-server` —
+    /// the existing session_index::refresh writes `sessions` rows
+    /// but doesn't populate the exchange-level tables. Idempotent;
+    /// safe to re-run.
+    ///
+    /// Run `claudepot session rebuild-index` first (or wait for any
+    /// list/GUI refresh) so the `sessions` rows are present.
+    BackfillExchanges {
+        /// Override `CLAUDE_CONFIG_DIR`. Defaults to the same
+        /// resolution Claude Code uses.
+        #[arg(long)]
+        claude_config: Option<std::path::PathBuf>,
+        /// JSON-formatted output. Default is human-readable.
+        #[arg(long)]
+        json: bool,
+    },
     /// Inspect one transcript: classification, chunks, linked tool
     /// calls, subagents, phases, context attribution. Read-only.
     View {
@@ -1326,6 +1344,10 @@ async fn main() -> Result<()> {
                 commands::session::adopt_orphan_cmd(&ctx, &slug, &target)?
             }
             SessionAction::RebuildIndex => commands::session::rebuild_index_cmd(&ctx)?,
+            SessionAction::BackfillExchanges {
+                claude_config,
+                json,
+            } => commands::session::backfill_exchanges_cmd(&ctx, claude_config, json).await?,
             SessionAction::View { target, show } => {
                 commands::session::view_cmd(&ctx, &target, &show)?
             }

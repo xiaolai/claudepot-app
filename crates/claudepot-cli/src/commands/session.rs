@@ -153,7 +153,9 @@ mod trash;
 // Re-exports — main.rs's match block dispatches on these names.
 pub use export::export_cmd;
 pub use inspect::view_cmd;
-pub use orphan::{adopt_orphan_cmd, list_orphans, move_cmd, rebuild_index_cmd};
+pub use orphan::{
+    adopt_orphan_cmd, backfill_exchanges_cmd, list_orphans, move_cmd, rebuild_index_cmd,
+};
 pub use prune::prune_cmd;
 pub use search::{search_cmd, worktrees_cmd};
 pub use slim::slim_cmd;

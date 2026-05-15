@@ -102,6 +102,91 @@ pub fn rebuild_index_cmd(ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
+/// `claudepot session backfill-exchanges` — populate the v4
+/// `exchanges` + `tool_calls` rows for every indexed Claude
+/// transcript. Required for cross-harness search to surface Claude
+/// content via `claudepot mcp memory-server`.
+///
+/// Runs `session_index::refresh` first so any new files on disk
+/// land in the `sessions` table (the backfill skips files that
+/// aren't there yet — see the per-file existence check in
+/// `claude_exchanges::backfill_claude_exchanges`). Then calls the
+/// backfill itself in a blocking task so the FS walk doesn't tie
+/// up the runtime.
+pub async fn backfill_exchanges_cmd(
+    ctx: &AppContext,
+    claude_config: Option<std::path::PathBuf>,
+    json: bool,
+) -> Result<()> {
+    use claudepot_core::shared_memory::claude_exchanges::backfill_claude_exchanges;
+
+    let _ = ctx; // The ctx.json flag is per-subcommand; we use our own --json.
+    let db_path = paths::claudepot_data_dir().join("sessions.db");
+    let claude_config = claude_config.unwrap_or_else(default_claude_config);
+
+    // 1. Make sure session_index has fresh rows.
+    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+        .context("open session index")?;
+    let refresh_stats = idx
+        .refresh(&claude_config)
+        .context("session_index::refresh")?;
+
+    // 2. Backfill Claude exchanges.
+    let claude_config_for_task = claude_config.clone();
+    let stats = tokio::task::spawn_blocking(move || {
+        backfill_claude_exchanges(&idx, &claude_config_for_task)
+    })
+    .await
+    .context("join backfill task")?
+    .context("backfill_claude_exchanges")?;
+
+    if json {
+        let report = serde_json::json!({
+            "discovered": stats.discovered,
+            "indexed": stats.indexed,
+            "skipped_unchanged": stats.skipped_unchanged,
+            "failed_count": stats.failed.len(),
+            "failed": stats.failed.iter().map(|(p, e)| serde_json::json!({
+                "path": p.display().to_string(),
+                "error": e,
+            })).collect::<Vec<_>>(),
+            "refresh_scanned": refresh_stats.scanned,
+            "refresh_deleted": refresh_stats.deleted,
+            "claude_config": claude_config.display().to_string(),
+            "db": db_path.display().to_string(),
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("Claude config dir:    {}", claude_config.display());
+        println!("sessions.db:          {}", db_path.display());
+        println!("refresh scanned:      {}", refresh_stats.scanned);
+        println!("refresh deleted:      {}", refresh_stats.deleted);
+        println!("discovered:           {}", stats.discovered);
+        println!("indexed:              {}", stats.indexed);
+        println!("skipped (unchanged):  {}", stats.skipped_unchanged);
+        println!("failed:               {}", stats.failed.len());
+        if !stats.failed.is_empty() {
+            println!();
+            println!("Failed files:");
+            for (p, e) in &stats.failed {
+                println!("  {} — {}", p.display(), e);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve Claude's config directory the same way Claude Code does:
+/// `$CLAUDE_CONFIG_DIR` if set, else `~/.claude`.
+fn default_claude_config() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".claude")
+}
+
 fn print_orphans_human(orphans: &[OrphanedProject]) {
     println!(
         "{:<48}  {:>8}  {:>12}  Slug",
