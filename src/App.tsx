@@ -49,6 +49,8 @@ const importThirdParty = () =>
   import("./sections/ThirdPartySection").then((m) => ({ default: m.ThirdPartySection }));
 const importAutomations = () =>
   import("./sections/AutomationsSection").then((m) => ({ default: m.AutomationsSection }));
+const importSharedMemory = () =>
+  import("./sections/SharedMemorySection").then((m) => ({ default: m.SharedMemorySection }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const EventsSection = lazy(importEvents);
@@ -56,6 +58,7 @@ const KeysSection = lazy(importKeys);
 const GlobalSection = lazy(importGlobal);
 const ThirdPartySection = lazy(importThirdParty);
 const AutomationsSection = lazy(importAutomations);
+const SharedMemorySection = lazy(importSharedMemory);
 // ConfigSection isn't rendered at the top level anymore — it lives
 // inside GlobalSection and the Projects shell's Config tab. The
 // import* chunk keys off GlobalSection's own import, and
@@ -1289,6 +1292,11 @@ function AppShell() {
               {section === "settings" && (
                 <ErrorBoundary key="settings" label="Settings">
                   <SettingsSection />
+                </ErrorBoundary>
+              )}
+              {section === "shared-memory" && (
+                <ErrorBoundary key="shared-memory" label="Shared Memory">
+                  <SharedMemorySection />
                 </ErrorBoundary>
               )}
             </Suspense>

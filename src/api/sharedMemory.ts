@@ -1,0 +1,206 @@
+// Shared Memory API — cross-harness durable memory + indexed
+// transcript search + Codex/Claude live MCP installer.
+//
+// Backs the Shared Memory section UI (WI-007) and the Settings →
+// MCP Installer pane (WI-009).
+
+import { invoke } from "@tauri-apps/api/core";
+
+// ─── search / read ───────────────────────────────────────────
+
+export interface SearchArgs {
+  query: string;
+  source_kind?: "claude_code" | "codex" | null;
+  project_path?: string | null;
+  since_ms?: number | null;
+  until_ms?: number | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface SearchHit {
+  exchange_id: string;
+  file_path: string;
+  session_id: string;
+  source_kind: "claude_code" | "codex";
+  project_path: string;
+  git_branch: string | null;
+  timestamp_ms: number | null;
+  line_start: number | null;
+  line_end: number | null;
+  snippet: string;
+  turn_index: number;
+}
+
+export interface SearchResponse {
+  hits: SearchHit[];
+  has_more: boolean;
+}
+
+export interface ReadLocatorArgs {
+  file_path: string;
+  exchange_id?: string | null;
+  max_bytes?: number | null;
+}
+
+export interface ConversationRead {
+  file_path: string;
+  exchange_id: string | null;
+  line_start: number;
+  line_end: number;
+  body: string;
+  truncated: boolean;
+}
+
+// ─── memories ────────────────────────────────────────────────
+
+export type MemoryScope = "global" | "project";
+export type MemoryKind =
+  | "fact"
+  | "preference"
+  | "pattern"
+  | "constraint"
+  | "summary";
+export type CreatedByKind = "user" | "agent" | "import" | "system";
+
+export interface ListMemoriesArgs {
+  scope?: MemoryScope | null;
+  project_path?: string | null;
+  kind?: MemoryKind | null;
+  include_archived?: boolean | null;
+  limit?: number | null;
+}
+
+export interface Memory {
+  id: string;
+  scope: MemoryScope;
+  project_path: string | null;
+  kind: MemoryKind;
+  content: string;
+  created_by_kind: CreatedByKind;
+  created_by: string;
+  confidence: number | null;
+  created_at_ms: number;
+  updated_at_ms: number;
+  archived_at_ms: number | null;
+}
+
+export interface CreateMemoryArgs {
+  scope: MemoryScope;
+  project_path?: string | null;
+  kind: MemoryKind;
+  content: string;
+  created_by: string;
+  confidence?: number | null;
+}
+
+// ─── decisions ───────────────────────────────────────────────
+
+export type DecisionStatus = "active" | "superseded" | "archived";
+
+export interface ListDecisionsArgs {
+  project_path?: string | null;
+  status?: DecisionStatus | null;
+  limit?: number | null;
+}
+
+export interface Decision {
+  id: string;
+  project_path: string | null;
+  topic: string | null;
+  decision: string;
+  rationale: string | null;
+  status: DecisionStatus;
+  created_by_kind: CreatedByKind;
+  created_by: string;
+  created_at_ms: number;
+  supersedes_id: string | null;
+}
+
+export interface LogDecisionArgs {
+  decision: string;
+  rationale?: string | null;
+  topic?: string | null;
+  project_path?: string | null;
+  created_by: string;
+  supersedes_id?: string | null;
+}
+
+// ─── discovery ───────────────────────────────────────────────
+
+export interface ListSessionsArgs {
+  source_kind?: "claude_code" | "codex" | null;
+  project_path?: string | null;
+  since_ms?: number | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface SessionSummary {
+  file_path: string;
+  session_id: string;
+  source_kind: "claude_code" | "codex";
+  project_path: string;
+  git_branch: string | null;
+  first_ts_ms: number | null;
+  last_ts_ms: number | null;
+  message_count: number;
+  tokens_input: number;
+  tokens_output: number;
+}
+
+export interface ProjectSummary {
+  project_path: string;
+  session_count: number;
+  last_activity_ms: number | null;
+}
+
+// ─── installer / MCP health ──────────────────────────────────
+
+export interface SnippetInstallResult {
+  path: string;
+  bytes_written: number;
+  include_line: string;
+}
+
+export interface McpHealth {
+  tool_visible: boolean;
+  tool_count: number;
+  error: string | null;
+}
+
+// ─── API surface ─────────────────────────────────────────────
+
+export const sharedMemoryApi = {
+  search: (args: SearchArgs) =>
+    invoke<SearchResponse>("shared_memory_search", { args }),
+  readLocator: (args: ReadLocatorArgs) =>
+    invoke<ConversationRead>("shared_memory_read_locator", { args }),
+
+  listMemories: (args: ListMemoriesArgs = {}) =>
+    invoke<Memory[]>("shared_memory_list_memories", { args }),
+  createMemory: (args: CreateMemoryArgs) =>
+    invoke<Memory>("shared_memory_create_memory", { args }),
+  archiveMemory: (id: string) =>
+    invoke<boolean>("shared_memory_archive_memory", { id }),
+
+  listDecisions: (args: ListDecisionsArgs = {}) =>
+    invoke<Decision[]>("shared_memory_list_decisions", { args }),
+  logDecision: (args: LogDecisionArgs) =>
+    invoke<Decision>("shared_memory_log_decision", { args }),
+  archiveDecision: (id: string) =>
+    invoke<boolean>("shared_memory_archive_decision", { id }),
+
+  listSessions: (args: ListSessionsArgs = {}) =>
+    invoke<SessionSummary[]>("shared_memory_list_sessions", { args }),
+  listProjects: (limit?: number) =>
+    invoke<ProjectSummary[]>("shared_memory_list_projects", { limit }),
+
+  installSnippet: (out?: string) =>
+    invoke<SnippetInstallResult>("shared_memory_install_snippet", { out }),
+  snippetBody: () => invoke<string>("shared_memory_snippet_body"),
+  mcpHealth: (claudepotBinary?: string) =>
+    invoke<McpHealth>("shared_memory_mcp_health", {
+      claudepotBinary,
+    }),
+};

@@ -29,6 +29,7 @@ import { ccDoctorApi } from "./cc-doctor";
 import { rotationApi } from "./rotation";
 import { permissionApi } from "./permission";
 import { envSecretApi } from "./envSecret";
+import { sharedMemoryApi } from "./sharedMemory";
 
 export const api = {
   ...accountApi,
@@ -57,7 +58,11 @@ export const api = {
   ...permissionApi,
   ...envSecretApi,
   migrate: migrateApi,
+  // Namespaced because the method names (search, listMemories,
+  // etc.) are generic and would collide with other domains.
+  sharedMemory: sharedMemoryApi,
 };
 
-export { migrateApi };
+export { migrateApi, sharedMemoryApi };
 export type * from "./migrate";
+export type * from "./sharedMemory";

@@ -53,6 +53,7 @@ pub mod session_index;
 pub mod session_move;
 pub mod session_prune;
 pub mod session_share;
+pub mod shared_memory;
 pub mod templates;
 pub mod updates;
 pub mod usage_local;

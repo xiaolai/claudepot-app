@@ -835,6 +835,20 @@ pub fn run() {
             commands::env_secret::env_file_delete,
             commands::env_secret::env_file_copy_value,
             commands::env_secret::env_file_inject,
+            // ─── shared_memory (WI-007, WI-009) ───────────────
+            commands::shared_memory::shared_memory_search,
+            commands::shared_memory::shared_memory_read_locator,
+            commands::shared_memory::shared_memory_list_memories,
+            commands::shared_memory::shared_memory_create_memory,
+            commands::shared_memory::shared_memory_archive_memory,
+            commands::shared_memory::shared_memory_list_decisions,
+            commands::shared_memory::shared_memory_log_decision,
+            commands::shared_memory::shared_memory_archive_decision,
+            commands::shared_memory::shared_memory_list_sessions,
+            commands::shared_memory::shared_memory_list_projects,
+            commands::shared_memory::shared_memory_install_snippet,
+            commands::shared_memory::shared_memory_snippet_body,
+            commands::shared_memory::shared_memory_mcp_health,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
