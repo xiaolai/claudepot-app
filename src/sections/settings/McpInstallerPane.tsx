@@ -131,7 +131,7 @@ export function McpInstallerPane({
           style={{
             marginTop: 8,
             padding: 16,
-            border: "tokens.sp.px solid var(--line)",
+            border: "var(--sp-px) solid var(--line)",
             borderRadius: 8,
             background: "var(--bg-raised)",
             display: "flex",
@@ -162,7 +162,7 @@ export function McpInstallerPane({
                 padding: 10,
                 background: "var(--bg-sunken)",
                 borderRadius: 6,
-                fontSize: "var(--fs-2xs, tokens.sp[12])",
+                fontSize: "var(--fs-2xs)",
                 color: "var(--danger)",
                 whiteSpace: "pre-wrap",
               }}
@@ -188,7 +188,7 @@ export function McpInstallerPane({
           style={{
             marginTop: 8,
             padding: 16,
-            border: "tokens.sp.px solid var(--line)",
+            border: "var(--sp-px) solid var(--line)",
             borderRadius: 8,
             background: "var(--bg-raised)",
             display: "flex",
@@ -254,7 +254,7 @@ export function McpInstallerPane({
               aria-label="Project"
               style={{
                 padding: 8,
-                border: "tokens.sp.px solid var(--line)",
+                border: "var(--sp-px) solid var(--line)",
                 borderRadius: 6,
                 background: "var(--bg-base)",
                 fontFamily: "monospace",
@@ -290,7 +290,7 @@ export function McpInstallerPane({
                 padding: 10,
                 background: "var(--bg-sunken)",
                 borderRadius: 6,
-                fontSize: "var(--fs-2xs, tokens.sp[12])",
+                fontSize: "var(--fs-2xs)",
                 fontFamily: "monospace",
                 userSelect: "text",
               }}
@@ -302,7 +302,7 @@ export function McpInstallerPane({
               {install.target_files.length > 0 && (
                 <div style={{ marginTop: 6, color: "var(--fg-muted)" }}>
                   Paste the line above into:
-                  <ul style={{ margin: "tokens.sp[4] 0 0 tokens.sp[16]", padding: 0 }}>
+                  <ul style={{ margin: "var(--sp-4) 0 0 var(--sp-16)", padding: 0 }}>
                     {install.target_files.map((f) => (
                       <li key={f}>{f}</li>
                     ))}
@@ -323,7 +323,7 @@ export function McpInstallerPane({
                 borderRadius: 6,
                 maxHeight: 360,
                 overflow: "auto",
-                fontSize: "var(--fs-2xs, tokens.sp[12])",
+                fontSize: "var(--fs-2xs)",
                 whiteSpace: "pre-wrap",
                 userSelect: "text",
               }}

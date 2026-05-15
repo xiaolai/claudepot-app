@@ -37,7 +37,7 @@ export function LiveSessionCard({ summary, onClick }: Props) {
       style={{
         textAlign: "left",
         background: "var(--bg-raised)",
-        border: "tokens.sp.px solid var(--line)",
+        border: "var(--sp-px) solid var(--line)",
         borderRadius: 8,
         padding: 12,
         font: "inherit",
@@ -58,7 +58,7 @@ export function LiveSessionCard({ summary, onClick }: Props) {
             height: 8,
             borderRadius: 8,
             background: busy ? "var(--accent)" : "var(--fg-muted)",
-            flex: "0 0 tokens.sp[8]",
+            flex: "0 0 var(--sp-8)",
           }}
         />
         <Tag>{sourceLabel}</Tag>
@@ -82,7 +82,7 @@ export function LiveSessionCard({ summary, onClick }: Props) {
       {summary.current_action && (
         <div
           style={{
-            fontSize: "var(--fs-2xs, tokens.sp[12])",
+            fontSize: "var(--fs-2xs)",
             color: "var(--fg-muted)",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -96,7 +96,7 @@ export function LiveSessionCard({ summary, onClick }: Props) {
       )}
       <footer
         style={{
-          fontSize: "var(--fs-2xs, tokens.sp[12])",
+          fontSize: "var(--fs-2xs)",
           color: "var(--fg-muted)",
           display: "flex",
           gap: 8,

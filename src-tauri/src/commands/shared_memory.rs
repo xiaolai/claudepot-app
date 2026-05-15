@@ -807,51 +807,63 @@ fn resolve_cli_binary(
 }
 
 #[tauri::command]
-pub async fn shared_memory_mcp_health(claudepot_binary: Option<String>) -> Result<McpHealthDto, String> {
-    tokio::task::spawn_blocking(move || {
-        use std::io::{BufRead, BufReader, Write};
-        use std::process::{Command, Stdio};
-        use std::time::{Duration, Instant};
+pub async fn shared_memory_mcp_health(
+    claudepot_binary: Option<String>,
+) -> Result<McpHealthDto, String> {
+    use std::process::Stdio;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::process::Command;
+    use tokio::time::timeout;
 
-        let bin = match resolve_cli_binary(claudepot_binary) {
-            Ok(p) => p,
-            Err(e) => {
-                return Ok::<_, String>(McpHealthDto {
-                    tool_visible: false,
-                    tool_count: 0,
-                    error: Some(e),
-                });
-            }
-        };
-
-        let mut child = Command::new(&bin)
-            .args(["mcp", "memory-server"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("RUST_LOG", "warn")
-            .spawn()
-            .map_err(|e| format!("spawn {}: {e}", bin.display()))?;
-
-        let stdin_handle = child.stdin.take();
-        let stdout_handle = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
-
-        if let Some(mut stdin) = stdin_handle {
-            let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"claudepot-health\",\"version\":\"0\"}}}\n\
-                          {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\
-                          {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n";
-            let _ = stdin.write_all(frames.as_bytes());
-            drop(stdin); // EOF → server processes queued + exits
+    let bin = match resolve_cli_binary(claudepot_binary) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(McpHealthDto {
+                tool_visible: false,
+                tool_count: 0,
+                error: Some(e),
+            });
         }
+    };
 
-        let stderr_handle = child.stderr.take();
+    let mut child = Command::new(&bin)
+        .args(["mcp", "memory-server"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("spawn {}: {e}", bin.display()))?;
 
+    let stdin_handle = child.stdin.take();
+    let stdout_handle = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
+    let stderr_handle = child.stderr.take();
+
+    if let Some(mut stdin) = stdin_handle {
+        let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"claudepot-health\",\"version\":\"0\"}}}\n\
+                      {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\
+                      {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n";
+        let _ = stdin.write_all(frames.as_bytes()).await;
+        // Drop stdin (EOF) so the server processes queued requests
+        // then exits cleanly on its own. Kept inside the spawned
+        // task so the await doesn't fight the read loop below.
+        drop(stdin);
+    }
+
+    // Hard wall-clock cap that survives a child that stays alive
+    // but emits no newline. Tokio's `timeout` aborts the whole
+    // read_line future, not just the deadline between reads — this
+    // is the exact bug the old `Instant::now() < deadline` shape
+    // had with blocking `BufReader::read_line`.
+    let read_fut = async {
         let mut reader = BufReader::new(stdout_handle);
-        let mut tool_count = 0usize;
-        let deadline = Instant::now() + Duration::from_secs(8);
-        while Instant::now() < deadline {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
+        let mut tool_count: usize = 0;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
                 Ok(0) => break,
                 Ok(_) => {
                     let trimmed = line.trim();
@@ -876,85 +888,54 @@ pub async fn shared_memory_mcp_health(claudepot_binary: Option<String>) -> Resul
                 Err(_) => break,
             }
         }
-        let _ = child.kill();
-        let _ = child.wait();
+        tool_count
+    };
 
-        // On failure, drain stderr (first 1 KiB) so the UI can show
-        // *why* the probe didn't see any tools — wrong binary,
-        // missing subcommand, panic, etc. — instead of a bare
-        // "failed" badge.
-        let error = if tool_count == 0 {
-            let mut buf = String::new();
-            if let Some(mut s) = stderr_handle {
-                use std::io::Read;
-                let mut take = (&mut s).take(1024);
-                let _ = take.read_to_string(&mut buf);
-            }
-            let trimmed = buf.trim();
-            Some(if trimmed.is_empty() {
-                format!(
-                    "spawned {} but no tools/list response within 8s",
-                    bin.display()
-                )
-            } else {
-                format!("stderr from {}: {trimmed}", bin.display())
-            })
+    let probe_timeout = Duration::from_secs(8);
+    let (tool_count, timed_out) = match timeout(probe_timeout, read_fut).await {
+        Ok(count) => (count, false),
+        Err(_) => (0, true),
+    };
+
+    // kill_on_drop = true would handle this when `child` falls out
+    // of scope, but be explicit to release the descriptor before
+    // we drain stderr.
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+
+    let error = if tool_count == 0 {
+        let mut buf = String::new();
+        if let Some(mut s) = stderr_handle {
+            let mut take = (&mut s).take(1024);
+            let _ = take.read_to_string(&mut buf).await;
+        }
+        let trimmed = buf.trim();
+        Some(if !trimmed.is_empty() {
+            format!("stderr from {}: {trimmed}", bin.display())
+        } else if timed_out {
+            format!(
+                "spawned {} but no tools/list response within {}s",
+                bin.display(),
+                probe_timeout.as_secs()
+            )
         } else {
-            None
-        };
-
-        Ok::<_, String>(McpHealthDto {
-            tool_visible: tool_count > 0,
-            tool_count,
-            error,
+            format!(
+                "spawned {} but it exited before emitting a tools/list response",
+                bin.display()
+            )
         })
+    } else {
+        None
+    };
+
+    Ok(McpHealthDto {
+        tool_visible: tool_count > 0,
+        tool_count,
+        error,
     })
-    .await
-    .map_err(join_err)?
 }
 
-// ─── shared snippet body ─────────────────────────────────────
-
-const SNIPPET_VERSION: &str = "1";
-
-/// Same content as `claudepot-cli/src/commands/mcp.rs::snippet_body()`.
-/// Duplicated here so the Tauri command doesn't take an unwanted dep
-/// on the CLI crate; the canonical text is checked in to both
-/// locations and a CI gate could enforce drift (out of scope for
-/// this commit).
-fn canonical_snippet() -> String {
-    format!(
-        r#"<!-- claudepot-mcp-instructions v{version} — managed by `claudepot mcp install-snippet` or Claudepot GUI -->
-
-# Claudepot shared memory
-
-You have access to the Claudepot MCP memory server via tools
-prefixed `claudepot_*`. Use them. Specifically:
-
-- **At the start of a session in a project**, call
-  `claudepot_list_decisions(project_path=cwd(), status="active")`
-  and `claudepot_list_memories(scope="project", project_path=cwd())`.
-
-- **Before asking the user a question that history might
-  answer**, call `claudepot_search_memory(query)` and follow up
-  with `claudepot_read_conversation` on the hit's file_path.
-
-- **When the user states a durable fact**, call
-  `claudepot_remember(scope="project", project_path=cwd(),
-  kind="...", content="...", created_by="...")`.
-
-- **On a non-trivial design decision**, call
-  `claudepot_log_decision(...)`. Pass `supersedes_id` if replacing.
-
-- **After an audit/fix loop**, call `claudepot_submit_evidence(...)`.
-
-- **For discovery**, `claudepot_list_sessions(project_path=cwd())`
-  and `claudepot_list_projects()`.
-
-All `created_by` ids should identify YOU. Future regenerations of
-this file (re-running install-snippet) refresh the content; the
-`@include` line in your CLAUDE.md / AGENTS.md never has to change.
-"#,
-        version = SNIPPET_VERSION,
-    )
-}
+// Canonical snippet body lives in `claudepot_core::mcp_snippet`
+// so the CLI and the Tauri installer emit the same bytes. Audit
+// 2026-05 found these had drifted within a single release.
+use claudepot_core::mcp_snippet::snippet_body as canonical_snippet;

@@ -335,7 +335,7 @@ export function EventsSection() {
                 minHeight: 0,
               }}
             >
-              <div style={{ padding: "0 tokens.sp[16]" }}>
+              <div style={{ padding: "0 var(--sp-16)" }}>
                 <LiveSessionsStrip />
               </div>
               <DashboardStrip />

@@ -379,7 +379,7 @@ fn pair_events_into_exchanges(session_id: &str, events: &[SessionEvent]) -> Vec<
                 }
                 let turn_index = out.len() as u32;
                 current = Some(ClaudeExchange {
-                    id: format!("{session_id}:{turn_index}"),
+                    id: format!("claude_code:{session_id}:{turn_index}"),
                     turn_index,
                     user_text: text.clone(),
                     assistant_text: String::new(),

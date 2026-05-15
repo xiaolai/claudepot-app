@@ -19,7 +19,7 @@ export function LiveSessionsStrip() {
           style={{
             marginTop: 8,
             padding: 16,
-            border: "tokens.sp.px dashed var(--line)",
+            border: "var(--sp-px) dashed var(--line)",
             borderRadius: 8,
             color: "var(--fg-muted)",
             fontSize: "var(--fs-sm)",
@@ -41,7 +41,7 @@ export function LiveSessionsStrip() {
         style={{
           marginTop: 8,
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(tokens.sidebar.width, 1fr))",
+          gridTemplateColumns: "repeat(auto-fill, minmax(var(--sidebar-width), 1fr))",
           gap: 12,
         }}
       >

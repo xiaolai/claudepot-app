@@ -107,6 +107,13 @@ struct SessionState {
     /// Last-published summary, used to suppress redundant deltas.
     last_status: Status,
     last_current_action: Option<String>,
+    /// Last waiting_for value emitted to detail subscribers. Used
+    /// to fire a fresh `StatusChanged` delta when CC's PID record
+    /// updates which permission/tool the session is waiting on,
+    /// even though the high-level `Status` stays at `Waiting`.
+    /// Compared against the freshly-applied `rec.waiting_for`
+    /// *before* the next emit; refreshed when an emit happens.
+    last_waiting_for: Option<String>,
     last_task_summary: Option<String>,
     last_errored: bool,
     last_stuck: bool,
@@ -604,7 +611,7 @@ impl LiveRuntime {
 
             if new_status != s.last_status
                 || (new_status == Status::Waiting
-                    && pid_waiting_for_snap != snapshot_waiting_for(s))
+                    && pid_waiting_for_snap != s.last_waiting_for)
             {
                 s.seq += 1;
                 let _ = self
@@ -621,6 +628,7 @@ impl LiveRuntime {
                     })
                     .await;
                 s.last_status = new_status;
+                s.last_waiting_for = pid_waiting_for_snap.clone();
             }
             if new_action != s.last_current_action {
                 s.last_current_action = new_action;
@@ -830,10 +838,6 @@ fn seed_status_from_recent_lines(
     Some(size)
 }
 
-fn snapshot_waiting_for(s: &SessionState) -> Option<String> {
-    s.machine.snapshot().waiting_for
-}
-
 impl SessionState {
     fn try_attach(rec: &PidRecord, projects_dir: &Path) -> std::io::Result<Self> {
         let path = transcript_path(projects_dir, &rec.cwd, &rec.session_id);
@@ -871,6 +875,7 @@ impl SessionState {
             seq: 0,
             last_status: Status::Idle,
             last_current_action: None,
+            last_waiting_for: None,
             last_task_summary: None,
             last_errored: false,
             last_stuck: false,

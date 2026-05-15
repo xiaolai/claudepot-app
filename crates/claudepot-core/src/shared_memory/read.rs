@@ -306,7 +306,7 @@ mod tests {
         let idx = prep_corpus(&tmp);
         let path = corpus_file(&tmp);
 
-        let locator = locator_for_exchange(&path, "sid:0");
+        let locator = locator_for_exchange(&path, "codex:sid:0");
         let result = read_locator(&idx, &locator, &RedactionPolicy::default()).unwrap();
 
         // Body should NOT contain the literal secret.
@@ -347,7 +347,7 @@ mod tests {
 
         let loc = ConversationLocator {
             file_path: path,
-            exchange_id: Some("sid:0".to_string()),
+            exchange_id: Some("codex:sid:0".to_string()),
             line_start: Some(1),
             line_end: Some(1),
         };
@@ -371,7 +371,7 @@ mod tests {
         let path = corpus_file(&tmp);
 
         // Read with a cap large enough to fit everything.
-        let loc = locator_for_exchange(&path, "sid:0");
+        let loc = locator_for_exchange(&path, "codex:sid:0");
         let result = read_locator_bounded(
             &idx,
             &loc,
@@ -469,7 +469,7 @@ mod tests {
         let idx = prep_corpus(&tmp);
         let path = corpus_file(&tmp);
 
-        let loc = locator_for_exchange(&path, "sid:0");
+        let loc = locator_for_exchange(&path, "codex:sid:0");
         let result =
             read_locator_bounded(&idx, &loc, 32, &RedactionPolicy::default()).unwrap();
         assert!(result.truncated, "32-byte cap should truncate");

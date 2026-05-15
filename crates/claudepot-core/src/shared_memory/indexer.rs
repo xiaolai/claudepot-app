@@ -956,8 +956,10 @@ mod tests {
             .query_row("SELECT id FROM tool_calls", [], |r| r.get(0))
             .unwrap();
         // L3 — composite key uses unit-separator (U+001F), not `:`.
-        // Format: <session_id>:<turn_index>\u{001f}<call_id>.
-        assert_eq!(tc_id, "01-tools:0\u{001f}call-a");
+        // Format: <source_kind>:<session_id>:<turn_index>\u{001f}<call_id>.
+        // (source_kind prefix added in v5 to avoid cross-harness
+        // session_id collisions.)
+        assert_eq!(tc_id, "codex:01-tools:0\u{001f}call-a");
         let tc_name: String = db
             .query_row("SELECT tool_name FROM tool_calls", [], |r| r.get(0))
             .unwrap();

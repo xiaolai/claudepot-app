@@ -56,6 +56,7 @@ pub mod launcher;
 pub mod memory_health;
 pub mod memory_log;
 pub mod memory_view;
+pub mod mcp_snippet;
 pub mod migrate;
 pub mod migrations;
 pub mod notification_log;

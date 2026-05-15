@@ -193,11 +193,13 @@ pub fn parse_codex_rollout_jsonl(path: &Path) -> Result<CodexConversation, Codex
                     ));
                 } else {
                     // Synthetic seed message (Instructions /
-                    // Environment) — fold into the current
-                    // exchange's environment trail without
-                    // starting a new turn.
+                    // Environment) — extend the current exchange's
+                    // physical line range without starting a new
+                    // turn. The text itself is dropped; we'll add
+                    // a real consumer (separate indexer column or
+                    // sidechain table) the day there's one.
                     if let Some(ref mut b) = current {
-                        b.extend_user_environment(&text);
+                        let _ = &text;
                         b.line_end = Some(line);
                     }
                 }
@@ -667,7 +669,6 @@ struct ExchangeBuilder {
     session_id: String,
     turn_index: u32,
     user_text: String,
-    environment_trail: String,
     assistant_text: String,
     timestamp: Option<DateTime<Utc>>,
     line_start: Option<u32>,
@@ -686,19 +687,11 @@ impl ExchangeBuilder {
             session_id: session_id.to_string(),
             turn_index,
             user_text,
-            environment_trail: String::new(),
             assistant_text: String::new(),
             timestamp,
             line_start: Some(line),
             line_end: Some(line),
         }
-    }
-
-    fn extend_user_environment(&mut self, text: &str) {
-        if !self.environment_trail.is_empty() {
-            self.environment_trail.push('\n');
-        }
-        self.environment_trail.push_str(text);
     }
 
     fn append_assistant(
@@ -718,15 +711,8 @@ impl ExchangeBuilder {
     }
 
     fn finish(self, pending: &[CodexToolCall]) -> CodexExchange {
-        // Combine the user prompt with any environment trail so
-        // downstream FTS can still surface the IDE-context block,
-        // but the displayable "user said" stays in `user_text`.
-        // We keep them separate at this layer; the durable
-        // indexer (WI-003) chooses whether to concatenate them
-        // into the FTS text columns.
-        let _ = &self.environment_trail; // reserved for indexer use
         CodexExchange {
-            id: format!("{}:{}", self.session_id, self.turn_index),
+            id: format!("codex:{}:{}", self.session_id, self.turn_index),
             turn_index: self.turn_index,
             user_text: self.user_text,
             assistant_text: self.assistant_text,

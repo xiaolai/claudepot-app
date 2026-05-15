@@ -50,8 +50,8 @@ export function SharedMemorySection() {
         style={{
           display: "flex",
           gap: 16,
-          padding: "0 tokens.sp[24]",
-          borderBottom: "tokens.sp.px solid var(--line)",
+          padding: "0 var(--sp-24)",
+          borderBottom: "var(--sp-px) solid var(--line)",
         }}
       >
         <TabButton active={tab === "search"} onClick={() => setTab("search")}>
@@ -102,11 +102,11 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       style={{
-        padding: "tokens.sp[12] 0",
+        padding: "var(--sp-12) 0",
         marginBottom: -1,
         borderBottom: active
-          ? "tokens.sp[2] solid var(--accent)"
-          : "tokens.sp[2] solid transparent",
+          ? "var(--sp-2) solid var(--accent)"
+          : "var(--sp-2) solid transparent",
         background: "transparent",
         color: active ? "var(--fg)" : "var(--fg-muted)",
         font: "inherit",
@@ -199,10 +199,10 @@ function SearchTab() {
           }
           aria-label="Source filter"
           style={{
-            padding: "0 tokens.sp[8]",
+            padding: "0 var(--sp-8)",
             background: "var(--bg-raised)",
             color: "var(--fg)",
-            border: "tokens.sp.px solid var(--line)",
+            border: "var(--sp-px) solid var(--line)",
             borderRadius: 6,
             font: "inherit",
           }}
@@ -236,7 +236,7 @@ function SearchTab() {
           <article
             key={hit.exchange_id}
             style={{
-              border: "tokens.sp.px solid var(--line)",
+              border: "var(--sp-px) solid var(--line)",
               borderRadius: 8,
               padding: 12,
               background: "var(--bg-raised)",
@@ -247,7 +247,7 @@ function SearchTab() {
                 display: "flex",
                 gap: 8,
                 alignItems: "center",
-                fontSize: "var(--fs-2xs, tokens.sp[12])",
+                fontSize: "var(--fs-2xs)",
                 color: "var(--fg-muted)",
                 marginBottom: 6,
               }}
@@ -288,7 +288,7 @@ function SearchTab() {
                   maxHeight: 320,
                   overflow: "auto",
                   whiteSpace: "pre-wrap",
-                  fontSize: "var(--fs-2xs, tokens.sp[12])",
+                  fontSize: "var(--fs-2xs)",
                 }}
               >
                 {body ?? "loading..."}
@@ -414,7 +414,7 @@ function MemoriesTab() {
           <article
             key={m.id}
             style={{
-              border: "tokens.sp.px solid var(--line)",
+              border: "var(--sp-px) solid var(--line)",
               borderRadius: 8,
               padding: 12,
               background: "var(--bg-raised)",
@@ -425,12 +425,12 @@ function MemoriesTab() {
               <Tag>{m.kind}</Tag>
               <Tag>{m.scope}</Tag>
               {m.project_path && (
-                <span style={{ fontSize: "var(--fs-2xs, tokens.sp[12])", color: "var(--fg-muted)" }}>
+                <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
                   {m.project_path}
                 </span>
               )}
               <div style={{ flex: 1 }} />
-              <span style={{ fontSize: "var(--fs-2xs, tokens.sp[12])", color: "var(--fg-muted)" }}>
+              <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
                 {m.created_by} · {new Date(m.created_at_ms).toLocaleDateString()}
               </span>
             </header>
@@ -494,7 +494,7 @@ function CreateMemoryForm({
   return (
     <div
       style={{
-        border: "tokens.sp.px solid var(--line)",
+        border: "var(--sp-px) solid var(--line)",
         borderRadius: 8,
         padding: 16,
         background: "var(--bg-raised)",
@@ -541,7 +541,7 @@ function CreateMemoryForm({
           padding: 8,
           background: "var(--bg-sunken)",
           color: "var(--fg)",
-          border: "tokens.sp.px solid var(--line)",
+          border: "var(--sp-px) solid var(--line)",
           borderRadius: 6,
           font: "inherit",
           resize: "vertical",
@@ -647,7 +647,7 @@ function DecisionsTab() {
               <article
                 key={d.id}
                 style={{
-                  border: "tokens.sp.px solid var(--line)",
+                  border: "var(--sp-px) solid var(--line)",
                   borderRadius: 8,
                   padding: 12,
                   background: "var(--bg-raised)",
@@ -658,7 +658,7 @@ function DecisionsTab() {
                   <Tag>{d.status}</Tag>
                   {d.topic && <Tag>{d.topic}</Tag>}
                   <div style={{ flex: 1 }} />
-                  <span style={{ fontSize: "var(--fs-2xs, tokens.sp[12])", color: "var(--fg-muted)" }}>
+                  <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
                     {d.created_by} · {new Date(d.created_at_ms).toLocaleDateString()}
                   </span>
                 </header>
@@ -666,7 +666,7 @@ function DecisionsTab() {
                   {d.decision}
                 </p>
                 {d.rationale && (
-                  <p style={{ margin: "tokens.sp[6] 0 0", whiteSpace: "pre-wrap", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
+                  <p style={{ margin: "var(--sp-6) 0 0", whiteSpace: "pre-wrap", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
                     {d.rationale}
                   </p>
                 )}
@@ -690,11 +690,11 @@ function DecisionsTab() {
 
 function selectStyle(): React.CSSProperties {
   return {
-    padding: "0 tokens.sp[8]",
+    padding: "0 var(--sp-8)",
     height: 32,
     background: "var(--bg-raised)",
     color: "var(--fg)",
-    border: "tokens.sp.px solid var(--line)",
+    border: "var(--sp-px) solid var(--line)",
     borderRadius: 6,
     font: "inherit",
   };

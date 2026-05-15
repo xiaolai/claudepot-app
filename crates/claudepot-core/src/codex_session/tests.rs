@@ -141,7 +141,7 @@ fn full_parse_single_turn_yields_one_exchange() {
     assert_eq!(conv.head.session_id, "01-abc");
     assert_eq!(conv.exchanges.len(), 1);
     let ex = &conv.exchanges[0];
-    assert_eq!(ex.id, "01-abc:0");
+    assert_eq!(ex.id, "codex:01-abc:0");
     assert_eq!(ex.turn_index, 0);
     assert_eq!(ex.user_text, "audit this codebase");
     assert_eq!(ex.assistant_text, "found 3 issues");
@@ -155,8 +155,8 @@ fn full_parse_two_turns_yields_two_exchanges_in_order() {
     let conv = parse_codex_rollout_jsonl(&fixture("two_turns.jsonl"))
         .expect("ok");
     assert_eq!(conv.exchanges.len(), 2);
-    assert_eq!(conv.exchanges[0].id, "01-two:0");
-    assert_eq!(conv.exchanges[1].id, "01-two:1");
+    assert_eq!(conv.exchanges[0].id, "codex:01-two:0");
+    assert_eq!(conv.exchanges[1].id, "codex:01-two:1");
     assert_eq!(conv.exchanges[0].user_text, "first question");
     assert_eq!(conv.exchanges[0].assistant_text, "first answer");
     assert_eq!(conv.exchanges[1].user_text, "second question");
@@ -426,5 +426,5 @@ fn exchange_ids_stable_across_reparse() {
     let ids_a: Vec<&str> = a.exchanges.iter().map(|e| e.id.as_str()).collect();
     let ids_b: Vec<&str> = b.exchanges.iter().map(|e| e.id.as_str()).collect();
     assert_eq!(ids_a, ids_b);
-    assert_eq!(ids_a, vec!["01-two:0", "01-two:1"]);
+    assert_eq!(ids_a, vec!["codex:01-two:0", "codex:01-two:1"]);
 }

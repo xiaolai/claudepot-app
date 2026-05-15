@@ -39,7 +39,15 @@
 ///     foreign_keys is also enabled on every connection as part of
 ///     this version — the existing v3 schema's by-convention FKs
 ///     finally start enforcing.
-pub const SCHEMA_VERSION: &str = "4";
+///   - v5: `exchanges.id` namespaced by source_kind to remove the
+///     theoretical cross-harness collision between identical Claude
+///     and Codex session UUIDs. Format went from
+///     `<session_id>:<turn_index>` to
+///     `<source_kind>:<session_id>:<turn_index>`. Bump forces re-scan
+///     so existing rows are rewritten in the new format. memory_links
+///     and tool_calls FKs cascade-clear via the existing v4
+///     migration's `DELETE FROM sessions`/`session_turns` path.
+pub const SCHEMA_VERSION: &str = "5";
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS usage_event (
