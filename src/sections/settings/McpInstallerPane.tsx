@@ -17,9 +17,15 @@
 // (we can't read CLAUDE.md / AGENTS.md across projects without
 // guessing). UI shows the snippet path as a confirmation.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { projectApi } from "../../api/project";
 import { sharedMemoryApi } from "../../api/sharedMemory";
-import type { McpHealth, SnippetInstallResult } from "../../api/sharedMemory";
+import type {
+  McpHealth,
+  SnippetInstallResult,
+  SnippetScope,
+} from "../../api/sharedMemory";
+import type { ProjectInfo } from "../../types/project";
 import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
@@ -41,6 +47,9 @@ export function McpInstallerPane({
   const [snippet, setSnippet] = useState<string>("");
   const [install, setInstall] = useState<SnippetInstallResult | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [scope, setScope] = useState<SnippetScope>("user");
+  const [projectPath, setProjectPath] = useState<string>("");
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
 
   const checkHealth = useCallback(async () => {
     setChecking(true);
@@ -66,13 +75,26 @@ export function McpInstallerPane({
   const doInstall = useCallback(async () => {
     setInstalling(true);
     try {
-      const r = await sharedMemoryApi.installSnippet();
+      const r = await sharedMemoryApi.installSnippet(
+        scope === "project"
+          ? { scope: "project", project_path: projectPath }
+          : { scope: "user" },
+      );
       setInstall(r);
       pushToast("info", `Wrote ${r.path} (${r.bytes_written} bytes)`);
     } catch (e) {
       pushToast("error", `Install failed: ${e}`);
     } finally {
       setInstalling(false);
+    }
+  }, [pushToast, scope, projectPath]);
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const list = await projectApi.projectList();
+      setProjects(list.filter((p: ProjectInfo) => p.is_reachable));
+    } catch (e) {
+      pushToast("error", `Failed to load projects: ${e}`);
     }
   }, [pushToast]);
 
@@ -89,6 +111,16 @@ export function McpInstallerPane({
   useEffect(() => {
     void loadSnippet();
   }, [loadSnippet]);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
+  const installDisabled = useMemo(() => {
+    if (installing) return true;
+    if (scope === "project" && !projectPath) return true;
+    return false;
+  }, [installing, scope, projectPath]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 760 }}>
@@ -147,10 +179,10 @@ export function McpInstallerPane({
         <p style={{ marginTop: 6, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
           Configuring an MCP entry alone isn't enough — agents have to
           be told <em>when</em> to call the tools. This snippet does
-          that. Install it once, then paste the <code>@include</code>{" "}
-          line into your <code>CLAUDE.md</code> (and/or{" "}
-          <code>AGENTS.md</code>). Future regenerations refresh the
-          file in place; the <code>@include</code> line never changes.
+          that. Pick a scope, install it once, then paste the{" "}
+          <code>@include</code> line into the target file Claudepot
+          names. Future regenerations refresh the file in place; the{" "}
+          <code>@include</code> line never changes.
         </p>
         <div
           style={{
@@ -164,8 +196,86 @@ export function McpInstallerPane({
             gap: 12,
           }}
         >
+          {/* Scope picker */}
+          <fieldset
+            style={{
+              border: "none",
+              padding: 0,
+              margin: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <legend style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)", padding: 0 }}>
+              Scope
+            </legend>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="snippet-scope"
+                value="user"
+                checked={scope === "user"}
+                onChange={() => setScope("user")}
+              />
+              <span>
+                <strong>User</strong>{" "}
+                <span style={{ color: "var(--fg-muted)" }}>
+                  — writes <code>~/.claude/claudepot-mcp-instructions.md</code>; paste{" "}
+                  <code>@include</code> into <code>~/.claude/CLAUDE.md</code>,{" "}
+                  <code>~/.codex/AGENTS.md</code>, <code>~/.gemini/GEMINI.md</code>. Loads
+                  in every project.
+                </span>
+              </span>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="snippet-scope"
+                value="project"
+                checked={scope === "project"}
+                onChange={() => setScope("project")}
+              />
+              <span>
+                <strong>Project</strong>{" "}
+                <span style={{ color: "var(--fg-muted)" }}>
+                  — writes <code>&lt;project&gt;/.claude/claudepot-mcp-instructions.md</code>;
+                  paste <code>@include</code> into the project's <code>AGENTS.md</code> (the
+                  canonical source per <code>/init-workspace</code>). Loads only in that
+                  project.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          {scope === "project" && (
+            <select
+              value={projectPath}
+              onChange={(e) => setProjectPath(e.currentTarget.value)}
+              aria-label="Project"
+              style={{
+                padding: 8,
+                border: "tokens.sp.px solid var(--line)",
+                borderRadius: 6,
+                background: "var(--bg-base)",
+                fontFamily: "monospace",
+                fontSize: "var(--fs-sm)",
+              }}
+            >
+              <option value="">Select project…</option>
+              {projects.map((p) => (
+                <option key={p.original_path} value={p.original_path}>
+                  {p.original_path}
+                </option>
+              ))}
+            </select>
+          )}
           <div style={{ display: "flex", gap: 12 }}>
-            <Button variant="solid" glyph={NF.download} onClick={() => void doInstall()} disabled={installing}>
+            <Button
+              variant="solid"
+              glyph={NF.download}
+              onClick={() => void doInstall()}
+              disabled={installDisabled}
+            >
               {installing ? "Installing…" : "Install snippet"}
             </Button>
             {install && (
@@ -185,8 +295,20 @@ export function McpInstallerPane({
                 userSelect: "text",
               }}
             >
-              <div>Wrote: {install.path}</div>
+              <div>
+                Wrote ({install.scope}): {install.path}
+              </div>
               <div style={{ marginTop: 4, fontWeight: 600 }}>{install.include_line}</div>
+              {install.target_files.length > 0 && (
+                <div style={{ marginTop: 6, color: "var(--fg-muted)" }}>
+                  Paste the line above into:
+                  <ul style={{ margin: "tokens.sp[4] 0 0 tokens.sp[16]", padding: 0 }}>
+                    {install.target_files.map((f) => (
+                      <li key={f}>{f}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
           <details style={{ marginTop: 4 }}>

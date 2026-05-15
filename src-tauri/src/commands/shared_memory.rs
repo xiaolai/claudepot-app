@@ -614,40 +614,105 @@ pub async fn shared_memory_list_projects(
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SnippetInstallResultDto {
+    pub scope: String,
     pub path: String,
     pub bytes_written: usize,
     pub include_line: String,
+    /// Files the user is expected to paste `include_line` into. For
+    /// user scope: the three agent home configs that auto-load every
+    /// session. For project scope: only `AGENTS.md` per
+    /// `/init-workspace`'s rule (CLAUDE.md / GEMINI.md just import
+    /// AGENTS.md and shouldn't be hand-edited).
+    pub target_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InstallSnippetArgs {
+    /// "user" (default) or "project".
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Required when scope = "project". Must be an existing
+    /// directory; `<project_path>/.claude/` is created if missing
+    /// but the project root itself is not.
+    #[serde(default)]
+    pub project_path: Option<String>,
+    /// Power-user escape hatch: write to this exact path instead
+    /// of the scope-derived default. Bypasses scope/project_path.
+    #[serde(default)]
+    pub out: Option<String>,
 }
 
 /// Write the canonical `claudepot-mcp-instructions.md` snippet to
-/// `~/.claude/claudepot-mcp-instructions.md` (or override). Mirrors
-/// the `claudepot mcp install-snippet` CLI verb so the GUI
-/// installer pane can call it without shelling out.
-///
-/// The snippet body is fetched from the CLI module's
-/// `snippet_body()` so there's only one canonical source.
+/// either user-scope (`~/.claude/`) or project-scope
+/// (`<project>/.claude/`). Project scope honors
+/// `/init-workspace`'s convention — the recommended paste target
+/// is the project's `AGENTS.md` (the canonical source-of-truth);
+/// `CLAUDE.md` / `GEMINI.md` are `@AGENTS.md` re-exports and
+/// shouldn't be hand-edited.
 #[tauri::command]
 pub async fn shared_memory_install_snippet(
-    out: Option<String>,
+    args: InstallSnippetArgs,
 ) -> Result<SnippetInstallResultDto, String> {
     tokio::task::spawn_blocking(move || {
-        let path = match out {
-            Some(p) => std::path::PathBuf::from(p),
-            None => dirs::home_dir()
-                .ok_or_else(|| "no home dir".to_string())?
-                .join(".claude")
-                .join("claudepot-mcp-instructions.md"),
+        let scope = args.scope.as_deref().unwrap_or("user");
+        if scope != "user" && scope != "project" {
+            return Err(format!("invalid scope: {scope:?} (expected \"user\" or \"project\")"));
+        }
+
+        // Resolve the snippet file path.
+        let (path, target_files, include_line): (
+            std::path::PathBuf,
+            Vec<String>,
+            String,
+        ) = if let Some(out) = args.out.as_deref() {
+            let p = std::path::PathBuf::from(out);
+            let line = format!("@{}", p.display());
+            (p, Vec::new(), line)
+        } else if scope == "user" {
+            let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
+            let p = home.join(".claude").join("claudepot-mcp-instructions.md");
+            let line = format!("@{}", p.display());
+            let targets = vec![
+                home.join(".claude").join("CLAUDE.md").display().to_string(),
+                home.join(".codex").join("AGENTS.md").display().to_string(),
+                home.join(".gemini").join("GEMINI.md").display().to_string(),
+            ];
+            (p, targets, line)
+        } else {
+            let project = args
+                .project_path
+                .as_deref()
+                .ok_or_else(|| "project_path required for scope = \"project\"".to_string())?;
+            let project_root = std::path::PathBuf::from(project);
+            if !project_root.is_dir() {
+                return Err(format!(
+                    "project_path is not an existing directory: {}",
+                    project_root.display()
+                ));
+            }
+            let p = project_root.join(".claude").join("claudepot-mcp-instructions.md");
+            // Relative-to-project include line. `/init-workspace`
+            // expects AGENTS.md at the project root, so a
+            // `.claude/claudepot-mcp-instructions.md` relative path
+            // resolves correctly when AGENTS.md imports it.
+            let include_line =
+                "@.claude/claudepot-mcp-instructions.md".to_string();
+            let targets = vec![project_root.join("AGENTS.md").display().to_string()];
+            (p, targets, include_line)
         };
+
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("create parent: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("create parent: {e}"))?;
         }
         let body = canonical_snippet();
         std::fs::write(&path, &body).map_err(|e| format!("write: {e}"))?;
+
         Ok::<_, String>(SnippetInstallResultDto {
-            include_line: format!("@include {}", path.display()),
+            scope: scope.to_string(),
             path: path.display().to_string(),
             bytes_written: body.len(),
+            include_line,
+            target_files,
         })
     })
     .await

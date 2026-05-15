@@ -157,10 +157,23 @@ export interface ProjectSummary {
 
 // ─── installer / MCP health ──────────────────────────────────
 
+export type SnippetScope = "user" | "project";
+
+export interface InstallSnippetArgs {
+  scope?: SnippetScope;
+  /** Required when scope = "project". */
+  project_path?: string;
+  /** Power-user escape hatch: write to this exact path; bypasses scope. */
+  out?: string;
+}
+
 export interface SnippetInstallResult {
+  scope: SnippetScope;
   path: string;
   bytes_written: number;
   include_line: string;
+  /** Files the user should paste `include_line` into. */
+  target_files: string[];
 }
 
 export interface McpHealth {
@@ -196,8 +209,8 @@ export const sharedMemoryApi = {
   listProjects: (limit?: number) =>
     invoke<ProjectSummary[]>("shared_memory_list_projects", { limit }),
 
-  installSnippet: (out?: string) =>
-    invoke<SnippetInstallResult>("shared_memory_install_snippet", { out }),
+  installSnippet: (args: InstallSnippetArgs = {}) =>
+    invoke<SnippetInstallResult>("shared_memory_install_snippet", { args }),
   snippetBody: () => invoke<string>("shared_memory_snippet_body"),
   mcpHealth: (claudepotBinary?: string) =>
     invoke<McpHealth>("shared_memory_mcp_health", {
