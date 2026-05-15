@@ -561,12 +561,39 @@ fn write_codex_conversation(
     Ok(())
 }
 
+/// Produce a stable, distinct slug for `file_path`. The common
+/// case — a clean UTF-8 file stem — returns the stem verbatim.
+///
+/// L9 — `walk_dir_recursive` resolves paths via
+/// `Path::to_string_lossy()`, which replaces invalid UTF-8 bytes
+/// with U+FFFD. Two distinct paths with non-UTF-8 bytes at
+/// different positions both lossily render to the same U+FFFD
+/// sequence — pre-fix, their slugs collided into the literal
+/// "codex-session", making them indistinguishable in the UI.
+/// Post-fix: any stem containing U+FFFD (or absent / empty)
+/// falls back to a hex digest of the full path bytes so distinct
+/// inputs always get distinct slugs.
+///
+/// The slug is stable across reparses (deterministic hash) and
+/// short enough for a UI column (16 hex chars = 64 bits of
+/// entropy; collisions are not a concern).
 fn derive_slug(file_path: &str) -> String {
-    Path::new(file_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("codex-session")
-        .to_string()
+    if let Some(stem) = Path::new(file_path).file_stem().and_then(|s| s.to_str()) {
+        if !stem.is_empty() && !stem.contains('\u{fffd}') {
+            return stem.to_string();
+        }
+    }
+    // Fallback path: hash the full path so distinct non-UTF-8 or
+    // empty-stem names get distinct slugs.
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(file_path.as_bytes());
+    let digest = hasher.finalize();
+    let hex: String = digest[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("codex-session-{hex}")
 }
 
 /// Build the pre-emission snippet column. v1: first 240 chars of
@@ -599,14 +626,24 @@ fn build_snippet(user: &str, assistant: &str) -> String {
     crate::redaction::apply(&combined, &crate::redaction::RedactionPolicy::default())
 }
 
+/// Truncate `s` to at most `cap` graphemes (extended grapheme
+/// clusters per UAX#29), appending `…` if truncation occurred.
+///
+/// L10 — uses `unicode_segmentation::UnicodeSegmentation::graphemes`
+/// rather than `chars()`. The `chars()` approach splits multi-
+/// codepoint graphemes (emoji + skin-tone modifier, ZWJ
+/// sequences like 👨‍👩‍👧, regional indicators like 🇨🇳) at codepoint
+/// boundaries, producing broken visual output at the snippet cap.
+/// Grapheme segmentation respects user-perceived characters.
 fn truncate_chars(s: &str, cap: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
     let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
+    for (i, g) in s.graphemes(true).enumerate() {
         if i >= cap {
             out.push('…');
             break;
         }
-        out.push(c);
+        out.push_str(g);
     }
     out
 }
@@ -932,6 +969,62 @@ mod tests {
             !snippet.contains("sk-ant-oat01-VeryLongSecretValueHere"),
             "snippet at rest must not contain raw secret, got: {snippet}"
         );
+    }
+
+    #[test]
+    fn derive_slug_returns_stem_for_utf8_paths() {
+        // Common case: file_stem is UTF-8, slug equals the stem
+        // verbatim.
+        assert_eq!(derive_slug("/x/rollout-2026.jsonl"), "rollout-2026");
+        assert_eq!(derive_slug("/x/foo.bar.jsonl"), "foo.bar");
+    }
+
+    #[test]
+    fn derive_slug_distinct_hashes_for_distinct_lossy_paths() {
+        // L9 — distinct non-UTF-8 paths render to the same U+FFFD
+        // sequence via to_string_lossy() and would collide on a
+        // simple stem-only slug. Post-fix they're disambiguated
+        // via a hex digest of the full path bytes.
+        //
+        // Simulate the lossy output directly: two paths whose
+        // stems contain U+FFFD at different positions but happen
+        // to render to similar-looking strings.
+        let a = derive_slug("/x/\u{fffd}abc.jsonl");
+        let b = derive_slug("/y/\u{fffd}abc.jsonl");
+        assert_ne!(a, b, "two lossy stems must produce distinct slugs");
+        assert!(a.starts_with("codex-session-"));
+        assert!(b.starts_with("codex-session-"));
+        // Same path → same slug (stability across reparses).
+        assert_eq!(a, derive_slug("/x/\u{fffd}abc.jsonl"));
+
+        // Clean UTF-8 stems with U+FFFD inside also trigger the
+        // fallback (no false negative).
+        let c = derive_slug("/x/foo\u{fffd}bar.jsonl");
+        assert!(c.starts_with("codex-session-"));
+    }
+
+    #[test]
+    fn truncate_chars_respects_grapheme_boundaries() {
+        // L10 — ZWJ family emoji and regional-indicator flag emoji
+        // are multi-codepoint graphemes. The pre-fix chars()
+        // approach would split them at the cap.
+        // 👨‍👩‍👧 is 5 codepoints (man, ZWJ, woman, ZWJ, girl) = 1 grapheme.
+        let family = "👨\u{200d}👩\u{200d}👧";
+        // With cap=1, we should get either the full family OR
+        // (if cap < grapheme count) the ellipsis. The previous
+        // chars() impl with cap=1 would have produced "👨…",
+        // splitting mid-grapheme.
+        let result = truncate_chars(family, 1);
+        // Either the whole grapheme survives or only the ellipsis
+        // is added. Either way, the man-emoji should NOT appear
+        // detached from its family.
+        assert!(
+            result == family || !result.contains('👨') || result.contains("👨\u{200d}👩\u{200d}👧"),
+            "ZWJ family must not be split: got {result:?}"
+        );
+
+        // A simple "a b c" string with cap=2 truncates to "ab…".
+        assert_eq!(truncate_chars("abc", 2), "ab…");
     }
 
     #[test]

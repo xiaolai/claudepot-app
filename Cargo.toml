@@ -78,6 +78,12 @@ libc = "0.2"
 # Unicode normalization (NFC for cross-platform path consistency)
 unicode-normalization = "0.1"
 
+# Unicode grapheme segmentation. Used by shared_memory::indexer's
+# truncate_chars helper so emoji + skin-tone modifiers, ZWJ
+# sequences, and other multi-codepoint graphemes don't split at
+# the snippet boundary. L10 of the grill fixing plan.
+unicode-segmentation = "1"
+
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6"

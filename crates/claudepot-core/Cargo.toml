@@ -30,6 +30,7 @@ libc.workspace = true
 async-trait.workspace = true
 whoami.workspace = true
 unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
 rayon.workspace = true
 num_cpus.workspace = true
 regex.workspace = true
