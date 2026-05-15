@@ -16,9 +16,11 @@ mod dto_automations;
 mod dto_cc_doctor;
 mod dto_cc_tips;
 mod dto_desktop;
+mod dto_env;
 mod dto_keys;
 mod dto_memory;
 mod dto_migrate;
+mod dto_permission;
 mod dto_project;
 mod dto_project_repair;
 mod dto_rotation;
@@ -34,6 +36,7 @@ mod dto_usage;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
+mod permission_orchestrator;
 mod preferences;
 mod rotation_orchestrator;
 mod service_status_watcher;
@@ -815,6 +818,23 @@ pub fn run() {
             commands::rotation::rotation_pending_list,
             commands::rotation::rotation_apply_pending,
             commands::rotation::rotation_dismiss_pending,
+            commands::permission::permission_list,
+            commands::permission::permission_get,
+            commands::permission::permission_grant,
+            commands::permission::permission_revert,
+            commands::permission::permission_extend,
+            commands::env_secret::env_vault_list,
+            commands::env_secret::env_vault_add,
+            commands::env_secret::env_vault_update,
+            commands::env_secret::env_vault_delete,
+            commands::env_secret::env_vault_copy,
+            commands::env_secret::env_file_list,
+            commands::env_secret::env_file_set,
+            commands::env_secret::env_file_comment,
+            commands::env_secret::env_file_uncomment,
+            commands::env_secret::env_file_delete,
+            commands::env_secret::env_file_copy_value,
+            commands::env_secret::env_file_inject,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

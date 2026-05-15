@@ -34,11 +34,13 @@ pub mod cli;
 pub mod config;
 pub mod config_types;
 pub mod desktop;
+pub mod env_secret;
 pub mod keys;
 pub mod memory;
 pub mod memory_health;
 pub mod migrate;
 pub mod notification;
+pub mod permission;
 pub mod preferences;
 pub mod pricing;
 pub mod project;
@@ -86,6 +88,25 @@ pub(crate) fn active_id<E>(
 pub(crate) fn open_store() -> Result<AccountStore, String> {
     let db = paths::claudepot_data_dir().join("accounts.db");
     AccountStore::open(&db).map_err(|e| format!("store open failed: {e}"))
+}
+
+/// Validate a renderer-supplied project root before it reaches a
+/// filesystem write (`.claude/settings.local.json`, a project
+/// `.env*`). The renderer is our own trusted code per
+/// `rules/architecture.md` — this is cheap defense in depth so a
+/// malformed or relative path can't land a write outside an actual
+/// project directory. Must be an absolute path to an existing dir.
+pub(crate) fn validate_project_path(project_path: &str) -> Result<(), String> {
+    let p = std::path::Path::new(project_path);
+    if !p.is_absolute() {
+        return Err(format!("project path must be absolute: {project_path}"));
+    }
+    if !p.is_dir() {
+        return Err(format!(
+            "project path is not an existing directory: {project_path}"
+        ));
+    }
+    Ok(())
 }
 
 /// `async fn` is load-bearing: Tauri 2 dispatches sync `#[command] fn`

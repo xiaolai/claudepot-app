@@ -13,6 +13,8 @@ import type {
 import { classifyProject } from "./projectStatus";
 import { formatRelativeTime, formatSize } from "./format";
 import { MoveSessionModal } from "./MoveSessionModal";
+import { PermissionPanel } from "./PermissionPanel";
+import { ProjectEnvPanel } from "./ProjectEnvPanel";
 import { sessionCostEstimate, formatUsd, usePriceTable } from "../../costs";
 
 /**
@@ -332,6 +334,24 @@ export function ProjectDetail({
           </>
         )}
       </section>
+
+      {status !== "orphan" && status !== "unreachable" && (
+        <>
+          {/* `key` remounts each panel on project switch — fresh state,
+              effects re-run, in-flight async from the prior project is
+              cleaned up rather than leaking into the new one. */}
+          <PermissionPanel
+            key={info.original_path}
+            projectPath={info.original_path}
+            onError={onError}
+          />
+          <ProjectEnvPanel
+            key={info.original_path}
+            projectPath={info.original_path}
+            onError={onError}
+          />
+        </>
+      )}
 
       {noContent && status !== "alive" && status !== "unreachable" && (
         <div className="project-hint cleanup" role="status">

@@ -1,0 +1,110 @@
+/* Permission grants + per-project .env panels (ProjectDetail).
+   Surface-scoped shard; see App.css for the import-order contract.
+   Tokens only — no literals (rules/design.md). */
+
+/* ── permission grant panel ─────────────────────────────────────── */
+
+.permission-grant-active,
+.permission-grant-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  font-size: var(--fs-sm);
+}
+
+.permission-grant-active {
+  padding: var(--sp-10) var(--sp-12);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+
+/* ── per-project .env panel ─────────────────────────────────────── */
+
+.env-file-card {
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-10) var(--sp-12);
+  margin-top: var(--sp-8);
+  background: var(--bg-raised);
+}
+
+.env-file-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+  font-size: var(--fs-sm);
+}
+
+.env-entry-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.env-entry-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-4) 0;
+  border-bottom: var(--bw-subhair) solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.env-entry-row:last-child {
+  border-bottom: 0;
+}
+
+.env-entry-key {
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+
+.env-entry-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+}
+
+.env-entry-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+}
+
+.env-file-card-forms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  margin-top: var(--sp-10);
+}
+
+.env-inline-form {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.env-inline-form input,
+.env-inline-form select {
+  background: var(--bg-sunken);
+  border: var(--bw-hair) solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--sp-4) var(--sp-8);
+}
+
+.env-inline-form input {
+  min-width: 0;
+  flex: 1;
+}

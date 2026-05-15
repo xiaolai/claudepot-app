@@ -27,6 +27,8 @@ import { updatesApi } from "./updates";
 import { ccTipsApi } from "./cc-tips";
 import { ccDoctorApi } from "./cc-doctor";
 import { rotationApi } from "./rotation";
+import { permissionApi } from "./permission";
+import { envSecretApi } from "./envSecret";
 
 export const api = {
   ...accountApi,
@@ -52,6 +54,8 @@ export const api = {
   ...ccTipsApi,
   ...ccDoctorApi,
   ...rotationApi,
+  ...permissionApi,
+  ...envSecretApi,
   migrate: migrateApi,
 };
 

@@ -52,6 +52,12 @@ pub fn spawn(app: AppHandle) {
 }
 
 async fn run_tick(app: &AppHandle) {
+    // Revert any expired permission grants first — this is independent
+    // of account state, so it must run before the early returns below
+    // (no accounts / no CLI credentials). Returns after one cheap file
+    // read when no grants exist.
+    crate::permission_orchestrator::tick(app).await;
+
     // Open store + list accounts under one blocking scope so the
     // SQLite open and the .list() call aren't ping-ponging into
     // the async runtime.
