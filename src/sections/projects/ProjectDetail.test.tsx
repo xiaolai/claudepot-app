@@ -24,6 +24,14 @@ vi.mock("../../api", () => ({
     revealInFinder: (...args: unknown[]) => revealSpy(...args),
     pricingGet: () => pricingImpl.fn(),
     sessionListAll: () => sessionListImpl.fn(),
+    // ProjectDetail now mounts PermissionPanel + ProjectEnvPanel for
+    // reachable projects; both fire reads on mount. Default to empty
+    // so the existing list/move/reveal/cost tests don't have to
+    // thread permission or .env data.
+    permissionList: () => Promise.resolve([]),
+    envFileList: (...args: unknown[]) =>
+      Promise.resolve({ projectPath: String(args[0] ?? ""), files: [] }),
+    envVaultList: () => Promise.resolve([]),
   },
 }));
 // Stub the app-state provider so ProjectDetail's useAppState() returns
@@ -40,6 +48,7 @@ vi.mock("../../providers/AppStateProvider", () => ({
       cc_config_dir: "/tmp/claudepot-test/.claude",
       account_count: 0,
     },
+    pushToast: vi.fn(),
   }),
 }));
 
