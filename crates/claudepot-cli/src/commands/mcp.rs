@@ -591,6 +591,68 @@ impl MemoryServer {
         }
     }
 
+    #[tool(description = "List indexed sessions (Claude Code + Codex transcripts) ordered by most-recent activity. A discovery primitive — agents that want to browse what's indexed instead of search-by-text can call this first, then read_conversation on a chosen file_path.")]
+    fn claudepot_list_sessions(
+        &self,
+        Parameters(req): Parameters<ListSessionsRequest>,
+    ) -> String {
+        let f = sms::SessionListFilter {
+            source_kind: req.source_kind,
+            project_path: req.project_path,
+            since_ms: req.since_ms,
+            limit: req.limit.unwrap_or(0),
+            offset: req.offset.unwrap_or(0),
+        };
+        match sms::list_sessions(&self.idx, &f) {
+            Ok(rows) => to_json(&ListSessionsPayload {
+                schema_version: SCHEMA_VERSION,
+                sessions: rows
+                    .into_iter()
+                    .map(|s| SessionSummaryOut {
+                        file_path: s.file_path,
+                        session_id: s.session_id,
+                        source_kind: s.source_kind,
+                        project_path: s.project_path,
+                        git_branch: s.git_branch,
+                        first_ts_ms: s.first_ts_ms,
+                        last_ts_ms: s.last_ts_ms,
+                        message_count: s.message_count,
+                        tokens_input: s.tokens_input,
+                        tokens_output: s.tokens_output,
+                    })
+                    .collect(),
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_list_sessions: query failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
+    #[tool(description = "List distinct project paths in the cache with per-project session count and most-recent-activity stamp. Use this to discover which projects have indexed transcripts before drilling in with claudepot_list_sessions(project_path=...).")]
+    fn claudepot_list_projects(
+        &self,
+        Parameters(req): Parameters<ListProjectsRequest>,
+    ) -> String {
+        match sms::list_projects(&self.idx, req.limit.unwrap_or(0)) {
+            Ok(rows) => to_json(&ListProjectsPayload {
+                schema_version: SCHEMA_VERSION,
+                projects: rows
+                    .into_iter()
+                    .map(|p| ProjectSummaryOut {
+                        project_path: p.project_path,
+                        session_count: p.session_count,
+                        last_activity_ms: p.last_activity_ms,
+                    })
+                    .collect(),
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_list_projects: query failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
     #[tool(description = "Mark a decision as archived. Use when a decision is no longer in force but wasn't replaced by a specific successor (use claudepot_log_decision with supersedes_id when there's a replacement). Returns archived=false if the id didn't reference an active decision.")]
     fn claudepot_archive_decision(
         &self,
@@ -670,6 +732,68 @@ struct ErrorPayload {
     error_code: String,
     /// Human-readable error description. Already redacted.
     error: String,
+}
+
+// ─── list_sessions / list_projects (discovery) ────────────────
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListSessionsRequest {
+    /// `claude_code` | `codex`. Omit to list both.
+    #[serde(default)]
+    source_kind: Option<String>,
+    /// Exact match. Use `claudepot_list_projects` to discover
+    /// the available values.
+    #[serde(default)]
+    project_path: Option<String>,
+    /// Inclusive lower bound on the session's last activity in
+    /// epoch ms.
+    #[serde(default)]
+    since_ms: Option<i64>,
+    /// Default 50; capped at 200.
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    offset: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SessionSummaryOut {
+    file_path: String,
+    session_id: String,
+    source_kind: String,
+    project_path: String,
+    git_branch: Option<String>,
+    first_ts_ms: Option<i64>,
+    last_ts_ms: Option<i64>,
+    message_count: i64,
+    tokens_input: i64,
+    tokens_output: i64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListSessionsPayload {
+    schema_version: u32,
+    sessions: Vec<SessionSummaryOut>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListProjectsRequest {
+    /// Default 100; capped at 500.
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ProjectSummaryOut {
+    project_path: String,
+    session_count: i64,
+    last_activity_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListProjectsPayload {
+    schema_version: u32,
+    projects: Vec<ProjectSummaryOut>,
 }
 
 /// Stable error codes. Documented as part of the MCP contract; do

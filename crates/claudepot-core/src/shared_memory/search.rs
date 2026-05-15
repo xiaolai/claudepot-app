@@ -211,6 +211,142 @@ pub fn search(
     Ok(hits)
 }
 
+/// One row of a `list_sessions` result. Discovery surface for
+/// agents that want to browse instead of search-by-text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub file_path: String,
+    pub session_id: String,
+    pub source_kind: String,
+    pub project_path: String,
+    pub git_branch: Option<String>,
+    pub first_ts_ms: Option<i64>,
+    pub last_ts_ms: Option<i64>,
+    pub message_count: i64,
+    pub tokens_input: i64,
+    pub tokens_output: i64,
+}
+
+/// Filter knobs for `list_sessions`.
+#[derive(Debug, Clone, Default)]
+pub struct SessionListFilter {
+    pub source_kind: Option<String>,
+    /// Exact match on the `project_path` column. Use
+    /// `list_projects` to enumerate the available values first.
+    pub project_path: Option<String>,
+    /// Inclusive lower bound on `last_ts_ms`.
+    pub since_ms: Option<i64>,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+/// One row of a `list_projects` result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectSummary {
+    pub project_path: String,
+    /// How many session rows exist under this project across both
+    /// source kinds.
+    pub session_count: i64,
+    /// Highest `last_ts_ms` observed in any of those sessions.
+    pub last_activity_ms: Option<i64>,
+}
+
+/// Enumerate sessions in the cache, ordered by most-recent activity.
+/// A discovery primitive for the MCP `claudepot_list_sessions` tool —
+/// lets agents browse what's indexed without having to guess query
+/// strings.
+pub fn list_sessions(
+    idx: &SessionIndex,
+    f: &SessionListFilter,
+) -> Result<Vec<SessionSummary>, rusqlite::Error> {
+    let limit = if f.limit == 0 { 50 } else { f.limit.clamp(1, 200) };
+    let offset = f.offset;
+
+    let mut sql = String::from(
+        "SELECT file_path, session_id, source_kind, project_path, git_branch, \
+                first_ts_ms, last_ts_ms, message_count, tokens_input, tokens_output \
+         FROM sessions WHERE 1=1",
+    );
+    let mut binds: Vec<Value> = Vec::new();
+    let mut nxt = 1;
+    if let Some(ref sk) = f.source_kind {
+        sql.push_str(&format!(" AND source_kind = ?{nxt}"));
+        binds.push(Value::Text(sk.clone()));
+        nxt += 1;
+    }
+    if let Some(ref pp) = f.project_path {
+        sql.push_str(&format!(" AND project_path = ?{nxt}"));
+        binds.push(Value::Text(pp.clone()));
+        nxt += 1;
+    }
+    if let Some(since) = f.since_ms {
+        sql.push_str(&format!(" AND last_ts_ms >= ?{nxt}"));
+        binds.push(Value::Integer(since));
+        nxt += 1;
+    }
+    sql.push_str(&format!(
+        " ORDER BY last_ts_ms DESC NULLS LAST LIMIT ?{} OFFSET ?{}",
+        nxt,
+        nxt + 1
+    ));
+    binds.push(Value::Integer(limit as i64));
+    binds.push(Value::Integer(offset as i64));
+
+    let db = idx.db();
+    let mut stmt = db.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(binds.iter()), |row| {
+        Ok(SessionSummary {
+            file_path: row.get(0)?,
+            session_id: row.get(1)?,
+            source_kind: row.get(2)?,
+            project_path: row.get(3)?,
+            git_branch: row.get(4)?,
+            first_ts_ms: row.get(5)?,
+            last_ts_ms: row.get(6)?,
+            message_count: row.get(7)?,
+            tokens_input: row.get(8)?,
+            tokens_output: row.get(9)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// Enumerate distinct `project_path` values in the cache with a
+/// count + most-recent-activity stamp per project. Ordered by
+/// most-recent-activity desc. Source-kind agnostic (a project may
+/// have both Claude and Codex sessions).
+pub fn list_projects(
+    idx: &SessionIndex,
+    limit: u32,
+) -> Result<Vec<ProjectSummary>, rusqlite::Error> {
+    let limit = if limit == 0 { 100 } else { limit.clamp(1, 500) };
+    let db = idx.db();
+    let mut stmt = db.prepare(
+        "SELECT project_path, COUNT(*) AS n, MAX(last_ts_ms) AS last_ms \
+         FROM sessions \
+         WHERE project_path != '' \
+         GROUP BY project_path \
+         ORDER BY last_ms DESC NULLS LAST \
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit as i64], |row| {
+        Ok(ProjectSummary {
+            project_path: row.get(0)?,
+            session_count: row.get(1)?,
+            last_activity_ms: row.get(2)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
 /// Escape an arbitrary user string as a single FTS5 phrase query.
 ///
 /// FTS5 phrase syntax: `"text with spaces and operators"`. Inside
@@ -514,6 +650,91 @@ mod tests {
     }
 
     // ─── locator stability ────────────────────────────────────
+
+    #[test]
+    fn list_sessions_orders_by_last_activity_desc() {
+        let tmp = TempDir::new().unwrap();
+        let (idx, _) = prep(&tmp);
+        let rows = list_sessions(&idx, &SessionListFilter::default()).unwrap();
+        // Three corpus rollouts staged in prep_corpus.
+        assert_eq!(rows.len(), 3);
+        // Newest last_ts_ms first.
+        for w in rows.windows(2) {
+            let a = w[0].last_ts_ms.unwrap_or(0);
+            let b = w[1].last_ts_ms.unwrap_or(0);
+            assert!(a >= b, "sessions not in last_ts_ms desc order");
+        }
+    }
+
+    #[test]
+    fn list_sessions_filters_source_and_project() {
+        let tmp = TempDir::new().unwrap();
+        let (idx, _) = prep(&tmp);
+        // The corpus uses 3 different /proj-* paths; filter to one.
+        let single = list_sessions(
+            &idx,
+            &SessionListFilter {
+                project_path: Some("/proj-a".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(single.iter().all(|s| s.project_path == "/proj-a"));
+        // Source filter: corpus is all Codex.
+        let codex = list_sessions(
+            &idx,
+            &SessionListFilter {
+                source_kind: Some("codex".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!codex.is_empty());
+        let claude = list_sessions(
+            &idx,
+            &SessionListFilter {
+                source_kind: Some("claude_code".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(claude.is_empty());
+    }
+
+    #[test]
+    fn list_projects_groups_by_project_path() {
+        let tmp = TempDir::new().unwrap();
+        let (idx, _) = prep(&tmp);
+        let projects = list_projects(&idx, 0).unwrap();
+        // 3 distinct projects in the corpus.
+        assert_eq!(projects.len(), 3);
+        // Each project has at least 1 session.
+        for p in &projects {
+            assert!(p.session_count >= 1);
+            assert!(p.last_activity_ms.is_some());
+        }
+        // Ordered by last activity desc.
+        for w in projects.windows(2) {
+            let a = w[0].last_activity_ms.unwrap_or(0);
+            let b = w[1].last_activity_ms.unwrap_or(0);
+            assert!(a >= b);
+        }
+    }
+
+    #[test]
+    fn list_sessions_respects_limit_cap() {
+        let tmp = TempDir::new().unwrap();
+        let (idx, _) = prep(&tmp);
+        let rows = list_sessions(
+            &idx,
+            &SessionListFilter {
+                limit: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+    }
 
     #[test]
     fn locator_fields_present_on_every_hit() {

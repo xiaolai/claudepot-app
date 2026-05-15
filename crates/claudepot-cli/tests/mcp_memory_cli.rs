@@ -32,6 +32,8 @@ const TOOLS: &[&str] = &[
     "claudepot_submit_evidence",
     "claudepot_list_memories",
     "claudepot_list_decisions",
+    "claudepot_list_sessions",
+    "claudepot_list_projects",
 ];
 
 fn bin_path() -> PathBuf {
@@ -149,7 +151,7 @@ fn parse_response_id(line: &str) -> Option<u32> {
 }
 
 #[test]
-fn tools_list_returns_all_eight_claudepot_tools() {
+fn tools_list_returns_all_ten_claudepot_tools() {
     let tmp = TempDir::new().unwrap();
     let db = tmp.path().join("sessions.db");
     let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"it\",\"version\":\"0\"}}}\n\
