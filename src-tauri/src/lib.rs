@@ -16,6 +16,7 @@ mod dto_automations;
 mod dto_cc_doctor;
 mod dto_cc_tips;
 mod dto_desktop;
+mod dto_env;
 mod dto_keys;
 mod dto_memory;
 mod dto_migrate;
@@ -821,6 +822,18 @@ pub fn run() {
             commands::permission::permission_grant,
             commands::permission::permission_revert,
             commands::permission::permission_extend,
+            commands::env_secret::env_vault_list,
+            commands::env_secret::env_vault_add,
+            commands::env_secret::env_vault_update,
+            commands::env_secret::env_vault_delete,
+            commands::env_secret::env_vault_copy,
+            commands::env_secret::env_file_list,
+            commands::env_secret::env_file_set,
+            commands::env_secret::env_file_comment,
+            commands::env_secret::env_file_uncomment,
+            commands::env_secret::env_file_delete,
+            commands::env_secret::env_file_copy_value,
+            commands::env_secret::env_file_inject,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

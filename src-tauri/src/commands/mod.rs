@@ -34,6 +34,7 @@ pub mod cli;
 pub mod config;
 pub mod config_types;
 pub mod desktop;
+pub mod env_secret;
 pub mod keys;
 pub mod memory;
 pub mod memory_health;

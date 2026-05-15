@@ -29,7 +29,9 @@ use zeroize::Zeroize;
 /// 30-second self-clear deadline for clipboard payloads written by
 /// `key_*_copy*`. Mirrors the legacy JS `CLIPBOARD_CLEAR_MS` so the UX
 /// timing didn't change when the policy moved Rust-side.
-const CLIPBOARD_CLEAR_MS: u64 = 30_000;
+///
+/// `pub(crate)` so the env-secret copy path shares one deadline.
+pub(crate) const CLIPBOARD_CLEAR_MS: u64 = 30_000;
 
 fn open_keys_store() -> Result<KeyStore, String> {
     let db = paths::claudepot_data_dir().join("keys.db");
@@ -328,7 +330,8 @@ fn format_payload(kind: CopyKind, secret: &str) -> String {
     }
 }
 
-fn now_unix_ms() -> u64 {
+/// `pub(crate)` — shared with the env-secret copy path.
+pub(crate) fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -343,7 +346,10 @@ fn now_unix_ms() -> u64 {
 ///
 /// The `payload` is moved into the task; the caller must zeroize its
 /// own local copy before / after returning to the IPC bridge.
-fn schedule_self_clear(app: AppHandle, mut payload: String) {
+///
+/// `pub(crate)` so the env-secret copy path reuses the exact same
+/// gated self-clear behavior.
+pub(crate) fn schedule_self_clear(app: AppHandle, mut payload: String) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(CLIPBOARD_CLEAR_MS)).await;
         let still_ours = match app.clipboard().read_text() {
