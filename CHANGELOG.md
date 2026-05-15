@@ -6,6 +6,72 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.35 — beta (unreleased)
+
+Cross-harness shared memory: a v4 schema migration over `sessions.db`,
+a Codex rollout parser, a backfill indexer, FTS5 search, durable
+memories/decisions/evidence, and an MCP server (`claudepot mcp
+memory-server`) that exposes search/read/remember/log-decision/
+archive-decision/submit-evidence/list-memories/list-decisions to
+Claude Code and Codex over stdio.
+
+### Added
+
+- **Cross-harness shared memory.** Claude Code and Codex transcripts
+  index into a unified `exchanges` table with FTS5 search. New CLI:
+  `claudepot codex index` walks `$CODEX_HOME/sessions/` and populates
+  the index incrementally.
+- **MCP memory server** (`claudepot mcp memory-server`) — 8 tools on
+  rmcp 1.7 stdio transport. Categorized error envelopes
+  (`invalid_scope`, `locator_not_indexed`, `decision_not_found`, ...)
+  and a stricter emission redaction policy than the at-rest store.
+- **Durable memories, decisions, and evidence.** New tables hold
+  user/agent-authored facts (`memories`), `decisions` with atomic
+  supersession + explicit archive, and audit-fix `evidence_records`,
+  cross-linked via `memory_links` with DB-level CHECK constraints
+  enforcing exactly-one parent + target.
+
+### Changed
+
+- **`sessions.db` migrated v3 → v4.** Additive: new `exchanges`,
+  `tool_calls`, FTS5 virtual table + maintenance triggers, plus the
+  four durable-CRUD tables. Migration is fully atomic (DDL +
+  cache-invalidate + version bump in a single `BEGIN IMMEDIATE`...
+  `COMMIT`) with strict post-write validation across the named
+  tables, the three FTS triggers, and FTS internals. Crash-safe
+  via `_pending_rescan` and forward-downgrade-guarded via
+  `_min_compatible_version`.
+- **`PRAGMA foreign_keys=ON`** now set on every `sessions.db`
+  connection. Pre-v4 FK declarations finally enforce.
+- **Tracing pinned to stderr** for the `mcp memory-server`
+  subcommand regardless of `--verbose`. MCP framing on stdout is
+  no longer at risk from a stray `tracing::warn!`.
+- **DB created atomically with mode 0600 on Unix** via
+  `OpenOptions::mode(0o600).create_new(...)` before rusqlite opens
+  the file. Closes the umask race window.
+
+### Fixed
+
+- Codex parser bounded to 1 MiB per line; oversized lines drained
+  via `BufRead::fill_buf` + `consume` so memory stays O(1)
+  regardless of input size.
+- Indexer skips symlinks to prevent arbitrary-file disclosure via a
+  poisoned `$CODEX_HOME/sessions/` entry pointing outside the
+  sessions root.
+- FTS5 user input phrase-escaped and ASCII control chars stripped
+  before reaching `MATCH`; LIKE filters wildcards escaped with an
+  explicit `ESCAPE` clause.
+- `read_locator`'s `exchange_id` lookup constrained by `file_path` —
+  a mismatched id returns `NotIndexed` instead of silently widening
+  the read to a file-level scan.
+- MCP `max_bytes` clamped server-side to 1 MiB.
+- Multi-byte-safe truncation in `read_lines`: walks down to the
+  nearest UTF-8 char boundary, never produces an invalid string.
+- Indexer's `truncate_chars` is grapheme-aware (ZWJ emoji families,
+  regional-indicator flags, skin-tone modifiers no longer split).
+- Slug uniqueness for non-UTF-8 paths via SHA-256-prefix hash
+  fallback when `to_string_lossy()` produced `U+FFFD` characters.
+
 ## 0.1.34 — beta (2026-05-15)
 
 Two new control surfaces layered over the existing project model:
