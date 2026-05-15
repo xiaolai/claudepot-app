@@ -738,7 +738,10 @@ mod tests {
             },
         )
         .unwrap_err();
-        matches!(err, DurableError::InvalidScope { .. });
+        assert!(
+            matches!(err, DurableError::InvalidScope { .. }),
+            "expected InvalidScope, got {err:?}"
+        );
     }
 
     #[test]
@@ -875,7 +878,10 @@ mod tests {
             },
         )
         .unwrap_err();
-        matches!(err, DurableError::DecisionNotFound(_));
+        assert!(
+            matches!(err, DurableError::DecisionNotFound(_)),
+            "expected DecisionNotFound, got {err:?}"
+        );
     }
 
     // ─── evidence ─────────────────────────────────────────────

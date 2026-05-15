@@ -33,7 +33,10 @@ fn parse_head_single_turn() {
 fn parse_head_missing_meta_errors() {
     let err = parse_head(&fixture("missing_session_meta.jsonl"))
         .expect_err("should fail");
-    matches!(err, CodexError::MissingSessionMeta { .. });
+    assert!(
+        matches!(err, CodexError::MissingSessionMeta { .. }),
+        "expected MissingSessionMeta, got {err:?}"
+    );
 }
 
 #[test]
@@ -49,7 +52,10 @@ fn parse_head_tolerates_malformed_lines() {
 #[test]
 fn parse_head_on_empty_errors() {
     let err = parse_head(&fixture("empty.jsonl")).expect_err("should fail");
-    matches!(err, CodexError::MissingSessionMeta { .. });
+    assert!(
+        matches!(err, CodexError::MissingSessionMeta { .. }),
+        "expected MissingSessionMeta, got {err:?}"
+    );
 }
 
 // ─── iter_events ──────────────────────────────────────────────
@@ -199,7 +205,10 @@ fn full_parse_tool_error_flagged_on_nonzero_exit() {
 fn full_parse_missing_meta_errors() {
     let err = parse_codex_rollout_jsonl(&fixture("missing_session_meta.jsonl"))
         .expect_err("must error");
-    matches!(err, CodexError::MissingSessionMeta { .. });
+    assert!(
+        matches!(err, CodexError::MissingSessionMeta { .. }),
+        "expected MissingSessionMeta, got {err:?}"
+    );
 }
 
 #[test]

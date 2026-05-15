@@ -281,7 +281,10 @@ mod tests {
             line_end: None,
         };
         let err = read_locator(&idx, &loc, &RedactionPolicy::default()).unwrap_err();
-        matches!(err, ReadError::NotIndexed(_));
+        assert!(
+            matches!(err, ReadError::NotIndexed(_)),
+            "expected NotIndexed, got {err:?}"
+        );
     }
 
     #[test]

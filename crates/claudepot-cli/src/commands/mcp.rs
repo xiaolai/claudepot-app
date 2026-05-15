@@ -40,6 +40,24 @@ fn default_db_path() -> PathBuf {
         .join("sessions.db")
 }
 
+/// Build the redaction policy used at every MCP emission. Stricter
+/// than `RedactionPolicy::default()` because the MCP boundary is
+/// the riskiest emission surface — LLM clients see exactly what
+/// the server returns, and prompt-injected agents can ask for
+/// arbitrary content. Masks `sk-ant-*` tokens, email addresses,
+/// and `FOO=bar` env-assignment lines.
+///
+/// At-rest data in `~/.claudepot/sessions.db` is unredacted per R9;
+/// this policy applies only to emission.
+fn mcp_redaction_policy() -> RedactionPolicy {
+    RedactionPolicy {
+        anthropic_keys: true,
+        emails: true,
+        env_assignments: true,
+        ..Default::default()
+    }
+}
+
 /// Entry point for the `mcp memory-server` subcommand.
 pub async fn run(db_path: Option<PathBuf>) -> Result<()> {
     let path = db_path.unwrap_or_else(default_db_path);
@@ -47,7 +65,7 @@ pub async fn run(db_path: Option<PathBuf>) -> Result<()> {
     tracing::info!(db = %path.display(), "claudepot mcp memory-server starting");
     let server = MemoryServer {
         idx,
-        policy: Arc::new(RedactionPolicy::default()),
+        policy: Arc::new(mcp_redaction_policy()),
     };
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
@@ -273,6 +291,10 @@ impl MemoryServer {
         &self,
         Parameters(req): Parameters<SearchMemoryRequest>,
     ) -> String {
+        let user_limit = req.limit.unwrap_or(20).clamp(1, 50);
+        // Query one extra row so we can report has_more without
+        // the boundary-false-positive of `len >= limit`. Slice
+        // back to user_limit before returning.
         let q = sms::SearchQuery {
             query: req.query,
             source_kind: req.source_kind,
@@ -281,17 +303,23 @@ impl MemoryServer {
             model: None,
             since_ms: None,
             until_ms: None,
-            limit: req.limit.unwrap_or(20),
+            limit: user_limit + 1,
             offset: req.offset.unwrap_or(0),
             sort: sms::SearchSort::Relevance,
         };
-        let limit = q.limit.clamp(1, 50);
-        let hits = sms::search(&self.idx, &q, &self.policy).unwrap_or_default();
-        let has_more = hits.len() as u32 >= limit;
+        let raw_hits = match sms::search(&self.idx, &q, &self.policy) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_search_memory: search failed");
+                return to_json(&error_with(error_code::SEARCH_FAILED, &e, &self.policy));
+            }
+        };
+        let has_more = raw_hits.len() as u32 > user_limit;
         let payload = SearchPayload {
             schema_version: SCHEMA_VERSION,
-            hits: hits
+            hits: raw_hits
                 .into_iter()
+                .take(user_limit as usize)
                 .map(|h| SearchHitOut {
                     exchange_id: h.exchange_id,
                     file_path: h.file_path,
@@ -331,10 +359,14 @@ impl MemoryServer {
                 body: r.body,
                 truncated: r.truncated,
             }),
-            Err(e) => to_json(&ErrorPayload {
-                schema_version: SCHEMA_VERSION,
-                error: format!("{e}"),
-            }),
+            Err(e) => {
+                let code = match &e {
+                    smr::ReadError::NotIndexed(_) => error_code::LOCATOR_NOT_INDEXED,
+                    smr::ReadError::Io { .. } | smr::ReadError::Sql(_) => error_code::READ_FAILED,
+                };
+                tracing::warn!(error = %e, "claudepot_read_conversation: read failed");
+                to_json(&error_with(code, &e, &self.policy))
+            }
         }
     }
 
@@ -346,7 +378,12 @@ impl MemoryServer {
         let scope = match req.scope.as_str() {
             "global" => durable::Scope::Global,
             "project" => durable::Scope::Project,
-            _ => return to_json(&error("scope must be 'global' or 'project'")),
+            _ => {
+                return to_json(&error_static(
+                    error_code::INVALID_SCOPE,
+                    "scope must be 'global' or 'project'",
+                ));
+            }
         };
         let kind = match req.kind.as_str() {
             "fact" => durable::MemoryKind::Fact,
@@ -354,13 +391,22 @@ impl MemoryServer {
             "pattern" => durable::MemoryKind::Pattern,
             "constraint" => durable::MemoryKind::Constraint,
             "summary" => durable::MemoryKind::Summary,
-            _ => return to_json(&error("kind must be one of fact|preference|pattern|constraint|summary")),
+            _ => {
+                return to_json(&error_static(
+                    error_code::INVALID_KIND,
+                    "kind must be one of fact|preference|pattern|constraint|summary",
+                ));
+            }
         };
         let created_by = req
             .created_by
             .clone()
             .unwrap_or_else(|| "agent:unknown".to_string());
         let pp = req.project_path.as_deref();
+        // L4: clamp confidence to [0, 100] for consistency with
+        // submit_evidence and to keep the column's semantic
+        // interpretation (a percentage) intact.
+        let confidence = req.confidence.map(|c| c.clamp(0, 100));
         let new = durable::NewMemory {
             scope,
             project_path: pp,
@@ -368,7 +414,7 @@ impl MemoryServer {
             content: &req.content,
             created_by_kind: durable::CreatedByKind::Agent,
             created_by: &created_by,
-            confidence: req.confidence,
+            confidence,
         };
         match durable::create_memory(&self.idx, &new) {
             Ok(m) => to_json(&RememberPayload {
@@ -378,7 +424,14 @@ impl MemoryServer {
                 kind: req.kind,
                 created_at_ms: m.created_at_ms,
             }),
-            Err(e) => to_json(&error(&format!("{e}"))),
+            Err(e) => {
+                let code = match &e {
+                    durable::DurableError::InvalidScope { .. } => error_code::INVALID_SCOPE,
+                    _ => error_code::WRITE_FAILED,
+                };
+                tracing::warn!(error = %e, "claudepot_remember: create failed");
+                to_json(&error_with(code, &e, &self.policy))
+            }
         }
     }
 
@@ -411,7 +464,14 @@ impl MemoryServer {
                 status: "active".to_string(),
                 supersedes_id: d.supersedes_id,
             }),
-            Err(e) => to_json(&error(&format!("{e}"))),
+            Err(e) => {
+                let code = match &e {
+                    durable::DurableError::DecisionNotFound(_) => error_code::DECISION_NOT_FOUND,
+                    _ => error_code::WRITE_FAILED,
+                };
+                tracing::warn!(error = %e, "claudepot_log_decision: write failed");
+                to_json(&error_with(code, &e, &self.policy))
+            }
         }
     }
 
@@ -440,7 +500,10 @@ impl MemoryServer {
                 id: e.id,
                 created_at_ms: e.created_at_ms,
             }),
-            Err(e) => to_json(&error(&format!("{e}"))),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_submit_evidence: write failed");
+                to_json(&error_with(error_code::WRITE_FAILED, &e, &self.policy))
+            }
         }
     }
 
@@ -481,12 +544,18 @@ impl MemoryServer {
                         kind: memory_kind_str(m.kind).to_string(),
                         content: redact_apply(&m.content, &self.policy),
                         created_by_kind: created_by_kind_str(m.created_by_kind).to_string(),
-                        created_by: m.created_by,
+                        // created_by is agent-supplied (e.g. via the
+                        // `remember` tool); an injected agent could
+                        // stash a secret here. Redact before emission.
+                        created_by: redact_apply(&m.created_by, &self.policy),
                         created_at_ms: m.created_at_ms,
                     })
                     .collect(),
             }),
-            Err(e) => to_json(&error(&format!("{e}"))),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_list_memories: query failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
         }
     }
 
@@ -514,35 +583,79 @@ impl MemoryServer {
                     .map(|d| DecisionOut {
                         id: d.id,
                         project_path: d.project_path,
-                        topic: d.topic,
+                        // topic is agent-supplied; redact.
+                        topic: d.topic.map(|t| redact_apply(&t, &self.policy)),
                         decision: redact_apply(&d.decision, &self.policy),
                         rationale: d
                             .rationale
                             .map(|r| redact_apply(&r, &self.policy)),
                         status: decision_status_str(d.status).to_string(),
                         created_by_kind: created_by_kind_str(d.created_by_kind).to_string(),
-                        created_by: d.created_by,
+                        // created_by is agent-supplied; redact.
+                        created_by: redact_apply(&d.created_by, &self.policy),
                         created_at_ms: d.created_at_ms,
                         supersedes_id: d.supersedes_id,
                     })
                     .collect(),
             }),
-            Err(e) => to_json(&error(&format!("{e}"))),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_list_decisions: query failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
         }
     }
 }
 
 // ─── shared helpers ───────────────────────────────────────────
 
+/// MCP error envelope. Carries a stable `error_code` so callers
+/// can branch programmatically (e.g. retry on `sql_error`, abort
+/// on `invalid_scope`). The `error` string is always run through
+/// the MCP redaction policy before reaching this struct so a
+/// failed write of secret-bearing content can't echo the secret
+/// back in the error message.
 #[derive(Serialize, schemars::JsonSchema)]
 struct ErrorPayload {
     schema_version: u32,
+    /// Stable category code. See `ErrorCode::*` constants.
+    error_code: String,
+    /// Human-readable error description. Already redacted.
     error: String,
 }
 
-fn error(message: &str) -> ErrorPayload {
+/// Stable error codes. Documented as part of the MCP contract; do
+/// not rename or remove without a schema bump.
+mod error_code {
+    pub const INVALID_SCOPE: &str = "invalid_scope";
+    pub const INVALID_KIND: &str = "invalid_kind";
+    pub const LOCATOR_NOT_INDEXED: &str = "locator_not_indexed";
+    pub const DECISION_NOT_FOUND: &str = "decision_not_found";
+    pub const SEARCH_FAILED: &str = "search_failed";
+    pub const READ_FAILED: &str = "read_failed";
+    pub const WRITE_FAILED: &str = "write_failed";
+    pub const LIST_FAILED: &str = "list_failed";
+}
+
+/// Build an error envelope with the given category and the
+/// `Display`-rendered cause. The message is redacted before
+/// emission so a `Sql` error that echoes a row value (e.g. UNIQUE
+/// constraint failure on `memories.content`) can't leak a secret
+/// the caller just tried to write.
+fn error_with(code: &str, cause: &dyn std::fmt::Display, policy: &RedactionPolicy) -> ErrorPayload {
+    let raw = format!("{cause}");
     ErrorPayload {
         schema_version: SCHEMA_VERSION,
+        error_code: code.to_string(),
+        error: redact_apply(&raw, policy),
+    }
+}
+
+/// Build an error envelope for a static message that doesn't need
+/// redaction (input-validation errors authored by us).
+fn error_static(code: &str, message: &str) -> ErrorPayload {
+    ErrorPayload {
+        schema_version: SCHEMA_VERSION,
+        error_code: code.to_string(),
         error: message.to_string(),
     }
 }
@@ -551,6 +664,7 @@ fn to_json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| {
         serde_json::to_string(&ErrorPayload {
             schema_version: SCHEMA_VERSION,
+            error_code: "serialization_failed".to_string(),
             error: "serialization failed".to_string(),
         })
         .unwrap_or_else(|_| "{}".to_string())

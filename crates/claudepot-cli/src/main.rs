@@ -887,6 +887,13 @@ impl AppContext {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Pin all tracing output to stderr regardless of subcommand. The
+    // MCP memory-server subcommand uses stdout for JSON-RPC frames;
+    // a single `tracing::info!` / `warn!` landing on the default
+    // stdout writer would corrupt the protocol stream silently. This
+    // is the single mandatory invariant for `claudepot mcp …`, but
+    // it's safe everywhere else too — Claudepot's user-facing CLI
+    // output uses `println!`, never `tracing`.
     if cli.verbose {
         // RUST_LOG wins when set — lets users pin noisy modules on the
         // fly (e.g. `RUST_LOG=claudepot_core::cli_backend=trace`).
@@ -894,7 +901,22 @@ async fn main() -> Result<()> {
         // unparseable, preserving the prior default.
         let filter = tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("claudepot=debug"));
-        tracing_subscriber::fmt().with_env_filter(filter).init();
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .init();
+    } else if matches!(cli.command, Commands::Mcp { .. }) {
+        // MCP subcommand always installs a stderr-pinned subscriber
+        // (even without --verbose) so deep-stack `tracing::warn!` from
+        // `apply_schema` or the indexer can never land on stdout.
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .init();
     }
 
     let data_dir = paths::claudepot_data_dir();
