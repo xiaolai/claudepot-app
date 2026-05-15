@@ -903,6 +903,11 @@ fn summary_from_state(s: &SessionState, now_ms: i64) -> LiveSessionSummary {
         .map(|t| (now_ms - t.timestamp_millis()).max(0))
         .unwrap_or(now_ms - s.started_at_ms);
     LiveSessionSummary {
+        // The current LiveRuntime polls only the Claude PID
+        // registry; Codex live-runtime integration (WI-L1/L2 of
+        // sessions-live.md) will set this to SourceKind::Codex
+        // when it lands.
+        source_kind: crate::session_live::types::SourceKind::ClaudeCode,
         session_id: s.session_id.clone(),
         pid: s.pid,
         cwd: crate::session_live::redact::redact_secrets(&s.cwd),

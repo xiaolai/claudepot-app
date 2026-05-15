@@ -680,6 +680,7 @@ async fn metrics_writes_transition_plus_heartbeat() {
         .record_tick(
             1_000,
             &[LiveSessionSummary {
+                source_kind: Default::default(),
                 session_id: "s".into(),
                 pid: 1,
                 cwd: "/tmp/p".into(),
@@ -699,6 +700,7 @@ async fn metrics_writes_transition_plus_heartbeat() {
         .record_tick(
             2_000,
             &[LiveSessionSummary {
+                source_kind: Default::default(),
                 session_id: "s".into(),
                 pid: 1,
                 cwd: "/tmp/p".into(),

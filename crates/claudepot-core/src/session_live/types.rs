@@ -10,6 +10,23 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Origin of a live session — Claude Code or Codex CLI. The live
+/// runtime currently only emits `ClaudeCode` summaries; the field
+/// exists on `LiveSessionSummary` so the UI can render a per-source
+/// badge and so future Codex live-runtime integration (WI-L1/L2 of
+/// the sessions-live plan) lands without a breaking DTO change.
+///
+/// Default is `ClaudeCode` for backward compatibility with any
+/// existing consumer that decodes the wire format without the
+/// field (serde `#[serde(default)]` on the parent uses this).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceKind {
+    #[default]
+    ClaudeCode,
+    Codex,
+}
+
 /// Canonical status vocabulary. Matches the three values Claude Code
 /// itself publishes via `concurrentSessions::SessionStatus` (see
 /// `~/github/claude_code_src/src/utils/concurrentSessions.ts:19`).
@@ -82,6 +99,11 @@ pub struct PidRecord {
 /// `redact::redact_secrets`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveSessionSummary {
+    /// Which harness this session belongs to. Defaults to
+    /// `ClaudeCode` because the existing runtime only emits Claude
+    /// summaries; the UI uses this to render a source badge.
+    #[serde(default)]
+    pub source_kind: SourceKind,
     pub session_id: String,
     pub pid: u32,
     pub cwd: String,

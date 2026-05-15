@@ -8,6 +8,12 @@ use serde::Serialize;
 /// webview doesn't need to handle `DateTime<Utc>`.
 #[derive(Serialize, Clone)]
 pub struct LiveSessionSummaryDto {
+    /// `claude_code` or `codex` — which harness this session
+    /// belongs to. UI renders a badge per source. The current
+    /// runtime emits only `claude_code`; Codex live-runtime
+    /// integration (WI-L1/L2 of sessions-live.md) will start
+    /// emitting `codex` when it lands.
+    pub source_kind: String,
     pub session_id: String,
     pub pid: u32,
     pub cwd: String,
@@ -26,14 +32,20 @@ pub struct LiveSessionSummaryDto {
 
 impl From<claudepot_core::session_live::types::LiveSessionSummary> for LiveSessionSummaryDto {
     fn from(s: claudepot_core::session_live::types::LiveSessionSummary) -> Self {
-        use claudepot_core::session_live::types::Status;
+        use claudepot_core::session_live::types::{SourceKind, Status};
         let status = match s.status {
             Status::Busy => "busy",
             Status::Idle => "idle",
             Status::Waiting => "waiting",
         }
         .to_string();
+        let source_kind = match s.source_kind {
+            SourceKind::ClaudeCode => "claude_code",
+            SourceKind::Codex => "codex",
+        }
+        .to_string();
         Self {
+            source_kind,
             session_id: s.session_id,
             pid: s.pid,
             cwd: s.cwd,

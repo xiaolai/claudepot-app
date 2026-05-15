@@ -202,6 +202,7 @@ mod tests {
 
     fn session(sid: &str, status: Status, errored: bool, stuck: bool) -> LiveSessionSummary {
         LiveSessionSummary {
+            source_kind: Default::default(),
             session_id: sid.to_string(),
             pid: 1,
             cwd: "/tmp/proj".to_string(),
