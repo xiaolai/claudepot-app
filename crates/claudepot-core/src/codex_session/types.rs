@@ -195,4 +195,32 @@ pub struct CodexToolCall {
 pub struct CodexConversation {
     pub head: CodexHead,
     pub exchanges: Vec<CodexExchange>,
+    /// Quality signals from the parse pass. The indexer uses these
+    /// to decide whether to stamp the file's staleness triple
+    /// (refuses to stamp when `truncated_by_io` so the next
+    /// backfill retries) and to surface per-file warnings.
+    pub diagnostics: ParseDiagnostics,
+}
+
+/// Per-file parse-quality signals. All fields default to zero/false
+/// on a clean parse. Non-default values do NOT make the parse
+/// "fail" — the caller still gets a valid `CodexConversation` with
+/// whatever was decoded — but they DO change the indexer's
+/// stamping behavior and surface as per-file warnings.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ParseDiagnostics {
+    /// Number of lines that didn't decode (bad JSON, unknown
+    /// shape, etc.). Each was skipped; the line counter advanced.
+    pub malformed_lines: u32,
+    /// Number of lines exceeding `MAX_LINE_BYTES` that were drained
+    /// without allocation. Defends against adversarial input that
+    /// would otherwise OOM the indexer.
+    pub oversize_lines: u32,
+    /// True if the parser stopped mid-stream due to an I/O error
+    /// (not EOF). The indexer must refuse to stamp the staleness
+    /// triple in this case — otherwise a transient read failure
+    /// leaves a partial transcript cached as if complete, and the
+    /// (size, mtime, inode) tuple makes it look "unchanged" on
+    /// subsequent backfills.
+    pub truncated_by_io: bool,
 }

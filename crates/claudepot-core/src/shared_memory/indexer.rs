@@ -66,8 +66,10 @@ pub fn backfill_codex(
     stats.discovered = discovered.len();
 
     let db = idx.db();
-    // Single transaction for atomic apply. Per-file parse happens
-    // outside the lock; only the upsert SQL holds it.
+    // Single outer transaction for atomic apply. Each per-file
+    // write is wrapped in a SAVEPOINT (M15) so that a per-file
+    // failure (e.g. PRIMARY KEY collision in tool_calls) only
+    // rolls back that file's writes, not the entire batch.
     let tx = db.unchecked_transaction()?;
 
     // Load existing Codex cache state.
@@ -76,16 +78,40 @@ pub fn backfill_codex(
 
     // Index pass.
     for entry in &discovered {
-        match upsert_codex_session(&tx, entry, existing.get(&entry.file_path)) {
+        let previously_indexed = existing.contains_key(&entry.file_path);
+        match upsert_codex_session_in_savepoint(&tx, entry, existing.get(&entry.file_path)) {
             Ok(IndexOutcome::Indexed) => stats.indexed += 1,
             Ok(IndexOutcome::Skipped) => stats.skipped_unchanged += 1,
             Err(e) => {
                 tracing::warn!(
                     path = %entry.file_path,
                     error = %e,
-                    "shared_memory: codex backfill error"
+                    previously_indexed,
+                    "shared_memory: codex backfill error (savepoint rolled back)"
                 );
                 stats.failed.push((PathBuf::from(&entry.file_path), e));
+                // H6 — stale-row cleanup: if a previously-indexed
+                // file fails to re-parse / re-write now, the old
+                // `sessions` row + cascade rows would otherwise
+                // keep pointing at content that no longer matches
+                // disk. Force-delete here so search results
+                // reflect on-disk truth.
+                //
+                // The DELETE runs in the outer transaction (not
+                // the rolled-back savepoint), so it persists at
+                // outer commit.
+                if previously_indexed {
+                    if let Err(e2) = tx.execute(
+                        "DELETE FROM sessions WHERE file_path = ?1 AND source_kind = 'codex'",
+                        [&entry.file_path],
+                    ) {
+                        tracing::warn!(
+                            path = %entry.file_path,
+                            error = %e2,
+                            "shared_memory: failed to clear stale cache row after parse failure"
+                        );
+                    }
+                }
             }
         }
     }
@@ -108,6 +134,38 @@ pub fn backfill_codex(
 
     tx.commit()?;
     Ok(stats)
+}
+
+/// Run `upsert_codex_session` inside a SAVEPOINT. On success the
+/// savepoint is released (merged into the outer txn); on failure
+/// it's rolled back so the per-file error doesn't poison the
+/// batch.
+///
+/// SQLite SAVEPOINT names must be ASCII identifiers; we use a
+/// fixed name (`codex_upsert`) since SAVEPOINTs nest by stack order
+/// and we never have two nested codex upserts at the same depth.
+fn upsert_codex_session_in_savepoint(
+    tx: &rusqlite::Transaction<'_>,
+    entry: &CodexDiscovery,
+    existing: Option<&(i64, i64, i64)>,
+) -> Result<IndexOutcome, String> {
+    tx.execute_batch("SAVEPOINT codex_upsert")
+        .map_err(|e| format!("savepoint: {e}"))?;
+    match upsert_codex_session(tx, entry, existing) {
+        Ok(outcome) => {
+            tx.execute_batch("RELEASE codex_upsert")
+                .map_err(|e| format!("release: {e}"))?;
+            Ok(outcome)
+        }
+        Err(e) => {
+            // Best-effort rollback. If this also fails, we propagate
+            // the original parse/write error to the caller; the
+            // outer transaction will fail on next write, which is
+            // acceptable degradation for what should be a rare path.
+            let _ = tx.execute_batch("ROLLBACK TO codex_upsert; RELEASE codex_upsert");
+            Err(e)
+        }
+    }
 }
 
 // ─── walk ─────────────────────────────────────────────────────
@@ -241,8 +299,60 @@ fn upsert_codex_session(
     let conv = parse_codex_rollout_jsonl(Path::new(&entry.file_path))
         .map_err(|e| format!("parse: {e}"))?;
 
-    write_codex_conversation(tx, entry, &conv).map_err(|e| format!("write: {e}"))?;
+    // M14 — TOCTOU mitigation. The staleness triple we want to
+    // stamp must reflect the file's state AFTER parsing, not
+    // before. If the file grew between the walk's stat and the
+    // parser's read (a live Codex session appended bytes), the
+    // walk's triple no longer matches disk; stamping it would mean
+    // the next backfill mistakenly skips the file. Re-stat now and
+    // use the post-parse triple. Net effect: we converge to truth
+    // on the next backfill if any drift was observed.
+    let post_parse_entry = match restat_after_parse(entry) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(
+                path = %entry.file_path,
+                error = %e,
+                "shared_memory: failed to re-stat after parse; using pre-parse tuple"
+            );
+            entry.clone()
+        }
+    };
+
+    // H6 — partial-parse stickiness mitigation. If the parser
+    // saw a mid-stream I/O error, the conversation we have is
+    // incomplete. Refuse to stamp the staleness triple so the
+    // next backfill retries; without this, the incomplete row
+    // would persist indefinitely because `(size, mtime, inode)`
+    // matches and the file is skipped.
+    if conv.diagnostics.truncated_by_io {
+        return Err(format!(
+            "parse truncated by I/O error (malformed={}, oversize={}); not stamping cache",
+            conv.diagnostics.malformed_lines, conv.diagnostics.oversize_lines
+        ));
+    }
+
+    write_codex_conversation(tx, &post_parse_entry, &conv)
+        .map_err(|e| format!("write: {e}"))?;
     Ok(IndexOutcome::Indexed)
+}
+
+fn restat_after_parse(entry: &CodexDiscovery) -> Result<CodexDiscovery, std::io::Error> {
+    let meta = fs::metadata(&entry.file_path)?;
+    let size = meta.len() as i64;
+    let mtime_ns = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0);
+    let inode = inode_of(&meta);
+    Ok(CodexDiscovery {
+        file_path: entry.file_path.clone(),
+        size,
+        mtime_ns,
+        inode,
+    })
 }
 
 fn write_codex_conversation(
@@ -639,6 +749,101 @@ mod tests {
             .query_row("SELECT tool_name FROM tool_calls", [], |r| r.get(0))
             .unwrap();
         assert_eq!(tc_name, "shell");
+    }
+
+    #[test]
+    fn parse_failure_clears_stale_cache_row() {
+        // H6 — when a previously-indexed file becomes unparseable,
+        // the indexer must remove the stale `sessions` row so
+        // search results don't keep pointing at the old content.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let codex_root = tmp.path().join("codex").join("sessions");
+        fs::create_dir_all(&codex_root).unwrap();
+        let p = write_rollout(
+            &codex_root,
+            "2026/05/15",
+            "rollout.jsonl",
+            &sample_rollout_body("01", "first prompt", "first answer"),
+        );
+
+        // First backfill: clean index.
+        backfill_codex(&idx, &codex_root).unwrap();
+        {
+            let db = open_raw(&tmp.path().join("sessions.db"));
+            let n: i64 = db
+                .query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 1);
+        }
+
+        // Corrupt the file — replace contents with non-JSONL.
+        // Bump mtime so the staleness guard triggers a re-parse.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(&p, "not json at all\nstill not json\n").unwrap();
+
+        let stats = backfill_codex(&idx, &codex_root).expect("ok");
+        assert_eq!(
+            stats.failed.len(),
+            1,
+            "corrupted file should be in failed list"
+        );
+
+        // Stale row must be gone — H6 cleanup.
+        let db = open_raw(&tmp.path().join("sessions.db"));
+        let n: i64 = db
+            .query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            n, 0,
+            "stale sessions row must be removed after parse failure"
+        );
+    }
+
+    #[test]
+    fn savepoint_isolates_per_file_failures() {
+        // M15 — a single bad file must not abort the whole tick's
+        // transaction. Stage one good file + one bad file and
+        // verify the good one persists.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let codex_root = tmp.path().join("codex").join("sessions");
+        fs::create_dir_all(&codex_root).unwrap();
+        write_rollout(
+            &codex_root,
+            "2026/05/15",
+            "good.jsonl",
+            &sample_rollout_body("01-good", "good prompt", "good answer"),
+        );
+        // Bad: looks like a Codex rollout but session_meta lacks
+        // payload.id, triggering MissingSessionMeta after parse_head.
+        write_rollout(
+            &codex_root,
+            "2026/05/15",
+            "bad.jsonl",
+            r#"{"timestamp":"2026-05-15T11:30:00.000Z","type":"session_meta","payload":{"cwd":"/x"}}
+{"timestamp":"2026-05-15T11:30:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"a"}]}}
+"#,
+        );
+
+        let stats = backfill_codex(&idx, &codex_root).expect("ok");
+        assert_eq!(stats.discovered, 2);
+        assert_eq!(stats.indexed, 1, "one file should index cleanly");
+        assert_eq!(stats.failed.len(), 1, "one file should fail");
+
+        let db = open_raw(&tmp.path().join("sessions.db"));
+        let session_ids: Vec<String> = db
+            .prepare("SELECT session_id FROM sessions ORDER BY session_id")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            session_ids,
+            vec!["01-good".to_string()],
+            "good file should persist despite bad file's savepoint rollback"
+        );
     }
 
     #[test]

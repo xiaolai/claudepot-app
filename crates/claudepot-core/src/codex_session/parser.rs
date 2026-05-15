@@ -2,7 +2,7 @@
 //! `parse_codex_rollout_jsonl`.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -11,8 +11,21 @@ use serde_json::Value;
 use super::error::CodexError;
 use super::types::{
     CodexConversation, CodexEvent, CodexExchange, CodexHead, CodexToolCall,
-    EnvironmentTextKind,
+    EnvironmentTextKind, ParseDiagnostics,
 };
+
+/// Maximum bytes the parser will read for a single JSONL line.
+/// Codex rollouts in the wild peak at a few kilobytes per line; 1
+/// MiB is three orders of magnitude above any real value and well
+/// below the OOM threshold for a typical desktop process.
+///
+/// A line longer than this cap is treated as adversarial input:
+/// we drain the rest of the line to the next `\n` without
+/// allocating it, emit a malformed-line signal so the indexer can
+/// surface the per-file failure, and continue. The file's
+/// staleness triple is NOT stamped when a truncated line is seen
+/// (per H6 / M14), so the next backfill retries.
+pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 
 /// Read just enough of the file to populate a `CodexHead`. Reads
 /// the first `session_meta` record and the first `turn_context`
@@ -93,9 +106,10 @@ pub fn parse_head(path: &Path) -> Result<CodexHead, CodexError> {
 }
 
 /// Stream every JSONL line as a `CodexEvent`. Malformed lines are
-/// silently skipped (the line counter still advances). Returns an
-/// iterator rather than collecting because rollouts can be tens of
-/// megabytes and the indexer can fold over the stream.
+/// silently skipped (the line counter still advances) but counted
+/// in [`EventIter::diagnostics`]. Returns an iterator rather than
+/// collecting because rollouts can be tens of megabytes and the
+/// indexer can fold over the stream.
 pub fn iter_events(path: &Path) -> Result<EventIter, CodexError> {
     let file = File::open(path).map_err(|source| CodexError::Io {
         path: path.to_path_buf(),
@@ -106,13 +120,16 @@ pub fn iter_events(path: &Path) -> Result<EventIter, CodexError> {
         line_no: 0,
         buf: String::new(),
         done: false,
+        diagnostics: ParseDiagnostics::default(),
     })
 }
 
 /// Full-file collector. Walks `iter_events`, builds exchanges by
 /// pairing genuine user prompts with subsequent assistant messages
 /// and tool calls. The head is parsed independently from the same
-/// file so callers only need to open it once.
+/// file so callers only need to open it once. The returned
+/// `CodexConversation.diagnostics` carries any parse-quality
+/// signals; the indexer reads them to decide stamping behavior.
 pub fn parse_codex_rollout_jsonl(path: &Path) -> Result<CodexConversation, CodexError> {
     let mut head = parse_head_collecting(path)?;
     let session_id = head.session_id.clone();
@@ -121,7 +138,10 @@ pub fn parse_codex_rollout_jsonl(path: &Path) -> Result<CodexConversation, Codex
     let mut current: Option<ExchangeBuilder> = None;
     let mut pending_calls: Vec<CodexToolCall> = Vec::new();
 
-    for event in iter_events(path)? {
+    let mut iter = iter_events(path)?;
+    // `by_ref()` so we can still read `iter.diagnostics()` after
+    // the loop drains it.
+    for event in iter.by_ref() {
         match event {
             CodexEvent::SessionMeta { .. } | CodexEvent::Other { .. } => {}
             CodexEvent::TurnContext {
@@ -229,7 +249,24 @@ pub fn parse_codex_rollout_jsonl(path: &Path) -> Result<CodexConversation, Codex
         exchanges.push(b.finish(&pending_calls));
     }
 
-    Ok(CodexConversation { head, exchanges })
+    let diagnostics = iter.diagnostics().clone();
+    if diagnostics.malformed_lines > 0
+        || diagnostics.oversize_lines > 0
+        || diagnostics.truncated_by_io
+    {
+        tracing::warn!(
+            path = %path.display(),
+            malformed = diagnostics.malformed_lines,
+            oversize = diagnostics.oversize_lines,
+            truncated_by_io = diagnostics.truncated_by_io,
+            "codex_session: parse completed with diagnostics"
+        );
+    }
+    Ok(CodexConversation {
+        head,
+        exchanges,
+        diagnostics,
+    })
 }
 
 /// Identical contract to `parse_head` but returns a fresh
@@ -246,12 +283,27 @@ fn parse_head_collecting(path: &Path) -> Result<CodexHead, CodexError> {
     Ok(head)
 }
 
-/// Streaming iterator over JSONL lines as decoded events.
+/// Streaming iterator over JSONL lines as decoded events. The
+/// iterator silently skips malformed and oversized lines but
+/// records both in `diagnostics()` — see [`ParseDiagnostics`].
+/// Mid-stream I/O errors flip `diagnostics().truncated_by_io` to
+/// true; the indexer reads this after iteration to decide whether
+/// to stamp the file's staleness triple.
 pub struct EventIter {
     reader: BufReader<File>,
     line_no: u32,
     buf: String,
     done: bool,
+    diagnostics: ParseDiagnostics,
+}
+
+impl EventIter {
+    /// Read-only access to the parse quality signals accumulated
+    /// during iteration. Stable across `next()` calls; finalize
+    /// after the iterator is exhausted.
+    pub fn diagnostics(&self) -> &ParseDiagnostics {
+        &self.diagnostics
+    }
 }
 
 impl Iterator for EventIter {
@@ -263,10 +315,57 @@ impl Iterator for EventIter {
         }
         loop {
             self.buf.clear();
-            match self.reader.read_line(&mut self.buf) {
+            // Cap the per-line read at MAX_LINE_BYTES. `take` here
+            // is a logical guard wrapping the underlying reader
+            // for one line; we restore the unbounded reader after.
+            // SAFETY: `take` consumes its inner; we re-borrow via
+            // `by_ref` and `take(N)` for each line.
+            let mut limited = (&mut self.reader).take(MAX_LINE_BYTES as u64 + 1);
+            match limited.read_line(&mut self.buf) {
                 Ok(0) => {
                     self.done = true;
                     return None;
+                }
+                Ok(n) if n > MAX_LINE_BYTES => {
+                    // Oversized line. We've consumed MAX_LINE_BYTES+1
+                    // bytes into self.buf already (no newline among
+                    // them, since `read_line` only stops at one).
+                    // Drain to the next newline via `read_until`
+                    // (which honors line boundaries — important so
+                    // the next `read_line` call starts at the
+                    // correct position, not mid-following-line).
+                    self.line_no += 1;
+                    self.diagnostics.oversize_lines += 1;
+                    tracing::warn!(
+                        line = self.line_no,
+                        bytes_consumed = n,
+                        cap = MAX_LINE_BYTES,
+                        "codex_session: dropping oversized JSONL line"
+                    );
+                    let mut sink: Vec<u8> = Vec::new();
+                    // `read_until` returns the count of bytes read
+                    // including the delimiter when found; returns
+                    // Ok(0) on EOF without delimiter. We don't care
+                    // about the bytes — `sink` is discarded.
+                    match self.reader.read_until(b'\n', &mut sink) {
+                        Ok(0) => {
+                            // EOF reached without seeing a newline.
+                            // The oversized line had no terminator.
+                            self.done = true;
+                            return None;
+                        }
+                        Ok(_) => {
+                            // Drained to (and past) the newline.
+                            // Next iteration of the outer loop
+                            // starts a fresh line.
+                        }
+                        Err(_) => {
+                            self.diagnostics.truncated_by_io = true;
+                            self.done = true;
+                            return None;
+                        }
+                    }
+                    continue;
                 }
                 Ok(_) => {
                     self.line_no += 1;
@@ -277,15 +376,18 @@ impl Iterator for EventIter {
                     if let Some(event) = decode_line(trimmed, self.line_no) {
                         return Some(event);
                     }
-                    // Malformed — skip silently, the line counter
-                    // has already advanced.
+                    // Malformed — skip but count for diagnostics
+                    // (the line counter has already advanced).
+                    self.diagnostics.malformed_lines += 1;
                 }
                 Err(_) => {
-                    // I/O hiccup mid-stream. The iterator surface
-                    // doesn't propagate errors; we end the stream
-                    // and trust the indexer to detect via the
-                    // staleness triple that the file should be
-                    // re-scanned next time.
+                    // I/O hiccup mid-stream. Surface as
+                    // `truncated_by_io` so the indexer refuses to
+                    // stamp the staleness triple — without that,
+                    // a partial parse persists indefinitely
+                    // because the next backfill sees the file as
+                    // unchanged.
+                    self.diagnostics.truncated_by_io = true;
                     self.done = true;
                     return None;
                 }

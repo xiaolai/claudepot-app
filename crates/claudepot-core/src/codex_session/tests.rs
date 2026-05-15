@@ -244,6 +244,50 @@ fn full_parse_classifies_synthetic_user_messages() {
 }
 
 #[test]
+fn diagnostics_count_malformed_lines() {
+    let conv = parse_codex_rollout_jsonl(&fixture("malformed_lines.jsonl"))
+        .expect("ok");
+    // Fixture has session_meta, then non-JSON, then truncated-JSON,
+    // then valid user message, then a JSON object lacking `type`,
+    // then valid assistant — 3 malformed lines total.
+    assert!(
+        conv.diagnostics.malformed_lines >= 3,
+        "expected ≥ 3 malformed lines, got {}",
+        conv.diagnostics.malformed_lines
+    );
+    assert!(!conv.diagnostics.truncated_by_io);
+    assert_eq!(conv.diagnostics.oversize_lines, 0);
+}
+
+#[test]
+fn diagnostics_flag_oversize_lines() {
+    // Build a fixture with one valid session_meta line, one
+    // adversarial line larger than MAX_LINE_BYTES, then one valid
+    // exchange. The oversize line should be dropped with
+    // diagnostics.oversize_lines == 1.
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("oversize.jsonl");
+    let huge = "x".repeat(super::parser::MAX_LINE_BYTES + 10);
+    let body = format!(
+        "{{\"timestamp\":\"2026-05-15T11:30:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"01-big\",\"cwd\":\"/x\",\"originator\":\"codex_cli\",\"cli_version\":\"0.44.0\"}}}}\n{huge}\n{{\"timestamp\":\"2026-05-15T11:30:00.200Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"hello\"}}]}}}}\n{{\"timestamp\":\"2026-05-15T11:30:01.000Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"hi\"}}]}}}}\n",
+    );
+    std::fs::write(&p, body).unwrap();
+
+    let conv = parse_codex_rollout_jsonl(&p).expect("ok");
+    assert!(
+        conv.diagnostics.oversize_lines >= 1,
+        "oversize line should be counted, got {}",
+        conv.diagnostics.oversize_lines
+    );
+    // The valid user/assistant pair after the oversized line
+    // should still produce an exchange.
+    assert!(
+        !conv.exchanges.is_empty(),
+        "parser should keep going past oversized line"
+    );
+}
+
+#[test]
 fn ide_context_opens_an_exchange_for_vscode_originator() {
     // codex_vscode wraps the real user prompt inside a
     // `# Context from ... ## My request for Codex: ...` block.

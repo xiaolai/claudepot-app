@@ -542,26 +542,40 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
         tx.execute("DELETE FROM meta WHERE k = '_pending_rescan'", [])?;
     }
 
-    // Post-write validation: the v4 DDL block promises seven
-    // tables. Count them inside the transaction; mismatch ROLLBACKs.
-    // (Note: FTS5 virtual tables show up in sqlite_master.)
-    let placeholders: Vec<&str> =
-        vec!["?"; crate::shared_memory::schema::V4_TABLE_NAMES.len()];
-    let in_list = placeholders.join(",");
-    let validation_sql = format!(
-        "SELECT count(*) FROM sqlite_master WHERE type IN ('table','view') AND name IN ({in_list})"
-    );
-    let params_iter: Vec<&dyn rusqlite::ToSql> = crate::shared_memory::schema::V4_TABLE_NAMES
-        .iter()
-        .map(|s| s as &dyn rusqlite::ToSql)
-        .collect();
-    let v4_count: i64 =
-        tx.query_row(&validation_sql, params_iter.as_slice(), |r| r.get(0))?;
-    let expected = crate::shared_memory::schema::V4_TABLE_NAMES.len() as i64;
-    if v4_count != expected {
-        // Roll back by dropping the transaction without commit.
+    // Post-write validation. The v4 DDL block promises three
+    // categories of objects:
+    //
+    //   1. Seven named user-facing tables (`V4_TABLE_NAMES`)
+    //   2. Three exchange_fts maintenance triggers
+    //   3. The FTS5 internal `_data` shadow table that proves the
+    //      virtual table actually instantiated (a missing FTS5
+    //      backing is a partial-build state that the table-name
+    //      check alone wouldn't catch).
+    //
+    // Each category is queried separately so a mismatch points at
+    // the specific missing class. Validation runs inside the
+    // transaction; any failure ROLLBACKs.
+    let missing = collect_missing_v4_objects(&tx)?;
+    if !missing.is_empty() {
+        let target_version = current_version.to_string();
+        let expected = crate::shared_memory::schema::V4_TABLE_NAMES.len()
+            + crate::shared_memory::schema::V4_TRIGGER_NAMES.len()
+            + 1; // +1 for the FTS5 _data shadow
+        let found = expected - missing.len();
+        tracing::error!(
+            target = %target_version,
+            expected,
+            found,
+            missing = ?missing,
+            "v4 migration validation failed; rolling back"
+        );
         drop(tx);
-        return Err(SessionIndexError::Sql(rusqlite::Error::QueryReturnedNoRows));
+        return Err(SessionIndexError::MigrationValidationFailed {
+            target_version,
+            expected,
+            found,
+            missing,
+        });
     }
 
     // Version bump LAST.
@@ -584,15 +598,85 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     Ok(())
 }
 
-/// Lexicographic comparison of single-digit string versions
-/// ("3", "4", ...). Sufficient for the foreseeable schema bump
-/// cadence; if we ever reach two-digit versions, replace with a
-/// numeric parse.
+/// Numeric comparison of schema versions. Fails closed: if either
+/// operand can't be parsed as `u32`, the function returns `true`
+/// — treat unknown as "I cannot reason about this; refuse to
+/// migrate". The previous implementation fell back to
+/// lexicographic comparison, which silently inverted at v10
+/// (lex `"4" < "10"` is false, so a v4 binary would happily
+/// migrate a v10 DB).
+///
+/// The conservative-on-parse-failure stance matches the same
+/// stance taken by `apply_schema` when `_min_compatible_version`
+/// is set higher than this binary understands.
 fn version_less_than(a: &str, b: &str) -> bool {
     match (a.parse::<u32>(), b.parse::<u32>()) {
         (Ok(av), Ok(bv)) => av < bv,
-        _ => a < b,
+        _ => {
+            tracing::warn!(
+                a,
+                b,
+                "version_less_than: non-numeric schema version; refusing to migrate"
+            );
+            true
+        }
     }
+}
+
+/// Strict validator for the v4 schema. Returns the list of named
+/// objects that should exist but don't. Empty Vec = validation
+/// passes.
+fn collect_missing_v4_objects(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<Vec<String>, SessionIndexError> {
+    let mut missing = Vec::new();
+
+    // Category 1: user-facing tables (and the FTS5 virtual table
+    // itself, which appears in sqlite_master as type='table').
+    for name in crate::shared_memory::schema::V4_TABLE_NAMES {
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE name = ?1 AND type IN ('table','view')",
+                [name],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !exists {
+            missing.push((*name).to_string());
+        }
+    }
+
+    // Category 2: exchange_fts maintenance triggers.
+    for name in crate::shared_memory::schema::V4_TRIGGER_NAMES {
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE name = ?1 AND type = 'trigger'",
+                [name],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !exists {
+            missing.push(format!("trigger:{name}"));
+        }
+    }
+
+    // Category 3: FTS5 internal `_data` shadow. Any FTS5 virtual
+    // table creates a `<vt>_data` table; its absence indicates the
+    // CREATE VIRTUAL TABLE for `exchange_fts` didn't actually
+    // instantiate (which a name-only check on `exchange_fts`
+    // alone might miss in some partial-build edge cases).
+    let fts_data_exists: bool = tx
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE name = 'exchange_fts_data' AND type = 'table'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !fts_data_exists {
+        missing.push("fts5_internal:exchange_fts_data".to_string());
+    }
+
+    Ok(missing)
 }
 
 /// Detect the two rusqlite error codes that mean "the file isn't a
