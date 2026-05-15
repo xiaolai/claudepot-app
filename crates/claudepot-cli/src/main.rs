@@ -221,6 +221,18 @@ enum Commands {
         #[command(subcommand)]
         action: McpAction,
     },
+    /// Manage Codex rollout transcripts.
+    ///
+    /// Codex stores rollout JSONL under `$CODEX_HOME/sessions/`
+    /// (default `~/.codex/sessions/`). The `index` subcommand
+    /// walks the tree and populates Claudepot's cross-harness
+    /// `exchanges` table so `claudepot mcp memory-server` can
+    /// surface Codex transcripts via `claudepot_search_memory` /
+    /// `claudepot_read_conversation`.
+    Codex {
+        #[command(subcommand)]
+        action: CodexAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -232,6 +244,26 @@ enum McpAction {
         /// `~/.claudepot/sessions.db`.
         #[arg(long)]
         db: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CodexAction {
+    /// Index Codex rollouts into `sessions.db`. Idempotent — files
+    /// whose (size, mtime, inode) tuple is unchanged since the last
+    /// run are skipped.
+    Index {
+        /// Override the Codex sessions root. Defaults to
+        /// `$CODEX_HOME/sessions/` (typically `~/.codex/sessions/`).
+        #[arg(long)]
+        codex_home: Option<std::path::PathBuf>,
+        /// Override the sessions.db path. Defaults to
+        /// `~/.claudepot/sessions.db`.
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+        /// JSON-formatted output. Default is human-readable.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1148,6 +1180,13 @@ async fn main() -> Result<()> {
         },
         Commands::Mcp { action } => match action {
             McpAction::MemoryServer { db } => commands::mcp::run(db).await?,
+        },
+        Commands::Codex { action } => match action {
+            CodexAction::Index {
+                codex_home,
+                db,
+                json,
+            } => commands::codex::index(codex_home, db, json).await?,
         },
         Commands::Activity { action } => match action {
             ActivityAction::Recent {
