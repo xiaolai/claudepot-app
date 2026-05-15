@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../../api";
 import {
   GRANT_DURATION_PRESETS,
   permissionModeLabel,
+  type PermissionRevertedEvent,
   type ProjectPermission,
 } from "../../api/permission";
 import { Button } from "../../components/primitives/Button";
@@ -47,6 +49,9 @@ export function PermissionPanel({
   );
   // Re-render tick so the countdown stays fresh without refetching.
   const [, setNowTick] = useState(0);
+  // Bumped to force a refetch — by the `permission-reverted` event
+  // (orchestrator auto-revert) without a manual reselect.
+  const [reloadTick, setReloadTick] = useState(0);
 
   const fail = useCallback(
     (msg: string) => {
@@ -56,25 +61,45 @@ export function PermissionPanel({
     [onError, pushToast],
   );
 
+  // Single-project fetch (not the full-tree `permissionList`). Re-runs
+  // on `projectPath` change and on `reloadTick` bumps; the `cancelled`
+  // guard keeps a slow in-flight fetch from clobbering a newer one.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     api
-      .permissionList()
-      .then((list) => {
-        if (cancelled) return;
-        setPerm(list.find((p) => p.projectPath === projectPath) ?? null);
-        setLoading(false);
+      .permissionGet(projectPath)
+      .then((p) => {
+        if (!cancelled) setPerm(p);
       })
       .catch((e) => {
-        if (cancelled) return;
-        fail(`Couldn't load permission state: ${e}`);
-        setLoading(false);
+        if (!cancelled) fail(`Couldn't load permission state: ${e}`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [projectPath, fail]);
+  }, [projectPath, reloadTick, fail]);
+
+  // The orchestrator auto-reverts expired grants server-side on its
+  // 5-min tick and emits `permission-reverted`. Refetch when that
+  // fires for THIS project so the countdown doesn't linger on a
+  // stale "expired".
+  useEffect(() => {
+    const unlisten = listen<PermissionRevertedEvent>(
+      "permission-reverted",
+      (e) => {
+        if (e.payload.projectPath === projectPath) {
+          setReloadTick((n) => n + 1);
+        }
+      },
+    );
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [projectPath]);
 
   // Tick once a minute while a grant is active so the countdown
   // re-renders. Cleared as soon as there's no active grant.

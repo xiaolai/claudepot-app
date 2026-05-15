@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
@@ -28,11 +28,23 @@ vi.mock("../../api", () => ({
     // reachable projects; both fire reads on mount. Default to empty
     // so the existing list/move/reveal/cost tests don't have to
     // thread permission or .env data.
-    permissionList: () => Promise.resolve([]),
+    permissionGet: (...args: unknown[]) =>
+      Promise.resolve({
+        projectPath: String(args[0] ?? ""),
+        effectiveMode: "default",
+        decidedBy: "default",
+        isElevated: false,
+        activeGrant: null,
+      }),
     envFileList: (...args: unknown[]) =>
       Promise.resolve({ projectPath: String(args[0] ?? ""), files: [] }),
     envVaultList: () => Promise.resolve([]),
   },
+}));
+// PermissionPanel subscribes to the `permission-reverted` event;
+// stub the event module so the listener is a no-op in jsdom.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: () => Promise.resolve(() => {}),
 }));
 // Stub the app-state provider so ProjectDetail's useAppState() returns
 // a minimal shape without having to mount the full provider.
@@ -260,12 +272,16 @@ describe("ProjectDetail", () => {
         onMoved={() => {}}
       />,
     );
-    const firstBatch = await screen.findAllByRole("option");
+    // Scope to the sessions listbox — PermissionPanel's duration
+    // <select> also contributes elements with the implicit `option`
+    // role, which a page-wide query would wrongly count.
+    const list = await screen.findByRole("listbox", { name: /sessions/i });
+    const firstBatch = within(list).getAllByRole("option");
     expect(firstBatch).toHaveLength(20);
     expect(screen.getByText(/5 more hidden/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show 5 more/i }));
-    const after = await screen.findAllByRole("option");
+    const after = await within(list).findAllByRole("option");
     expect(after).toHaveLength(25);
   });
 
@@ -286,9 +302,9 @@ describe("ProjectDetail", () => {
         onMoved={() => {}}
       />,
     );
-    await screen.findAllByRole("option");
+    const list = await screen.findByRole("listbox", { name: /sessions/i });
     await user.type(screen.getByLabelText(/filter sessions/i), "bbbb");
-    const filtered = await screen.findAllByRole("option");
+    const filtered = await within(list).findAllByRole("option");
     expect(filtered).toHaveLength(1);
   });
 
@@ -305,7 +321,8 @@ describe("ProjectDetail", () => {
         onMoved={() => {}}
       />,
     );
-    const row = await screen.findByRole("option");
+    const list = await screen.findByRole("listbox", { name: /sessions/i });
+    const row = within(list).getByRole("option");
     expect(row).toHaveAttribute("tabIndex", "0");
   });
 

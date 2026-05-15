@@ -66,6 +66,23 @@ pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
     .map_err(|e| format!("permission_list join: {e}"))?
 }
 
+/// One project's permission state. The single-project sibling of
+/// [`permission_list`] — used by the ProjectDetail panel so opening a
+/// project doesn't trigger a full project-tree scan.
+#[tauri::command]
+pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // `load` (not `load_or_default`) so a real I/O failure surfaces
+        // instead of silently rendering the project as un-granted.
+        let file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        let state = resolve_default_mode(Path::new(&project_path));
+        let active = eval::active_grant(&file, &project_path, Utc::now());
+        Ok(project_permission_dto(project_path.clone(), &state, active))
+    })
+    .await
+    .map_err(|e| format!("permission_get join: {e}"))?
+}
+
 /// Set `permissions.defaultMode` for a project to `mode` for
 /// `duration_secs`, recording a grant the orchestrator auto-reverts.
 /// Re-granting a project that already has a grant preserves the

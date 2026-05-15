@@ -56,6 +56,8 @@ export interface PermissionRevertedEvent {
 
 export const permissionApi = {
   permissionList: () => invoke<ProjectPermission[]>("permission_list"),
+  permissionGet: (projectPath: string) =>
+    invoke<ProjectPermission>("permission_get", { projectPath }),
   permissionGrant: (
     projectPath: string,
     mode: PermissionModeId,

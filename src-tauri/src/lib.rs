@@ -819,6 +819,7 @@ pub fn run() {
             commands::rotation::rotation_apply_pending,
             commands::rotation::rotation_dismiss_pending,
             commands::permission::permission_list,
+            commands::permission::permission_get,
             commands::permission::permission_grant,
             commands::permission::permission_revert,
             commands::permission::permission_extend,
