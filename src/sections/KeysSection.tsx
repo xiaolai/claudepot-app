@@ -26,6 +26,7 @@ import type {
 } from "../types";
 import { AddKeyModal } from "./keys/AddKeyModal";
 import { OAuthUsageModal } from "./keys/OAuthUsageModal";
+import { EnvVaultSection } from "./keys/EnvVaultSection";
 
 type PendingRemoval =
   | { kind: "api"; row: ApiKeySummary }
@@ -290,6 +291,8 @@ export function KeysSection() {
           onRename={(row, label) => onRename("oauth", row.uuid, label)}
           onAddRequested={() => setAdding(true)}
         />
+
+        <EnvVaultSection />
       </main>
 
       {pendingRemoval && (
