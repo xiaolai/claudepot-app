@@ -19,6 +19,7 @@ mod dto_desktop;
 mod dto_keys;
 mod dto_memory;
 mod dto_migrate;
+mod dto_permission;
 mod dto_project;
 mod dto_project_repair;
 mod dto_rotation;
@@ -34,6 +35,7 @@ mod dto_usage;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
+mod permission_orchestrator;
 mod preferences;
 mod rotation_orchestrator;
 mod service_status_watcher;
@@ -815,6 +817,10 @@ pub fn run() {
             commands::rotation::rotation_pending_list,
             commands::rotation::rotation_apply_pending,
             commands::rotation::rotation_dismiss_pending,
+            commands::permission::permission_list,
+            commands::permission::permission_grant,
+            commands::permission::permission_revert,
+            commands::permission::permission_extend,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

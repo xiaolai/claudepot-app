@@ -39,6 +39,7 @@ pub mod memory;
 pub mod memory_health;
 pub mod migrate;
 pub mod notification;
+pub mod permission;
 pub mod preferences;
 pub mod pricing;
 pub mod project;
