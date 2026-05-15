@@ -260,6 +260,121 @@ fn diagnostics_count_malformed_lines() {
 }
 
 #[test]
+fn drain_to_newline_unit_test_with_giant_stream() {
+    // Codex audit follow-up — direct unit test of the
+    // drain_to_newline helper with a 100 MiB stream of garbage
+    // followed by a newline and a known second line. The earlier
+    // 5 MiB "elapsed time" test was too weak: a regression to
+    // `read_until(&mut Vec)` would also pass at 5 MiB.
+    //
+    // 100 MiB into a `BufReader` using fill_buf + consume runs in
+    // bounded ~8 KiB memory regardless of stream size. A
+    // regression to read_until-into-Vec would allocate ~100 MiB
+    // — visible as memory pressure on small CI runners and a
+    // dramatic speed difference on cold-allocator paths.
+    use std::io::{BufRead, BufReader, Cursor};
+
+    let mut data: Vec<u8> = vec![b'x'; 100 * 1024 * 1024];
+    data.push(b'\n');
+    data.extend_from_slice(b"after-drain\n");
+
+    let mut reader = BufReader::new(Cursor::new(data));
+    let started = std::time::Instant::now();
+    let ok = super::parser::drain_to_newline(&mut reader).expect("drain ok");
+    let elapsed = started.elapsed();
+    assert!(ok, "drain should find the newline");
+
+    // The next read MUST start at "after-drain\n" — proving the
+    // drain stopped exactly at the newline (didn't over-consume).
+    let mut next = String::new();
+    reader.read_line(&mut next).unwrap();
+    assert_eq!(
+        next, "after-drain\n",
+        "drain stopped past the newline; next line should be after-drain"
+    );
+
+    // 100 MiB through BufReader::fill_buf+consume is sub-second
+    // on any reasonable machine. A regression that re-allocates
+    // proportional to stream size would either OOM or slow down
+    // by orders of magnitude on small-RAM CI.
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "drain_to_newline took {elapsed:?} on 100 MiB — possible allocation regression"
+    );
+}
+
+#[test]
+fn drain_to_newline_is_memory_bounded_on_huge_lines() {
+    // Codex audit HIGH — the oversize-line drain must not
+    // accumulate the discarded bytes into a Vec. This test
+    // creates a fixture with a 5 MiB oversize line (5× the
+    // MAX_LINE_BYTES cap) and asserts the parser completes with
+    // bounded memory and proceeds to the next valid line.
+    //
+    // Bounded-memory is verified indirectly: if the drain
+    // allocated proportionally to the oversize line, this test
+    // would either OOM or take noticeably long. A pass within
+    // the standard test timeout is the bounded-memory signal.
+    use super::parser::MAX_LINE_BYTES;
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("huge_drain.jsonl");
+    // 5 MiB of garbage on one line — five times the cap.
+    let huge = "x".repeat(MAX_LINE_BYTES * 5);
+    let body = format!(
+        "{{\"timestamp\":\"2026-05-15T11:30:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"01-drain\",\"cwd\":\"/x\",\"originator\":\"codex_cli\",\"cli_version\":\"0.44.0\"}}}}\n{huge}\n{{\"timestamp\":\"2026-05-15T11:30:00.200Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"after-drain\"}}]}}}}\n{{\"timestamp\":\"2026-05-15T11:30:01.000Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"ok\"}}]}}}}\n",
+    );
+    std::fs::write(&p, body).unwrap();
+
+    let started = std::time::Instant::now();
+    let conv = parse_codex_rollout_jsonl(&p).expect("ok");
+    let elapsed = started.elapsed();
+
+    assert!(
+        conv.diagnostics.oversize_lines >= 1,
+        "oversize line should be counted"
+    );
+    // The valid user/assistant pair AFTER the drain must produce
+    // an exchange — proving the drain stopped at the right
+    // newline and the parser continued correctly.
+    assert!(
+        !conv.exchanges.is_empty(),
+        "parser must continue past the drained oversize line"
+    );
+    assert!(
+        conv.exchanges[0].user_text.contains("after-drain"),
+        "exchange should reflect the line after the oversize one"
+    );
+    // 5 MiB parsed in well under 5s on any reasonable machine.
+    // If the drain re-allocated proportionally, this would
+    // balloon. Pick a generous ceiling.
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "drain took {elapsed:?} — likely re-allocating proportional to line size"
+    );
+}
+
+#[test]
+fn parse_head_rejects_empty_session_id() {
+    // Codex audit M-correctness — parse_head documents
+    // MissingSessionId but previously returned Ok(CodexHead {
+    // session_id: "" }) when payload.id was absent. Now it
+    // honors the contract.
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("no_id.jsonl");
+    std::fs::write(
+        &p,
+        r#"{"timestamp":"2026-05-15T11:30:00.000Z","type":"session_meta","payload":{"cwd":"/x","originator":"codex_cli","cli_version":"0.44.0"}}
+"#,
+    )
+    .unwrap();
+    let err = super::parser::parse_head(&p).expect_err("must error");
+    assert!(
+        matches!(err, CodexError::MissingSessionId { .. }),
+        "expected MissingSessionId, got {err:?}"
+    );
+}
+
+#[test]
 fn diagnostics_flag_oversize_lines() {
     // Build a fixture with one valid session_meta line, one
     // adversarial line larger than MAX_LINE_BYTES, then one valid

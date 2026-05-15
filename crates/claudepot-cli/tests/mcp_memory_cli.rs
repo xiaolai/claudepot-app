@@ -212,6 +212,43 @@ fn stdout_only_emits_jsonrpc_frames_at_default_log_level() {
 }
 
 #[test]
+fn mcp_returns_categorized_error_envelopes_for_invalid_input() {
+    // Codex audit L-testing — exercise the MCP error envelope
+    // paths so a regression that loses error_code or breaks
+    // structured-error categorization gets caught.
+    let tmp = TempDir::new().unwrap();
+    let db = tmp.path().join("sessions.db");
+
+    // Invalid scope on claudepot_remember → error_code = "invalid_scope".
+    // Invalid kind on claudepot_remember → error_code = "invalid_kind".
+    // Unknown file_path on claudepot_read_conversation → error_code = "locator_not_indexed".
+    let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"it\",\"version\":\"0\"}}}\n\
+                  {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\
+                  {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"claudepot_remember\",\"arguments\":{\"scope\":\"bogus\",\"kind\":\"fact\",\"content\":\"x\"}}}\n\
+                  {\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"claudepot_remember\",\"arguments\":{\"scope\":\"global\",\"kind\":\"bogus\",\"content\":\"x\"}}}\n\
+                  {\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"claudepot_read_conversation\",\"arguments\":{\"file_path\":\"/nonexistent/path.jsonl\"}}}\n";
+    let stdout = run_mcp_session(&db, frames, &[1, 2, 3, 4]);
+    assert!(
+        stdout.contains("invalid_scope"),
+        "missing 'invalid_scope' error_code in:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("invalid_kind"),
+        "missing 'invalid_kind' error_code in:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("locator_not_indexed"),
+        "missing 'locator_not_indexed' error_code in:\n{stdout}"
+    );
+    // The error envelope must include schema_version so callers
+    // can branch on protocol shape.
+    assert!(
+        stdout.contains("\\\"schema_version\\\":1"),
+        "MCP error payloads must include schema_version=1: {stdout}"
+    );
+}
+
+#[test]
 fn end_to_end_codex_index_then_search() {
     // H4 verification — wire the indexer to a CLI verb and prove
     // the full pipeline: stage a Codex rollout → `claudepot codex
@@ -232,11 +269,12 @@ fn end_to_end_codex_index_then_search() {
     let db = tmp.path().join("sessions.db");
 
     // 1. `claudepot codex index` populates sessions.db with the
-    //    Codex rollout.
+    //    Codex rollout. --codex-home is the CODEX_HOME path; the
+    //    indexer appends `sessions/` internally.
     let output = Command::new(bin_path())
         .args(["codex", "index"])
         .args(["--codex-home"])
-        .arg(codex_home.join("sessions"))
+        .arg(&codex_home)
         .args(["--db"])
         .arg(&db)
         .args(["--json"])

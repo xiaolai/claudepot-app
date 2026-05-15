@@ -220,27 +220,29 @@ fn walk_dir_recursive(
     };
     for entry in read.flatten() {
         let path = entry.path();
-        // M4 — symlink containment. `entry.metadata()` follows
-        // symlinks; we use `symlink_metadata` first to detect them
-        // and skip. Reasoning: a symlink under $CODEX_HOME/sessions/
-        // pointing at e.g. /etc/passwd or ~/.config/Claude/.credentials
-        // would otherwise be indexed → readable via
+        // M4 — symlink containment. `DirEntry::metadata()` does
+        // NOT follow symlinks (it's effectively `symlink_metadata`
+        // on every supported platform — see std::fs::DirEntry docs).
+        // So calling `.file_type().is_symlink()` on its result
+        // detects symlink entries and lets us skip them. Reasoning:
+        // a symlink under $CODEX_HOME/sessions/ pointing at e.g.
+        // /etc/passwd or ~/.config/Claude/.credentials would
+        // otherwise be indexed → readable via
         // `claudepot_read_conversation` because the cache row
         // "exists" → arbitrary file disclosure within the MCP user's
         // own privileges. Symlinks under the sessions root are not
         // a known Codex pattern, so refusing them is safe.
-        let link_meta = match entry.metadata() {
+        let meta = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,
         };
-        if link_meta.file_type().is_symlink() {
+        if meta.file_type().is_symlink() {
             tracing::warn!(
                 path = %path.display(),
                 "codex_session indexer: skipping symlink (M4 containment)"
             );
             continue;
         }
-        let meta = link_meta;
         if meta.is_dir() {
             walk_dir_recursive(&path, out, stats, depth + 1);
             continue;

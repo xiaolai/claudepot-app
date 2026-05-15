@@ -148,9 +148,14 @@ fn resolve_line_bounds(
 
     if let Some(ref ex_id) = loc.exchange_id {
         let db = idx.db();
+        // Constrain the lookup to the locator's file_path so a
+        // mismatched exchange_id (different file, hand-crafted,
+        // or stale) doesn't silently widen the read to a full-
+        // file scan. If the (id, file_path) pair doesn't match,
+        // return an error rather than fall through.
         let row = db.query_row(
-            "SELECT line_start, line_end FROM exchanges WHERE id = ?1",
-            [ex_id],
+            "SELECT line_start, line_end FROM exchanges WHERE id = ?1 AND file_path = ?2",
+            rusqlite::params![ex_id, &loc.file_path],
             |r| {
                 Ok((
                     r.get::<_, Option<i64>>(0)?,
@@ -158,11 +163,23 @@ fn resolve_line_bounds(
                 ))
             },
         );
-        if let Ok((Some(s), Some(e))) = row {
-            return Ok((s as u32, e as u32));
+        match row {
+            Ok((Some(s), Some(e))) => return Ok((s as u32, e as u32)),
+            Ok((_, _)) => {
+                // Exchange exists, matches file_path, but has no
+                // line range (e.g. compacted summary) → fall
+                // through to file-level read. Acceptable.
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // exchange_id was supplied but doesn't belong to
+                // this file. Refuse rather than widen.
+                return Err(ReadError::NotIndexed(format!(
+                    "exchange {ex_id} not found under {fp}",
+                    fp = loc.file_path
+                )));
+            }
+            Err(e) => return Err(ReadError::Sql(e)),
         }
-        // Exchange exists but has no line range (e.g. compacted
-        // summary) → fall through to file-level read.
     }
 
     // No bounds available; cap at 100 000 lines so we don't
@@ -219,11 +236,21 @@ fn read_lines(
         }
         out.push_str(&line);
         if out.len() >= max_bytes {
-            // Cap hit. Truncate at a char boundary and signal it.
-            while !out.is_char_boundary(max_bytes) && out.len() > max_bytes {
-                out.pop();
+            // Cap hit. Find the largest byte index ≤ max_bytes
+            // that is a char boundary and truncate there. Walks
+            // down at most 3 bytes (the max length of a UTF-8
+            // codepoint minus 1). Always lands on a boundary, so
+            // `String::truncate` is safe. The previous form did
+            // `pop()` in a loop then `truncate(max_bytes)`, which
+            // was subtle: `truncate` is a no-op when its arg
+            // exceeds `len`, so the function was already
+            // panic-free, but the resulting length could be off
+            // by up to 3 bytes from what the comment claimed.
+            let mut cut = max_bytes.min(out.len());
+            while cut > 0 && !out.is_char_boundary(cut) {
+                cut -= 1;
             }
-            out.truncate(max_bytes);
+            out.truncate(cut);
             truncated = true;
             break;
         }
@@ -357,6 +384,82 @@ mod tests {
             "fitting read should NOT be flagged truncated, body.len={} body={:?}",
             result.body.len(),
             result.body
+        );
+    }
+
+    #[test]
+    fn multibyte_truncation_lands_on_char_boundary() {
+        // Codex audit M-correctness — verify the truncation logic
+        // never produces an invalid UTF-8 string when max_bytes
+        // lands mid-multi-byte-char. The earlier version of this
+        // test used caps too small to reach the CJK content;
+        // this version unit-tests `read_lines` directly with
+        // caps that fall on CJK-byte positions.
+        //
+        // Strategy: write a single line of pure CJK (3 bytes per
+        // codepoint) into a temp file, then call read_lines with
+        // every cap from 0 to 12. With each codepoint at 3-byte
+        // boundary (3, 6, 9, 12), only those caps yield clean
+        // boundaries; caps in between (1, 2, 4, 5, 7, 8, 10, 11)
+        // would crash a naive byte-truncate but our code walks
+        // down to the nearest boundary.
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("cjk.txt");
+        // "中文回应" = 4 × 3-byte codepoints = 12 bytes total
+        std::fs::write(&p, "中文回应").unwrap();
+
+        let path_str = p.to_string_lossy().into_owned();
+        for cap in 0..=14usize {
+            let (body, truncated) =
+                super::read_lines(&path_str, 1, 1, cap).expect("read");
+            // Validity: must be valid UTF-8 (String guarantees).
+            // Must never exceed the cap (post-truncation length
+            // is ≤ cap).
+            assert!(
+                body.len() <= cap.min(12),
+                "cap={cap} produced body of {} bytes (raw is 12)",
+                body.len()
+            );
+            // Char boundary: every prefix of "中文回应" up to a
+            // codepoint boundary is a valid UTF-8 string. The
+            // truncate logic must land on byte 0, 3, 6, 9, or 12
+            // — never 1, 2, 4, 5, 7, 8, 10, 11.
+            assert!(
+                body.len() % 3 == 0,
+                "cap={cap}: body.len()={} not on CJK codepoint boundary",
+                body.len()
+            );
+            // Truncation signal: true iff the cap forced a stop
+            // before the line ended (i.e. raw line > cap). The
+            // raw line is 12 bytes.
+            if cap < 12 {
+                assert!(
+                    truncated,
+                    "cap={cap}: should be truncated (raw=12)"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_exchange_id_returns_not_indexed() {
+        // Codex audit M-security — an exchange_id that doesn't
+        // belong to the locator's file_path must NOT silently
+        // widen to a file-level read.
+        let tmp = TempDir::new().unwrap();
+        let idx = prep_corpus(&tmp);
+        let path = corpus_file(&tmp);
+        let loc = ConversationLocator {
+            file_path: path,
+            exchange_id: Some("not-a-real-id:0".to_string()),
+            line_start: None,
+            line_end: None,
+        };
+        let err = read_locator(&idx, &loc, &RedactionPolicy::default())
+            .expect_err("must refuse mismatched exchange_id");
+        assert!(
+            matches!(err, ReadError::NotIndexed(_)),
+            "expected NotIndexed for mismatched exchange_id, got {err:?}"
         );
     }
 

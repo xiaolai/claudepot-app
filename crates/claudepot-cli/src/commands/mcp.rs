@@ -120,6 +120,13 @@ struct SearchPayload {
     has_more: bool,
 }
 
+/// Server-side ceiling on the body size a single
+/// `claudepot_read_conversation` call can return. Even with a
+/// huge `max_bytes` from the client, the server will not allocate
+/// more than this. 1 MiB is far above any reasonable transcript
+/// excerpt and matches `MAX_LINE_BYTES` for the parser side.
+const READ_MAX_BYTES_CEILING: usize = 1024 * 1024;
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ReadConversationRequest {
     /// `sessions.file_path` returned in a SearchHitOut.
@@ -128,7 +135,9 @@ struct ReadConversationRequest {
     /// present, the read is bounded to that exchange's line range.
     #[serde(default)]
     exchange_id: Option<String>,
-    /// Byte cap on the returned body. Defaults to 16 KiB.
+    /// Byte cap on the returned body. Defaults to 16 KiB; the
+    /// server clamps to 1 MiB regardless of what the client asks
+    /// for.
     #[serde(default)]
     max_bytes: Option<usize>,
 }
@@ -366,7 +375,12 @@ impl MemoryServer {
             line_start: None,
             line_end: None,
         };
-        let cap = req.max_bytes.unwrap_or(16 * 1024);
+        // Clamp client-supplied max_bytes to the server ceiling
+        // so a single MCP call can't force unbounded allocation.
+        let cap = req
+            .max_bytes
+            .unwrap_or(16 * 1024)
+            .min(READ_MAX_BYTES_CEILING);
         match smr::read_locator_bounded(&self.idx, &locator, cap, &self.policy) {
             Ok(r) => to_json(&ReadPayload {
                 schema_version: SCHEMA_VERSION,

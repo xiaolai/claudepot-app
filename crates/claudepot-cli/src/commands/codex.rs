@@ -58,7 +58,17 @@ pub async fn index(
     db: Option<PathBuf>,
     json: bool,
 ) -> Result<()> {
-    let codex_sessions_root = codex_home.unwrap_or_else(default_codex_sessions_root);
+    // The CLI flag is named `--codex-home` and the docstring on
+    // main.rs::CodexAction::Index also describes it that way.
+    // Honor that contract: append `sessions/` ourselves so users
+    // can pass their literal `$CODEX_HOME` value. If they're
+    // setting up a custom layout (rare), the env-var path of
+    // `default_codex_sessions_root` still appends `sessions`
+    // either way.
+    let codex_sessions_root = match codex_home {
+        Some(home) => home.join("sessions"),
+        None => default_codex_sessions_root(),
+    };
     let db_path = db.unwrap_or_else(default_db_path);
 
     let idx = SessionIndex::open(&db_path)

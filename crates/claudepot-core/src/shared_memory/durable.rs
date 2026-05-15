@@ -476,33 +476,33 @@ pub fn supersede_decision(
 ) -> Result<DecisionRecord, DurableError> {
     let now = chrono::Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
-    let db = idx.db();
-    let tx = db.unchecked_transaction()?;
-    let n = tx.execute(
-        "UPDATE decisions SET status = 'superseded' WHERE id = ?1 AND status = 'active'",
-        [prior_id],
-    )?;
-    if n == 0 {
-        return Err(DurableError::DecisionNotFound(prior_id.to_string()));
-    }
-    tx.execute(
-        "INSERT INTO decisions (
-            id, project_path, topic, decision, rationale,
-            status, created_by_kind, created_by, created_at_ms, supersedes_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9)",
-        params![
-            id,
-            new.project_path,
-            new.topic,
-            new.decision,
-            new.rationale,
-            new.created_by_kind.as_str(),
-            new.created_by,
-            now,
-            prior_id,
-        ],
-    )?;
-    tx.commit()?;
+    with_tx(idx, |tx| {
+        let n = tx.execute(
+            "UPDATE decisions SET status = 'superseded' WHERE id = ?1 AND status = 'active'",
+            [prior_id],
+        )?;
+        if n == 0 {
+            return Err(DurableError::DecisionNotFound(prior_id.to_string()));
+        }
+        tx.execute(
+            "INSERT INTO decisions (
+                id, project_path, topic, decision, rationale,
+                status, created_by_kind, created_by, created_at_ms, supersedes_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                new.project_path,
+                new.topic,
+                new.decision,
+                new.rationale,
+                new.created_by_kind.as_str(),
+                new.created_by,
+                now,
+                prior_id,
+            ],
+        )?;
+        Ok(())
+    })?;
     Ok(DecisionRecord {
         id,
         project_path: new.project_path.map(String::from),

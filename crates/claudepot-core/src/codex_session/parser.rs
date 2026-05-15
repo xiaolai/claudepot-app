@@ -56,6 +56,16 @@ pub fn parse_head(path: &Path) -> Result<CodexHead, CodexError> {
                 ..
             } => {
                 if head.is_none() {
+                    // Honor the documented contract: an empty
+                    // `payload.id` is treated as MissingSessionId.
+                    // Previously parse_head returned Ok with an
+                    // empty session_id and only parse_head_collecting
+                    // caught it, contradicting the doc comment.
+                    if session_id.is_empty() {
+                        return Err(CodexError::MissingSessionId {
+                            path: path.to_path_buf(),
+                        });
+                    }
                     head = Some(CodexHead {
                         session_id,
                         cwd,
@@ -330,10 +340,14 @@ impl Iterator for EventIter {
                     // Oversized line. We've consumed MAX_LINE_BYTES+1
                     // bytes into self.buf already (no newline among
                     // them, since `read_line` only stops at one).
-                    // Drain to the next newline via `read_until`
-                    // (which honors line boundaries — important so
-                    // the next `read_line` call starts at the
-                    // correct position, not mid-following-line).
+                    // The pre-fix attempt used `read_until(b'\n',
+                    // &mut Vec<u8>)`, which accumulates the
+                    // discarded bytes — defeating M5's OOM defense
+                    // against adversarial multi-GB lines. Replace
+                    // with a fixed-size stack-buffer drain that
+                    // reads through the file's BufReader (whose
+                    // own buffer is bounded by `DEFAULT_BUF_SIZE`,
+                    // ~8 KiB) until it sees `\n` or EOF.
                     self.line_no += 1;
                     self.diagnostics.oversize_lines += 1;
                     tracing::warn!(
@@ -342,22 +356,15 @@ impl Iterator for EventIter {
                         cap = MAX_LINE_BYTES,
                         "codex_session: dropping oversized JSONL line"
                     );
-                    let mut sink: Vec<u8> = Vec::new();
-                    // `read_until` returns the count of bytes read
-                    // including the delimiter when found; returns
-                    // Ok(0) on EOF without delimiter. We don't care
-                    // about the bytes — `sink` is discarded.
-                    match self.reader.read_until(b'\n', &mut sink) {
-                        Ok(0) => {
-                            // EOF reached without seeing a newline.
-                            // The oversized line had no terminator.
+                    match drain_to_newline(&mut self.reader) {
+                        Ok(true) => {
+                            // Drained past the newline. Next outer
+                            // iteration starts a fresh line.
+                        }
+                        Ok(false) => {
+                            // EOF without seeing a newline.
                             self.done = true;
                             return None;
-                        }
-                        Ok(_) => {
-                            // Drained to (and past) the newline.
-                            // Next iteration of the outer loop
-                            // starts a fresh line.
                         }
                         Err(_) => {
                             self.diagnostics.truncated_by_io = true;
@@ -391,6 +398,51 @@ impl Iterator for EventIter {
                     self.done = true;
                     return None;
                 }
+            }
+        }
+    }
+}
+
+/// Consume bytes from `reader` up to and including the next `\n`
+/// or EOF, discarding everything. Uses `BufRead::fill_buf` +
+/// `consume` so memory consumption is O(1) (bounded by the
+/// reader's own internal buffer, ~8 KiB for `BufReader`) AND we
+/// stop *exactly* at the newline — bytes after the `\n` stay in
+/// the reader's buffer for the next `read_line` call.
+///
+/// This is the M5 OOM defense done right. The earlier
+/// `read_until(b'\n', &mut Vec<u8>)` accumulated the discarded
+/// bytes (defeating the defense for adversarial multi-GB lines).
+/// A naive `read()` into a stack buffer would over-consume past
+/// the newline. `fill_buf` + `consume` gives us both bounded
+/// memory AND exact line-boundary stops.
+///
+/// Returns `Ok(true)` if a newline was found and consumed,
+/// `Ok(false)` if EOF was reached without seeing one, or
+/// `Err(_)` on any I/O error.
+// `pub(crate)` so the tests module (a sibling) can exercise this
+// helper directly. Without direct access, the M5/H1 OOM defense
+// can only be tested through the full parser path, which doesn't
+// reliably catch a regression to allocation-heavy drain.
+pub(crate) fn drain_to_newline<R: BufRead>(reader: &mut R) -> std::io::Result<bool> {
+    loop {
+        let buf = reader.fill_buf()?;
+        if buf.is_empty() {
+            return Ok(false); // EOF
+        }
+        match buf.iter().position(|&b| b == b'\n') {
+            Some(idx) => {
+                // Consume up to AND INCLUDING the newline; bytes
+                // after stay in the reader for the next line.
+                reader.consume(idx + 1);
+                return Ok(true);
+            }
+            None => {
+                // No newline in this slice; consume the whole
+                // chunk and loop to refill. Stack memory stays
+                // bounded by the reader's internal buffer size.
+                let len = buf.len();
+                reader.consume(len);
             }
         }
     }
