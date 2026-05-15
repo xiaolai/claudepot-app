@@ -748,7 +748,7 @@ function Header({
             color: "var(--fg)",
           }}
         >
-          Events
+          Activities
         </h2>
         {counts && (
           <span

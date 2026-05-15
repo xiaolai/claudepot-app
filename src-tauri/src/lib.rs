@@ -151,6 +151,28 @@ pub fn run() {
             }
         };
 
+    // Shared `SessionIndex` for the Shared Memory commands. Opens
+    // the same `sessions.db`. SessionIndex owns a `Mutex<Connection>`
+    // internally so writes serialize; sharing one handle across all
+    // Shared Memory commands avoids the per-call open-and-migrate
+    // contention that surfaced as `SQLITE_BUSY` ("database is
+    // locked") in the dev pane. Open failure degrades the Shared
+    // Memory section to a "session index unavailable" banner; the
+    // rest of the app keeps working.
+    let shared_memory_index: Option<std::sync::Arc<claudepot_core::session_index::SessionIndex>> =
+        match claudepot_core::session_index::SessionIndex::open(&cards_db_path) {
+            Ok(idx) => Some(std::sync::Arc::new(idx)),
+            Err(e) => {
+                tracing::warn!(
+                    target = "claudepot_tauri",
+                    error = %e,
+                    path = %cards_db_path.display(),
+                    "shared-memory session index open failed — Shared Memory section degraded"
+                );
+                None
+            }
+        };
+
     // (Live state is built inside the `.manage` chain below — the
     // service-refactor pattern owns the runtime, so we hand the
     // cards index into the service's `enable_activity` accessor at
@@ -556,6 +578,12 @@ pub fn run() {
     if let Some(idx) = cards_index {
         builder = builder.manage(commands::activity_cards::ActivityCardsState { index: idx });
     }
+
+    // Shared SessionIndex for the Shared Memory commands. Always
+    // managed (even when `None`); the wrapper carries the Option so
+    // commands return a graceful error rather than panicking on a
+    // missing state.
+    builder = builder.manage(commands::shared_memory::SharedMemoryIndex(shared_memory_index));
 
     // Memory change-log state. Always managed — `memory_log` is now
     // unconditionally `Arc<MemoryLog>` per audit 2026-05 #2.

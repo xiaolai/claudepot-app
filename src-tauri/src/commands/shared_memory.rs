@@ -2,29 +2,43 @@
 //!
 //! Mirrors the MCP server's eight read/write tools, plus the two
 //! discovery tools, but with friendlier camelCase-or-snake_case
-//! JSON shapes for the frontend. Each command opens a fresh
-//! `SessionIndex` handle so commands can be called concurrently
-//! (the underlying connection is `Mutex<Connection>`, but opening
-//! one per-call avoids cross-command lock contention).
+//! JSON shapes for the frontend.
 //!
-//! Mutations (`shared_memory_remember`, `shared_memory_log_decision`,
-//! `shared_memory_archive_*`, etc.) hit the durable tables. Reads
-//! (`shared_memory_search`, list_*) hit transcript-derived rows
-//! populated by `claudepot codex index` and `claudepot session
-//! backfill-exchanges`.
+//! Shares a single `SessionIndex` handle across all commands via
+//! Tauri state. `SessionIndex` owns a `Mutex<Connection>` so writes
+//! serialize internally; reads inside `spawn_blocking` cross the
+//! await point without lock contention against the rest of the app
+//! (which also `.manage()`s the same Arc).
+//!
+//! Mutations (`shared_memory_create_memory`,
+//! `shared_memory_log_decision`, `shared_memory_archive_*`, etc.)
+//! hit the durable tables. Reads (`shared_memory_search`, list_*)
+//! hit transcript-derived rows populated by `claudepot codex index`
+//! and `claudepot session backfill-exchanges`.
 
-use claudepot_core::paths;
 use claudepot_core::redaction::{apply as redact_apply, RedactionPolicy};
 use claudepot_core::session_index::SessionIndex;
 use claudepot_core::shared_memory::{durable, read as smr, search as sms};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tauri::State;
+
+/// Shared `SessionIndex` handle. Opened once at app startup and
+/// `.manage()`d. `None` if startup open failed — the matching
+/// commands then return a "session index unavailable" error that
+/// the UI renders as a banner instead of crashing.
+pub struct SharedMemoryIndex(pub Option<Arc<SessionIndex>>);
+
+fn require_idx(state: &State<'_, SharedMemoryIndex>) -> Result<Arc<SessionIndex>, String> {
+    state
+        .0
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "session index unavailable (open failed at startup)".to_string())
+}
 
 fn join_err(e: tokio::task::JoinError) -> String {
     format!("blocking task failed: {e}")
-}
-
-fn db_path() -> std::path::PathBuf {
-    paths::claudepot_data_dir().join("sessions.db")
 }
 
 /// Stricter than `RedactionPolicy::default()` — adds emails +
@@ -80,9 +94,12 @@ pub struct SearchResponseDto {
 }
 
 #[tauri::command]
-pub async fn shared_memory_search(args: SearchArgs) -> Result<SearchResponseDto, String> {
+pub async fn shared_memory_search(
+    args: SearchArgs,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<SearchResponseDto, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
         let user_limit = args.limit.unwrap_or(20).clamp(1, 50);
         let q = sms::SearchQuery {
             query: args.query,
@@ -97,7 +114,7 @@ pub async fn shared_memory_search(args: SearchArgs) -> Result<SearchResponseDto,
             sort: sms::SearchSort::Relevance,
         };
         let policy = ui_redaction_policy();
-        let raw = sms::search(&idx, &q, &policy).map_err(|e| format!("search: {e}"))?;
+        let raw = sms::search(idx.as_ref(), &q, &policy).map_err(|e| format!("search: {e}"))?;
         let has_more = raw.len() as u32 > user_limit;
         let hits = raw
             .into_iter()
@@ -146,9 +163,10 @@ pub struct ConversationReadDto {
 #[tauri::command]
 pub async fn shared_memory_read_locator(
     args: ReadLocatorArgs,
+    state: State<'_, SharedMemoryIndex>,
 ) -> Result<ConversationReadDto, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
         let policy = ui_redaction_policy();
         // Same server-side ceiling as MCP: 1 MiB regardless of
         // requested cap.
@@ -159,7 +177,7 @@ pub async fn shared_memory_read_locator(
             line_start: None,
             line_end: None,
         };
-        let result = smr::read_locator_bounded(&idx, &locator, cap, &policy)
+        let result = smr::read_locator_bounded(idx.as_ref(), &locator, cap, &policy)
             .map_err(|e| format!("read: {e}"))?;
         Ok::<_, String>(ConversationReadDto {
             file_path: result.file_path,
@@ -270,9 +288,10 @@ fn decision_status_str(s: durable::DecisionStatus) -> &'static str {
 #[tauri::command]
 pub async fn shared_memory_list_memories(
     args: ListMemoriesArgs,
+    state: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<MemoryDto>, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
         let policy = ui_redaction_policy();
         let f = durable::MemoryListFilter {
             scope: parse_scope(args.scope.as_deref()),
@@ -281,7 +300,7 @@ pub async fn shared_memory_list_memories(
             include_archived: args.include_archived.unwrap_or(false),
             limit: args.limit.unwrap_or(0),
         };
-        let rows = durable::list_memories(&idx, &f).map_err(|e| format!("list: {e}"))?;
+        let rows = durable::list_memories(idx.as_ref(), &f).map_err(|e| format!("list: {e}"))?;
         Ok::<_, String>(
             rows.into_iter()
                 .map(|m| MemoryDto {
@@ -317,9 +336,12 @@ pub struct CreateMemoryArgs {
 }
 
 #[tauri::command]
-pub async fn shared_memory_create_memory(args: CreateMemoryArgs) -> Result<MemoryDto, String> {
+pub async fn shared_memory_create_memory(
+    args: CreateMemoryArgs,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<MemoryDto, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
         let scope = parse_scope(Some(args.scope.as_str()))
             .ok_or_else(|| "invalid scope".to_string())?;
         let kind = parse_memory_kind(Some(args.kind.as_str()))
@@ -334,7 +356,7 @@ pub async fn shared_memory_create_memory(args: CreateMemoryArgs) -> Result<Memor
             created_by: &args.created_by,
             confidence,
         };
-        let m = durable::create_memory(&idx, &new).map_err(|e| format!("create: {e}"))?;
+        let m = durable::create_memory(idx.as_ref(), &new).map_err(|e| format!("create: {e}"))?;
         Ok::<_, String>(MemoryDto {
             id: m.id,
             scope: scope_str(m.scope).to_string(),
@@ -354,10 +376,13 @@ pub async fn shared_memory_create_memory(args: CreateMemoryArgs) -> Result<Memor
 }
 
 #[tauri::command]
-pub async fn shared_memory_archive_memory(id: String) -> Result<bool, String> {
+pub async fn shared_memory_archive_memory(
+    id: String,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<bool, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
-        durable::archive_memory(&idx, &id).map_err(|e| format!("archive: {e}"))
+        durable::archive_memory(idx.as_ref(), &id).map_err(|e| format!("archive: {e}"))
     })
     .await
     .map_err(join_err)?
@@ -392,16 +417,17 @@ pub struct DecisionDto {
 #[tauri::command]
 pub async fn shared_memory_list_decisions(
     args: ListDecisionsArgs,
+    state: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<DecisionDto>, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
         let policy = ui_redaction_policy();
         let f = durable::DecisionListFilter {
             project_path: args.project_path,
             status: parse_decision_status(args.status.as_deref()),
             limit: args.limit.unwrap_or(0),
         };
-        let rows = durable::list_decisions(&idx, &f).map_err(|e| format!("list: {e}"))?;
+        let rows = durable::list_decisions(idx.as_ref(), &f).map_err(|e| format!("list: {e}"))?;
         Ok::<_, String>(
             rows.into_iter()
                 .map(|d| DecisionDto {
@@ -438,9 +464,12 @@ pub struct LogDecisionArgs {
 }
 
 #[tauri::command]
-pub async fn shared_memory_log_decision(args: LogDecisionArgs) -> Result<DecisionDto, String> {
+pub async fn shared_memory_log_decision(
+    args: LogDecisionArgs,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<DecisionDto, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
         let new = durable::NewDecision {
             project_path: args.project_path.as_deref(),
             topic: args.topic.as_deref(),
@@ -450,9 +479,9 @@ pub async fn shared_memory_log_decision(args: LogDecisionArgs) -> Result<Decisio
             created_by: &args.created_by,
         };
         let d = if let Some(ref prior) = args.supersedes_id {
-            durable::supersede_decision(&idx, prior, &new)
+            durable::supersede_decision(idx.as_ref(), prior, &new)
         } else {
-            durable::log_decision(&idx, &new)
+            durable::log_decision(idx.as_ref(), &new)
         }
         .map_err(|e| format!("log: {e}"))?;
         Ok::<_, String>(DecisionDto {
@@ -473,10 +502,13 @@ pub async fn shared_memory_log_decision(args: LogDecisionArgs) -> Result<Decisio
 }
 
 #[tauri::command]
-pub async fn shared_memory_archive_decision(id: String) -> Result<bool, String> {
+pub async fn shared_memory_archive_decision(
+    id: String,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<bool, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
-        durable::archive_decision(&idx, &id).map_err(|e| format!("archive: {e}"))
+        durable::archive_decision(idx.as_ref(), &id).map_err(|e| format!("archive: {e}"))
     })
     .await
     .map_err(join_err)?
@@ -515,9 +547,10 @@ pub struct SessionSummaryDto {
 #[tauri::command]
 pub async fn shared_memory_list_sessions(
     args: ListSessionsArgs,
+    state: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<SessionSummaryDto>, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
         let f = sms::SessionListFilter {
             source_kind: args.source_kind,
             project_path: args.project_path,
@@ -525,7 +558,7 @@ pub async fn shared_memory_list_sessions(
             limit: args.limit.unwrap_or(0),
             offset: args.offset.unwrap_or(0),
         };
-        let rows = sms::list_sessions(&idx, &f).map_err(|e| format!("list: {e}"))?;
+        let rows = sms::list_sessions(idx.as_ref(), &f).map_err(|e| format!("list: {e}"))?;
         Ok::<_, String>(
             rows.into_iter()
                 .map(|s| SessionSummaryDto {
@@ -557,11 +590,12 @@ pub struct ProjectSummaryDto {
 #[tauri::command]
 pub async fn shared_memory_list_projects(
     limit: Option<u32>,
+    state: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<ProjectSummaryDto>, String> {
+    let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let idx = SessionIndex::open(&db_path()).map_err(|e| format!("open db: {e}"))?;
-        let rows =
-            sms::list_projects(&idx, limit.unwrap_or(0)).map_err(|e| format!("list: {e}"))?;
+        let rows = sms::list_projects(idx.as_ref(), limit.unwrap_or(0))
+            .map_err(|e| format!("list: {e}"))?;
         Ok::<_, String>(
             rows.into_iter()
                 .map(|p| ProjectSummaryDto {
@@ -638,6 +672,75 @@ pub struct McpHealthDto {
     pub error: Option<String>,
 }
 
+/// Resolve the `claudepot` CLI binary the user would configure as
+/// the MCP command. The GUI binary (`current_exe()`) doesn't have
+/// the `mcp memory-server` subcommand — that's only on the CLI
+/// crate. Probe order:
+///
+///   1. Explicit override.
+///   2. Sibling of `current_exe()`. In dev: `target/debug/claudepot`
+///      (the CLI's `[[bin]] name`). In a prod bundle:
+///      `Contents/MacOS/claudepot-cli` (the externalBin-resolved
+///      sidecar that `tauri-cli` copies in at bundle time).
+///   3. Sibling with the platform-triple suffix that `externalBin`
+///      uses pre-bundle (`claudepot-cli-aarch64-apple-darwin` etc.).
+fn resolve_cli_binary(
+    override_path: Option<String>,
+) -> Result<std::path::PathBuf, String> {
+    if let Some(p) = override_path {
+        return Ok(std::path::PathBuf::from(p));
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "current_exe has no parent".to_string())?;
+    // In dev builds, prefer `claudepot` (the CLI crate's
+    // `[[bin]] name`). A stale `claudepot-cli` artifact from a
+    // pre-rename build may still sit next to it in `target/debug/`
+    // — probing that first would spawn the wrong binary.
+    // In release builds the sidecar is named `claudepot-cli`.
+    let mut candidates: Vec<std::path::PathBuf> = if cfg!(debug_assertions) {
+        vec![
+            dir.join("claudepot"),     // dev: target/debug/claudepot
+            dir.join("claudepot-cli"), // dev: stale rename fallback
+        ]
+    } else {
+        vec![
+            dir.join("claudepot-cli"), // prod bundle: Contents/MacOS/claudepot-cli
+            dir.join("claudepot"),     // fallback if installed manually
+        ]
+    };
+    // Pre-bundle externalBin candidates carry the host target triple.
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(dir.join("claudepot-cli-aarch64-apple-darwin"));
+        candidates.push(dir.join("claudepot-cli-x86_64-apple-darwin"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(dir.join("claudepot-cli-x86_64-unknown-linux-gnu"));
+        candidates.push(dir.join("claudepot-cli-aarch64-unknown-linux-gnu"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push(dir.join("claudepot-cli-x86_64-pc-windows-msvc.exe"));
+    }
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.clone());
+        }
+    }
+    Err(format!(
+        "no claudepot CLI binary found next to {} (tried: {})",
+        exe.display(),
+        candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
 #[tauri::command]
 pub async fn shared_memory_mcp_health(claudepot_binary: Option<String>) -> Result<McpHealthDto, String> {
     tokio::task::spawn_blocking(move || {
@@ -645,12 +748,15 @@ pub async fn shared_memory_mcp_health(claudepot_binary: Option<String>) -> Resul
         use std::process::{Command, Stdio};
         use std::time::{Duration, Instant};
 
-        // Use the running binary by default — same install the
-        // GUI was launched from.
-        let bin = match claudepot_binary {
-            Some(p) => std::path::PathBuf::from(p),
-            None => std::env::current_exe()
-                .map_err(|e| format!("current_exe: {e}"))?,
+        let bin = match resolve_cli_binary(claudepot_binary) {
+            Ok(p) => p,
+            Err(e) => {
+                return Ok::<_, String>(McpHealthDto {
+                    tool_visible: false,
+                    tool_count: 0,
+                    error: Some(e),
+                });
+            }
         };
 
         let mut child = Command::new(&bin)
@@ -660,7 +766,7 @@ pub async fn shared_memory_mcp_health(claudepot_binary: Option<String>) -> Resul
             .stderr(Stdio::piped())
             .env("RUST_LOG", "warn")
             .spawn()
-            .map_err(|e| format!("spawn: {e}"))?;
+            .map_err(|e| format!("spawn {}: {e}", bin.display()))?;
 
         let stdin_handle = child.stdin.take();
         let stdout_handle = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
@@ -672,6 +778,8 @@ pub async fn shared_memory_mcp_health(claudepot_binary: Option<String>) -> Resul
             let _ = stdin.write_all(frames.as_bytes());
             drop(stdin); // EOF → server processes queued + exits
         }
+
+        let stderr_handle = child.stderr.take();
 
         let mut reader = BufReader::new(stdout_handle);
         let mut tool_count = 0usize;
@@ -706,10 +814,34 @@ pub async fn shared_memory_mcp_health(claudepot_binary: Option<String>) -> Resul
         let _ = child.kill();
         let _ = child.wait();
 
+        // On failure, drain stderr (first 1 KiB) so the UI can show
+        // *why* the probe didn't see any tools — wrong binary,
+        // missing subcommand, panic, etc. — instead of a bare
+        // "failed" badge.
+        let error = if tool_count == 0 {
+            let mut buf = String::new();
+            if let Some(mut s) = stderr_handle {
+                use std::io::Read;
+                let mut take = (&mut s).take(1024);
+                let _ = take.read_to_string(&mut buf);
+            }
+            let trimmed = buf.trim();
+            Some(if trimmed.is_empty() {
+                format!(
+                    "spawned {} but no tools/list response within 8s",
+                    bin.display()
+                )
+            } else {
+                format!("stderr from {}: {trimmed}", bin.display())
+            })
+        } else {
+            None
+        };
+
         Ok::<_, String>(McpHealthDto {
             tool_visible: tool_count > 0,
             tool_count,
-            error: None,
+            error,
         })
     })
     .await
