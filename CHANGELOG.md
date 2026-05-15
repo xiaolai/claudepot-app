@@ -6,7 +6,89 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.1.35 — beta (unreleased)
+## 0.1.36 — beta (unreleased)
+
+Post-0.1.35 audit-fix round plus the user/project scope toggle for the
+MCP installer pane. Surfaced by driving the running dev app through
+the Tauri MCP bridge (`webview_screenshot` + `webview_execute_js`) and
+by a Codex mini-audit over the whole branch.
+
+### Added
+
+- **MCP installer scope toggle.** Settings → MCP now offers explicit
+  `User` vs `Project` scope. User scope writes
+  `~/.claude/claudepot-mcp-instructions.md` and names the three
+  home-scope agent configs (`~/.claude/CLAUDE.md`,
+  `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`) as paste targets.
+  Project scope writes `<project>/.claude/claudepot-mcp-instructions.md`
+  and emits a relative `@.claude/...` include line for the project's
+  `AGENTS.md` — aligned with the `/init-workspace` convention
+  (AGENTS.md is the canonical source; CLAUDE.md and GEMINI.md just
+  `@AGENTS.md`).
+- **Validation errors on MCP filter args.** `claudepot_list_memories`
+  and `claudepot_list_decisions` now reject unknown `scope` / `kind` /
+  `status` values with `invalid_scope` / `invalid_kind` /
+  `invalid_status` error envelopes instead of silently coercing them
+  to "no filter".
+
+### Changed
+
+- **`exchanges.id` namespaced by source_kind.** The PK format moved
+  from `<session_id>:<turn_index>` to
+  `<source_kind>:<session_id>:<turn_index>` so an unlikely Claude /
+  Codex UUID collision can't reject the second transcript.
+  SCHEMA_VERSION bumped 4 → 5; the existing v4 cache-invalidation path
+  cascade-clears `exchanges` via FK on first open.
+- **Canonical MCP snippet centralized.** The agent-instruction snippet
+  now has a single source of truth at
+  `claudepot_core::mcp_snippet`. CLI and Tauri pane both re-export /
+  alias it. Audit caught the CLI and GUI bodies had already drifted.
+- **Tauri Shared Memory commands share one `SessionIndex`.** Opened
+  once at startup and `.manage()`d via Tauri state instead of
+  per-command `SessionIndex::open()`. Mirrors the existing
+  `AccountStore` / cards-index pattern.
+- **Activities heading.** Now reads "Activities" (was a leftover
+  "Events" from before the registry rename).
+
+### Fixed
+
+- **`database is locked` in the Memories tab.** Each
+  `shared_memory_*` Tauri command was opening its own `SessionIndex`
+  per call; under live contention with the running app's other
+  handles, the first write inside `apply_schema` (a `BEGIN IMMEDIATE`
+  `_touch` round) raced and lost. The shared-state refactor above
+  eliminates the contention.
+- **MCP health probe stuck at `tool_visible · failed`.** Probe was
+  spawning `current_exe()` — the GUI binary, which has no
+  `mcp memory-server` subcommand. Resolver now finds the CLI binary
+  next to the GUI (`claudepot` in dev, `claudepot-cli` in release,
+  target-triple fallbacks for pre-bundle externalBin layouts). On
+  failure we drain 1 KiB of stderr so the UI shows *why* instead of
+  a bare "failed" badge.
+- **MCP health 8s deadline ineffective.** Blocking
+  `BufReader::read_line` only honored the deadline between reads, so
+  a child that stayed alive but emitted no newline hung the request
+  thread. Rewritten with `tokio::process::Command` +
+  `tokio::time::timeout` around the read loop and
+  `kill_on_drop(true)` on the child.
+- **Runtime `waiting_for` change never emitted.** `set_pid_status`
+  was updating the state machine *before* the diff check, so the
+  comparison against `snapshot_waiting_for(s)` always read equal.
+  `SessionState` now carries a `last_waiting_for` field and compares
+  against the previously-emitted value.
+- **`environment_trail` collected and discarded.** The Codex parser
+  populated this field but the indexer never read it. Removed; the
+  synthetic-seed branch still extends `line_end` so physical line
+  ranges stay accurate.
+- **CSS token-literal artifacts.** Five files contained invalid CSS
+  strings like `"tokens.sp.px solid var(--line)"` and
+  `"tokens.sidebar.width"` that the browser silently dropped —
+  borders, paddings, and grid columns never rendered. Rewritten to
+  `var(--sp-px)` / `var(--sp-N)` / `var(--sidebar-width)`. fontSize
+  fallbacks of the form `var(--fs-2xs, tokens.sp[12])` simplified to
+  `var(--fs-2xs)`.
+
+## 0.1.35 — beta (released 2026-05-15)
 
 Cross-harness shared memory: a v4 schema migration over `sessions.db`,
 a Codex rollout parser, a backfill indexer, FTS5 search, durable
