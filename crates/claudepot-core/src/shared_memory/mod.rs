@@ -17,6 +17,7 @@
 
 pub mod indexer;
 pub mod schema;
+pub mod search;
 
 #[cfg(test)]
 pub mod migration_tests;
