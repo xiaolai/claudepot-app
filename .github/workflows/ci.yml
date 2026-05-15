@@ -49,6 +49,83 @@ jobs:
         # would have caught at the source).
         run: cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings
 
+      # ─── Architectural invariants ─────────────────────────────
+      # Three grep-based tripwires. Each protects an invariant
+      # called out in dev-docs/codex-plans/20260515-1130-shared-memory.md
+      # that the type system can't enforce on its own.
+
+      - name: Invariant — codex_session parser is a single leaf
+        # The Codex rollout parser is a neutral leaf in the
+        # workspace. The decoder pattern is `"session_meta" =>`
+        # in a match arm — flag that anywhere outside the
+        # codex_session/ module. We deliberately ignore plain
+        # string occurrences (test fixtures, comments) because
+        # those aren't parsers.
+        run: |
+          set -euo pipefail
+          violators=$(grep -rnE '"session_meta"[[:space:]]*=>' crates/ --include='*.rs' || true)
+          unexpected=$(echo "$violators" | grep -v 'crates/claudepot-core/src/codex_session/' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::Codex rollout decoder found outside codex_session/:"
+            echo "$unexpected"
+            echo
+            echo "Codex rollout parsing (matching on 'session_meta' record type)"
+            echo "must live in claudepot-core/src/codex_session/. Duplicating it"
+            echo "elsewhere leads to two parsers drifting in parallel — exactly"
+            echo "what the plan's leaf-module discipline prevents."
+            exit 1
+          fi
+
+      - name: Invariant — raw text SELECTs are confined to redaction-aware paths
+        # R9 of the plan: every read of transcript-content columns
+        # must go through redaction::apply before crossing an
+        # emission boundary. This grep catches new SELECTs that
+        # skip the redaction step.
+        run: |
+          set -euo pipefail
+          patterns='SELECT.*user_text|SELECT.*assistant_text|SELECT.*tool_result_text'
+          violators=$(grep -rlE "$patterns" crates/ --include='*.rs' || true)
+          unexpected=$(echo "$violators" \
+            | grep -v 'crates/claudepot-core/src/shared_memory/search.rs' \
+            | grep -v 'crates/claudepot-core/src/shared_memory/read.rs' \
+            | grep -v 'crates/claudepot-core/src/shared_memory/indexer.rs' \
+            | grep -v 'crates/claudepot-core/src/shared_memory/schema.rs' \
+            || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::Raw text SELECTs found outside redaction-aware paths:"
+            echo "$unexpected"
+            echo
+            echo "Every emission of exchanges.user_text / assistant_text /"
+            echo "tool_calls.tool_result_text must go through redaction::apply"
+            echo "before crossing a UI / export / log / MCP boundary."
+            echo "Extend the allowlist in .github/workflows/ci.yml if adding"
+            echo "a legitimate reader, and document why redaction is handled"
+            echo "at the call site."
+            exit 1
+          fi
+
+      - name: Invariant — no bare matches!() statements
+        # H2 of the grill report: a bare matches!(err, Variant);
+        # returns bool and discards it. Tests pass against any
+        # error variant. The grill round caught six such sites;
+        # this gate prevents regression.
+        #
+        # The signal is a `matches!()` call used as a *statement*
+        # (followed by `;`), not as an expression value. Match
+        # arms, return values, and let bindings have no trailing
+        # semicolon and are correctly excluded.
+        run: |
+          set -euo pipefail
+          violators=$(grep -rnE '^[[:space:]]+matches!\(.*\);' crates/ --include='*.rs' || true)
+          if [ -n "$violators" ]; then
+            echo "::error::Bare matches!() statements found:"
+            echo "$violators"
+            echo
+            echo "A bare matches!() returns bool and discards it — the test"
+            echo "passes against any variant. Wrap in assert!(matches!(...))."
+            exit 1
+          fi
+
   test:
     name: Tests (${{ matrix.os }})
     strategy:

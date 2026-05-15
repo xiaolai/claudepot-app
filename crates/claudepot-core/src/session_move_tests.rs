@@ -989,5 +989,8 @@ fn discard_orphan_project_errors_when_slug_dir_missing() {
     let f = Fixture::new();
     let err = discard_orphan_project(f.config_dir(), "never-existed")
         .expect_err("missing slug dir must error");
-    matches!(err, MoveSessionError::InvalidConfigDir(_));
+    assert!(
+        matches!(err, MoveSessionError::InvalidConfigDir(_)),
+        "expected InvalidConfigDir, got {err:?}"
+    );
 }

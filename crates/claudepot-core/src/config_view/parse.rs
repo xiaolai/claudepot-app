@@ -237,7 +237,11 @@ mod tests {
     fn strict_json_rejects_malformed() {
         let p = parse_settings_json(br#"{ "a": ,}"#);
         assert_eq!(p.issues.len(), 1);
-        matches!(p.issues[0], ParseIssue::MalformedJson { .. });
+        assert!(
+            matches!(p.issues[0], ParseIssue::MalformedJson { .. }),
+            "expected MalformedJson, got {:?}",
+            p.issues[0]
+        );
     }
 
     #[test]
