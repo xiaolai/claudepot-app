@@ -209,6 +209,30 @@ enum Commands {
         #[command(subcommand)]
         action: UpdateAction,
     },
+    /// Run an MCP server backed by Claudepot's shared memory.
+    ///
+    /// The memory-server subcommand starts a stdio MCP server that
+    /// exposes search / read / remember / log-decision /
+    /// submit-evidence tools to Claude Code and Codex. See
+    /// `dev-docs/codex-plans/20260515-1130-shared-memory.md` (WI-008)
+    /// for the protocol shape and `dev-docs/reports/rmcp-spike-2026-05-15.md`
+    /// for the SDK verdict.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Run the Claudepot memory MCP server over stdio. Stdout is
+    /// reserved for JSON-RPC frames; logs go to stderr.
+    MemoryServer {
+        /// Override the sessions.db path. Defaults to
+        /// `~/.claudepot/sessions.db`.
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1099,6 +1123,9 @@ async fn main() -> Result<()> {
                 )
                 .await?
             }
+        },
+        Commands::Mcp { action } => match action {
+            McpAction::MemoryServer { db } => commands::mcp::run(db).await?,
         },
         Commands::Activity { action } => match action {
             ActivityAction::Recent {

@@ -4,6 +4,7 @@ pub mod automation;
 pub mod cli_ops;
 pub mod desktop_ops;
 pub mod doctor;
+pub mod mcp;
 pub mod memory;
 pub mod project;
 pub mod project_migrate;

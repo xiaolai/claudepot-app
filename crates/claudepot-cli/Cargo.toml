@@ -27,3 +27,9 @@ chrono.workspace = true
 reqwest.workspace = true
 dirs.workspace = true
 keyring.workspace = true
+
+# WI-008 — Claudepot MCP memory server. Binary-only on the CLI;
+# claudepot-core stays free of the ~30-dep rmcp tree. Per the spike
+# verdict at dev-docs/reports/rmcp-spike-2026-05-15.md. rmcp
+# re-exports schemars so we don't need it as a direct dep.
+rmcp = { version = "1.7", features = ["server", "transport-io", "macros"] }

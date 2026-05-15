@@ -1,0 +1,592 @@
+//! Claudepot MCP memory server (WI-008).
+//!
+//! `claudepot mcp memory-server` starts a stdio MCP server exposing
+//! seven tools backed by the shared_memory module:
+//!
+//! * `claudepot_search_memory`
+//! * `claudepot_read_conversation`
+//! * `claudepot_remember`
+//! * `claudepot_log_decision`
+//! * `claudepot_submit_evidence`
+//! * `claudepot_list_memories`
+//! * `claudepot_list_decisions`
+//!
+//! All emission paths run through `claudepot_core::redaction::apply`
+//! before crossing the MCP boundary. Server logs go to stderr only;
+//! stdout is reserved for JSON-RPC frames.
+//!
+//! Spike verdict in `dev-docs/reports/rmcp-spike-2026-05-15.md`.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::Result;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::transport::stdio;
+use rmcp::{schemars, tool, tool_router, ServiceExt};
+use serde::{Deserialize, Serialize};
+
+use claudepot_core::redaction::{apply as redact_apply, RedactionPolicy};
+use claudepot_core::session_index::SessionIndex;
+use claudepot_core::shared_memory::{durable, read as smr, search as sms};
+
+const SCHEMA_VERSION: u32 = 1;
+
+/// Default DB path: `~/.claudepot/sessions.db`.
+fn default_db_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".claudepot")
+        .join("sessions.db")
+}
+
+/// Entry point for the `mcp memory-server` subcommand.
+pub async fn run(db_path: Option<PathBuf>) -> Result<()> {
+    let path = db_path.unwrap_or_else(default_db_path);
+    let idx = Arc::new(SessionIndex::open(&path)?);
+    tracing::info!(db = %path.display(), "claudepot mcp memory-server starting");
+    let server = MemoryServer {
+        idx,
+        policy: Arc::new(RedactionPolicy::default()),
+    };
+    let service = server.serve(stdio()).await?;
+    service.waiting().await?;
+    Ok(())
+}
+
+#[derive(Clone)]
+struct MemoryServer {
+    idx: Arc<SessionIndex>,
+    policy: Arc<RedactionPolicy>,
+}
+
+// ─── tool input/output structs ────────────────────────────────
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SearchMemoryRequest {
+    /// Free-text query. Phrase-escaped before reaching FTS5; safe to
+    /// pass user-supplied secrets, operators, or quotes.
+    query: String,
+    /// Restrict by transcript origin: `claude_code` or `codex`.
+    #[serde(default)]
+    source_kind: Option<String>,
+    /// Substring match on project path.
+    #[serde(default)]
+    project_path: Option<String>,
+    /// Page size. Defaults to 20; capped at 50.
+    #[serde(default)]
+    limit: Option<u32>,
+    /// Pagination offset.
+    #[serde(default)]
+    offset: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SearchHitOut {
+    exchange_id: String,
+    file_path: String,
+    session_id: String,
+    source_kind: String,
+    project_path: String,
+    timestamp_ms: Option<i64>,
+    line_start: Option<i64>,
+    line_end: Option<i64>,
+    snippet: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SearchPayload {
+    schema_version: u32,
+    hits: Vec<SearchHitOut>,
+    /// True when more results exist past this page.
+    has_more: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ReadConversationRequest {
+    /// `sessions.file_path` returned in a SearchHitOut.
+    file_path: String,
+    /// Optional exchange id (`<session_id>:<turn_index>`); when
+    /// present, the read is bounded to that exchange's line range.
+    #[serde(default)]
+    exchange_id: Option<String>,
+    /// Byte cap on the returned body. Defaults to 16 KiB.
+    #[serde(default)]
+    max_bytes: Option<usize>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ReadPayload {
+    schema_version: u32,
+    file_path: String,
+    exchange_id: Option<String>,
+    line_start: u32,
+    line_end: u32,
+    /// Already redacted; emit verbatim.
+    body: String,
+    truncated: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct RememberRequest {
+    /// `global` or `project`.
+    scope: String,
+    /// Required when scope=`project`; must be omitted when scope=`global`.
+    #[serde(default)]
+    project_path: Option<String>,
+    /// `fact` | `preference` | `pattern` | `constraint` | `summary`.
+    kind: String,
+    content: String,
+    /// Free-form actor id (e.g. `codex@2026-05-15`, `claude-code`).
+    #[serde(default)]
+    created_by: Option<String>,
+    /// 0..=100. Optional self-rating.
+    #[serde(default)]
+    confidence: Option<i64>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct RememberPayload {
+    schema_version: u32,
+    id: String,
+    scope: String,
+    kind: String,
+    created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct LogDecisionRequest {
+    decision: String,
+    #[serde(default)]
+    rationale: Option<String>,
+    #[serde(default)]
+    topic: Option<String>,
+    #[serde(default)]
+    project_path: Option<String>,
+    #[serde(default)]
+    supersedes_id: Option<String>,
+    #[serde(default)]
+    created_by: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct LogDecisionPayload {
+    schema_version: u32,
+    id: String,
+    status: String,
+    supersedes_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SubmitEvidenceRequest {
+    summary: String,
+    verification: String,
+    /// JSON-encoded array of relative file paths.
+    files_changed: String,
+    /// 0..=100.
+    confidence: i64,
+    #[serde(default)]
+    topic: Option<String>,
+    #[serde(default)]
+    project_path: Option<String>,
+    #[serde(default)]
+    created_by: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SubmitEvidencePayload {
+    schema_version: u32,
+    id: String,
+    created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListMemoriesRequest {
+    /// Optional. When absent, all memories returned (capped).
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    project_path: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    include_archived: Option<bool>,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryOut {
+    id: String,
+    scope: String,
+    project_path: Option<String>,
+    kind: String,
+    content: String,
+    created_by_kind: String,
+    created_by: String,
+    created_at_ms: i64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListMemoriesPayload {
+    schema_version: u32,
+    memories: Vec<MemoryOut>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListDecisionsRequest {
+    #[serde(default)]
+    project_path: Option<String>,
+    /// `active`, `superseded`, or `archived`.
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DecisionOut {
+    id: String,
+    project_path: Option<String>,
+    topic: Option<String>,
+    decision: String,
+    rationale: Option<String>,
+    status: String,
+    created_by_kind: String,
+    created_by: String,
+    created_at_ms: i64,
+    supersedes_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListDecisionsPayload {
+    schema_version: u32,
+    decisions: Vec<DecisionOut>,
+}
+
+// ─── server impl ──────────────────────────────────────────────
+
+#[tool_router(server_handler)]
+impl MemoryServer {
+    #[tool(description = "Search Claudepot's shared memory across Claude Code and Codex transcripts. Returns compact hits with locators; raw secrets are redacted in snippets.")]
+    fn claudepot_search_memory(
+        &self,
+        Parameters(req): Parameters<SearchMemoryRequest>,
+    ) -> String {
+        let q = sms::SearchQuery {
+            query: req.query,
+            source_kind: req.source_kind,
+            project_path: req.project_path,
+            git_branch: None,
+            model: None,
+            since_ms: None,
+            until_ms: None,
+            limit: req.limit.unwrap_or(20),
+            offset: req.offset.unwrap_or(0),
+            sort: sms::SearchSort::Relevance,
+        };
+        let limit = q.limit.clamp(1, 50);
+        let hits = sms::search(&self.idx, &q, &self.policy).unwrap_or_default();
+        let has_more = hits.len() as u32 >= limit;
+        let payload = SearchPayload {
+            schema_version: SCHEMA_VERSION,
+            hits: hits
+                .into_iter()
+                .map(|h| SearchHitOut {
+                    exchange_id: h.exchange_id,
+                    file_path: h.file_path,
+                    session_id: h.session_id,
+                    source_kind: h.source_kind,
+                    project_path: h.project_path,
+                    timestamp_ms: h.timestamp_ms,
+                    line_start: h.line_start,
+                    line_end: h.line_end,
+                    snippet: h.snippet,
+                })
+                .collect(),
+            has_more,
+        };
+        to_json(&payload)
+    }
+
+    #[tool(description = "Read a transcript excerpt by locator. file_path must be a value previously returned by claudepot_search_memory; raw paths are rejected.")]
+    fn claudepot_read_conversation(
+        &self,
+        Parameters(req): Parameters<ReadConversationRequest>,
+    ) -> String {
+        let locator = smr::ConversationLocator {
+            file_path: req.file_path,
+            exchange_id: req.exchange_id,
+            line_start: None,
+            line_end: None,
+        };
+        let cap = req.max_bytes.unwrap_or(16 * 1024);
+        match smr::read_locator_bounded(&self.idx, &locator, cap, &self.policy) {
+            Ok(r) => to_json(&ReadPayload {
+                schema_version: SCHEMA_VERSION,
+                file_path: r.file_path,
+                exchange_id: r.exchange_id,
+                line_start: r.line_start,
+                line_end: r.line_end,
+                body: r.body,
+                truncated: r.truncated,
+            }),
+            Err(e) => to_json(&ErrorPayload {
+                schema_version: SCHEMA_VERSION,
+                error: format!("{e}"),
+            }),
+        }
+    }
+
+    #[tool(description = "Store a durable memory (fact / preference / pattern / constraint / summary). Survives transcript rebuilds.")]
+    fn claudepot_remember(
+        &self,
+        Parameters(req): Parameters<RememberRequest>,
+    ) -> String {
+        let scope = match req.scope.as_str() {
+            "global" => durable::Scope::Global,
+            "project" => durable::Scope::Project,
+            _ => return to_json(&error("scope must be 'global' or 'project'")),
+        };
+        let kind = match req.kind.as_str() {
+            "fact" => durable::MemoryKind::Fact,
+            "preference" => durable::MemoryKind::Preference,
+            "pattern" => durable::MemoryKind::Pattern,
+            "constraint" => durable::MemoryKind::Constraint,
+            "summary" => durable::MemoryKind::Summary,
+            _ => return to_json(&error("kind must be one of fact|preference|pattern|constraint|summary")),
+        };
+        let created_by = req
+            .created_by
+            .clone()
+            .unwrap_or_else(|| "agent:unknown".to_string());
+        let pp = req.project_path.as_deref();
+        let new = durable::NewMemory {
+            scope,
+            project_path: pp,
+            kind,
+            content: &req.content,
+            created_by_kind: durable::CreatedByKind::Agent,
+            created_by: &created_by,
+            confidence: req.confidence,
+        };
+        match durable::create_memory(&self.idx, &new) {
+            Ok(m) => to_json(&RememberPayload {
+                schema_version: SCHEMA_VERSION,
+                id: m.id,
+                scope: req.scope,
+                kind: req.kind,
+                created_at_ms: m.created_at_ms,
+            }),
+            Err(e) => to_json(&error(&format!("{e}"))),
+        }
+    }
+
+    #[tool(description = "Log a durable decision with rationale. If supersedes_id is set, the prior decision flips to 'superseded' atomically.")]
+    fn claudepot_log_decision(
+        &self,
+        Parameters(req): Parameters<LogDecisionRequest>,
+    ) -> String {
+        let created_by = req
+            .created_by
+            .clone()
+            .unwrap_or_else(|| "agent:unknown".to_string());
+        let new = durable::NewDecision {
+            project_path: req.project_path.as_deref(),
+            topic: req.topic.as_deref(),
+            decision: &req.decision,
+            rationale: req.rationale.as_deref(),
+            created_by_kind: durable::CreatedByKind::Agent,
+            created_by: &created_by,
+        };
+        let result = if let Some(ref prior) = req.supersedes_id {
+            durable::supersede_decision(&self.idx, prior, &new)
+        } else {
+            durable::log_decision(&self.idx, &new)
+        };
+        match result {
+            Ok(d) => to_json(&LogDecisionPayload {
+                schema_version: SCHEMA_VERSION,
+                id: d.id,
+                status: "active".to_string(),
+                supersedes_id: d.supersedes_id,
+            }),
+            Err(e) => to_json(&error(&format!("{e}"))),
+        }
+    }
+
+    #[tool(description = "Submit evidence for a task or audit-fix run. Records the verification step and the file changes so future sessions don't re-discover the same finding.")]
+    fn claudepot_submit_evidence(
+        &self,
+        Parameters(req): Parameters<SubmitEvidenceRequest>,
+    ) -> String {
+        let created_by = req
+            .created_by
+            .clone()
+            .unwrap_or_else(|| "agent:unknown".to_string());
+        let new = durable::NewEvidence {
+            project_path: req.project_path.as_deref(),
+            topic: req.topic.as_deref(),
+            summary: &req.summary,
+            verification: &req.verification,
+            files_changed_json: &req.files_changed,
+            confidence: req.confidence.clamp(0, 100),
+            created_by_kind: durable::CreatedByKind::Agent,
+            created_by: &created_by,
+        };
+        match durable::submit_evidence(&self.idx, &new) {
+            Ok(e) => to_json(&SubmitEvidencePayload {
+                schema_version: SCHEMA_VERSION,
+                id: e.id,
+                created_at_ms: e.created_at_ms,
+            }),
+            Err(e) => to_json(&error(&format!("{e}"))),
+        }
+    }
+
+    #[tool(description = "List durable memories. Without filters, returns the most recent (up to 100).")]
+    fn claudepot_list_memories(
+        &self,
+        Parameters(req): Parameters<ListMemoriesRequest>,
+    ) -> String {
+        let scope = match req.scope.as_deref() {
+            Some("global") => Some(durable::Scope::Global),
+            Some("project") => Some(durable::Scope::Project),
+            _ => None,
+        };
+        let kind = match req.kind.as_deref() {
+            Some("fact") => Some(durable::MemoryKind::Fact),
+            Some("preference") => Some(durable::MemoryKind::Preference),
+            Some("pattern") => Some(durable::MemoryKind::Pattern),
+            Some("constraint") => Some(durable::MemoryKind::Constraint),
+            Some("summary") => Some(durable::MemoryKind::Summary),
+            _ => None,
+        };
+        let f = durable::MemoryListFilter {
+            scope,
+            project_path: req.project_path,
+            kind,
+            include_archived: req.include_archived.unwrap_or(false),
+            limit: req.limit.unwrap_or(0),
+        };
+        match durable::list_memories(&self.idx, &f) {
+            Ok(rows) => to_json(&ListMemoriesPayload {
+                schema_version: SCHEMA_VERSION,
+                memories: rows
+                    .into_iter()
+                    .map(|m| MemoryOut {
+                        id: m.id,
+                        scope: scope_str(m.scope).to_string(),
+                        project_path: m.project_path,
+                        kind: memory_kind_str(m.kind).to_string(),
+                        content: redact_apply(&m.content, &self.policy),
+                        created_by_kind: created_by_kind_str(m.created_by_kind).to_string(),
+                        created_by: m.created_by,
+                        created_at_ms: m.created_at_ms,
+                    })
+                    .collect(),
+            }),
+            Err(e) => to_json(&error(&format!("{e}"))),
+        }
+    }
+
+    #[tool(description = "List decisions for a project (or all). Filter by status: active | superseded | archived.")]
+    fn claudepot_list_decisions(
+        &self,
+        Parameters(req): Parameters<ListDecisionsRequest>,
+    ) -> String {
+        let status = match req.status.as_deref() {
+            Some("active") => Some(durable::DecisionStatus::Active),
+            Some("superseded") => Some(durable::DecisionStatus::Superseded),
+            Some("archived") => Some(durable::DecisionStatus::Archived),
+            _ => None,
+        };
+        let f = durable::DecisionListFilter {
+            project_path: req.project_path,
+            status,
+            limit: req.limit.unwrap_or(0),
+        };
+        match durable::list_decisions(&self.idx, &f) {
+            Ok(rows) => to_json(&ListDecisionsPayload {
+                schema_version: SCHEMA_VERSION,
+                decisions: rows
+                    .into_iter()
+                    .map(|d| DecisionOut {
+                        id: d.id,
+                        project_path: d.project_path,
+                        topic: d.topic,
+                        decision: redact_apply(&d.decision, &self.policy),
+                        rationale: d
+                            .rationale
+                            .map(|r| redact_apply(&r, &self.policy)),
+                        status: decision_status_str(d.status).to_string(),
+                        created_by_kind: created_by_kind_str(d.created_by_kind).to_string(),
+                        created_by: d.created_by,
+                        created_at_ms: d.created_at_ms,
+                        supersedes_id: d.supersedes_id,
+                    })
+                    .collect(),
+            }),
+            Err(e) => to_json(&error(&format!("{e}"))),
+        }
+    }
+}
+
+// ─── shared helpers ───────────────────────────────────────────
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ErrorPayload {
+    schema_version: u32,
+    error: String,
+}
+
+fn error(message: &str) -> ErrorPayload {
+    ErrorPayload {
+        schema_version: SCHEMA_VERSION,
+        error: message.to_string(),
+    }
+}
+
+fn to_json<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| {
+        serde_json::to_string(&ErrorPayload {
+            schema_version: SCHEMA_VERSION,
+            error: "serialization failed".to_string(),
+        })
+        .unwrap_or_else(|_| "{}".to_string())
+    })
+}
+
+fn scope_str(s: durable::Scope) -> &'static str {
+    match s {
+        durable::Scope::Global => "global",
+        durable::Scope::Project => "project",
+    }
+}
+
+fn memory_kind_str(k: durable::MemoryKind) -> &'static str {
+    match k {
+        durable::MemoryKind::Fact => "fact",
+        durable::MemoryKind::Preference => "preference",
+        durable::MemoryKind::Pattern => "pattern",
+        durable::MemoryKind::Constraint => "constraint",
+        durable::MemoryKind::Summary => "summary",
+    }
+}
+
+fn created_by_kind_str(k: durable::CreatedByKind) -> &'static str {
+    match k {
+        durable::CreatedByKind::User => "user",
+        durable::CreatedByKind::Agent => "agent",
+        durable::CreatedByKind::Import => "import",
+        durable::CreatedByKind::System => "system",
+    }
+}
+
+fn decision_status_str(s: durable::DecisionStatus) -> &'static str {
+    match s {
+        durable::DecisionStatus::Active => "active",
+        durable::DecisionStatus::Superseded => "superseded",
+        durable::DecisionStatus::Archived => "archived",
+    }
+}
