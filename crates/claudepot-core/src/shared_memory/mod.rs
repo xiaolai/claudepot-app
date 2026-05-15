@@ -15,6 +15,7 @@
 //! See `dev-docs/codex-plans/20260515-1130-shared-memory.md` for
 //! the full plan.
 
+pub mod indexer;
 pub mod schema;
 
 #[cfg(test)]
