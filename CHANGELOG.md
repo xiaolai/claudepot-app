@@ -6,6 +6,45 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.33 — beta (2026-05-15)
+
+A new Third-party capability — shell-PATH setup for CLI wrappers —
+plus the route base-URL and edit-modal fixes that surfaced while
+building it.
+
+### Added
+
+- **Shell-PATH integration for third-party CLI wrappers.** "Use in
+  CLI" writes a wrapper to `~/.claudepot/bin/`, but nothing put that
+  directory on the shell's PATH — so the command the wrapper installs
+  couldn't actually be run, and the Third-party pane claimed
+  "✓ on PATH" from a flag that only meant "file written," never a
+  real check. Claudepot now probes the login shell to verify whether
+  `~/.claudepot/bin` is genuinely on PATH (timeout-guarded, so a slow
+  shell rc can't hang the app), shows a verified three-state wrapper
+  indicator, and offers an "Add to PATH" banner that appends the
+  `export` line to `.zshrc` / `.bash_profile` idempotently — scoped
+  to real PATH-assignment lines, with shell-unsafe paths refused
+  rather than written into a file the shell sources.
+
+### Fixed
+
+- **Gateway routes whose base URL ends in `/v1` no longer fail with
+  "model not found".** Ollama and other OpenAI-compatible docs tell
+  you to point at the `…/v1` URL, so that's what people pasted into
+  the route's base-URL field — but Claude Code's SDK appends
+  `/v1/messages` itself, producing `…/v1/v1/messages`: a 404 the CLI
+  surfaced as a misleading "the selected model may not exist." The
+  base URL is now normalized on save — a trailing `/v1` is stripped,
+  and query strings / fragments are rejected outright.
+- **The route and automation edit modals no longer reset while
+  you're typing.** Their fetch effects depended on callbacks the
+  parent section recreated on every render — and those sections
+  re-render on a timer (the live Activity strip) — so every few
+  seconds the modal refetched and remounted its form, throwing away
+  in-progress edits and scroll position. The fetch now keys only on
+  the route/automation being edited, not on render-churn.
+
 ## 0.1.32 — beta (2026-05-14)
 
 Two follow-ups to 0.1.31's chrome fix:
