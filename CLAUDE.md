@@ -40,13 +40,17 @@ pnpm test:coverage                   # React with coverage report
 - `src/App.tsx` + `src/api/` (sliced by domain — `account`, `project`,
   `notification`, `activity`, etc., merged in `index.ts`) + `src/types.ts` — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
-- Two SQLite files live in `~/.claudepot/` (override with `CLAUDEPOT_DATA_DIR`):
+- Three SQLite files live in `~/.claudepot/` (override with `CLAUDEPOT_DATA_DIR`):
   - `accounts.db` — authoritative account + verification state, linked to Keychain.
   - `sessions.db` — persistent cache for the Sessions tab. One row per
     `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
     re-parse guard. Owned by `claudepot-core::session_index`. Rebuild
     via Settings → Cleanup or `claudepot session rebuild-index`.
-- Three JSON ring buffers also live in `~/.claudepot/`:
+  - `env-vault.db` — the local named-secret vault (`env_secrets`
+    table, secret in a 0600 column). Owned by
+    `claudepot-core::env_vault::store`. Mirrors `keys.db`'s at-rest
+    pattern — no OS Keychain. See "## Env secret vault" below.
+- Four JSON files also live in `~/.claudepot/`:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -63,6 +67,52 @@ pnpm test:coverage                   # React with coverage report
     suggested, skipped_*, failed) with rule_id + from/to + reason.
     Owned by `claudepot-core::rotation::audit`. Rendered in the
     Settings → Rotation pane's "Recent activity" table.
+  - `permission-grants.json` — active time-boxed permission grants.
+    `{schema_version, grants: [...]}`, one grant per project_path.
+    Owned by `claudepot-core::permission::store`. The orchestrator
+    reverts expired grants each `usage_snapshot::run_tick`. Empty
+    file or no grants = feature off. See "## Permission grants".
+
+## Permission grants (ProjectDetail → Permissions)
+
+Optional feature: grant a project a time-boxed
+`permissions.defaultMode` (almost always `bypassPermissions`) that
+Claudepot auto-reverts on expiry — the elevated state is never
+left to memory.
+
+- Pure logic in `claudepot-core::permission`: `mode` (PermissionMode
+  over CC's wire strings), `settings` (resolve/read/write the nested
+  `permissions.defaultMode` key, format-preserving, refuses the
+  committed Project layer), `grants` + `store` (the JSON file),
+  `eval` (expiration, clock injected).
+- Orchestrator at `src-tauri/src/permission_orchestrator.rs` —
+  `tick()` reverts expired grants (skips if the user hand-changed
+  the setting since the grant) and emits `permission-reverted`.
+  Hooked into `usage_snapshot::run_tick` ahead of the account-state
+  early returns. Zero overhead when no grants exist.
+- Grants always land in `.claude/settings.local.json`. A project
+  elevated by hand-editing settings shows as elevated but *not*
+  Claudepot-managed — the UI won't revert someone's own choice.
+- CC schema (`permissions.defaultMode`) verified against
+  `~/github/claude_code_src/src`.
+
+## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
+
+Optional feature: a fully-local named-secret vault plus
+format-preserving per-project `.env*` editing — copy a secret out,
+inject it into a project's `.env`, comment/uncomment/delete keys.
+Movement layer only, not a text editor.
+
+- Pure logic in `claudepot-core::env_vault`: `env_file` (line-
+  oriented `.env` editor — every mutation touches only the target
+  key's line; `parse` exposes the active/commented/absent
+  tri-state), `store` (the SQLite vault).
+- Tauri commands in `src-tauri/src/commands/env_secret.rs` —
+  `env_vault_*` (vault) and `env_file_*` (per-project). Inbound
+  secret args zeroized on every exit path; outbound values cross
+  only via the Rust-side clipboard write + `KeyCopyReceiptDto`,
+  never rendered. Renderer-supplied `.env` file names are validated
+  as safe bare dotenv filenames (no separators / `..` / NUL).
 
 ## Auto-rotation (Settings → Rotation)
 
