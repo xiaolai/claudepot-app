@@ -12,6 +12,7 @@ import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { DashboardStrip } from "./activities/DashboardStrip";
+import { LiveSessionsStrip } from "../components/activity/LiveSessionsStrip";
 import {
   aggregate,
   daySeries,
@@ -334,6 +335,9 @@ export function EventsSection() {
                 minHeight: 0,
               }}
             >
+              <div style={{ padding: "0 tokens.sp[16]" }}>
+                <LiveSessionsStrip />
+              </div>
               <DashboardStrip />
               <MetricsStrip cards={aggCards} loading={loading} />
               <CardStream

@@ -35,6 +35,7 @@ import {
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { HealthPane } from "./settings/HealthPane";
+import { McpInstallerPane } from "./settings/McpInstallerPane";
 import { NetworkPane } from "./settings/NetworkPane";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { RotationPane } from "./settings/RotationPane";
@@ -56,6 +57,7 @@ type Tab =
   | "network"
   | "rotation"
   | "health"
+  | "mcp"
   | "cleanup"
   | "protected"
   | "github"
@@ -86,6 +88,7 @@ const TAB_DEFS: ReadonlyArray<{
   // inconsistent. Distinct from "Diagnostics" below, which is
   // Claudepot's own self-check (platform, accounts, data dir).
   { id: "health",      label: "Health",         glyph: NF.shield,   group: "core" },
+  { id: "mcp",         label: "MCP",            glyph: NF.server,   group: "core" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
@@ -167,6 +170,7 @@ export function SettingsSection() {
           {tab === "network" && <NetworkPane pushToast={pushToast} />}
           {tab === "rotation" && <RotationPane pushToast={pushToast} />}
           {tab === "health" && <HealthPane pushToast={pushToast} />}
+          {tab === "mcp" && <McpInstallerPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupTabPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "github" && <GithubPane pushToast={pushToast} />}
