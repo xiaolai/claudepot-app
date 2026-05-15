@@ -265,6 +265,44 @@ enum CodexAction {
         #[arg(long)]
         json: bool,
     },
+    /// Force a full rebuild of the transcript-derived tables
+    /// (`sessions`, `session_turns`, `exchanges`, `tool_calls`,
+    /// `exchange_fts`) on the next open. Sets the `_pending_rescan`
+    /// marker; the next `claudepot codex index` (or any
+    /// `SessionIndex::open`) clears the cache atomically inside the
+    /// migration transaction and the next refresh repopulates
+    /// from disk.
+    ///
+    /// Preserves durable rows (`memories`, `decisions`,
+    /// `evidence_records`, `memory_links`).
+    Rebuild {
+        /// Override the sessions.db path. Defaults to
+        /// `~/.claudepot/sessions.db`.
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+    },
+    /// Wipe Shared Memory rows (both transcript-derived and
+    /// durable). Use to remove on-disk copies of unredacted
+    /// transcript text after a contractor session, or to start
+    /// over. Leaves the v4 schema in place. After this runs, the
+    /// next `claudepot codex index` will repopulate the
+    /// transcript-derived tables from disk; durable
+    /// memories/decisions/evidence will be empty until you
+    /// re-create them.
+    ///
+    /// Requires `--yes` to confirm — this is the only destructive
+    /// path in the codex subcommand tree.
+    Forget {
+        /// Override the sessions.db path. Defaults to
+        /// `~/.claudepot/sessions.db`.
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+        /// Confirm the destructive action. Without this flag the
+        /// command refuses and prints the row counts it would
+        /// have removed.
+        #[arg(long = "yes")]
+        confirm: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1187,6 +1225,8 @@ async fn main() -> Result<()> {
                 db,
                 json,
             } => commands::codex::index(codex_home, db, json).await?,
+            CodexAction::Rebuild { db } => commands::codex::rebuild(db).await?,
+            CodexAction::Forget { db, confirm } => commands::codex::forget(db, confirm).await?,
         },
         Commands::Activity { action } => match action {
             ActivityAction::Recent {

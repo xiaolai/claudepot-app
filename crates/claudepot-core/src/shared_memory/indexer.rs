@@ -33,6 +33,119 @@ use rusqlite::params;
 use crate::codex_session::{parse_codex_rollout_jsonl, CodexConversation};
 use crate::session_index::SessionIndex;
 
+/// Result of `forget_shared_memory` — row counts removed.
+#[derive(Debug, Default, Clone)]
+pub struct ForgetReport {
+    pub exchanges: i64,
+    pub tool_calls: i64,
+    pub exchange_fts: i64,
+    pub memories: i64,
+    pub decisions: i64,
+    pub evidence_records: i64,
+    pub memory_links: i64,
+}
+
+/// Set the `_pending_rescan` marker. The next `SessionIndex::open`
+/// clears the transcript-derived cache atomically inside the
+/// migration transaction; `refresh()` repopulates from disk.
+///
+/// Durable rows (memories, decisions, evidence, links) are NOT
+/// affected. Use `forget_shared_memory` to clear those.
+///
+/// The marker is checked by `apply_schema`; this function just
+/// writes it. Opening the DB through `SessionIndex::open` would
+/// also trigger an immediate rescan in the current process, which
+/// callers usually don't want — they typically follow this with
+/// `claudepot codex index` to drive the rescan deliberately.
+pub fn mark_pending_rescan(db_path: &Path) -> Result<(), rusqlite::Error> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (k, v) VALUES ('_pending_rescan', '1')",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Count rows in the Shared Memory tables — both transcript-
+/// derived and durable. Used by the CLI `forget` verb to print a
+/// dry-run summary before the destructive path.
+pub fn count_shared_memory_rows(db_path: &Path) -> Result<ForgetReport, rusqlite::Error> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    let count = |t: &str| -> Result<i64, rusqlite::Error> {
+        conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
+    };
+    Ok(ForgetReport {
+        exchanges: count("exchanges")?,
+        tool_calls: count("tool_calls")?,
+        exchange_fts: count("exchange_fts")?,
+        memories: count("memories")?,
+        decisions: count("decisions")?,
+        evidence_records: count("evidence_records")?,
+        memory_links: count("memory_links")?,
+    })
+}
+
+/// Wipe all Shared Memory rows in a single transaction. Drops:
+/// - Transcript-derived: `exchanges`, `tool_calls` (the FTS table
+///   is rebuilt via FTS5's `'rebuild'` command after the cascade).
+/// - Durable: `memories`, `decisions`, `evidence_records`,
+///   `memory_links`.
+///
+/// The v4 schema stays in place — no DROP TABLE. After this runs,
+/// the `_pending_rescan` marker is set so the next index run
+/// repopulates the transcript-derived rows from disk. Durable
+/// rows are gone for good.
+///
+/// `PRAGMA foreign_keys=ON` is set on the local connection so the
+/// `DELETE FROM exchanges` cascade fires correctly even if the
+/// caller's connection has FKs off.
+pub fn forget_shared_memory(db_path: &Path) -> Result<ForgetReport, rusqlite::Error> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+
+    let counts = count_shared_memory_rows_impl(&conn)?;
+
+    let tx = conn.unchecked_transaction()?;
+    // Transcript-derived. FK cascade from exchanges drops tool_calls
+    // rows and the FTS trigger drops corresponding exchange_fts rows.
+    tx.execute("DELETE FROM exchanges", [])?;
+    // Defensive: explicitly clear tool_calls in case FKs were
+    // somehow not in effect.
+    tx.execute("DELETE FROM tool_calls", [])?;
+    // Force-rebuild the FTS index from scratch as a belt-and-
+    // suspenders cleanup in case any orphaned FTS rows slipped past.
+    tx.execute_batch("INSERT INTO exchange_fts(exchange_fts) VALUES('rebuild');")?;
+    // Durable rows.
+    tx.execute("DELETE FROM memory_links", [])?;
+    tx.execute("DELETE FROM evidence_records", [])?;
+    tx.execute("DELETE FROM decisions", [])?;
+    tx.execute("DELETE FROM memories", [])?;
+    // Mark for rescan on next open.
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (k, v) VALUES ('_pending_rescan', '1')",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(counts)
+}
+
+fn count_shared_memory_rows_impl(
+    conn: &rusqlite::Connection,
+) -> Result<ForgetReport, rusqlite::Error> {
+    let count = |t: &str| -> Result<i64, rusqlite::Error> {
+        conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
+    };
+    Ok(ForgetReport {
+        exchanges: count("exchanges")?,
+        tool_calls: count("tool_calls")?,
+        exchange_fts: count("exchange_fts")?,
+        memories: count("memories")?,
+        decisions: count("decisions")?,
+        evidence_records: count("evidence_records")?,
+        memory_links: count("memory_links")?,
+    })
+}
+
 /// Tally of what one `backfill_codex` run did.
 #[derive(Debug, Default, Clone)]
 pub struct CodexIndexerStats {
@@ -944,6 +1057,137 @@ mod tests {
             vec!["01-good".to_string()],
             "good file should persist despite bad file's savepoint rollback"
         );
+    }
+
+    #[test]
+    fn mark_pending_rescan_sets_marker_for_next_open() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let codex_root = tmp.path().join("codex").join("sessions");
+        fs::create_dir_all(&codex_root).unwrap();
+        write_rollout(
+            &codex_root,
+            "2026/05/15",
+            "rollout.jsonl",
+            &sample_rollout_body("01", "hello", "hi"),
+        );
+        backfill_codex(&idx, &codex_root).unwrap();
+        // Sanity: row present in exchanges.
+        {
+            let db = open_raw(&tmp.path().join("sessions.db"));
+            let n: i64 = db
+                .query_row("SELECT count(*) FROM exchanges", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 1);
+        }
+        // Drop the SessionIndex so the rusqlite connection lock
+        // releases; mark_pending_rescan opens its own.
+        drop(idx);
+
+        let db_path = tmp.path().join("sessions.db");
+        mark_pending_rescan(&db_path).unwrap();
+
+        // The marker is set; the next SessionIndex::open triggers
+        // a rescan inside apply_schema, clearing sessions +
+        // session_turns. After the rescan branch runs,
+        // refresh() would repopulate from disk — but we don't
+        // run refresh here, just verify the cache was cleared.
+        let _idx2 = SessionIndex::open(&db_path).expect("reopen");
+        let db = open_raw(&db_path);
+        let n: i64 = db
+            .query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "_pending_rescan marker should clear sessions on open");
+        // Marker itself was unset by apply_schema.
+        let marker: Option<String> = db
+            .query_row(
+                "SELECT v FROM meta WHERE k = '_pending_rescan'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        assert!(marker.is_none(), "marker should be cleared after handling");
+    }
+
+    #[test]
+    fn forget_shared_memory_wipes_all_rows_and_sets_marker() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let codex_root = tmp.path().join("codex").join("sessions");
+        fs::create_dir_all(&codex_root).unwrap();
+        write_rollout(
+            &codex_root,
+            "2026/05/15",
+            "rollout.jsonl",
+            &sample_rollout_body("01", "user said", "assistant said"),
+        );
+        backfill_codex(&idx, &codex_root).unwrap();
+
+        // Seed durable rows so forget has something to clear.
+        {
+            let db = open_raw(&tmp.path().join("sessions.db"));
+            db.execute(
+                "INSERT INTO memories (id, scope, project_path, kind, content,
+                    created_by_kind, created_by, confidence,
+                    created_at_ms, updated_at_ms, archived_at_ms)
+                 VALUES ('m1','global',NULL,'fact','x','user','u',NULL,1,1,NULL)",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO decisions (id, project_path, topic, decision, rationale,
+                    status, created_by_kind, created_by, created_at_ms, supersedes_id)
+                 VALUES ('d1',NULL,'t','dec',NULL,'active','user','u',1,NULL)",
+                [],
+            )
+            .unwrap();
+        }
+
+        drop(idx);
+        let db_path = tmp.path().join("sessions.db");
+
+        // Pre-counts.
+        let pre = count_shared_memory_rows(&db_path).unwrap();
+        assert!(pre.exchanges > 0);
+        assert_eq!(pre.memories, 1);
+        assert_eq!(pre.decisions, 1);
+
+        let report = forget_shared_memory(&db_path).unwrap();
+        // Report returns the counts AS THEY WERE before deletion
+        // (so callers can show "X rows removed").
+        assert_eq!(report.exchanges, pre.exchanges);
+        assert_eq!(report.memories, 1);
+        assert_eq!(report.decisions, 1);
+
+        // Post-state: all rows gone.
+        let post = count_shared_memory_rows(&db_path).unwrap();
+        assert_eq!(post.exchanges, 0);
+        assert_eq!(post.tool_calls, 0);
+        assert_eq!(post.exchange_fts, 0);
+        assert_eq!(post.memories, 0);
+        assert_eq!(post.decisions, 0);
+        assert_eq!(post.evidence_records, 0);
+        assert_eq!(post.memory_links, 0);
+
+        // Marker set for next open.
+        let db = open_raw(&db_path);
+        let marker: String = db
+            .query_row(
+                "SELECT v FROM meta WHERE k = '_pending_rescan'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, "1");
+
+        // `sessions` rows are preserved — they're the cache that
+        // points back to source files on disk. Only the v4
+        // Shared Memory tables (transcript-derived + durable)
+        // were cleared.
+        let session_count: i64 = db
+            .query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(session_count, 1, "sessions table is preserved by forget");
     }
 
     #[test]
