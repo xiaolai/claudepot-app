@@ -83,9 +83,17 @@ pub fn read_locator(
 }
 
 /// Read the locator with a caller-specified byte cap. `max_bytes`
-/// is honored *after* `redaction::apply` runs (so the redacted
-/// form is what counts toward the cap). Truncation marks the
-/// result with `truncated = true`.
+/// caps the **pre-redaction** read (it's the I/O safety knob: we
+/// won't slurp more than `max_bytes` from disk regardless of what
+/// redaction does to the byte count). The returned `body` is the
+/// post-redaction form, which may be shorter (a masked secret) or
+/// the same length; `truncated` reflects whether the pre-redaction
+/// read hit the cap.
+///
+/// Containment: `locator.file_path` must exist in the v4
+/// `sessions` table. We never open an arbitrary path — the cache
+/// is the trust boundary. Errors are categorized so callers can
+/// distinguish unknown path from SQL error from I/O error.
 pub fn read_locator_bounded(
     idx: &SessionIndex,
     locator: &ConversationLocator,
@@ -93,19 +101,22 @@ pub fn read_locator_bounded(
     policy: &RedactionPolicy,
 ) -> Result<ConversationRead, ReadError> {
     // Containment: the file_path must be in the sessions cache.
-    // We never open an arbitrary path. The cache enforces canonical
-    // path semantics at index time.
-    let exists: bool = {
+    // We never open an arbitrary path. Distinguish the legitimate
+    // "row not found" case from other SQL errors (locked DB, FTS
+    // corruption, etc.) so the caller doesn't conflate them.
+    {
         let db = idx.db();
-        db.query_row(
+        match db.query_row(
             "SELECT 1 FROM sessions WHERE file_path = ?1",
             [&locator.file_path],
             |_| Ok(true),
-        )
-        .unwrap_or(false)
-    };
-    if !exists {
-        return Err(ReadError::NotIndexed(locator.file_path.clone()));
+        ) {
+            Ok(_) => {}
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Err(ReadError::NotIndexed(locator.file_path.clone()));
+            }
+            Err(e) => return Err(ReadError::Sql(e)),
+        }
     }
 
     // Resolve line bounds. If the locator carries an exchange_id
@@ -113,8 +124,8 @@ pub fn read_locator_bounded(
     // line_end. Final fallback: full file.
     let (line_start, line_end) = resolve_line_bounds(idx, locator)?;
 
-    let body = read_lines(&locator.file_path, line_start, line_end, max_bytes)?;
-    let truncated = body.len() >= max_bytes;
+    let (body, truncated) =
+        read_lines(&locator.file_path, line_start, line_end, max_bytes)?;
     let redacted = redact_apply(&body, policy);
     Ok(ConversationRead {
         file_path: locator.file_path.clone(),
@@ -160,12 +171,17 @@ fn resolve_line_bounds(
     Ok((1, 100_000))
 }
 
+/// Read `path`'s lines `[line_start..=line_end]` (1-based) up to
+/// a byte cap. Returns `(body, truncated)` where `truncated` is
+/// true iff the byte cap was the reason iteration stopped. An
+/// exactly-fitting read (cap not hit, last requested line ends at
+/// or below cap) returns `truncated=false`.
 fn read_lines(
     path: &str,
     line_start: u32,
     line_end: u32,
     max_bytes: usize,
-) -> Result<String, ReadError> {
+) -> Result<(String, bool), ReadError> {
     let file = File::open(path).map_err(|source| ReadError::Io {
         path: PathBuf::from(path),
         source,
@@ -173,6 +189,7 @@ fn read_lines(
     let reader = BufReader::new(file);
     let mut out = String::new();
     let mut line_no: u32 = 0;
+    let mut truncated = false;
     for line in reader.lines() {
         line_no += 1;
         if line_no < line_start {
@@ -195,15 +212,16 @@ fn read_lines(
         }
         out.push_str(&line);
         if out.len() >= max_bytes {
-            // Truncate at a char boundary.
+            // Cap hit. Truncate at a char boundary and signal it.
             while !out.is_char_boundary(max_bytes) && out.len() > max_bytes {
                 out.pop();
             }
             out.truncate(max_bytes);
+            truncated = true;
             break;
         }
     }
-    Ok(out)
+    Ok((out, truncated))
 }
 
 // ─── tests ────────────────────────────────────────────────────
@@ -305,6 +323,34 @@ mod tests {
         // Line 1 is the session_meta — contains "session_meta"
         // verbatim because it's a JSON token, not a secret.
         assert!(result.body.contains("session_meta"));
+    }
+
+    #[test]
+    fn exactly_fitting_read_is_not_flagged_truncated() {
+        // M1 — a read that exactly equals max_bytes should NOT be
+        // marked truncated. The pre-fix `>=` comparison would
+        // false-positive at the boundary; the post-fix
+        // `read_lines` returns an explicit signal that's only
+        // true when the cap actually stopped iteration.
+        let tmp = TempDir::new().unwrap();
+        let idx = prep_corpus(&tmp);
+        let path = corpus_file(&tmp);
+
+        // Read with a cap large enough to fit everything.
+        let loc = locator_for_exchange(&path, "sid:0");
+        let result = read_locator_bounded(
+            &idx,
+            &loc,
+            10 * 1024, // generous cap
+            &RedactionPolicy::default(),
+        )
+        .unwrap();
+        assert!(
+            !result.truncated,
+            "fitting read should NOT be flagged truncated, body.len={} body={:?}",
+            result.body.len(),
+            result.body
+        );
     }
 
     #[test]

@@ -21,6 +21,7 @@ const TOOLS: &[&str] = &[
     "claudepot_read_conversation",
     "claudepot_remember",
     "claudepot_log_decision",
+    "claudepot_archive_decision",
     "claudepot_submit_evidence",
     "claudepot_list_memories",
     "claudepot_list_decisions",

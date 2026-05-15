@@ -226,6 +226,30 @@ pub enum DurableError {
     DecisionNotFound(String),
 }
 
+// ─── transaction helper ───────────────────────────────────────
+
+/// Run `f` inside a SQLite transaction. Commit on Ok, roll back
+/// (via drop) on Err. Every writer in this module goes through
+/// `with_tx` even for single-statement updates so that future
+/// invariants — say "every memory created via MCP also gets a
+/// default `memory_link`" or "every decision logs an audit-trail
+/// row" — can land without changing the public function signature
+/// of each writer.
+///
+/// The helper acquires the connection mutex once; the transaction
+/// is dropped (rolled back) on the early-return path if `f`
+/// returns `Err`, or committed at the end if `f` returns `Ok`.
+fn with_tx<F, T>(idx: &SessionIndex, f: F) -> Result<T, DurableError>
+where
+    F: FnOnce(&rusqlite::Transaction<'_>) -> Result<T, DurableError>,
+{
+    let db = idx.db();
+    let tx = db.unchecked_transaction()?;
+    let result = f(&tx)?;
+    tx.commit()?;
+    Ok(result)
+}
+
 // ─── memories ─────────────────────────────────────────────────
 
 pub fn create_memory(
@@ -248,25 +272,27 @@ pub fn create_memory(
 
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
-    let db = idx.db();
-    db.execute(
-        "INSERT INTO memories (
-            id, scope, project_path, kind, content,
-            created_by_kind, created_by,
-            confidence, created_at_ms, updated_at_ms, archived_at_ms
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, NULL)",
-        params![
-            id,
-            new.scope.as_str(),
-            new.project_path,
-            new.kind.as_str(),
-            new.content,
-            new.created_by_kind.as_str(),
-            new.created_by,
-            new.confidence,
-            now,
-        ],
-    )?;
+    with_tx(idx, |tx| {
+        tx.execute(
+            "INSERT INTO memories (
+                id, scope, project_path, kind, content,
+                created_by_kind, created_by,
+                confidence, created_at_ms, updated_at_ms, archived_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, NULL)",
+            params![
+                id,
+                new.scope.as_str(),
+                new.project_path,
+                new.kind.as_str(),
+                new.content,
+                new.created_by_kind.as_str(),
+                new.created_by,
+                new.confidence,
+                now,
+            ],
+        )?;
+        Ok(())
+    })?;
     Ok(MemoryRecord {
         id,
         scope: new.scope,
@@ -284,12 +310,13 @@ pub fn create_memory(
 
 pub fn archive_memory(idx: &SessionIndex, id: &str) -> Result<bool, DurableError> {
     let now = chrono::Utc::now().timestamp_millis();
-    let db = idx.db();
-    let n = db.execute(
-        "UPDATE memories SET archived_at_ms = ?1 WHERE id = ?2 AND archived_at_ms IS NULL",
-        params![now, id],
-    )?;
-    Ok(n > 0)
+    with_tx(idx, |tx| {
+        let n = tx.execute(
+            "UPDATE memories SET archived_at_ms = ?1 WHERE id = ?2 AND archived_at_ms IS NULL",
+            params![now, id],
+        )?;
+        Ok(n > 0)
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -367,23 +394,25 @@ pub fn log_decision(
 ) -> Result<DecisionRecord, DurableError> {
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
-    let db = idx.db();
-    db.execute(
-        "INSERT INTO decisions (
-            id, project_path, topic, decision, rationale,
-            status, created_by_kind, created_by, created_at_ms, supersedes_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, NULL)",
-        params![
-            id,
-            new.project_path,
-            new.topic,
-            new.decision,
-            new.rationale,
-            new.created_by_kind.as_str(),
-            new.created_by,
-            now,
-        ],
-    )?;
+    with_tx(idx, |tx| {
+        tx.execute(
+            "INSERT INTO decisions (
+                id, project_path, topic, decision, rationale,
+                status, created_by_kind, created_by, created_at_ms, supersedes_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, NULL)",
+            params![
+                id,
+                new.project_path,
+                new.topic,
+                new.decision,
+                new.rationale,
+                new.created_by_kind.as_str(),
+                new.created_by,
+                now,
+            ],
+        )?;
+        Ok(())
+    })?;
     Ok(DecisionRecord {
         id,
         project_path: new.project_path.map(String::from),
@@ -395,6 +424,25 @@ pub fn log_decision(
         created_by: new.created_by.to_string(),
         created_at_ms: now,
         supersedes_id: None,
+    })
+}
+
+/// Transition an active decision to `archived`. Use this for
+/// decisions that are no longer in force but weren't replaced by a
+/// specific successor (use `supersede_decision` when there's a
+/// replacement). Returns `true` if the row transitioned, `false`
+/// if no active decision with that id existed.
+///
+/// M13 — closes the API asymmetry where the schema CHECK and the
+/// `DecisionStatus::Archived` enum branch existed but no function
+/// produced the state.
+pub fn archive_decision(idx: &SessionIndex, id: &str) -> Result<bool, DurableError> {
+    with_tx(idx, |tx| {
+        let n = tx.execute(
+            "UPDATE decisions SET status = 'archived' WHERE id = ?1 AND status = 'active'",
+            [id],
+        )?;
+        Ok(n > 0)
     })
 }
 
@@ -511,26 +559,28 @@ pub fn submit_evidence(
 ) -> Result<EvidenceRecord, DurableError> {
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
-    let db = idx.db();
-    db.execute(
-        "INSERT INTO evidence_records (
-            id, project_path, topic, summary, verification,
-            files_changed_json, confidence,
-            created_by_kind, created_by, created_at_ms
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![
-            id,
-            new.project_path,
-            new.topic,
-            new.summary,
-            new.verification,
-            new.files_changed_json,
-            new.confidence,
-            new.created_by_kind.as_str(),
-            new.created_by,
-            now,
-        ],
-    )?;
+    with_tx(idx, |tx| {
+        tx.execute(
+            "INSERT INTO evidence_records (
+                id, project_path, topic, summary, verification,
+                files_changed_json, confidence,
+                created_by_kind, created_by, created_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                id,
+                new.project_path,
+                new.topic,
+                new.summary,
+                new.verification,
+                new.files_changed_json,
+                new.confidence,
+                new.created_by_kind.as_str(),
+                new.created_by,
+                now,
+            ],
+        )?;
+        Ok(())
+    })?;
     Ok(EvidenceRecord {
         id,
         project_path: new.project_path.map(String::from),
@@ -630,12 +680,14 @@ pub fn link(idx: &SessionIndex, l: &NewLink<'_>) -> Result<MemoryLinkRecord, Dur
         LinkTarget::Exchange(s) => (Some(s.to_string()), None),
         LinkTarget::File(s) => (None, Some(s.to_string())),
     };
-    let db = idx.db();
-    db.execute(
-        "INSERT INTO memory_links (id, memory_id, decision_id, evidence_id, exchange_id, file_path, relation) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, mem, dec, ev, ex, fp, l.relation.as_str()],
-    )?;
+    with_tx(idx, |tx| {
+        tx.execute(
+            "INSERT INTO memory_links (id, memory_id, decision_id, evidence_id, exchange_id, file_path, relation) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, mem.as_deref(), dec.as_deref(), ev.as_deref(), ex.as_deref(), fp.as_deref(), l.relation.as_str()],
+        )?;
+        Ok(())
+    })?;
     Ok(MemoryLinkRecord {
         id,
         memory_id: mem,
@@ -859,6 +911,46 @@ mod tests {
         .unwrap();
         assert_eq!(superseded.len(), 1);
         assert_eq!(superseded[0].id, d1.id);
+    }
+
+    #[test]
+    fn archive_decision_flips_status() {
+        // M13 — archive_decision closes the API asymmetry. A decision
+        // that's been replaced informally (not via supersede_decision)
+        // can now be marked archived; future list queries can filter
+        // it out via status.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let d = log_decision(
+            &idx,
+            &NewDecision {
+                project_path: Some("/p"),
+                topic: Some("storage"),
+                decision: "use SQLite",
+                rationale: None,
+                created_by_kind: CreatedByKind::User,
+                created_by: "user:test",
+            },
+        )
+        .unwrap();
+        assert_eq!(d.status, DecisionStatus::Active);
+
+        assert!(archive_decision(&idx, &d.id).unwrap());
+
+        let archived = list_decisions(
+            &idx,
+            &DecisionListFilter {
+                status: Some(DecisionStatus::Archived),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].id, d.id);
+        // Re-archive is a no-op (status no longer 'active' → 0 rows).
+        assert!(!archive_decision(&idx, &d.id).unwrap());
+        // Archive non-existent id → false (no row to flip).
+        assert!(!archive_decision(&idx, "nope").unwrap());
     }
 
     #[test]

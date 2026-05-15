@@ -71,6 +71,35 @@ impl SessionIndex {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+
+        // M9 — pre-create the DB file with mode 0600 on Unix BEFORE
+        // rusqlite opens it. Without this, `Connection::open` creates
+        // the file with the process umask (typically 0644) and there
+        // is a brief window — between create and the post-init
+        // `set_permissions` — where another local user can open or
+        // map the file at read-default mode. Atomic creation via
+        // `OpenOptions::mode(0o600).create_new(...)` closes that
+        // window. If the file already exists, we don't change its
+        // perms here (the post-init set_permissions below still runs
+        // and tightens to 0600 for the existing-but-not-strict
+        // case).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            if !path.exists() {
+                let _ = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path);
+                // Ignore the error: if create_new fails because the
+                // file appeared between the `exists()` check and
+                // this call (a TOCTOU edge case in a multi-process
+                // scenario), the subsequent post-init
+                // `set_permissions` still tightens to 0600.
+            }
+        }
+
         // `Connection::open` is lazy — it doesn't validate the file
         // header until the first query. Wrap the full initialization
         // sequence so corruption detected mid-init (on PRAGMA or

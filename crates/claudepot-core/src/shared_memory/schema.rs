@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS exchanges (
     line_end        INTEGER,                         -- 1-based inclusive (or NULL)
     is_sidechain    INTEGER NOT NULL DEFAULT 0,
     parent_id       TEXT,
-    snippet_text    TEXT    NOT NULL,                -- pre-redacted preview
+    snippet_text    TEXT    NOT NULL,                -- pre-redacted (indexer::build_snippet runs RedactionPolicy::default)
     FOREIGN KEY (file_path) REFERENCES sessions(file_path) ON DELETE CASCADE
 );
 

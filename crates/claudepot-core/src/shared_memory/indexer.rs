@@ -212,10 +212,27 @@ fn walk_dir_recursive(
     };
     for entry in read.flatten() {
         let path = entry.path();
-        let meta = match entry.metadata() {
+        // M4 — symlink containment. `entry.metadata()` follows
+        // symlinks; we use `symlink_metadata` first to detect them
+        // and skip. Reasoning: a symlink under $CODEX_HOME/sessions/
+        // pointing at e.g. /etc/passwd or ~/.config/Claude/.credentials
+        // would otherwise be indexed → readable via
+        // `claudepot_read_conversation` because the cache row
+        // "exists" → arbitrary file disclosure within the MCP user's
+        // own privileges. Symlinks under the sessions root are not
+        // a known Codex pattern, so refusing them is safe.
+        let link_meta = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,
         };
+        if link_meta.file_type().is_symlink() {
+            tracing::warn!(
+                path = %path.display(),
+                "codex_session indexer: skipping symlink (M4 containment)"
+            );
+            continue;
+        }
+        let meta = link_meta;
         if meta.is_dir() {
             walk_dir_recursive(&path, out, stats, depth + 1);
             continue;
@@ -524,20 +541,33 @@ fn derive_slug(file_path: &str) -> String {
 }
 
 /// Build the pre-emission snippet column. v1: first 240 chars of
-/// `user_text` joined to the first 240 chars of `assistant_text`.
-/// FTS5 and the read-by-locator path layer extra redaction on top
-/// for any *external* surface.
+/// `user_text` joined to the first 240 chars of `assistant_text`,
+/// then run through `redaction::apply` so the stored column is
+/// already redacted at rest. The schema comment promises a
+/// "pre-redacted preview"; this function makes that promise true.
+///
+/// Later read paths (search, MCP) still pass the column through
+/// `redaction::apply` again as defense in depth — a stricter
+/// emission policy may catch what the at-rest policy let through.
+/// But a future caller that reads `exchanges.snippet_text`
+/// directly (CLI dump, debug surface, backup tool) gets the
+/// redacted form, not raw tokens.
 fn build_snippet(user: &str, assistant: &str) -> String {
     const CAP: usize = 240;
     let head = truncate_chars(user, CAP);
     let tail = truncate_chars(assistant, CAP);
-    if head.is_empty() {
+    let combined = if head.is_empty() {
         tail
     } else if tail.is_empty() {
         head
     } else {
         format!("{head}\n→ {tail}")
-    }
+    };
+    // Run the at-rest redaction policy. Default masks sk-ant-*
+    // tokens; future tightening of `RedactionPolicy::default()`
+    // (e.g. opt-in env-assignment masking) would propagate here
+    // automatically.
+    crate::redaction::apply(&combined, &crate::redaction::RedactionPolicy::default())
 }
 
 fn truncate_chars(s: &str, cap: usize) -> String {
@@ -843,6 +873,33 @@ mod tests {
             session_ids,
             vec!["01-good".to_string()],
             "good file should persist despite bad file's savepoint rollback"
+        );
+    }
+
+    #[test]
+    fn snippet_text_is_redacted_at_rest() {
+        // M3 — the schema comment promises a pre-redacted snippet
+        // column. Backfill a fixture containing a secret token,
+        // then query `exchanges.snippet_text` and assert the
+        // literal token is absent.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let codex_root = tmp.path().join("codex").join("sessions");
+        fs::create_dir_all(&codex_root).unwrap();
+        let body = r#"{"timestamp":"2026-05-15T11:30:00.000Z","type":"session_meta","payload":{"id":"sec","cwd":"/x","originator":"codex_cli","cli_version":"0.44.0"}}
+{"timestamp":"2026-05-15T11:30:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"my key sk-ant-oat01-VeryLongSecretValueHere is the prompt"}]}}
+{"timestamp":"2026-05-15T11:30:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}}
+"#;
+        write_rollout(&codex_root, "2026/05/15", "sec.jsonl", body);
+        backfill_codex(&idx, &codex_root).unwrap();
+
+        let db = open_raw(&tmp.path().join("sessions.db"));
+        let snippet: String = db
+            .query_row("SELECT snippet_text FROM exchanges", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            !snippet.contains("sk-ant-oat01-VeryLongSecretValueHere"),
+            "snippet at rest must not contain raw secret, got: {snippet}"
         );
     }
 

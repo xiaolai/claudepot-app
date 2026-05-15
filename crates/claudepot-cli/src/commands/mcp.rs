@@ -252,6 +252,24 @@ struct ListMemoriesPayload {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ArchiveDecisionRequest {
+    /// The decision id to flip to `archived`. Use when a decision
+    /// is no longer in force but wasn't replaced by a specific
+    /// successor (use `claudepot_log_decision` with `supersedes_id`
+    /// when there's a replacement).
+    id: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ArchiveDecisionPayload {
+    schema_version: u32,
+    /// True if the decision transitioned from `active` to
+    /// `archived`. False if the id didn't reference an active
+    /// decision (already archived, superseded, or doesn't exist).
+    archived: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ListDecisionsRequest {
     #[serde(default)]
     project_path: Option<String>,
@@ -555,6 +573,23 @@ impl MemoryServer {
             Err(e) => {
                 tracing::warn!(error = %e, "claudepot_list_memories: query failed");
                 to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
+    #[tool(description = "Mark a decision as archived. Use when a decision is no longer in force but wasn't replaced by a specific successor (use claudepot_log_decision with supersedes_id when there's a replacement). Returns archived=false if the id didn't reference an active decision.")]
+    fn claudepot_archive_decision(
+        &self,
+        Parameters(req): Parameters<ArchiveDecisionRequest>,
+    ) -> String {
+        match durable::archive_decision(&self.idx, &req.id) {
+            Ok(archived) => to_json(&ArchiveDecisionPayload {
+                schema_version: SCHEMA_VERSION,
+                archived,
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_archive_decision: write failed");
+                to_json(&error_with(error_code::WRITE_FAILED, &e, &self.policy))
             }
         }
     }
