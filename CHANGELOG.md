@@ -6,6 +6,40 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.34 — beta (2026-05-15)
+
+Two new control surfaces layered over the existing project model:
+time-boxed permission grants and a fully-local `.env` secret vault.
+
+### Added
+
+- **Time-boxed permission grants (ProjectDetail → Permissions).**
+  Putting a Claude Code project into `bypassPermissions` is easy to
+  switch on and easy to forget — the elevated state is invisible and
+  relies on memory to undo. Claudepot now grants `bypassPermissions`
+  for a fixed window (30 minutes, 2 hours, 8 hours) and auto-reverts
+  it when the timer ends, restoring the exact mode that was there
+  before. A live countdown keeps the elevated state visible while it
+  lasts, and Extend / Revert-now controls let you adjust it. A
+  project elevated by hand-editing its own settings is surfaced as
+  elevated but left untouched — Claudepot only manages grants it
+  created. Grants are written to `.claude/settings.local.json` and
+  reverted on the existing five-minute background tick; if the
+  settings layer was changed by hand since the grant, the revert
+  steps aside rather than clobbering that change.
+- **Local `.env` secret vault + per-project `.env` editing (Keys →
+  Secret vault, ProjectDetail → Environment files).** A fully-local
+  named-secret store — no cloud, no sync, stored at rest on this
+  machine only — plus a movement layer for a project's `.env*`
+  files. Copy a value out (written to the OS clipboard from Rust,
+  never rendered into the UI, self-clearing after 30 seconds),
+  inject a vault secret into a project's `.env`, or comment /
+  uncomment / delete individual keys. Edits are line-oriented and
+  format-preserving: only the target key's line changes, so blank
+  lines, ordering, and unrelated comments survive byte-for-byte. It
+  is deliberately a movement layer, not a text editor — arbitrary
+  file editing stays with your editor of choice.
+
 ## 0.1.33 — beta (2026-05-15)
 
 A new Third-party capability — shell-PATH setup for CLI wrappers —
