@@ -337,8 +337,19 @@ export function ProjectDetail({
 
       {status !== "orphan" && status !== "unreachable" && (
         <>
-          <PermissionPanel projectPath={info.original_path} onError={onError} />
-          <ProjectEnvPanel projectPath={info.original_path} onError={onError} />
+          {/* `key` remounts each panel on project switch — fresh state,
+              effects re-run, in-flight async from the prior project is
+              cleaned up rather than leaking into the new one. */}
+          <PermissionPanel
+            key={info.original_path}
+            projectPath={info.original_path}
+            onError={onError}
+          />
+          <ProjectEnvPanel
+            key={info.original_path}
+            projectPath={info.original_path}
+            onError={onError}
+          />
         </>
       )}
 

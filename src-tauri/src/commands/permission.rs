@@ -13,6 +13,7 @@ use claudepot_core::project;
 use claudepot_core::settings_writer::SettingsLayer;
 use std::path::Path;
 
+use super::validate_project_path;
 use crate::dto_permission::{project_permission_dto, ProjectPermissionDto};
 use crate::permission_orchestrator::revert_grant;
 
@@ -101,6 +102,7 @@ pub async fn permission_grant(
     let duration = validate_duration(duration_secs)?;
 
     tauri::async_runtime::spawn_blocking(move || {
+        validate_project_path(&project_path)?;
         let root = Path::new(&project_path);
         let mut file =
             permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
@@ -114,20 +116,32 @@ pub async fn permission_grant(
             None => resolve_default_mode(root).local_project_value,
         };
 
-        write_default_mode(SettingsLayer::LocalProject, root, &granted_mode)
-            .map_err(|e| format!("settings write failed: {e}"))?;
-
         let now = Utc::now();
         let grant = Grant {
             project_path: project_path.clone(),
             layer: SettingsLayer::LocalProject,
-            granted_mode,
+            granted_mode: granted_mode.clone(),
             previous_mode,
             granted_at: now,
             expires_at: now + Duration::seconds(duration),
         };
+
+        // Persist the grant record FIRST. If this fails the settings
+        // file is untouched — a clean failure with nothing to undo.
         file.upsert(grant);
         permission_store::save(&file).map_err(|e| format!("grants save failed: {e}"))?;
+
+        // Then write the settings. If THIS fails, roll the grant
+        // record back out — otherwise the project would be left
+        // elevated with no managing grant, which the orchestrator
+        // would never revert. (Even if the rollback save also fails,
+        // the orchestrator self-heals: `revert_grant` sees the layer
+        // never held `granted_mode` and drops the grant.)
+        if let Err(e) = write_default_mode(SettingsLayer::LocalProject, root, &granted_mode) {
+            file.remove(&project_path);
+            let _ = permission_store::save(&file);
+            return Err(format!("settings write failed: {e}"));
+        }
 
         Ok(current_dto(&project_path))
     })

@@ -215,8 +215,10 @@ function EnvFileCard({
         <p className="muted small">No keys yet.</p>
       ) : (
         <ul className="env-entry-list" role="list">
-          {file.entries.map((entry) => (
-            <li key={entry.key} className="env-entry-row">
+          {/* Key by index too: a malformed .env can repeat a key,
+              and a bare `entry.key` would collide in React's keyspace. */}
+          {file.entries.map((entry, idx) => (
+            <li key={`${entry.key}-${idx}`} className="env-entry-row">
               <span className="mono env-entry-key">{entry.key}</span>
               {entry.state === "active" ? (
                 <Tag tone="neutral">active</Tag>

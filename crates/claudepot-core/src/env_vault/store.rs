@@ -41,13 +41,17 @@ pub struct VaultSecret {
 /// A short, non-reversible preview of a secret for display:
 /// `abcd…wxyz`. Secrets of 8 chars or fewer are fully masked so a
 /// short secret can't be reconstructed from the preview.
+///
+/// Never collects the whole secret into an owned buffer — only the
+/// 4-char head and 4-char tail are ever materialized, so the
+/// plaintext doesn't get a second heap copy that outlives the call.
 pub fn secret_preview(secret: &str) -> String {
-    let chars: Vec<char> = secret.chars().collect();
-    if chars.len() <= 8 {
+    let char_count = secret.chars().count();
+    if char_count <= 8 {
         return "••••".to_string();
     }
-    let head: String = chars.iter().take(4).collect();
-    let tail: String = chars.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let head: String = secret.chars().take(4).collect();
+    let tail: String = secret.chars().skip(char_count - 4).collect();
     format!("{head}…{tail}")
 }
 

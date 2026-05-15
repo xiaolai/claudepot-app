@@ -122,9 +122,10 @@ fn find_line(
     key: &str,
     want: impl Fn(&EnvLine) -> bool,
 ) -> Option<usize> {
-    lines
-        .iter()
-        .position(|l| matches_key(&classify(l), key) && want(&classify(l)))
+    lines.iter().position(|l| {
+        let classified = classify(l);
+        matches_key(&classified, key) && want(&classified)
+    })
 }
 
 fn matches_key(line: &EnvLine, key: &str) -> bool {

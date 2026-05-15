@@ -24,6 +24,7 @@ use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use zeroize::Zeroize;
 
+use super::validate_project_path;
 use crate::commands::keys::{now_unix_ms, schedule_self_clear, KeyCopyReceiptDto, CLIPBOARD_CLEAR_MS};
 use crate::dto_env::{entries_from_lines, EnvFileDto, ProjectEnvDto, VaultSecretDto};
 
@@ -58,6 +59,7 @@ fn safe_env_file_name(name: &str) -> Result<(), String> {
 /// `<project_root>/<file_name>`, after validating `file_name` is a
 /// safe bare dotenv filename.
 fn env_file_path(project_path: &str, file_name: &str) -> Result<PathBuf, String> {
+    validate_project_path(project_path)?;
     safe_env_file_name(file_name)?;
     Ok(Path::new(project_path).join(file_name))
 }
@@ -67,6 +69,7 @@ fn env_file_path(project_path: &str, file_name: &str) -> Result<PathBuf, String>
 /// can't be read is a hard error (fail loud, don't silently hide a
 /// permission problem).
 fn scan_env_files(project_path: &str) -> Result<Vec<EnvFileDto>, String> {
+    validate_project_path(project_path)?;
     let root = Path::new(project_path);
     let read_dir = match std::fs::read_dir(root) {
         Ok(rd) => rd,

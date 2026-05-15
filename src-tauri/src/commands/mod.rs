@@ -90,6 +90,25 @@ pub(crate) fn open_store() -> Result<AccountStore, String> {
     AccountStore::open(&db).map_err(|e| format!("store open failed: {e}"))
 }
 
+/// Validate a renderer-supplied project root before it reaches a
+/// filesystem write (`.claude/settings.local.json`, a project
+/// `.env*`). The renderer is our own trusted code per
+/// `rules/architecture.md` — this is cheap defense in depth so a
+/// malformed or relative path can't land a write outside an actual
+/// project directory. Must be an absolute path to an existing dir.
+pub(crate) fn validate_project_path(project_path: &str) -> Result<(), String> {
+    let p = std::path::Path::new(project_path);
+    if !p.is_absolute() {
+        return Err(format!("project path must be absolute: {project_path}"));
+    }
+    if !p.is_dir() {
+        return Err(format!(
+            "project path is not an existing directory: {project_path}"
+        ));
+    }
+    Ok(())
+}
+
 /// `async fn` is load-bearing: Tauri 2 dispatches sync `#[command] fn`
 /// handlers on the main thread (the same thread that serves the
 /// webview and runs the OS event loop). This handler does N
