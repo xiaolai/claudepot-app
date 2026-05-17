@@ -6,6 +6,49 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.37 — beta (unreleased)
+
+Eliminates the residual section-navigation flash that the cold-start
+fix in v0.1.x never reached, plus two web/post styling touch-ups.
+
+### Fixed
+
+- **Section navigation no longer flashes a blank panel.** The earlier
+  cold-start fix (boot skeleton in `index.html`, preloaded saved
+  section) only addressed the first paint — clicking from Accounts
+  to any other top-level section still entered `<Suspense
+  fallback={null}>` while the lazy chunk was being fetched, painting
+  the content column blank for one frame. Two coordinated changes
+  close the gap: `useSection` now wraps section state updates in
+  `startTransition`, so React keeps the previous section's tree on
+  screen until the next chunk resolves; `App.tsx` adds
+  `preloadAllSections()` that trickles every remaining lazy chunk
+  into the module cache during browser idle slices after first
+  paint. Verified live through the Tauri MCP bridge: a
+  `MutationObserver` watching `<main>` recorded zero empty-content
+  events across four rapid sidebar clicks.
+
+### Changed
+
+- **`web/post` title card breathes against its sibling embed.**
+  UrlAutoEmbed mounts the YouTube / Spotify / Apple Podcasts
+  wrapper outside `.proto-text` as a direct sibling of `.proto-row`,
+  so the editorial block-media rhythm never applied and the iframe
+  sat flush against the bare title card. Each of the three
+  `.proto-row + .proto-*-embed` selectors now carries a Stride-tier
+  top margin (`--sp-24`), matching the in-body stride used for
+  `pre` / `.proto-code` / `.proto-mermaid` / `.proto-table-wrap` /
+  `figure`.
+- **Inline `<code>` is tinted and scales with headings.** Replaces
+  the prior "stays unstyled" policy that font-mono-only.css made
+  ambiguous — a font-family swap can't distinguish code from prose
+  anymore. Inline `<code>` now gets a barely-tinted pill via
+  `--code-bg` / `--code-text` plus em-relative padding
+  (`--code-inline-py` / `--code-inline-px`) so it rides the
+  surrounding text scale, readable inside h1–h6 as well as in body
+  copy. Scoped via `:not(pre) > code` so fenced blocks inside
+  `.proto-code` are unaffected.
+
 ## 0.1.36 — beta (unreleased)
 
 Post-0.1.35 audit-fix round plus the user/project scope toggle for the

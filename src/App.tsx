@@ -93,9 +93,60 @@ function preloadSavedSection(): void {
     else if (id === "third-party") void importThirdParty();
     else if (id === "automations") void importAutomations();
     else if (id === "settings") void importSettings();
+    else if (id === "shared-memory") void importSharedMemory();
   } catch {
     // localStorage unavailable — nothing to preload.
   }
+}
+
+/**
+ * Warm every remaining section chunk during browser idle time so that
+ * subsequent in-app navigations never hit a Suspense fallback flash.
+ *
+ * Each `import()` is fired sequentially on its own idle slice so the
+ * fetches don't stampede the initial paint or the Tauri bridge — the
+ * first paint owns the foreground, then we trickle chunks into the
+ * module cache while the user reads the Accounts list.
+ *
+ * `startTransition` in `useSection` already eliminates the blank
+ * flash by keeping the previous section visible while the new chunk
+ * resolves; this preload makes that wait imperceptible by ensuring
+ * the chunk is already in the module cache when the click lands.
+ */
+function preloadAllSections(): void {
+  const factories: Array<() => Promise<unknown>> = [
+    importProjects,
+    importEvents,
+    importGlobal,
+    importKeys,
+    importThirdParty,
+    importAutomations,
+    importSettings,
+    importSharedMemory,
+  ];
+  const rIC: (cb: () => void) => number =
+    (window as typeof window & {
+      requestIdleCallback?: (cb: () => void) => number;
+    }).requestIdleCallback ?? ((cb) => window.setTimeout(cb, 0));
+
+  const schedule = (i: number) => {
+    if (i >= factories.length) return;
+    rIC(() => {
+      const next = factories[i];
+      if (!next) {
+        schedule(i + 1);
+        return;
+      }
+      // Swallow errors — preload is best-effort. If the chunk is
+      // really unreachable, the eventual click will surface the same
+      // error through the normal Suspense path with the fallback the
+      // user expects.
+      next()
+        .catch(() => undefined)
+        .finally(() => schedule(i + 1));
+    });
+  };
+  schedule(0);
 }
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
@@ -253,9 +304,14 @@ function AppShell() {
 
   // Kick off the saved section's lazy chunk the moment the shell
   // mounts, so the import is in flight (or already cached) by the
-  // time useSection's idle callback swaps to it. Runs once per mount.
+  // time useSection's idle callback swaps to it. Then trickle every
+  // remaining section chunk into the module cache during idle time
+  // so that later in-app navigation never blocks on a chunk fetch
+  // (which used to surface as a blank Suspense-fallback flash on
+  // every first visit to a new section). Runs once per mount.
   useEffect(() => {
     preloadSavedSection();
+    preloadAllSections();
   }, []);
 
   // Sync the OS-placed traffic-light row to a CSS custom property so

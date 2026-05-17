@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 const STORAGE_KEY = "claudepot.activeSection";
 const START_KEY = "claudepot.startSection";
@@ -84,8 +90,13 @@ export function useSection<Id extends string>(
       }).cancelIdleCallback ?? window.clearTimeout;
 
     const handle = rIC(() => {
-      setSectionState(target);
-      setSubRouteState(safeGet(SUBROUTE_KEY_PREFIX + target));
+      // Wrap in startTransition so the still-mounted default-section
+      // tree stays on screen while the saved-section's lazy chunk
+      // resolves — eliminates the blank Suspense fallback flash.
+      startTransition(() => {
+        setSectionState(target);
+        setSubRouteState(safeGet(SUBROUTE_KEY_PREFIX + target));
+      });
     });
     return () => cIC(handle);
     // Only resolves once per mount — saved prefs are static for this
@@ -111,14 +122,13 @@ export function useSection<Id extends string>(
 
   const setSection = useCallback(
     (id: Id, nextSubRoute?: string | null) => {
-      setSectionState(id);
+      // Persist synchronously — localStorage writes are cheap and the
+      // user's choice survives even if the transition is interrupted.
       safeSet(STORAGE_KEY, id);
-      // Load the per-section subroute from storage (caller override wins).
       const resolved =
         nextSubRoute !== undefined
           ? nextSubRoute
           : safeGet(SUBROUTE_KEY_PREFIX + id);
-      setSubRouteState(resolved);
       if (nextSubRoute !== undefined) {
         if (nextSubRoute === null) {
           try {
@@ -130,6 +140,17 @@ export function useSection<Id extends string>(
           safeSet(SUBROUTE_KEY_PREFIX + id, nextSubRoute);
         }
       }
+      // Wrap the React state updates in a transition. When the target
+      // section is a React.lazy chunk that hasn't loaded yet, React
+      // keeps rendering the current section's tree instead of falling
+      // back to `null` — no blank flash between sections. Persistence
+      // above runs eagerly because we want the saved-state to reflect
+      // the user's intent even if they navigate again before the
+      // transition commits.
+      startTransition(() => {
+        setSectionState(id);
+        setSubRouteState(resolved);
+      });
     },
     [],
   );
