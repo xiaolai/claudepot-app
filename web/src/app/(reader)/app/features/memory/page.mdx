@@ -1,0 +1,130 @@
+export const metadata = {
+  title: "Memory",
+  description:
+    "Cross-harness shared memory and indexed transcript search across Claude Code and Codex, with an MCP server so the harness itself can query the same store.",
+};
+
+# Memory
+
+Claude Code writes its transcripts. Codex writes its transcripts. Each
+lives in a separate filesystem corner, in a separate format, and a
+running session can't see across the boundary &mdash; not its sibling
+harness, and often not even its own past work in another project.
+
+ClauDepot's Memory tab is the bridge. It indexes every transcript both
+harnesses have ever written, exposes durable user-authored memory
+alongside that index, and serves the lot over an MCP server so the
+harness that wrote the transcripts can read them back.
+
+The result: ask Claude "what did I decide about authentication last
+week?" and it can answer, because it can search.
+
+## Three tabs
+
+### Search
+
+Full-text search across every indexed conversation &mdash; both Claude
+Code (`~/.claude/projects/**/*.jsonl`) and Codex
+(`~/.codex/sessions/**/*.jsonl`). Backed by SQLite FTS5 with phrase
+escaping; results show the matching snippet plus session metadata
+(project, harness, when), and clicking a hit opens the transcript in
+the originating tool.
+
+Filter by **source** (All / Claude Code only / Codex only) when you
+remember which harness wrote the thing you're looking for.
+
+### Memories
+
+Durable notes you (or a running Claude session) want to keep around
+between sessions: design decisions, recurring patterns, hard-won
+debugging recipes. Stored in the same `sessions.db` so they're
+searchable alongside transcripts &mdash; not in scattered Markdown
+files that drift out of sync.
+
+### Decisions
+
+A first-class record of `(decision, why, when)` triples, with optional
+**evidence** links (a Claude Code session, a Codex rollout, a file
+path, a URL). Archive a decision when it stops applying, and the
+archive note is preserved next to the original. Useful for the
+"why did we settle on X" question that comes up two months later
+when you're staring at the code and have forgotten the trade-off.
+
+## The MCP server
+
+The store wouldn't be useful if Claude couldn't read it. ClauDepot
+ships an MCP server that exposes ten tools:
+
+| Tool | What it does |
+|---|---|
+| `claudepot_search_memory` | FTS5 search across transcripts, memories, and decisions |
+| `claudepot_read_conversation` | Pull a specific transcript by id (with optional line bounds) |
+| `claudepot_remember` | Write a new memory |
+| `claudepot_log_decision` | Record a decision with reason |
+| `claudepot_archive_decision` | Mark a decision as superseded |
+| `claudepot_submit_evidence` | Attach a session / file / URL to a decision |
+| `claudepot_list_memories` | Browse stored memories |
+| `claudepot_list_decisions` | Browse stored decisions |
+| `claudepot_list_sessions` | List indexed sessions |
+| `claudepot_list_projects` | List the projects ClauDepot has seen |
+
+Install it into Claude Code or Codex from **Settings &rarr; MCP**.
+The pane offers a user/project scope toggle (matches the
+`/init-workspace` convention) and writes the canonical snippet for
+you. You can also do it from a shell:
+
+```bash
+# Show the snippet without installing
+claudepot mcp print-snippet
+
+# Install (writes ~/.claude/AGENTS.md or ./AGENTS.md depending on scope)
+claudepot mcp install-snippet
+```
+
+Once installed, a running Claude or Codex session calls
+`claudepot_search_memory` like any other tool. The server runs as a
+local subprocess; nothing leaves your machine.
+
+## Indexing Codex transcripts
+
+Claude Code transcripts are indexed automatically (the Sessions tab
+in **Projects** already does this). Codex needs one command:
+
+```bash
+claudepot codex index            # incremental, idempotent
+claudepot codex rebuild          # drop and re-index from scratch
+claudepot codex forget --confirm # remove all indexed Codex data
+```
+
+`index` is incremental &mdash; only files newer than the last run are
+re-parsed, so running it nightly via launchd or cron costs no time on
+a steady-state machine. Rebuild covers the rare cases where the parser
+gets smarter and you want every old rollout re-read.
+
+## Where it lives on disk
+
+- `~/.claudepot/sessions.db` &mdash; SQLite store, FTS5-indexed.
+  Schema v4 (atomic migration on first launch; older databases are
+  upgraded in place).
+- Pure-Rust pipeline; no remote service, no telemetry, no upload.
+  The MCP server is a local subprocess that Claude / Codex talk to
+  over stdio.
+
+## Common patterns
+
+- **"Find that conversation about rate limiting."** Search tab, type
+  `rate limit`, optionally filter to the source harness. Click the
+  hit to reopen the transcript where it was written.
+- **"I keep re-deriving this regex."** Memories tab &rarr; add. Next
+  time Claude calls `claudepot_search_memory("regex for X")` from a
+  fresh session, it surfaces.
+- **"Why did we pick library A over library B?"** Decisions tab,
+  with the related session linked as evidence. Six months later
+  Claude can pull the reasoning back without you having to retell
+  the story.
+
+## Where to next
+
+- [Settings (MCP installer) &rarr;](/app/features/settings)
+- [Projects (Sessions tab feeds the same index) &rarr;](/app/features/projects)
+- [Changelog &rarr;](/app/changelog)

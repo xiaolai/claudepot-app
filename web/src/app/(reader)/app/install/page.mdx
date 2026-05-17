@@ -1,30 +1,60 @@
 export const metadata = {
   title: "Install",
-  description: "Install ClauDepot from source on macOS, Linux, or Windows.",
+  description: "Install ClauDepot on macOS, Linux, or Windows — signed installers on every release, or build from source.",
 };
 
 # Install
 
-> **Status: beta (`0.1.22`).** Daily-driven on macOS. Linux and
+> **Status: beta (`0.1.37`).** Daily-driven on macOS. Linux and
 > Windows builds are green but less seasoned.
->
-> **Pre-built installers are coming.** Until they ship, ClauDepot is
-> source-build only. The build is fast (under two minutes on a
-> modern laptop) and needs no system dependencies beyond the Rust
-> and Node toolchains.
 
-Source is at
-[github.com/xiaolai/claudepot-app](https://github.com/xiaolai/claudepot-app).
+Two paths: grab a signed installer from the latest release (fast,
+recommended), or build from source (one extra step, works on every
+platform Rust + Node target).
 
-## Prerequisites
+## Recommended — download a signed installer
+
+Every tagged release publishes installers for macOS, Linux, and
+Windows. The download page reads the latest release straight from
+GitHub and matches the build to your platform.
+
+[**Open the download page →**](/app/download)
+
+What ships per platform:
+
+| Platform | Artifact |
+|---|---|
+| macOS (Apple Silicon) | `Claudepot-aarch64.dmg` — drag into Applications |
+| macOS (Intel) | `Claudepot-x86_64.dmg` |
+| Windows (x64) | `Claudepot-x86_64-setup.exe` (NSIS) or `Claudepot-x86_64.msi` |
+| Linux (x64) | `Claudepot-x86_64.AppImage`, `.deb`, or `Claudepot-x86_64-linux.tar.gz` |
+| Linux (ARM64) | `claudepot-aarch64-linux.tar.gz` |
+
+Every macOS `.dmg` is signed with a Developer ID certificate and
+notarized; every Windows `.msi` carries an `.msi.sig` next to it for
+in-app updater verification.
+
+## In-app auto-update
+
+Once installed, ClauDepot checks for updates on its own schedule
+(toggle in **Settings → General**). New versions arrive over the
+in-app updater channel — signed with the same key the release
+workflow embeds at build time, so a download tampered in transit
+won't install. The current channel and any pending update show in
+**Settings → About**.
+
+## Build from source
+
+Useful if you want to track `main`, run an unreleased feature, or
+package for a platform that the release matrix doesn't cover.
+
+Prerequisites:
 
 - A recent **Rust toolchain** ([rustup.rs](https://rustup.rs)).
 - **Node 20+** with **pnpm** ([pnpm.io](https://pnpm.io)).
 
-That's it. No Xcode-only tooling on macOS, no MSVC on Windows beyond
-what `rustup` already pulls in, no extra system libraries on Linux.
-
-## Build
+No Xcode-only tooling on macOS, no MSVC on Windows beyond what
+`rustup` pulls in, no extra system libraries on Linux.
 
 ```bash
 git clone https://github.com/xiaolai/claudepot-app
@@ -36,15 +66,18 @@ cargo build -p claudepot-cli --release
 # Binary lands at ./target/release/claudepot
 
 # Desktop app
-pnpm tauri build --no-bundle      # builds a binary; no installer
+pnpm tauri build --no-bundle   # raw .app / binary / .exe, no installer
 # OR
-pnpm tauri dev                    # run the GUI in dev mode (hot reload)
+pnpm tauri dev                 # run the GUI in dev mode (hot reload)
 ```
 
-`pnpm tauri build --no-bundle` skips the platform installer and
-gives you the raw app bundle in
-`src-tauri/target/release/bundle/`. On macOS that's a `.app`; on
-Linux it's a binary; on Windows it's an `.exe`.
+`--no-bundle` skips the platform installer and writes the raw bundle
+to `src-tauri/target/release/bundle/`. On macOS that's a `.app`; on
+Linux it's a binary; on Windows it's an `.exe`. To produce the same
+signed installers the release workflow ships, drop the flag — but
+note that bundling on macOS / Windows expects the same signing
+configuration the release workflow uses, so unless you're set up for
+that, the unsigned `--no-bundle` output is what you want locally.
 
 ## First run
 

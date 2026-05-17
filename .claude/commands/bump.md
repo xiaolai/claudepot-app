@@ -1,11 +1,11 @@
 ---
-description: Bump Claudepot version numbers in lock-step across Cargo.toml, package.json, src-tauri/tauri.conf.json, and stub a CHANGELOG section. Does not commit — leaves changes for review.
+description: Bump Claudepot version numbers in lock-step across Cargo.toml, package.json, src-tauri/tauri.conf.json, README.md, the web install page, and stub a CHANGELOG section. Does not commit — leaves changes for review.
 ---
 
 # Bump version
 
 Bump Claudepot's version in every file that holds one. Version lives
-in four sources of truth:
+in five sources of truth:
 
 | File | Line | Notes |
 |---|---|---|
@@ -13,10 +13,12 @@ in four sources of truth:
 | `package.json` | `"version": "X.Y.Z"` | Frontend build stamp |
 | `src-tauri/tauri.conf.json` | `"version": "X.Y.Z"` | Shown to the OS (menu bar "About", bundle metadata) |
 | `README.md` | `> **Status: {stage}** (\`X.Y.Z\`).` line | Public-facing status banner — the first thing visitors see in the repo |
+| `web/src/app/(reader)/app/install/page.mdx` | `> **Status: {stage} (\`X.Y.Z\`).**` line | Public-facing status banner on claudepot.com/app/install — same shape, different file (mind the dot placement) |
 
-All four MUST match byte-for-byte. A mismatch produces a release with
+All five MUST match byte-for-byte. A mismatch produces a release with
 a wrong "About" dialog, bundles that refuse to install over previous
-versions, or a README that lies about the current stage.
+versions, a README that lies about the current stage, or a website
+that quotes a version 10 releases old.
 
 ## Inputs
 
@@ -61,7 +63,7 @@ Store as `NEXT`.
 
 ### Step 3 — Apply edits
 
-Edit exactly these four locations:
+Edit exactly these five locations:
 
 1. `Cargo.toml` → the `version = "CURRENT"` line under
    `[workspace.package]`. Use `Edit` with the full surrounding line to
@@ -80,6 +82,13 @@ Edit exactly these four locations:
    - `1.0.x`+ → `stable`
    The rest of the line ("Daily-driven on macOS…") stays untouched —
    that's editorial copy, not version-derived.
+5. `web/src/app/(reader)/app/install/page.mdx` → the status banner near
+   the top. Same rewrite as README — stage word + version, no other
+   prose. Note the bold scope differs from README's: README is
+   `> **Status: beta** (\`X.Y.Z\`).` (bold around "Status: beta"
+   only); the MDX is `> **Status: beta (\`X.Y.Z\`).**` (bold extends
+   across the version and trailing period). Edit by matching the
+   `X.Y.Z` token plus its backticks, not the surrounding markdown.
 
 Do NOT rewrite `Cargo.lock` manually — `cargo check --workspace` will
 regenerate it on the next build. Run `cargo check -p claudepot-cli`

@@ -58,6 +58,20 @@ token is still valid. Useful before committing to a long task.
 The *Verify all* button at the top runs the check across every
 registered account in parallel.
 
+## Rate limits at a glance
+
+Each account card surfaces Anthropic&rsquo;s reported utilization
+windows alongside identity: `5h`, `7d` (all-models), and `7d` Sonnet.
+Updated by a 5-minute background poll &mdash; same snapshot the
+[auto-rotation rules](/app/features/settings#rotation) read &mdash;
+so picking which account to bind for the next hour&rsquo;s work
+doesn&rsquo;t require leaving ClauDepot for the Anthropic dashboard.
+
+If you cross a threshold often, **Settings &rarr; Rotation** lets
+you turn the manual swap into a rule: "when 5h on this account
+crosses 80%, swap to my least-used alternate." Confirm-mode raises a
+toast with a Switch action; auto-mode swaps immediately, audited.
+
 ## Remove
 
 Removing an account purges the keychain entry and the local DB row.

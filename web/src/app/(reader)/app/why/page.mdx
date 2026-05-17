@@ -47,6 +47,24 @@ disconnected from the new location. ClauDepot rewrites every reference
 in the affected transcripts, journals the change, and lets you
 roll back if anything looks off.
 
+**Claude can't see across harnesses, or even across its own
+projects.** Claude Code writes one corner of `~/.claude/`; Codex
+writes a different corner of `~/.codex/`. A running session has no
+way to ask "what did we decide about authentication last week?" —
+the transcripts exist, but the harness doesn't index them and can't
+read across the boundary. ClauDepot indexes both harnesses into one
+FTS5 store and runs an MCP server so the harness itself can search
+it. The [Memory tab](/app/features/memory) is the surface; the MCP
+server is the wire.
+
+**Caps cluster around month-end.** A Max account that's fine for
+three weeks runs hot in the fourth. Swapping by hand means watching
+the rate-limit dashboards, then editing `~/.claude/` files. ClauDepot
+reads the same `/api/oauth/usage` Anthropic exposes, draws the
+windows on each account card, and (if you want) **auto-rotates**
+when a window crosses a threshold you set. Confirm-mode raises a
+toast with a Switch action; auto-mode swaps and audits.
+
 ## What ClauDepot is not
 
 It's not a chat client. It doesn't replace Claude Code or Claude

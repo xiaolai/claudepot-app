@@ -1,7 +1,7 @@
 export const metadata = {
   title: "Settings",
   description:
-    "Eleven sub-panes covering preferences, auto-rotation, network probes, cleanup, protected paths, GitHub PAT, lock-recovery, diagnostics, and About.",
+    "Thirteen sub-panes covering preferences, appearance, notifications, network, auto-rotation, health, MCP installer, cleanup, protected paths, GitHub PAT, lock-recovery, diagnostics, and About.",
 };
 
 # Settings
@@ -9,8 +9,9 @@ export const metadata = {
 ![ClauDepot — settings tab](/screenshots/settings.png)
 
 ClauDepot's preference surface and the operational controls that
-don't belong to any single tab. Eleven sub-panes, grouped into
-*Core* (everyday prefs), *Advanced* (less-touched), and *About*.
+don't belong to any single tab. Thirteen sub-panes, grouped into
+*Core* (everyday prefs) and *Advanced* (less-touched, ending at
+About).
 
 ## General
 
@@ -72,6 +73,32 @@ evaluator in `claudepot-core::rotation::eval` is fully unit-tested,
 including cycle-boundary regressions. See
 [`dev-docs/auto-rotation.md`](https://github.com/xiaolai/claudepot-app/blob/main/dev-docs/auto-rotation.md)
 for the design.
+
+## Health
+
+A single pane that consolidates the warning channels scattered
+across older builds: keychain reachability, account-verification
+freshness, Claude Code daemon state, and the `cc_doctor` probe
+output. The same signals that surface as toasts and the
+StatusIssuesBanner have a quiet home here, so an operator who
+dismissed a banner can still see what triggered it.
+
+## MCP
+
+One-click installer for the ClauDepot Memory MCP server (the one
+that exposes `claudepot_search_memory` and friends &mdash; see the
+[Memory tab](/app/features/memory)). User/project scope toggle that
+mirrors the `/init-workspace` convention: *user* writes to
+`~/.claude/AGENTS.md`, *project* writes to `./AGENTS.md` for the
+currently-active project. Snippet is shown verbatim before install
+so nothing is silently appended.
+
+CLI equivalents:
+
+```bash
+claudepot mcp print-snippet    # show, don't install
+claudepot mcp install-snippet  # narrow-edit the right AGENTS.md
+```
 
 ## Cleanup
 

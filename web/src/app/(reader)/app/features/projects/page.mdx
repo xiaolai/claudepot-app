@@ -1,7 +1,7 @@
 export const metadata = {
   title: "Projects",
   description:
-    "Per-project sessions in a master-detail pane. Rename safely, move, search transcripts.",
+    "Per-project sessions in a master-detail pane. Rename safely, move, search transcripts. Time-boxed permission grants and per-project `.env` editing live here too.",
 };
 
 # Projects
@@ -54,6 +54,41 @@ ClauDepot) become *orphans* — the transcript exists but the project
 slug is dangling. The Projects tab surfaces orphans in a separate
 section so you can adopt them into a real project, move them, or
 trash them.
+
+## Permission grants
+
+Optional per-project elevation: grant a project a time-boxed
+`permissions.defaultMode` (almost always `bypassPermissions`) that
+ClauDepot **auto-reverts on expiry**. The elevated state is never
+left to memory &mdash; the orchestrator reverts expired grants each
+usage-snapshot tick and emits a `permission-reverted` event when it
+does. The grant lands in `.claude/settings.local.json`; if you
+hand-edit the setting after the grant, ClauDepot detects that and
+won&rsquo;t revert someone&rsquo;s own choice.
+
+Use it for short autonomous runs you don&rsquo;t want to keep
+elevated past their useful window &mdash; a one-hour refactor pass,
+say, that should drop back to normal permission prompts the moment
+the timer expires.
+
+## Environment files
+
+A format-preserving editor for the project&rsquo;s `.env*` files.
+Three operations, every one touching only the target key&rsquo;s
+line:
+
+- **Comment / uncomment / delete** an existing key.
+- **Set value** to a literal you typed, or
+- **Inject** a value from the [secret vault](/app/features/keys),
+  by name &mdash; the secret crosses Rust-side without ever
+  rendering in the DOM.
+
+`.env` filenames are validated as safe bare dotenv filenames (no
+separators, `..`, or NUL bytes) so a malicious payload can&rsquo;t
+escape the project root. Combined with the secret vault, the loop
+"copy from password manager &rarr; paste into `.env`" is replaced by
+"pick from list &rarr; injected; original value never crosses the
+clipboard."
 
 CLI equivalents:
 

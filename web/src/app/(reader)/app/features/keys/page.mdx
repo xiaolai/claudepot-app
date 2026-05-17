@@ -1,17 +1,28 @@
 export const metadata = {
   title: "Keys",
   description:
-    "Manage API keys for third-party services. Self-clearing clipboard, never echoed, never logged.",
+    "API keys for third-party services plus a local secret vault for `.env` injection. Self-clearing clipboard, never echoed, never logged.",
 };
 
 # Keys
 
 ![ClauDepot — keys tab](/screenshots/keys.png)
 
-API keys for the services you use alongside Claude — Anthropic
-console, Resend, OpenAI, GitHub PATs, OAuth refresh tokens. The Keys
-tab stores them in your OS keychain and gives you a single view to
-audit, copy, and rotate.
+Two stores under one tab:
+
+1. **API keys** for the services you use alongside Claude &mdash;
+   Anthropic console, Resend, OpenAI, GitHub PATs, OAuth refresh
+   tokens. Backed by your OS keychain.
+2. **The secret vault** &mdash; a local-only named-secret store for
+   the kind of values you keep dropping into a project's `.env` file
+   (database URLs, third-party webhook secrets, Stripe test keys).
+   Backed by a `0600`-permissioned SQLite store at
+   `~/.claudepot/env-vault.db`.
+
+Both share the same security posture: secrets never enter the
+renderer's JS heap on the way out, the clipboard self-clears after
+30s, and `sk-ant-…` patterns are scrubbed from logs and error
+messages.
 
 ## Add a key
 
@@ -55,6 +66,32 @@ event-log records every mint and revoke against the local DB.
 Editing a key creates a new keychain entry and atomically swaps it
 in. The old entry is deleted only after the new one is verified to
 work.
+
+## Secret vault
+
+A second store on the same tab, for the values that don&rsquo;t
+belong in the OS keychain because every project wants a different
+copy: database URLs, webhook secrets, third-party API tokens that
+land in `.env` files. The vault is a local-only SQLite store at
+`~/.claudepot/env-vault.db` (mode `0600`); it does not touch the OS
+keychain.
+
+The vault is a *movement layer*, not a text editor. Two operations:
+
+- **Copy** &mdash; identical to the API-key copy path. Rust-side
+  clipboard write via the Tauri plugin, returns only a receipt, and
+  the clipboard self-clears after 30 s if it still holds the same
+  value.
+- **Inject** &mdash; from a project&rsquo;s **Environment files**
+  panel in [Projects](/app/features/projects), pick a vault entry
+  and drop it into a chosen `.env*` key without rendering the secret
+  anywhere in the UI. The same panel handles comment / uncomment /
+  delete on existing keys, all format-preserving (only the target
+  line is touched, surrounding whitespace and comments stay).
+
+`.env` filenames are validated server-side (no separators / `..` /
+NUL); the renderer cannot supply a path that escapes the project
+root.
 
 ## Why this matters
 
