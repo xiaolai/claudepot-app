@@ -978,6 +978,10 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   overflow: hidden;
   background: var(--bg-sunken);
 }
+/* Post-detail title card uses .proto-row-bare (padding:0), so the
+ * embed sibling needs an explicit Stride-tier top margin to match
+ * the in-body block-media rhythm above. */
+.proto-row + .proto-yt-embed { margin-top: var(--sp-24); }
 :where(.proto-section, .proto-text, .proto-comment-body) .proto-yt-embed iframe,
 .proto-row + .proto-yt-embed iframe {
   position: absolute;
@@ -1001,6 +1005,7 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   overflow: hidden;
   background: var(--bg-sunken);
 }
+.proto-row + .proto-spotify-embed { margin-top: var(--sp-24); }
 :where(.proto-section, .proto-text, .proto-comment-body) .proto-spotify-embed iframe,
 .proto-row + .proto-spotify-embed iframe {
   width: 100%;
@@ -1021,6 +1026,7 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   overflow: hidden;
   background: var(--bg-sunken);
 }
+.proto-row + .proto-applepod-embed { margin-top: var(--sp-24); }
 :where(.proto-section, .proto-text, .proto-comment-body) .proto-applepod-embed iframe,
 .proto-row + .proto-applepod-embed iframe {
   width: 100%;
