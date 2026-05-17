@@ -905,10 +905,20 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   font-size: var(--fs-small);
 }
 
-/* Inline <code> stays unstyled. Under font-mono-only.css every
- * element is already monospace, so the visual distinction is the
- * source formatting itself — adding a pill would make code stand
- * out against… more code. */
+/* Inline <code> gets a barely-tinted pill. Under font-mono-only.css
+ * a font-family swap can't carry the distinction, so a background
+ * lift + small radius + tight padding does the work — readable as
+ * code in prose AND inside headings (the descendant selector picks
+ * up h1-h6 children), recessed enough not to clash with fenced
+ * blocks. Scoped via :not(pre) > code so the <code> inside a
+ * .proto-code body is unaffected. font-size is left at 1em so the
+ * pill rides the surrounding text scale at every heading level. */
+:where(.proto-section, .proto-text, .proto-comment-body) :not(pre) > code {
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: var(--code-inline-py) var(--code-inline-px);
+  border-radius: var(--radius-sm);
+}
 
 /* User-content h1 inside a post body or comment is visually demoted
  * so it doesn't compete with the page-level <h1> (the post title).

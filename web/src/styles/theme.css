@@ -119,6 +119,11 @@
      is appropriate. */
   --code-body-bg: #f9fafb;
   --code-text: #1f2937;
+  /* Inline-code pill geometry. em-relative so the pill rides the
+     surrounding text scale — important inside headings, where the
+     <code> element renders at the heading's font-size. */
+  --code-inline-py: 0.1em;
+  --code-inline-px: 0.3em;
 
   /* --- Moderation state colors --- */
   --state-pending-bg: #fef3c7;
