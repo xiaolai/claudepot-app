@@ -8,7 +8,9 @@
 use chrono::{Duration, Utc};
 use claudepot_core::permission::grants::Grant;
 use claudepot_core::permission::settings::resolve_default_mode;
-use claudepot_core::permission::{eval, store as permission_store, write_default_mode, PermissionMode};
+use claudepot_core::permission::{
+    eval, store as permission_store, write_default_mode, PermissionMode,
+};
 use claudepot_core::project;
 use claudepot_core::settings_writer::SettingsLayer;
 use std::path::Path;
@@ -48,8 +50,7 @@ fn current_dto(project_path: &str) -> ProjectPermissionDto {
 pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let cfg = claudepot_core::paths::claude_config_dir();
-        let projects =
-            project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
+        let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
         // `load` (not `load_or_default`) so a real I/O failure surfaces
         // instead of silently rendering every project as un-granted.
         let file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
@@ -97,15 +98,16 @@ pub async fn permission_grant(
 ) -> Result<ProjectPermissionDto, String> {
     let granted_mode = PermissionMode::from_wire_str(&mode);
     if !granted_mode.is_known() {
-        return Err(format!("`{mode}` is not a permission mode Claudepot can grant"));
+        return Err(format!(
+            "`{mode}` is not a permission mode Claudepot can grant"
+        ));
     }
     let duration = validate_duration(duration_secs)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         validate_project_path(&project_path)?;
         let root = Path::new(&project_path);
-        let mut file =
-            permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        let mut file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
 
         // Preserve the true original mode across a re-grant: if a
         // grant already exists, its `previous_mode` is the real
@@ -156,8 +158,7 @@ pub async fn permission_grant(
 #[tauri::command]
 pub async fn permission_revert(project_path: String) -> Result<ProjectPermissionDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut file =
-            permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        let mut file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
         let grant = file
             .find(&project_path)
             .cloned()
@@ -182,8 +183,7 @@ pub async fn permission_extend(
 ) -> Result<ProjectPermissionDto, String> {
     let duration = validate_duration(duration_secs)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let mut file =
-            permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        let mut file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
         let grant = file
             .grants
             .iter_mut()

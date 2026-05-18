@@ -58,6 +58,13 @@ async fn run_tick(app: &AppHandle) {
     // read when no grants exist.
     crate::permission_orchestrator::tick(app).await;
 
+    // Refresh per-project PR detection. Independent of accounts (a
+    // user can have projects without an Anthropic account); runs
+    // before the account-state early returns. The orchestrator
+    // dispatches each detect via `spawn_blocking` internally, so
+    // this awaits a single task that walks all projects sequentially.
+    pr_tick(app).await;
+
     // Open store + list accounts under one blocking scope so the
     // SQLite open and the .list() call aren't ping-ponging into
     // the async runtime.
@@ -136,4 +143,44 @@ async fn run_tick(app: &AppHandle) {
 /// that state.
 fn active_cli_uuid(accounts: &[claudepot_core::account::Account]) -> Option<Uuid> {
     accounts.iter().find(|a| a.is_cli_active).map(|a| a.uuid)
+}
+
+/// Walk every project and refresh its cached PR detection. Skipped
+/// silently when project listing fails (treated like permissions
+/// errors elsewhere — never fatal to the tick).
+async fn pr_tick(app: &AppHandle) {
+    use crate::pr_orchestrator::PrOrchestrator;
+    use std::path::PathBuf;
+
+    let orch_state = app.state::<Arc<PrOrchestrator>>();
+    let orch: Arc<PrOrchestrator> = Arc::clone(&orch_state);
+
+    // Discovering the project list is sync I/O — keep it on the
+    // blocking pool. The orchestrator's own `tick_all` is fully
+    // async (tokio::process under a Semaphore) so detection runs
+    // on the tokio reactor, not the blocking pool.
+    let roots = tauri::async_runtime::spawn_blocking(move || {
+        let cfg = claudepot_core::paths::claude_config_dir();
+        let projects = claudepot_core::project::list_projects(&cfg)
+            .map_err(|e| format!("pr_tick: list projects: {e}"))?;
+        Ok::<Vec<PathBuf>, String>(
+            projects
+                .iter()
+                .filter(|p| p.is_reachable)
+                .map(|p| PathBuf::from(&p.original_path))
+                .collect(),
+        )
+    })
+    .await;
+
+    let roots = match roots {
+        Ok(Ok(r)) if !r.is_empty() => r,
+        Ok(Err(e)) => {
+            tracing::debug!(error = %e, "pr_tick failed");
+            return;
+        }
+        _ => return,
+    };
+
+    orch.tick_all(roots).await;
 }

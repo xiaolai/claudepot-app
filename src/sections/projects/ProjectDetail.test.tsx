@@ -39,6 +39,11 @@ vi.mock("../../api", () => ({
     envFileList: (...args: unknown[]) =>
       Promise.resolve({ projectPath: String(args[0] ?? ""), files: [] }),
     envVaultList: () => Promise.resolve([]),
+    // SessionListPane now reads useSessionLive() to render
+    // per-session dots; the hook hydrates via sessionLiveSnapshot
+    // on first subscribe. Return an empty list so existing tests
+    // see no live sessions (which is the default state in jsdom).
+    sessionLiveSnapshot: () => Promise.resolve([]),
   },
 }));
 // PermissionPanel subscribes to the `permission-reverted` event;

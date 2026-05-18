@@ -346,8 +346,8 @@ pub async fn shared_memory_create_memory(
 ) -> Result<MemoryDto, String> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let scope = parse_scope(Some(args.scope.as_str()))
-            .ok_or_else(|| "invalid scope".to_string())?;
+        let scope =
+            parse_scope(Some(args.scope.as_str())).ok_or_else(|| "invalid scope".to_string())?;
         let kind = parse_memory_kind(Some(args.kind.as_str()))
             .ok_or_else(|| "invalid kind".to_string())?;
         let confidence = args.confidence.map(|c| c.clamp(0, 100));
@@ -660,50 +660,50 @@ pub async fn shared_memory_install_snippet(
     tokio::task::spawn_blocking(move || {
         let scope = args.scope.as_deref().unwrap_or("user");
         if scope != "user" && scope != "project" {
-            return Err(format!("invalid scope: {scope:?} (expected \"user\" or \"project\")"));
+            return Err(format!(
+                "invalid scope: {scope:?} (expected \"user\" or \"project\")"
+            ));
         }
 
         // Resolve the snippet file path.
-        let (path, target_files, include_line): (
-            std::path::PathBuf,
-            Vec<String>,
-            String,
-        ) = if let Some(out) = args.out.as_deref() {
-            let p = std::path::PathBuf::from(out);
-            let line = format!("@{}", p.display());
-            (p, Vec::new(), line)
-        } else if scope == "user" {
-            let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
-            let p = home.join(".claude").join("claudepot-mcp-instructions.md");
-            let line = format!("@{}", p.display());
-            let targets = vec![
-                home.join(".claude").join("CLAUDE.md").display().to_string(),
-                home.join(".codex").join("AGENTS.md").display().to_string(),
-                home.join(".gemini").join("GEMINI.md").display().to_string(),
-            ];
-            (p, targets, line)
-        } else {
-            let project = args
-                .project_path
-                .as_deref()
-                .ok_or_else(|| "project_path required for scope = \"project\"".to_string())?;
-            let project_root = std::path::PathBuf::from(project);
-            if !project_root.is_dir() {
-                return Err(format!(
-                    "project_path is not an existing directory: {}",
-                    project_root.display()
-                ));
-            }
-            let p = project_root.join(".claude").join("claudepot-mcp-instructions.md");
-            // Relative-to-project include line. `/init-workspace`
-            // expects AGENTS.md at the project root, so a
-            // `.claude/claudepot-mcp-instructions.md` relative path
-            // resolves correctly when AGENTS.md imports it.
-            let include_line =
-                "@.claude/claudepot-mcp-instructions.md".to_string();
-            let targets = vec![project_root.join("AGENTS.md").display().to_string()];
-            (p, targets, include_line)
-        };
+        let (path, target_files, include_line): (std::path::PathBuf, Vec<String>, String) =
+            if let Some(out) = args.out.as_deref() {
+                let p = std::path::PathBuf::from(out);
+                let line = format!("@{}", p.display());
+                (p, Vec::new(), line)
+            } else if scope == "user" {
+                let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
+                let p = home.join(".claude").join("claudepot-mcp-instructions.md");
+                let line = format!("@{}", p.display());
+                let targets = vec![
+                    home.join(".claude").join("CLAUDE.md").display().to_string(),
+                    home.join(".codex").join("AGENTS.md").display().to_string(),
+                    home.join(".gemini").join("GEMINI.md").display().to_string(),
+                ];
+                (p, targets, line)
+            } else {
+                let project = args
+                    .project_path
+                    .as_deref()
+                    .ok_or_else(|| "project_path required for scope = \"project\"".to_string())?;
+                let project_root = std::path::PathBuf::from(project);
+                if !project_root.is_dir() {
+                    return Err(format!(
+                        "project_path is not an existing directory: {}",
+                        project_root.display()
+                    ));
+                }
+                let p = project_root
+                    .join(".claude")
+                    .join("claudepot-mcp-instructions.md");
+                // Relative-to-project include line. `/init-workspace`
+                // expects AGENTS.md at the project root, so a
+                // `.claude/claudepot-mcp-instructions.md` relative path
+                // resolves correctly when AGENTS.md imports it.
+                let include_line = "@.claude/claudepot-mcp-instructions.md".to_string();
+                let targets = vec![project_root.join("AGENTS.md").display().to_string()];
+                (p, targets, include_line)
+            };
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("create parent: {e}"))?;
@@ -753,9 +753,7 @@ pub struct McpHealthDto {
 ///      sidecar that `tauri-cli` copies in at bundle time).
 ///   3. Sibling with the platform-triple suffix that `externalBin`
 ///      uses pre-bundle (`claudepot-cli-aarch64-apple-darwin` etc.).
-fn resolve_cli_binary(
-    override_path: Option<String>,
-) -> Result<std::path::PathBuf, String> {
+fn resolve_cli_binary(override_path: Option<String>) -> Result<std::path::PathBuf, String> {
     if let Some(p) = override_path {
         return Ok(std::path::PathBuf::from(p));
     }

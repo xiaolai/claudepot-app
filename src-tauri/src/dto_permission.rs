@@ -46,7 +46,10 @@ impl From<&Grant> for GrantDto {
     fn from(g: &Grant) -> Self {
         Self {
             granted_mode: g.granted_mode.as_wire_str().to_string(),
-            previous_mode: g.previous_mode.as_ref().map(|m| m.as_wire_str().to_string()),
+            previous_mode: g
+                .previous_mode
+                .as_ref()
+                .map(|m| m.as_wire_str().to_string()),
             granted_at_ms: g.granted_at.timestamp_millis(),
             expires_at_ms: g.expires_at.timestamp_millis(),
         }

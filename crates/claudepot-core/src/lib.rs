@@ -50,6 +50,7 @@ pub mod desktop_lock;
 pub mod env_vault;
 pub mod error;
 pub mod fs_utils;
+pub mod github_pr;
 pub mod host_activate;
 pub mod keys;
 pub mod launcher;

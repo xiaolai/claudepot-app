@@ -1,7 +1,28 @@
 //! Project DTOs — read-only surface for the Projects section.
 
 use crate::dto::system_time_to_ms;
+use claudepot_core::github_pr::{PrInfo, PrState};
 use serde::{Deserialize, Serialize};
+
+/// Wire form of a GitHub PR detection. Mirrors
+/// `claudepot_core::github_pr::PrInfo` minus the head ref name,
+/// which is only useful for diagnostics on the Rust side.
+#[derive(Serialize)]
+pub struct PrInfoDto {
+    pub number: u64,
+    pub url: String,
+    pub state: PrState,
+}
+
+impl From<&PrInfo> for PrInfoDto {
+    fn from(p: &PrInfo) -> Self {
+        Self {
+            number: p.number,
+            url: p.url.clone(),
+            state: p.state,
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct ProjectInfoDto {
@@ -22,6 +43,12 @@ pub struct ProjectInfoDto {
     /// Useful for callers that want to show a distinct "abandoned"
     /// label from the standard "source deleted" orphan.
     pub is_empty: bool,
+    /// Open / merged / closed PR detected on this project's current
+    /// branch by `pr_orchestrator`. `null` is the steady state — no
+    /// PR found, no `gh` installed, project not a git repo, or PR
+    /// detection hasn't run yet for this project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<PrInfoDto>,
 }
 
 impl From<&claudepot_core::project_types::ProjectInfo> for ProjectInfoDto {
@@ -36,6 +63,10 @@ impl From<&claudepot_core::project_types::ProjectInfo> for ProjectInfoDto {
             is_orphan: p.is_orphan,
             is_reachable: p.is_reachable,
             is_empty: p.is_empty,
+            // Decorated by the project_list command from the
+            // PR orchestrator's cache; the bare DTO never carries
+            // PR state.
+            pr: None,
         }
     }
 }
@@ -347,6 +378,51 @@ impl From<&claudepot_core::project_trash::ProjectRestoreReport> for ProjectResto
             claude_json_restored: r.claude_json_restored,
             history_lines_restored: r.history_lines_restored,
         }
+    }
+}
+
+#[cfg(test)]
+mod pr_info_dto_tests {
+    use super::*;
+    use claudepot_core::github_pr::{PrInfo, PrState};
+
+    #[test]
+    fn pr_info_dto_copies_fields_and_serializes_state_lowercase() {
+        let core = PrInfo {
+            number: 42,
+            url: "https://github.com/x/y/pull/42".into(),
+            state: PrState::Open,
+            head_ref_name: "feat/x".into(),
+        };
+        let dto = PrInfoDto::from(&core);
+        assert_eq!(dto.number, 42);
+        assert_eq!(dto.url, "https://github.com/x/y/pull/42");
+        // PrState serializes as lowercase via `serde(rename_all)`.
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert!(json.contains("\"state\":\"open\""), "got {json}");
+    }
+
+    #[test]
+    fn project_info_dto_omits_pr_field_when_none() {
+        // Wire contract: `pr` is skipped when None so the GUI
+        // doesn't get a flood of `"pr":null` on every row.
+        let dto = ProjectInfoDto {
+            sanitized_name: "x".into(),
+            original_path: "/x".into(),
+            session_count: 0,
+            memory_file_count: 0,
+            total_size_bytes: 0,
+            last_modified_ms: None,
+            is_orphan: false,
+            is_reachable: true,
+            is_empty: true,
+            pr: None,
+        };
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert!(
+            !json.contains("\"pr\""),
+            "pr field should be skipped when None, got: {json}"
+        );
     }
 }
 
