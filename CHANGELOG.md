@@ -6,6 +6,68 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.38 — beta (unreleased)
+
+Four findings from a Codex 5-dimension audit of the v0.1.37 surface
+(audit thread `019e3893-5f90-72b2-a4f9-2a5e55fb310b`). No new
+features — all four addressed pre-existing or just-introduced bugs
+in the v0.1.35–v0.1.37 work.
+
+### Fixed
+
+- **`useRunningOps` polling guard no longer suppresses in-flight
+  progress updates.** The v0.1.37 `opsEqual()` check compared only
+  `op_id` / `kind` / `old_path` / `new_path`, but `RunningOpInfo`
+  carries `status`, `current_phase`, `sub_progress`, `last_error`,
+  `move_result`, `clean_result`, `failed_journal_id`, and
+  `session_move_result` — every one of which the progress modal
+  and status strip render. A running op with stable identity but
+  progressing state was being marked "unchanged" by the polling
+  backstop. Events still flowed so the impact was degraded-
+  fallback-only, not full breakage, but the v0.1.37 fix overshot.
+  Replaced with a tight identity-equality skip that only fires when
+  BOTH the prior and the new list are empty (the actual case the
+  v0.1.37 guard was solving — the idle-state 3-second `[]` storm).
+  Non-empty lists are committed unconditionally; React's reconciler
+  handles change detection downstream.
+- **MCP `claudepot_search_memory` can now report `has_more` at the
+  maximum page size.** Both `crates/claudepot-cli/src/commands/mcp.rs`
+  and `src-tauri/src/commands/shared_memory.rs` clamp `user_limit`
+  to `[1, 50]` then ask the underlying search for `limit + 1` to
+  detect whether more results exist past the page. The search
+  function internally re-clamps to `[1, 50]`, silently truncating
+  the `+1` probe: at `user_limit = 50`, `has_more` was unreachable.
+  Lowered both user-side clamps to `[1, 49]` so the probe always
+  fits within the internal ceiling.
+- **MCP reads of a Claude exchange no longer widen to the whole
+  transcript.** `claude_exchanges.rs` inserts every Claude exchange
+  row with `NULL` `line_start` / `line_end` (the v0.1.35 indexer
+  doesn't record physical line bounds yet). The previous
+  `resolve_line_bounds` matched this case with a "fall through to
+  file-level read" comment, so an MCP caller passing a Claude
+  exchange_id got the whole transcript back instead of just the
+  requested exchange — a privacy regression vs the locator
+  contract. Refactored to a `Resolved` enum returning either a
+  line-range we slice OR an `ExchangeColumns` marker; the new
+  `read_exchange_columns` reads the exchange's stored `user_text` /
+  `assistant_text` columns directly, composes them with a blank-
+  line separator, applies the byte cap, and returns
+  `line_start = line_end = 0` as the "not a file slice" signal.
+  Regression test
+  `shared_memory::read::tests::null_line_bounds_with_exchange_id_returns_exchange_columns_only`
+  drives the full `backfill_claude_exchanges` + `read_locator` path
+  with a two-turn Claude JSONL and asserts the OTHER turn's content
+  doesn't leak into the body.
+- **`inode_of()` centralized in `fs_utils::file_identity()`.** Three
+  near-copies of the platform-specific staleness-fingerprint helper
+  lived in `session_index/codec.rs`, `shared_memory/indexer.rs`,
+  and `shared_memory/claude_exchanges.rs`. The v0.1.37 Windows-fix
+  branch updated two of them but the third silently returned `0`
+  on Windows, producing the staleness-tuple drift that crashed
+  `second_backfill_skips_unchanged_files` on the windows-latest
+  runner. Single helper in `fs_utils`, all three call sites
+  delegate.
+
 ## 0.1.37 — beta (unreleased)
 
 Recovery release. v0.1.36's release.yml failed silently on
