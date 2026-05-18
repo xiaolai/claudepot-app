@@ -151,6 +151,44 @@ pub fn claude_version(path: &Path) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Platform-specific file-identity proxy used in the
+/// `(size, mtime_ns, inode)` staleness triple stored in `sessions.db`.
+///
+/// - **Unix**: real POSIX inode via `MetadataExt::ino()`.
+/// - **Windows**: `creation_time()` (FILETIME, stable since Rust 1.1).
+///   `MetadataExt::file_index()` would be the natural choice but it
+///   sits behind nightly-only `windows_by_handle`
+///   (rust-lang/rust#63010) and breaks the release build (E0658,
+///   v0.1.36). `creation_time()` is strictly safer for the equality-
+///   only consumer: changes when the file is created or replaced,
+///   stays constant across in-place modifications.
+/// - **Other targets**: 0 (the staleness check degrades to size + mtime).
+///
+/// All three shared-memory writers — `session_index/codec.rs`,
+/// `shared_memory/indexer.rs`, `shared_memory/claude_exchanges.rs` —
+/// must use this function (not their own copy). Prior drift caused
+/// silent re-index of every Claude file on every Windows tick because
+/// `session_index` stored 0 and `shared_memory` stored `file_index()`
+/// — the triple never matched and `claude_exchanges::tests::
+/// second_backfill_skips_unchanged_files` failed on Windows.
+pub fn file_identity(meta: &std::fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.ino()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        meta.creation_time()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = meta;
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

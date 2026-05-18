@@ -381,34 +381,8 @@ fn walk_dir_recursive(
     }
 }
 
-#[cfg(unix)]
 fn inode_of(meta: &fs::Metadata) -> i64 {
-    use std::os::unix::fs::MetadataExt;
-    meta.ino() as i64
-}
-
-#[cfg(windows)]
-fn inode_of(meta: &fs::Metadata) -> i64 {
-    // Windows has no inode in the POSIX sense. The natural choice —
-    // `MetadataExt::file_index()` returning the NTFS file id — is
-    // gated behind `#![feature(windows_by_handle)]` and breaks the
-    // release build on stable rustc (E0658, rust-lang/rust#63010).
-    // v0.1.36's release.yml failed exactly here.
-    //
-    // `creation_time()` (stable since 1.1) is a strictly safer
-    // proxy for the (size, mtime_ns, inode) staleness triple stored
-    // in `sessions.db`: it changes when a file is created or
-    // replaced, and stays constant across in-place modifications —
-    // which is exactly what the equality check needs. Cast to i64
-    // (matches the column type); signedness is irrelevant because
-    // the consumer only ever compares with `==`.
-    use std::os::windows::fs::MetadataExt;
-    meta.creation_time() as i64
-}
-
-#[cfg(not(any(unix, windows)))]
-fn inode_of(_meta: &fs::Metadata) -> i64 {
-    0
+    crate::fs_utils::file_identity(meta) as i64
 }
 
 // ─── load cache ───────────────────────────────────────────────

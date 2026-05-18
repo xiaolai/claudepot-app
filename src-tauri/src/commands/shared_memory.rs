@@ -100,7 +100,11 @@ pub async fn shared_memory_search(
 ) -> Result<SearchResponseDto, String> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let user_limit = args.limit.unwrap_or(20).clamp(1, 50);
+        // Cap at 49 (not 50): the `+1` probe below must fit within
+        // `shared_memory::search::search`'s internal `clamp(1, 50)`
+        // ceiling, otherwise the probe is silently truncated and
+        // `has_more` is unreachable at the maximum page size.
+        let user_limit = args.limit.unwrap_or(20).clamp(1, 49);
         let q = sms::SearchQuery {
             query: args.query,
             source_kind: args.source_kind,

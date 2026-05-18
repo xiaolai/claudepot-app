@@ -121,10 +121,31 @@ pub fn read_locator_bounded(
 
     // Resolve line bounds. If the locator carries an exchange_id
     // but no explicit lines, look up the exchange's line_start /
-    // line_end. Final fallback: full file.
-    let (line_start, line_end) = resolve_line_bounds(idx, locator)?;
+    // line_end. Claude exchanges are inserted with `NULL, NULL`
+    // (claude_exchanges.rs only stores the turn payload, not the
+    // physical line range yet) so for those we read the
+    // user_text / assistant_text columns from the exchanges row
+    // directly — NOT a file slice. Without this, an MCP caller
+    // supplying a Claude exchange_id would get the whole
+    // transcript back instead of just the requested exchange.
+    let bounds = resolve_bounds(idx, locator)?;
 
-    let (body, truncated) = read_lines(&locator.file_path, line_start, line_end, max_bytes)?;
+    let (line_start, line_end, body, truncated) = match bounds {
+        Resolved::Lines(s, e) => {
+            let (body, trunc) = read_lines(&locator.file_path, s, e, max_bytes)?;
+            (s, e, body, trunc)
+        }
+        Resolved::ExchangeColumns { exchange_id } => {
+            let (body, trunc) =
+                read_exchange_columns(idx, &exchange_id, &locator.file_path, max_bytes)?;
+            // line_start / line_end are 0 to signal "not a file
+            // slice — content came from the exchanges row". The
+            // caller (MCP) renders this as exchange-scoped content;
+            // there's no meaningful line range to report.
+            (0, 0, body, trunc)
+        }
+    };
+
     let redacted = redact_apply(&body, policy);
     Ok(ConversationRead {
         file_path: locator.file_path.clone(),
@@ -136,13 +157,18 @@ pub fn read_locator_bounded(
     })
 }
 
-fn resolve_line_bounds(
-    idx: &SessionIndex,
-    loc: &ConversationLocator,
-) -> Result<(u32, u32), ReadError> {
+/// Outcome of bound resolution. Either a (start, end) file-line
+/// pair we can slice, or an explicit "read the exchange's stored
+/// columns" indicator for the Claude path where bounds are NULL.
+enum Resolved {
+    Lines(u32, u32),
+    ExchangeColumns { exchange_id: String },
+}
+
+fn resolve_bounds(idx: &SessionIndex, loc: &ConversationLocator) -> Result<Resolved, ReadError> {
     // Explicit bounds win.
     if let (Some(s), Some(e)) = (loc.line_start, loc.line_end) {
-        return Ok((s.max(1), e.max(s)));
+        return Ok(Resolved::Lines(s.max(1), e.max(s)));
     }
 
     if let Some(ref ex_id) = loc.exchange_id {
@@ -158,11 +184,21 @@ fn resolve_line_bounds(
             |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
         );
         match row {
-            Ok((Some(s), Some(e))) => return Ok((s as u32, e as u32)),
+            Ok((Some(s), Some(e))) => return Ok(Resolved::Lines(s as u32, e as u32)),
             Ok((_, _)) => {
                 // Exchange exists, matches file_path, but has no
-                // line range (e.g. compacted summary) → fall
-                // through to file-level read. Acceptable.
+                // physical line range. This is the Claude path —
+                // `claude_exchanges.rs` doesn't populate
+                // line_start/line_end (the parser drops line
+                // numbers during pairing). Read the stored
+                // user_text/assistant_text columns directly
+                // instead of falling through to a file-level
+                // read; without this, an MCP caller passing a
+                // Claude exchange_id gets the whole transcript
+                // back rather than just the requested exchange.
+                return Ok(Resolved::ExchangeColumns {
+                    exchange_id: ex_id.clone(),
+                });
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 // exchange_id was supplied but doesn't belong to
@@ -176,17 +212,93 @@ fn resolve_line_bounds(
         }
     }
 
-    // No bounds available; cap at 100 000 lines so we don't
-    // accidentally slurp a multi-GB transcript. The byte cap in
-    // `read_lines` is the real safety; if both ceilings fire the
-    // byte cap wins (it's nearly always reached first). L8 — log
-    // when this fallback kicks in so an operator chasing
-    // "why does my read stop at line 100000" finds the answer.
+    // No exchange_id and no explicit bounds → full-file read by
+    // intent. Cap at 100 000 lines so we don't accidentally slurp
+    // a multi-GB transcript. The byte cap in `read_lines` is the
+    // real safety; if both ceilings fire the byte cap wins (it's
+    // nearly always reached first). L8 — log when this fallback
+    // kicks in so an operator chasing "why does my read stop at
+    // line 100000" finds the answer.
     tracing::debug!(
         ?loc.file_path,
-        "read_locator: no line bounds; falling back to file-level read (capped at 100 000 lines / max_bytes)"
+        "read_locator: no line bounds and no exchange_id; full-file read (capped at 100 000 lines / max_bytes)"
     );
-    Ok((1, 100_000))
+    Ok(Resolved::Lines(1, 100_000))
+}
+
+/// Read the `user_text` + `assistant_text` columns for a single
+/// exchange row and return them concatenated as the read body. Used
+/// for the Claude path where physical line bounds aren't recorded
+/// — the exchanges row IS the canonical content; widening to a
+/// file-level read would leak unrelated turns. Tool-call payloads
+/// (separate `tool_calls` table) are deliberately *not* included:
+/// the MCP `claudepot_read_conversation` contract is "the turn
+/// content for this exchange," and tool result text rides through
+/// the dedicated `claudepot_search_memory` snippet path.
+fn read_exchange_columns(
+    idx: &SessionIndex,
+    exchange_id: &str,
+    file_path: &str,
+    max_bytes: usize,
+) -> Result<(String, bool), ReadError> {
+    let db = idx.db();
+    let row = db.query_row(
+        "SELECT user_text, assistant_text \
+         FROM exchanges WHERE id = ?1 AND file_path = ?2",
+        rusqlite::params![exchange_id, file_path],
+        |r| {
+            Ok((
+                r.get::<_, Option<String>>(0)?,
+                r.get::<_, Option<String>>(1)?,
+            ))
+        },
+    );
+    let (user_text, assistant_text) = match row {
+        Ok(t) => t,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            // Caller already validated existence in
+            // `resolve_bounds`; reaching here means the row was
+            // deleted between the two queries. Surface as
+            // NotIndexed so the caller treats it like any other
+            // stale-locator path.
+            return Err(ReadError::NotIndexed(format!(
+                "exchange {exchange_id} not found under {file_path}"
+            )));
+        }
+        Err(e) => return Err(ReadError::Sql(e)),
+    };
+
+    // Compose body: USER then ASSISTANT, separated by a blank
+    // line. Skip empty halves so consumers don't see leading or
+    // trailing separators when only one side has content (e.g. a
+    // turn that's still in flight).
+    let mut body = String::new();
+    if let Some(u) = user_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        body.push_str(u);
+    }
+    if let Some(a) = assistant_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str(a);
+    }
+
+    // Enforce the byte cap on the post-compose body. Truncating
+    // here (not earlier) keeps the policy uniform between the
+    // file-slice and exchange-columns paths.
+    let truncated = body.len() > max_bytes;
+    if truncated {
+        body.truncate(max_bytes);
+    }
+    Ok((body, truncated))
 }
 
 /// Read `path`'s lines `[line_start..=line_end]` (1-based) up to
@@ -498,5 +610,81 @@ mod tests {
         let result = read_locator(&idx, &loc, &RedactionPolicy::default()).unwrap();
         assert!(result.body.contains("session_meta"));
         assert!(result.body.contains("do not paste secrets"));
+    }
+
+    /// When an exchange_id is supplied for a Claude row (null line
+    /// bounds, the default for claude_exchanges.rs inserts), the
+    /// read MUST return only that exchange's stored
+    /// user_text/assistant_text — not widen to a file-level read
+    /// that would leak the rest of the transcript. Codex 9-dim
+    /// audit (v0.1.37) flagged the prior fall-through as
+    /// Medium/Security; this test locks the fix. Uses the real
+    /// `backfill_claude_exchanges` indexer to populate the row so
+    /// the test mirrors the production data shape end-to-end.
+    #[test]
+    fn null_line_bounds_with_exchange_id_returns_exchange_columns_only() {
+        use crate::shared_memory::claude_exchanges::backfill_claude_exchanges;
+
+        let tmp = TempDir::new().unwrap();
+        let claude_config = tmp.path().join("claude");
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+
+        // Mirror claude_exchanges::tests::stage_claude_session.
+        // Two turns so a file-level read would include both; the
+        // exchange we'll ask for is only the first.
+        let projects = claude_config.join("projects").join("-proj");
+        fs::create_dir_all(&projects).unwrap();
+        let file_path_buf = projects.join("sid.jsonl");
+        fs::write(
+            &file_path_buf,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"please refactor the auth flow"}]},"timestamp":"2026-05-15T11:30:00.000Z","sessionId":"sid","cwd":"/proj"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"the auth flow refactor is done"}]},"timestamp":"2026-05-15T11:30:01.000Z","sessionId":"sid","cwd":"/proj"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"now refactor the SECOND unrelated module"}]},"timestamp":"2026-05-15T11:30:10.000Z","sessionId":"sid","cwd":"/proj"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"second module SHOULD_NOT_APPEAR_in_first_exchange"}]},"timestamp":"2026-05-15T11:30:11.000Z","sessionId":"sid","cwd":"/proj"}
+"#,
+        )
+        .unwrap();
+
+        // Refresh sessions, then run the Claude exchanges backfill.
+        idx.refresh(&claude_config).expect("refresh");
+        let stats = backfill_claude_exchanges(&idx, &claude_config).expect("backfill");
+        assert_eq!(stats.indexed, 1, "indexer should populate exchanges");
+
+        // Ask for the FIRST exchange by id.
+        let file_path = file_path_buf.to_string_lossy().into_owned();
+        let loc = ConversationLocator {
+            file_path: file_path.clone(),
+            exchange_id: Some("claude_code:sid:0".to_string()),
+            line_start: None,
+            line_end: None,
+        };
+        let result = read_locator(&idx, &loc, &RedactionPolicy::default()).unwrap();
+
+        // Body has the first exchange's user + assistant text.
+        assert!(
+            result.body.contains("refactor the auth flow"),
+            "missing user_text in body: {}",
+            result.body
+        );
+        assert!(
+            result.body.contains("auth flow refactor is done"),
+            "missing assistant_text in body: {}",
+            result.body
+        );
+        // Body does NOT contain the second exchange's content
+        // (would indicate fall-through to file-level read).
+        assert!(
+            !result.body.contains("SHOULD_NOT_APPEAR_in_first_exchange"),
+            "leaked unrelated exchange content: {}",
+            result.body
+        );
+        assert!(
+            !result.body.contains("SECOND unrelated module"),
+            "leaked unrelated exchange content: {}",
+            result.body
+        );
+        // line_start/line_end are 0 (signal: "not a file slice").
+        assert_eq!(result.line_start, 0);
+        assert_eq!(result.line_end, 0);
     }
 }

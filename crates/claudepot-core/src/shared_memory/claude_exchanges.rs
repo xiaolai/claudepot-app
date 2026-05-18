@@ -174,34 +174,8 @@ fn walk(dir: &Path, out: &mut Vec<ClaudeFile>, stats: &mut ClaudeExchangeStats, 
     }
 }
 
-#[cfg(unix)]
 fn inode_of(meta: &fs::Metadata) -> i64 {
-    use std::os::unix::fs::MetadataExt;
-    meta.ino() as i64
-}
-
-#[cfg(windows)]
-fn inode_of(meta: &fs::Metadata) -> i64 {
-    // Windows has no inode in the POSIX sense. `MetadataExt::file_index()`
-    // returns the NTFS file id (the closest analog) but is gated behind
-    // `#![feature(windows_by_handle)]` — using it on stable rustc breaks
-    // the Windows release build (E0658, rust-lang/rust#63010). What this
-    // value is used for: equality inside the (size, mtime_ns, inode)
-    // staleness triple in `sessions.db` — purely "is this the same file
-    // I indexed before?" `creation_time()` (stable since 1.1) is a
-    // strictly safer proxy: it changes when a file is created or
-    // replaced, stays constant across in-place modifications. Cast to
-    // i64 (matches the column type); signedness doesn't matter because
-    // the consumer only ever uses `==`. v0.1.36 was the first release
-    // to hit this path and the release-build failed on Windows; this
-    // is the fix.
-    use std::os::windows::fs::MetadataExt;
-    meta.creation_time() as i64
-}
-
-#[cfg(not(any(unix, windows)))]
-fn inode_of(_meta: &fs::Metadata) -> i64 {
-    0
+    crate::fs_utils::file_identity(meta) as i64
 }
 
 /// Per-file state we use to decide skip-vs-reindex. The triple is

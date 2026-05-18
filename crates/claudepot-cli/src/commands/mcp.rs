@@ -366,7 +366,13 @@ impl MemoryServer {
         description = "Search Claudepot's shared memory across Claude Code and Codex transcripts. Returns compact hits with locators; raw secrets are redacted in snippets."
     )]
     fn claudepot_search_memory(&self, Parameters(req): Parameters<SearchMemoryRequest>) -> String {
-        let user_limit = req.limit.unwrap_or(20).clamp(1, 50);
+        // Cap at 49 (not 50) so the `+1` probe below fits inside
+        // `shared_memory::search::search`'s internal `clamp(1, 50)`
+        // ceiling. At user_limit=50, the probe (limit=51) was being
+        // re-clamped to 50, making has_more unreachable: callers
+        // requesting the maximum page would never learn there are
+        // more results past it.
+        let user_limit = req.limit.unwrap_or(20).clamp(1, 49);
         // Query one extra row so we can report has_more without
         // the boundary-false-positive of `len >= limit`. Slice
         // back to user_limit before returning.
