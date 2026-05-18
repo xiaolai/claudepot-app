@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
+import { headers } from "next/headers";
 import { JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -71,6 +72,13 @@ export default async function PrototypeLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // CSP nonce minted per-request by `src/middleware.ts` and threaded
+  // back here via the `x-nonce` request header. `headers()` returns
+  // null for the value if the middleware didn't run (e.g. when a route
+  // hits the matcher exclusion list and renders this layout anyway —
+  // rare, but `undefined` is safer than asserting).
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   // Pull session.user.image once at layout level so the nav can render
   // the real OAuth photo (path A). Falls back to identicon when null.
   // sessionUsername is the DB username (slug), not the OAuth display
@@ -127,6 +135,11 @@ export default async function PrototypeLayout({
          * was CORS-blocked and recorded zero events. Vercel Analytics
          * runs natively on this stack with no CORS surface.
          */}
+        {/* No nonce prop on Vercel components — both inject their
+         * `<script>` via `document.createElement` from within React's
+         * (nonced) bundle, so `strict-dynamic` in our CSP propagates
+         * trust automatically. @vercel/analytics 2.0.1 doesn't accept
+         * a nonce prop anyway. */}
         <Analytics />
         <SpeedInsights />
         {/* FAB popover handlers — close on outside-tap, on Esc, and
@@ -144,6 +157,7 @@ export default async function PrototypeLayout({
          * page but only find an [open] details when the user has
          * actually expanded the FAB. */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
               "(function(){var SEL='details.proto-toc-details,details.docs-sidebar-disclosure';function close(d){d.open=false}document.addEventListener('click',function(e){document.querySelectorAll(SEL).forEach(function(d){if(d.open&&!d.contains(e.target))close(d)})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll(SEL).forEach(function(d){if(d.open)close(d)})});document.addEventListener('click',function(e){var t=e.target;if(!t||!t.closest)return;var d=t.closest(SEL);if(!d||!d.open)return;var a=t.closest('a');if(a&&d.contains(a))close(d)})})();",
