@@ -870,6 +870,7 @@ dependencies = [
 name = "claudepot-tauri"
 version = "0.1.38"
 dependencies = [
+ "async-trait",
  "chrono",
  "claudepot-core",
  "dirs 6.0.0",

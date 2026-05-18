@@ -1,11 +1,73 @@
 import { type MouseEvent, useMemo, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { BrandGithubMark } from "../../components/primitives/BrandGithubMark";
 import { Glyph } from "../../components/primitives/Glyph";
 import { IconButton } from "../../components/primitives/IconButton";
+import { LiveStatusDot } from "../../components/primitives/LiveStatusDot";
+import { liveDotTitle } from "../../components/primitives/liveDotTitle";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import type { ProjectInfo } from "../../types";
+import type { LiveSessionSummary } from "../../types/activity";
+import { useSessionLive } from "../../hooks/useSessionLive";
 import { basename, formatRelativeTime, formatSize } from "./format";
 import { classifyProject, type ProjectStatus } from "./projectStatus";
+
+/**
+ * Return `true` when `cwd` is the project root or sits underneath
+ * it. Normalizes both inputs to forward-slash first so a Windows
+ * project path written `C:\foo\bar` matches a live cwd written
+ * `C:/foo/bar/sub` (and every other separator combination). After
+ * normalization the check is a simple prefix test with an explicit
+ * `/` boundary so `/foo` doesn't false-match `/foobar`.
+ *
+ * Windows-shaped paths are also case-folded before comparison —
+ * NTFS/ReFS are case-insensitive by default, so `C:\Users\X` and
+ * `c:\users\x` describe the same directory and must match. The
+ * Unix branch keeps case-sensitive comparison since POSIX
+ * filesystems are typically case-sensitive (macOS APFS being
+ * case-insensitive by default is the awkward outlier; we err
+ * toward false negatives on macOS rather than false positives
+ * elsewhere, since a missing dot is recoverable but a wrong
+ * project association isn't).
+ *
+ * Both inputs are expected to already be simplified by
+ * `claudepot_core::path_utils::simplify_windows_path` on the Rust
+ * side — so we don't need to strip `\\?\` verbatim prefixes here.
+ * See `.claude/rules/paths.md` for the full handling rule.
+ */
+export function cwdMatchesProject(cwd: string, projectPath: string): boolean {
+  let a = cwd.replace(/\\/g, "/");
+  let b = projectPath.replace(/\\/g, "/");
+  if (isWindowsShapedPath(a) || isWindowsShapedPath(b)) {
+    a = a.toLowerCase();
+    b = b.toLowerCase();
+  }
+  if (a === b) return true;
+  const prefix = b.endsWith("/") ? b : b + "/";
+  return a.startsWith(prefix);
+}
+
+/** Heuristic: drive-letter (`C:/...`) or UNC (`//server/...`)
+ *  shapes signal Windows. Tested against the slash-normalized
+ *  string so we don't need to branch on backslash. */
+function isWindowsShapedPath(p: string): boolean {
+  return /^[a-zA-Z]:\//.test(p) || p.startsWith("//");
+}
+
+/** Build a per-project list of live session summaries by matching
+ *  each summary's `cwd` against the project's `original_path`. */
+function groupLiveByProject(
+  live: LiveSessionSummary[],
+  projects: ProjectInfo[],
+): Map<string, LiveSessionSummary[]> {
+  const out = new Map<string, LiveSessionSummary[]>();
+  for (const p of projects) {
+    const matches = live.filter((s) => cwdMatchesProject(s.cwd, p.original_path));
+    if (matches.length > 0) out.set(p.original_path, matches);
+  }
+  return out;
+}
 
 export type ProjectFilter = "all" | "orphan" | "unreachable" | "empty";
 
@@ -95,6 +157,15 @@ export function ProjectsTable({
     return sorted;
   }, [projects, filter, sort]);
 
+  // Singleton store — one backend listener no matter how many rows
+  // render. We map cwd → project to render dots inside the Sessions
+  // cell so the live signal sits next to the count it relates to.
+  const liveAll = useSessionLive();
+  const liveByProject = useMemo(
+    () => groupLiveByProject(liveAll, shown),
+    [liveAll, shown],
+  );
+
   if (projects.length === 0) {
     return (
       <EmptyRow>
@@ -182,6 +253,7 @@ export function ProjectsTable({
               key={p.sanitized_name}
               project={p}
               active={p.original_path === selectedPath}
+              live={liveByProject.get(p.original_path)}
               onSelect={onSelect}
               onContextMenu={onContextMenu}
             />
@@ -195,11 +267,15 @@ export function ProjectsTable({
 function ProjectRow({
   project: p,
   active,
+  live,
   onSelect,
   onContextMenu,
 }: {
   project: ProjectInfo;
   active: boolean;
+  /** Live sessions whose cwd sits at or under this project. Empty
+   *  array or undefined when no live session matches. */
+  live?: LiveSessionSummary[];
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, p: ProjectInfo) => void;
 }) {
@@ -273,6 +349,29 @@ function ProjectRow({
           >
             {name}
           </span>
+          {p.pr && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (p.pr) void openUrl(p.pr.url).catch(() => {});
+              }}
+              title={`PR #${p.pr.number} — ${p.pr.state}`}
+              aria-label={`Open pull request #${p.pr.number} for ${name}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: prBadgeColor(p.pr.state),
+                lineHeight: 0,
+              }}
+            >
+              <BrandGithubMark size={14} />
+            </button>
+          )}
         </div>
         <div
           // Truncated path subtext — full string disclosed via tooltip
@@ -297,9 +396,13 @@ function ProjectRow({
         style={{
           color: p.session_count > 0 ? "var(--fg-muted)" : "var(--fg-ghost)",
           fontVariantNumeric: "tabular-nums",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--sp-6)",
         }}
       >
         {p.session_count > 0 ? p.session_count : "—"}
+        {live && live.length > 0 && <LiveDotCluster live={live} />}
       </span>
 
       <span
@@ -374,6 +477,56 @@ function ProjectRow({
       </span>
     </li>
   );
+}
+
+/**
+ * Render up to 5 live-status dots for a project row, followed by
+ * `+N` overflow text when there are more. Each dot's tooltip is the
+ * status verb so a hover discloses what's live without the user
+ * having to drill into the project. Decorative for screen readers
+ * because the project row already names the project; the dots are
+ * a sighted-user glance signal.
+ */
+function LiveDotCluster({ live }: { live: LiveSessionSummary[] }) {
+  const MAX = 5;
+  const visible = live.slice(0, MAX);
+  const overflow = live.length - visible.length;
+  return (
+    <span
+      style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-2)" }}
+    >
+      {visible.map((s) => {
+        const verb = liveDotTitle(s);
+        return (
+          <LiveStatusDot
+            key={s.session_id}
+            status={s.status}
+            errored={s.errored}
+            title={verb}
+            aria-label={`Session ${verb}`}
+          />
+        );
+      })}
+      {overflow > 0 && (
+        <span
+          style={{
+            color: "var(--fg-faint)",
+            fontSize: "var(--fs-xs)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          +{overflow}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Token color for the GitHub mark based on PR state. Open is the
+ *  attention color; merged/closed dim to neutral so the badge doesn't
+ *  shout for resolved work. */
+function prBadgeColor(state: "open" | "merged" | "closed"): string {
+  return state === "open" ? "var(--accent)" : "var(--fg-muted)";
 }
 
 /**

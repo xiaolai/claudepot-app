@@ -19,6 +19,10 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-pn
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# pr_orchestrator uses an async PrDetector trait so tests can swap in
+# a deterministic fake. async-trait is the workspace's chosen polyfill
+# for async-in-traits (claudepot-core uses it elsewhere too).
+async-trait.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 tracing.workspace = true

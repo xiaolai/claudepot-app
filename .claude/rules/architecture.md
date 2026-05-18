@@ -1,6 +1,6 @@
 ---
 description: Core architecture constraints for all Claudepot work
-globs: "**/*.rs"
+globs: "{**/*.rs,src/**/*.{ts,tsx},src-tauri/**/*.rs}"
 ---
 
 # Architecture
@@ -33,6 +33,20 @@ behaviors of this shape (rules over existing nouns, evaluated on
 snapshot data, dispatched via existing primitives) belong in
 `claudepot-core` as siblings of `rotation`, not as new domain
 modules.
+
+**Tool-orchestration boundary.** Claudepot observes and controls
+existing CC processes; it does not spawn them or orchestrate
+parallel sessions across branches. That space is filled by
+[`Bendzae/claude-manager`](https://github.com/Bendzae/claude-manager) —
+a tmux-based TUI that creates one CC instance per
+(project, branch, session) triple. Claudepot deliberately stops at
+the read/control boundary: PR badges, live status dots, and similar
+list-level signals are *observability* over existing CC state, not
+workflow primitives. Proposals to add session spawning, per-session
+worktrees, or a Task domain noun should be redirected to
+claude-manager rather than ported into Claudepot — the four nouns
+and the "behaviors over existing nouns" pattern (see `rotation` for
+the canonical example) are what keep Claudepot lean.
 
 ## Crate separation
 

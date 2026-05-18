@@ -37,6 +37,7 @@ mod live_activity_bridge;
 mod memory_watch;
 mod ops;
 mod permission_orchestrator;
+mod pr_orchestrator;
 mod preferences;
 mod rotation_orchestrator;
 mod service_status_watcher;
@@ -568,7 +569,14 @@ pub fn run() {
         .manage(claudepot_core::pricing::PricingCacheService::new())
         .manage(notification_log_state)
         .manage(commands::service_status::ServiceStatusState::new())
-        .manage(rotation_orchestrator);
+        .manage(rotation_orchestrator)
+        // Per-project PR detection cache + tick. Zero overhead until
+        // the orchestrator's `tick_all` is called from
+        // `usage_snapshot::run_tick`; `project_list` reads the cache
+        // synchronously to decorate `ProjectInfoDto.pr`. Shared as
+        // an `Arc<PrOrchestrator>` so the tick and the read path see
+        // the same cache instance.
+        .manage(std::sync::Arc::new(pr_orchestrator::PrOrchestrator::new()));
 
     // Conditionally publish the cards index — `None` means open
     // failed at startup, in which case the cards-* commands return
@@ -583,7 +591,9 @@ pub fn run() {
     // managed (even when `None`); the wrapper carries the Option so
     // commands return a graceful error rather than panicking on a
     // missing state.
-    builder = builder.manage(commands::shared_memory::SharedMemoryIndex(shared_memory_index));
+    builder = builder.manage(commands::shared_memory::SharedMemoryIndex(
+        shared_memory_index,
+    ));
 
     // Memory change-log state. Always managed — `memory_log` is now
     // unconditionally `Arc<MemoryLog>` per audit 2026-05 #2.
