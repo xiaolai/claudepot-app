@@ -178,7 +178,28 @@ fn inode_of(meta: &fs::Metadata) -> u64 {
     meta.ino()
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn inode_of(meta: &fs::Metadata) -> u64 {
+    // Windows has no POSIX inode. `MetadataExt::file_index()`
+    // (NTFS file id) is gated behind nightly-only
+    // `windows_by_handle` — using it breaks stable rustc builds.
+    // `creation_time()` (stable since Rust 1.1) is a strictly
+    // safer proxy for the staleness tuple's equality check:
+    // changes when the file is created or replaced, stays
+    // constant across in-place modifications. MUST match the
+    // identical computation in
+    // `shared_memory/claude_exchanges.rs::inode_of` and
+    // `shared_memory/indexer.rs::inode_of` — when the two
+    // diverge (e.g. one returns 0 here while the other returns
+    // creation_time elsewhere), every staleness comparison
+    // fails on Windows and `backfill_claude_exchanges` re-
+    // indexes unchanged files every tick. (That bug was latent
+    // under E0658 until the stable-rustc fix in v0.1.37.)
+    use std::os::windows::fs::MetadataExt;
+    meta.creation_time()
+}
+
+#[cfg(not(any(unix, windows)))]
 fn inode_of(_meta: &fs::Metadata) -> u64 {
     0
 }

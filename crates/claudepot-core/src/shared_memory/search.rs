@@ -429,7 +429,12 @@ mod tests {
 
     fn stage_corpus(tmp: &TempDir) -> PathBuf {
         let root = tmp.path().join("codex").join("sessions");
-        let day = root.join("2026/05/15");
+        // Chained .join() so each segment is a separate path
+        // component. `root.join("2026/05/15")` would land as one
+        // filename component on Windows (Path::join doesn't split
+        // on `/`) — the directory wouldn't be created at all and
+        // create_dir_all would error.
+        let day = root.join("2026").join("05").join("15");
         fs::create_dir_all(&day).unwrap();
         // Three transcripts with distinct content.
         fs::write(

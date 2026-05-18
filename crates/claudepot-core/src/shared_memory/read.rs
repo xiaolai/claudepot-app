@@ -264,7 +264,13 @@ mod tests {
     fn prep_corpus(tmp: &TempDir) -> SessionIndex {
         let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
         let root = tmp.path().join("codex").join("sessions");
-        let day = root.join("2026/05/15");
+        // Build the date path with chained .join() so each component
+        // uses the native separator. A single literal "2026/05/15"
+        // works on Unix (forward slashes are real separators) but
+        // becomes one filename component on Windows, leaving the
+        // corpus directory and the lookup path with mismatched
+        // separators — `NotIndexed` at read time.
+        let day = root.join("2026").join("05").join("15");
         fs::create_dir_all(&day).unwrap();
         fs::write(
             day.join("rollout.jsonl"),
@@ -288,8 +294,19 @@ mod tests {
     }
 
     fn corpus_file(tmp: &TempDir) -> String {
+        // Match prep_corpus's chained .join() so the lookup path
+        // matches what the indexer stored. On Windows, a single
+        // literal "codex/sessions/2026/05/15/rollout.jsonl" lands
+        // as one filename component instead of a path, producing
+        // mixed separators that NotIndexed against the canonical
+        // backslash form.
         tmp.path()
-            .join("codex/sessions/2026/05/15/rollout.jsonl")
+            .join("codex")
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("15")
+            .join("rollout.jsonl")
             .to_string_lossy()
             .into_owned()
     }

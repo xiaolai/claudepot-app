@@ -90,6 +90,7 @@ jobs:
             | grep -v 'crates/claudepot-core/src/shared_memory/read.rs' \
             | grep -v 'crates/claudepot-core/src/shared_memory/indexer.rs' \
             | grep -v 'crates/claudepot-core/src/shared_memory/schema.rs' \
+            | grep -v 'crates/claudepot-core/src/shared_memory/claude_exchanges.rs' \
             || true)
           if [ -n "$unexpected" ]; then
             echo "::error::Raw text SELECTs found outside redaction-aware paths:"
