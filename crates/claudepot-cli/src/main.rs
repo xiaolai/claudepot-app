@@ -1040,6 +1040,37 @@ async fn main() -> Result<()> {
         tracing::warn!("repair tree migration failed: {e}");
     }
 
+    // Subcommands that don't touch the account store get dispatched
+    // here, before AccountStore::open. None of these handlers consume
+    // `ctx`, and opening accounts.db unconditionally on every CLI
+    // invocation serializes parallel processes through SQLite's WAL
+    // writer lock — the 5 s busy_timeout then trips and the surface
+    // failure is a misleading "database is locked" that looks like a
+    // test flake. Surfaced by the v0.1.36 CI run (26006793979)
+    // where `cargo test`'s parallel `mcp memory-server` + `codex
+    // index` subprocesses raced on the runner's accounts.db.
+    if matches!(cli.command, Commands::Mcp { .. } | Commands::Codex { .. }) {
+        return match cli.command {
+            Commands::Mcp { action } => match action {
+                McpAction::MemoryServer { db } => commands::mcp::run(db).await,
+                McpAction::PrintSnippet => commands::mcp::print_snippet(),
+                McpAction::InstallSnippet { out, print_include } => {
+                    commands::mcp::install_snippet(out, print_include)
+                }
+            },
+            Commands::Codex { action } => match action {
+                CodexAction::Index {
+                    codex_home,
+                    db,
+                    json,
+                } => commands::codex::index(codex_home, db, json).await,
+                CodexAction::Rebuild { db } => commands::codex::rebuild(db).await,
+                CodexAction::Forget { db, confirm } => commands::codex::forget(db, confirm).await,
+            },
+            _ => unreachable!("matches! guard ensures Mcp or Codex"),
+        };
+    }
+
     let db_path = data_dir.join("accounts.db");
     let store = AccountStore::open(&db_path)
         .with_context(|| format!("failed to open account store: {}", db_path.display()))?;

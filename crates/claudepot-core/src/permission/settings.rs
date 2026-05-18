@@ -320,7 +320,10 @@ mod tests {
 
         let after: JsonValue = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(after["model"], JsonValue::from("opus"));
-        assert_eq!(after["permissions"]["allow"][0], JsonValue::from("Bash(ls)"));
+        assert_eq!(
+            after["permissions"]["allow"][0],
+            JsonValue::from("Bash(ls)")
+        );
         assert_eq!(
             after["permissions"]["defaultMode"],
             JsonValue::from("bypassPermissions")
@@ -377,7 +380,10 @@ mod tests {
             .unwrap()
             .get("defaultMode")
             .is_none());
-        assert_eq!(after["permissions"]["allow"][0], JsonValue::from("Bash(ls)"));
+        assert_eq!(
+            after["permissions"]["allow"][0],
+            JsonValue::from("Bash(ls)")
+        );
     }
 
     #[test]
@@ -423,12 +429,9 @@ mod tests {
             read_err,
             PermissionSettingsError::PermissionsNotAnObject(_)
         ));
-        let write_err = write_default_mode(
-            SettingsLayer::LocalProject,
-            &project,
-            &PermissionMode::Plan,
-        )
-        .unwrap_err();
+        let write_err =
+            write_default_mode(SettingsLayer::LocalProject, &project, &PermissionMode::Plan)
+                .unwrap_err();
         assert!(matches!(
             write_err,
             PermissionSettingsError::PermissionsNotAnObject(_)

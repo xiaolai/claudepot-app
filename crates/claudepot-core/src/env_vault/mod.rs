@@ -18,9 +18,7 @@ pub mod env_file;
 pub mod error;
 pub mod store;
 
-pub use env_file::{
-    comment, delete, parse, set, uncomment, is_valid_key, EnvEditError, EnvLine,
-};
+pub use env_file::{comment, delete, is_valid_key, parse, set, uncomment, EnvEditError, EnvLine};
 pub use error::VaultError;
 pub use store::{secret_preview, VaultSecret, VaultStore};
 

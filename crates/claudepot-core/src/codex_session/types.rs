@@ -112,10 +112,7 @@ pub enum CodexEvent {
     /// Any other top-level `type` (e.g. `event_msg`,
     /// `compaction`, future variants). Preserved so a stream
     /// consumer can decide what to do.
-    Other {
-        type_tag: String,
-        line: u32,
-    },
+    Other { type_tag: String, line: u32 },
 }
 
 /// Classification for synthetic user-message text. The parser

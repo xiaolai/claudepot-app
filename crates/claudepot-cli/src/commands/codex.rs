@@ -86,9 +86,7 @@ pub async fn rebuild(db: Option<PathBuf>) -> Result<()> {
 /// removed and exits non-zero so scripts can distinguish "needs
 /// confirmation" from "did the work."
 pub async fn forget(db: Option<PathBuf>, confirm: bool) -> Result<()> {
-    use claudepot_core::shared_memory::indexer::{
-        count_shared_memory_rows, forget_shared_memory,
-    };
+    use claudepot_core::shared_memory::indexer::{count_shared_memory_rows, forget_shared_memory};
 
     let db_path = db.unwrap_or_else(default_db_path);
     if !db_path.exists() {
@@ -105,7 +103,10 @@ pub async fn forget(db: Option<PathBuf>, confirm: bool) -> Result<()> {
             .with_context(|| "join count task")?
             .with_context(|| "count shared memory rows")?;
         println!("Refusing to forget without --yes.");
-        println!("If you proceed, the following will be removed from {}:", db_path.display());
+        println!(
+            "If you proceed, the following will be removed from {}:",
+            db_path.display()
+        );
         println!("  exchanges:           {}", counts.exchanges);
         println!("  tool_calls:          {}", counts.tool_calls);
         println!("  exchange_fts rows:   {}", counts.exchange_fts);
@@ -138,11 +139,7 @@ pub async fn forget(db: Option<PathBuf>, confirm: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn index(
-    codex_home: Option<PathBuf>,
-    db: Option<PathBuf>,
-    json: bool,
-) -> Result<()> {
+pub async fn index(codex_home: Option<PathBuf>, db: Option<PathBuf>, json: bool) -> Result<()> {
     // The CLI flag is named `--codex-home` and the docstring on
     // main.rs::CodexAction::Index also describes it that way.
     // Honor that contract: append `sessions/` ourselves so users
@@ -162,12 +159,11 @@ pub async fn index(
     // Run inside a blocking task — `backfill_codex` is synchronous
     // and may walk thousands of files.
     let codex_root_clone = codex_sessions_root.clone();
-    let stats: CodexIndexerStats = tokio::task::spawn_blocking(move || {
-        backfill_codex(&idx, &codex_root_clone)
-    })
-    .await
-    .with_context(|| "join indexer task")?
-    .with_context(|| "backfill_codex")?;
+    let stats: CodexIndexerStats =
+        tokio::task::spawn_blocking(move || backfill_codex(&idx, &codex_root_clone))
+            .await
+            .with_context(|| "join indexer task")?
+            .with_context(|| "backfill_codex")?;
 
     if json {
         let report = JsonReport {

@@ -271,10 +271,7 @@ fn upsert_claude_exchanges(
         // second condition catches the first-ever run of this
         // module against an existing v4 DB where `sessions` was
         // populated but `exchanges` wasn't.
-        if *size == entry.size
-            && *mtime == entry.mtime_ns
-            && *inode == entry.inode
-            && *ex_count > 0
+        if *size == entry.size && *mtime == entry.mtime_ns && *inode == entry.inode && *ex_count > 0
         {
             return Ok(Outcome::Skipped);
         }
@@ -287,8 +284,8 @@ fn upsert_claude_exchanges(
         return Ok(Outcome::Skipped);
     }
 
-    let events = parse_events_public(Path::new(&entry.file_path))
-        .map_err(|e| format!("parse: {e}"))?;
+    let events =
+        parse_events_public(Path::new(&entry.file_path)).map_err(|e| format!("parse: {e}"))?;
 
     // Derive session_id from the file_path stem (matches what
     // session::scan_session does so the sessions.session_id and
@@ -513,11 +510,7 @@ mod tests {
     /// Stage a Claude-shape projects/<slug>/<session>.jsonl with a
     /// minimal user/assistant turn + a tool_use/tool_result pair.
     /// Returns the path written.
-    fn stage_claude_session(
-        config_dir: &Path,
-        slug: &str,
-        session_id: &str,
-    ) -> std::path::PathBuf {
+    fn stage_claude_session(config_dir: &Path, slug: &str, session_id: &str) -> std::path::PathBuf {
         let dir = config_dir.join("projects").join(slug);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("{session_id}.jsonl"));

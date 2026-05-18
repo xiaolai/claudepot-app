@@ -610,8 +610,7 @@ impl LiveRuntime {
             let new_stuck = snap.stuck;
 
             if new_status != s.last_status
-                || (new_status == Status::Waiting
-                    && pid_waiting_for_snap != s.last_waiting_for)
+                || (new_status == Status::Waiting && pid_waiting_for_snap != s.last_waiting_for)
             {
                 s.seq += 1;
                 let _ = self

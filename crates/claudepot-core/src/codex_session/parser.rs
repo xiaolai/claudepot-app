@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use super::error::CodexError;
 use super::types::{
-    CodexConversation, CodexEvent, CodexExchange, CodexHead, CodexToolCall,
-    EnvironmentTextKind, ParseDiagnostics,
+    CodexConversation, CodexEvent, CodexExchange, CodexHead, CodexToolCall, EnvironmentTextKind,
+    ParseDiagnostics,
 };
 
 /// Maximum bytes the parser will read for a single JSONL line.
@@ -470,11 +470,7 @@ fn decode_line(raw: &str, line: u32) -> Option<CodexEvent> {
     }
 }
 
-fn decode_session_meta(
-    payload: &Value,
-    timestamp: Option<DateTime<Utc>>,
-    line: u32,
-) -> CodexEvent {
+fn decode_session_meta(payload: &Value, timestamp: Option<DateTime<Utc>>, line: u32) -> CodexEvent {
     let session_id = payload
         .get("id")
         .and_then(Value::as_str)
@@ -507,11 +503,7 @@ fn decode_session_meta(
     }
 }
 
-fn decode_turn_context(
-    payload: &Value,
-    timestamp: Option<DateTime<Utc>>,
-    line: u32,
-) -> CodexEvent {
+fn decode_turn_context(payload: &Value, timestamp: Option<DateTime<Utc>>, line: u32) -> CodexEvent {
     let cwd = payload
         .get("cwd")
         .and_then(Value::as_str)
@@ -563,10 +555,7 @@ fn decode_response_item(
             }
         }
         "function_call" => {
-            let call_id = payload
-                .get("call_id")
-                .and_then(Value::as_str)?
-                .to_string();
+            let call_id = payload.get("call_id").and_then(Value::as_str)?.to_string();
             let name = payload
                 .get("name")
                 .and_then(Value::as_str)
@@ -586,10 +575,7 @@ fn decode_response_item(
             })
         }
         "function_call_output" => {
-            let call_id = payload
-                .get("call_id")
-                .and_then(Value::as_str)?
-                .to_string();
+            let call_id = payload.get("call_id").and_then(Value::as_str)?.to_string();
             let output = payload
                 .get("output")
                 .and_then(Value::as_str)
@@ -694,12 +680,7 @@ impl ExchangeBuilder {
         }
     }
 
-    fn append_assistant(
-        &mut self,
-        text: &str,
-        timestamp: Option<DateTime<Utc>>,
-        line: u32,
-    ) {
+    fn append_assistant(&mut self, text: &str, timestamp: Option<DateTime<Utc>>, line: u32) {
         if !self.assistant_text.is_empty() {
             self.assistant_text.push('\n');
         }

@@ -89,7 +89,9 @@ mod tests {
     fn snippet_body_contains_version_stamp() {
         let body = snippet_body();
         assert!(
-            body.starts_with(&format!("<!-- claudepot-mcp-instructions v{SNIPPET_VERSION}")),
+            body.starts_with(&format!(
+                "<!-- claudepot-mcp-instructions v{SNIPPET_VERSION}"
+            )),
             "snippet must start with the version-stamped comment line"
         );
     }

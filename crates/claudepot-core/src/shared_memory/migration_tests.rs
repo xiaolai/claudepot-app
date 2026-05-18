@@ -245,10 +245,8 @@ fn case4_failed_ddl_rolls_back_and_keeps_v3() {
     {
         let db = Connection::open(&path).expect("open");
         db.execute_batch("PRAGMA journal_mode=WAL;").expect("wal");
-        db.execute_batch(
-            "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
-        )
-        .expect("meta");
+        db.execute_batch("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);")
+            .expect("meta");
         // Stamp v3 but do NOT create `sessions`. The migration
         // will detect prior_version="3", current="4", differ, and
         // try ALTER TABLE sessions — which fails because the
@@ -309,11 +307,8 @@ fn case4_failed_ddl_rolls_back_and_keeps_v3() {
             [],
         )
         .expect("poisoned meta");
-        db.execute(
-            "INSERT INTO meta (k, v) VALUES ('schema_version', '3')",
-            [],
-        )
-        .expect("v3 in poisoned meta");
+        db.execute("INSERT INTO meta (k, v) VALUES ('schema_version', '3')", [])
+            .expect("v3 in poisoned meta");
     }
 
     // Stage 2: try to migrate. Should fail because the version-
@@ -630,7 +625,10 @@ fn fk_cascade_fires_from_sessions_to_exchanges_and_fts() {
     let fts_count: i64 = db
         .query_row("SELECT count(*) FROM exchange_fts", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(fts_count, 0, "AFTER DELETE trigger on exchanges must remove FTS row");
+    assert_eq!(
+        fts_count, 0,
+        "AFTER DELETE trigger on exchanges must remove FTS row"
+    );
 }
 
 #[test]

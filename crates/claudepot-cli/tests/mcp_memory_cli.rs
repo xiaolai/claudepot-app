@@ -44,12 +44,15 @@ fn bin_path() -> PathBuf {
     if let Ok(p) = std::env::var("CARGO_BIN_EXE_claudepot") {
         return PathBuf::from(p);
     }
-    let manifest = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR not set");
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let mut p = PathBuf::from(manifest);
     p.pop(); // crates/claudepot-cli -> crates
     p.pop(); // -> workspace root
-    let suffix = if cfg!(windows) { "claudepot.exe" } else { "claudepot" };
+    let suffix = if cfg!(windows) {
+        "claudepot.exe"
+    } else {
+        "claudepot"
+    };
     p.push("target");
     p.push("debug");
     p.push(suffix);

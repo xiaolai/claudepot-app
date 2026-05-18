@@ -124,8 +124,7 @@ pub fn read_locator_bounded(
     // line_end. Final fallback: full file.
     let (line_start, line_end) = resolve_line_bounds(idx, locator)?;
 
-    let (body, truncated) =
-        read_lines(&locator.file_path, line_start, line_end, max_bytes)?;
+    let (body, truncated) = read_lines(&locator.file_path, line_start, line_end, max_bytes)?;
     let redacted = redact_apply(&body, policy);
     Ok(ConversationRead {
         file_path: locator.file_path.clone(),
@@ -156,12 +155,7 @@ fn resolve_line_bounds(
         let row = db.query_row(
             "SELECT line_start, line_end FROM exchanges WHERE id = ?1 AND file_path = ?2",
             rusqlite::params![ex_id, &loc.file_path],
-            |r| {
-                Ok((
-                    r.get::<_, Option<i64>>(0)?,
-                    r.get::<_, Option<i64>>(1)?,
-                ))
-            },
+            |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
         );
         match row {
             Ok((Some(s), Some(e))) => return Ok((s as u32, e as u32)),
@@ -410,8 +404,7 @@ mod tests {
 
         let path_str = p.to_string_lossy().into_owned();
         for cap in 0..=14usize {
-            let (body, truncated) =
-                super::read_lines(&path_str, 1, 1, cap).expect("read");
+            let (body, truncated) = super::read_lines(&path_str, 1, 1, cap).expect("read");
             // Validity: must be valid UTF-8 (String guarantees).
             // Must never exceed the cap (post-truncation length
             // is ≤ cap).
@@ -433,10 +426,7 @@ mod tests {
             // before the line ended (i.e. raw line > cap). The
             // raw line is 12 bytes.
             if cap < 12 {
-                assert!(
-                    truncated,
-                    "cap={cap}: should be truncated (raw=12)"
-                );
+                assert!(truncated, "cap={cap}: should be truncated (raw=12)");
             }
         }
     }
@@ -470,8 +460,7 @@ mod tests {
         let path = corpus_file(&tmp);
 
         let loc = locator_for_exchange(&path, "codex:sid:0");
-        let result =
-            read_locator_bounded(&idx, &loc, 32, &RedactionPolicy::default()).unwrap();
+        let result = read_locator_bounded(&idx, &loc, 32, &RedactionPolicy::default()).unwrap();
         assert!(result.truncated, "32-byte cap should truncate");
         assert!(result.body.len() <= 32);
     }

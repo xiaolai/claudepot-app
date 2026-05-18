@@ -43,8 +43,7 @@ pub fn active_grant<'a>(
     project_path: &str,
     now: DateTime<Utc>,
 ) -> Option<&'a Grant> {
-    file.find(project_path)
-        .filter(|g| !g.is_expired(now))
+    file.find(project_path).filter(|g| !g.is_expired(now))
 }
 
 #[cfg(test)]
@@ -85,11 +84,17 @@ mod tests {
         ]);
         let p = partition(&f, ts(200));
         assert_eq!(
-            p.active.iter().map(|g| g.project_path.as_str()).collect::<Vec<_>>(),
+            p.active
+                .iter()
+                .map(|g| g.project_path.as_str())
+                .collect::<Vec<_>>(),
             vec!["/p/active", "/p/also-active"]
         );
         assert_eq!(
-            p.expired.iter().map(|g| g.project_path.as_str()).collect::<Vec<_>>(),
+            p.expired
+                .iter()
+                .map(|g| g.project_path.as_str())
+                .collect::<Vec<_>>(),
             vec!["/p/expired"]
         );
     }

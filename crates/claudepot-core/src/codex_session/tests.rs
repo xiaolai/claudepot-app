@@ -21,7 +21,10 @@ fn fixture(name: &str) -> PathBuf {
 fn parse_head_single_turn() {
     let h = parse_head(&fixture("single_turn.jsonl")).expect("ok");
     assert_eq!(h.session_id, "01-abc");
-    assert_eq!(h.cwd.as_deref().map(|p| p.to_str().unwrap()), Some("/Users/jane/proj"));
+    assert_eq!(
+        h.cwd.as_deref().map(|p| p.to_str().unwrap()),
+        Some("/Users/jane/proj")
+    );
     assert_eq!(h.originator.as_deref(), Some("codex_cli"));
     assert_eq!(h.cli_version.as_deref(), Some("0.44.0"));
     assert_eq!(h.approval_policy.as_deref(), Some("on-request"));
@@ -31,8 +34,7 @@ fn parse_head_single_turn() {
 
 #[test]
 fn parse_head_missing_meta_errors() {
-    let err = parse_head(&fixture("missing_session_meta.jsonl"))
-        .expect_err("should fail");
+    let err = parse_head(&fixture("missing_session_meta.jsonl")).expect_err("should fail");
     assert!(
         matches!(err, CodexError::MissingSessionMeta { .. }),
         "expected MissingSessionMeta, got {err:?}"
@@ -136,8 +138,7 @@ fn iter_events_unknown_types_become_other() {
 
 #[test]
 fn full_parse_single_turn_yields_one_exchange() {
-    let conv = parse_codex_rollout_jsonl(&fixture("single_turn.jsonl"))
-        .expect("ok");
+    let conv = parse_codex_rollout_jsonl(&fixture("single_turn.jsonl")).expect("ok");
     assert_eq!(conv.head.session_id, "01-abc");
     assert_eq!(conv.exchanges.len(), 1);
     let ex = &conv.exchanges[0];
@@ -152,8 +153,7 @@ fn full_parse_single_turn_yields_one_exchange() {
 
 #[test]
 fn full_parse_two_turns_yields_two_exchanges_in_order() {
-    let conv = parse_codex_rollout_jsonl(&fixture("two_turns.jsonl"))
-        .expect("ok");
+    let conv = parse_codex_rollout_jsonl(&fixture("two_turns.jsonl")).expect("ok");
     assert_eq!(conv.exchanges.len(), 2);
     assert_eq!(conv.exchanges[0].id, "codex:01-two:0");
     assert_eq!(conv.exchanges[1].id, "codex:01-two:1");
@@ -165,8 +165,7 @@ fn full_parse_two_turns_yields_two_exchanges_in_order() {
 
 #[test]
 fn full_parse_tool_call_turn_links_call_and_output() {
-    let conv = parse_codex_rollout_jsonl(&fixture("tool_call_turn.jsonl"))
-        .expect("ok");
+    let conv = parse_codex_rollout_jsonl(&fixture("tool_call_turn.jsonl")).expect("ok");
     // Two synthetic user messages (instructions + environment)
     // precede the real user prompt; only the real prompt should
     // open an exchange.
@@ -203,8 +202,8 @@ fn full_parse_tool_error_flagged_on_nonzero_exit() {
 
 #[test]
 fn full_parse_missing_meta_errors() {
-    let err = parse_codex_rollout_jsonl(&fixture("missing_session_meta.jsonl"))
-        .expect_err("must error");
+    let err =
+        parse_codex_rollout_jsonl(&fixture("missing_session_meta.jsonl")).expect_err("must error");
     assert!(
         matches!(err, CodexError::MissingSessionMeta { .. }),
         "expected MissingSessionMeta, got {err:?}"
@@ -213,8 +212,7 @@ fn full_parse_missing_meta_errors() {
 
 #[test]
 fn full_parse_unknown_types_dont_break_exchanges() {
-    let conv = parse_codex_rollout_jsonl(&fixture("unknown_event_types.jsonl"))
-        .expect("ok");
+    let conv = parse_codex_rollout_jsonl(&fixture("unknown_event_types.jsonl")).expect("ok");
     // session_meta sets the head, event_msg + hypothetical event
     // both become Other and are ignored, the real user/assistant
     // pair produces one exchange.
@@ -245,8 +243,7 @@ fn full_parse_classifies_synthetic_user_messages() {
 
 #[test]
 fn diagnostics_count_malformed_lines() {
-    let conv = parse_codex_rollout_jsonl(&fixture("malformed_lines.jsonl"))
-        .expect("ok");
+    let conv = parse_codex_rollout_jsonl(&fixture("malformed_lines.jsonl")).expect("ok");
     // Fixture has session_meta, then non-JSON, then truncated-JSON,
     // then valid user message, then a JSON object lacking `type`,
     // then valid assistant — 3 malformed lines total.

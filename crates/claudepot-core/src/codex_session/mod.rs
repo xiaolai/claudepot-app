@@ -55,6 +55,5 @@ mod tests;
 pub use error::CodexError;
 pub use parser::{iter_events, parse_codex_rollout_jsonl, parse_head, EventIter};
 pub use types::{
-    CodexConversation, CodexEvent, CodexExchange, CodexHead, CodexToolCall,
-    EnvironmentTextKind,
+    CodexConversation, CodexEvent, CodexExchange, CodexHead, CodexToolCall, EnvironmentTextKind,
 };

@@ -242,13 +242,18 @@ mod tests {
     #[test]
     fn insert_and_list_round_trips() {
         let (store, _d) = tmp_store();
-        let rec = store.insert("OPENAI_API_KEY", "sk-proj-secret-value").unwrap();
+        let rec = store
+            .insert("OPENAI_API_KEY", "sk-proj-secret-value")
+            .unwrap();
         assert_eq!(rec.name, "OPENAI_API_KEY");
         assert_eq!(rec.secret_preview, "sk-p…alue");
         let list = store.list().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "OPENAI_API_KEY");
-        assert_eq!(store.reveal("OPENAI_API_KEY").unwrap(), "sk-proj-secret-value");
+        assert_eq!(
+            store.reveal("OPENAI_API_KEY").unwrap(),
+            "sk-proj-secret-value"
+        );
     }
 
     #[test]

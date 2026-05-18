@@ -93,8 +93,7 @@ pub fn install_snippet(out: Option<PathBuf>, print_include: bool) -> Result<()> 
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create parent of {}", path.display()))?;
     }
-    std::fs::write(&path, snippet_body())
-        .with_context(|| format!("write {}", path.display()))?;
+    std::fs::write(&path, snippet_body()).with_context(|| format!("write {}", path.display()))?;
     eprintln!("Wrote {} ({} bytes)", path.display(), snippet_body().len());
     if print_include {
         eprintln!();
@@ -363,11 +362,10 @@ struct ListDecisionsPayload {
 
 #[tool_router(server_handler)]
 impl MemoryServer {
-    #[tool(description = "Search Claudepot's shared memory across Claude Code and Codex transcripts. Returns compact hits with locators; raw secrets are redacted in snippets.")]
-    fn claudepot_search_memory(
-        &self,
-        Parameters(req): Parameters<SearchMemoryRequest>,
-    ) -> String {
+    #[tool(
+        description = "Search Claudepot's shared memory across Claude Code and Codex transcripts. Returns compact hits with locators; raw secrets are redacted in snippets."
+    )]
+    fn claudepot_search_memory(&self, Parameters(req): Parameters<SearchMemoryRequest>) -> String {
         let user_limit = req.limit.unwrap_or(20).clamp(1, 50);
         // Query one extra row so we can report has_more without
         // the boundary-false-positive of `len >= limit`. Slice
@@ -414,7 +412,9 @@ impl MemoryServer {
         to_json(&payload)
     }
 
-    #[tool(description = "Read a transcript excerpt by locator. file_path must be a value previously returned by claudepot_search_memory; raw paths are rejected.")]
+    #[tool(
+        description = "Read a transcript excerpt by locator. file_path must be a value previously returned by claudepot_search_memory; raw paths are rejected."
+    )]
     fn claudepot_read_conversation(
         &self,
         Parameters(req): Parameters<ReadConversationRequest>,
@@ -452,11 +452,10 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "Store a durable memory (fact / preference / pattern / constraint / summary). Survives transcript rebuilds.")]
-    fn claudepot_remember(
-        &self,
-        Parameters(req): Parameters<RememberRequest>,
-    ) -> String {
+    #[tool(
+        description = "Store a durable memory (fact / preference / pattern / constraint / summary). Survives transcript rebuilds."
+    )]
+    fn claudepot_remember(&self, Parameters(req): Parameters<RememberRequest>) -> String {
         let scope = match req.scope.as_str() {
             "global" => durable::Scope::Global,
             "project" => durable::Scope::Project,
@@ -517,11 +516,10 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "Log a durable decision with rationale. If supersedes_id is set, the prior decision flips to 'superseded' atomically.")]
-    fn claudepot_log_decision(
-        &self,
-        Parameters(req): Parameters<LogDecisionRequest>,
-    ) -> String {
+    #[tool(
+        description = "Log a durable decision with rationale. If supersedes_id is set, the prior decision flips to 'superseded' atomically."
+    )]
+    fn claudepot_log_decision(&self, Parameters(req): Parameters<LogDecisionRequest>) -> String {
         let created_by = req
             .created_by
             .clone()
@@ -557,7 +555,9 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "Submit evidence for a task or audit-fix run. Records the verification step and the file changes so future sessions don't re-discover the same finding.")]
+    #[tool(
+        description = "Submit evidence for a task or audit-fix run. Records the verification step and the file changes so future sessions don't re-discover the same finding."
+    )]
     fn claudepot_submit_evidence(
         &self,
         Parameters(req): Parameters<SubmitEvidenceRequest>,
@@ -589,11 +589,10 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "List durable memories. Without filters, returns the most recent (up to 100).")]
-    fn claudepot_list_memories(
-        &self,
-        Parameters(req): Parameters<ListMemoriesRequest>,
-    ) -> String {
+    #[tool(
+        description = "List durable memories. Without filters, returns the most recent (up to 100)."
+    )]
+    fn claudepot_list_memories(&self, Parameters(req): Parameters<ListMemoriesRequest>) -> String {
         let scope = match req.scope.as_deref() {
             None => None,
             Some("global") => Some(durable::Scope::Global),
@@ -601,9 +600,7 @@ impl MemoryServer {
             Some(other) => {
                 return to_json(&error_static(
                     error_code::INVALID_SCOPE,
-                    &format!(
-                        "scope must be 'global' or 'project' (or omitted); got '{other}'",
-                    ),
+                    &format!("scope must be 'global' or 'project' (or omitted); got '{other}'",),
                 ));
             }
         };
@@ -657,11 +654,10 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "List indexed sessions (Claude Code + Codex transcripts) ordered by most-recent activity. A discovery primitive — agents that want to browse what's indexed instead of search-by-text can call this first, then read_conversation on a chosen file_path.")]
-    fn claudepot_list_sessions(
-        &self,
-        Parameters(req): Parameters<ListSessionsRequest>,
-    ) -> String {
+    #[tool(
+        description = "List indexed sessions (Claude Code + Codex transcripts) ordered by most-recent activity. A discovery primitive — agents that want to browse what's indexed instead of search-by-text can call this first, then read_conversation on a chosen file_path."
+    )]
+    fn claudepot_list_sessions(&self, Parameters(req): Parameters<ListSessionsRequest>) -> String {
         let f = sms::SessionListFilter {
             source_kind: req.source_kind,
             project_path: req.project_path,
@@ -695,11 +691,10 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "List distinct project paths in the cache with per-project session count and most-recent-activity stamp. Use this to discover which projects have indexed transcripts before drilling in with claudepot_list_sessions(project_path=...).")]
-    fn claudepot_list_projects(
-        &self,
-        Parameters(req): Parameters<ListProjectsRequest>,
-    ) -> String {
+    #[tool(
+        description = "List distinct project paths in the cache with per-project session count and most-recent-activity stamp. Use this to discover which projects have indexed transcripts before drilling in with claudepot_list_sessions(project_path=...)."
+    )]
+    fn claudepot_list_projects(&self, Parameters(req): Parameters<ListProjectsRequest>) -> String {
         match sms::list_projects(&self.idx, req.limit.unwrap_or(0)) {
             Ok(rows) => to_json(&ListProjectsPayload {
                 schema_version: SCHEMA_VERSION,
@@ -719,7 +714,9 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "Mark a decision as archived. Use when a decision is no longer in force but wasn't replaced by a specific successor (use claudepot_log_decision with supersedes_id when there's a replacement). Returns archived=false if the id didn't reference an active decision.")]
+    #[tool(
+        description = "Mark a decision as archived. Use when a decision is no longer in force but wasn't replaced by a specific successor (use claudepot_log_decision with supersedes_id when there's a replacement). Returns archived=false if the id didn't reference an active decision."
+    )]
     fn claudepot_archive_decision(
         &self,
         Parameters(req): Parameters<ArchiveDecisionRequest>,
@@ -736,7 +733,9 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "List decisions for a project (or all). Filter by status: active | superseded | archived.")]
+    #[tool(
+        description = "List decisions for a project (or all). Filter by status: active | superseded | archived."
+    )]
     fn claudepot_list_decisions(
         &self,
         Parameters(req): Parameters<ListDecisionsRequest>,
@@ -771,9 +770,7 @@ impl MemoryServer {
                         // topic is agent-supplied; redact.
                         topic: d.topic.map(|t| redact_apply(&t, &self.policy)),
                         decision: redact_apply(&d.decision, &self.policy),
-                        rationale: d
-                            .rationale
-                            .map(|r| redact_apply(&r, &self.policy)),
+                        rationale: d.rationale.map(|r| redact_apply(&r, &self.policy)),
                         status: decision_status_str(d.status).to_string(),
                         created_by_kind: created_by_kind_str(d.created_by_kind).to_string(),
                         // created_by is agent-supplied; redact.

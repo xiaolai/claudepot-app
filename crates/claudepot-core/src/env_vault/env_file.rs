@@ -117,11 +117,7 @@ fn join_lines(lines: &[String]) -> String {
 /// Index of the first line matching `key`, with a predicate over the
 /// classified line. Used to target a specific state (active vs
 /// commented) for a mutation.
-fn find_line(
-    lines: &[String],
-    key: &str,
-    want: impl Fn(&EnvLine) -> bool,
-) -> Option<usize> {
+fn find_line(lines: &[String], key: &str, want: impl Fn(&EnvLine) -> bool) -> Option<usize> {
     lines.iter().position(|l| {
         let classified = classify(l);
         matches_key(&classified, key) && want(&classified)

@@ -223,8 +223,4 @@ pub const V4_TABLE_NAMES: &[&str] = &[
 /// migration validator checks for each one; a partial DDL apply
 /// that loses any of these would silently desynchronize the FTS
 /// index from `exchanges` on subsequent writes.
-pub const V4_TRIGGER_NAMES: &[&str] = &[
-    "exchange_fts_ai",
-    "exchange_fts_ad",
-    "exchange_fts_au",
-];
+pub const V4_TRIGGER_NAMES: &[&str] = &["exchange_fts_ai", "exchange_fts_ad", "exchange_fts_au"];

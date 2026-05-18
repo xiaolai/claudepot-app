@@ -291,10 +291,7 @@ struct CodexDiscovery {
     inode: i64,
 }
 
-fn walk_codex_sessions(
-    root: &Path,
-    stats: &mut CodexIndexerStats,
-) -> Vec<CodexDiscovery> {
+fn walk_codex_sessions(root: &Path, stats: &mut CodexIndexerStats) -> Vec<CodexDiscovery> {
     let mut out = Vec::new();
     if !root.is_dir() {
         return out;
@@ -491,8 +488,7 @@ fn upsert_codex_session(
         ));
     }
 
-    write_codex_conversation(tx, &post_parse_entry, &conv)
-        .map_err(|e| format!("write: {e}"))?;
+    write_codex_conversation(tx, &post_parse_entry, &conv).map_err(|e| format!("write: {e}"))?;
     Ok(IndexOutcome::Indexed)
 }
 
@@ -539,8 +535,11 @@ fn write_codex_conversation(
         .filter_map(|e| e.timestamp)
         .map(|t| t.timestamp_millis())
         .max();
-    let event_count = (conv.exchanges.iter().map(|e| 1 + e.tool_calls.len()).sum::<usize>())
-        as i64;
+    let event_count = (conv
+        .exchanges
+        .iter()
+        .map(|e| 1 + e.tool_calls.len())
+        .sum::<usize>()) as i64;
     let message_count = conv.exchanges.len() as i64 * 2; // user + assistant per turn
     let user_message_count = conv.exchanges.len() as i64;
     let assistant_message_count = conv.exchanges.len() as i64;
@@ -706,10 +705,7 @@ fn derive_slug(file_path: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(file_path.as_bytes());
     let digest = hasher.finalize();
-    let hex: String = digest[..8]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let hex: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
     format!("codex-session-{hex}")
 }
 
@@ -1104,11 +1100,9 @@ mod tests {
         assert_eq!(n, 0, "_pending_rescan marker should clear sessions on open");
         // Marker itself was unset by apply_schema.
         let marker: Option<String> = db
-            .query_row(
-                "SELECT v FROM meta WHERE k = '_pending_rescan'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT v FROM meta WHERE k = '_pending_rescan'", [], |r| {
+                r.get(0)
+            })
             .ok();
         assert!(marker.is_none(), "marker should be cleared after handling");
     }
@@ -1176,11 +1170,9 @@ mod tests {
         // Marker set for next open.
         let db = open_raw(&db_path);
         let marker: String = db
-            .query_row(
-                "SELECT v FROM meta WHERE k = '_pending_rescan'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT v FROM meta WHERE k = '_pending_rescan'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(marker, "1");
 

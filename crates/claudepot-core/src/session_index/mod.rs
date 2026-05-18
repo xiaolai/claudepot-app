@@ -476,9 +476,7 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     // ─── Phase 0: meta-table bootstrap (outside the migration txn) ───
     // We need to read meta rows; the table must exist first. CREATE
     // IF NOT EXISTS is cheap and runs the same way on every open.
-    db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
-    )?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);")?;
 
     // ─── Phase 1: downgrade guard ───
     // If a newer binary has bumped `_min_compatible_version` past

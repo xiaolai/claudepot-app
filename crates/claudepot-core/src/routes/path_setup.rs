@@ -466,10 +466,7 @@ mod tests {
             "/tmp/we\\ird/bin",
             "/tmp/we'ird/bin",
         ] {
-            assert!(
-                !path_is_shell_safe(Path::new(bad)),
-                "should reject {bad:?}",
-            );
+            assert!(!path_is_shell_safe(Path::new(bad)), "should reject {bad:?}",);
         }
     }
 
@@ -524,11 +521,7 @@ mod tests {
             dir,
             home
         ));
-        assert!(!body_has_wrapper_dir(
-            "export PATH=\"/usr/bin\"",
-            dir,
-            home
-        ));
+        assert!(!body_has_wrapper_dir("export PATH=\"/usr/bin\"", dir, home));
     }
 
     #[test]

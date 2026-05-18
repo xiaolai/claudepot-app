@@ -146,7 +146,10 @@ pub fn search(
         // become a single-character wildcard. Pair with an
         // explicit ESCAPE clause so SQLite honors our backslash
         // as the escape character.
-        sql.push_str(&format!(" AND s.project_path LIKE ?{} ESCAPE '\\'", next_idx));
+        sql.push_str(&format!(
+            " AND s.project_path LIKE ?{} ESCAPE '\\'",
+            next_idx
+        ));
         binds.push(Value::Text(format!("%{}%", escape_like(pp))));
         next_idx += 1;
     }
@@ -156,7 +159,10 @@ pub fn search(
         next_idx += 1;
     }
     if let Some(ref mdl) = query.model {
-        sql.push_str(&format!(" AND s.models_json LIKE ?{} ESCAPE '\\'", next_idx));
+        sql.push_str(&format!(
+            " AND s.models_json LIKE ?{} ESCAPE '\\'",
+            next_idx
+        ));
         binds.push(Value::Text(format!("%{}%", escape_like(mdl))));
         next_idx += 1;
     }
@@ -259,7 +265,11 @@ pub fn list_sessions(
     idx: &SessionIndex,
     f: &SessionListFilter,
 ) -> Result<Vec<SessionSummary>, rusqlite::Error> {
-    let limit = if f.limit == 0 { 50 } else { f.limit.clamp(1, 200) };
+    let limit = if f.limit == 0 {
+        50
+    } else {
+        f.limit.clamp(1, 200)
+    };
     let offset = f.offset;
 
     let mut sql = String::from(
@@ -552,7 +562,7 @@ mod tests {
             "(",
             ":",
             r#"a "quoted" b"#,
-            "",  // empty short-circuits to []
+            "", // empty short-circuits to []
         ] {
             let q = SearchQuery {
                 query: adversarial.to_string(),
