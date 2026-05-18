@@ -38,7 +38,7 @@ describe("LiveStatusDot", () => {
   });
 
   it("is aria-hidden by default (decorative)", () => {
-    const { container } = render(<LiveStatusDot status="busy" />);
+    const { container } = render(<LiveStatusDot status="busy" title="Busy" />);
     const dot = container.querySelector("span")!;
     expect(dot.getAttribute("aria-hidden")).toBe("true");
     expect(dot.getAttribute("role")).toBeNull();
@@ -46,7 +46,7 @@ describe("LiveStatusDot", () => {
 
   it("becomes role=img when aria-label is supplied", () => {
     const { container } = render(
-      <LiveStatusDot status="busy" aria-label="Session busy" />,
+      <LiveStatusDot status="busy" title="Busy" aria-label="Session busy" />,
     );
     const dot = container.querySelector("span")!;
     expect(dot.getAttribute("role")).toBe("img");

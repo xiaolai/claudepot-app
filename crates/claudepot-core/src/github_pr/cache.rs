@@ -1,21 +1,18 @@
 //! In-process TTL cache for PR detections.
 //!
-//! The orchestrator polls every project on each
-//! `usage_snapshot::run_tick` (5-minute cadence). Without a cache,
-//! that's ~one `gh pr view` subprocess per project per tick — for a
-//! user with 30 projects, 30 subprocess spawns every 5 minutes. The
-//! cache also stores *negative* results (no PR found), which is the
-//! common case for the average project, so the cache keeps even
-//! "nothing here" projects from hitting `gh` every tick.
+//! Keyed on `repo_root` only — only one branch can be HEAD at a
+//! time, so multi-branch caching wouldn't help. `insert` always
+//! overwrites, so a branch flip between ticks is absorbed without
+//! the cache needing to track the branch identity.
 //!
 //! TTL is 60 seconds rather than the 5-minute tick so a freshly-
 //! opened PR appears in the UI within ~1 minute of opening it
 //! (assuming the tick fires close by), without the user having to
 //! restart Claudepot.
 //!
-//! Cache key is `(repo_root, branch)` — a project switching branches
-//! triggers a fresh detection without polluting the previous
-//! branch's cache slot.
+//! Negative results (no PR found) are cached too — that's the
+//! steady state for most projects, and without negative caching
+//! every tick would re-shell `gh` for every PR-less project.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -28,12 +25,12 @@ const TTL: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 pub struct PrCache {
-    entries: Mutex<HashMap<(PathBuf, String), Entry>>,
+    entries: Mutex<HashMap<PathBuf, Entry>>,
 }
 
 struct Entry {
     stored_at: Instant,
-    value: Option<PrInfo>,
+    pr: Option<PrInfo>,
 }
 
 impl PrCache {
@@ -41,62 +38,54 @@ impl PrCache {
         Self::default()
     }
 
-    /// Look up a cached entry. Returns `Some(Some(info))` for a
-    /// cached positive hit, `Some(None)` for a cached negative
-    /// (no PR exists for this branch), and `None` for a cache miss
-    /// or expired entry — caller should compute and `insert`.
-    pub fn get(&self, repo_root: &std::path::Path, branch: &str) -> Option<Option<PrInfo>> {
-        let now = Instant::now();
+    /// Cache-only lookup. Returns the cached `PrInfo` if fresh and
+    /// positive; returns `None` for cache miss, expired entry, or
+    /// cached negative ("no PR exists for this branch"). The
+    /// caller can't tell positive-miss from cached-negative, which
+    /// is intentional — the UI renders the same in either case.
+    pub fn freshest_pr(&self, repo_root: &std::path::Path) -> Option<PrInfo> {
         let map = self.entries.lock().ok()?;
-        let key = (repo_root.to_path_buf(), branch.to_string());
-        let e = map.get(&key)?;
-        if now.duration_since(e.stored_at) > TTL {
+        let entry = map.get(repo_root)?;
+        if Instant::now().duration_since(entry.stored_at) > TTL {
             return None;
         }
-        Some(e.value.clone())
+        entry.pr.clone()
     }
 
-    /// Branch-agnostic lookup. Returns the first fresh positive PR
-    /// info for any branch under `repo_root`. Used by the
-    /// orchestrator command path when it doesn't yet know which
-    /// branch is current — there's only one current branch at a
-    /// time, so at most one fresh positive ever exists.
-    pub fn get_any_for(&self, repo_root: &std::path::Path) -> Option<PrInfo> {
-        let now = Instant::now();
-        let map = self.entries.lock().ok()?;
-        for ((k_root, _branch), entry) in map.iter() {
-            if k_root != repo_root {
-                continue;
-            }
-            if now.duration_since(entry.stored_at) > TTL {
-                continue;
-            }
-            if let Some(ref info) = entry.value {
-                return Some(info.clone());
-            }
-        }
-        None
-    }
-
-    pub fn insert(&self, repo_root: &std::path::Path, branch: &str, value: Option<PrInfo>) {
+    /// Insert or replace the entry for this repo. Branch identity
+    /// is intentionally not stored — `insert` overwrites
+    /// unconditionally, so a branch flip is absorbed by the next
+    /// tick without the cache needing to compare.
+    pub fn insert(&self, repo_root: &std::path::Path, pr: Option<PrInfo>) {
         if let Ok(mut map) = self.entries.lock() {
             map.insert(
-                (repo_root.to_path_buf(), branch.to_string()),
+                repo_root.to_path_buf(),
                 Entry {
                     stored_at: Instant::now(),
-                    value,
+                    pr,
                 },
             );
         }
     }
 
-    /// Drop entries for a given repo (e.g. when the project is
-    /// removed from Claudepot). Bounded by the number of branches
-    /// we've seen for that repo, which in practice is < 5.
+    /// Drop entries for a removed project. Bounded by the single
+    /// entry that exists per repo.
     pub fn forget_repo(&self, repo_root: &std::path::Path) {
         if let Ok(mut map) = self.entries.lock() {
-            map.retain(|(k_root, _), _| k_root != repo_root);
+            map.remove(repo_root);
         }
+    }
+
+    /// `true` when this repo has *any* cached entry — fresh, stale,
+    /// positive, or negative. Lets observers distinguish "negative
+    /// cached" from "never queried" without leaking the entry's
+    /// internals. Used by tests in this crate and the
+    /// `pr_orchestrator` test suite.
+    pub fn contains(&self, repo_root: &std::path::Path) -> bool {
+        self.entries
+            .lock()
+            .map(|m| m.contains_key(repo_root))
+            .unwrap_or(false)
     }
 
     #[cfg(test)]
@@ -135,46 +124,49 @@ mod tests {
     fn miss_then_hit_then_expire() {
         let cache = PrCache::new();
         let root = Path::new("/repo");
-        assert!(cache.get(root, "feat/x").is_none(), "initial miss");
-        cache.insert(root, "feat/x", Some(mk_pr(1)));
-        assert_eq!(cache.get(root, "feat/x"), Some(Some(mk_pr(1))));
+        assert!(cache.freshest_pr(root).is_none(), "initial miss");
+        cache.insert(root, Some(mk_pr(1)));
+        assert_eq!(cache.freshest_pr(root), Some(mk_pr(1)));
         cache.force_expire_all();
-        assert!(
-            cache.get(root, "feat/x").is_none(),
-            "expired entry must miss"
-        );
+        assert!(cache.freshest_pr(root).is_none(), "expired entry must miss");
     }
 
     #[test]
-    fn negative_results_are_cached() {
+    fn negative_results_are_cached_as_none() {
         let cache = PrCache::new();
         let root = Path::new("/repo");
-        cache.insert(root, "feat/x", None);
-        assert_eq!(
-            cache.get(root, "feat/x"),
-            Some(None),
-            "Some(None) distinguishes cached-negative from cache-miss",
-        );
+        cache.insert(root, None);
+        // Negative cached results return None — caller can't
+        // distinguish from a true miss, which is the desired
+        // contract (the UI renders the same either way).
+        assert!(cache.freshest_pr(root).is_none());
+        // But the entry IS present — proving the next refresh
+        // tick can detect the branch and decide whether to
+        // re-query.
+        assert_eq!(cache.len(), 1);
     }
 
     #[test]
-    fn different_branches_share_a_repo() {
+    fn second_insert_overwrites_prior_entry() {
+        // A repo can only have one HEAD branch at a time. Inserting
+        // again — whether from a branch flip or a refreshed tick —
+        // replaces the prior entry. No stale state accumulates.
         let cache = PrCache::new();
         let root = Path::new("/repo");
-        cache.insert(root, "feat/x", Some(mk_pr(1)));
-        cache.insert(root, "feat/y", Some(mk_pr(2)));
-        assert_eq!(cache.get(root, "feat/x"), Some(Some(mk_pr(1))));
-        assert_eq!(cache.get(root, "feat/y"), Some(Some(mk_pr(2))));
+        cache.insert(root, Some(mk_pr(1)));
+        cache.insert(root, Some(mk_pr(2)));
+        assert_eq!(cache.freshest_pr(root), Some(mk_pr(2)));
+        assert_eq!(cache.len(), 1);
     }
 
     #[test]
     fn forget_repo_drops_only_that_repo() {
         let cache = PrCache::new();
-        cache.insert(Path::new("/a"), "main", Some(mk_pr(1)));
-        cache.insert(Path::new("/b"), "main", Some(mk_pr(2)));
+        cache.insert(Path::new("/a"), Some(mk_pr(1)));
+        cache.insert(Path::new("/b"), Some(mk_pr(2)));
         cache.forget_repo(Path::new("/a"));
-        assert!(cache.get(Path::new("/a"), "main").is_none());
-        assert!(cache.get(Path::new("/b"), "main").is_some());
+        assert!(cache.freshest_pr(Path::new("/a")).is_none());
+        assert!(cache.freshest_pr(Path::new("/b")).is_some());
         assert_eq!(cache.len(), 1);
     }
 }

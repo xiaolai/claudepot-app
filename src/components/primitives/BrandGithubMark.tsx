@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 
 /**
- * GitHub Octocat brand mark, inline SVG.
+ * GitHub Octocat silhouette, inline SVG.
  *
  * `lucide-react` v1+ removed brand icons for trademark reasons (see
  * `.claude/rules/design.md` brand-mark exception). This mark is the
@@ -11,9 +11,12 @@ import type { CSSProperties } from "react";
  * `currentColor` so it inherits the theme, and is never a primary
  * navigation element.
  *
- * SVG path is GitHub's published 24×24 octocat (CC-BY 4.0). Kept as
- * a literal here so it ships with the bundle and doesn't require a
- * runtime fetch.
+ * The path is the widely-redistributed 24×24 octocat silhouette
+ * (the same shape SimpleIcons distributes under CC-BY 4.0 for the
+ * vector data). The Octocat figure itself is a trademark of GitHub
+ * Inc.; using it here falls under the brand-mark exception above.
+ * Kept as a literal so it ships with the bundle and doesn't require
+ * a runtime fetch.
  */
 
 interface Props {

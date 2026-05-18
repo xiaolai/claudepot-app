@@ -382,6 +382,51 @@ impl From<&claudepot_core::project_trash::ProjectRestoreReport> for ProjectResto
 }
 
 #[cfg(test)]
+mod pr_info_dto_tests {
+    use super::*;
+    use claudepot_core::github_pr::{PrInfo, PrState};
+
+    #[test]
+    fn pr_info_dto_copies_fields_and_serializes_state_lowercase() {
+        let core = PrInfo {
+            number: 42,
+            url: "https://github.com/x/y/pull/42".into(),
+            state: PrState::Open,
+            head_ref_name: "feat/x".into(),
+        };
+        let dto = PrInfoDto::from(&core);
+        assert_eq!(dto.number, 42);
+        assert_eq!(dto.url, "https://github.com/x/y/pull/42");
+        // PrState serializes as lowercase via `serde(rename_all)`.
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert!(json.contains("\"state\":\"open\""), "got {json}");
+    }
+
+    #[test]
+    fn project_info_dto_omits_pr_field_when_none() {
+        // Wire contract: `pr` is skipped when None so the GUI
+        // doesn't get a flood of `"pr":null` on every row.
+        let dto = ProjectInfoDto {
+            sanitized_name: "x".into(),
+            original_path: "/x".into(),
+            session_count: 0,
+            memory_file_count: 0,
+            total_size_bytes: 0,
+            last_modified_ms: None,
+            is_orphan: false,
+            is_reachable: true,
+            is_empty: true,
+            pr: None,
+        };
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert!(
+            !json.contains("\"pr\""),
+            "pr field should be skipped when None, got: {json}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod clean_preview_dto_tests {
     use super::*;
     use claudepot_core::project::CleanPreview;

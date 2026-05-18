@@ -36,10 +36,10 @@ interface Props {
   /** When true, overrides `status` with a danger-toned dot. */
   errored?: boolean;
   /** Hover tooltip — usually the verb form ("Busy", "Waiting on
-   *  Bash approval"). Mandatory in practice; primitives can't
-   *  enforce this without warning at runtime, but downstream
-   *  reviewers should reject a dot with no title. */
-  title?: string;
+   *  Bash approval"). Required because the dot has no inherent
+   *  label; pair with `liveDotTitle()` to derive from a live
+   *  summary in one line. */
+  title: string;
   /** Accessible label. Omit when the surrounding row carries the
    *  label (the default). */
   "aria-label"?: string;

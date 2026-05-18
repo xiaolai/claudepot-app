@@ -155,24 +155,32 @@ async fn pr_tick(app: &AppHandle) {
     let orch_state = app.state::<Arc<PrOrchestrator>>();
     let orch: Arc<PrOrchestrator> = Arc::clone(&orch_state);
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    // Discovering the project list is sync I/O — keep it on the
+    // blocking pool. The orchestrator's own `tick_all` is async and
+    // manages its own spawn_blocking + bounded fan-out for each
+    // detection, so the two phases nest cleanly.
+    let roots = tauri::async_runtime::spawn_blocking(move || {
         let cfg = claudepot_core::paths::claude_config_dir();
-        let projects = match claudepot_core::project::list_projects(&cfg) {
-            Ok(p) => p,
-            Err(e) => return Err(format!("pr_tick: list projects: {e}")),
-        };
-        let roots: Vec<PathBuf> = projects
-            .iter()
-            .filter(|p| p.is_reachable)
-            .map(|p| PathBuf::from(&p.original_path))
-            .collect();
-        if !roots.is_empty() {
-            orch.tick_all(&roots);
-        }
-        Ok::<_, String>(())
+        let projects = claudepot_core::project::list_projects(&cfg)
+            .map_err(|e| format!("pr_tick: list projects: {e}"))?;
+        Ok::<Vec<PathBuf>, String>(
+            projects
+                .iter()
+                .filter(|p| p.is_reachable)
+                .map(|p| PathBuf::from(&p.original_path))
+                .collect(),
+        )
     })
     .await;
-    if let Ok(Err(e)) = result {
-        tracing::debug!(error = %e, "pr_tick failed");
-    }
+
+    let roots = match roots {
+        Ok(Ok(r)) if !r.is_empty() => r,
+        Ok(Err(e)) => {
+            tracing::debug!(error = %e, "pr_tick failed");
+            return;
+        }
+        _ => return,
+    };
+
+    orch.tick_all(roots).await;
 }

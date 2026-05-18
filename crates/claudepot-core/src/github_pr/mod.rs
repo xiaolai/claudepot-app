@@ -98,9 +98,25 @@ impl GhError {
     }
 }
 
+/// Outcome of a single PR detection. Always carries the branch we
+/// queried — the orchestrator uses it to key its cache without
+/// shelling out to `git branch` a second time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectOutcome {
+    /// Branch HEAD was on when we asked. Empty when HEAD is
+    /// detached or the repo isn't a git repo.
+    pub branch: String,
+    /// The PR if one was found. `None` covers "no PR for this
+    /// branch", "no GitHub remote", "trunk branch", or "detached
+    /// HEAD" — every flavor of "nothing to render."
+    pub pr: Option<PrInfo>,
+}
+
 /// Detect whether `repo_root`'s current branch has an open PR.
 ///
-/// Returns `Ok(None)` when:
+/// Always returns the branch (empty on detached HEAD / non-repo) so
+/// the orchestrator can cache by branch without a second `git`
+/// invocation. `Ok(DetectOutcome { pr: None, .. })` covers:
 ///   * `repo_root` is not a git repo
 ///   * no `origin` remote, or `origin` doesn't point at GitHub
 ///   * HEAD is detached
@@ -109,19 +125,29 @@ impl GhError {
 ///   * `gh` reports no open PR for the branch
 ///
 /// Returns `Err(GhError::MissingCli)` when `gh` or `git` isn't on
-/// PATH — the orchestrator treats this identically to `Ok(None)`
-/// from the caller's perspective, but the typed distinction lets a
-/// future REST fallback re-route here.
-pub fn detect_pr(repo_root: &Path) -> Result<Option<PrInfo>, GhError> {
+/// PATH — the orchestrator treats this identically to "no PR" from
+/// the user's perspective, but the typed distinction lets the
+/// orchestrator flip its global gh-absent short-circuit and skip
+/// subsequent `git` calls for the rest of the session.
+pub fn detect_pr(repo_root: &Path) -> Result<DetectOutcome, GhError> {
     let branch = match cli::current_branch(repo_root)? {
-        Some(b) if !is_trunk_branch(&b) => b,
-        // Detached HEAD or trunk branch: no PR, no error.
-        _ => return Ok(None),
+        Some(b) => b,
+        // Detached HEAD or non-repo: no branch, no PR.
+        None => {
+            return Ok(DetectOutcome {
+                branch: String::new(),
+                pr: None,
+            });
+        }
     };
-    if !cli::has_github_origin(repo_root)? {
-        return Ok(None);
+    if is_trunk_branch(&branch) {
+        return Ok(DetectOutcome { branch, pr: None });
     }
-    cli::view_pr(repo_root, &branch)
+    if !cli::has_github_origin(repo_root)? {
+        return Ok(DetectOutcome { branch, pr: None });
+    }
+    let pr = cli::view_pr(repo_root, &branch)?;
+    Ok(DetectOutcome { branch, pr })
 }
 
 /// Return `true` when the branch name is a standard trunk that

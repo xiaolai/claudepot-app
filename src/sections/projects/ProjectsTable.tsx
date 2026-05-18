@@ -4,6 +4,7 @@ import { BrandGithubMark } from "../../components/primitives/BrandGithubMark";
 import { Glyph } from "../../components/primitives/Glyph";
 import { IconButton } from "../../components/primitives/IconButton";
 import { LiveStatusDot } from "../../components/primitives/LiveStatusDot";
+import { liveDotTitle } from "../../components/primitives/liveDotTitle";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import type { ProjectInfo } from "../../types";
@@ -14,9 +15,11 @@ import { classifyProject, type ProjectStatus } from "./projectStatus";
 
 /**
  * Return `true` when `cwd` is the project root or sits underneath
- * it. Separator-aware so Windows project paths (drive letter + `\`)
- * match Windows live cwds without false-positives like
- * `C:\foo` matching `C:\foobar`.
+ * it. Normalizes both inputs to forward-slash first so a Windows
+ * project path written `C:\foo\bar` matches a live cwd written
+ * `C:/foo/bar/sub` (and every other separator combination). After
+ * normalization the check is a simple prefix test with an explicit
+ * `/` boundary so `/foo` doesn't false-match `/foobar`.
  *
  * Both inputs are expected to already be simplified by
  * `claudepot_core::path_utils::simplify_windows_path` on the Rust
@@ -24,11 +27,11 @@ import { classifyProject, type ProjectStatus } from "./projectStatus";
  * See `.claude/rules/paths.md` for the full handling rule.
  */
 export function cwdMatchesProject(cwd: string, projectPath: string): boolean {
-  if (cwd === projectPath) return true;
-  const sep =
-    projectPath.includes("\\") && !projectPath.includes("/") ? "\\" : "/";
-  const prefix = projectPath.endsWith(sep) ? projectPath : projectPath + sep;
-  return cwd.startsWith(prefix);
+  const a = cwd.replace(/\\/g, "/");
+  const b = projectPath.replace(/\\/g, "/");
+  if (a === b) return true;
+  const prefix = b.endsWith("/") ? b : b + "/";
+  return a.startsWith(prefix);
 }
 
 /** Build a per-project list of live session summaries by matching
@@ -499,14 +502,6 @@ function LiveDotCluster({ live }: { live: LiveSessionSummary[] }) {
  *  shout for resolved work. */
 function prBadgeColor(state: "open" | "merged" | "closed"): string {
   return state === "open" ? "var(--accent)" : "var(--fg-muted)";
-}
-
-function liveDotTitle(live: LiveSessionSummary): string {
-  if (live.errored) return "Errored";
-  if (live.status === "waiting") {
-    return live.waiting_for ? `Waiting · ${live.waiting_for}` : "Waiting";
-  }
-  return live.status === "busy" ? "Busy" : "Idle";
 }
 
 /**

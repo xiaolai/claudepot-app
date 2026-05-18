@@ -6,6 +6,7 @@ import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu"
 import {
   BrandGithubMark,
   LiveStatusDot,
+  liveDotTitle,
 } from "../../components/primitives";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { fileManagerName } from "../../lib/platformLabels";
@@ -22,24 +23,6 @@ import { MoveSessionModal } from "./MoveSessionModal";
 import { PermissionPanel } from "./PermissionPanel";
 import { ProjectEnvPanel } from "./ProjectEnvPanel";
 import { sessionCostEstimate, formatUsd, usePriceTable } from "../../costs";
-
-/**
- * Tooltip text for a `LiveStatusDot` in the session list. Picks the
- * verb that makes the status concrete — falls through to the
- * capitalized base status when no overlay or waiting_for verb adds
- * useful detail.
- */
-function liveDotTitle(live: {
-  status: "busy" | "idle" | "waiting";
-  errored: boolean;
-  waiting_for: string | null;
-}): string {
-  if (live.errored) return "Errored";
-  if (live.status === "waiting") {
-    return live.waiting_for ? `Waiting · ${live.waiting_for}` : "Waiting";
-  }
-  return live.status === "busy" ? "Busy" : "Idle";
-}
 
 /**
  * Build the on-disk path of a session transcript given the containing

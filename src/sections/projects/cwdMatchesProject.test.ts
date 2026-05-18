@@ -69,13 +69,26 @@ describe("cwdMatchesProject", () => {
     });
   });
 
-  describe("separator detection edge cases", () => {
-    it("falls back to '/' when the project path uses both separators", () => {
-      // CC's `cwd` should always be in one style, but a project path
-      // with mixed separators (rare, but possible from a hand-edited
-      // config) shouldn't false-positive — we trust the forward slash
-      // boundary, which is the canonical Unix shape.
-      expect(cwdMatchesProject("/foo/bar", "/foo")).toBe(true);
+  describe("mixed-separator cases", () => {
+    it("matches when project uses backslash and cwd uses forward slash", () => {
+      // Real case: git on Windows sometimes emits forward-slash
+      // cwds while the user-registered project path is
+      // backslash-only.
+      expect(
+        cwdMatchesProject("C:/Users/x/proj/sub", "C:\\Users\\x\\proj"),
+      ).toBe(true);
+    });
+
+    it("matches when project uses forward slash and cwd uses backslash", () => {
+      expect(
+        cwdMatchesProject("C:\\Users\\x\\proj\\sub", "C:/Users/x/proj"),
+      ).toBe(true);
+    });
+
+    it("still rejects sibling false-positives after normalization", () => {
+      expect(
+        cwdMatchesProject("C:/Users/x/projbar", "C:\\Users\\x\\proj"),
+      ).toBe(false);
     });
   });
 });
