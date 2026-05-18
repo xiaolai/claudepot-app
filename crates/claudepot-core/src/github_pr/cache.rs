@@ -5,10 +5,18 @@
 //! overwrites, so a branch flip between ticks is absorbed without
 //! the cache needing to track the branch identity.
 //!
-//! TTL is 60 seconds rather than the 5-minute tick so a freshly-
-//! opened PR appears in the UI within ~1 minute of opening it
-//! (assuming the tick fires close by), without the user having to
-//! restart Claudepot.
+//! TTL must exceed the orchestrator's refresh cadence
+//! (`usage_snapshot::POLL_INTERVAL` = 5 min) so cached badges
+//! don't blink out between ticks. Setting it shorter than the
+//! tick means every entry spends most of its life expired, and
+//! `project_list` returns `None` for projects whose entry was
+//! seeded by the most recent tick more than a minute ago — the
+//! badge would only appear in the ~minute right after a tick.
+//! Six minutes leaves a one-minute cushion for tick drift.
+//!
+//! Freshness for newly-opened PRs comes from the next tick, not
+//! from a short TTL — `tick_all` always overwrites, so a PR
+//! opened mid-window appears within the next tick interval.
 //!
 //! Negative results (no PR found) are cached too — that's the
 //! steady state for most projects, and without negative caching
@@ -21,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use super::PrInfo;
 
-const TTL: Duration = Duration::from_secs(60);
+const TTL: Duration = Duration::from_secs(6 * 60);
 
 #[derive(Default)]
 pub struct PrCache {

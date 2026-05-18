@@ -21,17 +21,38 @@ import { classifyProject, type ProjectStatus } from "./projectStatus";
  * normalization the check is a simple prefix test with an explicit
  * `/` boundary so `/foo` doesn't false-match `/foobar`.
  *
+ * Windows-shaped paths are also case-folded before comparison —
+ * NTFS/ReFS are case-insensitive by default, so `C:\Users\X` and
+ * `c:\users\x` describe the same directory and must match. The
+ * Unix branch keeps case-sensitive comparison since POSIX
+ * filesystems are typically case-sensitive (macOS APFS being
+ * case-insensitive by default is the awkward outlier; we err
+ * toward false negatives on macOS rather than false positives
+ * elsewhere, since a missing dot is recoverable but a wrong
+ * project association isn't).
+ *
  * Both inputs are expected to already be simplified by
  * `claudepot_core::path_utils::simplify_windows_path` on the Rust
  * side — so we don't need to strip `\\?\` verbatim prefixes here.
  * See `.claude/rules/paths.md` for the full handling rule.
  */
 export function cwdMatchesProject(cwd: string, projectPath: string): boolean {
-  const a = cwd.replace(/\\/g, "/");
-  const b = projectPath.replace(/\\/g, "/");
+  let a = cwd.replace(/\\/g, "/");
+  let b = projectPath.replace(/\\/g, "/");
+  if (isWindowsShapedPath(a) || isWindowsShapedPath(b)) {
+    a = a.toLowerCase();
+    b = b.toLowerCase();
+  }
   if (a === b) return true;
   const prefix = b.endsWith("/") ? b : b + "/";
   return a.startsWith(prefix);
+}
+
+/** Heuristic: drive-letter (`C:/...`) or UNC (`//server/...`)
+ *  shapes signal Windows. Tested against the slash-normalized
+ *  string so we don't need to branch on backslash. */
+function isWindowsShapedPath(p: string): boolean {
+  return /^[a-zA-Z]:\//.test(p) || p.startsWith("//");
 }
 
 /** Build a per-project list of live session summaries by matching
@@ -474,14 +495,18 @@ function LiveDotCluster({ live }: { live: LiveSessionSummary[] }) {
     <span
       style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-2)" }}
     >
-      {visible.map((s) => (
-        <LiveStatusDot
-          key={s.session_id}
-          status={s.status}
-          errored={s.errored}
-          title={liveDotTitle(s)}
-        />
-      ))}
+      {visible.map((s) => {
+        const verb = liveDotTitle(s);
+        return (
+          <LiveStatusDot
+            key={s.session_id}
+            status={s.status}
+            errored={s.errored}
+            title={verb}
+            aria-label={`Session ${verb}`}
+          />
+        );
+      })}
       {overflow > 0 && (
         <span
           style={{

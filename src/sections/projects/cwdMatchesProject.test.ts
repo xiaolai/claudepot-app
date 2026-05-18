@@ -91,4 +91,42 @@ describe("cwdMatchesProject", () => {
       ).toBe(false);
     });
   });
+
+  describe("windows case-insensitivity", () => {
+    it("matches drive-letter paths case-insensitively", () => {
+      // NTFS doesn't care about case — the helper must match too.
+      expect(
+        cwdMatchesProject("c:\\users\\x\\proj", "C:\\Users\\X\\Proj"),
+      ).toBe(true);
+    });
+
+    it("matches drive-letter subdirectories case-insensitively", () => {
+      expect(
+        cwdMatchesProject("C:\\USERS\\X\\PROJ\\SUB", "c:\\users\\x\\proj"),
+      ).toBe(true);
+    });
+
+    it("matches UNC paths case-insensitively", () => {
+      expect(
+        cwdMatchesProject(
+          "\\\\Server\\Share\\Proj\\sub",
+          "\\\\server\\share\\proj",
+        ),
+      ).toBe(true);
+    });
+
+    it("rejects sibling case-mismatch after fold", () => {
+      // Even with case-fold, C:/Users/X/Proj must not match
+      // C:/Users/X/ProjBar.
+      expect(
+        cwdMatchesProject("C:\\Users\\X\\ProjBar", "c:\\users\\x\\proj"),
+      ).toBe(false);
+    });
+
+    it("keeps unix paths case-sensitive", () => {
+      // POSIX filesystems are typically case-sensitive; do NOT
+      // match /Users/X with /users/x.
+      expect(cwdMatchesProject("/Users/X/proj", "/users/x/proj")).toBe(false);
+    });
+  });
 });

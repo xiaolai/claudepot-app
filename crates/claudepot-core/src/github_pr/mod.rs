@@ -86,6 +86,11 @@ pub enum GhError {
     /// I/O failure spawning a subprocess.
     #[error("io error running {0}: {1}")]
     Io(&'static str, #[source] std::io::Error),
+    /// Subprocess exceeded the per-call deadline and was killed
+    /// (kill_on_drop). The orchestrator caches the miss so the
+    /// next tick can retry without wedging this tick.
+    #[error("{0} timed out")]
+    Timeout(&'static str),
 }
 
 impl GhError {
@@ -129,8 +134,8 @@ pub struct DetectOutcome {
 /// the user's perspective, but the typed distinction lets the
 /// orchestrator flip its global gh-absent short-circuit and skip
 /// subsequent `git` calls for the rest of the session.
-pub fn detect_pr(repo_root: &Path) -> Result<DetectOutcome, GhError> {
-    let branch = match cli::current_branch(repo_root)? {
+pub async fn detect_pr(repo_root: &Path) -> Result<DetectOutcome, GhError> {
+    let branch = match cli::current_branch(repo_root).await? {
         Some(b) => b,
         // Detached HEAD or non-repo: no branch, no PR.
         None => {
@@ -143,10 +148,10 @@ pub fn detect_pr(repo_root: &Path) -> Result<DetectOutcome, GhError> {
     if is_trunk_branch(&branch) {
         return Ok(DetectOutcome { branch, pr: None });
     }
-    if !cli::has_github_origin(repo_root)? {
+    if !cli::has_github_origin(repo_root).await? {
         return Ok(DetectOutcome { branch, pr: None });
     }
-    let pr = cli::view_pr(repo_root, &branch)?;
+    let pr = cli::view_pr(repo_root, &branch).await?;
     Ok(DetectOutcome { branch, pr })
 }
 

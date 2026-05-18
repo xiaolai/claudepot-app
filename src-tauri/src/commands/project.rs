@@ -62,15 +62,26 @@ pub async fn project_list(
 }
 
 #[tauri::command]
-pub async fn project_show(path: String) -> Result<ProjectDetailDto, String> {
+pub async fn project_show(
+    path: String,
+    pr_orch: tauri::State<'_, std::sync::Arc<crate::pr_orchestrator::PrOrchestrator>>,
+) -> Result<ProjectDetailDto, String> {
     // Same heavy I/O shape as `project_list`, focused on a single slug.
     // Fires on every row click — the freeze the user feels is this
     // command holding a worker for seconds on large projects or
     // stat-slow source paths.
+    let pr_orch: std::sync::Arc<crate::pr_orchestrator::PrOrchestrator> =
+        std::sync::Arc::clone(&pr_orch);
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
         let detail = project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
-        Ok(ProjectDetailDto::from(&detail))
+        let mut dto = ProjectDetailDto::from(&detail);
+        // Decorate the header with cached PR info so the badge in
+        // ProjectDetail matches the one rendered in the list.
+        // Synchronous cache-only read — never blocks on subprocesses.
+        let pr = pr_orch.cached_for(std::path::Path::new(&detail.info.original_path));
+        dto.info.pr = pr.as_ref().map(crate::dto::PrInfoDto::from);
+        Ok(dto)
     })
     .await
     .map_err(|e| format!("show join: {e}"))?

@@ -637,13 +637,18 @@ function SessionListPane({
                     gap: "var(--sp-6)",
                   }}
                 >
-                  {live && (
-                    <LiveStatusDot
-                      status={live.status}
-                      errored={live.errored}
-                      title={liveDotTitle(live)}
-                    />
-                  )}
+                  {live &&
+                    (() => {
+                      const verb = liveDotTitle(live);
+                      return (
+                        <LiveStatusDot
+                          status={live.status}
+                          errored={live.errored}
+                          title={verb}
+                          aria-label={`Session ${verb}`}
+                        />
+                      );
+                    })()}
                   {s.session_id.slice(0, 8)}
                 </span>
                 <span className="session-row-meta">

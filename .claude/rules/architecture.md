@@ -1,6 +1,6 @@
 ---
 description: Core architecture constraints for all Claudepot work
-globs: "**/*.rs"
+globs: "{**/*.rs,src/**/*.{ts,tsx},src-tauri/**/*.rs}"
 ---
 
 # Architecture

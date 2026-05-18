@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use claudepot_core::github_pr::{cache::PrCache, detect_pr, DetectOutcome, GhError, PrInfo};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -33,16 +34,18 @@ const MAX_PARALLEL: usize = 4;
 
 /// Trait isolating the subprocess work so unit tests can swap in a
 /// deterministic fake. Production wires this to `github_pr::detect_pr`.
+#[async_trait]
 pub trait PrDetector: Send + Sync + 'static {
-    fn detect(&self, repo_root: &Path) -> Result<DetectOutcome, GhError>;
+    async fn detect(&self, repo_root: &Path) -> Result<DetectOutcome, GhError>;
 }
 
 /// Production detector — calls into `github_pr::detect_pr`.
 pub struct RealDetector;
 
+#[async_trait]
 impl PrDetector for RealDetector {
-    fn detect(&self, repo_root: &Path) -> Result<DetectOutcome, GhError> {
-        detect_pr(repo_root)
+    async fn detect(&self, repo_root: &Path) -> Result<DetectOutcome, GhError> {
+        detect_pr(repo_root).await
     }
 }
 
@@ -75,17 +78,20 @@ impl PrOrchestrator {
         self.cache.freshest_pr(repo_root)
     }
 
-    /// `true` once the orchestrator has latched onto an absent
-    /// `gh` CLI for the lifetime of this process. Read-only — flip
-    /// happens internally on the first `MissingCli("gh")` from a
-    /// refresh.
+    /// Test-only introspection: `true` once the orchestrator has
+    /// latched onto an absent `gh` CLI. Promoted to non-test if a
+    /// future surface (e.g. a Settings status banner) wants to
+    /// disclose this to the user.
+    #[cfg(test)]
     pub fn gh_absent(&self) -> bool {
         self.gh_absent.load(Ordering::Relaxed)
     }
 
-    /// `true` when the orchestrator has any cache entry for this
-    /// repo (fresh or stale). Tests use it to distinguish
-    /// "negative cached" from "never queried".
+    /// Test-only introspection: `true` when the orchestrator has
+    /// any cache entry for this repo (fresh or stale). Distinguishes
+    /// "negative cached" from "never queried" — the public
+    /// `cached_for` collapses both to `None`.
+    #[cfg(test)]
     pub fn contains_entry_for(&self, repo_root: &Path) -> bool {
         self.cache.contains(repo_root)
     }
@@ -97,6 +103,12 @@ impl PrOrchestrator {
     /// If the gh-absent latch is set, returns immediately without
     /// spawning anything — the user lacks `gh`, so every detection
     /// would resolve to the same "no PR" answer.
+    ///
+    /// Once a task that's already in flight observes
+    /// `MissingCli("gh")`, the latch flips mid-tick — every later
+    /// task re-reads it after acquiring its semaphore permit and
+    /// skips the detection, so the rest of the tick degenerates to
+    /// permit-handoff instead of subprocess calls.
     pub async fn tick_all(self: Arc<Self>, repo_roots: Vec<PathBuf>) {
         if self.gh_absent.load(Ordering::Relaxed) {
             return;
@@ -113,19 +125,25 @@ impl PrOrchestrator {
                 // subprocess calls — pure-tokio would block the
                 // reactor.
                 let _permit = sem.acquire_owned().await.ok()?;
-                tokio::task::spawn_blocking(move || me.refresh_one(&root))
-                    .await
-                    .ok()
+                // Mid-tick re-check: a sibling task may have
+                // observed gh missing while we waited on the
+                // permit. Skip the detect rather than burn another
+                // gh-not-found cycle.
+                if me.gh_absent.load(Ordering::Relaxed) {
+                    return Some(());
+                }
+                me.refresh_one(&root).await;
+                Some(())
             });
         }
         while set.join_next().await.is_some() {}
     }
 
-    /// Synchronous refresh for a single project. Always overwrites
-    /// the cache entry — TTL is the cache's concern, not ours.
-    /// Updates the gh-absent latch on `MissingCli("gh")`.
-    fn refresh_one(&self, repo_root: &Path) {
-        match self.detector.detect(repo_root) {
+    /// Async refresh for a single project. Always overwrites the
+    /// cache entry — TTL is the cache's concern, not ours. Updates
+    /// the gh-absent latch on `MissingCli("gh")`.
+    async fn refresh_one(&self, repo_root: &Path) {
+        match self.detector.detect(repo_root).await {
             Ok(DetectOutcome { branch: _, pr }) => {
                 // Cache regardless of whether `branch` is empty
                 // (detached HEAD / non-repo) — the negative entry
@@ -180,8 +198,9 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl PrDetector for FakeDetector {
-        fn detect(&self, repo_root: &Path) -> Result<DetectOutcome, GhError> {
+        async fn detect(&self, repo_root: &Path) -> Result<DetectOutcome, GhError> {
             self.calls.lock().unwrap().push(repo_root.to_path_buf());
             let mut q = self.responses.lock().unwrap();
             if q.is_empty() {
@@ -247,6 +266,20 @@ mod tests {
             before,
             "post-latch tick must not invoke the detector"
         );
+    }
+
+    #[tokio::test]
+    async fn timeout_error_is_cached_as_miss() {
+        // Timeout is non-fatal: detector returns Timeout, cache
+        // records the miss (so next tick can retry without burning
+        // an extra slot), and the orchestrator does NOT latch
+        // gh-absent (the binary exists, it just hung).
+        let fake = Arc::new(FakeDetector::new(vec![Err(GhError::Timeout("gh"))]));
+        let orch = Arc::new(PrOrchestrator::with_detector(fake.clone()));
+        orch.clone().tick_all(vec![PathBuf::from("/repo")]).await;
+        assert!(orch.cached_for(Path::new("/repo")).is_none());
+        assert!(orch.contains_entry_for(Path::new("/repo")));
+        assert!(!orch.gh_absent(), "timeout must not latch gh-absent");
     }
 
     #[tokio::test]

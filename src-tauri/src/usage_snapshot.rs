@@ -156,9 +156,9 @@ async fn pr_tick(app: &AppHandle) {
     let orch: Arc<PrOrchestrator> = Arc::clone(&orch_state);
 
     // Discovering the project list is sync I/O — keep it on the
-    // blocking pool. The orchestrator's own `tick_all` is async and
-    // manages its own spawn_blocking + bounded fan-out for each
-    // detection, so the two phases nest cleanly.
+    // blocking pool. The orchestrator's own `tick_all` is fully
+    // async (tokio::process under a Semaphore) so detection runs
+    // on the tokio reactor, not the blocking pool.
     let roots = tauri::async_runtime::spawn_blocking(move || {
         let cfg = claudepot_core::paths::claude_config_dir();
         let projects = claudepot_core::project::list_projects(&cfg)
