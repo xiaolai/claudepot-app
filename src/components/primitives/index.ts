@@ -20,3 +20,4 @@ export { BackAffordance } from "./BackAffordance";
 export { Skeleton, SkeletonList, SkeletonRows } from "./Skeleton";
 export { Table, Th, ThSort, Tr, Td } from "./Table";
 export type { TableProps, ThProps, ThSortProps, TdProps } from "./Table";
+export { LiveStatusDot } from "./LiveStatusDot";

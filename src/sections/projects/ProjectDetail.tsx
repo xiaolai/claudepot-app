@@ -3,8 +3,10 @@ import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
+import { LiveStatusDot } from "../../components/primitives";
 import { fileManagerName } from "../../lib/platformLabels";
 import { useAppState } from "../../providers/AppStateProvider";
+import { useSessionLive } from "../../hooks/useSessionLive";
 import type {
   ProjectDetail as ProjectDetailData,
   ProjectInfo,
@@ -16,6 +18,24 @@ import { MoveSessionModal } from "./MoveSessionModal";
 import { PermissionPanel } from "./PermissionPanel";
 import { ProjectEnvPanel } from "./ProjectEnvPanel";
 import { sessionCostEstimate, formatUsd, usePriceTable } from "../../costs";
+
+/**
+ * Tooltip text for a `LiveStatusDot` in the session list. Picks the
+ * verb that makes the status concrete — falls through to the
+ * capitalized base status when no overlay or waiting_for verb adds
+ * useful detail.
+ */
+function liveDotTitle(live: {
+  status: "busy" | "idle" | "waiting";
+  errored: boolean;
+  waiting_for: string | null;
+}): string {
+  if (live.errored) return "Errored";
+  if (live.status === "waiting") {
+    return live.waiting_for ? `Waiting · ${live.waiting_for}` : "Waiting";
+  }
+  return live.status === "busy" ? "Busy" : "Idle";
+}
 
 /**
  * Build the on-disk path of a session transcript given the containing
@@ -519,6 +539,15 @@ function SessionListPane({
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE_SIZE);
 
+  // Subscribe once; useSessionLive is a singleton store, so calling it
+  // from N rendered ProjectDetails costs one backend listener total.
+  const liveAll = useSessionLive();
+  const liveBySessionId = useMemo(() => {
+    const m = new Map<string, (typeof liveAll)[number]>();
+    for (const s of liveAll) m.set(s.session_id, s);
+    return m;
+  }, [liveAll]);
+
   const q = query.trim().toLowerCase();
   const filtered = q
     ? sessions.filter((s) => s.session_id.toLowerCase().includes(q))
@@ -573,6 +602,7 @@ function SessionListPane({
         <ul className="session-list" role="listbox" aria-label="Sessions">
           {visible.map((s) => {
             const cost = costBySessionId?.get(s.session_id);
+            const live = liveBySessionId.get(s.session_id);
             return (
             <li
               key={s.session_id}
@@ -586,7 +616,21 @@ function SessionListPane({
               style={onOpen ? { cursor: "pointer" } : undefined}
             >
               <div className="session-row-text">
-                <span className="session-row-name mono">
+                <span
+                  className="session-row-name mono"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "var(--sp-6)",
+                  }}
+                >
+                  {live && (
+                    <LiveStatusDot
+                      status={live.status}
+                      errored={live.errored}
+                      title={liveDotTitle(live)}
+                    />
+                  )}
                   {s.session_id.slice(0, 8)}
                 </span>
                 <span className="session-row-meta">
