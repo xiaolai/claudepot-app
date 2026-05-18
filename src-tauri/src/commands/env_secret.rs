@@ -25,7 +25,9 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use zeroize::Zeroize;
 
 use super::validate_project_path;
-use crate::commands::keys::{now_unix_ms, schedule_self_clear, KeyCopyReceiptDto, CLIPBOARD_CLEAR_MS};
+use crate::commands::keys::{
+    now_unix_ms, schedule_self_clear, KeyCopyReceiptDto, CLIPBOARD_CLEAR_MS,
+};
 use crate::dto_env::{entries_from_lines, EnvFileDto, ProjectEnvDto, VaultSecretDto};
 
 fn open_vault() -> Result<VaultStore, String> {
@@ -152,10 +154,7 @@ pub async fn env_vault_list() -> Result<Vec<VaultSecretDto>, String> {
 /// Add a new named secret. The `secret` arrives over the IPC bridge
 /// and is zeroized on every exit path.
 #[tauri::command]
-pub async fn env_vault_add(
-    name: String,
-    mut secret: String,
-) -> Result<VaultSecretDto, String> {
+pub async fn env_vault_add(name: String, mut secret: String) -> Result<VaultSecretDto, String> {
     let result = {
         let name = name.clone();
         let secret_copy = secret.clone();
@@ -179,10 +178,7 @@ pub async fn env_vault_add(
 /// Replace the value of an existing named secret. `secret` zeroized
 /// on every exit path.
 #[tauri::command]
-pub async fn env_vault_update(
-    name: String,
-    mut secret: String,
-) -> Result<VaultSecretDto, String> {
+pub async fn env_vault_update(name: String, mut secret: String) -> Result<VaultSecretDto, String> {
     let result = {
         let name = name.clone();
         let secret_copy = secret.clone();
@@ -208,7 +204,9 @@ pub async fn env_vault_update(
 pub async fn env_vault_delete(name: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let vault = open_vault()?;
-        vault.delete(&name).map_err(|e| format!("vault delete: {e}"))
+        vault
+            .delete(&name)
+            .map_err(|e| format!("vault delete: {e}"))
     })
     .await
     .map_err(|e| format!("env_vault_delete join: {e}"))?
@@ -219,16 +217,15 @@ pub async fn env_vault_delete(name: String) -> Result<(), String> {
 /// only a `KeyCopyReceiptDto`. Self-clears after 30s if the clipboard
 /// still holds our payload.
 #[tauri::command]
-pub async fn env_vault_copy(
-    name: String,
-    app: AppHandle,
-) -> Result<KeyCopyReceiptDto, String> {
+pub async fn env_vault_copy(name: String, app: AppHandle) -> Result<KeyCopyReceiptDto, String> {
     let (mut secret, preview) = {
         let name = name.clone();
         tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
             let vault = open_vault()?;
             let record = vault.get(&name).map_err(|e| format!("vault get: {e}"))?;
-            let secret = vault.reveal(&name).map_err(|e| format!("vault reveal: {e}"))?;
+            let secret = vault
+                .reveal(&name)
+                .map_err(|e| format!("vault reveal: {e}"))?;
             Ok((secret, record.secret_preview))
         })
         .await
@@ -360,9 +357,7 @@ pub async fn env_file_copy_value(
             let value = lines
                 .iter()
                 .find_map(|l| match l {
-                    env_file::EnvLine::Active { key: k, value } if *k == key => {
-                        Some(value.clone())
-                    }
+                    env_file::EnvLine::Active { key: k, value } if *k == key => Some(value.clone()),
                     _ => None,
                 })
                 .or_else(|| {

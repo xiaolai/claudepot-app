@@ -1,7 +1,28 @@
 //! Project DTOs — read-only surface for the Projects section.
 
 use crate::dto::system_time_to_ms;
+use claudepot_core::github_pr::{PrInfo, PrState};
 use serde::{Deserialize, Serialize};
+
+/// Wire form of a GitHub PR detection. Mirrors
+/// `claudepot_core::github_pr::PrInfo` minus the head ref name,
+/// which is only useful for diagnostics on the Rust side.
+#[derive(Serialize)]
+pub struct PrInfoDto {
+    pub number: u64,
+    pub url: String,
+    pub state: PrState,
+}
+
+impl From<&PrInfo> for PrInfoDto {
+    fn from(p: &PrInfo) -> Self {
+        Self {
+            number: p.number,
+            url: p.url.clone(),
+            state: p.state,
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct ProjectInfoDto {
@@ -22,6 +43,12 @@ pub struct ProjectInfoDto {
     /// Useful for callers that want to show a distinct "abandoned"
     /// label from the standard "source deleted" orphan.
     pub is_empty: bool,
+    /// Open / merged / closed PR detected on this project's current
+    /// branch by `pr_orchestrator`. `null` is the steady state — no
+    /// PR found, no `gh` installed, project not a git repo, or PR
+    /// detection hasn't run yet for this project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<PrInfoDto>,
 }
 
 impl From<&claudepot_core::project_types::ProjectInfo> for ProjectInfoDto {
@@ -36,6 +63,10 @@ impl From<&claudepot_core::project_types::ProjectInfo> for ProjectInfoDto {
             is_orphan: p.is_orphan,
             is_reachable: p.is_reachable,
             is_empty: p.is_empty,
+            // Decorated by the project_list command from the
+            // PR orchestrator's cache; the bare DTO never carries
+            // PR state.
+            pr: None,
         }
     }
 }

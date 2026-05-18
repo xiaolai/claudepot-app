@@ -34,16 +34,28 @@ pub(crate) fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, 
 }
 
 #[tauri::command]
-pub async fn project_list() -> Result<Vec<ProjectInfoDto>, String> {
+pub async fn project_list(
+    pr_orch: tauri::State<'_, std::sync::Arc<crate::pr_orchestrator::PrOrchestrator>>,
+) -> Result<Vec<ProjectInfoDto>, String> {
     // `list_projects` fans out over every project slug, running
     // `dir_size` (recursive), `recover_cwd_from_sessions` (JSONL I/O),
     // `classify_reachability` (stat + optional slow-mount checks), and
     // `canonicalize` on each. Multi-hundred-ms in the tail; keep it
     // off the Tokio IPC worker so other commands don't queue behind it.
-    tauri::async_runtime::spawn_blocking(|| {
+    let pr_orch: std::sync::Arc<crate::pr_orchestrator::PrOrchestrator> =
+        std::sync::Arc::clone(&pr_orch);
+    tauri::async_runtime::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
         let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
-        Ok(projects.iter().map(ProjectInfoDto::from).collect())
+        let mut out: Vec<ProjectInfoDto> = projects.iter().map(ProjectInfoDto::from).collect();
+        // Synchronous cache-only enrichment — never blocks on
+        // subprocesses. Misses (nothing cached, expired, or no PR
+        // found) leave `pr = None`, which serializes as absent.
+        for (dto, info) in out.iter_mut().zip(projects.iter()) {
+            let pr = pr_orch.cached_for(std::path::Path::new(&info.original_path));
+            dto.pr = pr.as_ref().map(crate::dto::PrInfoDto::from);
+        }
+        Ok(out)
     })
     .await
     .map_err(|e| format!("list join: {e}"))?

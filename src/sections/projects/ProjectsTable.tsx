@@ -1,4 +1,6 @@
 import { type MouseEvent, useMemo, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { BrandGithubMark } from "../../components/primitives/BrandGithubMark";
 import { Glyph } from "../../components/primitives/Glyph";
 import { IconButton } from "../../components/primitives/IconButton";
 import { LiveStatusDot } from "../../components/primitives/LiveStatusDot";
@@ -323,6 +325,29 @@ function ProjectRow({
           >
             {name}
           </span>
+          {p.pr && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (p.pr) void openUrl(p.pr.url).catch(() => {});
+              }}
+              title={`PR #${p.pr.number} — ${p.pr.state}`}
+              aria-label={`Open pull request #${p.pr.number} for ${name}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: prBadgeColor(p.pr.state),
+                lineHeight: 0,
+              }}
+            >
+              <BrandGithubMark size={14} />
+            </button>
+          )}
         </div>
         <div
           // Truncated path subtext — full string disclosed via tooltip
@@ -467,6 +492,13 @@ function LiveDotCluster({ live }: { live: LiveSessionSummary[] }) {
       )}
     </span>
   );
+}
+
+/** Token color for the GitHub mark based on PR state. Open is the
+ *  attention color; merged/closed dim to neutral so the badge doesn't
+ *  shout for resolved work. */
+function prBadgeColor(state: "open" | "merged" | "closed"): string {
+  return state === "open" ? "var(--accent)" : "var(--fg-muted)";
 }
 
 function liveDotTitle(live: LiveSessionSummary): string {

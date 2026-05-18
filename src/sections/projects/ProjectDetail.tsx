@@ -3,7 +3,11 @@ import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
-import { LiveStatusDot } from "../../components/primitives";
+import {
+  BrandGithubMark,
+  LiveStatusDot,
+} from "../../components/primitives";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { fileManagerName } from "../../lib/platformLabels";
 import { useAppState } from "../../providers/AppStateProvider";
 import { useSessionLive } from "../../hooks/useSessionLive";
@@ -265,6 +269,32 @@ export function ProjectDetail({
             {info.original_path.split("/").filter(Boolean).pop() ??
               info.sanitized_name}
           </h2>
+          {info.pr && (
+            <button
+              type="button"
+              onClick={() => {
+                if (info.pr) void openUrl(info.pr.url).catch(() => {});
+              }}
+              title={`PR #${info.pr.number} — ${info.pr.state}`}
+              aria-label={`Open pull request #${info.pr.number}`}
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: info.pr.state === "open"
+                  ? "var(--accent)"
+                  : "var(--fg-muted)",
+                lineHeight: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "var(--sp-4)",
+              }}
+            >
+              <BrandGithubMark size={16} />
+              <span style={{ fontSize: "var(--fs-xs)" }}>#{info.pr.number}</span>
+            </button>
+          )}
           {status === "orphan" && (
             <span className="project-tag orphan" title="source directory does not exist">
               orphan

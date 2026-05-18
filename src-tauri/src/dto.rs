@@ -53,10 +53,10 @@ pub use crate::{
     },
     dto_keys::{ApiKeySummaryDto, OauthTokenSummaryDto},
     dto_project::{
-        CleanPreviewDto, DryRunPlanDto, MoveArgsDto, PendingJournalsSummaryDto, ProjectDetailDto,
-        ProjectInfoDto, ProjectRestoreReportDto, ProjectTrashEntryDto, ProjectTrashListingDto,
-        RemoveProjectPreviewBasicDto, RemoveProjectPreviewDto, RemoveProjectPreviewExtrasDto,
-        RemoveProjectResultDto, SessionInfoDto,
+        CleanPreviewDto, DryRunPlanDto, MoveArgsDto, PendingJournalsSummaryDto, PrInfoDto,
+        ProjectDetailDto, ProjectInfoDto, ProjectRestoreReportDto, ProjectTrashEntryDto,
+        ProjectTrashListingDto, RemoveProjectPreviewBasicDto, RemoveProjectPreviewDto,
+        RemoveProjectPreviewExtrasDto, RemoveProjectResultDto, SessionInfoDto,
     },
     dto_project_repair::{JournalEntryDto, JournalFlagsDto},
     dto_session::{

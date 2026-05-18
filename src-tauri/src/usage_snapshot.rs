@@ -58,6 +58,13 @@ async fn run_tick(app: &AppHandle) {
     // read when no grants exist.
     crate::permission_orchestrator::tick(app).await;
 
+    // Refresh per-project PR detection. Independent of accounts (a
+    // user can have projects without an Anthropic account); runs
+    // before the account-state early returns. The orchestrator
+    // dispatches each detect via `spawn_blocking` internally, so
+    // this awaits a single task that walks all projects sequentially.
+    pr_tick(app).await;
+
     // Open store + list accounts under one blocking scope so the
     // SQLite open and the .list() call aren't ping-ponging into
     // the async runtime.
@@ -136,4 +143,36 @@ async fn run_tick(app: &AppHandle) {
 /// that state.
 fn active_cli_uuid(accounts: &[claudepot_core::account::Account]) -> Option<Uuid> {
     accounts.iter().find(|a| a.is_cli_active).map(|a| a.uuid)
+}
+
+/// Walk every project and refresh its cached PR detection. Skipped
+/// silently when project listing fails (treated like permissions
+/// errors elsewhere — never fatal to the tick).
+async fn pr_tick(app: &AppHandle) {
+    use crate::pr_orchestrator::PrOrchestrator;
+    use std::path::PathBuf;
+
+    let orch_state = app.state::<Arc<PrOrchestrator>>();
+    let orch: Arc<PrOrchestrator> = Arc::clone(&orch_state);
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let cfg = claudepot_core::paths::claude_config_dir();
+        let projects = match claudepot_core::project::list_projects(&cfg) {
+            Ok(p) => p,
+            Err(e) => return Err(format!("pr_tick: list projects: {e}")),
+        };
+        let roots: Vec<PathBuf> = projects
+            .iter()
+            .filter(|p| p.is_reachable)
+            .map(|p| PathBuf::from(&p.original_path))
+            .collect();
+        if !roots.is_empty() {
+            orch.tick_all(&roots);
+        }
+        Ok::<_, String>(())
+    })
+    .await;
+    if let Ok(Err(e)) = result {
+        tracing::debug!(error = %e, "pr_tick failed");
+    }
 }

@@ -6,6 +6,20 @@
 // Project DTOs — mirror src-tauri/src/dto.rs ProjectInfoDto et al.
 // ---------------------------------------------------------------------------
 
+/** GitHub PR state — mirrors `claudepot_core::github_pr::PrState`. */
+export type PrState = "open" | "merged" | "closed";
+
+/** PR info attached to a project by the `pr_orchestrator`. Absent
+ *  (`pr === undefined`) is the steady state for projects without a
+ *  detected PR; the field is `skip_serializing_if = "Option::is_none"`
+ *  on the Rust side, so it's literally omitted from the wire payload
+ *  when missing. */
+export interface PrInfo {
+  number: number;
+  url: string;
+  state: PrState;
+}
+
 export interface ProjectInfo {
   sanitized_name: string;
   original_path: string;
@@ -23,6 +37,9 @@ export interface ProjectInfo {
   is_reachable: boolean;
   /** CC project dir has no sessions, no memory, minimal disk footprint. */
   is_empty: boolean;
+  /** Detected by the PR orchestrator — present only for projects
+   *  whose current branch has an open/merged/closed PR on origin. */
+  pr?: PrInfo;
 }
 
 export interface SessionInfo {
