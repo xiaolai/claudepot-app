@@ -392,19 +392,21 @@ fn inode_of(meta: &fs::Metadata) -> i64 {
 
 #[cfg(windows)]
 fn inode_of(meta: &fs::Metadata) -> i64 {
-    // L11 — Windows has no inode in the POSIX sense, but
-    // MetadataExt::file_index() returns the NTFS file id (the
-    // closest analog). Wraps to i64 — if the high bit is set the
-    // cast becomes negative, which is fine for equality
-    // comparison (the only consumer is the staleness triple
-    // check, which doesn't care about ordering or sign).
+    // Windows has no inode in the POSIX sense. The natural choice —
+    // `MetadataExt::file_index()` returning the NTFS file id — is
+    // gated behind `#![feature(windows_by_handle)]` and breaks the
+    // release build on stable rustc (E0658, rust-lang/rust#63010).
+    // v0.1.36's release.yml failed exactly here.
     //
-    // file_index() returns Some(u64) for files on volumes that
-    // support it; we fall back to 0 only if the platform returns
-    // None (rare — basically only ReFS in some pre-Server-2019
-    // builds).
+    // `creation_time()` (stable since 1.1) is a strictly safer
+    // proxy for the (size, mtime_ns, inode) staleness triple stored
+    // in `sessions.db`: it changes when a file is created or
+    // replaced, and stays constant across in-place modifications —
+    // which is exactly what the equality check needs. Cast to i64
+    // (matches the column type); signedness is irrelevant because
+    // the consumer only ever compares with `==`.
     use std::os::windows::fs::MetadataExt;
-    meta.file_index().map(|n| n as i64).unwrap_or(0)
+    meta.creation_time() as i64
 }
 
 #[cfg(not(any(unix, windows)))]

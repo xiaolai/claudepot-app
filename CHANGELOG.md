@@ -8,11 +8,29 @@ Versioning scheme:
 
 ## 0.1.37 — beta (unreleased)
 
-Eliminates the residual section-navigation flash that the cold-start
-fix in v0.1.x never reached, plus two web/post styling touch-ups.
+Recovery release. v0.1.36's release.yml failed silently on
+`windows-latest` (nightly-only `file_index()` from the v0.1.35
+shared-memory work — E0658), so no `.msi`/`.exe` installers shipped
+for either v0.1.35 or v0.1.36 even though both tags exist. v0.1.37
+bundles the Windows-compat fix plus everything that was supposed to
+ship in 0.1.35–0.1.36: the section-navigation flash fix, the
+shell-wide render-storm fix that surfaced as a "shaking" Sessions
+section in Projects detail, and two web/post styling touch-ups.
 
 ### Fixed
 
+- **Windows release build no longer fails on `file_index()`.** The
+  v0.1.35 shared-memory work introduced
+  `std::os::windows::fs::MetadataExt::file_index()` in two places to
+  populate the `(size, mtime_ns, inode)` staleness triple in
+  `sessions.db`. That method sits behind
+  `#![feature(windows_by_handle)]` (rust-lang/rust#63010) and breaks
+  stable rustc with E0658 — which silently killed the Windows job
+  in the v0.1.36 release matrix. Both call sites now use stable
+  `creation_time()` instead, which has strictly safer semantics for
+  the equality-only triple: it changes when a file is created or
+  replaced, stays constant across in-place modifications. macOS and
+  Linux paths are unchanged.
 - **Section navigation no longer flashes a blank panel.** The earlier
   cold-start fix (boot skeleton in `index.html`, preloaded saved
   section) only addressed the first paint — clicking from Accounts
@@ -27,6 +45,27 @@ fix in v0.1.x never reached, plus two web/post styling touch-ups.
   paint. Verified live through the Tauri MCP bridge: a
   `MutationObserver` watching `<main>` recorded zero empty-content
   events across four rapid sidebar clicks.
+- **Projects detail no longer shakes every 3 seconds.** Two polling
+  hooks (`useRunningOps`, 3 s; `usePendingJournals`, 30 s) committed
+  their Tauri IPC response unconditionally — every poll, the
+  freshly-deserialized object/array failed `Object.is` against the
+  prior state, even when the contents were structurally identical
+  (most commonly an empty list). `AppShell` re-rendered on every
+  tick; the cascade reached `ProjectsSection` whose inline
+  `onError={(msg) => pushToast("error", msg)}` arrows passed a fresh
+  function identity to `ProjectDetail`'s panels; `ProjectEnvPanel`'s
+  data-loading `useEffect` (deps include a `useCallback` over
+  `onError`) re-fired every 3 s, set `loading=true`, replaced its
+  171 px loaded body with a 64 px `Loading…` placeholder for ~2 ms.
+  The Sessions section below was being displaced ±107.8 px every
+  3 s — the "shake" reported via the Tauri MCP bridge inspector.
+  Four coordinated fixes: equality-guard the two polling hooks
+  (`opsEqual()` over op_id/kind/old_path/new_path; field-equality on
+  the journals summary); lift the pure-delegate `onError` arrows
+  into a single `useCallback`; stale-while-revalidate in both
+  `ProjectEnvPanel` and `PermissionPanel` so refetches don't replace
+  rendered content with `Loading…`. Verified live: zero shifts and
+  zero loading flashes across a 15-second observation window.
 
 ### Changed
 
