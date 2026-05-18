@@ -29,7 +29,22 @@ export function usePendingJournals(): {
   const refresh = useCallback(() => {
     api
       .repairStatusSummary()
-      .then((s) => setSummary(s))
+      .then((next) => {
+        // Identity-skip on structurally-equal results. The IPC returns
+        // a freshly-deserialized object on every call, so a naive
+        // `setSummary(next)` commits a state change React believes is
+        // meaningful, re-rendering every consumer (the banner + every
+        // AppShell child). The shape is three numbers — cheap to
+        // compare in full.
+        setSummary((prev) =>
+          prev !== null &&
+          prev.pending === next.pending &&
+          prev.stale === next.stale &&
+          prev.running === next.running
+            ? prev
+            : next,
+        );
+      })
       .catch((err) => {
         console.warn("usePendingJournals refresh failed", err);
       });

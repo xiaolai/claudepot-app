@@ -50,7 +50,13 @@ export function ProjectEnvPanel({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // Stale-while-revalidate: do NOT set loading=true on refetches.
+    // If we already have data (env !== null) keep showing it; the
+    // refresh swaps the content in atomically when it resolves. The
+    // initial mount still flashes the "Loading…" placeholder because
+    // `loading` starts true in useState. Without this guard, every
+    // parent re-render briefly collapsed the panel to "Loading…",
+    // displacing the Sessions section below by ~108 px.
     Promise.all([api.envFileList(projectPath), api.envVaultList()])
       .then(([e, vault]) => {
         if (cancelled) return;
@@ -111,7 +117,10 @@ export function ProjectEnvPanel({
     }
   }, [confirmDelete, projectPath, pushToast, fail]);
 
-  if (loading) {
+  // Show the loader only on the initial mount when we have no data
+  // yet. Refetches keep the prior content visible (stale-while-
+  // revalidate) so the section's height stays stable.
+  if (loading && env === null) {
     return (
       <section className="detail-section">
         <h3>Environment files</h3>

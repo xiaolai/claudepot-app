@@ -209,6 +209,25 @@ export function ProjectsSection({
   );
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
+  // Shared error-reporter for long-lived detail children
+  // (SessionDetail, ProjectDetail). An inline arrow here used to land
+  // a fresh function reference on every render of this section, which
+  // ProjectEnvPanel / PermissionPanel both depend on through their
+  // `fail` useCallback — the cascade caused redundant `.env*` and
+  // permission re-reads on every parent re-render (most visibly: the
+  // Sessions section below shaking 107 px when the Env panel briefly
+  // collapsed to "Loading…"). Stabilising it once at the top of the
+  // tree keeps both panels effectful only on their real deps.
+  //
+  // Modal `onError` handlers below (rename / remove / export / import)
+  // intentionally stay inline — each modal owns a different setter,
+  // they're short-lived, and they don't drive long-lived children, so
+  // a stable identity buys nothing.
+  const reportError = useCallback(
+    (msg: string) => pushToast("error", msg),
+    [pushToast],
+  );
+
   const refreshTokenRef = useRef(0);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -534,7 +553,7 @@ export function ProjectsSection({
                           setDetailRefreshSignal((n) => n + 1);
                           refresh();
                         }}
-                        onError={(msg) => pushToast("error", msg)}
+                        onError={reportError}
                         onBack={() => setOpenedSessionPath(null)}
                       />
                     ) : (
@@ -552,7 +571,7 @@ export function ProjectsSection({
                           setDetailRefreshSignal((n) => n + 1);
                           refresh();
                         }}
-                        onError={(msg) => pushToast("error", msg)}
+                        onError={reportError}
                         onOpenMaintenance={() => onSubRouteChange("maintenance")}
                         onOpenInConfig={() => setProjectTab("config")}
                         onOpenSession={(p) => setOpenedSessionPath(p)}

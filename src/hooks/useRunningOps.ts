@@ -5,6 +5,31 @@ import type { RunningOpInfo } from "../types";
 const POLL_INTERVAL_MS = 3_000;
 
 /**
+ * Tuple-equality over the fields that matter to the consumer surface
+ * (status strip, progress modal). Done field-by-field rather than a
+ * generic deep-equal so the cost is bounded and obvious; new fields
+ * on RunningOpInfo only matter here if a UI surface needs them, in
+ * which case they get added explicitly.
+ */
+function opsEqual(a: RunningOpInfo[], b: RunningOpInfo[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.op_id !== y.op_id ||
+      x.kind !== y.kind ||
+      x.old_path !== y.old_path ||
+      x.new_path !== y.new_path
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Polls the backend for currently-tracked ops so the RunningOpStrip
  * stays in sync even if a Tauri event is lost. Polling is cheap —
  * pure HashMap lookup behind the Tauri command — and is the only
@@ -28,7 +53,16 @@ export function useRunningOps(): {
   const refresh = useCallback(() => {
     api
       .runningOpsList()
-      .then(setOps)
+      .then((next) => {
+        // Identity-skip on structurally-equal results. Without this,
+        // each 3 s poll commits a fresh `[]` reference (the IPC always
+        // deserializes a new array), every `useState` consumer re-
+        // renders, and the cascade reaches into ProjectEnvPanel /
+        // PermissionPanel where it triggers redundant `.env*` re-reads
+        // and a visible loading flash. See dev-docs… well, this
+        // comment is the dev-doc.
+        setOps((prev) => (opsEqual(prev, next) ? prev : next));
+      })
       .catch((err) => {
         console.warn("useRunningOps refresh failed", err);
       });

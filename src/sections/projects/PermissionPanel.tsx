@@ -64,9 +64,13 @@ export function PermissionPanel({
   // Single-project fetch (not the full-tree `permissionList`). Re-runs
   // on `projectPath` change and on `reloadTick` bumps; the `cancelled`
   // guard keeps a slow in-flight fetch from clobbering a newer one.
+  //
+  // Stale-while-revalidate: don't flip loading=true on refetches when
+  // we already have data. The `loading || !perm` render branch below
+  // then only fires on first mount; later refetches swap the content
+  // in atomically. Same defect-class as the Env panel one step over.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     api
       .permissionGet(projectPath)
       .then((p) => {
