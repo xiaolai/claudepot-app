@@ -6,6 +6,142 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.39 — beta (unreleased)
+
+Reliability hardening release. Two rounds of crash/freeze auditing
+plus an audit-fix verification pass surfaced ten distinct hazards
+across the desktop app — every one of them latent in the v0.1.38
+surface or earlier. No new user-facing features; the goal is to
+eliminate the "Accounts pane is frozen on a locked keychain", the
+"op-progress modal hangs at in-progress forever after a worker
+panic", and the "Dock-blur shake on cold launch" symptom classes.
+
+### Fixed
+
+- **Titlebar drag works again after the 0.1.32 chrome-alignment
+  refactor.** Commit `463aee7` introduced an inner flex wrapper that
+  fills 100% of the chrome strip so a single `translateY` could pin
+  every chrome child onto the OS traffic-light centerline. The
+  wrapper did not carry `data-tauri-drag-region`, and Tauri 2's
+  injected mousedown handler is target-only — it checks
+  `event.target.hasAttribute('data-tauri-drag-region')` and does
+  not walk ancestors. So every mousedown landed on the inner
+  wrapper, the check failed, no drag fired. Re-added the attribute
+  to the inner wrapper and corrected the stale "inherits from
+  parent" comment that had been misleading future readers.
+- **Locked-keychain stalls no longer freeze the Accounts pane for
+  minutes.** Every `/usr/bin/security` invocation in
+  `cli_backend::storage` now runs through `tokio::process::Command`
+  with a 5 s `tokio::time::timeout` and `kill_on_drop(true)`, so a
+  TCC consent dialog the user doesn't see or a locked login
+  keychain that hangs on prompt can no longer stall the tokio worker
+  that called us. The change propagates through ~20 call sites
+  (`swap.rs`, `launcher.rs`, every service module that touches
+  credentials, plus the Tauri DTO + command layer); `AccountSummary`
+  construction moved from a sync `From<&Account>` impl to an async
+  `summary_for_account` free function, with sequential awaits so
+  macOS keychain unlock dialogs can't stack on the user. A new
+  JS-side `invokeWithTimeout` helper wraps the multi-account batch
+  IPCs (`account_list` 30 s, `verify_all_accounts` 60 s,
+  `fetch_all_usage` 60 s) and the single-account ones
+  (`verify_account`, `refresh_usage_for`, `account_remove`,
+  `sync_from_current_cc`, `account_add_from_current` — 15 s each;
+  `cli_use` 30 s) so a stuck Rust side surfaces as a typed
+  `IpcTimeoutError` the UI can render as Retry instead of an
+  indefinite spin. Four Desktop-side commands (`desktop_use`,
+  `desktop_adopt`, `desktop_clear`, `sync_from_current_desktop`)
+  got the same ceilings for symmetry.
+- **AppKit main-thread assertion no longer crashes on cold launch.**
+  The 300 ms and 1.3 s boot-time `traffic_light::emit` calls in
+  `lib.rs::run` were enqueued via `tauri::async_runtime::spawn`,
+  which lands them on a tokio worker. Inside `emit`,
+  `NSWindow.standardWindowButton(...)` and `convertRect:toView:` both
+  assert the main thread and abort the process with
+  `*** Assertion failure ... must be called from the main thread`.
+  A new `emit_on_main_thread` wrapper routes through
+  `WebviewWindow::run_on_main_thread`, with a docstring that flags
+  the call as load-bearing for any future caller that's not already
+  on the main thread.
+- **Op-progress modal no longer hangs at "in progress" forever after
+  a worker panic.** `spawn_op_thread`'s work closure was wrapped in
+  `std::panic::catch_unwind(AssertUnwindSafe(...))`. On panic, the
+  catch path downcasts the payload (`&'static str` and `String`
+  cases cover essentially every panic site in `claudepot-core`)
+  and calls `emit_terminal` with the translated error so the modal
+  resolves with a useful message and the `cp-op-terminal` event
+  carries an `error` status to the global listeners. A leaked
+  worker thread no longer takes the running-op record offline; the
+  user sees "internal error: <msg>" instead of an indefinite spinner.
+- **Mutex poison no longer cascades across every IPC that touches a
+  SQLite store.** A first `panic-while-holding-the-lock` (rusqlite
+  invariant violation, debug assertion, `unreachable!` reached by an
+  unexpected CC schema variant) would otherwise re-poison every
+  subsequent `.lock().expect(...)` and take the whole store offline
+  for the process lifetime. Consolidated the recovery pattern into
+  one shared helper at `claudepot_core::sync::recover_lock`
+  (log-warn + `poisoned.into_inner()`) and migrated nine call sites
+  to use it: the four SQLite stores patched in round one
+  (`account`, `env_vault`, `keys`, `session_live::runtime`'s
+  exit-notify slot), the round-two gap in
+  `session_live::metrics_store`, the original site in
+  `notification_log`, and the three previously-silent sites
+  (`memory_log`, `activity::index`, `session_index`) that recovered
+  via `unwrap_or_else(into_inner)` without logging. Single source of
+  policy, single source of truth.
+- **Login slot no longer stays held forever after a worker-thread
+  panic.** `LoginStateHandle::clear` previously used
+  `if let Ok(mut g) = self.slot.lock()` and silently no-oped on
+  poison — the slot stayed `Some(Notify)` and every subsequent
+  `account_login_start` rejected as "login already in progress" for
+  the process lifetime. Switched to the same `into_inner` recovery
+  pattern as the SQLite stores; added a regression test that
+  programmatically poisons the mutex via a panicking child thread
+  and asserts `clear()` still drains the slot.
+- **`sessions.db` and `activity_metrics.db` no longer grow without
+  bound.** `LiveRuntime::start` writes one `metrics_tick` row per
+  live session per 500 ms heartbeat; without pruning, a heavy-use
+  install accumulated rows forever even though `prune_before` had
+  been defined since v0.1.31 — it was never called. The
+  `activity_cards` table had the same shape: per-session pruning
+  ran only when the source `.jsonl` disappeared. Both tables now
+  get a 90-day retention prune at runtime startup, with the cutoff
+  centralized in a new `claudepot_core::retention` module so the
+  two sites can't drift.
+- **`Claude.app` no longer goes missing after an interrupted
+  update.** `install_via_zip` does `fs::rename(target, &backup)`
+  before the new bundle's `ditto` copy completes; a SIGKILL, OOM,
+  or hard reboot in that window left `Claude.app` absent on disk
+  with `Claude.app.bak-<ts>` orphaned next to it. A new
+  `recover_orphan_backup` runs at every startup (right after
+  `migrate_repair_tree`), scans `target.parent()` for siblings
+  matching the bak-`<unix_ts>` shape, picks the highest timestamp,
+  renames it back into place, and re-runs `codesign --verify`
+  against the restored bundle. A failed re-verify quarantines the
+  suspicious bundle to `<target>.bak-restored-but-unverified-<ts>`
+  and reports `OrphanRecovery::Failed`, so a planted hostile
+  `Claude.app.bak-<future_ts>` can't ride to install via the
+  recovery path.
+- **`TranscriptResolver`'s first-line-timestamp cache no longer leaks
+  entries for deleted transcripts.** The cache is keyed by `PathBuf`;
+  every scanned `.jsonl` left an entry that persisted for the
+  runtime's lifetime even after the source file was deleted (most
+  commonly via `claudepot session prune --trash`). A new
+  `evict_missing` sweep runs at every runtime start alongside the
+  metrics-tick prune, `path.exists()`-tests each entry, and drops
+  the stale ones. 10 000 entries weigh roughly 1–3 MB so this is
+  hygiene rather than crisis, but it keeps a year-old install from
+  carrying around dead `PathBuf` keys.
+
+### Changed
+
+- **CHANGELOG retention semantics documented inline.** The new
+  `claudepot_core::retention` module carries a docstring that
+  explains why the `activity_cards` and `metrics_tick` retention
+  windows must match (a heavy-use user with cards for sessions
+  whose metrics have been pruned, or vice versa, would see a
+  confusing Activities-vs-Trends gap), and pins the value to
+  `memory_log::MAX_ROW_AGE_NS`'s 90-day budget.
+
 ## 0.1.38 — beta (unreleased)
 
 Four findings from a Codex 5-dimension audit of the v0.1.37 surface
