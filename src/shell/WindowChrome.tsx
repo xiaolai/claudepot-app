@@ -18,11 +18,13 @@ interface WindowChromeProps {
 /**
  * Top chrome (height `--chrome-height`, 38px): breadcrumb on the
  * left, ⌘K palette hint center-right, theme toggle far right.
- * `data-tauri-drag-region` on the outer strip makes every pixel a
- * window-drag handle; interactive children stop mousedown from
- * propagating so they behave as buttons, not drag seeds. The
- * breadcrumb inherits drag from the parent without needing its own
- * attribute, so the text stays selectable.
+ * `data-tauri-drag-region` is on BOTH the outer strip and the inner
+ * flex wrapper because Tauri 2's mousedown handler is target-only —
+ * it checks `event.target.hasAttribute('data-tauri-drag-region')`
+ * and does not walk ancestors, so the wrapper that physically
+ * receives the click must carry the attribute itself. Interactive
+ * children stop mousedown from propagating so they behave as
+ * buttons, not drag seeds.
  * Left padding clears the OS traffic lights via `--chrome-inset-left`,
  * which `src/lib/trafficLights.ts` rewrites at runtime to track the
  * OS-placed cluster's actual right edge.
@@ -60,10 +62,12 @@ export function WindowChrome({
     >
       {/* Inner wrapper carries the flex layout AND the single
           translateY that pins every chrome child onto the OS-
-          reported traffic-light centerline. Drag region is inherited
-          from the outer `data-tauri-drag-region` so the wrapper
-          itself doesn't need it. */}
+          reported traffic-light centerline. Must repeat
+          `data-tauri-drag-region` because Tauri 2's mousedown
+          handler is target-only (no ancestor walk) and this wrapper
+          fills 100% of the outer strip, so every click lands here. */}
       <div
+        data-tauri-drag-region
         style={{
           height: "100%",
           display: "flex",
@@ -84,7 +88,10 @@ export function WindowChrome({
           transform: `translateY(${trafficLightOffset})`,
         }}
       >
-      {/* breadcrumb / cwd — drag inherits from the outer strip */}
+      {/* breadcrumb / cwd — text is plain (no drag attribute); the
+          containing flex wrapper carries it. The breadcrumb's text
+          itself stays non-draggable so `title={cwd}` hover discloses
+          the full path without competing with window drag. */}
       <div
         style={{
           display: "flex",
