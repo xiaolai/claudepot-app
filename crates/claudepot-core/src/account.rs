@@ -48,9 +48,11 @@ pub struct AccountStore {
 impl AccountStore {
     /// Internal accessor — kept `pub(crate)` so sibling modules inside
     /// `claudepot-core` (e.g. `account_verification`) can run their own
-    /// SQL without duplicating the lock/poisoning handling.
+    /// SQL without duplicating the lock/poisoning handling. Recovers
+    /// from a poisoned mutex via [`crate::sync::recover_lock`]; see
+    /// that helper for the project-wide poisoning policy.
     pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
-        self.db.lock().expect("account store mutex poisoned")
+        crate::sync::recover_lock(&self.db, "account store")
     }
 
     /// Test-only helper: drop the accounts table so subsequent queries fail.

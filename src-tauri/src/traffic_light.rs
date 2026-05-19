@@ -108,8 +108,32 @@ pub fn traffic_light_metrics<R: Runtime>(window: WebviewWindow<R>) -> Option<Tra
 /// Emit the current metrics to the renderer if they can be computed.
 /// No-op on non-macOS and on platforms where the NSWindow pointer is
 /// not available (e.g. headless test runners).
+///
+/// **Must be called from the main thread on macOS.** `compute` calls
+/// into AppKit (`NSWindow.standardWindowButton`, `convertRect:toView:`,
+/// `frame`); those methods assert the main thread and crash the process
+/// with `*** Assertion failure ... must be called from the main thread`
+/// if invoked from a tokio worker or any other secondary thread. Call
+/// sites that may not be on the main thread should use
+/// [`emit_on_main_thread`] instead, which routes through
+/// `WebviewWindow::run_on_main_thread`.
 pub fn emit<R: Runtime>(window: &WebviewWindow<R>) {
     if let Some(m) = compute(window) {
         let _ = window.emit("traffic-light-metrics", m);
+    }
+}
+
+/// Main-thread-safe wrapper around [`emit`]. Schedules the AppKit-
+/// touching body via `WebviewWindow::run_on_main_thread`, so callers in
+/// async / tokio-worker contexts can dispatch a metrics emit without
+/// crashing on the AppKit main-thread assertion.
+///
+/// Fires-and-forgets: any error from `run_on_main_thread` is logged at
+/// `warn` and otherwise ignored, mirroring `emit`'s `let _ = …` for the
+/// emit-error path.
+pub fn emit_on_main_thread<R: Runtime>(window: &WebviewWindow<R>) {
+    let win = window.clone();
+    if let Err(e) = window.run_on_main_thread(move || emit(&win)) {
+        tracing::warn!("traffic_light::emit_on_main_thread: dispatch failed: {e}");
     }
 }

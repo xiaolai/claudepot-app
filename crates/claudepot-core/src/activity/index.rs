@@ -110,7 +110,7 @@ impl ActivityIndex {
     }
 
     fn db(&self) -> MutexGuard<'_, Connection> {
-        self.db.lock().unwrap_or_else(|p| p.into_inner())
+        crate::sync::recover_lock(&self.db, "activity_cards")
     }
 
     /// Insert one card. Idempotent on `(session_path, event_uuid)` —
@@ -310,6 +310,22 @@ impl ActivityIndex {
         let n = db.execute(
             "DELETE FROM activity_cards WHERE session_path = ?1",
             params![session_path.to_string_lossy().as_ref()],
+        )?;
+        Ok(n)
+    }
+
+    /// Delete every card with `ts_ms < cutoff_ms`. Called sparingly
+    /// (once a day on startup) so the table stays bounded across
+    /// months of sustained use — the previous shape relied on
+    /// `delete_for_session` firing only when the source `.jsonl` was
+    /// gone, which left cards from long-finished sessions hanging
+    /// around until the user manually pruned the transcript. Returns
+    /// the row count deleted.
+    pub fn prune_before(&self, cutoff_ms: i64) -> Result<usize, ActivityIndexError> {
+        let db = self.db();
+        let n = db.execute(
+            "DELETE FROM activity_cards WHERE ts_ms < ?1",
+            params![cutoff_ms],
         )?;
         Ok(n)
     }

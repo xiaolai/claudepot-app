@@ -93,37 +93,43 @@ impl From<&claudepot_core::account::Account> for AccountSummaryBasic {
 /// callers should prefer the `From<&AccountSummaryView>` impl, which
 /// keeps Keychain I/O upstream in `list_summaries` where it can be
 /// sequenced.
-impl From<&claudepot_core::account::Account> for AccountSummary {
-    fn from(a: &claudepot_core::account::Account) -> Self {
-        let health =
-            claudepot_core::services::account_service::token_health(a.uuid, a.has_cli_credentials);
-        let credentials_healthy = health.status.starts_with("valid") || health.status == "expired";
-        let desktop_profile_on_disk = claudepot_core::paths::desktop_profile_dir(a.uuid).exists();
-        Self {
-            uuid: a.uuid.to_string(),
-            email: a.email.clone(),
-            org_name: a.org_name.clone(),
-            subscription_type: a.subscription_type.clone(),
-            is_cli_active: a.is_cli_active,
-            is_desktop_active: a.is_desktop_active,
-            has_cli_credentials: a.has_cli_credentials,
-            has_desktop_profile: a.has_desktop_profile,
-            last_cli_switch: a.last_cli_switch,
-            last_desktop_switch: a.last_desktop_switch,
-            token_status: health.status,
-            token_remaining_mins: health.remaining_mins,
-            credentials_healthy,
-            verify_status: a.verify_status.clone(),
-            verified_email: a.verified_email.clone(),
-            verified_at: a.verified_at,
-            // Derive from verify_status, not `verified_email != email`:
-            // update_verification() preserves verified_email across
-            // rejected/network_error so a transient blip doesn't wipe
-            // history; comparing emails would spuriously paint stale
-            // history as drift.
-            drift: a.verify_status == "drift",
-            desktop_profile_on_disk,
-        }
+///
+/// Async because `token_health` is async — every credential read
+/// goes through the macOS keychain subprocess (or file storage on
+/// other platforms), and both branches need to be reachable without
+/// blocking the tokio worker that called us. Callers that previously
+/// used `AccountSummary::from(&account)` should switch to
+/// `summary_for_account(&account).await`.
+pub async fn summary_for_account(a: &claudepot_core::account::Account) -> AccountSummary {
+    let health =
+        claudepot_core::services::account_service::token_health(a.uuid, a.has_cli_credentials)
+            .await;
+    let credentials_healthy = health.status.starts_with("valid") || health.status == "expired";
+    let desktop_profile_on_disk = claudepot_core::paths::desktop_profile_dir(a.uuid).exists();
+    AccountSummary {
+        uuid: a.uuid.to_string(),
+        email: a.email.clone(),
+        org_name: a.org_name.clone(),
+        subscription_type: a.subscription_type.clone(),
+        is_cli_active: a.is_cli_active,
+        is_desktop_active: a.is_desktop_active,
+        has_cli_credentials: a.has_cli_credentials,
+        has_desktop_profile: a.has_desktop_profile,
+        last_cli_switch: a.last_cli_switch,
+        last_desktop_switch: a.last_desktop_switch,
+        token_status: health.status,
+        token_remaining_mins: health.remaining_mins,
+        credentials_healthy,
+        verify_status: a.verify_status.clone(),
+        verified_email: a.verified_email.clone(),
+        verified_at: a.verified_at,
+        // Derive from verify_status, not `verified_email != email`:
+        // update_verification() preserves verified_email across
+        // rejected/network_error so a transient blip doesn't wipe
+        // history; comparing emails would spuriously paint stale
+        // history as drift.
+        drift: a.verify_status == "drift",
+        desktop_profile_on_disk,
     }
 }
 

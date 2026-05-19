@@ -113,34 +113,26 @@ pub(crate) fn validate_project_path(project_path: &str) -> Result<(), String> {
 /// `async fn` is load-bearing: Tauri 2 dispatches sync `#[command] fn`
 /// handlers on the main thread (the same thread that serves the
 /// webview and runs the OS event loop). This handler does N
-/// synchronous Keychain lookups per account via `token_health` →
+/// Keychain lookups per account via `token_health` →
 /// `swap::load_private`, so a sync dispatch would freeze the window
 /// for the sum of those round-trips. `async fn` moves the body to a
-/// Tokio worker; the sync I/O blocks that worker instead of the UI
-/// thread. Same rationale / pattern as the `session_*` commands
-/// (commit 4ad707e).
+/// Tokio worker; each underlying `/usr/bin/security` invocation now
+/// runs through `tokio::process::Command` with a 5 s timeout (see
+/// `cli_backend::storage`), so a hung subprocess cannot stall this
+/// handler indefinitely.
 ///
-/// The Keychain reads themselves are routed through
-/// `tauri::async_runtime::spawn_blocking` so they run on Tokio's
-/// blocking pool instead of an async worker — same threading guard
-/// as the `commands_config` / `commands_keys` handlers. Sequential
-/// order is preserved inside `list_summaries` so macOS unlock
-/// dialogs don't stack.
+/// Sequential order is preserved inside `list_summaries` so macOS
+/// unlock dialogs don't stack.
 ///
 /// **Pure read.** Any DB ↔ truth-on-disk drift is reconciled by
 /// [`accounts_reconcile`] (called once at startup in `lib.rs::run`
 /// and on user request). `account_list` never writes to the store.
 #[tauri::command]
 pub async fn account_list() -> Result<Vec<AccountSummary>, String> {
-    let views = tauri::async_runtime::spawn_blocking(move || {
-        let store = open_store()?;
-        let views = services::account_summary::list_summaries(&store)
-            .map_err(|e| format!("list failed: {e}"))?;
-        Ok::<_, String>(views)
-    })
-    .await
-    .map_err(|e| format!("account_list join: {e}"))??;
-
+    let store = open_store()?;
+    let views = services::account_summary::list_summaries(&store)
+        .await
+        .map_err(|e| format!("list failed: {e}"))?;
     Ok(views.iter().map(AccountSummary::from).collect())
 }
 
@@ -156,14 +148,10 @@ pub async fn account_list() -> Result<Vec<AccountSummary>, String> {
 /// Keychain syscalls and must stay off async workers.
 #[tauri::command]
 pub async fn accounts_reconcile() -> Result<ReconcileReportDto, String> {
-    let report = tauri::async_runtime::spawn_blocking(move || {
-        let store = open_store()?;
-        services::account_service::reconcile_all(&store)
-            .map_err(|e| format!("reconcile failed: {e}"))
-    })
-    .await
-    .map_err(|e| format!("accounts_reconcile join: {e}"))??;
-
+    let store = open_store()?;
+    let report = services::account_service::reconcile_all(&store)
+        .await
+        .map_err(|e| format!("reconcile failed: {e}"))?;
     Ok(ReconcileReportDto::from(&report))
 }
 
@@ -569,6 +557,6 @@ mod tests {
 
         // Cleanup keychain side: nothing was saved here, but if a
         // previous run left a blob on this uuid, drop it.
-        let _ = swap::delete_private(a.uuid);
+        let _ = swap::delete_private(a.uuid).await;
     }
 }

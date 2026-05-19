@@ -13,6 +13,7 @@ use uuid::Uuid;
 /// Get a fresh access token for an account, refreshing if expired.
 pub async fn get_access_token(account_id: Uuid) -> Result<String, LauncherError> {
     let blob_str = swap::load_private(account_id)
+        .await
         .map_err(|_| LauncherError::NoStoredCredentials(account_id))?;
     let blob = CredentialBlob::from_json(&blob_str)
         .map_err(|e| LauncherError::CorruptBlob(e.to_string()))?;
@@ -31,6 +32,7 @@ pub async fn get_access_token(account_id: Uuid) -> Result<String, LauncherError>
     // Save the rotated credentials, preserving original subscription metadata
     let new_blob_str = refresh::build_blob(&token_resp, Some(&blob));
     swap::save_private(account_id, &new_blob_str)
+        .await
         .map_err(|e| LauncherError::SaveFailed(e.to_string()))?;
 
     Ok(token_resp.access_token)
@@ -83,12 +85,12 @@ mod tests {
         let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
 
-        swap::save_private(id, &fresh_blob_json()).unwrap();
+        swap::save_private(id, &fresh_blob_json()).await.unwrap();
 
         let token = get_access_token(id).await.unwrap();
         assert_eq!(token, "sk-ant-oat01-test");
 
-        swap::delete_private(id).unwrap();
+        swap::delete_private(id).await.unwrap();
     }
 
     #[tokio::test]
@@ -107,12 +109,12 @@ mod tests {
         let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
 
-        swap::save_private(id, "not json").unwrap();
+        swap::save_private(id, "not json").await.unwrap();
 
         let result = get_access_token(id).await;
         assert!(matches!(result, Err(LauncherError::CorruptBlob(_))));
 
-        swap::delete_private(id).unwrap();
+        swap::delete_private(id).await.unwrap();
     }
 
     #[tokio::test]
@@ -120,12 +122,12 @@ mod tests {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
-        swap::save_private(id, &fresh_blob_json()).unwrap();
+        swap::save_private(id, &fresh_blob_json()).await.unwrap();
 
         let result = run(id, &[]).await;
         assert!(matches!(result, Err(LauncherError::NoCommand)));
 
-        swap::delete_private(id).unwrap();
+        swap::delete_private(id).await.unwrap();
     }
 
     #[tokio::test]
@@ -133,7 +135,7 @@ mod tests {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
-        swap::save_private(id, &fresh_blob_json()).unwrap();
+        swap::save_private(id, &fresh_blob_json()).await.unwrap();
 
         // Cross-platform: `echo` is a cmd.exe builtin on Windows (no .exe),
         // but `cmd /c exit 0` always works. On Unix, prefer `true`.
@@ -145,7 +147,7 @@ mod tests {
         let exit_code = run(id, &args).await.unwrap();
         assert_eq!(exit_code, 0);
 
-        swap::delete_private(id).unwrap();
+        swap::delete_private(id).await.unwrap();
     }
 
     #[tokio::test]
@@ -153,12 +155,12 @@ mod tests {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
-        swap::save_private(id, &fresh_blob_json()).unwrap();
+        swap::save_private(id, &fresh_blob_json()).await.unwrap();
 
         let args = vec!["/nonexistent/binary/that/doesnt/exist".to_string()];
         let result = run(id, &args).await;
         assert!(matches!(result, Err(LauncherError::SpawnFailed(_))));
 
-        swap::delete_private(id).unwrap();
+        swap::delete_private(id).await.unwrap();
     }
 }

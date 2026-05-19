@@ -115,6 +115,7 @@ async fn clear_credentials_with_platform_inner(
                 {
                     Ok(()) => {
                         cli_backend::swap::save_private(uuid, blob_str)
+                            .await
                             .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
                     }
                     Err(e) if force => {
@@ -283,10 +284,10 @@ mod tests {
             .unwrap();
 
         // Outgoing blob saved to private storage.
-        let saved = cli_backend::swap::load_private(account.uuid).unwrap();
+        let saved = cli_backend::swap::load_private(account.uuid).await.unwrap();
         assert_eq!(saved, blob_json);
 
-        cli_backend::swap::delete_private(account.uuid).unwrap();
+        cli_backend::swap::delete_private(account.uuid).await.unwrap();
     }
 
     #[tokio::test]
@@ -320,7 +321,7 @@ mod tests {
         // Active pointer must still be set — we refused before any cleanup.
         assert!(store.active_cli_uuid().unwrap().is_some());
         // The wrong blob did NOT land under active uuid's slot.
-        assert!(cli_backend::swap::load_private(account.uuid).is_err());
+        assert!(cli_backend::swap::load_private(account.uuid).await.is_err());
     }
 
     #[tokio::test]

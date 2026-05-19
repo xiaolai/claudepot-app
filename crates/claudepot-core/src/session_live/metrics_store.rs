@@ -47,6 +47,18 @@ pub struct MetricsStore {
     conn: Mutex<Connection>,
 }
 
+/// Thin shim over [`crate::sync::recover_lock`] so the rest of this
+/// file keeps calling `lock_inner(&self.conn)` without changing.
+/// The previous shape returned `MetricsError::Sqlite(InvalidQuery)` on
+/// poison — that silently killed every subsequent `record_tick` for the
+/// process lifetime, exactly the cascade the round-1 fix swept the
+/// other four stores to prevent. rusqlite's `unchecked_transaction`
+/// rolls back on guard drop, so a panic mid-transaction leaves the
+/// connection in a clean state when we re-acquire here.
+fn lock_inner(m: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
+    crate::sync::recover_lock(m, "metrics_store")
+}
+
 impl MetricsStore {
     /// Open the default store at `~/.claudepot/activity_metrics.db`.
     pub fn open_default() -> Result<Self, MetricsError> {
@@ -85,10 +97,7 @@ impl MetricsStore {
         ts_ms: i64,
         sessions: &[LiveSessionSummary],
     ) -> Result<(), MetricsError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        let conn = lock_inner(&self.conn);
         let tx_guard = conn.unchecked_transaction()?;
         for s in sessions {
             let status_s = match s.status {
@@ -117,10 +126,7 @@ impl MetricsStore {
     /// (once a day on startup) — keeps the DB bounded so a month of
     /// constant use doesn't balloon the file.
     pub fn prune_before(&self, cutoff_ms: i64) -> Result<usize, MetricsError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        let conn = lock_inner(&self.conn);
         let n = conn.execute(
             "DELETE FROM metrics_tick WHERE ts_ms < ?1",
             rusqlite::params![cutoff_ms],
@@ -146,10 +152,7 @@ impl MetricsStore {
         }
         let total = (to_ms - from_ms).max(1) as f64;
         let bucket_width = total / bucket_count as f64;
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        let conn = lock_inner(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT ts_ms, session_id FROM metrics_tick \
              WHERE ts_ms >= ?1 AND ts_ms < ?2",
@@ -177,10 +180,7 @@ impl MetricsStore {
     /// `errored` overlay. Used for the error-burst sparkline and the
     /// headline "errors today" stat.
     pub fn error_count(&self, from_ms: i64, to_ms: i64) -> Result<u64, MetricsError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        let conn = lock_inner(&self.conn);
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM metrics_tick \
              WHERE ts_ms >= ?1 AND ts_ms < ?2 AND errored = 1",

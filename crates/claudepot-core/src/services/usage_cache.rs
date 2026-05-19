@@ -225,7 +225,7 @@ impl UsageCache {
         //    "inflight fetch was cancelled" (audit M9). We also delay
         //    the inflight-cleanup to AFTER the broadcast so new callers
         //    don't slip past the dedupe and duplicate the work.
-        let access_token = match self.load_access_token(uuid) {
+        let access_token = match self.load_access_token(uuid).await {
             Ok(Some(token)) => token,
             Ok(None) => {
                 let _ = tx.send(Some(FetchOutcome::NoBlob));
@@ -533,8 +533,8 @@ impl UsageCache {
     /// - blob expired → `Err(TokenExpired)` — caller's graceful path
     ///   returns None so the UI shows blank until reconciliation rotates
     ///   the slot
-    fn load_access_token(&self, uuid: Uuid) -> Result<Option<String>, UsageFetchError> {
-        let blob_str = match swap::load_private(uuid) {
+    async fn load_access_token(&self, uuid: Uuid) -> Result<Option<String>, UsageFetchError> {
+        let blob_str = match swap::load_private(uuid).await {
             Ok(s) => s,
             Err(_) => return Ok(None),
         };
@@ -605,7 +605,13 @@ impl<'a> Drop for InflightGuard<'a> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
+    // See cli_backend/swap_tests.rs: tests serialize through
+    // `lock_data_dir()` (a `Mutex<()>`) so they don't trample the
+    // shared `CLAUDEPOT_DATA_DIR` env var. That guard is held
+    // across `.await` — single-threaded, never poisoned, never
+    // contended in a way that could deadlock.
     use super::*;
     use crate::oauth::usage::UsageWindow;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -893,38 +899,38 @@ mod tests {
     //    explicit coverage for "fresh → returns token", "expired →
     //    TokenExpired", "missing → Ok(None)", "corrupt → FetchFailed".
 
-    #[test]
-    fn test_load_access_token_fresh_blob_returns_token() {
+    #[tokio::test]
+    async fn test_load_access_token_fresh_blob_returns_token() {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let uuid = uuid::Uuid::new_v4();
-        crate::cli_backend::swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+        crate::cli_backend::swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
 
         let (fetcher, _) = MockFetcher::new(0.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
-        let token = cache.load_access_token(uuid).unwrap();
+        let token = cache.load_access_token(uuid).await.unwrap();
         assert_eq!(token.as_deref(), Some("sk-ant-oat01-test"));
-        crate::cli_backend::swap::delete_private(uuid).unwrap();
+        crate::cli_backend::swap::delete_private(uuid).await.unwrap();
     }
 
-    #[test]
-    fn test_load_access_token_expired_blob_returns_token_expired() {
+    #[tokio::test]
+    async fn test_load_access_token_expired_blob_returns_token_expired() {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let uuid = uuid::Uuid::new_v4();
-        crate::cli_backend::swap::save_private(uuid, &crate::testing::expired_blob_json()).unwrap();
+        crate::cli_backend::swap::save_private(uuid, &crate::testing::expired_blob_json()).await.unwrap();
 
         let (fetcher, _) = MockFetcher::new(0.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
         assert!(matches!(
-            cache.load_access_token(uuid),
+            cache.load_access_token(uuid).await,
             Err(UsageFetchError::TokenExpired)
         ));
-        crate::cli_backend::swap::delete_private(uuid).unwrap();
+        crate::cli_backend::swap::delete_private(uuid).await.unwrap();
     }
 
-    #[test]
-    fn test_load_access_token_missing_blob_returns_ok_none() {
+    #[tokio::test]
+    async fn test_load_access_token_missing_blob_returns_ok_none() {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let uuid = uuid::Uuid::new_v4();
@@ -932,22 +938,22 @@ mod tests {
 
         let (fetcher, _) = MockFetcher::new(0.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
-        assert!(matches!(cache.load_access_token(uuid), Ok(None)));
+        assert!(matches!(cache.load_access_token(uuid).await, Ok(None)));
     }
 
-    #[test]
-    fn test_load_access_token_corrupt_blob_returns_fetch_failed() {
+    #[tokio::test]
+    async fn test_load_access_token_corrupt_blob_returns_fetch_failed() {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let uuid = uuid::Uuid::new_v4();
-        crate::cli_backend::swap::save_private(uuid, "not-json-at-all").unwrap();
+        crate::cli_backend::swap::save_private(uuid, "not-json-at-all").await.unwrap();
 
         let (fetcher, _) = MockFetcher::new(0.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
         assert!(matches!(
-            cache.load_access_token(uuid),
+            cache.load_access_token(uuid).await,
             Err(UsageFetchError::FetchFailed(_))
         ));
-        crate::cli_backend::swap::delete_private(uuid).unwrap();
+        crate::cli_backend::swap::delete_private(uuid).await.unwrap();
     }
 }

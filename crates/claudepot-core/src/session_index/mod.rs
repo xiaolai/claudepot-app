@@ -165,7 +165,7 @@ impl SessionIndex {
     /// roll back at this layer. Project rules ("no `expect` in core")
     /// make the previous `.expect(...)` a hard violation.
     pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
-        self.db.lock().unwrap_or_else(|p| p.into_inner())
+        crate::sync::recover_lock(&self.db, "session_index")
     }
 
     /// Return the stored `meta.schema_version`. Primarily a test hook

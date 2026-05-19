@@ -86,8 +86,10 @@ impl VaultStore {
         Ok(Self { db: Mutex::new(db) })
     }
 
+    /// Recover from a poisoned mutex via [`crate::sync::recover_lock`];
+    /// see that helper for the project-wide poisoning policy.
     fn db(&self) -> MutexGuard<'_, Connection> {
-        self.db.lock().expect("env vault mutex poisoned")
+        crate::sync::recover_lock(&self.db, "env vault")
     }
 
     /// All vault secrets, newest-updated first. No plaintext crosses.
