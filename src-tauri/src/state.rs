@@ -75,10 +75,31 @@ pub struct LoginStateHandle {
 impl LoginStateHandle {
     /// Drop the active login slot. Idempotent — safe to call multiple
     /// times even if no login was running.
+    ///
+    /// Mirrors the poison-recovery policy used by the SQLite stores
+    /// (`account.rs`, `env_vault/store.rs`, `keys/store.rs`,
+    /// `session_live/metrics_store.rs`) and `notification_log`: if the
+    /// mutex is poisoned by an earlier worker-thread panic, recover via
+    /// `into_inner()` and clear the slot anyway. The previous
+    /// `if let Ok(mut g) = self.slot.lock()` shape silently no-oped on
+    /// poison, leaving the in-process login lock held forever — every
+    /// subsequent `account_login_start` would then reject with "login
+    /// already in progress" for the process lifetime. The whole point
+    /// of `clear()` existing is to make sure that lock gets released
+    /// even when something blows up upstream, so the policy is to
+    /// recover and clear.
     pub fn clear(&self) {
-        if let Ok(mut g) = self.slot.lock() {
-            g.take();
-        }
+        let mut g = match self.slot.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!(
+                    "LoginStateHandle::clear: slot mutex was poisoned by an earlier panic; \
+                     clearing anyway so the login slot doesn't stay held forever"
+                );
+                poisoned.into_inner()
+            }
+        };
+        g.take();
     }
 }
 
@@ -119,6 +140,52 @@ mod tests {
         // Clear is idempotent.
         handle.clear();
         assert!(state.active.lock().unwrap().is_none());
+    }
+
+    /// Poison-recovery: if a worker thread panics while holding the
+    /// slot's mutex, the slot is poisoned for the process lifetime.
+    /// `clear()` must still drain the slot anyway — otherwise every
+    /// future `account_login_start` would reject with "login already
+    /// in progress." This test simulates the panic-while-holding by
+    /// poisoning the mutex explicitly via a panicking child thread.
+    #[test]
+    fn login_state_handle_clear_recovers_from_poisoned_mutex() {
+        let state = LoginState::default();
+        let handle = state.clone_handle();
+
+        // Install something in the slot so we can confirm clear()
+        // actually emptied it (rather than the slot just happening to
+        // be empty).
+        {
+            let mut g = state.active.lock().unwrap();
+            *g = Some(Arc::new(Notify::new()));
+        }
+
+        // Poison the mutex: spawn a thread, lock, panic.
+        let slot_for_panic = Arc::clone(&state.active);
+        let join = std::thread::spawn(move || {
+            let _g = slot_for_panic.lock().unwrap();
+            panic!("intentional panic to poison the mutex");
+        });
+        let _ = join.join();
+        // Confirm the mutex is actually poisoned now.
+        assert!(state.active.is_poisoned(), "test setup: mutex must be poisoned");
+
+        // The fix: clear() recovers via `into_inner()` and drains the
+        // slot, so a subsequent login_start can take it. Before the
+        // fix, this assertion failed — the `if let Ok(...)` branch was
+        // skipped silently and the slot stayed occupied.
+        handle.clear();
+        let g = state.active.lock();
+        // The mutex remains poisoned (recovery doesn't unpoison it),
+        // but we can still read the slot through `into_inner` on a
+        // poisoned guard. Use the same recovery pattern in the
+        // assertion.
+        let inner = match g {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        assert!(inner.is_none(), "clear() must drain the slot even on poison");
     }
 }
 

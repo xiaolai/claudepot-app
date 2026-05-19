@@ -243,7 +243,7 @@ pub async fn verify_account(uuid: String) -> Result<AccountSummary, String> {
         .find_by_uuid(id)
         .map_err(|e| format!("lookup failed: {e}"))?
         .ok_or_else(|| "account not found".to_string())?;
-    Ok(AccountSummary::from(&account))
+    Ok(crate::dto::summary_for_account(&account).await)
 }
 
 /// Reconcile every account's blob identity against `/api/oauth/profile`.
@@ -291,7 +291,14 @@ pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
     // the values can differ from what verify_account_identity saw if a
     // refresh rotated the access_token in between.
     let refreshed = store.list().map_err(|e| format!("list failed: {e}"))?;
-    Ok(refreshed.iter().map(AccountSummary::from).collect())
+    // Sequential rather than concurrent: macOS surfaces one unlock
+    // dialog per locked-keychain access; parallel reads would stack
+    // dialogs on the user. Mirrors `account_summary::list_summaries`.
+    let mut out: Vec<AccountSummary> = Vec::with_capacity(refreshed.len());
+    for a in &refreshed {
+        out.push(crate::dto::summary_for_account(a).await);
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

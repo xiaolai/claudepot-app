@@ -777,6 +777,16 @@ impl claudepot_core::services::account_service::VerifyProgressSink for TauriVeri
 /// `std::thread::spawn` rather than `tokio::spawn`: Tauri's sync
 /// command path doesn't always have a reactor running, and the work
 /// is blocking I/O anyway.
+///
+/// **Panic guard.** The work closure is invoked inside
+/// `catch_unwind`. A panic inside core (e.g. one of the
+/// `.lock().expect("... mutex poisoned")` sites that can cascade after
+/// a first panic-while-holding) would otherwise silently kill the
+/// worker thread without `emit_terminal` ever firing, leaving the
+/// op-progress modal stuck at "in progress" forever. On catch, we
+/// translate the panic payload into a typed terminal error so the
+/// modal closes with a useful message and the `cp-op-terminal` event
+/// carries an `error` status to the global listeners.
 pub fn spawn_op_thread<F>(app: AppHandle, ops: RunningOps, op_id: String, work: F)
 where
     F: FnOnce(TauriProgressSink, AppHandle, RunningOps, String) + Send + 'static,
@@ -787,6 +797,44 @@ where
             op_id: op_id.clone(),
             ops: ops.clone(),
         };
-        work(sink, app, ops, op_id);
+        let app_for_panic = app.clone();
+        let ops_for_panic = ops.clone();
+        let op_id_for_panic = op_id.clone();
+        // `AssertUnwindSafe` is load-bearing: the work closure
+        // closes over Tauri handles, mutex-backed stores, and
+        // sometimes `AccountStore` — none of which implement
+        // `UnwindSafe`. We've reasoned about the panic semantics
+        // here: after a panic we ONLY emit a terminal event, which
+        // touches the RunningOps map (poisoned-on-panic-safe in
+        // its own right) and the Tauri emit channel. We never
+        // re-use captured state from the panicked closure on the
+        // happy path past the catch_unwind call.
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                work(sink, app, ops, op_id);
+            }));
+        if let Err(panic_payload) = result {
+            // Best-effort extraction of the panic message — the
+            // payload is typically `&str` or `String`. Anything
+            // else falls back to a generic label so the user sees
+            // SOMETHING instead of a hang.
+            let msg = if let Some(s) = panic_payload.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "op worker panicked (unknown payload type)".to_string()
+            };
+            tracing::error!(
+                op_id = %op_id_for_panic,
+                "spawn_op_thread: work closure panicked: {msg}"
+            );
+            emit_terminal(
+                &app_for_panic,
+                &ops_for_panic,
+                &op_id_for_panic,
+                Some(format!("internal error: {msg}")),
+            );
+        }
     });
 }

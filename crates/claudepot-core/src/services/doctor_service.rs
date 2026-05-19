@@ -87,7 +87,7 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
         Ok(a) => (a, None),
         Err(e) => (vec![], Some(format!("failed to list accounts: {e}"))),
     };
-    let account_health = build_account_health(&accounts);
+    let account_health = build_account_health(&accounts).await;
     let desktop_profiles = build_profile_info(&accounts);
 
     HealthReport {
@@ -180,21 +180,24 @@ async fn check_keychain() -> Option<Result<bool, String>> {
 }
 
 /// Build account health vector from a list of accounts (testable extraction).
-fn build_account_health(accounts: &[crate::account::Account]) -> Vec<AccountHealth> {
-    accounts
-        .iter()
-        .map(|a| {
-            let health =
-                crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
-            AccountHealth {
-                email: a.email.clone(),
-                token_status: health.status,
-                remaining_mins: health.remaining_mins,
-                verify_status: a.verify_status.clone(),
-                verified_email: a.verified_email.clone(),
-            }
-        })
-        .collect()
+///
+/// Sequential rather than concurrent: macOS surfaces one unlock dialog
+/// per locked-keychain access; parallel `token_health` calls would stack
+/// dialogs on the user. Mirrors `account_summary::list_summaries`.
+async fn build_account_health(accounts: &[crate::account::Account]) -> Vec<AccountHealth> {
+    let mut out = Vec::with_capacity(accounts.len());
+    for a in accounts {
+        let health =
+            crate::services::account_service::token_health(a.uuid, a.has_cli_credentials).await;
+        out.push(AccountHealth {
+            email: a.email.clone(),
+            token_status: health.status,
+            remaining_mins: health.remaining_mins,
+            verify_status: a.verify_status.clone(),
+            verified_email: a.verified_email.clone(),
+        });
+    }
+    out
 }
 
 /// Build desktop profile info from a list of accounts (testable extraction).
@@ -257,58 +260,58 @@ mod tests {
         test_store,
     };
 
-    #[test]
-    fn test_build_account_health_empty() {
-        let health = build_account_health(&[]);
+    #[tokio::test]
+    async fn test_build_account_health_empty() {
+        let health = build_account_health(&[]).await;
         assert!(health.is_empty());
     }
 
-    #[test]
-    fn test_build_account_health_with_credentials() {
+    #[tokio::test]
+    async fn test_build_account_health_with_credentials() {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
 
         let account = make_account("health@example.com");
         let id = account.uuid;
-        swap::save_private(id, &fresh_blob_json()).unwrap();
+        swap::save_private(id, &fresh_blob_json()).await.unwrap();
 
-        let health = build_account_health(&[account]);
+        let health = build_account_health(&[account]).await;
         assert_eq!(health.len(), 1);
         assert_eq!(health[0].email, "health@example.com");
         assert!(health[0].token_status.contains("valid"));
         assert!(health[0].remaining_mins.unwrap() > 0);
 
-        swap::delete_private(id).unwrap();
+        swap::delete_private(id).await.unwrap();
     }
 
-    #[test]
-    fn test_build_account_health_expired() {
+    #[tokio::test]
+    async fn test_build_account_health_expired() {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
 
         let account = make_account("expired@example.com");
         let id = account.uuid;
-        swap::save_private(id, &expired_blob_json()).unwrap();
+        swap::save_private(id, &expired_blob_json()).await.unwrap();
 
-        let health = build_account_health(&[account]);
+        let health = build_account_health(&[account]).await;
         assert_eq!(health[0].token_status, "expired");
 
-        swap::delete_private(id).unwrap();
+        swap::delete_private(id).await.unwrap();
     }
 
-    #[test]
-    fn test_build_account_health_no_credentials() {
+    #[tokio::test]
+    async fn test_build_account_health_no_credentials() {
         let account = {
             let mut a = make_account("nocred@example.com");
             a.has_cli_credentials = false;
             a
         };
-        let health = build_account_health(&[account]);
+        let health = build_account_health(&[account]).await;
         assert_eq!(health[0].token_status, "no credentials");
     }
 
-    #[test]
-    fn test_build_profile_info_no_profile() {
+    #[tokio::test]
+    async fn test_build_profile_info_no_profile() {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
 
@@ -319,8 +322,8 @@ mod tests {
         assert!(info[0].item_count.is_none());
     }
 
-    #[test]
-    fn test_build_profile_info_with_profile() {
+    #[tokio::test]
+    async fn test_build_profile_info_with_profile() {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
 
@@ -365,19 +368,19 @@ mod tests {
 
     // -- Group 8: doctor accuracy --
 
-    #[test]
-    fn test_doctor_expired_accounts_counted_as_warnings() {
+    #[tokio::test]
+    async fn test_doctor_expired_accounts_counted_as_warnings() {
         // Build account_health for a store with two accounts (1 fresh, 1 expired).
         // The expired one must have status == "expired"; the fresh one "valid (...)".
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
 
         let fresh = make_account("fresh@example.com");
-        swap::save_private(fresh.uuid, &fresh_blob_json()).unwrap();
+        swap::save_private(fresh.uuid, &fresh_blob_json()).await.unwrap();
         let expired = make_account("expired@example.com");
-        swap::save_private(expired.uuid, &expired_blob_json()).unwrap();
+        swap::save_private(expired.uuid, &expired_blob_json()).await.unwrap();
 
-        let health = build_account_health(&[fresh.clone(), expired.clone()]);
+        let health = build_account_health(&[fresh.clone(), expired.clone()]).await;
         assert_eq!(health.len(), 2);
 
         let fresh_entry = health
@@ -397,8 +400,8 @@ mod tests {
             "expired account surfaces as 'expired' (counted as warning in summary)"
         );
 
-        swap::delete_private(fresh.uuid).unwrap();
-        swap::delete_private(expired.uuid).unwrap();
+        swap::delete_private(fresh.uuid).await.unwrap();
+        swap::delete_private(expired.uuid).await.unwrap();
     }
 
     #[tokio::test]

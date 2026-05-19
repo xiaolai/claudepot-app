@@ -252,7 +252,7 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
         .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
-    let health = account_service::token_health(account.uuid, account.has_cli_credentials);
+    let health = account_service::token_health(account.uuid, account.has_cli_credentials).await;
     let usage_result = account_service::fetch_usage(&ctx.usage_cache, account.uuid, false).await;
 
     if ctx.json {

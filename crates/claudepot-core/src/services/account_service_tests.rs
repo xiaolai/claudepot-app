@@ -260,7 +260,7 @@ async fn test_register_from_current_success() {
     assert_eq!(found.email, "alice@example.com");
     assert!(found.has_cli_credentials);
 
-    swap::delete_private(result.uuid).unwrap();
+    swap::delete_private(result.uuid).await.unwrap();
 }
 
 #[tokio::test]
@@ -339,7 +339,7 @@ async fn test_register_from_token_success() {
     assert_eq!(result.email, "bob@example.com");
     assert!(store.find_by_email("bob@example.com").unwrap().is_some());
 
-    swap::delete_private(result.uuid).unwrap();
+    swap::delete_private(result.uuid).await.unwrap();
 }
 
 #[tokio::test]
@@ -378,8 +378,8 @@ async fn test_register_from_token_duplicate() {
 
 // -- format_duration_mins tests --
 
-#[test]
-fn test_format_duration_mins() {
+#[tokio::test]
+async fn test_format_duration_mins() {
     assert_eq!(format_duration_mins(0), "0m");
     assert_eq!(format_duration_mins(-5), "0m");
     assert_eq!(format_duration_mins(1), "1m");
@@ -396,60 +396,60 @@ fn test_format_duration_mins() {
 
 // -- token_health tests --
 
-#[test]
-fn test_token_health_no_credentials() {
-    let health = token_health(Uuid::new_v4(), false);
+#[tokio::test]
+async fn test_token_health_no_credentials() {
+    let health = token_health(Uuid::new_v4(), false).await;
     assert_eq!(health.status, "no credentials");
     assert!(health.remaining_mins.is_none());
 }
 
-#[test]
-fn test_token_health_missing_blob() {
+#[tokio::test]
+async fn test_token_health_missing_blob() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
-    let health = token_health(Uuid::new_v4(), true);
+    let health = token_health(Uuid::new_v4(), true).await;
     assert_eq!(health.status, "missing");
 }
 
-#[test]
-fn test_token_health_valid_token() {
+#[tokio::test]
+async fn test_token_health_valid_token() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
     let id = Uuid::new_v4();
-    swap::save_private(id, &fresh_blob_json()).unwrap();
+    swap::save_private(id, &fresh_blob_json()).await.unwrap();
 
-    let health = token_health(id, true);
+    let health = token_health(id, true).await;
     assert!(health.status.contains("valid"));
     assert!(health.remaining_mins.unwrap() > 0);
 
-    swap::delete_private(id).unwrap();
+    swap::delete_private(id).await.unwrap();
 }
 
-#[test]
-fn test_token_health_expired_token() {
+#[tokio::test]
+async fn test_token_health_expired_token() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
     let id = Uuid::new_v4();
-    swap::save_private(id, &crate::testing::expired_blob_json()).unwrap();
+    swap::save_private(id, &crate::testing::expired_blob_json()).await.unwrap();
 
-    let health = token_health(id, true);
+    let health = token_health(id, true).await;
     assert_eq!(health.status, "expired");
     assert!(health.remaining_mins.unwrap() < 0);
 
-    swap::delete_private(id).unwrap();
+    swap::delete_private(id).await.unwrap();
 }
 
-#[test]
-fn test_token_health_corrupt_blob() {
+#[tokio::test]
+async fn test_token_health_corrupt_blob() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
     let id = Uuid::new_v4();
-    swap::save_private(id, "not json").unwrap();
+    swap::save_private(id, "not json").await.unwrap();
 
-    let health = token_health(id, true);
+    let health = token_health(id, true).await;
     assert_eq!(health.status, "corrupt blob");
 
-    swap::delete_private(id).unwrap();
+    swap::delete_private(id).await.unwrap();
 }
 
 #[tokio::test]
@@ -460,13 +460,13 @@ async fn test_remove_deletes_credential_file() {
     let account = insert_account(&store, "cred@example.com");
 
     // Save a credential file
-    swap::save_private(account.uuid, r#"{"test":"blob"}"#).unwrap();
-    assert!(swap::load_private(account.uuid).is_ok());
+    swap::save_private(account.uuid, r#"{"test":"blob"}"#).await.unwrap();
+    assert!(swap::load_private(account.uuid).await.is_ok());
 
     remove_account(&store, account.uuid, None).await.unwrap();
 
     // Credential file should be gone
-    assert!(swap::load_private(account.uuid).is_err());
+    assert!(swap::load_private(account.uuid).await.is_err());
 }
 
 #[tokio::test]
@@ -593,7 +593,7 @@ async fn test_sync_adopts_cc_blob_when_email_matches_registered_account() {
 
     assert_eq!(synced, Some(account.uuid), "should report the synced uuid");
     // Blob now in Claudepot's storage.
-    assert_eq!(swap::load_private(account.uuid).unwrap(), cc_blob);
+    assert_eq!(swap::load_private(account.uuid).await.unwrap(), cc_blob);
     // active_cli aligned with CC's current reality.
     assert_eq!(
         store.active_cli_uuid().unwrap(),
@@ -606,7 +606,7 @@ async fn test_sync_adopts_cc_blob_when_email_matches_registered_account() {
         "platform.write_default must not fire when /profile succeeds"
     );
 
-    swap::delete_private(account.uuid).unwrap();
+    swap::delete_private(account.uuid).await.unwrap();
 }
 
 #[tokio::test]
@@ -704,7 +704,7 @@ async fn test_sync_refreshes_stale_access_token_and_retries_profile() {
 
     // Claudepot's private slot also gets the fresh blob, and the
     // account's active_cli pointer is set.
-    let stored = swap::load_private(account.uuid).unwrap();
+    let stored = swap::load_private(account.uuid).await.unwrap();
     assert_eq!(
         stored, written,
         "private slot must match what we wrote to CC's keychain"
@@ -714,7 +714,7 @@ async fn test_sync_refreshes_stale_access_token_and_retries_profile() {
         Some(account.uuid.to_string())
     );
 
-    swap::delete_private(account.uuid).unwrap();
+    swap::delete_private(account.uuid).await.unwrap();
 }
 
 #[tokio::test]
@@ -814,10 +814,10 @@ async fn test_sync_race_adopts_fresh_keychain_blob_without_burning_refresh_token
     // Claudepot's private slot mirrors the FRESH blob, not the
     // stale snapshot. If we stored the stale one, the next swap
     // would feed CC dead tokens.
-    let stored = swap::load_private(account.uuid).unwrap();
+    let stored = swap::load_private(account.uuid).await.unwrap();
     assert_eq!(stored, fresh_blob);
 
-    swap::delete_private(account.uuid).unwrap();
+    swap::delete_private(account.uuid).await.unwrap();
 }
 
 #[tokio::test]
@@ -882,7 +882,7 @@ async fn test_sync_race_refresh_uses_latest_refresh_token_not_stale_snapshot() {
         "sk-ant-oat01-new"
     );
 
-    swap::delete_private(account.uuid).unwrap();
+    swap::delete_private(account.uuid).await.unwrap();
 }
 
 #[tokio::test]
@@ -942,13 +942,13 @@ async fn test_sync_race_cas_skips_keychain_writeback_when_concurrent_writer_land
     // Persisted blob must be CC's live blob (intruder's), NOT the
     // rotated `new_blob_str` we minted but never installed. That
     // would mis-file our orphan token into the account's slot.
-    let stored = swap::load_private(account.uuid).unwrap();
+    let stored = swap::load_private(account.uuid).await.unwrap();
     assert_eq!(
         stored, intruder_blob,
         "must persist CC's live blob, never the orphan rotated blob"
     );
 
-    swap::delete_private(account.uuid).unwrap();
+    swap::delete_private(account.uuid).await.unwrap();
 }
 
 #[tokio::test]
@@ -989,7 +989,7 @@ async fn test_sync_race_cas_miss_aborts_when_live_blob_unverifiable() {
 
     // Nothing was persisted to the account's private slot.
     assert!(
-        swap::load_private(account.uuid).is_err(),
+        swap::load_private(account.uuid).await.is_err(),
         "must not persist anything when live blob unverifiable"
     );
 }
@@ -1063,7 +1063,7 @@ async fn test_remove_account_preserves_files_on_db_failure() {
     let (store, _db) = test_store();
 
     let account = insert_account(&store, "dbfail@example.com");
-    swap::save_private(account.uuid, "credential-content").unwrap();
+    swap::save_private(account.uuid, "credential-content").await.unwrap();
     let profile_dir = paths::desktop_profile_dir(account.uuid);
     std::fs::create_dir_all(&profile_dir).unwrap();
     std::fs::write(profile_dir.join("config.json"), "{}").unwrap();
@@ -1076,7 +1076,7 @@ async fn test_remove_account_preserves_files_on_db_failure() {
 
     // Credential + profile files still on disk since DB remove failed first.
     assert!(
-        swap::load_private(account.uuid).is_ok(),
+        swap::load_private(account.uuid).await.is_ok(),
         "credential blob preserved after DB failure"
     );
     assert!(
@@ -1085,7 +1085,7 @@ async fn test_remove_account_preserves_files_on_db_failure() {
     );
 
     // Cleanup — tear down manually since store is now corrupt.
-    let _ = swap::delete_private(account.uuid);
+    let _ = swap::delete_private(account.uuid).await;
     let _ = std::fs::remove_dir_all(&profile_dir);
 }
 
@@ -1123,8 +1123,8 @@ fn count_private_files() -> usize {
 // Reconcile tests (B-2)
 // ---------------------------------------------------------------------
 
-#[test]
-fn test_reconcile_cli_flags_flips_stale_true_to_false() {
+#[tokio::test]
+async fn test_reconcile_cli_flags_flips_stale_true_to_false() {
     // DB says the account has CLI credentials but the keychain is
     // empty (the user removed the blob out-of-band, or a swap
     // failed mid-write). reconcile_cli_flags must flip the flag to
@@ -1138,7 +1138,7 @@ fn test_reconcile_cli_flags_flips_stale_true_to_false() {
     store.insert(&acct).unwrap();
     // No swap::save_private — keychain is empty for this uuid.
 
-    let flips = reconcile_cli_flags(&store).unwrap();
+    let flips = reconcile_cli_flags(&store).await.unwrap();
     assert_eq!(flips.len(), 1);
     assert_eq!(flips[0].uuid, acct.uuid);
     assert_eq!(flips[0].email, acct.email);
@@ -1148,8 +1148,8 @@ fn test_reconcile_cli_flags_flips_stale_true_to_false() {
     assert!(!after.has_cli_credentials);
 }
 
-#[test]
-fn test_reconcile_cli_flags_flips_stale_false_to_true() {
+#[tokio::test]
+async fn test_reconcile_cli_flags_flips_stale_false_to_true() {
     // DB says no CLI credentials but a parseable blob is on the
     // keychain. The flag must be lifted to true and the flip
     // reported.
@@ -1160,9 +1160,9 @@ fn test_reconcile_cli_flags_flips_stale_false_to_true() {
     let mut acct = make_account("stale-false@example.com");
     acct.has_cli_credentials = false;
     store.insert(&acct).unwrap();
-    swap::save_private(acct.uuid, &crate::testing::fresh_blob_json()).unwrap();
+    swap::save_private(acct.uuid, &crate::testing::fresh_blob_json()).await.unwrap();
 
-    let flips = reconcile_cli_flags(&store).unwrap();
+    let flips = reconcile_cli_flags(&store).await.unwrap();
     assert_eq!(flips.len(), 1);
     assert_eq!(flips[0].uuid, acct.uuid);
     assert!(flips[0].new_value);
@@ -1170,11 +1170,11 @@ fn test_reconcile_cli_flags_flips_stale_false_to_true() {
     let after = store.find_by_uuid(acct.uuid).unwrap().unwrap();
     assert!(after.has_cli_credentials);
 
-    swap::delete_private(acct.uuid).unwrap();
+    swap::delete_private(acct.uuid).await.unwrap();
 }
 
-#[test]
-fn test_reconcile_cli_flags_idempotent() {
+#[tokio::test]
+async fn test_reconcile_cli_flags_idempotent() {
     // After a converged pass, a second run must report zero flips
     // and leave the DB untouched.
     let _lock = crate::testing::lock_data_dir();
@@ -1190,24 +1190,24 @@ fn test_reconcile_cli_flags_idempotent() {
     let mut a_yes = make_account("yes@example.com");
     a_yes.has_cli_credentials = false; // start drifted
     store.insert(&a_yes).unwrap();
-    swap::save_private(a_yes.uuid, &crate::testing::fresh_blob_json()).unwrap();
+    swap::save_private(a_yes.uuid, &crate::testing::fresh_blob_json()).await.unwrap();
 
     // First pass converges the drifted row.
-    let first = reconcile_cli_flags(&store).unwrap();
+    let first = reconcile_cli_flags(&store).await.unwrap();
     assert_eq!(first.len(), 1);
     // Second pass on a converged store: empty Vec.
-    let second = reconcile_cli_flags(&store).unwrap();
+    let second = reconcile_cli_flags(&store).await.unwrap();
     assert!(
         second.is_empty(),
         "expected idempotent second pass, got {} flips",
         second.len()
     );
 
-    swap::delete_private(a_yes.uuid).unwrap();
+    swap::delete_private(a_yes.uuid).await.unwrap();
 }
 
-#[test]
-fn test_reconcile_all_combines_cli_and_desktop() {
+#[tokio::test]
+async fn test_reconcile_all_combines_cli_and_desktop() {
     // Drift one CLI flag (DB says true, keychain empty) and one
     // desktop flag (DB says true, snapshot dir absent). reconcile_all
     // must report both passes via its bundled outcome.
@@ -1226,7 +1226,7 @@ fn test_reconcile_all_combines_cli_and_desktop() {
     store.insert(&desk_drift).unwrap();
     // Snapshot dir intentionally missing on disk.
 
-    let report = reconcile_all(&store).unwrap();
+    let report = reconcile_all(&store).await.unwrap();
     assert_eq!(report.cli_flips.len(), 1);
     assert_eq!(report.cli_flips[0].uuid, cli_drift.uuid);
     assert!(!report.cli_flips[0].new_value);
@@ -1435,9 +1435,9 @@ async fn test_verify_all_with_progress_emits_started_then_per_account_then_done(
 
     // Two accounts both with credentials and a fresh blob.
     let a1 = insert_account(&store, "alice@example.com");
-    swap::save_private(a1.uuid, &fresh_blob_json()).unwrap();
+    swap::save_private(a1.uuid, &fresh_blob_json()).await.unwrap();
     let a2 = insert_account(&store, "bob@example.com");
-    swap::save_private(a2.uuid, &fresh_blob_json()).unwrap();
+    swap::save_private(a2.uuid, &fresh_blob_json()).await.unwrap();
 
     // Simple fetcher that returns "alice@example.com" for every call —
     // a1 is Ok, a2 is Drift (label "bob" vs server "alice").
@@ -1476,8 +1476,8 @@ async fn test_verify_all_with_progress_emits_started_then_per_account_then_done(
 
     // Cleanup — drop the per-account credential files so the data
     // dir lock isn't polluted for siblings.
-    let _ = swap::delete_private(a1.uuid);
-    let _ = swap::delete_private(a2.uuid);
+    let _ = swap::delete_private(a1.uuid).await;
+    let _ = swap::delete_private(a2.uuid).await;
 }
 
 #[tokio::test]
@@ -1488,7 +1488,7 @@ async fn test_verify_all_with_progress_skips_accounts_without_credentials() {
 
     // alice has credentials.
     let a1 = insert_account(&store, "alice@example.com");
-    swap::save_private(a1.uuid, &fresh_blob_json()).unwrap();
+    swap::save_private(a1.uuid, &fresh_blob_json()).await.unwrap();
     // bob does NOT — flip the flag explicitly. No swap::save_private
     // here so the blob is genuinely absent on disk too.
     let mut acc = make_account("nocreds@example.com");
@@ -1513,7 +1513,7 @@ async fn test_verify_all_with_progress_skips_accounts_without_credentials() {
 
     // Cleanup
     for a in store.list().unwrap() {
-        let _ = swap::delete_private(a.uuid);
+        let _ = swap::delete_private(a.uuid).await;
     }
 }
 
@@ -1527,11 +1527,11 @@ async fn test_verify_all_with_progress_uses_200ms_stagger_only_between_calls() {
     let (store, _dir) = test_store();
 
     let a1 = insert_account(&store, "a1@example.com");
-    swap::save_private(a1.uuid, &fresh_blob_json()).unwrap();
+    swap::save_private(a1.uuid, &fresh_blob_json()).await.unwrap();
     let a2 = insert_account(&store, "a2@example.com");
-    swap::save_private(a2.uuid, &fresh_blob_json()).unwrap();
+    swap::save_private(a2.uuid, &fresh_blob_json()).await.unwrap();
     let a3 = insert_account(&store, "a3@example.com");
-    swap::save_private(a3.uuid, &fresh_blob_json()).unwrap();
+    swap::save_private(a3.uuid, &fresh_blob_json()).await.unwrap();
 
     let fetcher = VerifyFetcher::new().returns("any", "a1@example.com");
     let sink = RecordingVerifySink::new();
@@ -1554,6 +1554,6 @@ async fn test_verify_all_with_progress_uses_200ms_stagger_only_between_calls() {
 
     // Cleanup
     for a in store.list().unwrap() {
-        let _ = swap::delete_private(a.uuid);
+        let _ = swap::delete_private(a.uuid).await;
     }
 }

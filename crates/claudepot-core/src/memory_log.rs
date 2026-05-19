@@ -261,7 +261,7 @@ impl MemoryLog {
     }
 
     fn db(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.db.lock().unwrap_or_else(|p| p.into_inner())
+        crate::sync::recover_lock(&self.db, "memory_log")
     }
 
     /// Insert a row for the given change. Runs eviction in the same

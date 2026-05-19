@@ -362,7 +362,7 @@ async fn switch_inner(
     // Load target blob from Claudepot private storage first.
     // If it doesn't exist, fail before touching anything.
     tracing::debug!(target = %target_id, "loading target credentials");
-    let target_blob_original = storage::load(target_id)?;
+    let target_blob_original = storage::load(target_id).await?;
 
     // Conditionally refresh in MEMORY if expired/expiring. The
     // refreshed bytes don't touch disk yet — see MaybeRefreshed
@@ -389,7 +389,7 @@ async fn switch_inner(
     // disk so a stale-but-correct slot is preferable to a fresh-but-
     // misattributed one.
     if let MaybeRefreshed::Refreshed { blob } = &refresh_outcome {
-        storage::save(target_id, blob)?;
+        storage::save(target_id, blob).await?;
     }
 
     // Save outgoing (current CC blob may have been refreshed by the CLI).
@@ -443,9 +443,9 @@ async fn switch_inner(
                 Err(other) => return Err(other),
             };
 
-            let previous_private = storage::load_opt(cur);
+            let previous_private = storage::load_opt(cur).await;
             if !skip_backup {
-                storage::save(cur, current_blob)?;
+                storage::save(cur, current_blob).await?;
             }
 
             // Write target to CC storage.
@@ -454,10 +454,10 @@ async fn switch_inner(
                 if !skip_backup {
                     match previous_private {
                         Some(prev) => {
-                            let _ = storage::save(cur, &prev);
+                            let _ = storage::save(cur, &prev).await;
                         }
                         None => {
-                            let _ = storage::delete(cur);
+                            let _ = storage::delete(cur).await;
                         }
                     }
                 }

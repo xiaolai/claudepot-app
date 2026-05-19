@@ -85,7 +85,7 @@ pub async fn verify_account_identity_with(
         .map_err(|e| VerifyError::Store(e.to_string()))?
         .ok_or(VerifyError::AccountNotFound(uuid))?;
 
-    let blob_str = match swap::load_private(uuid) {
+    let blob_str = match swap::load_private(uuid).await {
         Ok(s) => s,
         Err(_) => return Err(VerifyError::NoBlob),
     };
@@ -115,9 +115,9 @@ pub async fn verify_account_identity_with(
                         // rotation would clobber it. Skip the write in
                         // that case and treat the fetched identity as
                         // authoritative for this pass.
-                        match swap::load_private(uuid) {
+                        match swap::load_private(uuid).await {
                             Ok(current) if current == blob_str => {
-                                if let Err(e) = swap::save_private(uuid, &new_blob_json) {
+                                if let Err(e) = swap::save_private(uuid, &new_blob_json).await {
                                     tracing::error!(
                                         account = %uuid,
                                         "persisting refreshed blob failed: {e}"
@@ -189,7 +189,7 @@ pub async fn verify_and_get_access_token(
     let token = if matches!(outcome, VerifyOutcome::Ok { .. }) {
         // Re-read the slot — it may have been rotated by a refresh inside
         // `verify_account_identity`.
-        match swap::load_private(uuid) {
+        match swap::load_private(uuid).await {
             Ok(s) => CredentialBlob::from_json(&s)
                 .ok()
                 .map(|b| b.claude_ai_oauth.access_token),
@@ -383,7 +383,7 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
 
         let fetcher = MockFetcher::ok("alice@example.com");
         let outcome = verify_account_identity(&store, uuid, &fetcher)
@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(row.verify_status, "ok");
         assert_eq!(row.verified_email.as_deref(), Some("alice@example.com"));
         assert!(row.verified_at.is_some());
-        swap::delete_private(uuid).unwrap();
+        swap::delete_private(uuid).await.unwrap();
     }
 
     #[tokio::test]
@@ -408,7 +408,7 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
 
         let fetcher = MockFetcher::ok("bob@example.com");
         let outcome = verify_account_identity(&store, uuid, &fetcher)
@@ -419,7 +419,7 @@ mod tests {
         let row = store.find_by_uuid(uuid).unwrap().unwrap();
         assert_eq!(row.verify_status, "drift");
         assert_eq!(row.verified_email.as_deref(), Some("bob@example.com"));
-        swap::delete_private(uuid).unwrap();
+        swap::delete_private(uuid).await.unwrap();
     }
 
     /// 401 on /profile + definitive RefreshFailed on refresh → Rejected.
@@ -428,7 +428,7 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
 
         let fetcher = MockFetcher::rejecting();
         let refresher = MockRefresher::rejecting();
@@ -439,7 +439,7 @@ mod tests {
 
         let row = store.find_by_uuid(uuid).unwrap().unwrap();
         assert_eq!(row.verify_status, "rejected");
-        swap::delete_private(uuid).unwrap();
+        swap::delete_private(uuid).await.unwrap();
     }
 
     /// 401 on /profile + ServerError on refresh (5xx) → NetworkError, NOT
@@ -449,7 +449,7 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
         store
             .update_verification(
                 uuid,
@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(row.verify_status, "network_error");
         // Previous verified_email must survive the transient error.
         assert_eq!(row.verified_email.as_deref(), Some("alice@example.com"));
-        swap::delete_private(uuid).unwrap();
+        swap::delete_private(uuid).await.unwrap();
     }
 
     /// 401 → refresh succeeds → new profile matches stored email → the
@@ -481,7 +481,7 @@ mod tests {
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
         let original_blob = crate::testing::fresh_blob_json();
-        swap::save_private(uuid, &original_blob).unwrap();
+        swap::save_private(uuid, &original_blob).await.unwrap();
 
         // /profile rejects first, then the post-refresh call returns the
         // expected email.
@@ -502,10 +502,10 @@ mod tests {
         );
 
         // Slot must hold the rotated blob now — NOT the original.
-        let stored = swap::load_private(uuid).unwrap();
+        let stored = swap::load_private(uuid).await.unwrap();
         assert_ne!(stored, original_blob, "slot must hold the refreshed blob");
         assert!(stored.contains("sk-ant-oat01-new"));
-        swap::delete_private(uuid).unwrap();
+        swap::delete_private(uuid).await.unwrap();
     }
 
     /// 401 → refresh succeeds → new profile returns DIFFERENT email →
@@ -518,7 +518,7 @@ mod tests {
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
         let original_blob = crate::testing::fresh_blob_json();
-        swap::save_private(uuid, &original_blob).unwrap();
+        swap::save_private(uuid, &original_blob).await.unwrap();
 
         let fetcher = MockFetcher {
             // 1st (pre-refresh) call: 401. 2nd (post-refresh) call: bob.
@@ -533,12 +533,12 @@ mod tests {
         assert!(matches!(outcome, VerifyOutcome::Drift { .. }));
 
         // Critical: the rotated blob must NOT have been written.
-        let stored = swap::load_private(uuid).unwrap();
+        let stored = swap::load_private(uuid).await.unwrap();
         assert_eq!(
             stored, original_blob,
             "drift must not persist the rotated blob"
         );
-        swap::delete_private(uuid).unwrap();
+        swap::delete_private(uuid).await.unwrap();
     }
 
     #[tokio::test]
@@ -546,7 +546,7 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
 
         // Seed a prior successful verification.
         store
@@ -568,7 +568,7 @@ mod tests {
         assert_eq!(row.verify_status, "network_error");
         // Prior verified_email must survive the blip.
         assert_eq!(row.verified_email.as_deref(), Some("alice@example.com"));
-        swap::delete_private(uuid).unwrap();
+        swap::delete_private(uuid).await.unwrap();
     }
 
     #[tokio::test]

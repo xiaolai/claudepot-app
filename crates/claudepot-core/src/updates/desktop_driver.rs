@@ -350,6 +350,179 @@ async fn install_via_zip(
     Err(UpdateError::UnsupportedPlatform)
 }
 
+/// Outcome of a startup orphan-backup recovery sweep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OrphanRecovery {
+    /// No recovery needed — target exists OR no orphan backup was found.
+    NoOp,
+    /// Restored from `backup_path` → `target_path`.
+    Restored {
+        backup_path: std::path::PathBuf,
+        target_path: std::path::PathBuf,
+    },
+    /// Recovery candidate found but the restore itself failed.
+    /// Surfaces as a logged warning at the call site; included as a
+    /// distinct variant for tests.
+    Failed {
+        backup_path: std::path::PathBuf,
+        target_path: std::path::PathBuf,
+        error: String,
+    },
+}
+
+/// Recover a Claude.app that went missing because `install_via_zip`
+/// was interrupted between the `fs::rename(target, &backup)` and the
+/// `ditto`-restore branch (SIGKILL, OOM, hard reboot mid-install).
+///
+/// Scans `target.parent()` for `Claude.app.bak-<unix-ts>` siblings,
+/// picks the highest timestamp (most recent backup), and renames it
+/// back into place. Idempotent: a no-op when the target exists or no
+/// orphan backup is found. Both renames happen on the same filesystem
+/// — atomic; no risk of leaving partial state if THIS call is itself
+/// interrupted (the source still exists under its bak-<ts> name).
+///
+/// Call once at startup, before `detect_desktop_install` runs in any
+/// UI surface that asks "is Claude.app installed?" — otherwise the
+/// user sees a phantom "Desktop not installed" state while a usable
+/// backup sits next to where it should be.
+///
+/// Calls the platform-default verifier (`verify_codesign` on macOS,
+/// no-op elsewhere) post-restore. For test injection, use
+/// [`recover_orphan_backup_with_verifier`].
+pub fn recover_orphan_backup(target: &Path) -> OrphanRecovery {
+    recover_orphan_backup_with_verifier(target, default_post_restore_verifier)
+}
+
+/// Default post-restore verifier: re-checks the codesign of the
+/// restored bundle on macOS, no-op elsewhere. Pulled out so the
+/// startup path uses the real verifier and tests inject a no-op
+/// without compiling-out the verify branch.
+fn default_post_restore_verifier(target: &Path) -> std::result::Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        verify_codesign(target).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = target;
+        Ok(())
+    }
+}
+
+/// Test-injectable variant of [`recover_orphan_backup`]. The
+/// `verifier` runs post-rename against the restored target path;
+/// returning `Err(msg)` triggers the quarantine-aside branch. The
+/// public `recover_orphan_backup` passes [`default_post_restore_verifier`].
+pub fn recover_orphan_backup_with_verifier(
+    target: &Path,
+    verifier: fn(&Path) -> std::result::Result<(), String>,
+) -> OrphanRecovery {
+    if target.exists() {
+        return OrphanRecovery::NoOp;
+    }
+    let Some(parent) = target.parent() else {
+        return OrphanRecovery::NoOp;
+    };
+    let Some(target_name) = target.file_name().and_then(|s| s.to_str()) else {
+        return OrphanRecovery::NoOp;
+    };
+    // The backup filename shape comes from `install_via_zip`:
+    //     {target_name}.bak-{unix_ts}
+    // See the `fs::rename(target, &backup)` site above.
+    let prefix = format!("{target_name}.bak-");
+
+    // Find the highest-timestamp backup.
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return OrphanRecovery::NoOp;
+    };
+    let best = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let path = e.path();
+            let name = path.file_name()?.to_str()?.to_string();
+            let suffix = name.strip_prefix(&prefix)?;
+            // Reject anything that's already trashed / partial — the
+            // suffix must be a positive integer (`unix_ts` from
+            // `chrono::Utc::now().timestamp()`).
+            let ts: i64 = suffix.parse().ok()?;
+            Some((ts, path))
+        })
+        .max_by_key(|(ts, _)| *ts);
+
+    let Some((ts, backup_path)) = best else {
+        return OrphanRecovery::NoOp;
+    };
+
+    match std::fs::rename(&backup_path, target) {
+        Ok(()) => {
+            // Re-verify the codesign of the restored bundle. The
+            // backup was produced by `install_via_zip`'s
+            // `fs::rename(target, &backup)`, which already happened
+            // on a code-signed install — so a clean recovery should
+            // re-verify identically. But the filename timestamp is
+            // forgeable: anyone with write access to `target.parent()`
+            // (notably `~/Applications/` on user-local installs)
+            // can plant a hostile `Claude.app.bak-<future_ts>` and
+            // delete the real bundle to trigger orphan recovery on
+            // next launch. The attacker still needs user-level code
+            // execution to delete the bundle, so this is
+            // defense-in-depth rather than a fresh hole — but the
+            // cost is one `codesign --verify` per restore, which is
+            // cheap and matches the discipline `install_via_zip`
+            // uses for the install path.
+            //
+            // On failure, rename the suspicious bundle aside to a
+            // quarantined name so the user can inspect it manually
+            // (and we don't auto-recover the same suspicious backup
+            // on the next launch). Surface as `OrphanRecovery::Failed`.
+            if let Err(verify_err) = verifier(target) {
+                let quarantine_path = target.with_file_name(format!(
+                    "{target_name}.bak-restored-but-unverified-{ts}"
+                ));
+                let quarantine_attempted = std::fs::rename(target, &quarantine_path);
+                tracing::error!(
+                    target = %target.display(),
+                    backup = %backup_path.display(),
+                    verify_error = %verify_err,
+                    quarantine = ?quarantine_attempted.as_ref().ok().map(|_| quarantine_path.display().to_string()),
+                    "orphan-backup recovery: restored bundle failed codesign verification; quarantining"
+                );
+                return OrphanRecovery::Failed {
+                    backup_path,
+                    target_path: target.to_path_buf(),
+                    error: format!(
+                        "restored bundle failed codesign verification: {verify_err}"
+                    ),
+                };
+            }
+
+            tracing::warn!(
+                target = %target.display(),
+                backup = %backup_path.display(),
+                backup_ts = ts,
+                "recovered orphan Claude.app backup left over from an interrupted update"
+            );
+            OrphanRecovery::Restored {
+                backup_path,
+                target_path: target.to_path_buf(),
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                target = %target.display(),
+                backup = %backup_path.display(),
+                error = %e,
+                "orphan-backup recovery: rename failed; backup left in place for manual recovery"
+            );
+            OrphanRecovery::Failed {
+                backup_path,
+                target_path: target.to_path_buf(),
+                error: e.to_string(),
+            }
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn verify_codesign(app: &Path) -> Result<()> {
     // Step 1: signature integrity (--verify --deep --strict).
@@ -401,4 +574,220 @@ fn verify_codesign(app: &Path) -> Result<()> {
 #[allow(dead_code)]
 fn verify_codesign(_app: &Path) -> Result<()> {
     Err(UpdateError::UnsupportedPlatform)
+}
+
+/// Run [`recover_orphan_backup`] against every standard Claude.app
+/// install location on the current platform. Wired into `lib.rs::run`
+/// as a one-shot startup sweep so an interrupted update doesn't leave
+/// the user staring at a "Desktop not installed" surface when a
+/// recoverable backup is sitting right next to it.
+///
+/// macOS: `/Applications/Claude.app` (Homebrew + direct DMG) and
+/// `~/Applications/Claude.app` (user-local). Other platforms: no-op
+/// — Squirrel-Windows handles its own rollback, Linux has no Desktop
+/// build to recover.
+#[cfg(target_os = "macos")]
+pub fn recover_orphan_backups_at_startup() -> Vec<OrphanRecovery> {
+    let mut out = Vec::new();
+    let system = std::path::PathBuf::from("/Applications/Claude.app");
+    out.push(recover_orphan_backup(&system));
+    if let Some(home) = dirs::home_dir() {
+        let user = home.join("Applications/Claude.app");
+        out.push(recover_orphan_backup(&user));
+    }
+    out
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn recover_orphan_backups_at_startup() -> Vec<OrphanRecovery> {
+    Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Test verifier: pretends every restored bundle is codesign-clean.
+    /// The real verifier shells out to `/usr/bin/codesign` which would
+    /// reject the empty `Claude.app` test fixtures these tests use.
+    /// Coverage of the "verifier rejects → quarantine" branch lives in
+    /// the dedicated `verifier_failure_*` test below.
+    fn ok_verifier(_: &Path) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    /// Test verifier that always rejects. Used by the quarantine tests
+    /// to exercise the "restored bundle failed codesign verification"
+    /// branch without depending on a real signed fixture.
+    fn fail_verifier(_: &Path) -> std::result::Result<(), String> {
+        Err("simulated codesign rejection".into())
+    }
+
+    /// Set up `<tempdir>/Applications/Claude.app` (the "target") plus
+    /// zero or more bak-<ts> siblings. Returns the simulated target
+    /// path so tests can pass it to `recover_orphan_backup`.
+    fn setup_install_dir(
+        td: &TempDir,
+        target_exists: bool,
+        backups: &[(i64, &str)],
+    ) -> std::path::PathBuf {
+        let apps = td.path().join("Applications");
+        fs::create_dir_all(&apps).unwrap();
+        let target = apps.join("Claude.app");
+        if target_exists {
+            fs::create_dir(&target).unwrap();
+            // .app bundles always carry a Contents/ directory; a
+            // bare empty directory is enough for these tests.
+            fs::create_dir(target.join("Contents")).unwrap();
+        }
+        for (ts, marker) in backups {
+            let bak = apps.join(format!("Claude.app.bak-{ts}"));
+            fs::create_dir(&bak).unwrap();
+            fs::write(bak.join("marker.txt"), marker).unwrap();
+        }
+        target
+    }
+
+    #[test]
+    fn recover_orphan_backup_noop_when_target_exists() {
+        let td = TempDir::new().unwrap();
+        let target = setup_install_dir(&td, true, &[(1, "old")]);
+        let result = recover_orphan_backup_with_verifier(&target, ok_verifier);
+        assert_eq!(result, OrphanRecovery::NoOp);
+        // Target still in place, backup untouched.
+        assert!(target.exists());
+        assert!(target.parent().unwrap().join("Claude.app.bak-1").exists());
+    }
+
+    #[test]
+    fn recover_orphan_backup_noop_when_no_backup_present() {
+        let td = TempDir::new().unwrap();
+        let target = setup_install_dir(&td, false, &[]);
+        let result = recover_orphan_backup_with_verifier(&target, ok_verifier);
+        assert_eq!(result, OrphanRecovery::NoOp);
+        // Still missing — no restore happened because there was
+        // nothing to restore from.
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn recover_orphan_backup_restores_when_target_missing_and_backup_present() {
+        let td = TempDir::new().unwrap();
+        let target = setup_install_dir(&td, false, &[(1700000000, "only-bak")]);
+        assert!(!target.exists());
+        let result = recover_orphan_backup_with_verifier(&target, ok_verifier);
+        match result {
+            OrphanRecovery::Restored {
+                backup_path,
+                target_path,
+            } => {
+                assert_eq!(target_path, target);
+                assert_eq!(
+                    backup_path.file_name().unwrap().to_str().unwrap(),
+                    "Claude.app.bak-1700000000"
+                );
+            }
+            other => panic!("expected Restored, got {other:?}"),
+        }
+        // Target restored from backup; backup name no longer present.
+        assert!(target.exists());
+        assert!(!target.parent().unwrap().join("Claude.app.bak-1700000000").exists());
+        // The content from the backup followed the rename.
+        let marker = fs::read_to_string(target.join("marker.txt")).unwrap();
+        assert_eq!(marker, "only-bak");
+    }
+
+    #[test]
+    fn recover_orphan_backup_picks_highest_timestamp() {
+        let td = TempDir::new().unwrap();
+        let target = setup_install_dir(
+            &td,
+            false,
+            &[
+                (1700000000, "oldest"),
+                (1800000000, "newest"),
+                (1750000000, "middle"),
+            ],
+        );
+        let result = recover_orphan_backup_with_verifier(&target, ok_verifier);
+        assert!(matches!(result, OrphanRecovery::Restored { .. }));
+        assert!(target.exists());
+        // The newest backup was restored; the other two remain.
+        let marker = fs::read_to_string(target.join("marker.txt")).unwrap();
+        assert_eq!(marker, "newest");
+        assert!(target.parent().unwrap().join("Claude.app.bak-1700000000").exists());
+        assert!(target.parent().unwrap().join("Claude.app.bak-1750000000").exists());
+        assert!(!target.parent().unwrap().join("Claude.app.bak-1800000000").exists());
+    }
+
+    #[test]
+    fn recover_orphan_backup_ignores_non_timestamp_suffixes() {
+        let td = TempDir::new().unwrap();
+        let apps = td.path().join("Applications");
+        fs::create_dir_all(&apps).unwrap();
+        let target = apps.join("Claude.app");
+        // A garbage-named sibling we must NOT pick up — only properly
+        // formatted bak-<unix_ts> entries are candidates.
+        let bogus = apps.join("Claude.app.bak-NOT-A-TIMESTAMP");
+        fs::create_dir(&bogus).unwrap();
+        fs::write(bogus.join("marker.txt"), "should-be-ignored").unwrap();
+
+        let result = recover_orphan_backup_with_verifier(&target, ok_verifier);
+        assert_eq!(result, OrphanRecovery::NoOp);
+        // Target stayed missing; the garbage directory wasn't promoted.
+        assert!(!target.exists());
+        assert!(bogus.exists());
+    }
+
+    /// Verifier rejects the restored bundle (simulating a planted
+    /// hostile backup whose codesign doesn't match). The function
+    /// must rename the suspicious target aside to a quarantined name
+    /// so we don't auto-restore the same hostile bundle on the next
+    /// launch, and report `OrphanRecovery::Failed`.
+    #[test]
+    fn recover_orphan_backup_quarantines_when_verifier_rejects() {
+        let td = TempDir::new().unwrap();
+        let target = setup_install_dir(&td, false, &[(1900000000, "tainted")]);
+        assert!(!target.exists());
+
+        let result = recover_orphan_backup_with_verifier(&target, fail_verifier);
+        match result {
+            OrphanRecovery::Failed {
+                backup_path,
+                target_path,
+                error,
+            } => {
+                assert_eq!(target_path, target);
+                assert_eq!(
+                    backup_path.file_name().unwrap().to_str().unwrap(),
+                    "Claude.app.bak-1900000000"
+                );
+                assert!(
+                    error.contains("simulated codesign rejection"),
+                    "error must carry the verifier's message: {error}"
+                );
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+
+        // The original target slot is empty (the restore was undone
+        // via the quarantine rename) and the suspicious bundle now
+        // lives under the quarantined name.
+        assert!(!target.exists());
+        let quarantine = target
+            .parent()
+            .unwrap()
+            .join("Claude.app.bak-restored-but-unverified-1900000000");
+        assert!(
+            quarantine.exists(),
+            "suspicious bundle must be renamed aside for manual inspection"
+        );
+        let marker = fs::read_to_string(quarantine.join("marker.txt")).unwrap();
+        assert_eq!(marker, "tainted");
+        // The original bak-<ts> name is gone because the rename moved
+        // it to target first, then to the quarantine name.
+        assert!(!target.parent().unwrap().join("Claude.app.bak-1900000000").exists());
+    }
 }

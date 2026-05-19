@@ -205,33 +205,12 @@ struct Inner {
     volatile: bool,
 }
 
-/// Mutex-poison recovery — `unwrap_or_else(PoisonError::into_inner)`
-/// in one place so every method handles a poisoned lock the same way:
-/// recover via `into_inner()` after a `tracing::warn!`. The
-/// notification log is advisory state (no correctness guarantees
-/// ride on it), so panicking the process — or worse, panicking every
-/// subsequent caller — is the wrong tradeoff. The previous
-/// `.expect()` per call site violated `.claude/rules/rust-conventions.md`'s
-/// "no unwrap/expect in core" gate.
-///
-/// Note: a poisoned mutex stays poisoned for the process lifetime,
-/// so every subsequent acquire under poison logs another warn. The
-/// noise is informative — it tells operators that an earlier panic
-/// is still unresolved rather than silently masking it. If the
-/// volume becomes a problem we can hoist a `OnceCell` to log once;
-/// for now the explicit per-call signal is correct.
+/// Thin shim over [`crate::sync::recover_lock`] so the rest of this
+/// file keeps calling `lock_inner(&self.inner)` without changing.
+/// The shared helper is the project-wide poisoning policy — see its
+/// docstring for the rationale (this module was the original site).
 fn lock_inner(m: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
-    match m.lock() {
-        Ok(g) => g,
-        Err(poisoned) => {
-            tracing::warn!(
-                "notification_log: mutex was poisoned by an earlier panic; \
-                 recovering with under-lock data (advisory state, no \
-                 correctness guarantees ride on it)"
-            );
-            poisoned.into_inner()
-        }
-    }
+    crate::sync::recover_lock(m, "notification_log")
 }
 
 /// Persistent ring-buffer log of dispatched notifications. Cheap to

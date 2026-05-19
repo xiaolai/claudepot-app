@@ -3,6 +3,7 @@
 // domain slice into the canonical `api` object.
 
 import { invoke } from "@tauri-apps/api/core";
+import { invokeWithTimeout } from "./invokeWithTimeout";
 import type {
   AccountSummary,
   AccountSummaryBasic,
@@ -49,7 +50,12 @@ export const accountApi = {
   /// Idempotent startup adoption: if CC holds credentials for one of the
   /// registered accounts, imports them into the matching slot. Returns
   /// the synced email (empty string when nothing matched).
-  syncFromCurrentCc: () => invoke<string>("sync_from_current_cc"),
+  ///
+  /// Bounded at 15s: one keychain read + one save + one /profile HTTP
+  /// call. See `./invokeWithTimeout.ts` for why JS-side ceilings are
+  /// load-bearing alongside the 5s-per-subprocess Rust budget.
+  syncFromCurrentCc: () =>
+    invokeWithTimeout<string>("sync_from_current_cc", undefined, 15_000),
   /// macOS-only: request a native keychain-unlock dialog. The user's
   /// password is entered directly into macOS's own trusted prompt and
   /// never reaches Claudepot.
@@ -58,20 +64,32 @@ export const accountApi = {
   /// file manager). Walks up to the nearest existing parent if the
   /// exact path is gone (orphan projects still "open parent").
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
-  accountList: () => invoke<AccountSummary[]>("account_list"),
+  /// Bounded at 30s: N × `token_health` → `swap::load_private` calls,
+  /// each capped at 5s on the Rust side. 30s carries up to ~6
+  /// keychain-stalled accounts before the JS ceiling fires. See
+  /// `./invokeWithTimeout.ts`.
+  accountList: () =>
+    invokeWithTimeout<AccountSummary[]>("account_list", undefined, 30_000),
   /** Keychain-free lean list — use when you only need identity
    *  fields (uuid / email / org / subscription / active flags).
    *  Much faster than `accountList` because it skips the per-account
    *  `token_health` call that hits macOS Keychain. */
   accountListBasic: () =>
     invoke<AccountSummaryBasic[]>("account_list_basic"),
+  /// Bounded at 30s: full swap path does multiple keychain reads
+  /// (`storage::load`, `storage::save`) plus an HTTP `/profile` fetch
+  /// for identity verification.
   cliUse: (email: string, force = false) =>
-    invoke<void>("cli_use", { email, force }),
+    invokeWithTimeout<void>("cli_use", { email, force }, 30_000),
   /// Cheap preflight used before cli_use to decide whether to raise
   /// the split-brain confirmation dialog.
   cliIsCcRunning: () => invoke<boolean>("cli_is_cc_running"),
+  /// Bounded at 30s: Desktop slot swap touches the CC-credentials
+  /// keychain via `cli_backend::keychain` (5s Rust ceiling per
+  /// subprocess) plus profile-storage moves on disk. Same policy
+  /// symmetry as `cliUse` — see `./invokeWithTimeout.ts`.
   desktopUse: (email: string, noLaunch: boolean) =>
-    invoke<void>("desktop_use", { email, noLaunch }),
+    invokeWithTimeout<void>("desktop_use", { email, noLaunch }, 30_000),
   /// Ground-truth "who is Claude Desktop signed in as". Phase 1
   /// returns `org_uuid_candidate` (NOT verified) or `none`; the
   /// `decrypted` trust tier lands in Phase 2. UI must gate mutating
@@ -89,19 +107,44 @@ export const accountApi = {
   /// Adopt the live Desktop session into `uuid`'s snapshot directory.
   /// Always verifies identity via the authoritative Decrypted path
   /// before mutating — fast-path candidates cannot drive adoption.
+  ///
+  /// Bounded at 30s: Decrypted identity probe (keychain read +
+  /// SecCryptoKey unwrap) plus profile snapshot mkdir/copy.
   desktopAdopt: (uuid: string, overwrite: boolean) =>
-    invoke<DesktopAdoptOutcome>("desktop_adopt", { uuid, overwrite }),
+    invokeWithTimeout<DesktopAdoptOutcome>(
+      "desktop_adopt",
+      { uuid, overwrite },
+      30_000,
+    ),
   /// Sign Desktop out. `keepSnapshot=true` (default) preserves the
   /// current session as a snapshot under the active account.
+  ///
+  /// Bounded at 15s: identity probe + snapshot move.
   desktopClear: (keepSnapshot: boolean) =>
-    invoke<DesktopClearOutcome>("desktop_clear", { keepSnapshot }),
+    invokeWithTimeout<DesktopClearOutcome>(
+      "desktop_clear",
+      { keepSnapshot },
+      15_000,
+    ),
   /// Startup / window-focus sync. Read-only (no disk mutation); at
   /// most refreshes the active_desktop pointer cache.
+  ///
+  /// Bounded at 15s: identity probe (CC-credentials keychain read).
   syncFromCurrentDesktop: () =>
-    invoke<DesktopSyncOutcome>("sync_from_current_desktop"),
+    invokeWithTimeout<DesktopSyncOutcome>(
+      "sync_from_current_desktop",
+      undefined,
+      15_000,
+    ),
   desktopLaunch: () => invoke<void>("desktop_launch"),
+  /// Bounded at 15s: one `storage::save_private` + one `/profile`
+  /// HTTP fetch.
   accountAddFromCurrent: () =>
-    invoke<RegisterOutcome>("account_add_from_current"),
+    invokeWithTimeout<RegisterOutcome>(
+      "account_add_from_current",
+      undefined,
+      15_000,
+    ),
   /// Browser OAuth onboarding — spawns `claude auth login` in a temp
   /// config dir, returns when the user finishes (or errors). The
   /// refresh token never crosses the IPC bridge; everything is handled
@@ -131,18 +174,34 @@ export const accountApi = {
   accountLoginStatus: (opId: string) =>
     invoke<RunningOpInfo | null>("account_login_status", { opId }),
   accountLoginCancel: () => invoke<void>("account_login_cancel"),
+  /// Bounded at 15s: one `storage::delete` (keychain delete + file
+  /// delete) plus a DB write.
   accountRemove: (uuid: string) =>
-    invoke<RemoveOutcome>("account_remove", { uuid }),
-  fetchAllUsage: () => invoke<UsageMap>("fetch_all_usage"),
+    invokeWithTimeout<RemoveOutcome>("account_remove", { uuid }, 15_000),
+  /// Bounded at 60s: N × `load_access_token` (each a keychain read,
+  /// 5s ceiling) plus N × usage HTTP calls (each ~5-10s). For up to
+  /// ~6 accounts the worst case lands well under 60s.
+  fetchAllUsage: () =>
+    invokeWithTimeout<UsageMap>("fetch_all_usage", undefined, 60_000),
   /// Invalidate cache + cooldown for a single account then refetch.
   /// Scoped alternative to fetchAllUsage for per-row Retry buttons.
+  /// Bounded at 15s: one keychain read + one usage HTTP call.
   refreshUsageFor: (uuid: string) =>
-    invoke<UsageEntry>("refresh_usage_for", { uuid }),
+    invokeWithTimeout<UsageEntry>("refresh_usage_for", { uuid }, 15_000),
   /// Reconcile every account's blob identity against `/api/oauth/profile`.
   /// Returns the refreshed list so the caller can re-render without a
   /// separate `accountList` round-trip. Slow — one HTTP call per account
   /// with credentials.
-  verifyAllAccounts: () => invoke<AccountSummary[]>("verify_all_accounts"),
+  ///
+  /// Bounded at 60s: N × `(load_private + /profile)`. For locked-
+  /// keychain stalls the JS ceiling fires before the user assumes the
+  /// whole pane is dead.
+  verifyAllAccounts: () =>
+    invokeWithTimeout<AccountSummary[]>(
+      "verify_all_accounts",
+      undefined,
+      60_000,
+    ),
   /// Async variant of `verifyAllAccounts`: returns the op_id immediately
   /// so per-account events can drive inline row badge updates instead of
   /// blocking the IPC worker on N round-trips. Subscribe to
@@ -154,8 +213,10 @@ export const accountApi = {
     invoke<RunningOpInfo | null>("verify_all_accounts_status", { opId }),
   /// Verify a single account — fast, single /profile round-trip. Used
   /// by the per-row context menu and command palette.
+  ///
+  /// Bounded at 15s: one keychain read + one HTTP call.
   verifyAccount: (uuid: string) =>
-    invoke<AccountSummary>("verify_account", { uuid }),
+    invokeWithTimeout<AccountSummary>("verify_account", { uuid }, 15_000),
   /// Ground-truth "what is CC currently authenticated as". Reads the
   /// shared slot + calls /profile. Never throws — errors land in the
   /// returned `error` field so the UI can render them as a banner.

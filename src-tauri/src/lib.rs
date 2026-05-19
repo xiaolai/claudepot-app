@@ -71,6 +71,16 @@ pub fn run() {
         tracing::warn!("repair tree migration failed: {e}");
     }
 
+    // Recover any orphan `Claude.app.bak-<ts>` siblings left over from
+    // an interrupted Desktop update — a SIGKILL or hard reboot between
+    // the `fs::rename(target, &backup)` and `ditto`-restore branch in
+    // `install_via_zip` leaves Claude.app missing on disk with a usable
+    // backup right next to it. Without this scan the user would see a
+    // phantom "Desktop not installed" state in About / health / tray
+    // until they manually rename the backup back. Idempotent and safe
+    // to run on every boot — no-ops when nothing needs recovery.
+    let _ = claudepot_core::updates::desktop_driver::recover_orphan_backups_at_startup();
+
     // Load persisted preferences BEFORE the builder constructs anything
     // that might need them. `hide_dock_icon` in particular must reach
     // `set_activation_policy()` inside the very first `setup()` tick to
@@ -140,7 +150,35 @@ pub fn run() {
     let cards_db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
     let cards_index: Option<std::sync::Arc<claudepot_core::activity::ActivityIndex>> =
         match claudepot_core::activity::ActivityIndex::open(&cards_db_path) {
-            Ok(idx) => Some(std::sync::Arc::new(idx)),
+            Ok(idx) => {
+                // Prune cards older than the retention window once
+                // per startup so the table stays bounded across
+                // months of sustained use. The previous shape only
+                // pruned per-session (and only when the source
+                // `.jsonl` was gone), leaving cards from long-
+                // finished sessions accumulating forever. The
+                // retention window lives in
+                // `claudepot_core::retention` so the sibling
+                // metrics_tick prune in `LiveRuntime::start` can't
+                // drift out of sync.
+                let cutoff_ms = chrono::Utc::now().timestamp_millis()
+                    - claudepot_core::retention::RETENTION_MS;
+                match idx.prune_before(cutoff_ms) {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!(
+                        target = "claudepot_tauri",
+                        pruned = n,
+                        cutoff_ms,
+                        "activity-cards startup prune"
+                    ),
+                    Err(e) => tracing::warn!(
+                        target = "claudepot_tauri",
+                        error = %e,
+                        "activity-cards startup prune failed"
+                    ),
+                }
+                Some(std::sync::Arc::new(idx))
+            }
             Err(e) => {
                 tracing::warn!(
                     target = "claudepot_tauri",
@@ -341,12 +379,21 @@ pub fn run() {
                 // also pulls once via `traffic_light_metrics` IPC at
                 // mount time as a belt-and-suspenders for the case
                 // where both emits beat the listener.
+                //
+                // Each emit is routed through `run_on_main_thread`
+                // because `traffic_light::emit` calls into AppKit
+                // (`NSWindow.standardWindowButton`, `convertRect:toView:`),
+                // which asserts the main thread and crashes the process
+                // when invoked from a tokio worker. The previous shape
+                // called `emit` directly from the spawned task — a
+                // latent crash that fired probabilistically on cold
+                // launch depending on main-thread load.
                 let win_for_boot = window.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                    traffic_light::emit(&win_for_boot);
+                    traffic_light::emit_on_main_thread(&win_for_boot);
                     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-                    traffic_light::emit(&win_for_boot);
+                    traffic_light::emit_on_main_thread(&win_for_boot);
                 });
             }
 
@@ -418,7 +465,11 @@ pub fn run() {
             // common "user mutated state out-of-band" case, and the
             // explicit `accounts_reconcile` Tauri command covers the
             // user-driven path. Failure here never blocks startup.
-            tauri::async_runtime::spawn_blocking(|| {
+            // `tauri::async_runtime::spawn` (not `spawn_blocking`): the
+            // reconcile path is async because `swap::load_private` is
+            // async, and the underlying keychain subprocess calls have
+            // their own bounded 5 s timeout in `cli_backend::storage`.
+            tauri::async_runtime::spawn(async {
                 let store = match crate::commands::open_store() {
                     Ok(s) => s,
                     Err(e) => {
@@ -426,7 +477,7 @@ pub fn run() {
                         return;
                     }
                 };
-                match claudepot_core::services::account_service::reconcile_all(&store) {
+                match claudepot_core::services::account_service::reconcile_all(&store).await {
                     Ok(report) => {
                         if !report.cli_flips.is_empty()
                             || !report.desktop.flag_flips.is_empty()

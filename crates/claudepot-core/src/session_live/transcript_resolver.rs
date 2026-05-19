@@ -202,6 +202,23 @@ impl TranscriptResolver {
         parsed
     }
 
+    /// Drop cache entries whose source transcript no longer exists
+    /// on disk. Bounds the cache size on heavy-use installs where
+    /// the user accumulates thousands of historical transcripts —
+    /// the cache grew monotonically before, because each entry is
+    /// keyed by `PathBuf` and we never re-checked existence.
+    ///
+    /// CC's transcript first lines are immutable once written (see
+    /// the module docstring), so a still-present file's cached entry
+    /// is still correct; we only ever need to drop entries that
+    /// reference deleted files. Returns the number of entries
+    /// evicted, for diagnostics.
+    pub fn evict_missing(&mut self) -> usize {
+        let before = self.first_event_ts.len();
+        self.first_event_ts.retain(|path, _| path.exists());
+        before - self.first_event_ts.len()
+    }
+
     /// Test-only: peek cache size (for asserting we don't re-read
     /// the same file repeatedly).
     #[cfg(test)]
@@ -564,6 +581,46 @@ mod tests {
             "second resolve must reuse the cache without re-reading"
         );
         assert_eq!(after_first, 1, "exactly one entry per observed file");
+    }
+
+    /// Eviction sweep drops entries whose source transcript was
+    /// deleted from disk between resolves. Without it, a long-running
+    /// session that runs `claudepot session prune --trash` over
+    /// thousands of historical transcripts leaves a stale `PathBuf`
+    /// per transcript in the cache for the rest of the runtime's
+    /// lifetime.
+    #[test]
+    fn evict_missing_drops_stale_entries() {
+        let td = TempDir::new().unwrap();
+        let projects = td.path().join("projects");
+        let cwd = "/Users/me/project";
+        let started_at = chrono::Utc::now().timestamp_millis() - 60 * 1000;
+
+        // Seed the cache with two transcripts.
+        let a = write_transcript(&projects, cwd, "a-sid", &iso_from_offset_secs(-30));
+        let b = write_transcript(&projects, cwd, "b-sid", &iso_from_offset_secs(-30));
+        touch(&a, -1);
+        touch(&b, -1);
+
+        let mut r = TranscriptResolver::new();
+        let rec = mk_pid("a-sid", cwd, started_at);
+        r.resolve(&rec, &projects);
+        assert_eq!(r.cache_len(), 2, "both transcripts cached after resolve");
+
+        // Delete one transcript on disk.
+        std::fs::remove_file(&a).unwrap();
+
+        // Before eviction, the cache still holds the dead entry.
+        assert_eq!(r.cache_len(), 2);
+
+        // Sweep evicts exactly the dead entry.
+        let evicted = r.evict_missing();
+        assert_eq!(evicted, 1);
+        assert_eq!(r.cache_len(), 1);
+
+        // Idempotent — second sweep evicts nothing.
+        assert_eq!(r.evict_missing(), 0);
+        assert_eq!(r.cache_len(), 1);
     }
 
     #[test]

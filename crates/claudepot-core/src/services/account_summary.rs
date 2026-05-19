@@ -46,11 +46,13 @@ pub struct AccountSummaryView {
 /// per-row `token_health` and `paths::desktop_profile_dir(...).exists()`
 /// calls already swallow their own I/O failures into a status string
 /// or a `false`, so this signature stays narrow.
-pub fn list_summaries(store: &AccountStore) -> Result<Vec<AccountSummaryView>, rusqlite::Error> {
+pub async fn list_summaries(
+    store: &AccountStore,
+) -> Result<Vec<AccountSummaryView>, rusqlite::Error> {
     let accounts = store.list()?;
     let mut out = Vec::with_capacity(accounts.len());
     for account in accounts {
-        let health = token_health(account.uuid, account.has_cli_credentials);
+        let health = token_health(account.uuid, account.has_cli_credentials).await;
         // A stored blob is "healthy" if it exists and parses. Any other
         // status ("missing", "corrupt blob", "no credentials") means the
         // swap can't succeed — the UI should gate on this, not the DB flag.
@@ -76,7 +78,14 @@ pub fn list_summaries(store: &AccountStore) -> Result<Vec<AccountSummaryView>, r
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
+    // See cli_backend/swap_tests.rs and account_service_tests.rs:
+    // tests serialize through `lock_data_dir()` (a `Mutex<()>`) so
+    // they don't trample the shared `CLAUDEPOT_DATA_DIR` env var.
+    // That guard is intentionally held across `.await` — the lock
+    // is single-threaded, never poisoned, never contended in a way
+    // that could deadlock.
     use super::*;
     use crate::account_verification::VerifyOutcome;
     use crate::cli_backend::swap;
@@ -86,18 +95,18 @@ mod tests {
         store.insert(account).unwrap();
     }
 
-    #[test]
-    fn test_list_summaries_empty_store() {
+    #[tokio::test]
+    async fn test_list_summaries_empty_store() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
 
-        let views = list_summaries(&store).unwrap();
+        let views = list_summaries(&store).await.unwrap();
         assert!(views.is_empty());
     }
 
-    #[test]
-    fn test_list_summaries_no_credentials_yields_no_credentials_status() {
+    #[tokio::test]
+    async fn test_list_summaries_no_credentials_yields_no_credentials_status() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
@@ -105,7 +114,7 @@ mod tests {
         acct.has_cli_credentials = false;
         insert(&store, &acct);
 
-        let views = list_summaries(&store).unwrap();
+        let views = list_summaries(&store).await.unwrap();
         assert_eq!(views.len(), 1);
         let v = &views[0];
         assert_eq!(v.token_health.status, "no credentials");
@@ -113,8 +122,8 @@ mod tests {
         assert!(v.token_health.remaining_mins.is_none());
     }
 
-    #[test]
-    fn test_list_summaries_drift_flag_derives_from_verify_status() {
+    #[tokio::test]
+    async fn test_list_summaries_drift_flag_derives_from_verify_status() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
@@ -134,7 +143,7 @@ mod tests {
             )
             .unwrap();
 
-        let views = list_summaries(&store).unwrap();
+        let views = list_summaries(&store).await.unwrap();
         let by_email: std::collections::HashMap<_, _> =
             views.iter().map(|v| (v.account.email.clone(), v)).collect();
 
@@ -143,8 +152,8 @@ mod tests {
         assert_eq!(by_email["drift@example.com"].account.verify_status, "drift");
     }
 
-    #[test]
-    fn test_list_summaries_desktop_profile_on_disk_reflects_filesystem() {
+    #[tokio::test]
+    async fn test_list_summaries_desktop_profile_on_disk_reflects_filesystem() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
@@ -161,7 +170,7 @@ mod tests {
         let dir = paths::desktop_profile_dir(with_profile.uuid);
         std::fs::create_dir_all(&dir).unwrap();
 
-        let views = list_summaries(&store).unwrap();
+        let views = list_summaries(&store).await.unwrap();
         let by_email: std::collections::HashMap<_, _> =
             views.iter().map(|v| (v.account.email.clone(), v)).collect();
 
@@ -169,20 +178,20 @@ mod tests {
         assert!(!by_email["nodesk@example.com"].desktop_profile_on_disk);
     }
 
-    #[test]
-    fn test_list_summaries_credentials_healthy_with_valid_blob() {
+    #[tokio::test]
+    async fn test_list_summaries_credentials_healthy_with_valid_blob() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
         let acct = make_account("valid@example.com");
         insert(&store, &acct);
-        swap::save_private(acct.uuid, &fresh_blob_json()).unwrap();
+        swap::save_private(acct.uuid, &fresh_blob_json()).await.unwrap();
 
-        let views = list_summaries(&store).unwrap();
+        let views = list_summaries(&store).await.unwrap();
         assert_eq!(views.len(), 1);
         assert!(views[0].credentials_healthy);
         assert!(views[0].token_health.status.contains("valid"));
 
-        swap::delete_private(acct.uuid).unwrap();
+        swap::delete_private(acct.uuid).await.unwrap();
     }
 }

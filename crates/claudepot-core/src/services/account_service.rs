@@ -48,7 +48,7 @@ pub(crate) async fn register_from_current_with(
         .await
         .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?;
 
-    register_account_from_profile(store, &blob_str, &prof)
+    register_account_from_profile(store, &blob_str, &prof).await
 }
 
 /// Trait for fetching an OAuth profile — enables testing without network.
@@ -73,7 +73,7 @@ impl ProfileFetcher for DefaultProfileFetcher {
 
 /// Shared logic: given a credential blob string and a fetched profile,
 /// save credentials and insert the account.
-fn register_account_from_profile(
+async fn register_account_from_profile(
     store: &AccountStore,
     blob_str: &str,
     prof: &profile::Profile,
@@ -90,6 +90,7 @@ fn register_account_from_profile(
 
     let account_id = Uuid::new_v4();
     swap::save_private(account_id, blob_str)
+        .await
         .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
 
     let account = Account {
@@ -114,7 +115,7 @@ fn register_account_from_profile(
     };
     if let Err(e) = store.insert(&account) {
         // Rollback: delete orphaned private blob
-        let _ = swap::delete_private(account_id);
+        let _ = swap::delete_private(account_id).await;
         return Err(RegisterError::Store(e.to_string()));
     }
 
@@ -162,7 +163,7 @@ pub(crate) async fn register_from_token_with(
         .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?;
 
     let blob_str = refresh::build_blob(&token_resp, None);
-    register_account_from_profile(store, &blob_str, &prof)
+    register_account_from_profile(store, &blob_str, &prof).await
 }
 
 /// Register an account via browser-based OAuth login.
@@ -409,12 +410,13 @@ pub(crate) async fn sync_from_current_cc_with(
     );
 
     // Write if the stored blob differs from or is missing vs. CC's current.
-    let needs_write = match swap::load_private(account.uuid) {
+    let needs_write = match swap::load_private(account.uuid).await {
         Ok(stored) => stored != effective_blob_str,
         Err(_) => true,
     };
     if needs_write {
         swap::save_private(account.uuid, &effective_blob_str)
+            .await
             .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
         let _ = store.update_credentials_flag(account.uuid, true);
     }
@@ -506,6 +508,7 @@ pub(crate) async fn reimport_from_current_with(
     }
 
     swap::save_private(account_id, &blob_str)
+        .await
         .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
 
     // Sync the flag — storage is now populated.
@@ -568,7 +571,7 @@ pub async fn remove_account(
         .map_err(|e| RegisterError::Store(e.to_string()))?;
 
     // Now safe to delete files — DB row is already gone
-    if let Err(e) = swap::delete_private(uuid) {
+    if let Err(e) = swap::delete_private(uuid).await {
         warnings.push(format!("failed to delete credential file: {e}"));
     }
     if had_profile {
@@ -639,14 +642,19 @@ fn format_duration_mins(mins: i64) -> String {
 }
 
 /// Get token health for an account.
-pub fn token_health(uuid: Uuid, has_credentials: bool) -> TokenHealth {
+///
+/// Async because `swap::load_private` is async — every credential
+/// read goes through the macOS keychain subprocess (or file storage
+/// on other platforms), and both branches need to be reachable
+/// without blocking the tokio worker that called us.
+pub async fn token_health(uuid: Uuid, has_credentials: bool) -> TokenHealth {
     if !has_credentials {
         return TokenHealth {
             status: "no credentials".into(),
             remaining_mins: None,
         };
     }
-    match swap::load_private(uuid) {
+    match swap::load_private(uuid).await {
         Ok(blob_str) => match CredentialBlob::from_json(&blob_str) {
             Ok(blob) => {
                 let remaining =
@@ -931,7 +939,7 @@ async fn finish_login_after_subprocess(
     }
 
     progress.phase(LoginPhase::Persisting);
-    if let Err(e) = swap::save_private(account_id, &blob_str) {
+    if let Err(e) = swap::save_private(account_id, &blob_str).await {
         let msg = e.to_string();
         progress.error(LoginPhase::Persisting, &msg);
         return Err(RegisterError::CredentialWrite(msg));
@@ -1036,7 +1044,7 @@ pub async fn register_from_browser_with_progress(
 
     progress.phase(LoginPhase::Persisting);
     let account_id = Uuid::new_v4();
-    if let Err(e) = swap::save_private(account_id, &blob_str) {
+    if let Err(e) = swap::save_private(account_id, &blob_str).await {
         let msg = e.to_string();
         // Cleanup on credential write failure
         let cd = config_dir.clone();
@@ -1066,7 +1074,7 @@ pub async fn register_from_browser_with_progress(
     if let Err(e) = store.insert(&account) {
         let msg = e.to_string();
         // Rollback: delete orphaned private blob + cleanup temp dir
-        let _ = swap::delete_private(account_id);
+        let _ = swap::delete_private(account_id).await;
         onboard::cleanup(&config_dir).await;
         progress.error(LoginPhase::Persisting, &msg);
         return Err(RegisterError::Store(msg));
@@ -1296,7 +1304,9 @@ pub enum ReconcileError {
 ///
 /// Idempotent: a second pass on a converged store returns an empty `Vec`.
 /// Errors short-circuit on the first sqlite failure (read or write).
-pub fn reconcile_cli_flags(store: &AccountStore) -> Result<Vec<CliFlagFlip>, ReconcileError> {
+pub async fn reconcile_cli_flags(
+    store: &AccountStore,
+) -> Result<Vec<CliFlagFlip>, ReconcileError> {
     let accounts = store
         .list()
         .map_err(|e| ReconcileError::Store(e.to_string()))?;
@@ -1306,7 +1316,7 @@ pub fn reconcile_cli_flags(store: &AccountStore) -> Result<Vec<CliFlagFlip>, Rec
         // truth the DB flag should mirror — anything else (missing,
         // unreadable, malformed JSON) means the swap can't succeed and
         // the flag should be `false`.
-        let truth = match swap::load_private(a.uuid) {
+        let truth = match swap::load_private(a.uuid).await {
             Ok(blob_str) => CredentialBlob::from_json(&blob_str).is_ok(),
             Err(_) => false,
         };
@@ -1327,8 +1337,8 @@ pub fn reconcile_cli_flags(store: &AccountStore) -> Result<Vec<CliFlagFlip>, Rec
 /// Run both reconcile passes (CLI flags + Desktop flags / orphan pointer)
 /// and bundle the outcomes. Failures from either pass surface as
 /// [`ReconcileError::Store`].
-pub fn reconcile_all(store: &AccountStore) -> Result<ReconcileReport, ReconcileError> {
-    let cli_flips = reconcile_cli_flags(store)?;
+pub async fn reconcile_all(store: &AccountStore) -> Result<ReconcileReport, ReconcileError> {
+    let cli_flips = reconcile_cli_flags(store).await?;
     let desktop = super::desktop_service::reconcile_flags(store)
         .map_err(|e| ReconcileError::Store(e.to_string()))?;
     Ok(ReconcileReport { cli_flips, desktop })

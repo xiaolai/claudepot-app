@@ -254,7 +254,14 @@ impl LiveRuntime {
         // concurrent `start`.
         let my_notify = Arc::new(tokio::sync::Notify::new());
         let prior_notify = {
-            let mut slot = self.exit_notify.lock().expect("exit_notify mutex poisoned");
+            // Recover from a poisoned mutex via the shared helper.
+            // The exit-notify slot is advisory state — losing
+            // visibility into the prior poll task's exit can at
+            // worst produce a brief double-tick window on a
+            // stop→start race, which is much less bad than
+            // cascading a panic across the entire live-runtime
+            // surface.
+            let mut slot = crate::sync::recover_lock(&self.exit_notify, "exit_notify");
             slot.replace(Arc::clone(&my_notify))
         };
 
@@ -266,6 +273,51 @@ impl LiveRuntime {
             // the new one starts ticking — producing two pollers.
             if let Some(prior) = prior_notify {
                 prior.notified().await;
+            }
+            // Prune the metrics_tick table once per runtime start so
+            // the table stays bounded across months of sustained
+            // use. The previous shape defined `prune_before` but
+            // never called it — every 500 ms heartbeat wrote a row
+            // per live session and they accumulated forever. The
+            // retention window lives in `crate::retention` so the
+            // sibling activity-cards prune in `src-tauri/src/lib.rs`
+            // can't drift out of sync.
+            if let Some(ref metrics) = this.metrics {
+                let cutoff_ms =
+                    chrono::Utc::now().timestamp_millis() - crate::retention::RETENTION_MS;
+                match metrics.prune_before(cutoff_ms) {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!(
+                        target = "session_live::runtime",
+                        pruned = n,
+                        cutoff_ms,
+                        "metrics_tick startup prune"
+                    ),
+                    Err(e) => tracing::warn!(
+                        target = "session_live::runtime",
+                        error = %e,
+                        "metrics_tick startup prune failed"
+                    ),
+                }
+            }
+            // Evict TranscriptResolver cache entries pointing at
+            // transcripts that no longer exist on disk. The cache
+            // grew monotonically before — a user who runs
+            // `claudepot session prune --trash` across thousands of
+            // historical transcripts left dead `PathBuf` keys behind
+            // for the runtime's lifetime. Bounded but unbounded-ish
+            // (~100-300 bytes per entry), so we sweep at every
+            // runtime start. Same cadence as the metrics prune above.
+            {
+                let mut resolver = this.resolver.lock().await;
+                let evicted = resolver.evict_missing();
+                if evicted > 0 {
+                    tracing::info!(
+                        target = "session_live::runtime",
+                        evicted,
+                        "transcript_resolver startup eviction"
+                    );
+                }
             }
             while this.current_generation.load(Ordering::SeqCst) == my_gen {
                 if let Err(e) = this.tick().await {

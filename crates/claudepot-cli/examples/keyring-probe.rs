@@ -8,7 +8,8 @@
 use claudepot_core::cli_backend::swap::{delete_private, load_private, save_private};
 use uuid::Uuid;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fixed test UUID so repeat runs clean up properly.
     let id = Uuid::parse_str("aaaaaaaa-1234-4567-8901-cccccccccccc")?;
     let blob = r#"{"probe":"keyring-roundtrip"}"#;
@@ -20,10 +21,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("test uuid:   {id}");
 
     println!("1. save_private...");
-    save_private(id, blob)?;
+    save_private(id, blob).await?;
 
     println!("2. load_private...");
-    let loaded = load_private(id)?;
+    let loaded = load_private(id).await?;
     println!("   loaded: {loaded}");
     assert_eq!(loaded, blob, "roundtrip mismatch");
 
@@ -46,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     println!("4. delete_private + cleanup");
-    delete_private(id)?;
+    delete_private(id).await?;
 
     println!();
     if in_keychain {

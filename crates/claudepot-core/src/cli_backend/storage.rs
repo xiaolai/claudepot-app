@@ -16,6 +16,20 @@ use uuid::Uuid;
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "com.claudepot.credentials";
 
+/// Subprocess timeout for every `/usr/bin/security` invocation in this
+/// module. A TCC consent dialog the user doesn't see, a locked login
+/// keychain hanging on prompt, or `security` itself stalling must not
+/// hang the tokio worker that called us — every call site is reached
+/// from the async swap/launcher path, and the only acceptable failure
+/// mode under stall is a typed error after a bounded wait.
+///
+/// 5 s matches the sibling `cli_backend::keychain` `TIMEOUT` for the
+/// CC-credentials store. Both subprocesses do the same kind of work
+/// against the same login keychain; using the same budget here means
+/// a failure in one surface and the other report at the same cadence.
+#[cfg(target_os = "macos")]
+const KEYCHAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Typed outcome from a `/usr/bin/security` invocation. Distinguishes
 /// "the keychain told us the item isn't there" (safe to fall back to
 /// file storage) from real failures like a locked login keychain or
@@ -149,10 +163,11 @@ fn validate_keychain_attr(value: &str) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
+async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
     use age::secrecy::{ExposeSecret, SecretString};
-    use std::io::Write as _;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt as _;
+    use tokio::process::Command;
 
     let account = account_id.to_string();
     validate_keychain_attr(&account).map_err(|e| KeychainErr::Other(e.to_string()))?;
@@ -179,25 +194,50 @@ fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
         hex_value.expose_secret()
     ));
 
-    let mut child = Command::new("/usr/bin/security")
-        .args(["-i"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
+    // Total `save_to_keyring` budget is `2 × KEYCHAIN_TIMEOUT`: this
+    // block (the `add-generic-password` subprocess) plus the
+    // `load_from_keyring` read-back call below, which carries its own
+    // independent `tokio::time::timeout` block.
+    //
+    // The two timeouts are INDEPENDENT on purpose — combining them
+    // (one outer timeout wrapping both subprocess calls) would let a
+    // slow write eat into the read-back budget and produce false
+    // "read-back mismatch" errors after a near-deadline write. Keeping
+    // them separate means each subprocess gets a full 5 s.
+    //
+    // On timeout the child is dropped, which sends SIGKILL via tokio's
+    // `kill_on_drop(true)` semantics for tokio::process::Command — see
+    // the docs. A leaked `security` process would block subsequent
+    // keychain accesses on the same login keychain until macOS reaps
+    // it; the kill avoids that pile-up.
+    let result = tokio::time::timeout(KEYCHAIN_TIMEOUT, async {
+        let mut child = Command::new("/usr/bin/security")
+            .args(["-i"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(command_line.expose_secret().as_bytes())
-            .map_err(|e| KeychainErr::Other(format!("stdin write: {e}")))?;
-        // Closing stdin signals end-of-input to `security -i`.
-        drop(stdin);
-    }
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(command_line.expose_secret().as_bytes())
+                .await
+                .map_err(|e| KeychainErr::Other(format!("stdin write: {e}")))?;
+            // Dropping stdin signals end-of-input to `security -i`.
+            drop(stdin);
+        }
 
-    let out = child
-        .wait_with_output()
-        .map_err(|e| KeychainErr::Other(format!("wait: {e}")))?;
+        child
+            .wait_with_output()
+            .await
+            .map_err(|e| KeychainErr::Other(format!("wait: {e}")))
+    })
+    .await
+    .map_err(|_| KeychainErr::Other("security add-generic-password timed out".into()))?;
+
+    let out = result?;
     if !out.status.success() {
         return Err(KeychainErr::Other(format!(
             "security add-generic-password failed (exit {}): {}",
@@ -208,8 +248,11 @@ fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
 
     // Read-back verification — `security -i` returns 0 even when the
     // inner command silently fails (TCC denial, ACL gate). Only confirm
-    // success once we observe the blob actually landed.
-    match load_from_keyring(account_id)? {
+    // success once we observe the blob actually landed. `load_from_keyring`
+    // wraps its own subprocess in `tokio::time::timeout(KEYCHAIN_TIMEOUT,
+    // ...)`, so this `.await` is bounded — see the design note above the
+    // surrounding write block for why the two timeouts stay independent.
+    match load_from_keyring(account_id).await? {
         Some(stored) if stored == blob => Ok(()),
         Some(_) => Err(KeychainErr::Other(
             "keyring write did not take effect (read-back mismatch)".into(),
@@ -221,19 +264,25 @@ fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
 }
 
 #[cfg(target_os = "macos")]
-fn load_from_keyring(account_id: Uuid) -> Result<Option<String>, KeychainErr> {
-    use std::process::Command;
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "find-generic-password",
-            "-a",
-            &account_id.to_string(),
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-w",
-        ])
-        .output()
-        .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
+async fn load_from_keyring(account_id: Uuid) -> Result<Option<String>, KeychainErr> {
+    use tokio::process::Command;
+    let out = tokio::time::timeout(KEYCHAIN_TIMEOUT, async {
+        Command::new("/usr/bin/security")
+            .args([
+                "find-generic-password",
+                "-a",
+                &account_id.to_string(),
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-w",
+            ])
+            .kill_on_drop(true)
+            .output()
+            .await
+    })
+    .await
+    .map_err(|_| KeychainErr::Other("security find-generic-password timed out".into()))?
+    .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
     if out.status.success() {
         let blob = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
         Ok(Some(blob))
@@ -259,18 +308,24 @@ fn load_from_keyring(account_id: Uuid) -> Result<Option<String>, KeychainErr> {
 }
 
 #[cfg(target_os = "macos")]
-fn delete_from_keyring(account_id: Uuid) -> Result<(), KeychainErr> {
-    use std::process::Command;
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "delete-generic-password",
-            "-a",
-            &account_id.to_string(),
-            "-s",
-            KEYCHAIN_SERVICE,
-        ])
-        .output()
-        .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
+async fn delete_from_keyring(account_id: Uuid) -> Result<(), KeychainErr> {
+    use tokio::process::Command;
+    let out = tokio::time::timeout(KEYCHAIN_TIMEOUT, async {
+        Command::new("/usr/bin/security")
+            .args([
+                "delete-generic-password",
+                "-a",
+                &account_id.to_string(),
+                "-s",
+                KEYCHAIN_SERVICE,
+            ])
+            .kill_on_drop(true)
+            .output()
+            .await
+    })
+    .await
+    .map_err(|_| KeychainErr::Other("security delete-generic-password timed out".into()))?
+    .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
     let code = out.status.code().unwrap_or(-1);
     // success or exit 44 (item not found) → idempotent ok.
     if out.status.success() || code == 44 {
@@ -312,31 +367,33 @@ impl From<KeychainErr> for SwapError {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn save_to_keyring(_account_id: Uuid, _blob: &str) -> Result<(), KeychainErr> {
+async fn save_to_keyring(_account_id: Uuid, _blob: &str) -> Result<(), KeychainErr> {
     Err(KeychainErr::Other(
         "keyring backend is only implemented on macOS".into(),
     ))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn load_from_keyring(_account_id: Uuid) -> Result<Option<String>, KeychainErr> {
+async fn load_from_keyring(_account_id: Uuid) -> Result<Option<String>, KeychainErr> {
     Err(KeychainErr::Other(
         "keyring backend is only implemented on macOS".into(),
     ))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn delete_from_keyring(_account_id: Uuid) -> Result<(), KeychainErr> {
+async fn delete_from_keyring(_account_id: Uuid) -> Result<(), KeychainErr> {
     Err(KeychainErr::Other(
         "keyring backend is only implemented on macOS".into(),
     ))
 }
 
-pub fn save(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
+pub async fn save(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
     match backend() {
         CredBackend::FileOnly => save_to_file(account_id, blob),
-        CredBackend::KeyringOnly => save_to_keyring(account_id, blob).map_err(SwapError::from),
-        CredBackend::Auto => match save_to_keyring(account_id, blob) {
+        CredBackend::KeyringOnly => save_to_keyring(account_id, blob)
+            .await
+            .map_err(SwapError::from),
+        CredBackend::Auto => match save_to_keyring(account_id, blob).await {
             Ok(()) => {
                 let _ = delete_file(account_id);
                 Ok(())
@@ -355,15 +412,15 @@ pub fn save(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
     }
 }
 
-pub fn load(account_id: Uuid) -> Result<String, SwapError> {
+pub async fn load(account_id: Uuid) -> Result<String, SwapError> {
     match backend() {
         CredBackend::FileOnly => load_from_file(account_id),
-        CredBackend::KeyringOnly => match load_from_keyring(account_id) {
+        CredBackend::KeyringOnly => match load_from_keyring(account_id).await {
             Ok(Some(blob)) => Ok(blob),
             Ok(None) => Err(SwapError::NoStoredCredentials(account_id)),
             Err(e) => Err(e.into()),
         },
-        CredBackend::Auto => match load_from_keyring(account_id) {
+        CredBackend::Auto => match load_from_keyring(account_id).await {
             Ok(Some(blob)) => {
                 let _ = delete_file(account_id);
                 Ok(blob)
@@ -376,7 +433,7 @@ pub fn load(account_id: Uuid) -> Result<String, SwapError> {
             // forced unreachable. Fail closed.
             Ok(None) => match load_from_file(account_id) {
                 Ok(blob) => {
-                    if save_to_keyring(account_id, &blob).is_ok() {
+                    if save_to_keyring(account_id, &blob).await.is_ok() {
                         let _ = delete_file(account_id);
                     }
                     Ok(blob)
@@ -388,14 +445,16 @@ pub fn load(account_id: Uuid) -> Result<String, SwapError> {
     }
 }
 
-pub fn load_opt(account_id: Uuid) -> Option<String> {
-    load(account_id).ok()
+pub async fn load_opt(account_id: Uuid) -> Option<String> {
+    load(account_id).await.ok()
 }
 
-pub fn delete(account_id: Uuid) -> Result<(), SwapError> {
+pub async fn delete(account_id: Uuid) -> Result<(), SwapError> {
     match backend() {
         CredBackend::FileOnly => delete_file(account_id),
-        CredBackend::KeyringOnly => delete_from_keyring(account_id).map_err(SwapError::from),
+        CredBackend::KeyringOnly => delete_from_keyring(account_id)
+            .await
+            .map_err(SwapError::from),
         CredBackend::Auto => {
             // Audit fix for storage.rs:328 — fail-closed on real
             // keychain errors. The previous shape returned Ok if
@@ -413,7 +472,7 @@ pub fn delete(account_id: Uuid) -> Result<(), SwapError> {
             //     surface it regardless of what the file path did.
             //   - the file path only fails for IO errors; a missing
             //     file is `Ok`. So a file Err is also a real failure.
-            let keyring_result = delete_from_keyring(account_id);
+            let keyring_result = delete_from_keyring(account_id).await;
             let file_result = delete_file(account_id);
 
             match (keyring_result, file_result) {

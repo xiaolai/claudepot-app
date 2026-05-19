@@ -86,7 +86,13 @@ fn apply_tray_icon(tray: &tauri::tray::TrayIcon, alert_count: u32) {
 pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     let store = crate::commands::open_store()?;
     let accounts = store.list().map_err(|e| format!("list: {e}"))?;
-    let summaries: Vec<AccountSummary> = accounts.iter().map(AccountSummary::from).collect();
+    // Sequential rather than concurrent: macOS surfaces one unlock
+    // dialog per locked-keychain access — parallel `token_health`
+    // calls would stack dialogs on the user.
+    let mut summaries: Vec<AccountSummary> = Vec::with_capacity(accounts.len());
+    for a in &accounts {
+        summaries.push(crate::dto::summary_for_account(a).await);
+    }
 
     let cli_active = summaries.iter().find(|a| a.is_cli_active);
     let desktop_active = summaries.iter().find(|a| a.is_desktop_active);
@@ -329,9 +335,34 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
     // well under a millisecond on the typical 0–10 account list.
     if let Ok(store) = crate::commands::open_store() {
         if let Ok(accounts) = store.list() {
+            // refresh_alert_chrome is sync. The tooltip only needs
+            // `uuid` and `email` from each summary (see
+            // `tray_menu::build_tooltip`), so we build a minimal stub
+            // and skip the per-account keychain reads that
+            // `summary_for_account` would do. The full summary lands
+            // on the next `rebuild` (async) call.
             let summaries: Vec<crate::dto::AccountSummary> = accounts
                 .iter()
-                .map(crate::dto::AccountSummary::from)
+                .map(|a| crate::dto::AccountSummary {
+                    uuid: a.uuid.to_string(),
+                    email: a.email.clone(),
+                    org_name: a.org_name.clone(),
+                    subscription_type: a.subscription_type.clone(),
+                    is_cli_active: a.is_cli_active,
+                    is_desktop_active: a.is_desktop_active,
+                    has_cli_credentials: a.has_cli_credentials,
+                    has_desktop_profile: a.has_desktop_profile,
+                    last_cli_switch: a.last_cli_switch,
+                    last_desktop_switch: a.last_desktop_switch,
+                    token_status: String::new(),
+                    token_remaining_mins: None,
+                    credentials_healthy: false,
+                    verify_status: a.verify_status.clone(),
+                    verified_email: a.verified_email.clone(),
+                    verified_at: a.verified_at,
+                    drift: a.verify_status == "drift",
+                    desktop_profile_on_disk: false,
+                })
                 .collect();
             let cli = summaries.iter().find(|a| a.is_cli_active);
             let desktop = summaries.iter().find(|a| a.is_desktop_active);
