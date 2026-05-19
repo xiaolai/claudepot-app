@@ -1,62 +1,73 @@
 /**
  * Client child of UserAvatar — wraps the tier-1 <img> with an
- * onError handler that swaps to a pre-rendered fallback SVG.
+ * onError handler that swaps to a boring-avatars identicon fallback.
  *
- * Why this exists
- * ---------------
+ * Why this is a client component
+ * ------------------------------
  * The parent UserAvatar is a server component and stays that way:
- * tiers 2 and 3 render boring-avatars / agent sprites entirely on
- * the server, keeping ~3KB of identicon code out of the client
- * bundle.
+ * tier 2 (agent sprite) and tier 3 (identicon) render entirely on
+ * the server with zero client cost.
  *
  * Tier 1 (real photo) needs an event handler to react to load
  * failures (CSP block, 404, network), which forces a client
- * boundary. We isolate that boundary to this file so the heavier
- * SVG generators never get pulled into the client graph — the
- * parent pre-renders the fallback as an SVG string and we just
- * dangerouslySetInnerHTML it on error.
+ * boundary. Boring-avatars renders here on the client *only* when
+ * the photo fails — most pageloads never instantiate it because
+ * the photo loads.
+ *
+ * History
+ * -------
+ * A previous version pre-rendered the fallback SVG on the server
+ * via renderToStaticMarkup and passed it as a string prop. Next.js
+ * 15's App Router rejects components that import react-dom/server
+ * (incompatible with RSC serialization). The Vercel build failed
+ * silently on 2026-05-18 — typecheck and unit tests passed, only
+ * `next build` catches it. Lesson: web/ commits that touch the
+ * RSC graph need a real build, not just tsc/test.
  *
  * Failure modes the fallback covers:
- *   - Vercel Blob 404 (avatar deleted out of band, or filename drift).
- *   - CSP block (a future image host added to setAvatar without
- *     a matching middleware allowlist — paired with tests/csp.test.ts
- *     this is belt-and-suspenders).
+ *   - Vercel Blob 404 (avatar deleted out of band).
+ *   - CSP block (belt-and-suspenders with tests/csp.test.ts).
  *   - Network timeout / offline.
  *
- * The fallback SVG is the same identicon the user would see if
- * they had no photo at all (or the matching agent sprite for the
- * 108 agent usernames), so degraded state is visually identical
- * to never-uploaded state.
+ * Visual: the fallback identicon is the same shape the user would
+ * see if they had no photo, so degraded state is indistinguishable
+ * from never-uploaded state.
  */
 
 "use client";
 
 import { useState } from "react";
 
+import Avatar from "boring-avatars";
+
+const PALETTE = ["#a35a2a", "#1a1a2e", "#374151", "#9ca3af", "#f5e6d8"];
+
+type Variant = "beam" | "marble" | "pixel" | "ring" | "sunset" | "bauhaus";
+
 interface Props {
   src: string;
   alt: string;
+  username: string;
   size: number;
   className?: string;
-  fallbackSvg: string;
+  variant: Variant;
 }
 
 export function UserAvatarPhoto({
   src,
   alt,
+  username,
   size,
   className,
-  fallbackSvg,
+  variant,
 }: Props) {
   const [errored, setErrored] = useState(false);
 
   if (errored) {
     return (
-      <span
-        className={`proto-avatar ${className ?? ""}`}
-        aria-label={alt}
-        dangerouslySetInnerHTML={{ __html: fallbackSvg }}
-      />
+      <span className={`proto-avatar ${className ?? ""}`} aria-label={alt}>
+        <Avatar size={size} name={username} variant={variant} colors={PALETTE} />
+      </span>
     );
   }
 
