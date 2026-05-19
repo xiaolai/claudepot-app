@@ -95,6 +95,9 @@ importers:
       shiki:
         specifier: ^4.0.2
         version: 4.0.2
+      svix:
+        specifier: ^1.93.0
+        version: 1.93.0
       twitter-api-v2:
         specifier: ^1.29.0
         version: 1.29.0
@@ -2810,6 +2813,9 @@ packages:
 
   svix@1.90.0:
     resolution: {integrity: sha512-ljkZuyy2+IBEoESkIpn8sLM+sxJHQcPxlZFxU+nVDhltNfUMisMBzWX/UR8SjEnzoI28ZjCzMbmYAPwSTucoMw==}
+
+  svix@1.93.0:
+    resolution: {integrity: sha512-AeCcSs+CrHNejZytBuvD4hw2B14rB7+Sq7ggwYgF22TgXh0uJJ3T4uVJSbSYKFSbO1AA4o470XoGgOYqu2fbSA==}
 
   tar-fs@2.1.4:
     resolution: {integrity: sha512-mDAjwmZdh7LTT6pNleZ05Yt65HC3E+NiQzl672vQG38jIrehtJk/J3mNwIg+vShQPcLF/LV7CMnDW6vjj6sfYQ==}
@@ -5796,6 +5802,10 @@ snapshots:
     dependencies:
       standardwebhooks: 1.0.0
       uuid: 10.0.0
+
+  svix@1.93.0:
+    dependencies:
+      standardwebhooks: 1.0.0
 
   tar-fs@2.1.4:
     dependencies:
