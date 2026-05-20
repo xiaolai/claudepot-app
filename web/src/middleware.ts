@@ -22,24 +22,32 @@ import { NextResponse } from "next/server";
  * from style sinks in modern browsers.
  *
  * External origins explicitly allowlisted:
- *   img-src    Google + GitHub avatars (OAuth user.image when the user
- *              hasn't uploaded their own), raw.github (markdown-rewritten
- *              images from GitHub-imported posts), and Vercel Blob
- *              (where setAvatar() persists user-uploaded photos AND
- *              where seeded bot avatars live — see src/lib/avatars.ts).
- *              The Vercel Blob host carries a per-project random
- *              subdomain (e.g. iaomvi8nxzu0duzf.public.blob.…), so the
- *              allowlist uses a wildcard to survive a future store
- *              rotation without a redeploy gap.
+ *   img-src    Any HTTPS host. Claudepot is a content aggregator —
+ *              posts reference images from arbitrary publisher CDNs
+ *              (Wired, Substack, NYT, …) and an enumerated allowlist
+ *              is structurally incompatible with that. `data:` and
+ *              `blob:` cover inline avatars and pre-upload previews.
+ *              XSS via <img> is not a real path here: `script-src`
+ *              (nonce + strict-dynamic) is what blocks script
+ *              execution; image loads can't run code. The accepted
+ *              residual risks are tracking pixels embedded in
+ *              ingested content and reader-IP exposure to publisher
+ *              CDNs — both inherent to embedding remote content.
+ *              `referrerpolicy="no-referrer"` on rendered <img>
+ *              strips the referer header. See the 2026-05-20
+ *              decision in this file's history.
+ *   media-src  Same reasoning as img-src — third-party <audio>/
+ *              <video> sources are part of the aggregator surface.
  *   frame-src  YouTube-nocookie, Spotify embeds, Apple Podcasts embeds
- *              (see src/lib/embed-attrs.ts)
+ *              (see src/lib/embed-attrs.ts). Iframes load entire
+ *              third-party documents with their own JS, so this one
+ *              stays enumerated — add hosts per embed provider.
  *
- * If you add a new image origin (a new CDN, a new OAuth provider, a
- * remote markdown source) you MUST update img-src AND mirror the
- * change in tests/csp.test.ts — that test exists specifically to
- * make accidental removal/omission of an avatar host a failed build,
- * because a silent CSP drop blocks every avatar at once (see the
- * 2026-05-18 incident, fixed in the same commit that added this note).
+ * Old footgun (2026-05-18): when img-src was enumerated, dropping
+ * the Vercel Blob host from the allowlist 404'd every avatar at
+ * once. The current `https:` policy makes that class of accident
+ * impossible. If you ever re-tighten img-src, restore tests/csp.test.ts
+ * to its pre-relaxation shape so a silent drop fails the build.
  *
  * Vercel Analytics + Speed Insights load their scripts from same-origin
  * (`/_vercel/insights/script.js`), so `'self'` covers them — no third-
@@ -62,10 +70,10 @@ export function buildCsp(nonce: string): string {
     "form-action 'self'",
     `script-src ${scriptSrc}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://raw.githubusercontent.com https://*.public.blob.vercel-storage.com",
+    "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
     "connect-src 'self'",
-    "media-src 'self'",
+    "media-src 'self' https:",
     "frame-src 'self' https://www.youtube-nocookie.com https://open.spotify.com https://embed.podcasts.apple.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
