@@ -1,6 +1,7 @@
 /**
- * CSP allowlist contract — pins the image origins the app actually
- * uses, so a silent drop fails the build instead of breaking prod.
+ * CSP contract — pins the load-bearing shape of the header so an
+ * accidental loosening of script-src or an accidental re-tightening
+ * of img-src/media-src fails the build instead of breaking prod.
  *
  *   pnpm tsx tests/csp.test.ts
  *
@@ -9,17 +10,14 @@
  * On 2026-05-18 the strict-CSP middleware shipped with an img-src
  * that only allowed Google + GitHub OAuth hosts. Every avatar the
  * app actually renders — user uploads written by setAvatar() and the
- * seeded bot avatars — lives on Vercel Blob, which was not in the
- * allowlist. Result: every avatar on claudepot.com 404'd until a
- * patch landed.
+ * seeded bot avatars on Vercel Blob — 404'd until a patch landed.
  *
- * Each origin assertion below corresponds to a real writer / source
- * site. Comments name the writer so the next person editing the CSP
- * can trace why the host has to stay.
- *
- * If you add a new image origin (a new CDN, a new OAuth provider,
- * a new markdown source), update the allowlist in src/middleware.ts
- * AND add an assertion here naming the writer.
+ * On 2026-05-20, img-src was relaxed to `https:` because claudepot
+ * is a content aggregator and an enumerated allowlist of publisher
+ * CDNs is structurally unmaintainable. media-src followed for the
+ * same reason. The hardening floor (script-src nonce + strict-
+ * dynamic, default-src/object-src/frame-ancestors/base-uri/
+ * form-action) is unchanged — those are what actually block XSS.
  */
 
 import assert from "node:assert/strict";
@@ -43,46 +41,41 @@ function test(name: string, fn: () => void) {
 const NONCE = "test-nonce-aaaa==";
 const csp = buildCsp(NONCE);
 
-function imgSrc(): string {
-  const directive = csp
+function directive(name: string): string {
+  const found = csp
     .split(";")
     .map((d) => d.trim())
-    .find((d) => d.startsWith("img-src "));
-  if (!directive) throw new Error("img-src directive missing from CSP");
-  return directive;
+    .find((d) => d.startsWith(`${name} `));
+  if (!found) throw new Error(`${name} directive missing from CSP`);
+  return found;
 }
 
-/* ── img-src — every avatar surface must be reachable ────────── */
+/* ── img-src — open https:, aggregator surface ───────────────── */
 
 test("img-src allows 'self' (same-origin app assets)", () => {
-  assert.match(imgSrc(), /(?:^|\s)'self'(?:\s|$)/);
+  assert.match(directive("img-src"), /(?:^|\s)'self'(?:\s|$)/);
 });
 
 test("img-src allows data: (inline boring-avatars + sprites)", () => {
-  assert.match(imgSrc(), /(?:^|\s)data:(?:\s|$)/);
+  assert.match(directive("img-src"), /(?:^|\s)data:(?:\s|$)/);
 });
 
 test("img-src allows blob: (in-memory preview before upload)", () => {
-  assert.match(imgSrc(), /(?:^|\s)blob:(?:\s|$)/);
+  assert.match(directive("img-src"), /(?:^|\s)blob:(?:\s|$)/);
 });
 
-test("img-src allows Google avatars (OAuth user.image — Google provider)", () => {
-  assert.match(imgSrc(), /https:\/\/lh3\.googleusercontent\.com/);
+test("img-src allows any HTTPS origin (aggregator — arbitrary publisher CDNs)", () => {
+  assert.match(directive("img-src"), /(?:^|\s)https:(?:\s|$)/);
 });
 
-test("img-src allows GitHub avatars (OAuth user.image — GitHub provider)", () => {
-  assert.match(imgSrc(), /https:\/\/avatars\.githubusercontent\.com/);
+/* ── media-src — same shape as img-src, for <audio>/<video> ──── */
+
+test("media-src allows 'self' (same-origin media)", () => {
+  assert.match(directive("media-src"), /(?:^|\s)'self'(?:\s|$)/);
 });
 
-test("img-src allows raw.githubusercontent.com (markdown image rewrites from GitHub-imported posts)", () => {
-  assert.match(imgSrc(), /https:\/\/raw\.githubusercontent\.com/);
-});
-
-test("img-src allows Vercel Blob (setAvatar writer + seeded bot avatars — see src/lib/avatars.ts)", () => {
-  // Wildcard host because the public store subdomain is project-
-  // specific and can rotate. The actual prod host today is
-  // iaomvi8nxzu0duzf.public.blob.vercel-storage.com.
-  assert.match(imgSrc(), /https:\/\/\*\.public\.blob\.vercel-storage\.com/);
+test("media-src allows any HTTPS origin (aggregator — arbitrary media CDNs)", () => {
+  assert.match(directive("media-src"), /(?:^|\s)https:(?:\s|$)/);
 });
 
 /* ── script-src — hydration must survive the nonce flow ──────── */
