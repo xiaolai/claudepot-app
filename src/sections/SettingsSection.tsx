@@ -825,6 +825,8 @@ function UpdatesPane() {
     checkFrequency,
     setCheckFrequency,
     lastCheckedAt,
+    releaseChannel,
+    setReleaseChannel,
     checkNow,
     downloadAndInstall,
     applyUpdate,
@@ -939,6 +941,35 @@ function UpdatesPane() {
           <option value="weekly">Weekly</option>
           <option value="manual">Only when I click Check now</option>
         </select>
+      </Row>
+
+      <Row
+        label="Release channel"
+        hint={
+          releaseChannel === "beta"
+            ? "Beta: you'll be offered prereleases (vX.Y.Z-beta.N) as well as stable releases. Earlier access, less tested. Switch back to Stable any time — it applies on the next check."
+            : "Stable: you're only offered fully-released versions. Choose Beta to also receive prereleases and try new features early."
+        }
+      >
+        {releaseChannel === null ? (
+          <span
+            style={{ fontSize: "var(--fs-sm)", color: "var(--fg-faint)" }}
+          >
+            Loading…
+          </span>
+        ) : (
+          <select
+            value={releaseChannel}
+            onChange={(e) =>
+              setReleaseChannel(e.target.value as "stable" | "beta")
+            }
+            style={selectStyle}
+            aria-label="Release channel"
+          >
+            <option value="stable">Stable</option>
+            <option value="beta">Beta — include prereleases</option>
+          </select>
+        )}
       </Row>
 
       <Row label="Last checked">

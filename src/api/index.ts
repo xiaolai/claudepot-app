@@ -24,6 +24,7 @@ import { usageApi } from "./usage";
 import { notificationApi } from "./notification";
 import { serviceStatusApi } from "./service-status";
 import { updatesApi } from "./updates";
+import { releaseUpdateApi } from "./releaseUpdate";
 import { ccTipsApi } from "./cc-tips";
 import { ccDoctorApi } from "./cc-doctor";
 import { rotationApi } from "./rotation";
@@ -52,6 +53,7 @@ export const api = {
   ...notificationApi,
   ...serviceStatusApi,
   ...updatesApi,
+  ...releaseUpdateApi,
   ...ccTipsApi,
   ...ccDoctorApi,
   ...rotationApi,

@@ -597,6 +597,13 @@ pub fn run() {
         .manage(claudepot_core::updates::UpdateStateMutex::new(
             updates_state,
         ))
+        // Channel-aware self-updater. Holds the most recent Rust
+        // `Update` handle returned by `release_update_check` so
+        // `release_update_install` can act on the same object — the
+        // handle is bound to the channel endpoints it was checked
+        // against and can't be reconstructed from a DTO. See
+        // `commands::release_update`.
+        .manage(commands::release_update::ReleaseUpdateState::new())
         // Single shared gate: serializes background poller, manual
         // check, and manual install across the whole process. See
         // `updates_watcher::tick` and `commands_updates`.
@@ -899,6 +906,14 @@ pub fn run() {
             commands::updates::updates_settings_set,
             commands::updates::updates_channel_set,
             commands::updates::updates_minimum_version_set,
+            // Channel-aware self-updater (Claudepot's own app bundle).
+            // Distinct from the `updates::*` commands above, which
+            // manage Claude Code's CLI/Desktop. See
+            // `commands::release_update`.
+            commands::release_update::release_channel_get,
+            commands::release_update::release_channel_set,
+            commands::release_update::release_update_check,
+            commands::release_update::release_update_install,
             commands::rotation::rotation_rules_get,
             commands::rotation::rotation_rules_set,
             commands::rotation::rotation_rule_validate,

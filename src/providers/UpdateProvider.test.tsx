@@ -1,9 +1,13 @@
 /**
  * UpdateProvider unit tests. We exercise the pure scheduler
  * (`shouldCheckNow`) directly and the provider's public API via
- * `renderHook`. The actual `@tauri-apps/plugin-updater` is mocked at
- * the module level so the hook can drive the state machine without
- * a webview present.
+ * `renderHook`.
+ *
+ * Channel-aware rewire: the provider now drives the Rust `release_*`
+ * commands (`releaseUpdateCheck` / `releaseUpdateInstall` /
+ * `releaseChannelGet` / `releaseChannelSet`) instead of the JS
+ * `@tauri-apps/plugin-updater`. We mock the whole `api` surface so
+ * the hook can drive the state machine without a webview.
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
@@ -12,23 +16,35 @@ import type { ReactNode } from "react";
 
 import { shouldCheckNow, UpdateProvider, useUpdater } from "./UpdateProvider";
 
-const checkMock = vi.fn();
+const releaseUpdateCheckMock = vi.fn();
+const releaseUpdateInstallMock = vi.fn();
+const releaseChannelGetMock = vi.fn();
+const releaseChannelSetMock = vi.fn();
 const updaterSupportedMock = vi.fn().mockResolvedValue(true);
-
-vi.mock("@tauri-apps/plugin-updater", () => ({
-  check: (...args: unknown[]) => checkMock(...args),
-}));
+const listenMock = vi.fn();
+const unlistenSpy = vi.fn();
 
 vi.mock("@tauri-apps/plugin-process", () => ({
   relaunch: vi.fn().mockResolvedValue(undefined),
 }));
 
-// The provider probes platform support via the Tauri-bound API on
-// mount. Stub the whole `api` surface so the mock survives across
-// tests; tests can override `updaterSupportedMock` per case.
+// `listen` is the download-progress channel. Most tests never drive
+// an install, so the default (set in `beforeEach`) just resolves to
+// the unlisten spy; the install test installs a capturing impl.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (...args: unknown[]) => listenMock(...args),
+}));
+
+// The provider probes platform support and drives all update flow
+// through the Tauri-bound `api`. Stub the whole surface; individual
+// mocks are overridden per test.
 vi.mock("../api", () => ({
   api: {
     updaterSupported: () => updaterSupportedMock(),
+    releaseUpdateCheck: () => releaseUpdateCheckMock(),
+    releaseUpdateInstall: () => releaseUpdateInstallMock(),
+    releaseChannelGet: () => releaseChannelGetMock(),
+    releaseChannelSet: (...args: unknown[]) => releaseChannelSetMock(...args),
   },
 }));
 
@@ -74,9 +90,19 @@ describe("shouldCheckNow", () => {
 
 describe("UpdateProvider — checkNow lifecycle", () => {
   beforeEach(() => {
-    checkMock.mockReset();
+    releaseUpdateCheckMock.mockReset();
+    releaseUpdateInstallMock.mockReset();
+    releaseChannelGetMock.mockReset();
+    releaseChannelSetMock.mockReset();
     updaterSupportedMock.mockReset();
+    listenMock.mockReset();
+    unlistenSpy.mockReset();
+    listenMock.mockResolvedValue(unlistenSpy);
     updaterSupportedMock.mockResolvedValue(true);
+    releaseChannelGetMock.mockResolvedValue("stable");
+    releaseChannelSetMock.mockImplementation((channel: string) =>
+      Promise.resolve(channel),
+    );
     try {
       localStorage.clear();
     } catch {
@@ -99,8 +125,21 @@ describe("UpdateProvider — checkNow lifecycle", () => {
     await waitFor(() => expect(result.current.supported).toBe(false));
   });
 
+  it("loads the release channel from the Rust preference on mount", async () => {
+    releaseChannelGetMock.mockResolvedValue("beta");
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await waitFor(() => expect(result.current.releaseChannel).toBe("beta"));
+  });
+
   it("transitions to 'up-to-date' when no update is returned", async () => {
-    checkMock.mockResolvedValue(null);
+    releaseUpdateCheckMock.mockResolvedValue({
+      updateAvailable: false,
+      version: null,
+      currentVersion: "0.1.39",
+      notes: null,
+      pubDate: null,
+      channel: "stable",
+    });
     const { result } = renderHook(() => useUpdater(), { wrapper });
 
     await act(async () => {
@@ -112,13 +151,13 @@ describe("UpdateProvider — checkNow lifecycle", () => {
   });
 
   it("transitions to 'available' and exposes UpdateInfo when an update is returned", async () => {
-    checkMock.mockResolvedValue({
+    releaseUpdateCheckMock.mockResolvedValue({
+      updateAvailable: true,
       version: "0.0.7",
       currentVersion: "0.0.6",
-      body: "release notes",
-      date: "2026-04-28T10:00:00Z",
-      downloadAndInstall: vi.fn(),
-      close: vi.fn().mockResolvedValue(undefined),
+      notes: "release notes",
+      pubDate: "2026-04-28",
+      channel: "stable",
     });
     const { result } = renderHook(() => useUpdater(), { wrapper });
 
@@ -130,12 +169,12 @@ describe("UpdateProvider — checkNow lifecycle", () => {
       version: "0.0.7",
       currentVersion: "0.0.6",
       notes: "release notes",
-      pubDate: "2026-04-28T10:00:00Z",
+      pubDate: "2026-04-28",
     });
   });
 
   it("transitions to 'error' and surfaces the message when check throws", async () => {
-    checkMock.mockRejectedValue(new Error("network down"));
+    releaseUpdateCheckMock.mockRejectedValue(new Error("network down"));
     const { result } = renderHook(() => useUpdater(), { wrapper });
 
     await act(async () => {
@@ -146,13 +185,13 @@ describe("UpdateProvider — checkNow lifecycle", () => {
   });
 
   it("skipThisVersion sets isSkipped, resetSkip clears it", async () => {
-    checkMock.mockResolvedValue({
+    releaseUpdateCheckMock.mockResolvedValue({
+      updateAvailable: true,
       version: "0.0.7",
       currentVersion: "0.0.6",
-      body: "",
-      date: null,
-      downloadAndInstall: vi.fn(),
-      close: vi.fn().mockResolvedValue(undefined),
+      notes: "",
+      pubDate: null,
+      channel: "stable",
     });
     const { result } = renderHook(() => useUpdater(), { wrapper });
 
@@ -186,5 +225,107 @@ describe("UpdateProvider — checkNow lifecycle", () => {
     expect(localStorage.getItem("claudepot.update.checkFrequency")).toBe(
       "weekly",
     );
+  });
+
+  it("setReleaseChannel optimistically updates and persists via the Rust command", async () => {
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await waitFor(() => expect(result.current.releaseChannel).toBe("stable"));
+
+    await act(async () => {
+      result.current.setReleaseChannel("beta");
+    });
+    // Optimistic local update is immediate.
+    expect(result.current.releaseChannel).toBe("beta");
+    // And the Rust setter was invoked with the new channel.
+    expect(releaseChannelSetMock).toHaveBeenCalledWith("beta");
+  });
+
+  it("setReleaseChannel keeps the optimistic value and surfaces an error when the Rust setter rejects", async () => {
+    releaseChannelSetMock.mockRejectedValue(new Error("disk full"));
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await waitFor(() => expect(result.current.releaseChannel).toBe("stable"));
+
+    await act(async () => {
+      result.current.setReleaseChannel("beta");
+    });
+    // The Rust persist failed, but the optimistic value is retained
+    // (the next check simply uses whatever Rust actually has) and the
+    // failure is surfaced.
+    await waitFor(() =>
+      expect(result.current.error).toContain("disk full"),
+    );
+    expect(result.current.releaseChannel).toBe("beta");
+  });
+
+  it("drives the download → ready path and maps started/progress/finished events", async () => {
+    // Capture the progress callback `downloadAndInstall` registers.
+    let progressCb: ((ev: { payload: unknown }) => void) | null = null;
+    listenMock.mockImplementation(
+      (_event: string, cb: (ev: { payload: unknown }) => void) => {
+        progressCb = cb;
+        return Promise.resolve(unlistenSpy);
+      },
+    );
+    releaseUpdateCheckMock.mockResolvedValue({
+      updateAvailable: true,
+      version: "0.0.7",
+      currentVersion: "0.0.6",
+      notes: "",
+      pubDate: null,
+      channel: "stable",
+    });
+    // Rust emits the three progress frames during the install call,
+    // then resolves.
+    releaseUpdateInstallMock.mockImplementation(() => {
+      progressCb?.({ payload: { event: "started", contentLength: 1000 } });
+      progressCb?.({
+        payload: { event: "progress", downloaded: 400, contentLength: 1000 },
+      });
+      progressCb?.({ payload: { event: "finished" } });
+      return Promise.resolve();
+    });
+
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(result.current.status).toBe("available");
+
+    await act(async () => {
+      await result.current.downloadAndInstall();
+    });
+    expect(result.current.status).toBe("ready");
+    // `finished` settles `downloaded` to the known total.
+    expect(result.current.downloadProgress).toEqual({
+      downloaded: 1000,
+      total: 1000,
+    });
+    // The progress listener must be torn down after the install.
+    expect(unlistenSpy).toHaveBeenCalled();
+  });
+
+  it("transitions to 'error' and unsubscribes when the install rejects", async () => {
+    listenMock.mockResolvedValue(unlistenSpy);
+    releaseUpdateCheckMock.mockResolvedValue({
+      updateAvailable: true,
+      version: "0.0.7",
+      currentVersion: "0.0.6",
+      notes: "",
+      pubDate: null,
+      channel: "stable",
+    });
+    releaseUpdateInstallMock.mockRejectedValue(new Error("install failed"));
+
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    await act(async () => {
+      await result.current.downloadAndInstall();
+    });
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBe("install failed");
+    // The listener is torn down on the failure path too (`finally`).
+    expect(unlistenSpy).toHaveBeenCalled();
   });
 });
