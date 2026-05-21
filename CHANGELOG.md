@@ -6,6 +6,46 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.40 — beta (unreleased)
+
+A feature release: opt-in beta updates, a safety net for the
+background automations, and a fix for command-line tools silently
+failing to resolve when Claudepot is launched from the Dock.
+
+### Added
+
+- **Release channels — choose between stable and beta updates.**
+  Settings → About now carries a channel selector. The default,
+  Stable, behaves exactly as before. Switching to Beta opts the
+  in-app updater into prerelease builds, so you can try changes
+  ahead of a stable cut and report problems early. The switch takes
+  effect on the next update check — no restart needed — and every
+  update stays signature-verified against the same key regardless
+  of channel.
+
+- **A circuit breaker for auto-rotation and permission grants.**
+  Previously a background action that kept failing — an
+  auto-rotation swap, or the auto-revert of a time-boxed permission
+  grant — retried every five minutes indefinitely, with no signal
+  that anything was wrong. Now, after three consecutive failures the
+  action is quarantined for a six-hour cooldown (after which a
+  single probe retry is allowed), and a notification names the rule
+  or project that was paused and why. A permanently broken rule no
+  longer fails silently forever.
+
+### Fixed
+
+- **Command-line tools now resolve when Claudepot is launched from
+  the Dock.** A macOS app started from the Dock or Finder inherits a
+  minimal `PATH` that omits Homebrew and per-user toolchain
+  directories, so Claudepot could silently fail to find `gh`,
+  `git`, `brew`, an external editor, or the `claude` CLI — even
+  though the same build worked when launched from a terminal. The
+  visible symptoms were missing pull-request badges, a dead "open in
+  editor" action, and incomplete update-source detection. Claudepot
+  now augments `PATH` with the standard install locations — appended
+  after the trusted system directories — for every tool it spawns.
+
 ## 0.1.39 — beta (unreleased)
 
 Reliability hardening release. Two rounds of crash/freeze auditing
