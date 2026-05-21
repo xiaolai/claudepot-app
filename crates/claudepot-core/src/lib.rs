@@ -88,6 +88,7 @@ pub mod project_types;
 pub mod protected_paths;
 pub mod proxy;
 pub mod redaction;
+pub mod release_channel;
 pub mod resolve;
 pub mod retention;
 pub mod rotation;

@@ -480,6 +480,34 @@ jobs:
         with:
           path: artifacts
 
+      # Classify the release channel from the tag shape. A tag with a
+      # `-beta.N` suffix (e.g. `v0.2.0-beta.1`) is a prerelease and
+      # routes through the beta channel; everything else is stable.
+      # The two `GITHUB_OUTPUT` values drive the prerelease flag, the
+      # manifest filename, and the manifest upload target below.
+      - name: Classify release channel
+        id: channel
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          if [[ "$TAG" =~ -beta\.[0-9]+$ ]]; then
+            echo "is_beta=true"     >> "$GITHUB_OUTPUT"
+            echo "manifest=latest-beta.json" >> "$GITHUB_OUTPUT"
+            echo "Channel: beta (prerelease) — tag $TAG"
+          elif [[ "$TAG" =~ -[A-Za-z] ]]; then
+            # Any other pre-release suffix (-alpha, -rc, …) is not a
+            # shape this pipeline supports. Fail loudly rather than
+            # silently treating it as stable and clobbering latest.json.
+            echo "::error::Tag '$TAG' has an unrecognized pre-release suffix."
+            echo "::error::Only '-beta.N' prereleases and bare 'vX.Y.Z' stable tags are supported."
+            exit 1
+          else
+            echo "is_beta=false"    >> "$GITHUB_OUTPUT"
+            echo "manifest=latest.json" >> "$GITHUB_OUTPUT"
+            echo "Channel: stable — tag $TAG"
+          fi
+
       - name: Flatten artifacts
         run: |
           mkdir -p release
@@ -516,6 +544,10 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: release/*
           draft: true
+          # `-beta.N` tags publish as a GitHub prerelease so the
+          # stable `/releases/latest/` URL keeps skipping them — only
+          # the fixed-tag beta manifest serves beta update traffic.
+          prerelease: ${{ steps.channel.outputs.is_beta == 'true' }}
           generate_release_notes: true
           body: |
             ## Downloads
@@ -538,17 +570,25 @@ jobs:
             for new versions in Settings → About; `.deb` users update
             via apt as before.
 
-      # Generate Tauri-2 latest.json from the four signature files so
-      # the in-app updater can verify and install the new bundles.
-      # Tauri's updater plugin parses the `version` field with `semver`
-      # — a leading 'v' breaks parsing silently — so we strip it. Each
-      # platform entry is gated on the existence of its `.sig`, so a
-      # missing signing secret on one platform doesn't break the others
-      # (the latest.json simply omits that platform; the updater
-      # reports "no update available" for users on that OS).
-      - name: Generate latest.json
+      # Generate the Tauri-2 updater manifest from the four signature
+      # files so the in-app updater can verify and install the new
+      # bundles. Tauri's updater plugin parses the `version` field with
+      # `semver` — a leading 'v' breaks parsing silently — so we strip
+      # it. Each platform entry is gated on the existence of its
+      # `.sig`, so a missing signing secret on one platform doesn't
+      # break the others.
+      #
+      # Channel-aware filename: a stable release writes `latest.json`
+      # (served via `/releases/latest/download/latest.json`); a beta
+      # release writes `latest-beta.json` (served via the fixed-tag
+      # `updater-manifest` release — see the upload step below). The
+      # asset URLs point at the per-tag release in BOTH cases, so a
+      # beta manifest hosted on `updater-manifest` still resolves its
+      # `.app.tar.gz` / `.AppImage` / `-setup.exe` correctly.
+      - name: Generate updater manifest
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          MANIFEST: ${{ steps.channel.outputs.manifest }}
         run: |
           set -eu
           VERSION="${TAG#v}"
@@ -600,21 +640,22 @@ jobs:
 
             echo "  }"
             echo "}"
-          } > latest.json
+          } > "$MANIFEST"
 
-          echo "Generated latest.json:"
-          cat latest.json
+          echo "Generated $MANIFEST:"
+          cat "$MANIFEST"
 
           # Validate. Tauri's updater rejects a leading 'v' or non-SemVer
-          # version. An unsubstituted shell variable in a URL means the
-          # heredoc lost a value and would silently fail at runtime.
-          MV=$(jq -er '.version' latest.json)
+          # version. A `-beta.N` suffix is valid SemVer pre-release, so
+          # the regex below permits it. An unsubstituted shell variable
+          # in a URL means the heredoc lost a value.
+          MV=$(jq -er '.version' "$MANIFEST")
           if [[ "$MV" =~ ^v ]] || ! [[ "$MV" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$ ]]; then
-            echo "::error::latest.json version field invalid: '$MV'"
+            echo "::error::$MANIFEST version field invalid: '$MV'"
             exit 1
           fi
-          if jq -er '.platforms[] | select(.url | test("\\$|\\{|VERSION|GITHUB_"))' latest.json > /dev/null 2>&1; then
-            echo "::error::latest.json contains an unexpanded shell variable in a platform URL"
+          if jq -er '.platforms[] | select(.url | test("\\$|\\{|VERSION|GITHUB_"))' "$MANIFEST" > /dev/null 2>&1; then
+            echo "::error::$MANIFEST contains an unexpanded shell variable in a platform URL"
             exit 1
           fi
           # Every supported platform MUST be present. If the Linux
@@ -628,24 +669,50 @@ jobs:
           REQUIRED=("darwin-aarch64" "darwin-x86_64" "linux-x86_64" "windows-x86_64")
           MISSING=()
           for p in "${REQUIRED[@]}"; do
-            if ! jq -er ".platforms.\"$p\"" latest.json > /dev/null 2>&1; then
+            if ! jq -er ".platforms.\"$p\"" "$MANIFEST" > /dev/null 2>&1; then
               MISSING+=("$p")
             fi
           done
           if [ ${#MISSING[@]} -gt 0 ]; then
-            echo "::error::latest.json is missing required platforms: ${MISSING[*]}"
+            echo "::error::$MANIFEST is missing required platforms: ${MISSING[*]}"
             echo "::error::Cause: a build failed to produce a .sig (likely TAURI_SIGNING_PRIVATE_KEY missing on that runner)."
             exit 1
           fi
-          PLATFORMS=$(jq -er '.platforms | length' latest.json)
-          echo "OK: latest.json validates with $PLATFORMS platform(s) — all required targets present"
+          PLATFORMS=$(jq -er '.platforms | length' "$MANIFEST")
+          echo "OK: $MANIFEST validates with $PLATFORMS platform(s) — all required targets present"
 
-      - name: Upload latest.json to release
+      # Upload the manifest to the endpoint the in-app updater reads.
+      #
+      #  - Stable: `latest.json` goes on the per-tag release. GitHub's
+      #    `/releases/latest/download/latest.json` URL self-tracks the
+      #    newest NON-prerelease release, so already-installed stable
+      #    apps keep updating with no config change.
+      #  - Beta: `latest-beta.json` goes on the permanent fixed-tag
+      #    `updater-manifest` release. A prerelease has no
+      #    `/releases/latest/` URL of its own (that URL skips
+      #    prereleases), so beta needs this stable host. The
+      #    `updater-manifest` release is created once by hand — see
+      #    dev-docs/octoally-borrowings.md Item C; CI never creates it.
+      - name: Upload updater manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          MANIFEST: ${{ steps.channel.outputs.manifest }}
+          IS_BETA: ${{ steps.channel.outputs.is_beta }}
         run: |
-          gh release upload "$TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber
+          set -eu
+          if [ "$IS_BETA" = "true" ]; then
+            if ! gh release view updater-manifest --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              echo "::error::The 'updater-manifest' host release does not exist."
+              echo "::error::Create it once with: gh release create updater-manifest --repo $GITHUB_REPOSITORY --title 'Updater manifests' --notes 'Permanent host for channel manifests (latest-beta.json). Do not delete.' --latest=false"
+              exit 1
+            fi
+            gh release upload updater-manifest "$MANIFEST" --repo "$GITHUB_REPOSITORY" --clobber
+            echo "Uploaded $MANIFEST to the updater-manifest host release"
+          else
+            gh release upload "$TAG" "$MANIFEST" --repo "$GITHUB_REPOSITORY" --clobber
+            echo "Uploaded $MANIFEST to release $TAG"
+          fi
 
       # Homebrew can't fetch draft release assets (they require auth),
       # so the tap-update workflow needs a published release. Comment
@@ -673,53 +740,87 @@ jobs:
       #   1. Each release ships ~150 MB of signed bundles + sigs across
       #      five platforms; keeping the full back-catalog forever would
       #      bloat the repo's storage usage indefinitely.
-      #   2. The in-app updater always reads
-      #      `/releases/latest/download/latest.json`, so older releases
-      #      never serve update traffic — they're purely historical.
+      #   2. The in-app updater reads `/releases/latest/download/
+      #      latest.json` (stable) and `updater-manifest/latest-beta.json`
+      #      (beta), so older releases never serve update traffic — they
+      #      are purely historical.
       #
-      # Policy: keep the 2 most recent published releases plus their
-      # tags; delete everything older. Drafts left over from failed runs
-      # are also pruned (the workflow always finishes by either
-      # publishing or failing within seconds of creating its own draft,
-      # so any draft that survives a successful run is an orphan).
+      # Policy (channel-aware): keep the 2 most recent STABLE releases
+      # and, SEPARATELY, the 2 most recent BETA (prerelease) releases.
+      # Pruning by recency alone would let a burst of betas evict every
+      # stable release (or vice-versa), stranding one channel's users
+      # on a release whose assets were just deleted. Drafts orphaned by
+      # failed runs are pruned too.
+      #
+      # The permanent `updater-manifest` host release is NEVER deleted —
+      # it carries `latest-beta.json` and has no version of its own. It
+      # is excluded explicitly below.
       #
       # `continue-on-error: true` because a transient API hiccup here
       # shouldn't fail the release after everything else has succeeded.
       # Worst case: an extra older release lingers until the next
       # release run trims it.
-      - name: Prune old releases (keep 2 most recent)
+      - name: Prune old releases (keep 2 stable + 2 beta)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           KEEP=2
+          # The permanent host release for channel manifests. Never a
+          # prune target — it has no version and serves beta traffic.
+          MANIFEST_TAG="updater-manifest"
 
-          # Sort published releases newest-first; keep the head, target
-          # the tail for deletion.
-          PUBLISHED=$(gh release list \
+          # Fetch every release with its prerelease flag. `isPrerelease`
+          # is the channel signal: betas publish with `prerelease: true`
+          # (see the "Create release (draft)" step above).
+          RELEASES_JSON=$(gh release list \
             --repo "$GITHUB_REPOSITORY" \
             --limit 100 \
-            --json tagName,isDraft,publishedAt \
-            --jq 'sort_by(.publishedAt) | reverse | .[] | select(.isDraft | not) | .tagName')
-          KEPT=$(echo "$PUBLISHED" | sed -n "1,${KEEP}p")
-          DELETE=$(echo "$PUBLISHED" | sed -n "$((KEEP+1)),\$p")
+            --json tagName,isDraft,isPrerelease,publishedAt)
 
-          DRAFTS=$(gh release list \
-            --repo "$GITHUB_REPOSITORY" \
-            --limit 100 \
-            --json tagName,isDraft \
-            --jq '.[] | select(.isDraft) | .tagName')
+          # Stable = published, not prerelease, not the manifest host.
+          # Beta   = published, prerelease, not the manifest host.
+          # Each list is newest-first; keep the head $KEEP, delete the tail.
+          STABLE=$(echo "$RELEASES_JSON" | jq -r --arg m "$MANIFEST_TAG" \
+            'sort_by(.publishedAt) | reverse | .[]
+             | select(.isDraft | not) | select(.isPrerelease | not)
+             | select(.tagName != $m) | .tagName')
+          BETA=$(echo "$RELEASES_JSON" | jq -r --arg m "$MANIFEST_TAG" \
+            'sort_by(.publishedAt) | reverse | .[]
+             | select(.isDraft | not) | select(.isPrerelease)
+             | select(.tagName != $m) | .tagName')
 
-          echo "Keeping (most recent $KEEP):"
-          echo "$KEPT" | sed 's/^/  /'
-          echo "Deleting (older published):"
-          echo "$DELETE" | sed 's/^/  /'
+          STABLE_KEEP=$(echo "$STABLE" | sed -n "1,${KEEP}p")
+          STABLE_DELETE=$(echo "$STABLE" | sed -n "$((KEEP+1)),\$p")
+          BETA_KEEP=$(echo "$BETA" | sed -n "1,${KEEP}p")
+          BETA_DELETE=$(echo "$BETA" | sed -n "$((KEEP+1)),\$p")
+
+          # Orphan drafts — but never the manifest host release.
+          DRAFTS=$(echo "$RELEASES_JSON" | jq -r --arg m "$MANIFEST_TAG" \
+            '.[] | select(.isDraft) | select(.tagName != $m) | .tagName')
+
+          echo "Keeping stable (most recent $KEEP):"
+          echo "$STABLE_KEEP" | sed 's/^/  /'
+          echo "Keeping beta (most recent $KEEP):"
+          echo "$BETA_KEEP" | sed 's/^/  /'
+          echo "Protected (never deleted):"
+          echo "  $MANIFEST_TAG"
+          echo "Deleting (older stable):"
+          echo "$STABLE_DELETE" | sed 's/^/  /'
+          echo "Deleting (older beta):"
+          echo "$BETA_DELETE" | sed 's/^/  /'
           echo "Deleting (orphan drafts):"
           echo "$DRAFTS" | sed 's/^/  /'
 
-          for tag in $DELETE $DRAFTS; do
+          for tag in $STABLE_DELETE $BETA_DELETE $DRAFTS; do
             [ -z "$tag" ] && continue
+            # Defence in depth: never delete the manifest host even if
+            # a future query change accidentally lets it through.
+            if [ "$tag" = "$MANIFEST_TAG" ]; then
+              echo "  skip $tag (protected manifest host)"
+              continue
+            fi
             echo "  rm $tag"
             gh release delete "$tag" \
               --cleanup-tag \

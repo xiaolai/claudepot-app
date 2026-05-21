@@ -216,6 +216,16 @@ pub struct Preferences {
     #[serde(default)]
     pub service_status: ServiceStatusPrefs,
 
+    /// Which Claudepot release channel the in-app self-updater reads.
+    /// `Stable` (the default) offers only stable releases; `Beta`
+    /// also offers prereleases. The Rust updater commands
+    /// (`release_update_check`) read this each call, so switching it
+    /// takes effect on the next check with no restart. Distinct from
+    /// CC's `autoUpdatesChannel` — see
+    /// `claudepot_core::release_channel`.
+    #[serde(default)]
+    pub release_channel: claudepot_core::release_channel::ReleaseChannel,
+
     /// Per-category notification preferences. Populated from old
     /// scalar `notify_on_*` fields on first launch after Phase 1.5
     /// of the notification refactor (see `migrate_to_v1`). Missing
@@ -322,6 +332,7 @@ impl Default for Preferences {
             editor_defaults: Default::default(),
             pricing_tier: PriceTier::default(),
             service_status: ServiceStatusPrefs::default(),
+            release_channel: claudepot_core::release_channel::ReleaseChannel::default(),
             category_prefs: HashMap::new(),
             schema_version: PREFS_SCHEMA_VERSION_CURRENT,
         }
@@ -754,6 +765,45 @@ mod tests {
         let cp = back.category_pref(Category::RotationSuggested);
         assert!(!cp.enabled);
         assert_eq!(cp.os_override, Some(true));
+    }
+
+    #[test]
+    fn test_release_channel_defaults_to_stable() {
+        // A fresh install (cold-start Default::default) must land on
+        // the conservative Stable channel — never auto-opt a new
+        // user into prereleases.
+        let p = Preferences::default();
+        assert_eq!(
+            p.release_channel,
+            claudepot_core::release_channel::ReleaseChannel::Stable
+        );
+    }
+
+    #[test]
+    fn test_release_channel_missing_field_deserializes_to_stable() {
+        // An old preferences.json written before this feature shipped
+        // has no `release_channel` key. `#[serde(default)]` must fill
+        // it with Stable so the upgrade is seamless.
+        let json = r#"{"hide_dock_icon": false}"#;
+        let p: Preferences = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            p.release_channel,
+            claudepot_core::release_channel::ReleaseChannel::Stable
+        );
+    }
+
+    #[test]
+    fn test_release_channel_serde_round_trip() {
+        let p = Preferences {
+            release_channel: claudepot_core::release_channel::ReleaseChannel::Beta,
+            ..Preferences::default()
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let back: Preferences = serde_json::from_str(&s).unwrap();
+        assert_eq!(
+            back.release_channel,
+            claudepot_core::release_channel::ReleaseChannel::Beta
+        );
     }
 
     #[test]

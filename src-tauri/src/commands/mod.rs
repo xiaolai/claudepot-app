@@ -45,6 +45,7 @@ pub mod preferences;
 pub mod pricing;
 pub mod project;
 pub mod protected;
+pub mod release_update;
 pub mod repair;
 pub mod rotation;
 pub mod routes;
