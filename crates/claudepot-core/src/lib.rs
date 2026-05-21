@@ -64,6 +64,7 @@ pub mod notification_log;
 pub mod notifications;
 pub mod oauth;
 pub mod onboard;
+pub mod path_env;
 pub mod path_utils;
 pub mod paths;
 pub mod permission;

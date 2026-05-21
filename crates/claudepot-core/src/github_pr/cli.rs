@@ -141,6 +141,10 @@ async fn run_with_timeout(
     tool: &'static str,
 ) -> Result<std::process::Output, GhError> {
     cmd.kill_on_drop(true);
+    // A Dock/Finder-launched app inherits a minimal PATH that lacks
+    // Homebrew — where `gh` lives for nearly every user. Enrich it
+    // so `git`/`gh` resolve regardless of how Claudepot was started.
+    cmd.env("PATH", crate::path_env::enriched_path());
     let child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             GhError::MissingCli(tool)

@@ -83,24 +83,35 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Find the `claude` CLI binary. Checks common install locations
-/// then falls back to PATH via `which`/`where`.
+/// Find the `claude` CLI binary. Probes every well-known install
+/// location (see [`crate::path_env::tool_dirs`]) then falls back to
+/// a PATH search via `which`/`where`.
+///
+/// Both the probe list and the `which` fallback go through the
+/// enriched PATH so the binary resolves even when Claudepot is
+/// launched from Dock/Finder with a minimal `PATH` — without that,
+/// onboarding's `claude auth login` would silently fail to find a
+/// Homebrew- or toolchain-installed `claude`.
 pub fn find_claude_binary() -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = vec![];
+    let mut candidates: Vec<PathBuf> = Vec::new();
 
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".local/bin/claude"));
+    #[cfg(not(target_os = "windows"))]
+    {
+        for dir in crate::path_env::tool_dirs() {
+            candidates.push(dir.join("claude"));
+        }
+        // System dir — not in `tool_dirs` (already on PATH), but a
+        // `claude` could still be installed there.
+        candidates.push(PathBuf::from("/usr/bin/claude"));
     }
-    candidates.push(PathBuf::from("/usr/local/bin/claude"));
-    candidates.push(PathBuf::from("/usr/bin/claude"));
 
     #[cfg(target_os = "windows")]
     {
-        if let Some(appdata) = std::env::var_os("APPDATA") {
-            candidates.push(PathBuf::from(appdata).join("npm").join("claude.cmd"));
-        }
         if let Some(home) = dirs::home_dir() {
             candidates.push(home.join(".local").join("bin").join("claude.exe"));
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            candidates.push(PathBuf::from(appdata).join("npm").join("claude.cmd"));
         }
     }
 
@@ -110,7 +121,8 @@ pub fn find_claude_binary() -> Option<PathBuf> {
         }
     }
 
-    // Fallback: try PATH
+    // Fallback: PATH search, enriched so a Dock launch still hits
+    // Homebrew / per-user toolchain directories.
     let which_cmd = if cfg!(target_os = "windows") {
         "where"
     } else {
@@ -123,6 +135,7 @@ pub fn find_claude_binary() -> Option<PathBuf> {
     };
     if let Ok(output) = std::process::Command::new(which_cmd)
         .arg(claude_name)
+        .env("PATH", crate::path_env::enriched_path())
         .output()
     {
         if output.status.success() {

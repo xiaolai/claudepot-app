@@ -301,7 +301,11 @@ fn query_binary_version(bin: &Path) -> Option<String> {
 fn npm_global_bin() -> Option<PathBuf> {
     // `npm bin -g` was removed in npm 9. Try the canonical
     // `npm root -g` and derive `bin` as its parent's `bin/`.
-    let output = Command::new("npm").args(["root", "-g"]).output().ok()?;
+    let output = Command::new("npm")
+        .args(["root", "-g"])
+        .env("PATH", crate::path_env::enriched_path())
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -316,6 +320,7 @@ fn npm_global_bin() -> Option<PathBuf> {
 fn brew_cask_installed(cask: &str) -> bool {
     Command::new("brew")
         .args(["list", "--cask", cask])
+        .env("PATH", crate::path_env::enriched_path())
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -459,6 +464,7 @@ fn classify_desktop_source(app: &Path) -> DesktopSource {
     }
     if Command::new("brew")
         .args(["list", "--cask", "claude"])
+        .env("PATH", crate::path_env::enriched_path())
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
