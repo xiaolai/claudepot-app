@@ -39,6 +39,7 @@ pub mod artifact_lifecycle;
 pub mod artifact_usage;
 pub mod automations;
 pub mod blob;
+pub mod breaker;
 pub mod cc_doctor;
 pub mod cc_tips;
 pub mod cli_backend;

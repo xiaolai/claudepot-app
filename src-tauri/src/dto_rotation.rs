@@ -372,5 +372,6 @@ fn rotation_outcome_str(o: RotationOutcome) -> &'static str {
         RotationOutcome::SkippedCcRunning => "skipped_cc_running",
         RotationOutcome::NoCandidate => "no_candidate",
         RotationOutcome::Failed => "failed",
+        RotationOutcome::Quarantined => "quarantined",
     }
 }

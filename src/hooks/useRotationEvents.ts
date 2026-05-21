@@ -20,6 +20,11 @@ import { useEmit } from "../providers/AppStateProvider";
  * - `rotation-failed` — swap attempt failed. Error toast. Separate
  *   category from `rotationApplied` so a user can mute applied-acks
  *   while still hearing failures.
+ * - `rotation-breaker-tripped` — a rule's swap failed enough
+ *   consecutive times that its circuit breaker quarantined it. The
+ *   rule stops re-firing until the breaker's cooldown probe. Routes
+ *   to the `rotationFailed` category (an error-level event) so it
+ *   reaches the same toast + bell facade as a plain failure.
  *
  * This hook is wired once at the app root next to
  * `useUsageThresholdNotifications`. It reads the emit() dispatcher
@@ -49,6 +54,13 @@ interface FailedPayload {
   fromEmail: string;
   toEmail: string;
   error: string;
+}
+
+interface BreakerTrippedPayload {
+  ruleId: string;
+  fromEmail: string;
+  toEmail: string;
+  consecutiveFailures: number;
 }
 
 export function useRotationEvents(): void {
@@ -117,6 +129,20 @@ export function useRotationEvents(): void {
     [emit],
   );
 
+  const handleBreakerTripped = useCallback(
+    (p: BreakerTrippedPayload) => {
+      void emit({
+        category: "rotationFailed",
+        kind: "error",
+        title: "Auto-rotation rule paused",
+        body: `Rule "${p.ruleId}" was paused after ${p.consecutiveFailures} consecutive failed swaps. It will retry automatically after a cooldown.`,
+        dedupeKey: `rotation:breaker:${p.ruleId}`,
+        target: { kind: "app", route: { section: "settings" } },
+      });
+    },
+    [emit],
+  );
+
   useEffect(() => {
     let active = true;
     const unlisteners: UnlistenFn[] = [];
@@ -138,6 +164,10 @@ export function useRotationEvents(): void {
     wire<SuggestedPayload>("rotation-suggested", handleSuggested);
     wire<AppliedPayload>("rotation-applied", handleApplied);
     wire<FailedPayload>("rotation-failed", handleFailed);
+    wire<BreakerTrippedPayload>(
+      "rotation-breaker-tripped",
+      handleBreakerTripped,
+    );
 
     // Hydrate any pending swaps the orchestrator queued while the
     // renderer was disconnected (between reloads, before mount,
@@ -175,5 +205,5 @@ export function useRotationEvents(): void {
       active = false;
       unlisteners.forEach((fn) => fn());
     };
-  }, [handleSuggested, handleApplied, handleFailed]);
+  }, [handleSuggested, handleApplied, handleFailed, handleBreakerTripped]);
 }

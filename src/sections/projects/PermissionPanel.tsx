@@ -4,6 +4,7 @@ import { api } from "../../api";
 import {
   GRANT_DURATION_PRESETS,
   permissionModeLabel,
+  type PermissionBreakerTrippedEvent,
   type PermissionRevertedEvent,
   type ProjectPermission,
 } from "../../api/permission";
@@ -104,6 +105,30 @@ export function PermissionPanel({
       void unlisten.then((fn) => fn());
     };
   }, [projectPath]);
+
+  // The orchestrator quarantines a grant whose auto-revert keeps
+  // failing — its consecutive-failure circuit breaker trips and
+  // `permission-breaker-tripped` fires once. Surface it for THIS
+  // project so the user knows the grant is stuck (not silently
+  // reverting) and may need a manual revert. Refetch too — the
+  // breaker counter is part of the grant state.
+  useEffect(() => {
+    const unlisten = listen<PermissionBreakerTrippedEvent>(
+      "permission-breaker-tripped",
+      (e) => {
+        if (e.payload.projectPath === projectPath) {
+          pushToast(
+            "error",
+            `Auto-revert for this project was paused after ${e.payload.consecutiveFailures} consecutive failures. The bypass grant is still active — revert it manually, then check the project's settings file.`,
+          );
+          setReloadTick((n) => n + 1);
+        }
+      },
+    );
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [projectPath, pushToast]);
 
   // Tick once a minute while a grant is active so the countdown
   // re-renders. Cleared as soon as there's no active grant.

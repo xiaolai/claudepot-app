@@ -83,7 +83,8 @@ export type RotationOutcomeId =
   | "skipped_guard"
   | "skipped_cc_running"
   | "no_candidate"
-  | "failed";
+  | "failed"
+  | "quarantined";
 
 export interface RotationAuditEntry {
   id: number;
@@ -158,4 +159,5 @@ export const ROTATION_OUTCOME_LABEL: Record<RotationOutcomeId, string> = {
   skipped_cc_running: "Skipped (CC running)",
   no_candidate: "No candidate",
   failed: "Failed",
+  quarantined: "Quarantined",
 };

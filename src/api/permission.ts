@@ -54,6 +54,18 @@ export interface PermissionRevertedEvent {
   outcome: "reverted" | "skipped_user_changed";
 }
 
+/**
+ * Event payload for `permission-breaker-tripped` — a grant's
+ * auto-revert failed enough consecutive times that the orchestrator's
+ * circuit breaker quarantined it. The grant is left in place,
+ * un-reverted, until the breaker's cooldown lets a probe retry
+ * through.
+ */
+export interface PermissionBreakerTrippedEvent {
+  projectPath: string;
+  consecutiveFailures: number;
+}
+
 export const permissionApi = {
   permissionList: () => invoke<ProjectPermission[]>("permission_list"),
   permissionGet: (projectPath: string) =>

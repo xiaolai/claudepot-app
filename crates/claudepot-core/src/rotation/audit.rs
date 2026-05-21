@@ -50,6 +50,13 @@ pub enum RotationOutcome {
     /// Rule fired and the swap was attempted but failed. Error in
     /// `error`.
     Failed,
+    /// Rule was *not* evaluated because its consecutive-failure
+    /// circuit breaker is tripped — the swap kept failing, so the
+    /// orchestrator quarantined the rule instead of retrying it every
+    /// tick. Logged once on the trip transition, then the rule is
+    /// silently skipped until the breaker's cooldown probe. See
+    /// `claudepot_core::breaker`.
+    Quarantined,
 }
 
 /// Trigger snapshot frozen at fire time so the audit log is self-

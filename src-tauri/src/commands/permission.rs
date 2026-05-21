@@ -126,6 +126,9 @@ pub async fn permission_grant(
             previous_mode,
             granted_at: now,
             expires_at: now + Duration::seconds(duration),
+            // Fresh grant — its revert circuit breaker starts clean.
+            consecutive_failures: 0,
+            last_failure_at: None,
         };
 
         // Persist the grant record FIRST. If this fails the settings

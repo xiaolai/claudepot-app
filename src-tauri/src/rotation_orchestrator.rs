@@ -15,15 +15,17 @@
 //! The pure rule logic lives in core; this module only wires it to
 //! Tauri (event emission, account-store I/O, the cli_backend swap).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
+use claudepot_core::breaker;
 use claudepot_core::cli_backend;
 use claudepot_core::rotation::{
     audit::{entry_for, AuditMode, RotationAuditEntry, RotationAuditLog, RotationOutcome},
+    breaker_store::{self, BreakerFile},
     eval::{evaluate, NoCandidateReason, PendingSwap, RuleDecision, SkipReason, SkipReasonRecord},
-    rules::RotationRulesFile,
+    rules::{RotationRule, RotationRulesFile},
     store as rotation_store,
 };
 use claudepot_core::services::usage_snapshot::UsageSnapshot;
@@ -44,6 +46,32 @@ pub struct QueuedSwap {
 /// than acting on a stale 30-minute-old fire.
 const PENDING_TTL_SECS: i64 = 1800;
 
+/// Filter the rule set down to those the circuit breaker permits to
+/// run this tick.
+///
+/// The gate only *excludes* — never includes. An **enabled** rule
+/// whose breaker is tripped is dropped (it is quarantined; there is
+/// no pending entry to skip, so it must be excluded before the
+/// evaluator runs). A **disabled** rule passes through via the
+/// `!r.enabled` short-circuit — its breaker is irrelevant and
+/// `evaluate` drops it for being disabled anyway. Keeping disabled
+/// rules in the list means a rule re-enabled while still tripped is
+/// correctly gated again on the next tick.
+///
+/// Pure — the orchestrator's only breaker-gate logic lives here so
+/// it is unit-testable without a tick harness.
+fn breaker_gated_rules(
+    rules: &[RotationRule],
+    breaker_file: &BreakerFile,
+    now: chrono::DateTime<Utc>,
+) -> Vec<RotationRule> {
+    rules
+        .iter()
+        .filter(|r| !r.enabled || !breaker::is_tripped(&breaker_file.ledger_for(&r.id), now))
+        .cloned()
+        .collect()
+}
+
 #[derive(Default)]
 struct Inner {
     pending: HashMap<String, QueuedSwap>,
@@ -62,6 +90,12 @@ struct Inner {
 pub struct RotationOrchestrator {
     inner: Mutex<Inner>,
     audit: Arc<RotationAuditLog>,
+    /// Serializes breaker-file read-modify-write sections. `tick`
+    /// (background) and `apply_confirmed` (a Tauri command) both
+    /// record breaker outcomes and can run concurrently; without
+    /// this lock their separate load→modify→save cycles could
+    /// interleave and lose a ledger update (last-writer-wins).
+    breaker_io: Mutex<()>,
 }
 
 impl RotationOrchestrator {
@@ -69,6 +103,21 @@ impl RotationOrchestrator {
         Self {
             inner: Mutex::new(Inner::default()),
             audit,
+            breaker_io: Mutex::new(()),
+        }
+    }
+
+    /// Acquire the breaker-file critical-section lock. Every
+    /// breaker-file read-modify-write must hold this so a
+    /// confirm-mode apply cannot interleave with the background
+    /// tick and clobber a ledger update. Poison-tolerant — the
+    /// guarded unit carries no data, so a panic mid-section cannot
+    /// corrupt anything. All breaker file ops are synchronous, so
+    /// the guard never crosses an `await`.
+    fn breaker_guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        match self.breaker_io.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
         }
     }
 
@@ -96,9 +145,23 @@ impl RotationOrchestrator {
         // confirm-mode dedupe below is accurate.
         self.evict_stale();
 
-        let audit_snapshot = self.audit.snapshot();
         let now = Utc::now();
-        let decisions = evaluate(&rules.rules, snapshot, active_uuid, &audit_snapshot, now);
+
+        // Consecutive-failure circuit breaker: load the per-rule
+        // failure ledgers and filter out any rule whose breaker is
+        // tripped *before* the evaluator runs — a quarantined rule
+        // has no pending entry to skip, so it must be excluded up
+        // front. A real I/O failure on load skips the breaker gate
+        // (fail open: a missing breaker file must not silence
+        // rotation), but corruption recovers to empty. The breaker
+        // *logic* is pure `claudepot_core::breaker`; this is wiring.
+        let breaker_file = breaker_store::load_or_default();
+        let live_rule_ids: HashSet<String> =
+            rules.rules.iter().map(|r| r.id.clone()).collect();
+        let active_rules = breaker_gated_rules(&rules.rules, &breaker_file, now);
+
+        let audit_snapshot = self.audit.snapshot();
+        let decisions = evaluate(&active_rules, snapshot, active_uuid, &audit_snapshot, now);
 
         for decision in decisions {
             match decision {
@@ -114,6 +177,65 @@ impl RotationOrchestrator {
                 }
             }
         }
+
+        // Prune breaker ledgers for rules the user has since deleted
+        // so `rotation-breaker.json` doesn't accumulate stale state
+        // for rule ids that no longer exist. Cheap, runs last so it
+        // doesn't race the failure/success recording above.
+        self.prune_breaker_ledgers(&live_rule_ids);
+    }
+
+    /// Drop breaker ledgers whose `rule_id` is no longer in the rules
+    /// file. Best-effort — a load/save failure is logged and
+    /// swallowed; a stale ledger is harmless (the rule is gone, so it
+    /// is never evaluated).
+    fn prune_breaker_ledgers(&self, live_rule_ids: &HashSet<String>) {
+        let _io = self.breaker_guard();
+        let mut file = match breaker_store::load() {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error = %e, "rotation_breaker: prune load failed");
+                return;
+            }
+        };
+        let before = file.ledgers.len();
+        file.retain_rules(live_rule_ids);
+        if file.ledgers.len() != before {
+            if let Err(e) = breaker_store::save(&file) {
+                tracing::warn!(error = %e, "rotation_breaker: prune save failed");
+            }
+        }
+    }
+
+    /// Record the outcome of a swap attempt against `rule_id`'s
+    /// circuit breaker. `success = true` resets the ledger; `false`
+    /// advances it. Returns `true` iff this failure was the one that
+    /// newly tripped the breaker (crossed the threshold) — the
+    /// caller fires the `rotation-breaker-tripped` event exactly once
+    /// on that transition. The breaker arithmetic is pure
+    /// `claudepot_core::breaker`; this only loads → mutates → saves
+    /// the persisted ledger.
+    fn record_breaker_outcome(&self, rule_id: &str, success: bool) -> bool {
+        let _io = self.breaker_guard();
+        let mut file: BreakerFile = match breaker_store::load() {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error = %e, rule_id, "rotation_breaker: outcome load failed");
+                return false;
+            }
+        };
+        let ledger = file.ledger_for(rule_id);
+        let (next, newly_tripped) = if success {
+            (breaker::record_success(&ledger), false)
+        } else {
+            let newly_tripped = breaker::trips_on_next_failure(&ledger);
+            (breaker::record_failure(&ledger, Utc::now()), newly_tripped)
+        };
+        file.set_ledger(rule_id, next);
+        if let Err(e) = breaker_store::save(&file) {
+            tracing::warn!(error = %e, rule_id, "rotation_breaker: outcome save failed");
+        }
+        newly_tripped
     }
 
     fn log_skip(&self, rule_id: &str, rec: &SkipReasonRecord) {
@@ -200,6 +322,8 @@ impl RotationOrchestrator {
                     "",
                 );
                 let _ = self.audit.append(entry);
+                // A successful swap clears any prior failure run.
+                self.record_breaker_outcome(&pending.rule_id, true);
                 emit_applied(app, &pending);
             }
             Err(e) => {
@@ -214,8 +338,34 @@ impl RotationOrchestrator {
                 );
                 let _ = self.audit.append(entry);
                 emit_failed(app, &pending, &e);
+                // Advance the circuit breaker; quarantine + surface
+                // when this failure crosses the threshold.
+                if self.record_breaker_outcome(&pending.rule_id, false) {
+                    self.note_breaker_tripped(app, &pending);
+                }
             }
         }
+    }
+
+    /// Log the `Quarantined` audit entry and emit the
+    /// `rotation-breaker-tripped` event. Called once, on the failure
+    /// that trips the breaker — subsequent failed ticks for the same
+    /// rule are silently skipped at the `tick` gate.
+    fn note_breaker_tripped(&self, app: &AppHandle, pending: &PendingSwap) {
+        let entry = entry_for(
+            &pending.rule_id,
+            pending.trigger.clone(),
+            pending.from_email.clone(),
+            Some(pending.to_email.clone()),
+            pending.mode,
+            RotationOutcome::Quarantined,
+            format!(
+                "paused after {} consecutive failures; will probe again after the cooldown",
+                breaker::THRESHOLD
+            ),
+        );
+        let _ = self.audit.append(entry);
+        emit_breaker_tripped(app, pending);
     }
 
     fn queue_confirm(&self, app: &AppHandle, pending: PendingSwap) {
@@ -340,6 +490,8 @@ impl RotationOrchestrator {
                     "user confirmed",
                 );
                 let _ = self.audit.append(entry);
+                // A successful swap clears any prior failure run.
+                self.record_breaker_outcome(&queued.pending.rule_id, true);
                 emit_applied(app, &queued.pending);
                 self.remove_pending(&queued.swap_id);
                 Ok(())
@@ -356,6 +508,13 @@ impl RotationOrchestrator {
                 );
                 let _ = self.audit.append(entry);
                 emit_failed(app, &queued.pending, &e);
+                // Advance the circuit breaker; quarantine + surface
+                // when this failure crosses the threshold. A tripped
+                // rule is filtered out of the next `tick`'s
+                // evaluation, so it stops re-suggesting.
+                if self.record_breaker_outcome(&queued.pending.rule_id, false) {
+                    self.note_breaker_tripped(app, &queued.pending);
+                }
                 // Do NOT remove the pending entry — let the user
                 // retry. The 30-min TTL still bounds blast radius.
                 Err(e)
@@ -466,6 +625,19 @@ pub struct RotationFailedPayload {
     pub error: String,
 }
 
+/// `rotation-breaker-tripped` payload — a rule's swap kept failing,
+/// so its circuit breaker quarantined it. Emitted once, on the
+/// failure that crosses the threshold.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotationBreakerTrippedPayload {
+    pub rule_id: String,
+    pub from_email: String,
+    pub to_email: String,
+    /// Number of consecutive failures that tripped the breaker.
+    pub consecutive_failures: u32,
+}
+
 fn emit_suggested(app: &AppHandle, swap_id: &str, p: &PendingSwap) {
     let payload = RotationSuggestedPayload {
         swap_id: swap_id.to_string(),
@@ -506,6 +678,18 @@ fn emit_failed(app: &AppHandle, p: &PendingSwap, error: &str) {
     }
 }
 
+fn emit_breaker_tripped(app: &AppHandle, p: &PendingSwap) {
+    let payload = RotationBreakerTrippedPayload {
+        rule_id: p.rule_id.clone(),
+        from_email: p.from_email.clone(),
+        to_email: p.to_email.clone(),
+        consecutive_failures: breaker::THRESHOLD,
+    };
+    if let Err(e) = app.emit("rotation-breaker-tripped", payload) {
+        tracing::warn!(error = %e, "rotation_orchestrator: emit breaker-tripped failed");
+    }
+}
+
 fn window_kind_str(k: claudepot_core::services::usage_alerts::UsageWindowKind) -> String {
     use claudepot_core::services::usage_alerts::UsageWindowKind as W;
     match k {
@@ -513,5 +697,89 @@ fn window_kind_str(k: claudepot_core::services::usage_alerts::UsageWindowKind) -
         W::SevenDay => "seven_day".into(),
         W::SevenDayOpus => "seven_day_opus".into(),
         W::SevenDaySonnet => "seven_day_sonnet".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudepot_core::breaker::FailureLedger;
+    use claudepot_core::rotation::rules::{Action, RotationGuards, RotationMode, Selector, Trigger};
+    use claudepot_core::services::usage_alerts::UsageWindowKind;
+
+    fn rule(id: &str, enabled: bool) -> RotationRule {
+        RotationRule {
+            id: id.to_string(),
+            enabled,
+            trigger: Trigger::UtilizationThreshold {
+                window: UsageWindowKind::FiveHour,
+                pct: 80,
+            },
+            action: Action::RotateTo {
+                selector: Selector::Explicit {
+                    email: "to@example.com".to_string(),
+                },
+            },
+            mode: RotationMode::Auto,
+            guards: RotationGuards::default(),
+        }
+    }
+
+    fn tripped_ledger(now: chrono::DateTime<Utc>) -> FailureLedger {
+        FailureLedger {
+            consecutive: breaker::THRESHOLD,
+            last_failure: Some(now),
+        }
+    }
+
+    #[test]
+    fn test_breaker_gate_excludes_enabled_tripped_rule() {
+        let now = Utc::now();
+        let mut bf = BreakerFile::default();
+        bf.set_ledger("tripped", tripped_ledger(now));
+        let rules = vec![rule("tripped", true), rule("healthy", true)];
+        let gated = breaker_gated_rules(&rules, &bf, now);
+        let ids: Vec<&str> = gated.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["healthy"],
+            "an enabled, tripped rule must be gated out before evaluation"
+        );
+    }
+
+    #[test]
+    fn test_breaker_gate_keeps_disabled_tripped_rule() {
+        // A disabled rule passes the gate (its breaker is moot) —
+        // `evaluate` drops it for being disabled. Keeping it here
+        // means re-enabling it while still tripped re-gates it.
+        let now = Utc::now();
+        let mut bf = BreakerFile::default();
+        bf.set_ledger("off", tripped_ledger(now));
+        let gated = breaker_gated_rules(&[rule("off", false)], &bf, now);
+        assert_eq!(gated.len(), 1, "a disabled rule is not gated by the breaker");
+    }
+
+    #[test]
+    fn test_breaker_gate_keeps_rule_with_clean_ledger() {
+        let now = Utc::now();
+        let bf = BreakerFile::default(); // no ledgers — every rule clean
+        let gated = breaker_gated_rules(&[rule("fresh", true)], &bf, now);
+        assert_eq!(gated.len(), 1, "a rule with no failure history runs");
+    }
+
+    #[test]
+    fn test_breaker_gate_keeps_rule_below_threshold() {
+        // Two failures — one short of THRESHOLD — must not gate.
+        let now = Utc::now();
+        let mut bf = BreakerFile::default();
+        bf.set_ledger(
+            "flapping",
+            FailureLedger {
+                consecutive: breaker::THRESHOLD - 1,
+                last_failure: Some(now),
+            },
+        );
+        let gated = breaker_gated_rules(&[rule("flapping", true)], &bf, now);
+        assert_eq!(gated.len(), 1, "below-threshold failures do not gate the rule");
     }
 }

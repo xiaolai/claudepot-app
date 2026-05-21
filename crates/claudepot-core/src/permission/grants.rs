@@ -61,12 +61,44 @@ pub struct Grant {
     pub granted_at: DateTime<Utc>,
     /// When the orchestrator must revert to `previous_mode`.
     pub expires_at: DateTime<Utc>,
+    /// Consecutive-failure circuit breaker state — number of revert
+    /// attempts that have failed in an unbroken run. `#[serde(default)]`
+    /// so `permission-grants.json` files written before the breaker
+    /// shipped still deserialize (they read back as `0`). Reset to `0`
+    /// implicitly — a grant whose revert succeeds is removed from the
+    /// file entirely. See `claudepot_core::breaker`.
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    /// When the most recent revert failure happened — the breaker's
+    /// cooldown clock. `None` iff `consecutive_failures == 0`.
+    /// `#[serde(default)]` for the same backward-compat reason as
+    /// `consecutive_failures`.
+    #[serde(default)]
+    pub last_failure_at: Option<DateTime<Utc>>,
 }
 
 impl Grant {
     /// True once `now` has reached or passed `expires_at`.
     pub fn is_expired(&self, now: DateTime<Utc>) -> bool {
         now >= self.expires_at
+    }
+
+    /// This grant's circuit-breaker ledger, read off the two breaker
+    /// fields. Pass to `claudepot_core::breaker::evaluate` to decide
+    /// whether the orchestrator should attempt the revert.
+    pub fn breaker_ledger(&self) -> crate::breaker::FailureLedger {
+        crate::breaker::FailureLedger {
+            consecutive: self.consecutive_failures,
+            last_failure: self.last_failure_at,
+        }
+    }
+
+    /// Write `ledger` back onto the grant's two breaker fields. The
+    /// orchestrator calls this after a failed revert (advanced
+    /// ledger) before persisting the file.
+    pub fn set_breaker_ledger(&mut self, ledger: crate::breaker::FailureLedger) {
+        self.consecutive_failures = ledger.consecutive;
+        self.last_failure_at = ledger.last_failure;
     }
 }
 
@@ -107,6 +139,15 @@ impl GrantsFile {
     /// The grant for `project_path`, if any.
     pub fn find(&self, project_path: &str) -> Option<&Grant> {
         self.grants.iter().find(|g| g.project_path == project_path)
+    }
+
+    /// Mutable handle to the grant for `project_path`, if any. Used by
+    /// the orchestrator to advance a grant's circuit-breaker fields
+    /// in place after a failed revert.
+    pub fn find_mut(&mut self, project_path: &str) -> Option<&mut Grant> {
+        self.grants
+            .iter_mut()
+            .find(|g| g.project_path == project_path)
     }
 
     /// Insert or replace the grant for its `project_path`. Returns the
@@ -174,6 +215,8 @@ mod tests {
             previous_mode: Some(PermissionMode::Default),
             granted_at: ts(0),
             expires_at: ts(7200),
+            consecutive_failures: 0,
+            last_failure_at: None,
         }
     }
 
@@ -284,6 +327,51 @@ mod tests {
         assert_eq!(file.grants.len(), 1);
         assert_eq!(file.grants[0], updated);
         assert!(file.validate().is_ok());
+    }
+
+    #[test]
+    fn test_grant_breaker_fields_default_when_absent_in_json() {
+        // A `permission-grants.json` written before the circuit
+        // breaker shipped has no `consecutive_failures` /
+        // `last_failure_at` keys — it must still deserialize, with
+        // the breaker fields defaulting to the clean state.
+        let json = r#"{
+            "project_path": "/p/a",
+            "layer": "local_project",
+            "granted_mode": "bypassPermissions",
+            "previous_mode": "default",
+            "granted_at": "2023-11-14T22:13:20Z",
+            "expires_at": "2023-11-15T00:13:20Z"
+        }"#;
+        let g: Grant = serde_json::from_str(json).unwrap();
+        assert_eq!(g.consecutive_failures, 0);
+        assert_eq!(g.last_failure_at, None);
+        assert_eq!(g.breaker_ledger(), crate::breaker::FailureLedger::default());
+    }
+
+    #[test]
+    fn test_grant_breaker_fields_round_trip_when_present() {
+        let mut g = sample_grant("/p/a");
+        g.consecutive_failures = 4;
+        g.last_failure_at = Some(ts(123));
+        let s = serde_json::to_string(&g).unwrap();
+        let back: Grant = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, g);
+        assert_eq!(back.consecutive_failures, 4);
+        assert_eq!(back.last_failure_at, Some(ts(123)));
+    }
+
+    #[test]
+    fn test_grant_breaker_ledger_round_trips_through_setter() {
+        let mut g = sample_grant("/p/a");
+        let ledger = crate::breaker::FailureLedger {
+            consecutive: 2,
+            last_failure: Some(ts(50)),
+        };
+        g.set_breaker_ledger(ledger);
+        assert_eq!(g.consecutive_failures, 2);
+        assert_eq!(g.last_failure_at, Some(ts(50)));
+        assert_eq!(g.breaker_ledger(), ledger);
     }
 
     #[test]
