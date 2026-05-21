@@ -234,7 +234,13 @@ impl ProbeBackend for RealProbe {
         } else {
             "which"
         };
-        let out = Command::new(cmd).arg(name).output().ok()?;
+        // Enrich PATH so `which` searches Homebrew etc. even when
+        // Claudepot was launched from Dock with a minimal PATH.
+        let out = Command::new(cmd)
+            .arg(name)
+            .env("PATH", crate::path_env::enriched_path())
+            .output()
+            .ok()?;
         if !out.status.success() {
             return None;
         }
@@ -433,6 +439,9 @@ pub fn invoke(editor: &EditorCandidate, path: &Path) -> Result<(), LaunchError> 
             let bin = parts.next().ok_or(LaunchError::NoEnvEditor)?;
             let mut cmd = std::process::Command::new(bin);
             cmd.args(parts).arg(path);
+            // $EDITOR may be a bare name (e.g. `vim`); enrich PATH
+            // so it resolves under a Dock launch.
+            cmd.env("PATH", crate::path_env::enriched_path());
             cmd.spawn().map_err(|e| LaunchError::Spawn(e.to_string()))?;
             Ok(())
         }
@@ -448,6 +457,7 @@ pub fn invoke(editor: &EditorCandidate, path: &Path) -> Result<(), LaunchError> 
             {
                 std::process::Command::new("xdg-open")
                     .arg(path)
+                    .env("PATH", crate::path_env::enriched_path())
                     .spawn()
                     .map_err(|e| LaunchError::Spawn(e.to_string()))?;
             }
