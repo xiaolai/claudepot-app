@@ -50,7 +50,7 @@ pnpm test:coverage                   # React with coverage report
     table, secret in a 0600 column). Owned by
     `claudepot-core::env_vault::store`. Mirrors `keys.db`'s at-rest
     pattern — no OS Keychain. See "## Env secret vault" below.
-- Four JSON files also live in `~/.claudepot/`:
+- Five JSON files also live in `~/.claudepot/`:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -64,9 +64,18 @@ pnpm test:coverage                   # React with coverage report
     is the editor; the orchestrator loads the file each
     `usage_snapshot::run_tick`. Empty file or no rules = feature off.
   - `rotation-audit.json` — ≤ 500 rotation outcomes (applied,
-    suggested, skipped_*, failed) with rule_id + from/to + reason.
-    Owned by `claudepot-core::rotation::audit`. Rendered in the
-    Settings → Rotation pane's "Recent activity" table.
+    suggested, skipped_*, failed, quarantined) with rule_id +
+    from/to + reason. Owned by `claudepot-core::rotation::audit`.
+    Rendered in the Settings → Rotation pane's "Recent activity"
+    table.
+  - `rotation-breaker.json` — per-rule consecutive-failure ledgers
+    for the auto-rotation circuit breaker. `{schema_version,
+    ledgers: {rule_id: {...}}}`. Owned by
+    `claudepot-core::rotation::breaker_store`; the breaker logic is
+    pure `claudepot-core::breaker`. A rule that fails to swap 3
+    times running is quarantined (skipped before `evaluate`) until
+    a 6-hour cooldown probe. Stale rule_ids are pruned each tick.
+    Empty file = no failures recorded.
   - `permission-grants.json` — active time-boxed permission grants.
     `{schema_version, grants: [...]}`, one grant per project_path.
     Owned by `claudepot-core::permission::store`. The orchestrator

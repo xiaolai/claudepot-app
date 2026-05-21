@@ -9,6 +9,10 @@
 //!   `~/.claudepot/rotation-audit.json`.
 //! - [`eval`] — pure evaluator that maps `(rules, snapshot, active,
 //!   audit, now)` to a list of pending swaps.
+//! - [`breaker_store`] — atomic load/save of the per-rule
+//!   consecutive-failure circuit breaker state at
+//!   `~/.claudepot/rotation-breaker.json`. The breaker *logic* itself
+//!   is in [`crate::breaker`]; this module just persists its ledgers.
 //!
 //! The orchestrator (Tauri's `usage_watcher`) loads rules + audit,
 //! calls [`eval::evaluate`], then dispatches swaps based on each
@@ -16,6 +20,7 @@
 //! account-mutation I/O; that lives behind `cli_backend::swap`.
 
 pub mod audit;
+pub mod breaker_store;
 pub mod eval;
 pub mod rules;
 pub mod store;
@@ -24,6 +29,7 @@ pub use audit::{
     RotationAuditEntry, RotationAuditLog, RotationOutcome, RotationTriggerSummary,
     MAX_AUDIT_ENTRIES,
 };
+pub use breaker_store::{BreakerFile, LedgerEntry, RotationBreakerError};
 pub use eval::{evaluate, NoCandidateReason, PendingSwap, SkipReason};
 pub use rules::{
     Action, RotationGuards, RotationMode, RotationRule, RotationRulesFile, Selector, Trigger,
