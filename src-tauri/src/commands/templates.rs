@@ -349,6 +349,15 @@ pub async fn templates_install(
         },
         log_retention_runs: resolved.log_retention_runs,
         template_id: Some(resolved.template_id),
+        // Phase-1 spec fields: templates don't set these yet (the
+        // Session Narrator template arrives in Phase 3). Defaults
+        // keep the instantiated agent's invocation unchanged.
+        disallowed_tools: Vec::new(),
+        mcp_servers: Vec::new(),
+        run_as: None,
+        task_budget: None,
+        rate_limit: None,
+        drafted_by: None,
     };
 
     crate::commands::agents::agents_add(dto).await

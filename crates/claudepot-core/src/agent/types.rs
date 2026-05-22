@@ -15,6 +15,58 @@ use uuid::Uuid;
 /// the same Uuid alias so callers don't have to learn a new shape.
 pub type AgentId = Uuid;
 
+/// A reference to an MCP server the agent should attach via
+/// `claude --mcp-config`. `ClaudepotMemory` resolves at shim-render
+/// time to a stdio entry running `claudepot mcp memory-server`;
+/// `Custom` carries a verbatim MCP server config object that the
+/// shim drops straight into the `--mcp-config` JSON.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum McpServerRef {
+    /// Claudepot's own memory server. One-click attachable from the
+    /// GUI; the shim materializes a stdio entry pointing at the
+    /// `claudepot` CLI's `mcp memory-server` subcommand.
+    ClaudepotMemory,
+    /// A user-supplied MCP server. `config` is an opaque MCP server
+    /// config object (the value that would sit under one key of an
+    /// `mcpServers` map); the shim does not interpret it.
+    Custom {
+        name: String,
+        config: serde_json::Value,
+    },
+}
+
+/// Claudepot-enforced rate limit for an agent. Distinct from
+/// `task_budget` (a per-run token ceiling passed to `claude`): the
+/// rate limit caps run *frequency* and is enforced by Claudepot,
+/// not by the model.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RateLimit {
+    /// Minimum number of seconds that must elapse between two runs.
+    #[serde(default)]
+    pub min_interval_secs: Option<u64>,
+    /// Maximum number of runs allowed in a rolling 24-hour window.
+    #[serde(default)]
+    pub max_per_day: Option<u32>,
+}
+
+/// Agent lifecycle. A `Draft` is inert — no scheduler artifact is
+/// materialized, nothing fires. The `Draft -> Installed` transition
+/// is human-only (enforced by the GUI). Default is `Draft`: a
+/// freshly-deserialized record with no `lifecycle` field is
+/// conservatively treated as a draft, EXCEPT the v1->v2 store
+/// migration which upgrades every pre-existing record to
+/// `Installed` (they were already armed).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Lifecycle {
+    /// Inert. No scheduler artifact, no event binding.
+    #[default]
+    Draft,
+    /// Armed. The scheduler artifact is live.
+    Installed,
+}
+
 /// One scheduled or manually-triggered `claude -p` run definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Agent {
@@ -68,6 +120,43 @@ pub struct Agent {
     /// created via the regular Add Agent flow.
     #[serde(default)]
     pub template_id: Option<String>,
+
+    // ---- Agent-spec fields (Phase 1) ----
+    /// Tools the agent is *forbidden* to use — `--disallowed-tools`.
+    /// Whitelists (`allowed_tools`) are preferred; this is the
+    /// blacklist counterpart for callers who need it.
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
+    /// MCP servers to attach via `--mcp-config`. Claudepot's own
+    /// memory server is one-click attachable; see [`McpServerRef`].
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerRef>,
+    /// Account email this agent runs as. `None` = run as whatever
+    /// account is CLI-active at fire time. Phase 1: per-run
+    /// credential injection is not yet wired — a `Some(email)`
+    /// value is recorded but the shim still defaults to the active
+    /// account (see `shim.rs`).
+    #[serde(default)]
+    pub run_as: Option<String>,
+    /// Per-run token ceiling, passed to `claude --task-budget` so
+    /// the model paces itself. Caps one run's spend.
+    #[serde(default)]
+    pub task_budget: Option<u64>,
+    /// Claudepot-enforced run-frequency limit. See [`RateLimit`].
+    #[serde(default)]
+    pub rate_limit: Option<RateLimit>,
+
+    // ---- Lifecycle (Phase 1) ----
+    /// Draft vs. installed. Default `Draft`; only the GUI may set
+    /// `Installed`. See [`Lifecycle`].
+    #[serde(default)]
+    pub lifecycle: Lifecycle,
+    /// Actor id recorded when this agent was AI- or
+    /// template-drafted (e.g. `claude-code@2026-05-22`,
+    /// `template:session-narrator`). Audit trail; `None` for
+    /// agents created via the regular Add Agent flow.
+    #[serde(default)]
+    pub drafted_by: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -416,9 +505,64 @@ mod tests {
             updated_at: now,
             claudepot_managed: true,
             template_id: None,
+            disallowed_tools: vec![],
+            mcp_servers: vec![],
+            run_as: None,
+            task_budget: None,
+            rate_limit: None,
+            lifecycle: Lifecycle::Draft,
+            drafted_by: None,
         };
         let s = serde_json::to_string(&a).unwrap();
         let back: Agent = serde_json::from_str(&s).unwrap();
         assert_eq!(a, back);
+    }
+
+    #[test]
+    fn lifecycle_defaults_to_draft() {
+        assert_eq!(Lifecycle::default(), Lifecycle::Draft);
+    }
+
+    #[test]
+    fn lifecycle_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&Lifecycle::Installed).unwrap(),
+            "\"installed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Lifecycle::Draft).unwrap(),
+            "\"draft\""
+        );
+    }
+
+    #[test]
+    fn mcp_server_ref_round_trip() {
+        let memory = McpServerRef::ClaudepotMemory;
+        let custom = McpServerRef::Custom {
+            name: "fs".into(),
+            config: serde_json::json!({ "command": "mcp-fs", "args": ["/tmp"] }),
+        };
+        for r in [memory, custom] {
+            let s = serde_json::to_string(&r).unwrap();
+            let back: McpServerRef = serde_json::from_str(&s).unwrap();
+            assert_eq!(r, back);
+        }
+        // Wire form pin: the tag is `kind` with snake_case values.
+        let v = serde_json::to_value(McpServerRef::ClaudepotMemory).unwrap();
+        assert_eq!(v["kind"], "claudepot_memory");
+    }
+
+    #[test]
+    fn rate_limit_round_trip_and_defaults() {
+        let rl = RateLimit {
+            min_interval_secs: Some(3600),
+            max_per_day: Some(24),
+        };
+        let s = serde_json::to_string(&rl).unwrap();
+        let back: RateLimit = serde_json::from_str(&s).unwrap();
+        assert_eq!(rl, back);
+        // Empty object deserializes to all-None.
+        let empty: RateLimit = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, RateLimit::default());
     }
 }

@@ -119,6 +119,13 @@ fn make_agent(name: &str) -> Agent {
         updated_at: now,
         claudepot_managed: true,
         template_id: None,
+        disallowed_tools: vec![],
+        mcp_servers: vec![],
+        run_as: None,
+        task_budget: None,
+        rate_limit: None,
+        lifecycle: claudepot_core::agent::Lifecycle::Installed,
+        drafted_by: None,
     }
 }
 

@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 
 use base64::Engine;
 
-use super::types::{Agent, OutputFormat};
+use super::types::{Agent, McpServerRef, OutputFormat};
 
 /// Inputs that don't live on the [`Agent`] record itself —
 /// resolved at shim-render time and passed in. Keeps the renderer
@@ -50,7 +50,7 @@ pub struct ShimInputs<'a> {
 /// mode 0700.
 pub fn render_unix(agent: &Agent, inputs: &ShimInputs<'_>) -> String {
     let prompt_b64 = base64_encode(&agent.prompt);
-    let flags = build_cli_flags(agent);
+    let flags = build_cli_flags(agent, inputs);
     let path_value = inputs.path_segments.join(":");
     let auto_dir = sh_quote(inputs.agent_dir);
     let bin = sh_quote(inputs.binary_abs_path);
@@ -144,7 +144,7 @@ exit $EXIT
 /// re-interpreted; we use `%FOO%` everywhere.
 pub fn render_windows(agent: &Agent, inputs: &ShimInputs<'_>) -> String {
     let prompt_b64 = base64_encode(&agent.prompt);
-    let flags = build_cli_flags_windows(agent);
+    let flags = build_cli_flags_windows(agent, inputs);
     let path_value = inputs.path_segments.join(";");
     let id = agent.id.to_string();
 
@@ -228,7 +228,7 @@ pub fn render_windows(agent: &Agent, inputs: &ShimInputs<'_>) -> String {
     s
 }
 
-fn build_cli_flags(a: &Agent) -> Vec<String> {
+fn build_cli_flags(a: &Agent, inputs: &ShimInputs<'_>) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     v.push(format!(
         "    --output-format {}",
@@ -244,12 +244,21 @@ fn build_cli_flags(a: &Agent) -> Vec<String> {
     if let Some(budget) = a.max_budget_usd {
         v.push(format!("    --max-budget-usd {}", budget));
     }
+    // Per-run token ceiling. CC's `--task-budget <tokens>` (verified
+    // against the CLI surface) makes the model pace itself.
+    if let Some(tokens) = a.task_budget {
+        v.push(format!("    --task-budget {}", tokens));
+    }
     if let Some(fb) = &a.fallback_model {
         v.push(format!("    --fallback-model {}", sh_quote(fb)));
     }
     if !a.allowed_tools.is_empty() {
         let joined = a.allowed_tools.join(",");
         v.push(format!("    --allowedTools {}", sh_quote(&joined)));
+    }
+    if !a.disallowed_tools.is_empty() {
+        let joined = a.disallowed_tools.join(",");
+        v.push(format!("    --disallowed-tools {}", sh_quote(&joined)));
     }
     if let Some(sp) = &a.system_prompt {
         v.push(format!("    --system-prompt {}", sh_quote(sp)));
@@ -259,6 +268,13 @@ fn build_cli_flags(a: &Agent) -> Vec<String> {
     }
     for d in &a.add_dir {
         v.push(format!("    --add-dir {}", sh_quote(d)));
+    }
+    // MCP servers: render a single inline `--mcp-config` JSON object
+    // (CC accepts inline JSON, not only a file path). The
+    // `ClaudepotMemory` ref resolves to a stdio server running
+    // `claudepot mcp memory-server`.
+    if let Some(json) = build_mcp_config_json(a, inputs.claudepot_cli_abs_path) {
+        v.push(format!("    --mcp-config {}", sh_quote(&json)));
     }
     if let Some(schema) = &a.json_schema {
         v.push(format!("    --json-schema {}", sh_quote(schema)));
@@ -273,7 +289,51 @@ fn build_cli_flags(a: &Agent) -> Vec<String> {
     if matches!(a.output_format, OutputFormat::StreamJson) {
         v.push("    --include-partial-messages".to_string());
     }
+    // Phase 1: `run_as` is recorded on the agent but per-run
+    // credential injection is not yet wired — the shim still runs
+    // as whatever account is CLI-active. A later refinement scopes
+    // the pinned account's credential to the child env. The global
+    // CLI slot is never swapped.
+    if a.run_as.is_some() {
+        // Phase 1: run_as not yet wired — defaults to active account.
+        v.push("    # Phase 1: run_as not yet wired — defaults to active account".to_string());
+    }
     v
+}
+
+/// Build the inline `--mcp-config` JSON for an agent's attached MCP
+/// servers, or `None` when no servers are attached.
+///
+/// The JSON shape is CC's `{"mcpServers": { "<name>": <config> }}`.
+/// [`McpServerRef::ClaudepotMemory`] resolves to a stdio server
+/// invoking `<claudepot> mcp memory-server`; [`McpServerRef::Custom`]
+/// drops its `config` value in verbatim.
+fn build_mcp_config_json(a: &Agent, claudepot_cli_abs_path: &str) -> Option<String> {
+    if a.mcp_servers.is_empty() {
+        return None;
+    }
+    let mut servers = serde_json::Map::new();
+    for server in &a.mcp_servers {
+        match server {
+            McpServerRef::ClaudepotMemory => {
+                servers.insert(
+                    "claudepot-memory".to_string(),
+                    serde_json::json!({
+                        "type": "stdio",
+                        "command": claudepot_cli_abs_path,
+                        "args": ["mcp", "memory-server"],
+                    }),
+                );
+            }
+            McpServerRef::Custom { name, config } => {
+                servers.insert(name.clone(), config.clone());
+            }
+        }
+    }
+    let doc = serde_json::json!({ "mcpServers": serde_json::Value::Object(servers) });
+    // Serialization of a `serde_json::Value` cannot fail; fall back
+    // to omitting the flag rather than panicking if it somehow does.
+    serde_json::to_string(&doc).ok()
 }
 
 /// POSIX-shell-safe single-quote: wrap and double up any `'`.
@@ -356,7 +416,7 @@ fn cmd_quote_arg(s: &str) -> String {
 /// dynamic value so `&`, spaces, and quotes can't break out of the
 /// argument or invoke chained commands. The `--bare`, `--include-partial-messages`
 /// flags are constants.
-fn build_cli_flags_windows(a: &Agent) -> Vec<String> {
+fn build_cli_flags_windows(a: &Agent, inputs: &ShimInputs<'_>) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     v.push(format!("--output-format {}", a.output_format.as_cli_flag()));
     if let Some(model) = &a.model {
@@ -369,12 +429,19 @@ fn build_cli_flags_windows(a: &Agent) -> Vec<String> {
     if let Some(budget) = a.max_budget_usd {
         v.push(format!("--max-budget-usd {}", budget));
     }
+    if let Some(tokens) = a.task_budget {
+        v.push(format!("--task-budget {}", tokens));
+    }
     if let Some(fb) = &a.fallback_model {
         v.push(format!("--fallback-model {}", cmd_quote_arg(fb)));
     }
     if !a.allowed_tools.is_empty() {
         let joined = a.allowed_tools.join(",");
         v.push(format!("--allowedTools {}", cmd_quote_arg(&joined)));
+    }
+    if !a.disallowed_tools.is_empty() {
+        let joined = a.disallowed_tools.join(",");
+        v.push(format!("--disallowed-tools {}", cmd_quote_arg(&joined)));
     }
     if let Some(sp) = &a.system_prompt {
         v.push(format!("--system-prompt {}", cmd_quote_arg(sp)));
@@ -384,6 +451,9 @@ fn build_cli_flags_windows(a: &Agent) -> Vec<String> {
     }
     for d in &a.add_dir {
         v.push(format!("--add-dir {}", cmd_quote_arg(d)));
+    }
+    if let Some(json) = build_mcp_config_json(a, inputs.claudepot_cli_abs_path) {
+        v.push(format!("--mcp-config {}", cmd_quote_arg(&json)));
     }
     if let Some(schema) = &a.json_schema {
         v.push(format!("--json-schema {}", cmd_quote_arg(schema)));
@@ -395,6 +465,8 @@ fn build_cli_flags_windows(a: &Agent) -> Vec<String> {
     if matches!(a.output_format, OutputFormat::StreamJson) {
         v.push("--include-partial-messages".to_string());
     }
+    // Phase 1: run_as not yet wired — defaults to active account.
+    // (No-op on Windows; recorded on the agent for a later phase.)
     v
 }
 
@@ -460,6 +532,13 @@ mod tests {
             updated_at: now,
             claudepot_managed: true,
             template_id: None,
+            disallowed_tools: vec![],
+            mcp_servers: vec![],
+            run_as: None,
+            task_budget: None,
+            rate_limit: None,
+            lifecycle: Lifecycle::Installed,
+            drafted_by: None,
         }
     }
 
@@ -503,6 +582,102 @@ mod tests {
         // Prompt is delivered via stdin, not argv — must not
         // appear verbatim in the script.
         assert!(!s.contains("summarize today's PRs"));
+    }
+
+    #[test]
+    fn unix_shim_default_new_fields_unchanged() {
+        // Behavior pin: an agent with every Phase-1 field at its
+        // default produces a shim with no new flags — the
+        // invocation must be identical to the pre-Phase-1 shape.
+        let a = auto();
+        let (segs, env) = inputs();
+        let inp = ShimInputs {
+            binary_abs_path: "/usr/local/bin/claude",
+            claudepot_cli_abs_path: "/cli",
+            agent_dir: "/auto",
+            path_segments: &segs,
+            extra_env: &env,
+        };
+        let s = render_unix(&a, &inp);
+        assert!(!s.contains("--task-budget"));
+        assert!(!s.contains("--disallowed-tools"));
+        assert!(!s.contains("--mcp-config"));
+        assert!(!s.contains("run_as not yet wired"));
+    }
+
+    #[test]
+    fn unix_shim_maps_phase1_spec_fields() {
+        let mut a = auto();
+        a.task_budget = Some(50_000);
+        a.disallowed_tools = vec!["Bash".into(), "WebFetch".into()];
+        a.mcp_servers = vec![McpServerRef::ClaudepotMemory];
+        a.run_as = Some("dev@example.com".into());
+        let (segs, env) = inputs();
+        let inp = ShimInputs {
+            binary_abs_path: "/usr/local/bin/claude",
+            claudepot_cli_abs_path: "/Users/me/.claudepot/bin/claudepot",
+            agent_dir: "/auto",
+            path_segments: &segs,
+            extra_env: &env,
+        };
+        let s = render_unix(&a, &inp);
+        assert!(s.contains("--task-budget 50000"));
+        assert!(s.contains("--disallowed-tools 'Bash,WebFetch'"));
+        // The memory MCP server resolves to a stdio entry invoking
+        // the claudepot CLI's `mcp memory-server` subcommand.
+        assert!(s.contains("--mcp-config "));
+        assert!(s.contains("claudepot-memory"));
+        assert!(s.contains("mcp"));
+        assert!(s.contains("memory-server"));
+        // run_as is a Phase-1 placeholder — recorded as a comment,
+        // never an actual account swap.
+        assert!(s.contains("run_as not yet wired"));
+    }
+
+    #[test]
+    fn unix_shim_custom_mcp_server_embedded_verbatim() {
+        let mut a = auto();
+        a.mcp_servers = vec![McpServerRef::Custom {
+            name: "fs".into(),
+            config: serde_json::json!({
+                "type": "stdio",
+                "command": "mcp-fs",
+                "args": ["/tmp"],
+            }),
+        }];
+        let (segs, env) = inputs();
+        let inp = ShimInputs {
+            binary_abs_path: "/usr/local/bin/claude",
+            claudepot_cli_abs_path: "/cli",
+            agent_dir: "/auto",
+            path_segments: &segs,
+            extra_env: &env,
+        };
+        let s = render_unix(&a, &inp);
+        assert!(s.contains("--mcp-config "));
+        assert!(s.contains("mcp-fs"));
+        assert!(s.contains("\\\"fs\\\"") || s.contains("\"fs\""));
+    }
+
+    #[test]
+    fn windows_shim_maps_phase1_spec_fields() {
+        let mut a = auto();
+        a.task_budget = Some(50_000);
+        a.disallowed_tools = vec!["Bash".into()];
+        a.mcp_servers = vec![McpServerRef::ClaudepotMemory];
+        let (segs, env) = inputs();
+        let inp = ShimInputs {
+            binary_abs_path: r"C:\claude.exe",
+            claudepot_cli_abs_path: r"C:\claudepot.exe",
+            agent_dir: r"C:\auto",
+            path_segments: &segs,
+            extra_env: &env,
+        };
+        let s = render_windows(&a, &inp);
+        assert!(s.contains("--task-budget 50000"));
+        assert!(s.contains("--disallowed-tools"));
+        assert!(s.contains("--mcp-config"));
+        assert!(s.contains("memory-server"));
     }
 
     #[test]

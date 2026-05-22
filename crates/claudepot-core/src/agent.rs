@@ -60,6 +60,7 @@ pub use store::{
     agent_dir, agent_runs_dir, agents_file_path, AgentPatch, AgentStore,
 };
 pub use types::{
-    Agent, AgentBinary, AgentId, AgentRun, HostPlatform, OutputFormat,
-    PermissionMode, PlatformOptions, RunResult, Trigger, TriggerKind,
+    Agent, AgentBinary, AgentId, AgentRun, HostPlatform, Lifecycle,
+    McpServerRef, OutputFormat, PermissionMode, PlatformOptions, RateLimit,
+    RunResult, Trigger, TriggerKind,
 };

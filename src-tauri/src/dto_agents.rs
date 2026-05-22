@@ -6,8 +6,9 @@
 //! this boundary — agents don't carry credentials.
 
 use claudepot_core::agent::{
-    Agent, AgentBinary, AgentRun, OutputFormat, PermissionMode, PlatformOptions,
-    RunResult, SchedulerCapabilities, Trigger, TriggerKind,
+    Agent, AgentBinary, AgentRun, Lifecycle, McpServerRef, OutputFormat,
+    PermissionMode, PlatformOptions, RateLimit, RunResult, SchedulerCapabilities,
+    Trigger, TriggerKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,9 @@ pub struct AgentSummaryDto {
     pub trigger_kind: String,
     pub cron: Option<String>,
     pub timezone: Option<String>,
+    /// `"draft"` or `"installed"`. Read-only — the GUI arms an
+    /// agent (draft -> installed); see Phase 2 of the Agents PRD.
+    pub lifecycle: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -62,6 +66,7 @@ impl From<&Agent> for AgentSummaryDto {
             trigger_kind,
             cron,
             timezone: tz,
+            lifecycle: lifecycle_str(a.lifecycle).to_string(),
             created_at: a.created_at.to_rfc3339(),
             updated_at: a.updated_at.to_rfc3339(),
         }
@@ -82,6 +87,14 @@ pub struct AgentDetailsDto {
     pub extra_env: std::collections::BTreeMap<String, String>,
     pub platform_options: PlatformOptionsDto,
     pub log_retention_runs: u32,
+    // ---- Agent-spec fields (Phase 1) ----
+    pub disallowed_tools: Vec<String>,
+    pub mcp_servers: Vec<McpServerRefDto>,
+    pub run_as: Option<String>,
+    pub task_budget: Option<u64>,
+    pub rate_limit: Option<RateLimitDto>,
+    /// Audit field: who drafted this agent. Read-only.
+    pub drafted_by: Option<String>,
 }
 
 impl From<&Agent> for AgentDetailsDto {
@@ -103,6 +116,12 @@ impl From<&Agent> for AgentDetailsDto {
                 run_when_logged_out: a.platform_options.run_when_logged_out,
             },
             log_retention_runs: a.log_retention_runs,
+            disallowed_tools: a.disallowed_tools.clone(),
+            mcp_servers: a.mcp_servers.iter().map(McpServerRefDto::from).collect(),
+            run_as: a.run_as.clone(),
+            task_budget: a.task_budget,
+            rate_limit: a.rate_limit.as_ref().map(RateLimitDto::from),
+            drafted_by: a.drafted_by.clone(),
         }
     }
 }
@@ -124,6 +143,78 @@ impl From<PlatformOptionsDto> for PlatformOptions {
             catch_up_if_missed: d.catch_up_if_missed,
             run_when_logged_out: d.run_when_logged_out,
         }
+    }
+}
+
+/// Wire form of [`McpServerRef`]. `kind = "claudepot_memory"` carries
+/// nothing else; `kind = "custom"` carries a name + an opaque config
+/// object. Mirrors the `#[serde(tag = "kind")]` core enum.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum McpServerRefDto {
+    ClaudepotMemory,
+    Custom {
+        name: String,
+        config: serde_json::Value,
+    },
+}
+
+impl From<&McpServerRef> for McpServerRefDto {
+    fn from(r: &McpServerRef) -> Self {
+        match r {
+            McpServerRef::ClaudepotMemory => McpServerRefDto::ClaudepotMemory,
+            McpServerRef::Custom { name, config } => McpServerRefDto::Custom {
+                name: name.clone(),
+                config: config.clone(),
+            },
+        }
+    }
+}
+
+impl From<McpServerRefDto> for McpServerRef {
+    fn from(d: McpServerRefDto) -> Self {
+        match d {
+            McpServerRefDto::ClaudepotMemory => McpServerRef::ClaudepotMemory,
+            McpServerRefDto::Custom { name, config } => {
+                McpServerRef::Custom { name, config }
+            }
+        }
+    }
+}
+
+/// Wire form of [`RateLimit`]. Both fields optional; an all-null
+/// value means "no rate limit".
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RateLimitDto {
+    #[serde(default)]
+    pub min_interval_secs: Option<u64>,
+    #[serde(default)]
+    pub max_per_day: Option<u32>,
+}
+
+impl From<&RateLimit> for RateLimitDto {
+    fn from(r: &RateLimit) -> Self {
+        RateLimitDto {
+            min_interval_secs: r.min_interval_secs,
+            max_per_day: r.max_per_day,
+        }
+    }
+}
+
+impl From<RateLimitDto> for RateLimit {
+    fn from(d: RateLimitDto) -> Self {
+        RateLimit {
+            min_interval_secs: d.min_interval_secs,
+            max_per_day: d.max_per_day,
+        }
+    }
+}
+
+/// Stringify [`Lifecycle`] for the wire (`"draft"` / `"installed"`).
+fn lifecycle_str(l: Lifecycle) -> &'static str {
+    match l {
+        Lifecycle::Draft => "draft",
+        Lifecycle::Installed => "installed",
     }
 }
 
@@ -162,6 +253,22 @@ pub struct AgentCreateDto {
     /// template. Drives template-aware post-run behavior.
     #[serde(default)]
     pub template_id: Option<String>,
+    // ---- Agent-spec fields (Phase 1) ----
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerRefDto>,
+    #[serde(default)]
+    pub run_as: Option<String>,
+    #[serde(default)]
+    pub task_budget: Option<u64>,
+    #[serde(default)]
+    pub rate_limit: Option<RateLimitDto>,
+    /// Audit field. Set by the (Phase 2) `agent draft` CLI verb /
+    /// template instantiation; the regular Add Agent flow leaves it
+    /// `None`.
+    #[serde(default)]
+    pub drafted_by: Option<String>,
 }
 
 fn default_log_retention() -> u32 {
@@ -220,6 +327,23 @@ pub struct AgentUpdateDto {
     pub platform_options: Option<PlatformOptionsDto>,
     #[serde(default)]
     pub log_retention_runs: Option<u32>,
+    // ---- Agent-spec fields (Phase 1) ----
+    #[serde(default)]
+    pub disallowed_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub mcp_servers: Option<Vec<McpServerRefDto>>,
+    /// Empty string clears `run_as` to `None`; a non-empty email
+    /// pins the account. Omitted = leave unchanged.
+    #[serde(default)]
+    pub run_as: Option<String>,
+    /// `Some(0)` clears the budget; any positive value sets it.
+    /// Omitted = leave unchanged.
+    #[serde(default)]
+    pub task_budget: Option<u64>,
+    /// A populated value sets the rate limit; an all-null value
+    /// clears it. Omitted = leave unchanged.
+    #[serde(default)]
+    pub rate_limit: Option<RateLimitDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -49,8 +49,8 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use claudepot_core::agent::{
     active_scheduler, install_shim, record_run_for_agent, store::agent_runs_dir,
-    Agent, AgentBinary, AgentId, OutputFormat, PermissionMode, PlatformOptions,
-    RecordInputs, Trigger, TriggerKind,
+    Agent, AgentBinary, AgentId, Lifecycle, OutputFormat, PermissionMode,
+    PlatformOptions, RecordInputs, Trigger, TriggerKind,
 };
 use claudepot_core::templates::apply::{
     apply_selected, validate_item, ItemOutcome, PendingChanges,
@@ -461,6 +461,13 @@ fn cron_schedule_fires_real_template_and_records_run() {
         updated_at: now_ts,
         claudepot_managed: true,
         template_id: Some(bp.id().0.clone()),
+        disallowed_tools: vec![],
+        mcp_servers: vec![],
+        run_as: None,
+        task_budget: None,
+        rate_limit: None,
+        lifecycle: Lifecycle::Installed,
+        drafted_by: None,
     };
     let _guard = CronCleanupGuard {
         id,
@@ -923,6 +930,13 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
         updated_at: now_ts,
         claudepot_managed: true,
         template_id: Some("it.morning-health-check".into()),
+        disallowed_tools: vec![],
+        mcp_servers: vec![],
+        run_as: None,
+        task_budget: None,
+        rate_limit: None,
+        lifecycle: Lifecycle::Installed,
+        drafted_by: None,
     };
 
     let inputs = RecordInputs {
