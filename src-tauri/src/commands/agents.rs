@@ -203,7 +203,9 @@ fn build_patch_from_update(
         // the patch must supply a usable cron string.
         let (existing_cron, existing_tz) = match &existing.trigger {
             Trigger::Cron { cron, timezone } => (cron.clone(), timezone.clone()),
-            Trigger::Manual => (String::new(), None),
+            // Transitioning from Manual or Event to Cron: no
+            // cron/tz to inherit, the patch must supply one.
+            Trigger::Manual | Trigger::Event { .. } => (String::new(), None),
         };
         let cron = dto.cron.unwrap_or(existing_cron);
         // Validate the cron string before building the trigger.

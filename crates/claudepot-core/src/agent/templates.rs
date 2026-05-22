@@ -1,0 +1,245 @@
+//! Built-in agent templates (PRD §9.2 / D5).
+//!
+//! v1 ships **exactly one** built-in template — the **Session
+//! Narrator**, the agent that motivated the whole Agents line of
+//! work. A *catalog* of templates is explicitly v2 (PRD §13); this
+//! module is deliberately a single function, not a registry.
+//!
+//! A template instantiates to a **draft** (`lifecycle = Draft`,
+//! `drafted_by = "template:session-narrator"`). The draft is inert
+//! until a human reviews and installs it via the existing Phase-2
+//! Review & install flow — that click *is* the human-approval gate
+//! (PRD §8.2). The template never produces an armed agent.
+//!
+//! Pure: no I/O, no env reads. The caller supplies the `cwd` (the
+//! project the narrator watches) and the clock.
+
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+use super::types::{
+    Agent, AgentBinary, EventKind, Lifecycle, McpServerRef, OutputFormat,
+    PermissionMode, PlatformOptions, RateLimit, Trigger, DEFAULT_DEBOUNCE_SECS,
+};
+
+/// Stable id recorded in `drafted_by` for Session-Narrator drafts.
+/// The audit trail distinguishes a template-drafted agent from an
+/// AI-drafted (`claude-code@…`) or hand-created (`None`) one.
+pub const SESSION_NARRATOR_DRAFTED_BY: &str = "template:session-narrator";
+
+/// The Session Narrator's `template_id`. Set on the produced agent
+/// so template-aware run handling (output-artifact discovery) and
+/// the GUI can recognize it.
+pub const SESSION_NARRATOR_TEMPLATE_ID: &str = "session-narrator";
+
+/// Default model: summarization is Haiku work, not Opus work
+/// (PRD §9.2). A versioned id, never a bare alias.
+pub const SESSION_NARRATOR_MODEL: &str = "claude-haiku-4-5";
+
+/// The Narrator's digest prompt. Asks for a readable account of the
+/// settled session; the `CLAUDEPOT_EVENT_SESSION_ID` /
+/// `CLAUDEPOT_EVENT_SESSION_PATH` env vars the orchestrator injects
+/// point the model at the exact transcript.
+const SESSION_NARRATOR_PROMPT: &str = "\
+Produce a readable, plain-English account of what Claude Code did in \
+the most recently settled session. The session id is in the \
+CLAUDEPOT_EVENT_SESSION_ID environment variable and the transcript \
+file is at CLAUDEPOT_EVENT_SESSION_PATH.
+
+Read the transcript and write a digest that covers, in order:
+1. What the user asked for (the goal of the session).
+2. What Claude actually did — the files it changed, the commands it \
+ran, the decisions it made.
+3. The outcome — what shipped, what is still open, any errors.
+
+Keep it concise and skimmable. Lead with the outcome. Do not quote \
+long code blocks; describe changes instead. Write for someone who \
+was not watching the session.";
+
+/// A clear digest-shaped JSON schema so the run emits structured
+/// output the Run-History panel can render as content (PRD §10).
+const SESSION_NARRATOR_JSON_SCHEMA: &str = r#"{
+  "type": "object",
+  "properties": {
+    "headline": {
+      "type": "string",
+      "description": "One-line summary of the session outcome."
+    },
+    "goal": {
+      "type": "string",
+      "description": "What the user asked Claude Code to do."
+    },
+    "actions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Notable things Claude did, in order."
+    },
+    "outcome": {
+      "type": "string",
+      "description": "What shipped and what is still open."
+    }
+  },
+  "required": ["headline", "goal", "actions", "outcome"]
+}"#;
+
+/// Build the **Session Narrator** as a pre-filled draft [`Agent`].
+///
+/// The returned agent has `lifecycle = Draft` and
+/// `drafted_by = "template:session-narrator"`; persisting it (via
+/// `AgentStore::add` + `save`) is the caller's job, and even a
+/// persisted draft stays inert until a human arms it through the
+/// GUI Review & install flow.
+///
+/// `cwd` is the project the narrator watches — the `session-settled`
+/// trigger only fires for sessions in that project (PRD §7, scope
+/// rule). `now` is injected for testability.
+///
+/// The draft carries a **mandatory `rate_limit`** because its
+/// trigger is an event trigger (PRD D9): without one, an event agent
+/// could fire on every settled session unbounded. The cap here —
+/// at most one run every 30 minutes, 12 per day — is conservative;
+/// the user can loosen it in the Review modal before installing.
+pub fn session_narrator(cwd: &str, now: DateTime<Utc>) -> Agent {
+    Agent {
+        id: Uuid::new_v4(),
+        name: "session-narrator".to_string(),
+        display_name: Some("Session Narrator".to_string()),
+        description: Some(
+            "Writes a readable digest of each finished Claude Code \
+             session in this project."
+                .to_string(),
+        ),
+        // A draft is created enabled so that, once a human arms it,
+        // the install path activates it immediately. `Lifecycle`,
+        // not `enabled`, is what keeps it inert until then.
+        enabled: true,
+        binary: AgentBinary::FirstParty,
+        model: Some(SESSION_NARRATOR_MODEL.to_string()),
+        cwd: cwd.to_string(),
+        prompt: SESSION_NARRATOR_PROMPT.to_string(),
+        system_prompt: None,
+        append_system_prompt: None,
+        // Read-only work — the narrator inspects a transcript and
+        // writes a digest. Default permission mode; no elevation.
+        permission_mode: PermissionMode::Default,
+        allowed_tools: vec!["Read".to_string(), "Grep".to_string()],
+        add_dir: Vec::new(),
+        max_budget_usd: None,
+        fallback_model: None,
+        // Structured output so RunHistoryPanel renders the digest as
+        // content, not just an exit code (PRD §10).
+        output_format: OutputFormat::Json,
+        json_schema: Some(SESSION_NARRATOR_JSON_SCHEMA.to_string()),
+        bare: false,
+        extra_env: BTreeMap::new(),
+        // The flagship reactive trigger: fire when a session in this
+        // project has been idle for the default debounce window.
+        trigger: Trigger::Event {
+            event: EventKind::SessionSettled {
+                debounce_secs: DEFAULT_DEBOUNCE_SECS,
+            },
+        },
+        platform_options: PlatformOptions::default(),
+        log_retention_runs: 50,
+        created_at: now,
+        updated_at: now,
+        claudepot_managed: true,
+        template_id: Some(SESSION_NARRATOR_TEMPLATE_ID.to_string()),
+        disallowed_tools: Vec::new(),
+        // Claudepot's own memory server, attached so the narrator can
+        // read project context as a data source (PRD §9.2).
+        mcp_servers: vec![McpServerRef::ClaudepotMemory],
+        run_as: None,
+        task_budget: None,
+        // Mandatory for event triggers (D9). Conservative default;
+        // adjustable in the Review modal before install.
+        rate_limit: Some(RateLimit {
+            min_interval_secs: Some(30 * 60),
+            max_per_day: Some(12),
+        }),
+        lifecycle: Lifecycle::Draft,
+        drafted_by: Some(SESSION_NARRATOR_DRAFTED_BY.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::slug::validate_name;
+
+    fn now() -> DateTime<Utc> {
+        Utc::now()
+    }
+
+    #[test]
+    fn session_narrator_builds_a_valid_draft() {
+        let a = session_narrator("/home/u/proj", now());
+        // It is a draft — inert until a human installs it.
+        assert_eq!(a.lifecycle, Lifecycle::Draft);
+        assert_eq!(
+            a.drafted_by.as_deref(),
+            Some(SESSION_NARRATOR_DRAFTED_BY)
+        );
+        assert_eq!(
+            a.template_id.as_deref(),
+            Some(SESSION_NARRATOR_TEMPLATE_ID)
+        );
+        // The name passes the same validation the store enforces.
+        validate_name(&a.name).expect("narrator name must be valid");
+        assert_eq!(a.cwd, "/home/u/proj");
+    }
+
+    #[test]
+    fn session_narrator_uses_haiku_and_session_settled_trigger() {
+        let a = session_narrator("/home/u/proj", now());
+        assert_eq!(a.model.as_deref(), Some(SESSION_NARRATOR_MODEL));
+        match &a.trigger {
+            Trigger::Event {
+                event: EventKind::SessionSettled { debounce_secs },
+            } => assert_eq!(*debounce_secs, DEFAULT_DEBOUNCE_SECS),
+            other => panic!("expected SessionSettled trigger, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_narrator_carries_a_rate_limit() {
+        // An event-triggered agent MUST carry a rate limit (D9).
+        let a = session_narrator("/home/u/proj", now());
+        let rl = a.rate_limit.expect("event agent must carry a rate_limit");
+        assert!(rl.min_interval_secs.is_some());
+        assert!(rl.max_per_day.is_some());
+    }
+
+    #[test]
+    fn session_narrator_attaches_claudepot_memory() {
+        let a = session_narrator("/home/u/proj", now());
+        assert!(a
+            .mcp_servers
+            .iter()
+            .any(|m| matches!(m, McpServerRef::ClaudepotMemory)));
+    }
+
+    #[test]
+    fn session_narrator_emits_structured_output() {
+        // The digest must be structured so the Run-History panel can
+        // render it as content (PRD §10).
+        let a = session_narrator("/home/u/proj", now());
+        assert_eq!(a.output_format, OutputFormat::Json);
+        assert!(a.json_schema.is_some());
+        // The schema is itself valid JSON.
+        let schema: serde_json::Value =
+            serde_json::from_str(a.json_schema.as_deref().unwrap()).unwrap();
+        assert_eq!(schema["type"], "object");
+    }
+
+    #[test]
+    fn session_narrator_round_trips_through_serde() {
+        // The produced draft must survive a store write/read cycle.
+        let a = session_narrator("/home/u/proj", now());
+        let s = serde_json::to_string(&a).unwrap();
+        let back: Agent = serde_json::from_str(&s).unwrap();
+        assert_eq!(a, back);
+    }
+}

@@ -314,6 +314,12 @@ impl AgentStore {
                 "bypassPermissions requires a non-empty allowed_tools whitelist".into(),
             ));
         }
+        // Cross-field invariant: an event-triggered agent MUST carry
+        // a rate limit (PRD D9). Without one, a reactive agent could
+        // fire on every settled session unbounded — events × agents
+        // × Claude is the dominant cost-runaway risk. It must not be
+        // possible to install an unthrottled event agent.
+        validate_event_rate_limit(&agent)?;
         if self
             .file
             .agents
@@ -459,6 +465,11 @@ impl AgentStore {
                 "bypassPermissions requires a non-empty allowed_tools whitelist".into(),
             ));
         }
+        // An event-triggered agent must keep a rate limit through
+        // every mutation — a patch that switches the trigger to
+        // `event` (or strips the rate limit off an event agent) is
+        // rejected here, the last gate before persistence.
+        validate_event_rate_limit(&a)?;
         a.updated_at = chrono::Utc::now();
         // Commit the validated clone back into the live store. Any
         // earlier `Err` return path leaves `self.file.agents[idx]`
@@ -525,6 +536,32 @@ impl AgentStore {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Reject an `Event`-triggered agent that carries no usable
+/// `rate_limit` (PRD D9). An event trigger fires reactively, so an
+/// unthrottled one is a cost-runaway hazard; the store refuses to
+/// persist one. A rate limit "counts" only if it actually
+/// constrains — an all-`None` [`RateLimit`] is treated as absent.
+///
+/// Non-event triggers (cron, manual) are unaffected — their
+/// frequency is already bounded by the schedule / the Run-Now
+/// button.
+fn validate_event_rate_limit(agent: &Agent) -> Result<(), AgentError> {
+    if !agent.trigger.is_event() {
+        return Ok(());
+    }
+    let has_usable_limit = agent.rate_limit.as_ref().is_some_and(|r| {
+        r.min_interval_secs.is_some() || r.max_per_day.is_some()
+    });
+    if !has_usable_limit {
+        return Err(AgentError::InvalidEnv(
+            "an event-triggered agent must carry a rate_limit \
+             (a min interval and/or a max per day)"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Canonical path: `<claudepot_data_dir>/agents.json` (v2).

@@ -54,13 +54,18 @@ pub use record_run::record_run_cmd;
 
 /// One-line trigger summary for the `list` table and `show`.
 pub(super) fn trigger_summary(agent: &Agent) -> String {
-    use claudepot_core::agent::Trigger;
+    use claudepot_core::agent::{EventKind, Trigger};
     match &agent.trigger {
         Trigger::Cron { cron, timezone } => match timezone {
             Some(tz) => format!("cron {cron} ({tz})"),
             None => format!("cron {cron}"),
         },
         Trigger::Manual => "manual".to_string(),
+        Trigger::Event { event } => match event {
+            EventKind::SessionSettled { debounce_secs } => {
+                format!("event session-settled ({debounce_secs}s)")
+            }
+        },
     }
 }
 

@@ -49,11 +49,12 @@ pub fn plist_path_for(id: &AgentId) -> Result<PathBuf, AgentError> {
 
 impl Scheduler for LaunchdScheduler {
     fn register(&self, agent: &Agent) -> Result<(), AgentError> {
-        // Manual triggers never get a scheduler artifact. Run-Now
-        // is the only entry point. Best-effort unregister of any
-        // stale plist from a prior schedule keeps the on-disk
-        // state honest.
-        if agent.trigger.is_manual() {
+        // Manual and Event triggers never get a scheduler artifact.
+        // Manual is Run-Now only; Event is fired by the in-app
+        // orchestrator (launchd cannot watch for "session settled").
+        // Best-effort unregister of any stale plist from a prior
+        // schedule keeps the on-disk state honest.
+        if agent.trigger.has_no_os_schedule() {
             let _ = self.unregister(&agent.id);
             return Ok(());
         }
@@ -163,7 +164,8 @@ impl Scheduler for LaunchdScheduler {
     ) -> Result<Vec<DateTime<Utc>>, AgentError> {
         match trigger {
             Trigger::Cron { cron, .. } => cron_next_runs(cron, from, n),
-            Trigger::Manual => Ok(Vec::new()),
+            // Manual + Event carry no schedule — no upcoming OS runs.
+            Trigger::Manual | Trigger::Event { .. } => Ok(Vec::new()),
         }
     }
 
@@ -227,14 +229,13 @@ pub fn render_plist(agent: &Agent) -> Result<String, AgentError> {
 
     let slots = match &agent.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,
-        // `register` short-circuits Manual before reaching here,
-        // so this arm is unreachable in production. Returning
-        // an empty plist is the fail-safe; a render-call against
-        // a Manual-trigger agent would produce a plist
-        // with no calendar trigger, which launchd would simply
-        // never fire — equivalent to Manual semantics — but we
-        // never write it to disk.
-        Trigger::Manual => return Ok(String::new()),
+        // `register` short-circuits Manual + Event before reaching
+        // here, so these arms are unreachable in production.
+        // Returning an empty plist is the fail-safe; a render-call
+        // against a no-schedule trigger would produce a plist with
+        // no calendar trigger, which launchd would simply never
+        // fire — but we never write it to disk.
+        Trigger::Manual | Trigger::Event { .. } => return Ok(String::new()),
     };
 
     let mut xml = String::new();

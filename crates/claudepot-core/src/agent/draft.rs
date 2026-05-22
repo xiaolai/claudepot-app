@@ -371,6 +371,23 @@ pub fn build_draft(
         super::cron::expand(cron)?;
     }
 
+    // An event-triggered agent MUST carry a rate limit (PRD D9).
+    // Reject at draft time so a human is never asked to arm an
+    // unthrottled reactive agent — events × agents × Claude is the
+    // dominant cost-runaway risk.
+    if spec.trigger.is_event() {
+        let has_usable_limit = spec.rate_limit.as_ref().is_some_and(|r| {
+            r.min_interval_secs.is_some() || r.max_per_day.is_some()
+        });
+        if !has_usable_limit {
+            return Err(AgentError::InvalidEnv(
+                "an event-triggered agent must carry a rate_limit \
+                 (a min interval and/or a max per day)"
+                    .into(),
+            ));
+        }
+    }
+
     Ok(Agent {
         id: Uuid::new_v4(),
         name,

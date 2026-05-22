@@ -43,8 +43,10 @@ pub fn xml_path_for(id: &AgentId) -> PathBuf {
 
 impl Scheduler for SchtasksScheduler {
     fn register(&self, agent: &Agent) -> Result<(), AgentError> {
-        // Manual triggers don't materialize Task Scheduler XML.
-        if agent.trigger.is_manual() {
+        // Manual + Event triggers don't materialize Task Scheduler
+        // XML. Manual is Run-Now only; Event is fired by the in-app
+        // orchestrator.
+        if agent.trigger.has_no_os_schedule() {
             let _ = self.unregister(&agent.id);
             return Ok(());
         }
@@ -137,7 +139,8 @@ impl Scheduler for SchtasksScheduler {
     ) -> Result<Vec<DateTime<Utc>>, AgentError> {
         match trigger {
             Trigger::Cron { cron, .. } => cron_next_runs(cron, from, n),
-            Trigger::Manual => Ok(Vec::new()),
+            // Manual + Event carry no schedule — no upcoming OS runs.
+            Trigger::Manual | Trigger::Event { .. } => Ok(Vec::new()),
         }
     }
 
@@ -201,9 +204,9 @@ pub fn render_xml(agent: &Agent) -> Result<String, AgentError> {
 
     let slots = match &agent.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,
-        // Manual triggers short-circuit `register`; this arm is
-        // unreachable in practice.
-        Trigger::Manual => return Ok(String::new()),
+        // Manual + Event triggers short-circuit `register`; these
+        // arms are unreachable in practice.
+        Trigger::Manual | Trigger::Event { .. } => return Ok(String::new()),
     };
 
     let opts = &agent.platform_options;

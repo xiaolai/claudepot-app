@@ -14,10 +14,11 @@ pub struct NoopScheduler;
 
 impl Scheduler for NoopScheduler {
     fn register(&self, agent: &Agent) -> Result<(), AgentError> {
-        // Manual triggers don't need a scheduler. The Noop adapter
-        // can honor them even on unsupported hosts; Run-Now does
-        // not depend on platform-specific scheduling.
-        if agent.trigger.is_manual() {
+        // Manual + Event triggers don't need a scheduler. The Noop
+        // adapter can honor them even on unsupported hosts; Run-Now
+        // and the in-app event orchestrator don't depend on
+        // platform-specific scheduling.
+        if agent.trigger.has_no_os_schedule() {
             return Ok(());
         }
         Err(AgentError::UnsupportedPlatform(
@@ -48,7 +49,8 @@ impl Scheduler for NoopScheduler {
     ) -> Result<Vec<DateTime<Utc>>, AgentError> {
         match trigger {
             Trigger::Cron { cron, timezone: _ } => cron_next_runs(cron, from, n),
-            Trigger::Manual => Ok(Vec::new()),
+            // Manual + Event carry no schedule — no upcoming OS runs.
+            Trigger::Manual | Trigger::Event { .. } => Ok(Vec::new()),
         }
     }
 

@@ -12,8 +12,9 @@
 //! survey (the `claude -p` flag table this module is built on)
 //! lives in `dev-docs/agents-cli-surface.md`.
 //!
-//! v1 scope: cron + manual triggers only. fs-watch / webhook
-//! reactive triggers are explicitly v2.
+//! Trigger scope: cron, manual, and the `session-settled` reactive
+//! event (PRD §7). fs-watch / webhook / usage-threshold reactive
+//! triggers remain PRD-deferred siblings (§13).
 //!
 //! ## Module layout
 //!
@@ -39,6 +40,7 @@ pub mod cron;
 pub mod draft;
 pub mod env;
 pub mod error;
+pub mod events;
 pub mod install;
 pub mod prerun;
 pub mod run;
@@ -46,10 +48,15 @@ pub mod scheduler;
 pub mod shim;
 pub mod slug;
 pub mod store;
+pub mod templates;
 pub mod types;
 
 pub use draft::{build_draft, CliOverrides, DraftInput, DraftSpec};
 pub use error::AgentError;
+pub use events::{
+    evaluate as evaluate_events, AgentEventsError, AgentRunStats, EventFire,
+    EventsFile, FiredEntry,
+};
 pub use install::{current_claudepot_cli, install_shim, resolve_binary};
 pub use run::{
     list_run_ids, parse_result_event, read_run, record_run, record_run_for_agent, run_now,
@@ -64,8 +71,9 @@ pub use slug::validate_name;
 pub use store::{
     agent_dir, agent_runs_dir, agents_file_path, AgentPatch, AgentStore,
 };
+pub use templates::session_narrator;
 pub use types::{
-    Agent, AgentBinary, AgentId, AgentRun, HostPlatform, Lifecycle,
+    Agent, AgentBinary, AgentId, AgentRun, EventKind, HostPlatform, Lifecycle,
     McpServerRef, OutputFormat, PermissionMode, PlatformOptions, RateLimit,
-    RunResult, Trigger, TriggerKind,
+    RunResult, Trigger, TriggerKind, DEFAULT_DEBOUNCE_SECS,
 };

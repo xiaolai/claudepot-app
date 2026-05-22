@@ -29,6 +29,14 @@ pub struct AgentSummaryDto {
     pub trigger_kind: String,
     pub cron: Option<String>,
     pub timezone: Option<String>,
+    /// Set only when `trigger_kind == "event"`. v1 value:
+    /// `"session_settled"` (PRD §7.1).
+    #[serde(default)]
+    pub event_kind: Option<String>,
+    /// Debounce window for a `session_settled` event trigger, in
+    /// seconds. `None` for non-event triggers.
+    #[serde(default)]
+    pub event_debounce_secs: Option<u64>,
     /// `"draft"` or `"installed"`. Read-only — the GUI arms an
     /// agent (draft -> installed); see Phase 2 of the Agents PRD.
     pub lifecycle: String,
@@ -49,6 +57,16 @@ impl From<&Agent> for AgentSummaryDto {
                 ("cron".to_string(), Some(cron.clone()), timezone.clone())
             }
             Trigger::Manual => ("manual".to_string(), None, None),
+            // `event` triggers carry no cron/timezone; the
+            // event-specific shape is exposed via `event_kind` /
+            // `event_debounce_secs` below.
+            Trigger::Event { .. } => ("event".to_string(), None, None),
+        };
+        let (event_kind, event_debounce_secs) = match &a.trigger {
+            Trigger::Event {
+                event: claudepot_core::agent::EventKind::SessionSettled { debounce_secs },
+            } => (Some("session_settled".to_string()), Some(*debounce_secs)),
+            _ => (None, None),
         };
         AgentSummaryDto {
             id: a.id.to_string(),
@@ -66,6 +84,8 @@ impl From<&Agent> for AgentSummaryDto {
             trigger_kind,
             cron,
             timezone: tz,
+            event_kind,
+            event_debounce_secs,
             lifecycle: lifecycle_str(a.lifecycle).to_string(),
             created_at: a.created_at.to_rfc3339(),
             updated_at: a.updated_at.to_rfc3339(),
