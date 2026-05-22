@@ -52,7 +52,10 @@ pub mod store;
 pub mod templates;
 pub mod types;
 
-pub use draft::{build_draft, validate_cwd, CliOverrides, DraftInput, DraftSpec};
+pub use draft::{
+    build_draft, validate_cwd, validate_trigger_timezone, CliOverrides, DraftInput,
+    DraftSpec,
+};
 pub use error::AgentError;
 pub use events::{
     evaluate as evaluate_events, AgentEventsError, AgentRunStats, EventFire,
@@ -61,8 +64,8 @@ pub use events::{
 pub use install::{current_claudepot_cli, install_shim, resolve_binary};
 pub use install_gate::{install_draft, InstallOutcome};
 pub use run::{
-    list_run_ids, parse_result_event, read_run, record_run, record_run_for_agent, run_now,
-    RecordInputs,
+    list_run_ids, parse_result_event, prune_run_dirs, read_run, record_run,
+    record_run_for_agent, run_now, RecordInputs,
 };
 pub use scheduler::{
     active_scheduler, cron_next_runs, noop::NoopScheduler, RegisteredEntry, Scheduler,
@@ -71,7 +74,8 @@ pub use scheduler::{
 pub use shim::{render_unix, render_windows, ShimInputs};
 pub use slug::validate_name;
 pub use store::{
-    agent_dir, agent_runs_dir, agents_file_path, AgentPatch, AgentStore,
+    agent_dir, agent_runs_dir, agents_file_path, reconcile_installed_agents,
+    reconcile_with_scheduler, AgentPatch, AgentStore, OrphanInstalled,
 };
 pub use templates::session_narrator;
 pub use types::{

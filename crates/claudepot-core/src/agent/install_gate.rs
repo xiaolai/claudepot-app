@@ -13,22 +13,31 @@
 //!
 //! ## Ordering and rollback
 //!
-//! The committed ordering is **arm (in memory) → install shim →
-//! register → save**. `arm` is a pure in-memory `lifecycle` flip, so
-//! every step before `save` is reversible:
+//! The ordering is **arm (in memory) → install shim → save →
+//! register** (grill finding F10 inverts the earlier
+//! save-after-register order). `arm` is a pure in-memory
+//! `lifecycle` flip; the OS scheduler artifact is the *last* thing
+//! materialized, so every failure leaves a coherent on-disk state:
 //!
 //! - **shim-install failure** → the store is *not* saved; the agent
 //!   on disk is still an inert `Draft`. The in-memory `lifecycle` is
 //!   rolled back to `Draft` so a reused store object stays honest.
-//! - **register failure** → same: store not saved, lifecycle rolled
-//!   back in memory, agent on disk still `Draft`. A draft with no
-//!   scheduler artifact is the safe failure state.
-//! - **save failure** → the shim + scheduler artifact exist but the
-//!   on-disk record is still `Draft`. This is the one residual
-//!   window (an installed artifact behind a Draft record); it is
-//!   far rarer than a register failure and is the same window
-//!   `agents_add` accepts. Phase 3 / grill F10 inverts the ordering
-//!   to close it; that is out of scope here.
+//! - **save failure** → store unsaved, lifecycle rolled back in
+//!   memory, agent on disk still `Draft`. No scheduler artifact was
+//!   registered (register runs only after a clean save). A draft
+//!   with no artifact is the safe failure state.
+//! - **register failure** → the `Installed` flip is already on disk,
+//!   so the lifecycle is rolled back to `Draft` *and re-saved*. The
+//!   agent ends as a `Draft` with no artifact — the same safe state
+//!   as the other two failures.
+//!
+//! The previous order (register before save) leaked the *harmful*
+//! direction: a save failure after a successful register left an
+//! armed launchd / systemd / Task Scheduler artifact firing
+//! `claude -p` on schedule behind an on-disk `Draft` record — an
+//! invisible firing draft. Saving the `Installed` flip first means
+//! the only artifact that can ever exist is one whose record is
+//! already (or, after a register-failure rollback, again) coherent.
 
 use super::error::AgentError;
 use super::scheduler::Scheduler;
@@ -49,9 +58,17 @@ pub struct InstallOutcome {
 /// artifact for an *enabled* agent — a disabled draft is armed but
 /// not scheduled, exactly as `agents_add` treats a disabled agent.
 ///
-/// On any failure before `save`, the in-memory `lifecycle` is rolled
-/// back to `Draft` and the store is left unsaved, so the on-disk
-/// record stays an inert `Draft`.
+/// Ordering is **arm → install shim → save → register** (grill F10).
+/// Every failure leaves the agent as an artifact-free `Draft`:
+///
+/// - a shim or save failure rolls the in-memory `lifecycle` back to
+///   `Draft` and leaves the store unsaved;
+/// - a register failure rolls the `lifecycle` back to `Draft` and
+///   **re-saves**, because the `Installed` flip is already on disk.
+///
+/// A `Draft` with no scheduler artifact is the safe failure state —
+/// it is invisible to both the OS scheduler and the event
+/// orchestrator until a human re-arms it.
 pub fn install_draft<F>(
     store: &mut AgentStore,
     id: &AgentId,
@@ -69,7 +86,16 @@ where
     // Materialize the shim. On failure, undo the in-memory arm and
     // leave the store unsaved — the agent on disk is still a Draft.
     if let Err(e) = install_shim(&armed) {
-        rollback_to_draft(store, id);
+        rollback_to_draft(store, id, false);
+        return Err(e);
+    }
+
+    // Persist the Draft -> Installed flip BEFORE registering the OS
+    // artifact (grill F10). A save failure here rolls back in memory
+    // and leaves the store unsaved; no artifact has been registered
+    // yet, so the on-disk record stays a coherent `Draft`.
+    if let Err(e) = store.save() {
+        rollback_to_draft(store, id, false);
         return Err(e);
     }
 
@@ -78,25 +104,44 @@ where
     // scheduled until the user enables it.
     if armed.enabled {
         if let Err(e) = scheduler.register(&armed) {
-            rollback_to_draft(store, id);
+            // The `Installed` flip is already on disk. Roll the
+            // lifecycle back to `Draft` AND re-save so the record
+            // never claims `Installed` without a live artifact. A
+            // draft with no artifact is the safe failure state.
+            rollback_to_draft(store, id, true);
             return Err(e);
         }
     }
 
-    // Shim + registration succeeded — commit the Draft → Installed
-    // flip to disk. A `save` failure here leaves an installed
-    // artifact behind a still-Draft record; see the module docs.
-    store.save()?;
     Ok(InstallOutcome { agent: armed })
 }
 
-/// Best-effort: flip an in-memory `Installed` record back to `Draft`
-/// after a failed install step, so a reused [`AgentStore`] is not
-/// left claiming an agent is installed when its artifact never
-/// materialized. Silent if the id vanished — there is nothing to
-/// roll back.
-fn rollback_to_draft(store: &mut AgentStore, id: &AgentId) {
+/// Flip an in-memory `Installed` record back to `Draft` after a
+/// failed install step, so the store is not left claiming an agent
+/// is installed when its scheduler artifact never materialized.
+///
+/// `persist` controls whether the rollback is also written to disk:
+/// pass `true` only when the `Installed` flip already reached disk
+/// (the register-failure path), so the on-disk record is corrected
+/// too. A failed re-save is logged but not propagated — the caller
+/// is already returning the original install error, and surfacing a
+/// second error would mask it; the in-memory rollback still keeps a
+/// reused [`AgentStore`] honest. Silent if the id vanished — there
+/// is nothing to roll back.
+fn rollback_to_draft(store: &mut AgentStore, id: &AgentId, persist: bool) {
     store.set_lifecycle(id, Lifecycle::Draft);
+    if persist {
+        if let Err(e) = store.save() {
+            tracing::error!(
+                agent_id = %id,
+                error = %e,
+                "install_draft: register failed and the rollback re-save \
+                 ALSO failed — the on-disk record still claims Installed \
+                 with no live scheduler artifact; the next boot \
+                 reconciliation will demote it"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -150,6 +195,9 @@ mod tests {
         }
         fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AgentError> {
             Ok(Vec::new())
+        }
+        fn expected_identifier(&self, id: &AgentId) -> String {
+            format!("fake.agent.{id}")
         }
         fn next_runs(
             &self,
@@ -239,15 +287,20 @@ mod tests {
         assert_eq!(sched.registered.borrow().len(), 1);
         // In memory: installed.
         assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Installed);
-        // On disk: installed (save ran).
+        // On disk: installed (save ran). Drop the store first so the
+        // reopen does not block on the advisory lock.
+        drop(store);
         let reopened = AgentStore::open_at(path).unwrap();
         assert_eq!(reopened.get(&id).unwrap().lifecycle, Lifecycle::Installed);
     }
 
     #[test]
-    fn install_draft_register_failure_leaves_agent_draft_unsaved() {
-        // grill F6 rollback direction 1: a register failure must
-        // leave the agent `Draft` with nothing saved.
+    fn install_draft_register_failure_rolls_back_to_draft_on_disk() {
+        // grill F10: with save-before-register ordering, the
+        // `Installed` flip reaches disk BEFORE register runs. A
+        // register failure must therefore roll the lifecycle back to
+        // `Draft` AND re-save, so the on-disk record never claims
+        // `Installed` behind a missing scheduler artifact.
         let dir = tempdir().unwrap();
         let path = dir.path().join("agents.json");
         let mut store = AgentStore::open_at(path.clone()).unwrap();
@@ -262,7 +315,10 @@ mod tests {
 
         // In memory: rolled back to Draft.
         assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Draft);
-        // On disk: still Draft — `save` never ran.
+        // On disk: ALSO Draft — the rollback re-saved. The previous
+        // (pre-F10) order would have left an `Installed` record here
+        // with no live artifact.
+        drop(store);
         let reopened = AgentStore::open_at(path).unwrap();
         assert_eq!(reopened.get(&id).unwrap().lifecycle, Lifecycle::Draft);
         // No artifact was registered.
@@ -291,6 +347,7 @@ mod tests {
         assert!(result.is_err());
 
         assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Draft);
+        drop(store);
         let reopened = AgentStore::open_at(path).unwrap();
         assert_eq!(reopened.get(&id).unwrap().lifecycle, Lifecycle::Draft);
         // Register was never reached.
@@ -316,6 +373,7 @@ mod tests {
         assert_eq!(outcome.agent.lifecycle, Lifecycle::Installed);
         assert!(sched.registered.borrow().is_empty());
 
+        drop(store);
         let reopened = AgentStore::open_at(path).unwrap();
         assert_eq!(reopened.get(&id).unwrap().lifecycle, Lifecycle::Installed);
     }
@@ -352,10 +410,15 @@ mod tests {
             result.is_err(),
             "a failed save must surface as Err, not be swallowed"
         );
-        // The shim + register ran (the save is the last step), so
-        // the in-memory record is Installed — the residual window
-        // the module docs call out. The point of the test is that
-        // the failure is *not silent*.
-        assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Installed);
+        // grill F10: with save-before-register ordering, a save
+        // failure happens BEFORE any scheduler artifact is
+        // registered. The lifecycle is rolled back to `Draft` and
+        // no artifact exists — the safe failure state. The register
+        // step is never reached.
+        assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Draft);
+        assert!(
+            sched.registered.borrow().is_empty(),
+            "register must not run after a save failure"
+        );
     }
 }

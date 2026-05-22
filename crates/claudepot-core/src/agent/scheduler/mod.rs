@@ -82,6 +82,14 @@ pub trait Scheduler {
     /// reports.
     fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AgentError>;
 
+    /// The scheduler-artifact identifier this adapter would register
+    /// for `id` — the launchd label, the systemd unit base, or the
+    /// Task Scheduler task path. Pure: does not touch the OS. Used
+    /// by boot-time reconciliation (grill finding F15) to match a
+    /// stored `Installed` record against the artifacts
+    /// [`list_managed`](Self::list_managed) reports.
+    fn expected_identifier(&self, id: &AgentId) -> String;
+
     /// Compute the next `n` fire times for a given trigger, in
     /// UTC. Pure function — does not touch the OS. Returns an
     /// empty vec if the trigger has no upcoming fire time.

@@ -543,6 +543,18 @@ pub fn run() {
             // `src-tauri/src/usage_snapshot.rs`.
             usage_snapshot::spawn(app.handle().clone());
 
+            // Boot-time agent reconciliation (grill finding F15).
+            // Loudly logs any agent marked `Installed` in
+            // `agents.json` for which the OS scheduler reports no
+            // live artifact — catches a hand-edited lifecycle field
+            // or an install rollback that could not re-save. It is
+            // observability only (no mutation) and best-effort, so
+            // it runs on a detached blocking task and never blocks
+            // setup. See `claudepot_core::agent::reconcile_with_scheduler`.
+            tauri::async_runtime::spawn_blocking(|| {
+                claudepot_core::agent::reconcile_with_scheduler();
+            });
+
             // Background poller for CC CLI + Claude Desktop updates.
             // Probes upstream every `poll_interval_minutes` (default
             // 4 h), updates the tray badge, and runs the auto-install

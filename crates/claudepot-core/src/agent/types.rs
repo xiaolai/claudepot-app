@@ -50,17 +50,22 @@ pub struct RateLimit {
     pub max_per_day: Option<u32>,
 }
 
-/// Agent lifecycle. A `Draft` is inert — no scheduler artifact is
-/// materialized, nothing fires. The `Draft -> Installed` transition
-/// is human-only (enforced by the GUI). Default is `Draft`: a
-/// freshly-deserialized record with no `lifecycle` field is
-/// conservatively treated as a draft, EXCEPT the v1->v2 store
-/// migration which upgrades every pre-existing record to
-/// `Installed` (they were already armed).
+/// Agent lifecycle. A `Draft` carries **no automatic or scheduled
+/// execution** — no launchd / systemd / Task Scheduler artifact is
+/// materialized and the event orchestrator never fires it. It is
+/// *not* unconditionally inert: an explicit GUI "Run now" can still
+/// execute a draft, and that path now routes through the same
+/// human-confirmation surface as install (grill finding F16). The
+/// `Draft -> Installed` transition is human-only (enforced by the
+/// GUI). Default is `Draft`: a freshly-deserialized record with no
+/// `lifecycle` field is conservatively treated as a draft, EXCEPT
+/// the v1->v2 store migration which upgrades every pre-existing
+/// record to `Installed` (they were already armed).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Lifecycle {
-    /// Inert. No scheduler artifact, no event binding.
+    /// No automatic execution: no scheduler artifact, no event
+    /// binding. An explicit Run-Now can still execute it.
     #[default]
     Draft,
     /// Armed. The scheduler artifact is live.

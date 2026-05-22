@@ -49,6 +49,11 @@ pub struct RecordInputs<'a> {
     /// Path to `stderr.log` written by the shim.
     pub stderr_log_path: &'a Path,
     pub claudepot_version: &'a str,
+    /// The agent's `log_retention_runs`, used to prune old run
+    /// directories after this run's `result.json` is written
+    /// (grill finding F12). `None` means the caller could not
+    /// resolve it — the prune is then skipped, never guessed.
+    pub log_retention_runs: Option<u32>,
 }
 
 /// Top-level: read stdout.log, parse the result event, write
@@ -125,6 +130,26 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AgentRun, AgentError> {
     };
 
     write_result_json(&run, inputs.stdout_log_path)?;
+
+    // Enforce `log_retention_runs` (grill finding F12): now that
+    // this run's `result.json` is durably on disk, delete the oldest
+    // run directories so the agent's run history does not grow
+    // unbounded. An agent on a 15-minute cron writes ~35k run dirs
+    // a year, each with a full `stdout.log` — a disk-exhaustion path
+    // the stored-but-unenforced field used to mislead about. The
+    // prune is best-effort: a failure is logged, never fatal to
+    // recording the run.
+    //
+    // The retention count travels in [`RecordInputs`] so this
+    // function never has to open the store — keeping it cheap and
+    // store-lock-free. The `_record-run` CLI verb and the in-process
+    // Run-Now path each resolve the count from the agent record and
+    // pass it in. `None` means "retention not supplied" and the
+    // prune is skipped (a missing count must never delete history).
+    if let Some(retention) = inputs.log_retention_runs {
+        prune_run_dirs(&agent_runs_dir(&inputs.agent_id), retention as usize);
+    }
+
     tracing::info!(
         agent_id = %inputs.agent_id,
         run_id = %inputs.run_id,
@@ -135,6 +160,65 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AgentRun, AgentError> {
         "agent record-run: finished"
     );
     Ok(run)
+}
+
+/// Retention prune (grill finding F12): keep the newest `retention`
+/// run directories under `runs_dir`, delete the rest.
+///
+/// Run-id directory names sort lexicographically by their
+/// ISO-timestamp prefix, so "oldest" is the lexicographically
+/// smallest name. Dotfiles (the `.latest` symlink and pointer
+/// files) are never counted or deleted. A `retention` of 0 is
+/// treated as "keep none configured = do not prune" — defensively,
+/// the model defaults the field to 50 and the GUI/CLI never let it
+/// reach 0, so a 0 here means an uninitialized value, not "delete
+/// everything."
+///
+/// Best-effort throughout: every failure is logged and swallowed —
+/// retention is housekeeping, never worth aborting a recorded run.
+/// Public so the in-process Run-Now path can prune too.
+pub fn prune_run_dirs(runs_dir: &Path, retention: usize) {
+    if retention == 0 || !runs_dir.exists() {
+        return;
+    }
+    let mut names: Vec<String> = match std::fs::read_dir(runs_dir) {
+        Ok(rd) => rd
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .filter(|n| !n.starts_with('.'))
+            .collect(),
+        Err(e) => {
+            tracing::warn!(
+                dir = %runs_dir.display(),
+                error = %e,
+                "agent retention: could not read runs dir — skipping prune"
+            );
+            return;
+        }
+    };
+    if names.len() <= retention {
+        return;
+    }
+    // Sort ascending (oldest first); the run id's ISO-timestamp
+    // prefix makes lexicographic order match chronological order.
+    names.sort();
+    let to_delete = names.len() - retention;
+    for name in names.into_iter().take(to_delete) {
+        let dir = runs_dir.join(&name);
+        if let Err(e) = std::fs::remove_dir_all(&dir) {
+            tracing::warn!(
+                dir = %dir.display(),
+                error = %e,
+                "agent retention: failed to delete an old run dir"
+            );
+        } else {
+            tracing::debug!(
+                dir = %dir.display(),
+                "agent retention: pruned an old run dir"
+            );
+        }
+    }
 }
 
 /// Template-aware record-run.
@@ -578,6 +662,14 @@ pub async fn run_now(
     };
     sink.phase("record", PhaseStatus::Complete);
 
+    // Enforce `log_retention_runs` (grill finding F12). The shim's
+    // own `_record-run` callback already prunes when it ran; this
+    // also covers the synthesize branch above (shim crashed before
+    // calling `_record-run`), so a misbehaving agent's run dirs are
+    // bounded regardless of which path recorded the run. The agent
+    // record is in hand, so no store open is needed.
+    prune_run_dirs(&runs_root, agent.log_retention_runs as usize);
+
     sink.phase("done", PhaseStatus::Complete);
     tracing::info!(
         agent_id = %agent.id,
@@ -833,6 +925,7 @@ mod tests {
             stdout_log_path: &stdout_path,
             stderr_log_path: &stderr_path,
             claudepot_version: "0.0.5",
+            log_retention_runs: None,
         };
         let run = record_run(&inputs).unwrap();
         assert_eq!(run.duration_ms, 13_000);
@@ -876,11 +969,81 @@ mod tests {
             stdout_log_path: &stdout_path,
             stderr_log_path: &stderr_path,
             claudepot_version: "0.0.5",
+            log_retention_runs: None,
         };
         let run = record_run(&inputs).unwrap();
         assert_eq!(run.exit_code, 70);
         assert!(run.result.is_none());
         assert!(dir.path().join("result.json").exists());
+    }
+
+    #[test]
+    fn prune_run_dirs_keeps_only_the_newest_retention() {
+        // grill F12: with 7 run dirs and a retention of 3, the 4
+        // oldest (lexicographically smallest names) are deleted and
+        // the 3 newest survive.
+        let dir = tempdir().unwrap();
+        let runs = dir.path().join("runs");
+        std::fs::create_dir(&runs).unwrap();
+        // ISO-prefixed names sort chronologically.
+        let names = [
+            "20260101T000000Z-a",
+            "20260102T000000Z-b",
+            "20260103T000000Z-c",
+            "20260104T000000Z-d",
+            "20260105T000000Z-e",
+            "20260106T000000Z-f",
+            "20260107T000000Z-g",
+        ];
+        for n in names {
+            let d = runs.join(n);
+            std::fs::create_dir(&d).unwrap();
+            std::fs::write(d.join("result.json"), b"{}").unwrap();
+        }
+        // A dotfile must never be counted or deleted.
+        std::fs::write(runs.join(".latest"), b"ptr").unwrap();
+
+        prune_run_dirs(&runs, 3);
+
+        let survivors: std::collections::HashSet<String> = std::fs::read_dir(&runs)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .collect();
+        assert_eq!(survivors.len(), 3, "exactly retention=3 dirs survive");
+        assert!(survivors.contains("20260107T000000Z-g"), "newest kept");
+        assert!(survivors.contains("20260106T000000Z-f"));
+        assert!(survivors.contains("20260105T000000Z-e"));
+        assert!(!survivors.contains("20260101T000000Z-a"), "oldest deleted");
+        // The dotfile is untouched.
+        assert!(runs.join(".latest").exists());
+    }
+
+    #[test]
+    fn prune_run_dirs_noop_when_under_retention() {
+        // Fewer dirs than the retention cap — nothing is deleted.
+        let dir = tempdir().unwrap();
+        let runs = dir.path().join("runs");
+        std::fs::create_dir(&runs).unwrap();
+        for n in ["20260101T000000Z-a", "20260102T000000Z-b"] {
+            std::fs::create_dir(runs.join(n)).unwrap();
+        }
+        prune_run_dirs(&runs, 50);
+        let count = std::fs::read_dir(&runs).unwrap().flatten().count();
+        assert_eq!(count, 2, "no prune when under the retention cap");
+    }
+
+    #[test]
+    fn prune_run_dirs_zero_retention_is_a_noop() {
+        // A retention of 0 means "uninitialized" — it must NOT
+        // delete everything. The model defaults the field to 50.
+        let dir = tempdir().unwrap();
+        let runs = dir.path().join("runs");
+        std::fs::create_dir(&runs).unwrap();
+        std::fs::create_dir(runs.join("20260101T000000Z-a")).unwrap();
+        prune_run_dirs(&runs, 0);
+        assert!(runs.join("20260101T000000Z-a").exists());
     }
 
     #[test]
@@ -903,6 +1066,7 @@ mod tests {
             stdout_log_path: &stdout_path,
             stderr_log_path: &stderr_path,
             claudepot_version: "0.0.5",
+            log_retention_runs: None,
         };
         let run = record_run(&inputs).unwrap();
         assert_eq!(run.exit_code, 1);

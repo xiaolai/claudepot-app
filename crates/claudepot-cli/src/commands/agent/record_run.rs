@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use claudepot_core::agent::{
-    agent_runs_dir, record_run, AgentId, RecordInputs, TriggerKind,
+    agent_runs_dir, record_run, AgentId, AgentStore, RecordInputs, TriggerKind,
 };
 use uuid::Uuid;
 
@@ -83,6 +83,16 @@ pub fn record_run_cmd(
     let stdout_log = run_dir.join("stdout.log");
     let stderr_log = run_dir.join("stderr.log");
 
+    // Resolve the agent's `log_retention_runs` so `record_run` can
+    // prune old run dirs after writing this run's `result.json`
+    // (grill finding F12). `_record-run` is a short-lived CLI
+    // process spawned by the shim, so opening the store here is
+    // cheap. A store-open / agent-not-found failure resolves to
+    // `None` — the prune is skipped, never guessed.
+    let log_retention_runs = AgentStore::open()
+        .ok()
+        .and_then(|store| store.get(&id).map(|a| a.log_retention_runs));
+
     let inputs = RecordInputs {
         agent_id: id,
         run_id,
@@ -93,6 +103,7 @@ pub fn record_run_cmd(
         stdout_log_path: &stdout_log,
         stderr_log_path: &stderr_log,
         claudepot_version: env!("CARGO_PKG_VERSION"),
+        log_retention_runs,
     };
     match record_run(&inputs) {
         Ok(_run) => {
