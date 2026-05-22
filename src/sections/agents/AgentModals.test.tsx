@@ -68,6 +68,7 @@ const details = (overrides?: Partial<AgentDetailsDto>): AgentDetailsDto => ({
   task_budget: null,
   rate_limit: null,
   drafted_by: "claude-code@2026-05-22",
+  created_via: "cli_draft",
   ...overrides,
 });
 
@@ -130,9 +131,110 @@ describe("ReviewInstallModal — the human-in-the-loop install gate", () => {
     expect(screen.getByRole("button", { name: "Install" })).toBeEnabled();
   });
 
+  it("flags a non-GUI provenance (F19) — cli_draft renders the AI-drafted banner", async () => {
+    agentsGet.mockResolvedValue(details({ created_via: "cli_draft" }));
+    render(
+      <ReviewInstallModal
+        open
+        target={summary()}
+        onClose={() => {}}
+        onInstalled={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("summarize today's commits"),
+      ).toBeInTheDocument(),
+    );
+    // The provenance banner copy: it must call out that the
+    // record is not GUI-authored and steer scrutiny to the spec.
+    expect(screen.getByText(/AI-drafted/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Not authored in the GUI/),
+    ).toBeInTheDocument();
+  });
+
+  it("does NOT flag provenance when created_via == 'gui'", async () => {
+    agentsGet.mockResolvedValue(details({ created_via: "gui" }));
+    render(
+      <ReviewInstallModal
+        open
+        target={summary()}
+        onClose={() => {}}
+        onInstalled={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("summarize today's commits"),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/AI-drafted/)).toBeNull();
+    expect(
+      screen.queryByText(/Not authored in the GUI/),
+    ).toBeNull();
+  });
+
+  it("warns about the recorded-but-ignored run_as (F22)", async () => {
+    agentsGet.mockResolvedValue(
+      details({ run_as: "dev@example.com" }),
+    );
+    render(
+      <ReviewInstallModal
+        open
+        target={summary()}
+        onClose={() => {}}
+        onInstalled={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("summarize today's commits"),
+      ).toBeInTheDocument(),
+    );
+    // The pinned email renders verbatim.
+    expect(
+      screen.getByText("dev@example.com"),
+    ).toBeInTheDocument();
+    // And the inline "not yet wired" note must accompany it so the
+    // user is not surprised the run uses a different account.
+    expect(
+      screen.getByText(/Per-run credential injection is not yet wired/),
+    ).toBeInTheDocument();
+  });
+
+  it("does NOT show the run_as warning when run_as is null", async () => {
+    agentsGet.mockResolvedValue(details({ run_as: null }));
+    render(
+      <ReviewInstallModal
+        open
+        target={summary()}
+        onClose={() => {}}
+        onInstalled={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("summarize today's commits"),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(/Per-run credential injection is not yet wired/),
+    ).toBeNull();
+    expect(
+      screen.getByText("active account at fire time"),
+    ).toBeInTheDocument();
+  });
+
   it("flags a bypassPermissions draft before the human installs it", async () => {
     agentsGet.mockResolvedValue(
-      details({ summary: summary({ permission_mode: "bypassPermissions" }) }),
+      details({
+        // Use `gui` so the F19 origin-warning alert is suppressed
+        // and this test stays focused on the bypassPermissions
+        // danger alert specifically.
+        created_via: "gui",
+        summary: summary({ permission_mode: "bypassPermissions" }),
+      }),
     );
     render(
       <ReviewInstallModal

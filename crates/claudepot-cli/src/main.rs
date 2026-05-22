@@ -784,6 +784,12 @@ enum AgentAction {
         attach_memory: bool,
         /// Audit actor id recorded as `drafted_by` (e.g.
         /// `claude-code@2026-05-22`). Defaults to `cli`.
+        ///
+        /// This is a **free-text, advisory** field — the caller
+        /// picks the value. The trustworthy "this was AI-drafted"
+        /// signal is the immutable `created_via` field stamped by
+        /// `build_draft` itself, which the GUI install review uses
+        /// to flag non-GUI agents.
         #[arg(long = "drafted-by", default_value = "cli")]
         drafted_by: String,
     },

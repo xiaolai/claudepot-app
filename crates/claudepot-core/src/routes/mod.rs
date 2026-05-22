@@ -16,6 +16,7 @@
 //!
 //! Full design: `dev-docs/third-party-llm-design.md`.
 
+mod decision;
 mod desktop;
 mod error;
 mod helper;
@@ -27,6 +28,7 @@ mod types;
 mod url;
 mod wrapper;
 
+pub use decision::RouteDecision;
 pub use desktop::{
     activate_desktop, clear_desktop_active, delete_library_profile, enterprise_config_path,
     library_dir, write_library_profile,

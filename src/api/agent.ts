@@ -30,6 +30,18 @@ export const agentApi = {
   agentInstall: (id: string) =>
     invoke<AgentSummaryDto>("agent_install", { id }),
 
+  /**
+   * Instantiate a built-in agent template as a fresh draft (F21).
+   * The returned summary has `lifecycle = "draft"`; the human
+   * reviews and arms it via the existing install flow. v1 ships
+   * one template id: `"session-narrator"`.
+   */
+  agentAddFromTemplate: (templateId: string, cwd: string) =>
+    invoke<AgentSummaryDto>("agent_add_from_template", {
+      templateId,
+      cwd,
+    }),
+
   agentsUpdate: (dto: AgentUpdateDto) =>
     invoke<AgentSummaryDto>("agents_update", { dto }),
 

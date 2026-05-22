@@ -14,6 +14,7 @@ import type {
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   AddAgentModal,
+  AddFromBuiltinTemplateModal,
   EditAgentModal,
   ReviewInstallModal,
 } from "./agents/AgentModals";
@@ -46,6 +47,7 @@ export function AgentsSection() {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
+  const [showBuiltinNarrator, setShowBuiltinNarrator] = useState(false);
   const [editTarget, setEditTarget] =
     useState<AgentSummaryDto | null>(null);
   const [reviewTarget, setReviewTarget] =
@@ -200,6 +202,14 @@ export function AgentsSection() {
             >
               From template…
             </Button>
+            <Button
+              variant="ghost"
+              glyph={NF.star}
+              onClick={() => setShowBuiltinNarrator(true)}
+              title="Add a built-in Session Narrator draft. The draft is inert until you review and install it."
+            >
+              Session Narrator
+            </Button>
             {agents !== null && agents.length > 0 && (
               <Button
                 variant="solid"
@@ -264,6 +274,20 @@ export function AgentsSection() {
         onCreated={() => {
           refresh();
           pushToast("info", "Agent created.");
+        }}
+      />
+
+      <AddFromBuiltinTemplateModal
+        open={showBuiltinNarrator}
+        templateId="session-narrator"
+        templateName="Session Narrator"
+        onClose={() => setShowBuiltinNarrator(false)}
+        onCreated={() => {
+          refresh();
+          pushToast(
+            "info",
+            "Session Narrator draft created. Open Review & install to arm it.",
+          );
         }}
       />
 

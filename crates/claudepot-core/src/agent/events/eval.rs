@@ -5,11 +5,11 @@
 //! `(sessions, ledger, event-agents, run-stats, exclusion-set, now)`
 //! to the list of `(agent, session)` pairs that should fire.
 //!
-//! The orchestrator (`src-tauri/src/agent_event_orchestrator.rs`)
-//! collects every input — indexes the sessions, loads the ledger,
-//! walks each agent's run history, builds the agent-produced-session
-//! exclusion set — and then calls [`evaluate`]. All filesystem and
-//! Tauri concerns live there; this module is pure.
+//! The in-app event orchestrator (the Tauri layer) collects every
+//! input — indexes the sessions, loads the ledger, walks each
+//! agent's run history, builds the agent-produced-session exclusion
+//! set — and then calls [`evaluate`]. All filesystem and Tauri
+//! concerns live there; this module is pure.
 //!
 //! A session fires for an agent when **all** of these hold:
 //!
@@ -177,6 +177,13 @@ pub fn evaluate(
 /// timestamp it falls back to the file's mtime (`last_modified`).
 /// A session with neither is never considered settled — we cannot
 /// prove it has stopped growing.
+///
+/// F20: the comparison runs on `u64` so a huge `debounce_secs`
+/// never wraps. The earlier `idle_secs >= debounce_secs as i64`
+/// shape silently wrapped `u64::MAX as i64` to `-1`, flipping an
+/// extreme debounce into "fire immediately". A negative idle
+/// duration (clock skew) cannot satisfy any positive debounce, so
+/// it is returned as `false` directly.
 pub fn is_settled(
     session: &SessionRow,
     debounce_secs: u64,
@@ -187,7 +194,12 @@ pub fn is_settled(
         None => return false,
     };
     let idle_secs = (now - last_activity).num_seconds();
-    idle_secs >= debounce_secs as i64
+    if idle_secs < 0 {
+        return false;
+    }
+    // Safe: `idle_secs >= 0` was just checked, so the `as u64`
+    // narrowing here is lossless.
+    (idle_secs as u64) >= debounce_secs
 }
 
 /// Resolve a session's "last activity" instant.
@@ -212,7 +224,14 @@ fn rate_limit_blocks(
     if let Some(min_interval) = limit.min_interval_secs {
         if let Some(last) = stats.last_run_started_at {
             let secs_since_last = (now - last).num_seconds();
-            if secs_since_last < min_interval as i64 {
+            // F20: compare on `u64` so a huge `min_interval` never
+            // wraps. A negative `secs_since_last` (clock skew /
+            // future-dated run history) is treated as "no interval
+            // has elapsed at all" — block the fire rather than let
+            // a sign flip slip past the limit.
+            let elapsed_ok = secs_since_last >= 0
+                && (secs_since_last as u64) >= min_interval;
+            if !elapsed_ok {
                 return Some(SkipReason::RateLimitedMinInterval {
                     secs_since_last,
                 });
@@ -305,6 +324,7 @@ mod tests {
             rate_limit: rl,
             lifecycle: Lifecycle::Installed,
             drafted_by: None,
+            created_via: crate::agent::types::CreatedVia::Gui,
         }
     }
 

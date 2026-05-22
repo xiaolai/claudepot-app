@@ -21,8 +21,8 @@ use crate::routes::{Route, RouteId, RouteProvider};
 /// `<run-dir>/prerun-decision.json`; `record_run` merges it into
 /// `AgentRun.route_decision`.
 ///
-/// This mirrors `agent::types::RouteDecision` but lives
-/// here so the prerun module doesn't have a circular import.
+/// This mirrors `routes::RouteDecision` but lives here so the
+/// prerun module doesn't have a circular import.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PrerunDecision {

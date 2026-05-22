@@ -468,6 +468,7 @@ fn cron_schedule_fires_real_template_and_records_run() {
         rate_limit: None,
         lifecycle: Lifecycle::Installed,
         drafted_by: None,
+        created_via: claudepot_core::agent::CreatedVia::Gui,
     };
     let _guard = CronCleanupGuard {
         id,
@@ -937,6 +938,7 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
         rate_limit: None,
         lifecycle: Lifecycle::Installed,
         drafted_by: None,
+        created_via: claudepot_core::agent::CreatedVia::Gui,
     };
 
     let inputs = RecordInputs {

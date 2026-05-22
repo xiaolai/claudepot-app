@@ -30,9 +30,10 @@ use super::install::install_shim;
 use super::prerun::PrerunDecision;
 use super::store::agent_runs_dir;
 use super::types::{
-    ArtifactKind, Agent, AgentId, AgentRun, HostPlatform, OutputArtifact,
-    RouteDecision, RunResult, TriggerKind,
+    Agent, AgentId, AgentRun, ArtifactKind, HostPlatform, OutputArtifact,
+    RunResult, TriggerKind,
 };
+use crate::routes::RouteDecision;
 
 /// Inputs to [`record_run`]. All values are knowable by the helper
 /// shim at exit time.

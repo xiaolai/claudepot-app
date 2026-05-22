@@ -194,9 +194,95 @@ pub struct CliOverrides {
     pub attach_memory: bool,
 }
 
+// ------- Untrusted-input caps (grill finding F18) -------
+//
+// `agent draft` accepts JSON from an AI client and eventually feeds
+// it into a `claude -p` invocation. Without explicit caps, a
+// multi-megabyte `prompt` is `exec`-busted, a control character in
+// `system_prompt` corrupts logs and the GUI, and an unbounded
+// `add_dir` list grows the CLI invocation past sensible limits. The
+// thresholds below are intentionally generous — they bound the
+// pathological cases, not legitimate use.
+
+/// Maximum total bytes of the raw spec JSON. ~256 KB is hundreds of
+/// times the size of a typical Session Narrator spec and well under
+/// the platform `ARG_MAX` reach.
+pub const MAX_SPEC_BYTES: usize = 256 * 1024;
+
+/// Maximum bytes for the `prompt` / `system_prompt` /
+/// `append_system_prompt` strings. ~128 KB is far past any
+/// reasonable instructions; a multi-MB prompt fails the run later
+/// with `E2BIG` at `exec` time, with no helpful error.
+pub const MAX_PROMPT_BYTES: usize = 128 * 1024;
+
+/// Maximum bytes for the `cwd` string. POSIX `PATH_MAX` is 4 KB on
+/// most platforms; even with `\\?\` Windows extended-length, 8 KB
+/// is generous.
+pub const MAX_CWD_BYTES: usize = 8 * 1024;
+
+/// Maximum bytes for the `model` identifier. Real Anthropic model
+/// ids are well under 128 chars; 1 KB is paranoid.
+pub const MAX_MODEL_BYTES: usize = 1024;
+
+// `json_schema` is not currently surfaced through either draft
+// input shape (`NativeInput` / `AgentDefinitionInput`) — templates
+// supply it directly via the constructor, not through the AI-drafting
+// path. If the field grows a wire surface, add a cap here and a
+// `validate_text_field("json_schema", …)` call below; the existing
+// `MAX_PROMPT_BYTES` ceiling is the right shape for it.
+
+// `add_dir` is likewise not surfaced through the draft input shapes
+// (`build_draft` always returns `Vec::new()` for it). If a wire
+// surface arrives, mirror the tool-list count cap below.
+
+/// Maximum number of tool names in `allowed_tools` /
+/// `disallowed_tools`.
+pub const MAX_TOOL_LIST_ELEMS: usize = 256;
+/// Maximum number of MCP server refs.
+pub const MAX_MCP_SERVERS_ELEMS: usize = 32;
+
+/// Reject text fields that reach a shell flag if they contain
+/// control characters other than newline / tab. A `\u{0000}` is a
+/// shell-truncation hazard; ESC sequences corrupt terminal logs.
+fn contains_bad_control_chars(s: &str) -> bool {
+    s.chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\t')
+}
+
+/// Cap a text field's length and reject control characters. Used
+/// for fields that flow into a shell flag or a UI surface.
+fn validate_text_field(
+    name: &'static str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<(), AgentError> {
+    if value.len() > max_bytes {
+        return Err(AgentError::InvalidEnv(format!(
+            "{name} is {} bytes, max {max_bytes}",
+            value.len()
+        )));
+    }
+    if contains_bad_control_chars(value) {
+        return Err(AgentError::InvalidEnv(format!(
+            "{name} contains control characters (only \\n and \\t are allowed)"
+        )));
+    }
+    Ok(())
+}
+
 impl DraftInput {
     /// Parse a [`DraftInput`] from a JSON document.
+    ///
+    /// The raw input is size-capped at [`MAX_SPEC_BYTES`] (~256 KB)
+    /// before deserialization — an oversized spec is rejected
+    /// here rather than after serde walks every byte.
     pub fn from_json(raw: &str) -> Result<Self, AgentError> {
+        if raw.len() > MAX_SPEC_BYTES {
+            return Err(AgentError::InvalidEnv(format!(
+                "draft spec is {} bytes, max {MAX_SPEC_BYTES}",
+                raw.len()
+            )));
+        }
         serde_json::from_str(raw).map_err(AgentError::Json)
     }
 
@@ -367,6 +453,69 @@ pub fn validate_trigger_timezone(trigger: &Trigger) -> Result<(), AgentError> {
     Ok(())
 }
 
+/// Hard ceiling on `debounce_secs` (grill finding F20). A
+/// `u64::MAX` debounce silently inverts the comparison and a
+/// month-long debounce is well past any legitimate use; cap at 7
+/// days so a fat-fingered configuration fails draft rather than
+/// firing immediately or never.
+pub const MAX_EVENT_DEBOUNCE_SECS: u64 = 7 * 24 * 60 * 60;
+
+/// Validate an `Event` trigger's numeric fields (grill finding
+/// F20). Bounds `debounce_secs` to a sane ceiling so an extreme
+/// value can't silently wrap into a zero-debounce / fire-immediately
+/// case downstream. Non-event triggers pass through unchanged.
+pub fn validate_event_trigger_numerics(
+    trigger: &Trigger,
+) -> Result<(), AgentError> {
+    if let Trigger::Event {
+        event: super::types::EventKind::SessionSettled { debounce_secs },
+    } = trigger
+    {
+        if *debounce_secs == 0 {
+            return Err(AgentError::InvalidEnv(
+                "session-settled debounce_secs must be > 0 — a zero \
+                 debounce would fire on every transcript write"
+                    .into(),
+            ));
+        }
+        if *debounce_secs > MAX_EVENT_DEBOUNCE_SECS {
+            return Err(AgentError::InvalidEnv(format!(
+                "session-settled debounce_secs is {debounce_secs}, \
+                 max {MAX_EVENT_DEBOUNCE_SECS} (7 days)"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Validate the numeric fields of an agent's [`RateLimit`] (grill
+/// finding F20). Reject `max_per_day == 0` — a zero ceiling
+/// silently makes an agent that can never fire, which is the
+/// "fail loud" violation `None` ("no cap") already solves. Reject
+/// `min_interval_secs == 0` for the same reason: it is a no-op
+/// that pretends to constrain.
+pub fn validate_rate_limit_numerics(
+    rl: Option<&super::types::RateLimit>,
+) -> Result<(), AgentError> {
+    if let Some(rl) = rl {
+        if matches!(rl.max_per_day, Some(0)) {
+            return Err(AgentError::InvalidEnv(
+                "rate_limit.max_per_day = 0 makes an agent that can \
+                 never fire; use null to mean 'no per-day cap'"
+                    .into(),
+            ));
+        }
+        if matches!(rl.min_interval_secs, Some(0)) {
+            return Err(AgentError::InvalidEnv(
+                "rate_limit.min_interval_secs = 0 is a no-op; use null \
+                 to mean 'no minimum interval'"
+                    .into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Validate an agent's working directory. It must be an **absolute**
 /// path (`Path::is_absolute` per `.claude/rules/paths.md` — never a
 /// `starts_with("/")` check, so Windows drive paths resolve) and free
@@ -413,6 +562,50 @@ pub fn build_draft(
 ) -> Result<Agent, AgentError> {
     // Name shape — same rule the store re-checks on `add`.
     let name = validate_name(&spec.name)?;
+
+    // F18: bound per-field sizes + reject control characters in any
+    // string that will reach a shell flag. The bytes-cap is paired
+    // with the `MAX_SPEC_BYTES` cap in `DraftInput::from_json`; this
+    // tier protects the fields after the `untagged` serde dispatch
+    // has chosen a shape (so a giant `prompt` inside a small spec
+    // is also caught).
+    validate_text_field("prompt", &spec.prompt, MAX_PROMPT_BYTES)?;
+    if let Some(v) = spec.system_prompt.as_deref() {
+        validate_text_field("system_prompt", v, MAX_PROMPT_BYTES)?;
+    }
+    if let Some(v) = spec.append_system_prompt.as_deref() {
+        validate_text_field(
+            "append_system_prompt",
+            v,
+            MAX_PROMPT_BYTES,
+        )?;
+    }
+    if let Some(v) = spec.model.as_deref() {
+        validate_text_field("model", v, MAX_MODEL_BYTES)?;
+    }
+    validate_text_field("cwd", &spec.cwd, MAX_CWD_BYTES)?;
+    // `allowed_tools` / `disallowed_tools` / `mcp_servers`:
+    // element-count caps, no per-string content check (the names
+    // are validated by `claude` itself at run time; we only guard
+    // against the n × cost ballooning the inline CLI invocation).
+    if spec.allowed_tools.len() > MAX_TOOL_LIST_ELEMS {
+        return Err(AgentError::InvalidEnv(format!(
+            "allowed_tools has {} entries, max {MAX_TOOL_LIST_ELEMS}",
+            spec.allowed_tools.len()
+        )));
+    }
+    if spec.disallowed_tools.len() > MAX_TOOL_LIST_ELEMS {
+        return Err(AgentError::InvalidEnv(format!(
+            "disallowed_tools has {} entries, max {MAX_TOOL_LIST_ELEMS}",
+            spec.disallowed_tools.len()
+        )));
+    }
+    if spec.mcp_servers.len() > MAX_MCP_SERVERS_ELEMS {
+        return Err(AgentError::InvalidEnv(format!(
+            "mcp_servers has {} entries, max {MAX_MCP_SERVERS_ELEMS}",
+            spec.mcp_servers.len()
+        )));
+    }
 
     // Cross-field invariant: bypassPermissions demands a non-empty
     // allow-list. Reject at draft time so a human is never asked to
@@ -461,6 +654,13 @@ pub fn build_draft(
     // adapter honors it, so accepting it would be a silent lie
     // (grill finding F11). Reject at draft time.
     validate_trigger_timezone(&spec.trigger)?;
+
+    // Numeric bounds (grill finding F20). Reject a `debounce_secs`
+    // outside the safe range (silent wrap → fire-immediately) and a
+    // `max_per_day: 0` / `min_interval_secs: 0` (silent never-fire /
+    // no-op).
+    validate_event_trigger_numerics(&spec.trigger)?;
+    validate_rate_limit_numerics(spec.rate_limit.as_ref())?;
 
     // An event-triggered agent MUST carry a rate limit (PRD D9).
     // Reject at draft time so a human is never asked to arm an
@@ -519,6 +719,13 @@ pub fn build_draft(
         // The load-bearing field: a `draft` agent is inert.
         lifecycle: Lifecycle::Draft,
         drafted_by: Some(drafted_by.to_string()),
+        // F19: `created_via` is the trustworthy "this was AI-drafted"
+        // signal — stamped here, never accepted from the caller, so
+        // `--drafted-by "manual-setup"` (or any other spoofed value)
+        // cannot launder a CLI-drafted agent into looking
+        // hand-authored. The GUI install review flags every non-Gui
+        // record.
+        created_via: super::types::CreatedVia::CliDraft,
     })
 }
 
@@ -803,6 +1010,193 @@ mod tests {
                 { "kind": "custom", "name": "evil",
                   "config": { "command": "bash", "args": ["-c", "x"] } }
             ]
+        }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        assert!(matches!(err, AgentError::InvalidEnv(_)));
+    }
+
+    // ---- F18 / F19 / F20 regression tests ----
+
+    #[test]
+    fn oversized_spec_json_is_rejected_before_parse() {
+        // F18: a multi-MB spec is rejected at the input boundary,
+        // not after serde walks every byte.
+        let raw = format!(
+            "{{ \"name\":\"x\",\"cwd\":\"/tmp\",\"prompt\":\"{}\" }}",
+            "p".repeat(MAX_SPEC_BYTES + 16)
+        );
+        let err = DraftInput::from_json(&raw).unwrap_err();
+        match err {
+            AgentError::InvalidEnv(m) => {
+                assert!(m.contains("draft spec"), "got: {m}");
+            }
+            other => panic!("expected InvalidEnv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_prompt_field_is_rejected_at_build_time() {
+        // F18: an oversized `prompt` inside an otherwise-small spec
+        // is caught at build time (after serde dispatch).
+        let mut spec = DraftInput::from_json(
+            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
+        )
+        .unwrap()
+        .normalize(&CliOverrides::default())
+        .unwrap();
+        spec.prompt = "p".repeat(MAX_PROMPT_BYTES + 1);
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        assert!(matches!(err, AgentError::InvalidEnv(_)));
+    }
+
+    #[test]
+    fn control_chars_in_prompt_rejected() {
+        // F18: shell-bound text fields refuse control characters
+        // other than \n and \t.
+        let mut spec = DraftInput::from_json(
+            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
+        )
+        .unwrap()
+        .normalize(&CliOverrides::default())
+        .unwrap();
+        spec.prompt = "hello\u{001B}[31mred".to_string();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        match err {
+            AgentError::InvalidEnv(m) => {
+                assert!(m.contains("control characters"), "got: {m}");
+            }
+            other => panic!("expected InvalidEnv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn newline_and_tab_in_prompt_are_allowed() {
+        // F18: the contains_bad_control_chars guard must allow the
+        // two whitespace control chars legitimate prompts carry.
+        let mut spec = DraftInput::from_json(
+            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
+        )
+        .unwrap()
+        .normalize(&CliOverrides::default())
+        .unwrap();
+        spec.prompt = "line one\nline two\twith tab".to_string();
+        build_draft(spec, "t", now())
+            .expect("\\n and \\t must pass the control-char gate");
+    }
+
+    #[test]
+    fn too_many_allowed_tools_rejected() {
+        // F18: element-count cap.
+        let mut spec = DraftInput::from_json(
+            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
+        )
+        .unwrap()
+        .normalize(&CliOverrides::default())
+        .unwrap();
+        spec.allowed_tools =
+            (0..MAX_TOOL_LIST_ELEMS + 1).map(|i| format!("T{i}")).collect();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        assert!(matches!(err, AgentError::InvalidEnv(_)));
+    }
+
+    #[test]
+    fn build_draft_stamps_cli_draft_provenance() {
+        // F19: every record built through `build_draft` carries
+        // `created_via = CliDraft` — the trustworthy "this was the
+        // AI-drafting path" signal, regardless of what the caller
+        // passes for `drafted_by`.
+        let raw = r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let agent =
+            build_draft(spec, "manual-setup", now()).unwrap();
+        // The caller's spoofy `drafted_by` is preserved (audit
+        // trail, advisory) but `created_via` is the hard signal.
+        assert_eq!(agent.drafted_by.as_deref(), Some("manual-setup"));
+        assert_eq!(
+            agent.created_via,
+            super::super::types::CreatedVia::CliDraft
+        );
+    }
+
+    #[test]
+    fn debounce_secs_beyond_ceiling_rejected() {
+        // F20: a `debounce_secs` past the 7-day ceiling is rejected
+        // at draft time — the earlier `as i64` cast would let
+        // `u64::MAX` wrap to -1 and fire immediately.
+        let raw = format!(
+            r#"{{
+                "name":"narrator",
+                "cwd":"/tmp",
+                "prompt":"p",
+                "rate_limit": {{ "min_interval_secs": 60, "max_per_day": 5 }},
+                "trigger": {{ "kind":"event","event":{{ "kind":"session_settled", "debounce_secs": {} }} }}
+            }}"#,
+            MAX_EVENT_DEBOUNCE_SECS + 1
+        );
+        let spec = DraftInput::from_json(&raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        match err {
+            AgentError::InvalidEnv(m) => {
+                assert!(m.contains("debounce_secs"), "got: {m}");
+            }
+            other => panic!("expected InvalidEnv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn debounce_secs_zero_rejected() {
+        // F20: zero debounce would fire on every transcript write.
+        let raw = r#"{
+            "name":"narrator","cwd":"/tmp","prompt":"p",
+            "rate_limit": { "min_interval_secs": 60, "max_per_day": 5 },
+            "trigger": { "kind":"event","event":{ "kind":"session_settled", "debounce_secs": 0 } }
+        }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        assert!(build_draft(spec, "t", now()).is_err());
+    }
+
+    #[test]
+    fn max_per_day_zero_rejected() {
+        // F20: max_per_day = 0 is a silent never-fire; reject.
+        let raw = r#"{
+            "name":"narrator","cwd":"/tmp","prompt":"p",
+            "rate_limit": { "min_interval_secs": 60, "max_per_day": 0 },
+            "trigger": { "kind":"event","event":{ "kind":"session_settled", "debounce_secs": 600 } }
+        }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        match err {
+            AgentError::InvalidEnv(m) => {
+                assert!(m.contains("max_per_day"), "got: {m}");
+            }
+            other => panic!("expected InvalidEnv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn min_interval_secs_zero_rejected() {
+        // F20: a zero-second min-interval is a no-op; reject so
+        // the user must spell out "no minimum interval" as null.
+        let raw = r#"{
+            "name":"narrator","cwd":"/tmp","prompt":"p",
+            "rate_limit": { "min_interval_secs": 0, "max_per_day": 5 },
+            "trigger": { "kind":"event","event":{ "kind":"session_settled", "debounce_secs": 600 } }
         }"#;
         let spec = DraftInput::from_json(raw)
             .unwrap()
