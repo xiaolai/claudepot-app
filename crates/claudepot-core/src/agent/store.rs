@@ -28,9 +28,27 @@
 //!    as `automations.json.pre-v2-backup`.
 //! 3. Else -> a fresh empty v2 store.
 //!
-//! The migration never deletes data: the old JSON is preserved as
-//! a backup, and a failed runs-dir rename (cross-device, etc.) is
-//! logged and tolerated.
+//! The migration is **crash-safe and concurrency-safe** (grill
+//! findings F7/F8). The legacy `automations.json` is renamed to its
+//! `.pre-v2-backup` *before* the v2 `agents.json` is written, so at
+//! any instant exactly one of {v1, v2} is present under its
+//! canonical name — a crash mid-migration can never leave both.
+//! The whole open→migrate→save critical section is held under an
+//! advisory file lock, so a concurrent CLI + GUI first-boot cannot
+//! race the migration.
+//!
+//! ## Concurrent-write protection
+//!
+//! `agents.json` is a JSON read-modify-write store with two live
+//! writers (the CLI `agent draft` verb and the GUI `agents_add` /
+//! `agent_install` commands). To stop a stale read from one writer
+//! clobbering the other's committed write, every mutating
+//! [`AgentStore`] holds an advisory exclusive file lock on a
+//! sibling `agents.json.lock` for its whole open→mutate→save
+//! lifetime (grill finding F7). The lock is released on `Drop`, so
+//! a single process that opens the store, mutates, saves, drops it,
+//! then opens it again works without deadlock — the sequential
+//! pattern every CLI command and Tauri command uses.
 
 use std::path::{Path, PathBuf};
 
@@ -39,7 +57,10 @@ use serde::{Deserialize, Serialize};
 use crate::fs_utils;
 use crate::paths::claudepot_data_dir;
 
-use super::draft::validate_cwd;
+mod lock;
+use lock::StoreLock;
+
+use super::draft::{validate_cwd, validate_trigger_timezone};
 use super::error::AgentError;
 use super::slug::validate_name;
 use super::types::{Agent, AgentId, Lifecycle};
@@ -138,12 +159,24 @@ pub struct AgentPatch {
 
 /// In-memory cache + read-modify-write helper around
 /// `agents.json`. Construct once per command; not `Clone`.
-/// Internally serializes every mutation through atomic writes,
-/// so cross-process safety is best-effort (concurrent claudepot
-/// CLI + GUI mutations may stomp each other).
+///
+/// Holds an advisory file lock ([`StoreLock`]) for its whole
+/// lifetime — acquired in [`AgentStore::open_at`], released on
+/// `Drop` — so a concurrent CLI + GUI open→mutate→save cannot lose
+/// writes (grill finding F7). The lock is exclusive, so the store
+/// is a serialization point: open it, mutate, `save`, drop it
+/// promptly. A long-lived `AgentStore` held open across unrelated
+/// work would block every other writer. The lock holds only a
+/// `File`, so an `AgentStore` is still `Send` and may cross an
+/// `.await` in a Tauri async command.
 pub struct AgentStore {
     path: PathBuf,
     file: AgentsFile,
+    /// The advisory lock held for the store's lifetime. Field order
+    /// places it last so it drops *after* `file`/`path` — purely
+    /// cosmetic (none of them have side-effecting `Drop` beyond the
+    /// lock), but it keeps "lock released last" obvious.
+    _lock: StoreLock,
 }
 
 impl AgentStore {
@@ -161,11 +194,19 @@ impl AgentStore {
     /// `automations.json` sibling and migrates it in place — see
     /// the module docs for the exact, idempotent order.
     pub fn open_at(path: PathBuf) -> Result<Self, AgentError> {
+        // Acquire the advisory lock BEFORE touching the filesystem.
+        // It is held for the store's whole lifetime and covers the
+        // migration too (grill findings F7/F8): a concurrent CLI +
+        // GUI first-boot can no longer race the v1 -> v2 migration,
+        // and no two writers can interleave open -> mutate -> save.
+        let lock = StoreLock::acquire(&path)?;
+
         // (1) A v2 file already exists -> load it directly.
         if path.exists() {
             return Ok(Self {
                 file: Self::load_v2(&path)?,
                 path,
+                _lock: lock,
             });
         }
 
@@ -174,17 +215,36 @@ impl AgentStore {
         let legacy_path = legacy_agents_file_path_for(&path);
         if legacy_path.exists() {
             let file = Self::migrate_v1_to_v2(&legacy_path, &path)?;
-            return Ok(Self { file, path });
+            return Ok(Self {
+                file,
+                path,
+                _lock: lock,
+            });
         }
 
         // (3) Neither file exists -> fresh empty v2 store.
         Ok(Self {
             path,
             file: AgentsFile::default(),
+            _lock: lock,
         })
     }
 
     /// Read and validate a v2 `agents.json` from disk.
+    ///
+    /// **Threat-model note (grill finding F15).** `lifecycle` is a
+    /// plain serde field: `load_v2` does not — and cannot —
+    /// cross-check that an `Installed` record was legitimately armed
+    /// through [`arm`](Self::arm). The draft/install gate is
+    /// airtight against the *CLI verb surface* (there is no install
+    /// or edit verb, and `AgentPatch` has no `lifecycle` field), but
+    /// **not** against a same-user process editing `agents.json`
+    /// directly: anything that can write the file can set
+    /// `"lifecycle":"installed"`. That is the universal "same user =
+    /// same trust" limit, not a closable hole. The mitigation is
+    /// boot-time reconciliation against the OS scheduler — see
+    /// [`reconcile_with_scheduler`] — which loudly logs any
+    /// `Installed` record with no live scheduler artifact.
     fn load_v2(path: &Path) -> Result<AgentsFile, AgentError> {
         let raw = std::fs::read(path)?;
         if raw.is_empty() {
@@ -204,16 +264,37 @@ impl AgentStore {
     }
 
     /// Migrate a legacy v1 `automations.json` into a v2
-    /// `agents.json`. Idempotent and data-preserving:
+    /// `agents.json`. Crash-safe, concurrency-safe, idempotent, and
+    /// data-preserving (grill finding F8).
     ///
-    /// - upgrades each record (new fields default; `lifecycle` is
-    ///   forced to `Installed` — existing automations are armed and
-    ///   must not become inert drafts);
-    /// - writes the v2 `agents.json` atomically;
-    /// - renames `~/.claudepot/automations/` -> `agents/` if it
-    ///   exists (a failed rename is logged, not fatal);
-    /// - renames the old `automations.json` to
-    ///   `automations.json.pre-v2-backup` as a safety net.
+    /// The caller ([`open_at`](Self::open_at)) holds the advisory
+    /// [`StoreLock`] across this whole function, so a concurrent
+    /// CLI + GUI first-boot cannot race the migration.
+    ///
+    /// **Crash safety — backup before write.** The ordering is:
+    ///
+    /// 1. parse + upgrade the v1 records in memory;
+    /// 2. move the legacy runs dir (`automations/` -> `agents/`);
+    /// 3. rename the legacy `automations.json` ->
+    ///    `automations.json.pre-v2-backup` — the single atomic gate;
+    /// 4. write the v2 `agents.json`.
+    ///
+    /// Renaming the legacy JSON aside *before* writing the v2 file
+    /// means that at every instant exactly one of {v1, v2} exists
+    /// under its canonical name. A crash between steps 3 and 4
+    /// leaves only the `.pre-v2-backup` file: the next `open_at`
+    /// finds neither `agents.json` nor `automations.json` and starts
+    /// a fresh empty v2 store — the records sit safely in the
+    /// backup for manual recovery. The previous order (write v2,
+    /// then rename) could leave *both* files present, two competing
+    /// sources of truth.
+    ///
+    /// **Runs-dir rename.** A cross-device (`EXDEV`) rename falls
+    /// back to a recursive copy + remove rather than silently
+    /// orphaning the run history under the un-renamed
+    /// `automations/` directory. If even the copy fails the
+    /// migration aborts with an error — run history is not
+    /// discarded silently.
     fn migrate_v1_to_v2(
         legacy_path: &Path,
         v2_path: &Path,
@@ -246,41 +327,37 @@ impl AgentStore {
         };
         file.version = CURRENT_VERSION;
 
-        // Write the v2 file first — this is the load-bearing step.
+        // Step 2 — move the legacy runs dir. Done before the JSON
+        // rename so the run history follows the store. An `EXDEV`
+        // (cross-device) rename falls back to copy + remove; any
+        // hard failure aborts the migration so run history is never
+        // silently orphaned under the old directory name.
+        let data_dir = claudepot_data_dir();
+        let legacy_runs = data_dir.join("automations");
+        let v2_runs = data_dir.join("agents");
+        if legacy_runs.exists() && !v2_runs.exists() {
+            migrate_runs_dir(&legacy_runs, &v2_runs)?;
+        }
+
+        // Step 3 — rename the legacy JSON aside. This is the single
+        // atomic gate: after this rename succeeds the legacy file no
+        // longer exists under its canonical name, so a crash before
+        // the v2 write below cannot leave two sources of truth.
+        // A failure here is fatal — without it the next open would
+        // re-run the migration and a half-written state could
+        // diverge.
+        let backup = legacy_backup_path_for(legacy_path);
+        std::fs::rename(legacy_path, &backup)?;
+
+        // Step 4 — write the v2 file. The backup already exists, so
+        // even if this write fails the legacy data is preserved in
+        // `.pre-v2-backup` and the next open starts a clean empty
+        // v2 store. We still surface the error.
         if let Some(parent) = v2_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let bytes = serde_json::to_vec_pretty(&file)?;
         fs_utils::atomic_write(v2_path, &bytes)?;
-
-        // Rename the legacy runs dir. Best-effort: a cross-device
-        // rename or a permissions error must not abort the
-        // migration — the store is fully usable without it (a fresh
-        // runs dir is created lazily on the next run).
-        let data_dir = claudepot_data_dir();
-        let legacy_runs = data_dir.join("automations");
-        let v2_runs = data_dir.join("agents");
-        if legacy_runs.exists() && !v2_runs.exists() {
-            if let Err(e) = std::fs::rename(&legacy_runs, &v2_runs) {
-                tracing::warn!(
-                    error = %e,
-                    from = %legacy_runs.display(),
-                    to = %v2_runs.display(),
-                    "agent store migration: runs dir rename failed; continuing"
-                );
-            }
-        }
-
-        // Back up the legacy JSON rather than deleting it.
-        let backup = legacy_backup_path_for(legacy_path);
-        if let Err(e) = std::fs::rename(legacy_path, &backup) {
-            tracing::warn!(
-                error = %e,
-                from = %legacy_path.display(),
-                to = %backup.display(),
-                "agent store migration: legacy file backup rename failed; continuing"
-            );
-        }
 
         Ok(file)
     }
@@ -309,6 +386,10 @@ impl AgentStore {
         // Re-validate the working directory at the store boundary —
         // the last gate before persistence (grill finding F4).
         validate_cwd(&agent.cwd)?;
+        // Reject a cron trigger carrying an IANA timezone — no
+        // scheduler adapter honors it (grill finding F11). This
+        // gates the GUI Add-Agent path too, not just the CLI draft.
+        validate_trigger_timezone(&agent.trigger)?;
         if matches!(
             agent.permission_mode,
             super::types::PermissionMode::BypassPermissions
@@ -474,6 +555,9 @@ impl AgentStore {
         // `event` (or strips the rate limit off an event agent) is
         // rejected here, the last gate before persistence.
         validate_event_rate_limit(&a)?;
+        // A patch that switches to (or keeps) a cron trigger with an
+        // IANA timezone is rejected — no adapter honors it (F11).
+        validate_trigger_timezone(&a.trigger)?;
         a.updated_at = chrono::Utc::now();
         // Commit the validated clone back into the live store. Any
         // earlier `Err` return path leaves `self.file.agents[idx]`
@@ -567,6 +651,120 @@ impl AgentStore {
     }
 }
 
+/// One discrepancy found by [`reconcile_installed_agents`]: an agent
+/// whose stored `lifecycle` is `Installed` but for which the OS
+/// scheduler reports no live artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrphanInstalled {
+    /// The agent id whose record claims `Installed`.
+    pub agent_id: AgentId,
+    /// The agent's name, for the log line.
+    pub name: String,
+}
+
+/// Pure reconciliation core (grill finding F15).
+///
+/// Compares every `Installed`, OS-scheduled agent against the set of
+/// scheduler artifact identifiers the host actually reports, and
+/// returns the agents that claim `Installed` but have no live
+/// artifact. An agent whose trigger carries no OS schedule
+/// (`Manual` / `Event`) is **never** flagged — those are run by
+/// Run-Now or the in-app event orchestrator and legitimately have
+/// no scheduler artifact even when `Installed`.
+///
+/// `expected_identifier` maps an agent id to the scheduler
+/// identifier the active adapter would register for it (e.g. the
+/// launchd label). Passing it in keeps this function pure and
+/// host-agnostic — testable without a real scheduler.
+pub fn reconcile_installed_agents(
+    agents: &[Agent],
+    registered_identifiers: &std::collections::HashSet<String>,
+    expected_identifier: impl Fn(&AgentId) -> String,
+) -> Vec<OrphanInstalled> {
+    agents
+        .iter()
+        .filter(|a| a.lifecycle == Lifecycle::Installed)
+        // Only OS-scheduled triggers should have an artifact. A
+        // Manual/Event agent legitimately has none.
+        .filter(|a| !a.trigger.has_no_os_schedule())
+        // An installed-but-disabled agent has no artifact by design
+        // (disabling unregisters it) — not an orphan.
+        .filter(|a| a.enabled)
+        .filter(|a| !registered_identifiers.contains(&expected_identifier(&a.id)))
+        .map(|a| OrphanInstalled {
+            agent_id: a.id,
+            name: a.name.clone(),
+        })
+        .collect()
+}
+
+/// Boot-time reconciliation of the store against the OS scheduler
+/// (grill finding F15).
+///
+/// Opens the store, asks the active scheduler what artifacts it
+/// actually holds, and **loudly logs** every `Installed` agent with
+/// no live artifact. This catches the one residual gap the
+/// draft/install gate cannot close on its own: a same-user process
+/// editing `agents.json` to set `"lifecycle":"installed"` directly
+/// (the gate is airtight only against the *CLI verb surface* — see
+/// [`AgentStore::load_v2`]). It also surfaces an artifact that a
+/// failed install rollback could not re-save (see
+/// [`install_gate`](super::install_gate)).
+///
+/// This is *observability*, not enforcement: it does not mutate the
+/// store. Demoting an orphan record to `Draft` automatically would
+/// risk silently disarming an agent during a transient scheduler
+/// hiccup; logging loudly and leaving the decision to the operator
+/// is the conservative choice. The function is best-effort — a
+/// store-open or scheduler-query failure is logged and swallowed so
+/// it can run unconditionally at boot. Returns the orphan list for
+/// callers (and tests) that want to act on it.
+pub fn reconcile_with_scheduler() -> Vec<OrphanInstalled> {
+    let store = match AgentStore::open() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "agent reconciliation: store open failed; skipping"
+            );
+            return Vec::new();
+        }
+    };
+    let scheduler = super::scheduler::active_scheduler();
+    let registered: std::collections::HashSet<String> = match scheduler.list_managed() {
+        Ok(entries) => entries.into_iter().map(|e| e.identifier).collect(),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "agent reconciliation: scheduler list_managed failed; skipping"
+            );
+            return Vec::new();
+        }
+    };
+    let orphans = reconcile_installed_agents(store.list(), &registered, |id| {
+        scheduler.expected_identifier(id)
+    });
+    for orphan in &orphans {
+        tracing::error!(
+            agent_id = %orphan.agent_id,
+            agent_name = %orphan.name,
+            "agent reconciliation: agent is marked Installed but the OS \
+             scheduler reports NO live artifact for it — it will never \
+             fire on schedule. Either it was hand-edited into \
+             agents.json, or an install rollback could not complete. \
+             Re-install it from the GUI to materialize the artifact, or \
+             delete it."
+        );
+    }
+    if orphans.is_empty() {
+        tracing::debug!(
+            "agent reconciliation: every Installed agent has a live \
+             scheduler artifact"
+        );
+    }
+    orphans
+}
+
 /// Reject an `Event`-triggered agent that carries no usable
 /// `rate_limit` (PRD D9). An event trigger fires reactively, so an
 /// unthrottled one is a cost-runaway hazard; the store refuses to
@@ -617,6 +815,63 @@ fn legacy_agents_file_path_for(v2_path: &Path) -> PathBuf {
             Some(dir) => dir.join("automations.json"),
             None => PathBuf::from("automations.json"),
         }
+    }
+}
+
+/// Move the legacy `automations/` runs dir to `agents/` during the
+/// v1 -> v2 migration (grill finding F8).
+///
+/// A plain `std::fs::rename` is tried first — atomic and instant on
+/// the common same-filesystem case. If it fails with a cross-device
+/// error (`EXDEV` — the data dir and the runs dir straddle a mount
+/// boundary, e.g. a bind-mounted `~/.claudepot`), it falls back to a
+/// recursive copy followed by removing the source. Either way the
+/// run history ends up under `agents/`; it is never silently
+/// orphaned under the old directory name. A hard failure of *both*
+/// paths surfaces as an [`AgentError`] so the migration aborts
+/// loudly rather than continuing with lost run history.
+fn migrate_runs_dir(legacy_runs: &Path, v2_runs: &Path) -> Result<(), AgentError> {
+    match std::fs::rename(legacy_runs, v2_runs) {
+        Ok(()) => Ok(()),
+        Err(e) if is_cross_device(&e) => {
+            tracing::warn!(
+                from = %legacy_runs.display(),
+                to = %v2_runs.display(),
+                "agent store migration: runs dir rename is cross-device; \
+                 falling back to copy + remove"
+            );
+            fs_utils::copy_dir_recursive(legacy_runs, v2_runs)?;
+            // The copy succeeded; remove the source. A failed remove
+            // leaves a harmless stale copy under the old name — log
+            // it, but the migration is otherwise complete, so do not
+            // abort.
+            if let Err(rm) = std::fs::remove_dir_all(legacy_runs) {
+                tracing::warn!(
+                    error = %rm,
+                    path = %legacy_runs.display(),
+                    "agent store migration: copied runs dir but failed to \
+                     remove the legacy source; a stale copy remains"
+                );
+            }
+            Ok(())
+        }
+        Err(e) => Err(AgentError::Io(e)),
+    }
+}
+
+/// True for a cross-device-link (`EXDEV`) I/O error. `ErrorKind`
+/// has no portable `CrossesDevices` variant on stable Rust, so we
+/// match the raw OS error code: `EXDEV` is 18 on Linux/macOS and
+/// `ERROR_NOT_SAME_DEVICE` (17) on Windows.
+fn is_cross_device(e: &std::io::Error) -> bool {
+    match e.raw_os_error() {
+        #[cfg(unix)]
+        Some(code) => code == libc::EXDEV,
+        #[cfg(windows)]
+        Some(code) => code == 17,
+        #[cfg(not(any(unix, windows)))]
+        Some(_) => false,
+        None => false,
     }
 }
 
@@ -1049,6 +1304,118 @@ mod tests {
         // Legacy file backed up, not deleted.
         assert!(!v1_path.exists());
         assert!(dir.path().join("automations.json.pre-v2-backup").exists());
+    }
+
+    #[test]
+    fn migrate_v1_backs_up_legacy_before_writing_v2() {
+        // GOLDEN (F8): the legacy file is renamed to its
+        // `.pre-v2-backup` BEFORE the v2 file is written. After a
+        // successful migration: the v2 file exists, the legacy file
+        // is gone, and the backup holds the original bytes — so a
+        // crash at any point leaves exactly one of {v1, v2}, never
+        // both, under a canonical name.
+        let dir = tempdir().unwrap();
+        let v2_path = dir.path().join("agents.json");
+        let v1_path = dir.path().join("automations.json");
+        std::fs::write(&v1_path, V1_FIXTURE).unwrap();
+
+        let store = AgentStore::open_at(v2_path.clone()).unwrap();
+        assert_eq!(store.list().len(), 1);
+
+        assert!(v2_path.exists(), "v2 file written");
+        assert!(!v1_path.exists(), "legacy file renamed away");
+        let backup = dir.path().join("automations.json.pre-v2-backup");
+        assert!(backup.exists(), "legacy file preserved as backup");
+        // The backup carries the original v1 bytes verbatim.
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            V1_FIXTURE,
+            "backup must hold the original legacy bytes"
+        );
+    }
+
+    #[test]
+    fn migrate_v1_concurrent_open_is_serialized_by_the_lock() {
+        // GOLDEN (F8): two `open_at` calls in sequence on the same
+        // path — the second loads the migrated v2 file, never
+        // re-runs the migration. The advisory lock guarantees that
+        // even a concurrent CLI + GUI first-boot serializes; here we
+        // exercise the deterministic sequential equivalent (the lock
+        // is released at each `drop`).
+        let dir = tempdir().unwrap();
+        let v2_path = dir.path().join("agents.json");
+        let v1_path = dir.path().join("automations.json");
+        std::fs::write(&v1_path, V1_FIXTURE).unwrap();
+
+        {
+            let first = AgentStore::open_at(v2_path.clone()).unwrap();
+            assert_eq!(first.list().len(), 1);
+        }
+        // Second open: the legacy file is gone, the v2 file loads
+        // directly, the record count is unchanged (no double-add).
+        let second = AgentStore::open_at(v2_path.clone()).unwrap();
+        assert_eq!(second.list().len(), 1);
+        assert_eq!(second.list()[0].name, "morning-pr");
+        assert!(!v1_path.exists());
+    }
+
+    // ---- grill F15: store / scheduler reconciliation ----
+
+    #[test]
+    fn reconcile_flags_installed_cron_agent_with_no_artifact() {
+        // GOLDEN (F15): an `Installed`, enabled, cron-triggered agent
+        // whose id is absent from the scheduler's reported artifacts
+        // is an orphan — it claims to be armed but nothing fires it.
+        let mut a = sample("ghost-agent"); // sample() => Installed, Cron
+        a.id = Uuid::nil();
+        let orphans = reconcile_installed_agents(
+            std::slice::from_ref(&a),
+            &std::collections::HashSet::new(), // scheduler reports nothing
+            |id| format!("io.claudepot.agent.{id}"),
+        );
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].name, "ghost-agent");
+    }
+
+    #[test]
+    fn reconcile_does_not_flag_an_agent_with_a_live_artifact() {
+        let mut a = sample("healthy-agent");
+        a.id = Uuid::nil();
+        let mut registered = std::collections::HashSet::new();
+        registered.insert(format!("io.claudepot.agent.{}", a.id));
+        let orphans = reconcile_installed_agents(
+            std::slice::from_ref(&a),
+            &registered,
+            |id| format!("io.claudepot.agent.{id}"),
+        );
+        assert!(orphans.is_empty(), "an agent with a live artifact is fine");
+    }
+
+    #[test]
+    fn reconcile_ignores_draft_manual_and_disabled_agents() {
+        // A draft has no artifact by design; a Manual/Event agent
+        // legitimately has none even when Installed; a disabled
+        // Installed agent is unregistered by design. None are
+        // orphans.
+        let mut draft = sample("a-draft");
+        draft.lifecycle = Lifecycle::Draft;
+
+        let mut manual = sample("a-manual");
+        manual.trigger = Trigger::Manual;
+
+        let mut disabled = sample("a-disabled");
+        disabled.enabled = false;
+
+        let agents = vec![draft, manual, disabled];
+        let orphans = reconcile_installed_agents(
+            &agents,
+            &std::collections::HashSet::new(),
+            |id| format!("io.claudepot.agent.{id}"),
+        );
+        assert!(
+            orphans.is_empty(),
+            "draft / manual / disabled agents are never reconciliation orphans"
+        );
     }
 
     #[test]

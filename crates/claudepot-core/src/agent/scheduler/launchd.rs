@@ -156,6 +156,12 @@ impl Scheduler for LaunchdScheduler {
         Ok(out)
     }
 
+    fn expected_identifier(&self, id: &AgentId) -> String {
+        // Matches the `identifier` `list_managed` strips out of the
+        // plist filename: the launchd label, no `.plist` suffix.
+        label_for(id)
+    }
+
     fn next_runs(
         &self,
         trigger: &Trigger,

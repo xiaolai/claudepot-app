@@ -330,6 +330,43 @@ fn merge_cli_overrides(spec: &mut DraftSpec, ov: &CliOverrides) {
     }
 }
 
+/// Reject a cron trigger that carries an IANA `timezone` (grill
+/// finding F11).
+///
+/// The `Trigger::Cron.timezone` field is accepted by the wire/JSON
+/// shape and persisted, but **no scheduler adapter honors it**:
+/// launchd's `StartCalendarInterval`, systemd's `OnCalendar=`, and
+/// Task Scheduler all interpret the cron slots in the host's local
+/// time, never an arbitrary IANA zone. Honoring it correctly across
+/// all three back-ends — which means projecting each cron slot
+/// through the named zone *and* re-deriving the slot set on every
+/// DST transition (a single "9 AM LA" cron has no fixed UTC offset)
+/// — is a substantial cross-platform feature. Until that lands, a
+/// silently-ignored timezone is a "load-bearing lie": an agent set
+/// to "9 AM LA time" by a New York user fires at 9 AM Eastern with
+/// no error.
+///
+/// The honest interim contract is to **reject** a non-`None`
+/// timezone at draft/install validation with a clear message,
+/// rather than accept-and-ignore it. A `None` timezone (cron
+/// interpreted in host-local time, the only behavior the adapters
+/// actually implement) is always accepted.
+pub fn validate_trigger_timezone(trigger: &Trigger) -> Result<(), AgentError> {
+    if let Trigger::Cron {
+        timezone: Some(tz),
+        ..
+    } = trigger
+    {
+        return Err(AgentError::InvalidEnv(format!(
+            "cron timezone {tz:?} is not supported yet — Claudepot's \
+             schedulers interpret cron in the host's local time. Remove \
+             the timezone (leave the schedule in local time), or track \
+             the timezone-aware-scheduling follow-up."
+        )));
+    }
+    Ok(())
+}
+
 /// Validate an agent's working directory. It must be an **absolute**
 /// path (`Path::is_absolute` per `.claude/rules/paths.md` — never a
 /// `starts_with("/")` check, so Windows drive paths resolve) and free
@@ -419,6 +456,11 @@ pub fn build_draft(
     if let Trigger::Cron { cron, .. } = &spec.trigger {
         super::cron::expand(cron)?;
     }
+
+    // A cron trigger must not carry an IANA timezone: no scheduler
+    // adapter honors it, so accepting it would be a silent lie
+    // (grill finding F11). Reject at draft time.
+    validate_trigger_timezone(&spec.trigger)?;
 
     // An event-triggered agent MUST carry a rate limit (PRD D9).
     // Reject at draft time so a human is never asked to arm an
@@ -617,6 +659,55 @@ mod tests {
             .normalize(&CliOverrides::default())
             .unwrap();
         assert!(build_draft(spec, "t", now()).is_err());
+    }
+
+    #[test]
+    fn cron_trigger_with_timezone_is_rejected() {
+        // F11: a cron trigger carrying an IANA timezone must be
+        // rejected at draft time — no scheduler adapter honors it,
+        // so accepting it would be a silent lie.
+        let raw = r#"{
+            "name": "tz-agent",
+            "cwd": "/tmp",
+            "prompt": "p",
+            "trigger": {
+                "kind": "cron",
+                "cron": "0 9 * * *",
+                "timezone": "America/Los_Angeles"
+            }
+        }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        match err {
+            AgentError::InvalidEnv(m) => {
+                assert!(
+                    m.contains("timezone"),
+                    "error should name the timezone problem, got: {m}"
+                );
+            }
+            other => panic!("expected InvalidEnv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cron_trigger_without_timezone_is_accepted() {
+        // The complement: a cron trigger with no timezone (local
+        // time, the only behavior the adapters implement) builds.
+        let raw = r#"{
+            "name": "local-cron",
+            "cwd": "/tmp",
+            "prompt": "p",
+            "trigger": { "kind": "cron", "cron": "0 9 * * *" }
+        }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let agent = build_draft(spec, "t", now()).unwrap();
+        assert!(agent.trigger.is_cron());
     }
 
     #[test]

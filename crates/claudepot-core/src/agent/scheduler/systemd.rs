@@ -133,6 +133,12 @@ impl Scheduler for SystemdScheduler {
         Ok(out)
     }
 
+    fn expected_identifier(&self, id: &AgentId) -> String {
+        // Matches the `identifier` `list_managed` strips out of the
+        // unit filename: the unit base, no `.timer` suffix.
+        unit_base_for(id)
+    }
+
     fn next_runs(
         &self,
         trigger: &Trigger,

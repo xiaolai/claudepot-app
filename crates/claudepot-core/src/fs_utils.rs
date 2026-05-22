@@ -1,6 +1,16 @@
 //! Shared filesystem utilities.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Process-global monotonic counter feeding [`atomic_write`]'s temp
+/// suffix. The pid alone is not unique enough: a multi-threaded
+/// process (Tauri always is) can issue two concurrent writes to the
+/// same target, both computing `.{name}.tmp.{pid}` and interleaving
+/// their `write_all` into one file. The counter makes every temp
+/// path distinct within a process; the pid keeps it distinct across
+/// processes (grill finding F9).
+static TEMP_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Recursively copy a directory, skipping symlinks.
 ///
@@ -44,13 +54,19 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     })?;
     std::fs::create_dir_all(parent)?;
 
-    // Sibling temp so rename stays atomic (same filesystem).
+    // Sibling temp so rename stays atomic (same filesystem). The
+    // suffix carries both the pid (cross-process uniqueness) and a
+    // process-global counter (intra-process uniqueness): without the
+    // counter, two threads writing the same target concurrently
+    // would compute the identical temp path and interleave their
+    // `write_all` into one corrupt file (grill finding F9).
     let tmp = parent.join(format!(
-        ".{}.tmp.{}",
+        ".{}.tmp.{}.{}",
         path.file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("claudepot"),
-        std::process::id()
+        std::process::id(),
+        TEMP_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
 
     // Write + fsync under a scope so the file handle is closed before
@@ -317,6 +333,53 @@ mod tests {
         fs::write(&target, b"old").unwrap();
         atomic_write(&target, b"new").unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"new");
+    }
+
+    #[test]
+    fn test_atomic_write_concurrent_same_target_no_collision() {
+        // grill F9: two threads writing the SAME target concurrently
+        // must not interleave into one corrupt file. With a pid-only
+        // temp suffix both threads computed `.{name}.tmp.{pid}` and
+        // the second `write_all` could land mid-stream of the first.
+        // The atomic counter makes every temp path distinct; the
+        // final rename leaves exactly one of the two payloads intact
+        // and the file is never byte-interleaved.
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("contended.json");
+        // Two distinct, valid, equal-length JSON payloads.
+        let payload_a = br#"{"writer":"aaaaaaaaaaaaaaaaaaaaaaa"}"#;
+        let payload_b = br#"{"writer":"bbbbbbbbbbbbbbbbbbbbbbb"}"#;
+
+        for _ in 0..50 {
+            let t = target.clone();
+            let a = *payload_a;
+            let h_a = std::thread::spawn(move || atomic_write(&t, &a));
+            let t = target.clone();
+            let b = *payload_b;
+            let h_b = std::thread::spawn(move || atomic_write(&t, &b));
+            h_a.join().unwrap().unwrap();
+            h_b.join().unwrap().unwrap();
+
+            // The file must be exactly one of the two payloads —
+            // never a byte-interleaved mix.
+            let got = fs::read(&target).unwrap();
+            assert!(
+                got == payload_a || got == payload_b,
+                "atomic_write produced a corrupt interleaved file: {got:?}"
+            );
+            // No temp files leaked into the parent dir.
+            let leftovers: Vec<_> = fs::read_dir(tmp.path())
+                .unwrap()
+                .flatten()
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|n| n.contains(".tmp."))
+                        .unwrap_or(false)
+                })
+                .collect();
+            assert!(leftovers.is_empty(), "temp files leaked: {leftovers:?}");
+        }
     }
 
     #[cfg(unix)]

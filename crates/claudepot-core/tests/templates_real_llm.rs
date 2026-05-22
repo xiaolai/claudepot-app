@@ -949,6 +949,7 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
         stdout_log_path: &stdout_log,
         stderr_log_path: &stderr_log,
         claudepot_version: env!("CARGO_PKG_VERSION"),
+        log_retention_runs: Some(agent.log_retention_runs),
     };
 
     let run = record_run_for_agent(&agent, &inputs, Some(&report_path))

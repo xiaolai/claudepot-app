@@ -41,6 +41,13 @@ impl Scheduler for NoopScheduler {
         Ok(Vec::new())
     }
 
+    fn expected_identifier(&self, id: &AgentId) -> String {
+        // The Noop adapter registers nothing; a stable synthetic
+        // identifier keeps the trait total without implying an
+        // artifact exists.
+        format!("noop.agent.{id}")
+    }
+
     fn next_runs(
         &self,
         trigger: &Trigger,

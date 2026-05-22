@@ -131,6 +131,12 @@ impl Scheduler for SchtasksScheduler {
         Ok(entries)
     }
 
+    fn expected_identifier(&self, id: &AgentId) -> String {
+        // Matches the `identifier` `list_managed` reads from the CSV
+        // TaskName column: the full `\Claudepot\agent_<id>` path.
+        task_path_for(id)
+    }
+
     fn next_runs(
         &self,
         trigger: &Trigger,

@@ -482,6 +482,27 @@ pub async fn agents_run_now_start(
         .ok_or_else(|| format!("agent {aid} not found"))?
         .clone();
 
+    // grill F16: Run-Now must NOT execute a `Draft`. A draft has
+    // never passed the human install review, yet Run-Now spawns
+    // `claude -p` with its `--mcp-config`, `cwd`, and
+    // `permission_mode` — running unreviewed config is exactly what
+    // the draft/install gate exists to prevent. The GUI already
+    // hides "Run now" on a draft card (it shows only "Review &
+    // install"); this is the backend enforcement of that contract.
+    // A draft is exercised by arming it through the install review,
+    // not by Run-Now.
+    if matches!(
+        agent.lifecycle,
+        claudepot_core::agent::Lifecycle::Draft
+    ) {
+        return Err(format!(
+            "agent '{}' is a draft — review and install it before running. \
+             A draft is never executed directly; arming it through the \
+             install review is the gate.",
+            agent.name
+        ));
+    }
+
     let op_id = format!("agent-run-{}", Uuid::new_v4());
     ops.insert(new_running_op(
         &op_id,
