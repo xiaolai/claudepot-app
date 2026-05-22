@@ -1,4 +1,4 @@
-//! Parsing and recording for a single automation run.
+//! Parsing and recording for a single agent run.
 //!
 //! Two responsibilities:
 //!
@@ -7,14 +7,14 @@
 //!    permissive: take the last `type === "result"` element and
 //!    fall back to `is_error: true` if no `result` event is
 //!    present.
-//! 2. Assemble an [`AutomationRun`] record and write
+//! 2. Assemble an [`AgentRun`] record and write
 //!    `<run_dir>/result.json` plus update the run-history
 //!    directory.
 //!
 //! The `Run-Now` executor (spawning the shim, streaming progress)
 //! is a separate concern and lives in a future module — this one
 //! is the post-exit recorder, exercised both by the helper shim
-//! (via `claudepot automation _record-run`) and by the in-process
+//! (via `claudepot agent _record-run`) and by the in-process
 //! Run-Now path.
 
 use std::path::{Path, PathBuf};
@@ -25,12 +25,12 @@ use serde::Deserialize;
 use crate::fs_utils;
 use crate::project_progress::{PhaseStatus, ProgressSink};
 
-use super::error::AutomationError;
+use super::error::AgentError;
 use super::install::install_shim;
 use super::prerun::PrerunDecision;
-use super::store::automation_runs_dir;
+use super::store::agent_runs_dir;
 use super::types::{
-    ArtifactKind, Automation, AutomationId, AutomationRun, HostPlatform, OutputArtifact,
+    ArtifactKind, Agent, AgentId, AgentRun, HostPlatform, OutputArtifact,
     RouteDecision, RunResult, TriggerKind,
 };
 
@@ -38,7 +38,7 @@ use super::types::{
 /// shim at exit time.
 #[derive(Debug, Clone)]
 pub struct RecordInputs<'a> {
-    pub automation_id: AutomationId,
+    pub agent_id: AgentId,
     pub run_id: &'a str,
     pub exit_code: i32,
     pub started_at: DateTime<Utc>,
@@ -57,7 +57,7 @@ pub struct RecordInputs<'a> {
 /// On any malformed-JSON / missing-result-event condition, falls
 /// back to a synthetic [`RunResult`] reflecting the OS exit code
 /// so the run row still gets recorded.
-pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AutomationRun, AutomationError> {
+pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AgentRun, AgentError> {
     let stdout_bytes = std::fs::read(inputs.stdout_log_path).unwrap_or_default();
     let result = parse_result_event(&stdout_bytes);
     let session_jsonl_path = result
@@ -65,9 +65,9 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AutomationRun, Automation
         .and_then(|r| r.session_id.clone())
         .and_then(|sid| locate_transcript_for_session(&sid));
 
-    let run = AutomationRun {
+    let run = AgentRun {
         id: inputs.run_id.to_string(),
-        automation_id: inputs.automation_id,
+        agent_id: inputs.agent_id,
         started_at: inputs.started_at,
         ended_at: inputs.ended_at,
         duration_ms: (inputs.ended_at - inputs.started_at).num_milliseconds(),
@@ -80,7 +80,7 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AutomationRun, Automation
         host_platform: HostPlatform::current(),
         claudepot_version: inputs.claudepot_version.to_string(),
         // `record_run` is the post-run hook for non-template
-        // automations; template-aware enrichment (output-artifact
+        // agents; template-aware enrichment (output-artifact
         // discovery, prerun-decision merge) is layered on by
         // `record_run_with_template_context` once the templates
         // pre-run gate is wired through the shim.
@@ -99,21 +99,21 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AutomationRun, Automation
 ///
 /// 1. If the run dir contains `prerun-decision.json`, parse it
 ///    and merge into `route_decision`.
-/// 2. If the automation has a `template_id`, scan the
+/// 2. If the agent has a `template_id`, scan the
 ///    blueprint's output-path neighborhood for files modified
 ///    during the run window, populate `output_artifacts`.
 ///
 /// The result.json file is rewritten with the enriched record
 /// so the Reports panel and apply pipeline see the same data.
-pub fn record_run_for_automation(
-    automation: &Automation,
+pub fn record_run_for_agent(
+    agent: &Agent,
     inputs: &RecordInputs<'_>,
     output_path: Option<&Path>,
-) -> Result<AutomationRun, AutomationError> {
+) -> Result<AgentRun, AgentError> {
     let mut run = record_run(inputs)?;
 
     let run_dir = inputs.stdout_log_path.parent().ok_or_else(|| {
-        AutomationError::InvalidPath(
+        AgentError::InvalidPath(
             inputs.stdout_log_path.display().to_string(),
             "stdout log has no parent dir",
         )
@@ -125,9 +125,9 @@ pub fn record_run_for_automation(
     }
 
     // 2. Output-artifact discovery, scoped to the resolved
-    //    output path. Only template-driven automations carry
-    //    one; non-template automations leave the field empty.
-    if automation.template_id.is_some() {
+    //    output path. Only template-driven agents carry
+    //    one; non-template agents leave the field empty.
+    if agent.template_id.is_some() {
         if let Some(path) = output_path {
             run.output_artifacts = discover_artifacts(path, inputs.started_at, inputs.ended_at);
         }
@@ -264,9 +264,9 @@ fn classify_artifact(path: &Path) -> ArtifactKind {
 
 /// Find the run directory containing `stdout.log` and write
 /// `result.json` alongside.
-fn write_result_json(run: &AutomationRun, stdout_log: &Path) -> Result<(), AutomationError> {
+fn write_result_json(run: &AgentRun, stdout_log: &Path) -> Result<(), AgentError> {
     let run_dir = stdout_log.parent().ok_or_else(|| {
-        AutomationError::InvalidPath(
+        AgentError::InvalidPath(
             stdout_log.display().to_string(),
             "stdout log has no parent dir",
         )
@@ -323,7 +323,7 @@ pub fn parse_result_event(stdout_bytes: &[u8]) -> Option<RunResult> {
         }
     }
 
-    // Audit fix for automations/run.rs:146 — accept BOTH the array
+    // Audit fix for agents/run.rs:146 — accept BOTH the array
     // shape and a top-level result object. CC's `--output-format=json`
     // (without `--verbose`) emits a single `{type:"result",...}`
     // object, not an array; the previous code only matched the array
@@ -414,18 +414,18 @@ fn walk_for_filename(dir: &Path, target: &str, depth_remaining: u32) -> Option<P
     None
 }
 
-/// Spawn the automation's helper shim once and return the
-/// resulting [`AutomationRun`]. Used by the "Run Now" button —
+/// Spawn the agent's helper shim once and return the
+/// resulting [`AgentRun`]. Used by the "Run Now" button —
 /// distinct from scheduled runs which the OS scheduler invokes
 /// directly. Phase events are emitted on `sink`.
 pub async fn run_now(
-    automation: &Automation,
+    agent: &Agent,
     binary_abs_path: &str,
     claudepot_cli_abs_path: &str,
     sink: &dyn ProgressSink,
-) -> Result<AutomationRun, AutomationError> {
+) -> Result<AgentRun, AgentError> {
     sink.phase("prepare", PhaseStatus::Running);
-    let shim_path = install_shim(automation, binary_abs_path, claudepot_cli_abs_path)?;
+    let shim_path = install_shim(agent, binary_abs_path, claudepot_cli_abs_path)?;
 
     // Mint a deterministic run id in Rust so we can read back the
     // exact run dir without scanning for "newest" (which would race
@@ -438,7 +438,7 @@ pub async fn run_now(
         Utc::now().format("%Y%m%dT%H%M%SZ"),
         uuid::Uuid::new_v4().simple()
     );
-    let runs_root = automation_runs_dir(&automation.id);
+    let runs_root = agent_runs_dir(&agent.id);
     let run_dir = runs_root.join(&run_id);
     sink.phase("prepare", PhaseStatus::Complete);
 
@@ -457,7 +457,7 @@ pub async fn run_now(
     };
     cmd.env("CLAUDEPOT_RUN_ID", &run_id);
     let status = cmd.status().await.map_err(|e| {
-        AutomationError::Io(std::io::Error::other(format!("failed to spawn shim: {e}")))
+        AgentError::Io(std::io::Error::other(format!("failed to spawn shim: {e}")))
     })?;
     let ended_at = Utc::now();
     let exit_code = status.code().unwrap_or(-1);
@@ -473,7 +473,7 @@ pub async fn run_now(
         let raw = std::fs::read(&result_path)?;
         serde_json::from_slice(&raw)?
     } else {
-        let synth = synthesize_run(automation, started_at, ended_at, exit_code, &run_dir);
+        let synth = synthesize_run(agent, started_at, ended_at, exit_code, &run_dir);
         // Persist the synthesized record so the run history has a
         // row for it. Best-effort — don't fail the whole run-now
         // if the persist itself errors (that would mask the actual
@@ -493,19 +493,19 @@ pub async fn run_now(
 }
 
 fn synthesize_run(
-    automation: &Automation,
+    agent: &Agent,
     started_at: DateTime<Utc>,
     ended_at: DateTime<Utc>,
     exit_code: i32,
     run_dir: &Path,
-) -> AutomationRun {
-    AutomationRun {
+) -> AgentRun {
+    AgentRun {
         id: run_dir
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("synthetic")
             .to_string(),
-        automation_id: automation.id,
+        agent_id: agent.id,
         started_at,
         ended_at,
         duration_ms: (ended_at - started_at).num_milliseconds(),
@@ -548,10 +548,10 @@ fn find_latest_run_dir(runs_dir: &Path) -> Option<PathBuf> {
     best
 }
 
-/// Convenience: list all run-id directory names for an automation,
+/// Convenience: list all run-id directory names for an agent,
 /// sorted descending (newest first).
-pub fn list_run_ids(id: &AutomationId) -> Result<Vec<String>, AutomationError> {
-    let dir = automation_runs_dir(id);
+pub fn list_run_ids(id: &AgentId) -> Result<Vec<String>, AgentError> {
+    let dir = agent_runs_dir(id);
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -569,27 +569,27 @@ pub fn list_run_ids(id: &AutomationId) -> Result<Vec<String>, AutomationError> {
 
 /// Read a single run record by id. Validates `run_id` is a single
 /// safe filename component and pins the resolved path under the
-/// automation's runs dir so a malicious caller cannot escape with
+/// agent's runs dir so a malicious caller cannot escape with
 /// `..` or absolute paths.
 pub fn read_run(
-    automation_id: &AutomationId,
+    agent_id: &AgentId,
     run_id: &str,
-) -> Result<AutomationRun, AutomationError> {
+) -> Result<AgentRun, AgentError> {
     validate_run_id(run_id)?;
-    let runs_root = automation_runs_dir(automation_id);
+    let runs_root = agent_runs_dir(agent_id);
     let path = runs_root.join(run_id).join("result.json");
     // Defense in depth: confirm the resolved canonical path stays
     // inside the runs root. We use the raw join because the path
     // may not exist yet on disk; the canonicalize-after-read happens
     // on the read step below.
     if !path.starts_with(&runs_root) {
-        return Err(AutomationError::InvalidPath(
+        return Err(AgentError::InvalidPath(
             run_id.to_string(),
-            "run_id resolved outside automation runs dir",
+            "run_id resolved outside agent runs dir",
         ));
     }
     let bytes = std::fs::read(&path)?;
-    let run: AutomationRun = serde_json::from_slice(&bytes)?;
+    let run: AgentRun = serde_json::from_slice(&bytes)?;
     Ok(run)
 }
 
@@ -598,21 +598,21 @@ pub fn read_run(
 /// directory name on every supported host without escaping). This
 /// matches the shape the unix and Windows shims emit
 /// (`<ISO-timestamp>-<pid|random>`).
-fn validate_run_id(s: &str) -> Result<(), AutomationError> {
+fn validate_run_id(s: &str) -> Result<(), AgentError> {
     if s.is_empty() {
-        return Err(AutomationError::InvalidPath(
+        return Err(AgentError::InvalidPath(
             s.to_string(),
             "run_id cannot be empty",
         ));
     }
     if s.len() > 128 {
-        return Err(AutomationError::InvalidPath(
+        return Err(AgentError::InvalidPath(
             s.to_string(),
             "run_id exceeds 128 characters",
         ));
     }
     if s.starts_with('.') {
-        return Err(AutomationError::InvalidPath(
+        return Err(AgentError::InvalidPath(
             s.to_string(),
             "run_id cannot start with `.`",
         ));
@@ -620,14 +620,14 @@ fn validate_run_id(s: &str) -> Result<(), AutomationError> {
     for b in s.bytes() {
         let ok = b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.';
         if !ok {
-            return Err(AutomationError::InvalidPath(
+            return Err(AgentError::InvalidPath(
                 s.to_string(),
                 "run_id contains characters outside [A-Za-z0-9._-]",
             ));
         }
     }
     if s.contains("..") {
-        return Err(AutomationError::InvalidPath(
+        return Err(AgentError::InvalidPath(
             s.to_string(),
             "run_id cannot contain `..`",
         ));
@@ -726,7 +726,7 @@ mod tests {
         let started = Utc.with_ymd_and_hms(2026, 4, 28, 9, 0, 0).unwrap();
         let ended = started + chrono::Duration::seconds(13);
         let inputs = RecordInputs {
-            automation_id: id,
+            agent_id: id,
             run_id: "20260428T090000Z-1",
             exit_code: 0,
             started_at: started,
@@ -745,7 +745,7 @@ mod tests {
 
         // Round-trip the on-disk record.
         let raw = std::fs::read(&result_path).unwrap();
-        let on_disk: AutomationRun = serde_json::from_slice(&raw).unwrap();
+        let on_disk: AgentRun = serde_json::from_slice(&raw).unwrap();
         assert_eq!(on_disk.id, run.id);
         assert_eq!(on_disk.exit_code, 0);
         assert_eq!(
@@ -765,7 +765,7 @@ mod tests {
         let id = Uuid::new_v4();
         let started = Utc::now();
         let inputs = RecordInputs {
-            automation_id: id,
+            agent_id: id,
             run_id: "r1",
             exit_code: 1,
             started_at: started,

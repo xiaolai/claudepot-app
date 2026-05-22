@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::automations::types::HostPlatform;
+use crate::agent::types::HostPlatform;
 
 use super::blueprint::Blueprint;
 use super::error::TemplateError;

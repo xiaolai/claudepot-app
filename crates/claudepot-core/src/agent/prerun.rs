@@ -1,4 +1,4 @@
-//! Pre-run gate for template-driven automations.
+//! Pre-run gate for template-driven agents.
 //!
 //! This is the Rust-side gate the shim invokes before
 //! `claude -p`. It resolves the assigned route, probes its
@@ -19,9 +19,9 @@ use crate::routes::{Route, RouteId, RouteProvider};
 
 /// What the gate decided. The shim writes this to
 /// `<run-dir>/prerun-decision.json`; `record_run` merges it into
-/// `AutomationRun.route_decision`.
+/// `AgentRun.route_decision`.
 ///
-/// This mirrors `automations::types::RouteDecision` but lives
+/// This mirrors `agent::types::RouteDecision` but lives
 /// here so the prerun module doesn't have a circular import.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -165,22 +165,22 @@ pub fn probe_sync(route: &Route, timeout: Duration) -> Result<(), String> {
     })
 }
 
-/// Inputs the gate needs from the surrounding automation. The
+/// Inputs the gate needs from the surrounding agent. The
 /// caller (CLI subcommand) materializes these from
-/// `AutomationStore` + `RouteStore` + `TemplateRegistry`.
+/// `AgentStore` + `RouteStore` + `TemplateRegistry`.
 #[derive(Debug, Clone)]
 pub struct PrerunInput<'a> {
     pub assigned_route: Option<&'a Route>,
     pub default_wrapper: Option<&'a str>,
     /// Templates' privacy class as a string from the blueprint.
     /// `"local"`, `"private-cloud"`, or `"any"`. Non-template
-    /// automations set this to `"any"` so fallback to the
+    /// agents set this to `"any"` so fallback to the
     /// default route is always permissible.
     pub privacy: &'a str,
     /// Templates' fallback policy as a string from the
     /// blueprint. `"skip"`, `"use_default_route"`, or
     /// `"alert"`. Defaults to `"skip"` for non-template
-    /// automations.
+    /// agents.
     pub fallback_policy: &'a str,
     /// Probe timeout. CLI default is 3 seconds.
     pub probe_timeout: Duration,

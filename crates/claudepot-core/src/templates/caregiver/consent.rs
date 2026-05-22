@@ -19,7 +19,10 @@ use crate::paths;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsentRecord {
     pub id: String,
-    pub automation_id: String,
+    // on-disk JSON key kept as "automation_id" (persisted in
+    // consent-records/<id>.json); renamed by the Phase 1 migration.
+    #[serde(rename = "automation_id")]
+    pub agent_id: String,
     pub blueprint_id: String,
     pub blueprint_version: u32,
     /// Free-form label the user typed at install time.
@@ -250,7 +253,7 @@ mod tests {
     fn record() -> ConsentRecord {
         ConsentRecord {
             id: ConsentRecord::new_id(),
-            automation_id: "auto-1".into(),
+            agent_id: "auto-1".into(),
             blueprint_id: "caregiver.weekly-report".into(),
             blueprint_version: 1,
             dependent_label: "Dad's MacBook".into(),

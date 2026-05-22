@@ -21,7 +21,7 @@
 //! launchd `StartCalendarInterval` dicts, Task Scheduler triggers,
 //! or systemd `OnCalendar=` lines.
 
-use super::error::AutomationError;
+use super::error::AgentError;
 
 /// Hard cap on the number of (m, h, dom, mon, dow) slots. Catches
 /// `* * * * *` (44640) and similar typos. 200 is enough for every
@@ -58,10 +58,10 @@ struct Field {
 
 /// Parse a cron expression and expand to launch slots. Bounded by
 /// [`MAX_SLOTS`].
-pub fn expand(expr: &str) -> Result<Vec<LaunchSlot>, AutomationError> {
+pub fn expand(expr: &str) -> Result<Vec<LaunchSlot>, AgentError> {
     let parts: Vec<&str> = expr.split_whitespace().collect();
     if parts.len() != 5 {
-        return Err(AutomationError::InvalidCron(
+        return Err(AgentError::InvalidCron(
             expr.to_string(),
             format!("expected 5 fields, got {}", parts.len()),
         ));
@@ -176,7 +176,7 @@ pub fn expand(expr: &str) -> Result<Vec<LaunchSlot>, AutomationError> {
     }
 
     if slots.is_empty() {
-        return Err(AutomationError::InvalidCron(
+        return Err(AgentError::InvalidCron(
             expr.to_string(),
             "expression matches no times".into(),
         ));
@@ -184,9 +184,9 @@ pub fn expand(expr: &str) -> Result<Vec<LaunchSlot>, AutomationError> {
     Ok(slots)
 }
 
-fn check_cap(slots: &[LaunchSlot], expr: &str) -> Result<(), AutomationError> {
+fn check_cap(slots: &[LaunchSlot], expr: &str) -> Result<(), AgentError> {
     if slots.len() > MAX_SLOTS {
-        return Err(AutomationError::CronTooDense(
+        return Err(AgentError::CronTooDense(
             expr.to_string(),
             slots.len(),
             MAX_SLOTS,
@@ -218,7 +218,7 @@ fn parse_field(
     max: u8,
     expr: &str,
     kind: FieldKind,
-) -> Result<Field, AutomationError> {
+) -> Result<Field, AgentError> {
     let mut values: Vec<u8> = Vec::new();
     for part in raw.split(',') {
         parse_part(part, min, max, expr, kind, &mut values)?;
@@ -226,7 +226,7 @@ fn parse_field(
     values.sort_unstable();
     values.dedup();
     if values.is_empty() {
-        return Err(AutomationError::InvalidCron(
+        return Err(AgentError::InvalidCron(
             expr.to_string(),
             format!("field '{raw}' produced no values"),
         ));
@@ -245,14 +245,14 @@ fn parse_part(
     expr: &str,
     kind: FieldKind,
     out: &mut Vec<u8>,
-) -> Result<(), AutomationError> {
+) -> Result<(), AgentError> {
     let (range_part, step) = match part.split_once('/') {
         Some((r, s)) => {
             let n: u8 = s.parse().map_err(|_| {
-                AutomationError::InvalidCron(expr.to_string(), format!("invalid step in '{part}'"))
+                AgentError::InvalidCron(expr.to_string(), format!("invalid step in '{part}'"))
             })?;
             if n == 0 {
-                return Err(AutomationError::InvalidCron(
+                return Err(AgentError::InvalidCron(
                     expr.to_string(),
                     format!("step must be >= 1 in '{part}'"),
                 ));
@@ -268,7 +268,7 @@ fn parse_part(
         let a = parse_value(a, kind, expr)?;
         let b = parse_value(b, kind, expr)?;
         if a > b {
-            return Err(AutomationError::InvalidCron(
+            return Err(AgentError::InvalidCron(
                 expr.to_string(),
                 format!("inverted range '{range_part}'"),
             ));
@@ -280,7 +280,7 @@ fn parse_part(
     };
 
     if start < min || end > max {
-        return Err(AutomationError::InvalidCron(
+        return Err(AgentError::InvalidCron(
             expr.to_string(),
             format!("'{range_part}' out of range {min}..={max}"),
         ));
@@ -297,7 +297,7 @@ fn parse_part(
     Ok(())
 }
 
-fn parse_value(raw: &str, kind: FieldKind, expr: &str) -> Result<u8, AutomationError> {
+fn parse_value(raw: &str, kind: FieldKind, expr: &str) -> Result<u8, AgentError> {
     if let Ok(n) = raw.parse::<u8>() {
         return Ok(n);
     }
@@ -332,7 +332,7 @@ fn parse_value(raw: &str, kind: FieldKind, expr: &str) -> Result<u8, AutomationE
         .iter()
         .find_map(|(n, v)| (*n == lower).then_some(*v))
         .ok_or_else(|| {
-            AutomationError::InvalidCron(expr.to_string(), format!("unrecognized value '{raw}'"))
+            AgentError::InvalidCron(expr.to_string(), format!("unrecognized value '{raw}'"))
         })
 }
 
@@ -443,7 +443,7 @@ mod tests {
         // every minute every day → 1440 slots, way over MAX_SLOTS
         assert!(matches!(
             expand("* * * * *"),
-            Err(AutomationError::CronTooDense(..))
+            Err(AgentError::CronTooDense(..))
         ));
     }
 

@@ -1,4 +1,4 @@
-//! End-to-end automation smoke tests.
+//! End-to-end agent smoke tests.
 //!
 //! `#[ignore]` because they touch the real OS scheduler:
 //!   - macOS: writes a plist to ~/Library/LaunchAgents/, calls
@@ -7,26 +7,26 @@
 //!   - windows: registers a Task Scheduler task, calls schtasks.
 //!
 //! Each test uses a unique `CLAUDEPOT_DATA_DIR` and a dedicated
-//! automation id so concurrent runs don't collide. The test
+//! agent id so concurrent runs don't collide. The test
 //! cleans up its registration on success and on panic via a Drop
 //! guard.
 //!
 //! Run with:
-//!   cargo test -p claudepot-core --test automation_e2e -- --ignored
+//!   cargo test -p claudepot-core --test agent_e2e -- --ignored
 
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use claudepot_core::automations::{
-    active_scheduler, install_shim, store::automation_runs_dir, Automation, AutomationBinary,
-    AutomationId, OutputFormat, PermissionMode, PlatformOptions, Trigger,
+use claudepot_core::agent::{
+    active_scheduler, install_shim, store::agent_runs_dir, Agent, AgentBinary,
+    AgentId, OutputFormat, PermissionMode, PlatformOptions, Trigger,
 };
 use uuid::Uuid;
 
 struct CleanupGuard {
-    id: AutomationId,
+    id: AgentId,
 }
 
 impl Drop for CleanupGuard {
@@ -71,7 +71,7 @@ fn current_claudepot_cli() -> PathBuf {
     // Use the test binary itself as the "cli" — it never gets called
     // since the fake claude returns success without error subtype,
     // but the shim still references it. The shim invokes with
-    // --automation-id ... which will fail unless this is actually
+    // --agent-id ... which will fail unless this is actually
     // the claudepot binary. So we point at the built binary if
     // present, else accept that _record-run will fail (the run
     // still produces stdout.log and we read result from there
@@ -84,15 +84,15 @@ fn current_claudepot_cli() -> PathBuf {
     target.canonicalize().unwrap_or(target)
 }
 
-fn make_automation(name: &str) -> Automation {
+fn make_agent(name: &str) -> Agent {
     let now = Utc::now();
-    Automation {
+    Agent {
         id: Uuid::new_v4(),
         name: name.to_string(),
         display_name: None,
         description: None,
         enabled: true,
-        binary: AutomationBinary::FirstParty,
+        binary: AgentBinary::FirstParty,
         model: Some("haiku".to_string()),
         cwd: std::env::temp_dir().display().to_string(),
         prompt: "test".to_string(),
@@ -133,11 +133,11 @@ fn end_to_end_register_kickstart_unregister() {
     let fake_claude = make_fake_claude(stdout);
     let cli = current_claudepot_cli();
 
-    let automation = make_automation(&format!("e2e-test-{}", Utc::now().timestamp()));
-    let _guard = CleanupGuard { id: automation.id };
+    let agent = make_agent(&format!("e2e-test-{}", Utc::now().timestamp()));
+    let _guard = CleanupGuard { id: agent.id };
 
     install_shim(
-        &automation,
+        &agent,
         fake_claude.to_str().unwrap(),
         cli.to_str().unwrap(),
     )
@@ -151,11 +151,11 @@ fn end_to_end_register_kickstart_unregister() {
         return;
     }
 
-    scheduler.register(&automation).expect("register");
-    scheduler.kickstart(&automation.id).expect("kickstart");
+    scheduler.register(&agent).expect("register");
+    scheduler.kickstart(&agent.id).expect("kickstart");
 
     // Wait up to 30s for the run dir to appear with a result.json.
-    let runs_dir = automation_runs_dir(&automation.id);
+    let runs_dir = agent_runs_dir(&agent.id);
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut found_result = false;
     while Instant::now() < deadline {
@@ -199,12 +199,12 @@ fn end_to_end_register_kickstart_unregister() {
                 }
             }
         }
-        let _ = scheduler.unregister(&automation.id);
+        let _ = scheduler.unregister(&agent.id);
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
         panic!("no result.json materialized within 30s");
     }
 
-    let _ = scheduler.unregister(&automation.id);
+    let _ = scheduler.unregister(&agent.id);
     std::env::remove_var("CLAUDEPOT_DATA_DIR");
 }
 
@@ -214,9 +214,9 @@ fn dry_run_shim_renders_and_is_executable() {
     let tmp = tempfile::tempdir().expect("tempdir");
     std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path());
 
-    let automation = make_automation("e2e-shim-render");
-    let _guard = CleanupGuard { id: automation.id };
-    let path = install_shim(&automation, "/bin/echo", "/bin/false").expect("install");
+    let agent = make_agent("e2e-shim-render");
+    let _guard = CleanupGuard { id: agent.id };
+    let path = install_shim(&agent, "/bin/echo", "/bin/false").expect("install");
     assert!(path.exists(), "shim should exist at {path:?}");
     let contents = std::fs::read_to_string(&path).unwrap();
     if cfg!(target_os = "windows") {

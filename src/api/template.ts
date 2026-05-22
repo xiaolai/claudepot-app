@@ -4,7 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AutomationSummaryDto,
+  AgentSummaryDto,
   TemplateDetailsDto,
   TemplateInstanceDto,
   TemplateRouteSummaryDto,
@@ -24,5 +24,5 @@ export const templateApi = {
     invoke<TemplateRouteSummaryDto[]>("templates_capable_routes", { id }),
 
   templatesInstall: (instance: TemplateInstanceDto) =>
-    invoke<AutomationSummaryDto>("templates_install", { instance }),
+    invoke<AgentSummaryDto>("templates_install", { instance }),
 };

@@ -5,38 +5,38 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::automations::error::AutomationError;
-use crate::automations::types::{Automation, AutomationId, Trigger};
+use crate::agent::error::AgentError;
+use crate::agent::types::{Agent, AgentId, Trigger};
 
 use super::{cron_next_runs, RegisteredEntry, Scheduler, SchedulerCapabilities};
 
 pub struct NoopScheduler;
 
 impl Scheduler for NoopScheduler {
-    fn register(&self, automation: &Automation) -> Result<(), AutomationError> {
+    fn register(&self, agent: &Agent) -> Result<(), AgentError> {
         // Manual triggers don't need a scheduler. The Noop adapter
         // can honor them even on unsupported hosts; Run-Now does
         // not depend on platform-specific scheduling.
-        if automation.trigger.is_manual() {
+        if agent.trigger.is_manual() {
             return Ok(());
         }
-        Err(AutomationError::UnsupportedPlatform(
+        Err(AgentError::UnsupportedPlatform(
             "no scheduler adapter is wired for this host yet",
         ))
     }
 
-    fn unregister(&self, _id: &AutomationId) -> Result<(), AutomationError> {
+    fn unregister(&self, _id: &AgentId) -> Result<(), AgentError> {
         // Always succeed — "nothing to remove" is the right answer.
         Ok(())
     }
 
-    fn kickstart(&self, _id: &AutomationId) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform(
+    fn kickstart(&self, _id: &AgentId) -> Result<(), AgentError> {
+        Err(AgentError::UnsupportedPlatform(
             "kickstart is unavailable without a scheduler adapter",
         ))
     }
 
-    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AutomationError> {
+    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AgentError> {
         Ok(Vec::new())
     }
 
@@ -45,7 +45,7 @@ impl Scheduler for NoopScheduler {
         trigger: &Trigger,
         from: DateTime<Utc>,
         n: usize,
-    ) -> Result<Vec<DateTime<Utc>>, AutomationError> {
+    ) -> Result<Vec<DateTime<Utc>>, AgentError> {
         match trigger {
             Trigger::Cron { cron, timezone: _ } => cron_next_runs(cron, from, n),
             Trigger::Manual => Ok(Vec::new()),

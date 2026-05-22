@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TemplateInstallView } from "./TemplateInstallView";
 import type {
-  AutomationSummaryDto,
+  AgentSummaryDto,
   TemplateDetailsDto,
   TemplateInstanceDto,
   TemplateRouteSummaryDto,
@@ -167,7 +167,7 @@ describe("TemplateInstallView — install action", () => {
   it("posts a TemplateInstanceDto with blueprint id, version, default schedule, no route", async () => {
     const user = userEvent.setup();
     const onInstalled = vi.fn();
-    installSpy.mockResolvedValue({} as AutomationSummaryDto);
+    installSpy.mockResolvedValue({} as AgentSummaryDto);
     setup({ onInstalled });
 
     await screen.findByRole("button", { name: "Install" });
@@ -184,9 +184,9 @@ describe("TemplateInstallView — install action", () => {
 
   it("disables Install + shows 'Installing…' while the request is in flight", async () => {
     const user = userEvent.setup();
-    let resolveInstall!: (a: AutomationSummaryDto) => void;
+    let resolveInstall!: (a: AgentSummaryDto) => void;
     installSpy.mockReturnValue(
-      new Promise<AutomationSummaryDto>((res) => {
+      new Promise<AgentSummaryDto>((res) => {
         resolveInstall = res;
       }),
     );
@@ -198,7 +198,7 @@ describe("TemplateInstallView — install action", () => {
     expect(busy).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
 
-    resolveInstall({} as AutomationSummaryDto);
+    resolveInstall({} as AgentSummaryDto);
   });
 
   it("surfaces an install error via pushToast without unmounting", async () => {

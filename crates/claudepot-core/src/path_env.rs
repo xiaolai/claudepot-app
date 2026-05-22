@@ -18,7 +18,7 @@
 //! directories — that is all the Dock-launch fix needs.
 //!
 //! This is the runtime cousin of
-//! [`crate::automations::env::default_path_segments`], which builds
+//! [`crate::agent::env::default_path_segments`], which builds
 //! a `PATH` *from scratch* with literal `%VAR%` tokens for the
 //! scheduler shim files — a different output contract. The two are
 //! separate functions on purpose. Their unix user-tool directory

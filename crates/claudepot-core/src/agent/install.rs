@@ -1,4 +1,4 @@
-//! Materialize a per-automation directory on disk: helper shim,
+//! Materialize a per-agent directory on disk: helper shim,
 //! per-run dirs, and (on unix) executable permission bits.
 //!
 //! Called from the scheduler register path and from the Run-Now
@@ -6,22 +6,22 @@
 
 use std::path::PathBuf;
 
-use crate::automations::env::default_path_segments;
-use crate::automations::error::AutomationError;
-use crate::automations::shim::{render_unix, render_windows, ShimInputs};
-use crate::automations::store::automation_dir;
-use crate::automations::types::{Automation, AutomationBinary};
+use crate::agent::env::default_path_segments;
+use crate::agent::error::AgentError;
+use crate::agent::shim::{render_unix, render_windows, ShimInputs};
+use crate::agent::store::agent_dir;
+use crate::agent::types::{Agent, AgentBinary};
 use crate::fs_utils;
 use crate::paths::claudepot_data_dir;
 
-/// Produce + write the helper shim for an automation. Returns the
+/// Produce + write the helper shim for an agent. Returns the
 /// path the scheduler should reference.
 pub fn install_shim(
-    automation: &Automation,
+    agent: &Agent,
     binary_abs_path: &str,
     claudepot_cli_abs_path: &str,
-) -> Result<PathBuf, AutomationError> {
-    let auto_dir = automation_dir(&automation.id);
+) -> Result<PathBuf, AgentError> {
+    let auto_dir = agent_dir(&agent.id);
     let runs_dir = auto_dir.join("runs");
     std::fs::create_dir_all(&runs_dir)?;
 
@@ -31,18 +31,18 @@ pub fn install_shim(
     let inputs = ShimInputs {
         binary_abs_path,
         claudepot_cli_abs_path,
-        automation_dir: &auto_dir.display().to_string(),
+        agent_dir: &auto_dir.display().to_string(),
         path_segments: &path_segments,
-        extra_env: &automation.extra_env,
+        extra_env: &agent.extra_env,
     };
 
     let (shim_path, contents) = if cfg!(target_os = "windows") {
         (
             auto_dir.join("run.cmd"),
-            render_windows(automation, &inputs),
+            render_windows(agent, &inputs),
         )
     } else {
-        (auto_dir.join("run.sh"), render_unix(automation, &inputs))
+        (auto_dir.join("run.sh"), render_unix(agent, &inputs))
     };
 
     fs_utils::atomic_write(&shim_path, contents.as_bytes())?;
@@ -81,17 +81,17 @@ pub fn install_shim(
 ///
 /// [`default_path_segments`]: super::env::default_path_segments
 pub fn resolve_binary(
-    automation: &Automation,
+    agent: &Agent,
     route_lookup: &dyn Fn(&uuid::Uuid) -> Option<String>,
-) -> Result<String, AutomationError> {
-    match &automation.binary {
-        AutomationBinary::FirstParty => Ok(claude_exe_name().to_string()),
-        AutomationBinary::Route { route_id } => {
+) -> Result<String, AgentError> {
+    match &agent.binary {
+        AgentBinary::FirstParty => Ok(claude_exe_name().to_string()),
+        AgentBinary::Route { route_id } => {
             let wrapper_name = route_lookup(route_id)
-                .ok_or_else(|| AutomationError::NotFound(format!("route {route_id}")))?;
+                .ok_or_else(|| AgentError::NotFound(format!("route {route_id}")))?;
             let bin = claudepot_data_dir().join("bin").join(&wrapper_name);
             if !bin.exists() {
-                return Err(AutomationError::InvalidPath(
+                return Err(AgentError::InvalidPath(
                     bin.display().to_string(),
                     "route wrapper missing on disk",
                 ));
@@ -112,7 +112,7 @@ const fn claude_exe_name() -> &'static str {
 /// Resolve the path to the `claudepot` CLI binary the helper shim
 /// should call back into for `_record-run`. Tauri-side callers are
 /// running the GUI executable, which is NOT the CLI — it can't
-/// service `automation _record-run`. We resolve in this order:
+/// service `agent _record-run`. We resolve in this order:
 ///
 /// 1. `CLAUDEPOT_CLI_PATH` env var (explicit override; trumps all).
 /// 2. `<current_exe parent>/claudepot[.exe]` (sibling install — the
@@ -124,7 +124,7 @@ const fn claude_exe_name() -> &'static str {
 ///
 /// Returns the resolved absolute path as a string. Errors only when
 /// none of the four paths produces an existing file.
-pub fn current_claudepot_cli() -> Result<String, AutomationError> {
+pub fn current_claudepot_cli() -> Result<String, AgentError> {
     let exe_name = if cfg!(target_os = "windows") {
         "claudepot.exe"
     } else {
@@ -165,7 +165,7 @@ pub fn current_claudepot_cli() -> Result<String, AutomationError> {
     //    return the path so callers can register, but the shim's
     //    record-run callback will fail at runtime in the GUI case.
     let current = std::env::current_exe().map_err(|e| {
-        AutomationError::Io(std::io::Error::other(format!("current_exe failed: {e}")))
+        AgentError::Io(std::io::Error::other(format!("current_exe failed: {e}")))
     })?;
     Ok(current.display().to_string())
 }
@@ -173,7 +173,7 @@ pub fn current_claudepot_cli() -> Result<String, AutomationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automations::types::*;
+    use crate::agent::types::*;
     use chrono::Utc;
     use parking_lot::Mutex;
     use tempfile::tempdir;
@@ -183,15 +183,15 @@ mod tests {
     /// runs tests in parallel within one binary by default.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    fn auto() -> Automation {
+    fn auto() -> Agent {
         let now = Utc::now();
-        Automation {
+        Agent {
             id: Uuid::new_v4(),
             name: "test".into(),
             display_name: None,
             description: None,
             enabled: true,
-            binary: AutomationBinary::FirstParty,
+            binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
             cwd: "/tmp".into(),
             prompt: "hi".into(),
@@ -252,24 +252,24 @@ mod tests {
         let _guard = ENV_LOCK.lock();
         let mut a = auto();
         let route_id = Uuid::new_v4();
-        a.binary = AutomationBinary::Route { route_id };
+        a.binary = AgentBinary::Route { route_id };
         let lookup = |_id: &uuid::Uuid| Some("claude-mywrapper".to_string());
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
         let res = resolve_binary(&a, &lookup);
-        assert!(matches!(res, Err(AutomationError::InvalidPath(..))));
+        assert!(matches!(res, Err(AgentError::InvalidPath(..))));
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }
 
     #[test]
     fn resolve_binary_route_unknown_id_returns_not_found() {
         let mut a = auto();
-        a.binary = AutomationBinary::Route {
+        a.binary = AgentBinary::Route {
             route_id: Uuid::new_v4(),
         };
         let lookup = |_id: &uuid::Uuid| None;
         let res = resolve_binary(&a, &lookup);
-        assert!(matches!(res, Err(AutomationError::NotFound(_))));
+        assert!(matches!(res, Err(AgentError::NotFound(_))));
     }
 
     #[test]

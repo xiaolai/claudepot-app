@@ -7,8 +7,8 @@
 //! gets the final say per-template.
 //!
 //! Rules apply only at install time. A deleted rule never
-//! breaks an already-running automation, because the
-//! automation carries its own resolved `route_id`.
+//! breaks an already-running agent, because the
+//! agent carries its own resolved `route_id`.
 //!
 //! See `dev-docs/templates-implementation-plan.md` §3.5 / §13.
 

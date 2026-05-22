@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PendingChanges {
     pub schema_version: u32,
-    pub automation_id: String,
+    // on-disk JSON key kept as "automation_id"; renamed by the Phase 1 migration.
+    #[serde(rename = "automation_id")]
+    pub agent_id: String,
     pub run_id: String,
     pub generated_at: String,
     pub summary: String,

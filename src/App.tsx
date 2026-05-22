@@ -47,8 +47,8 @@ const importGlobal = () =>
   import("./sections/GlobalSection").then((m) => ({ default: m.GlobalSection }));
 const importThirdParty = () =>
   import("./sections/ThirdPartySection").then((m) => ({ default: m.ThirdPartySection }));
-const importAutomations = () =>
-  import("./sections/AutomationsSection").then((m) => ({ default: m.AutomationsSection }));
+const importAgents = () =>
+  import("./sections/AgentsSection").then((m) => ({ default: m.AgentsSection }));
 const importSharedMemory = () =>
   import("./sections/SharedMemorySection").then((m) => ({ default: m.SharedMemorySection }));
 const ProjectsSection = lazy(importProjects);
@@ -57,7 +57,7 @@ const EventsSection = lazy(importEvents);
 const KeysSection = lazy(importKeys);
 const GlobalSection = lazy(importGlobal);
 const ThirdPartySection = lazy(importThirdParty);
-const AutomationsSection = lazy(importAutomations);
+const AgentsSection = lazy(importAgents);
 const SharedMemorySection = lazy(importSharedMemory);
 // ConfigSection isn't rendered at the top level anymore — it lives
 // inside GlobalSection and the Projects shell's Config tab. The
@@ -91,7 +91,8 @@ function preloadSavedSection(): void {
     else if (id === "global") void importGlobal();
     else if (id === "keys") void importKeys();
     else if (id === "third-party") void importThirdParty();
-    else if (id === "automations") void importAutomations();
+    // section id kept as "automations" for localStorage compatibility
+    else if (id === "automations") void importAgents();
     else if (id === "settings") void importSettings();
     else if (id === "shared-memory") void importSharedMemory();
   } catch {
@@ -120,7 +121,7 @@ function preloadAllSections(): void {
     importGlobal,
     importKeys,
     importThirdParty,
-    importAutomations,
+    importAgents,
     importSettings,
     importSharedMemory,
   ];
@@ -529,7 +530,7 @@ function AppShell() {
   useCardNotifications();
   // Op-completion OS notifications. Fires when a long-running op
   // (verify_all, project rename, session prune/slim/share/move,
-  // account login/register, clean projects, automation run)
+  // account login/register, clean projects, agent run)
   // terminates while the window is unfocused, gated by the
   // `notify_on_op_done` preference.
   useOpDoneNotifications();
@@ -1340,9 +1341,10 @@ function AppShell() {
                   <ThirdPartySection />
                 </ErrorBoundary>
               )}
+              {/* section id kept as "automations" for localStorage compatibility */}
               {section === "automations" && (
-                <ErrorBoundary key="automations" label="Automations">
-                  <AutomationsSection />
+                <ErrorBoundary key="automations" label="Agents">
+                  <AgentsSection />
                 </ErrorBoundary>
               )}
               {section === "settings" && (

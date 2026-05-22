@@ -2,7 +2,7 @@
 // events used to be consumed only by mounted panes (MemoryPane,
 // useConfigTree's subscriber inside ConfigSection). If the user was on
 // any other section while CC rewrote ~/.claude/CLAUDE.md or an
-// automation patched ~/.claude/settings.json, the event vanished —
+// agent patched ~/.claude/settings.json, the event vanished —
 // no toast, no banner, no bell entry.
 //
 // This hook wires both events at app-state level (parallel to
@@ -40,7 +40,7 @@ interface ConfigTreePatchPayload {
  *
  * Why no toast/banner: P3 ambient categories route to log-only by
  * design. Routine `CLAUDE.md` writes from CC or `settings.json`
- * edits from an automation should be queryable in the bell, not
+ * edits from an agent should be queryable in the bell, not
  * interrupt the user. The user opens the bell popover when they
  * want to ask "what did Claudepot just record for me?" — the
  * design.md "render-if-nonzero" rule applies to spray, not to

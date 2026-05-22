@@ -1,4 +1,4 @@
-//! Automation name validation.
+//! Agent name validation.
 //!
 //! A name maps directly to a launchd label component, a systemd
 //! unit-name fragment, and a Task Scheduler path component, so we
@@ -12,35 +12,35 @@
 //! trailing dash, no consecutive dashes. The single-character form
 //! is allowed (`a` is valid; `-` is not).
 
-use super::error::AutomationError;
+use super::error::AgentError;
 
 const MAX_LEN: usize = 64;
 
-/// Validate an automation name. Returns the trimmed name on
+/// Validate an agent name. Returns the trimmed name on
 /// success. Does **not** check uniqueness — that's the store's job.
-pub fn validate_name(input: &str) -> Result<String, AutomationError> {
+pub fn validate_name(input: &str) -> Result<String, AgentError> {
     let name = input.trim();
     if name.is_empty() {
-        return Err(AutomationError::InvalidName(
+        return Err(AgentError::InvalidName(
             input.to_string(),
             "name cannot be empty",
         ));
     }
     if name.len() > MAX_LEN {
-        return Err(AutomationError::InvalidName(
+        return Err(AgentError::InvalidName(
             input.to_string(),
             "name exceeds 64 characters",
         ));
     }
     let bytes = name.as_bytes();
     if !is_alnum_lower(bytes[0]) {
-        return Err(AutomationError::InvalidName(
+        return Err(AgentError::InvalidName(
             input.to_string(),
             "name must start with a-z or 0-9",
         ));
     }
     if !is_alnum_lower(bytes[bytes.len() - 1]) {
-        return Err(AutomationError::InvalidName(
+        return Err(AgentError::InvalidName(
             input.to_string(),
             "name must end with a-z or 0-9",
         ));
@@ -50,7 +50,7 @@ pub fn validate_name(input: &str) -> Result<String, AutomationError> {
         match b {
             b'-' => {
                 if prev_dash {
-                    return Err(AutomationError::InvalidName(
+                    return Err(AgentError::InvalidName(
                         input.to_string(),
                         "consecutive dashes are not allowed",
                     ));
@@ -59,7 +59,7 @@ pub fn validate_name(input: &str) -> Result<String, AutomationError> {
             }
             b if is_alnum_lower(b) => prev_dash = false,
             _ => {
-                return Err(AutomationError::InvalidName(
+                return Err(AgentError::InvalidName(
                     input.to_string(),
                     "only lowercase a-z, 0-9, and `-` are allowed",
                 ))

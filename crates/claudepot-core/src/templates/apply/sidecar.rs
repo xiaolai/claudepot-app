@@ -55,7 +55,7 @@ mod tests {
         let p = dir.path().join(".pending-changes.json");
         let value = PendingChanges {
             schema_version: 1,
-            automation_id: "a".into(),
+            agent_id: "a".into(),
             run_id: "r".into(),
             generated_at: "2026-05-02T08:00:00Z".into(),
             summary: "1 change".into(),

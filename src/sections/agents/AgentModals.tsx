@@ -7,24 +7,24 @@ import {
 import { api } from "../../api";
 import { useAppState } from "../../providers/AppStateProvider";
 import type {
-  AutomationCreateDto,
-  AutomationDetailsDto,
-  AutomationSummaryDto,
-  AutomationUpdateDto,
+  AgentCreateDto,
+  AgentDetailsDto,
+  AgentSummaryDto,
+  AgentUpdateDto,
   RouteSummaryDto,
   SchedulerCapabilitiesDto,
 } from "../../types";
-import { AutomationForm } from "./AutomationForm";
+import { AgentForm } from "./AgentForm";
 
 interface AddProps {
   open: boolean;
   routes: RouteSummaryDto[];
   capabilities: SchedulerCapabilitiesDto | null;
   onClose: () => void;
-  onCreated: (a: AutomationSummaryDto) => void;
+  onCreated: (a: AgentSummaryDto) => void;
 }
 
-export function AddAutomationModal({
+export function AddAgentModal({
   open,
   routes,
   capabilities,
@@ -34,10 +34,10 @@ export function AddAutomationModal({
   const { pushToast } = useAppState();
   const [busy, setBusy] = useState(false);
 
-  async function submit(dto: AutomationCreateDto) {
+  async function submit(dto: AgentCreateDto) {
     setBusy(true);
     try {
-      const created = await api.automationsAdd(dto);
+      const created = await api.agentsAdd(dto);
       onCreated(created);
       onClose();
     } catch (e) {
@@ -53,15 +53,15 @@ export function AddAutomationModal({
       open={open}
       onClose={onClose}
       width="lg"
-      aria-labelledby="add-automation-title"
+      aria-labelledby="add-agent-title"
     >
       <ModalHeader
-        title="Add automation"
-        id="add-automation-title"
+        title="Add agent"
+        id="add-agent-title"
         onClose={onClose}
       />
       <ModalBody>
-        <AutomationForm
+        <AgentForm
           routes={routes}
           capabilities={capabilities}
           busy={busy}
@@ -76,14 +76,14 @@ export function AddAutomationModal({
 
 interface EditProps {
   open: boolean;
-  target: AutomationSummaryDto | null;
+  target: AgentSummaryDto | null;
   routes: RouteSummaryDto[];
   capabilities: SchedulerCapabilitiesDto | null;
   onClose: () => void;
-  onUpdated: (a: AutomationSummaryDto) => void;
+  onUpdated: (a: AgentSummaryDto) => void;
 }
 
-export function EditAutomationModal({
+export function EditAgentModal({
   open,
   target,
   routes,
@@ -92,7 +92,7 @@ export function EditAutomationModal({
   onUpdated,
 }: EditProps) {
   const { pushToast } = useAppState();
-  const [details, setDetails] = useState<AutomationDetailsDto | null>(null);
+  const [details, setDetails] = useState<AgentDetailsDto | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -103,7 +103,7 @@ export function EditAutomationModal({
     let cancelled = false;
     (async () => {
       try {
-        const d = await api.automationsGet(target.id);
+        const d = await api.agentsGet(target.id);
         if (!cancelled) setDetails(d);
       } catch (e) {
         // Guard the toast too: if the modal closed (or the target
@@ -117,11 +117,11 @@ export function EditAutomationModal({
     };
   }, [open, target, pushToast]);
 
-  async function submit(dto: AutomationCreateDto) {
+  async function submit(dto: AgentCreateDto) {
     if (!target) return;
     setBusy(true);
     try {
-      const update: AutomationUpdateDto = {
+      const update: AgentUpdateDto = {
         id: target.id,
         display_name: dto.display_name,
         description: dto.description,
@@ -144,7 +144,7 @@ export function EditAutomationModal({
         platform_options: dto.platform_options,
         log_retention_runs: dto.log_retention_runs,
       };
-      const updated = await api.automationsUpdate(update);
+      const updated = await api.agentsUpdate(update);
       onUpdated(updated);
       onClose();
     } catch (e) {
@@ -160,16 +160,16 @@ export function EditAutomationModal({
       open={open}
       onClose={onClose}
       width="lg"
-      aria-labelledby="edit-automation-title"
+      aria-labelledby="edit-agent-title"
     >
       <ModalHeader
         title={`Edit ${target?.display_name || target?.name || ""}`.trim()}
-        id="edit-automation-title"
+        id="edit-agent-title"
         onClose={onClose}
       />
       <ModalBody>
         {details ? (
-          <AutomationForm
+          <AgentForm
             initial={details}
             routes={routes}
             capabilities={capabilities}

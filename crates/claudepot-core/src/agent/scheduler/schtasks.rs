@@ -1,7 +1,7 @@
 //! Windows scheduler adapter — Task Scheduler via `schtasks.exe`.
 //!
-//! Each automation maps to a registered task at
-//! `\Claudepot\automation_<id>` whose XML lives at
+//! Each agent maps to a registered task at
+//! `\Claudepot\agent_<id>` whose XML lives at
 //! `<claudepot_data_dir>/scheduled-tasks/<id>.xml`. Operations:
 //! `schtasks /Create /XML <path> /TN ...` to register, `/Delete`
 //! to unregister, `/Run` to kickstart.
@@ -18,39 +18,39 @@ use std::process::Command;
 
 use chrono::{DateTime, Utc};
 
-use crate::automations::cron::{self, LaunchSlot};
-use crate::automations::error::AutomationError;
-use crate::automations::store::automation_dir;
-use crate::automations::types::{Automation, AutomationId, Trigger};
+use crate::agent::cron::{self, LaunchSlot};
+use crate::agent::error::AgentError;
+use crate::agent::store::agent_dir;
+use crate::agent::types::{Agent, AgentId, Trigger};
 
 use super::xml::{indent, xml_escape};
 use super::{cron_next_runs, RegisteredEntry, Scheduler, SchedulerCapabilities};
 
-const TASK_PATH_PREFIX: &str = r"\Claudepot\automation_";
+const TASK_PATH_PREFIX: &str = r"\Claudepot\agent_";
 
 pub struct SchtasksScheduler;
 
-pub fn task_path_for(id: &AutomationId) -> String {
+pub fn task_path_for(id: &AgentId) -> String {
     format!("{TASK_PATH_PREFIX}{id}")
 }
 
 /// Disk path to the persisted XML registration file.
-pub fn xml_path_for(id: &AutomationId) -> PathBuf {
+pub fn xml_path_for(id: &AgentId) -> PathBuf {
     crate::paths::claudepot_data_dir()
         .join("scheduled-tasks")
         .join(format!("{id}.xml"))
 }
 
 impl Scheduler for SchtasksScheduler {
-    fn register(&self, automation: &Automation) -> Result<(), AutomationError> {
+    fn register(&self, agent: &Agent) -> Result<(), AgentError> {
         // Manual triggers don't materialize Task Scheduler XML.
-        if automation.trigger.is_manual() {
-            let _ = self.unregister(&automation.id);
+        if agent.trigger.is_manual() {
+            let _ = self.unregister(&agent.id);
             return Ok(());
         }
 
-        let xml = render_xml(automation)?;
-        let xml_path = xml_path_for(&automation.id);
+        let xml = render_xml(agent)?;
+        let xml_path = xml_path_for(&agent.id);
         if let Some(parent) = xml_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -63,7 +63,7 @@ impl Scheduler for SchtasksScheduler {
             )
             .collect();
         crate::fs_utils::atomic_write(&xml_path, &utf16)?;
-        let task_path = task_path_for(&automation.id);
+        let task_path = task_path_for(&agent.id);
         run_schtasks(&[
             "/Create",
             "/XML",
@@ -76,7 +76,7 @@ impl Scheduler for SchtasksScheduler {
         Ok(())
     }
 
-    fn unregister(&self, id: &AutomationId) -> Result<(), AutomationError> {
+    fn unregister(&self, id: &AgentId) -> Result<(), AgentError> {
         let _ = run_schtasks(&["/Delete", "/TN", &task_path_for(id), "/F"]);
         let xml_path = xml_path_for(id);
         if xml_path.exists() {
@@ -85,11 +85,11 @@ impl Scheduler for SchtasksScheduler {
         Ok(())
     }
 
-    fn kickstart(&self, id: &AutomationId) -> Result<(), AutomationError> {
+    fn kickstart(&self, id: &AgentId) -> Result<(), AgentError> {
         run_schtasks(&["/Run", "/TN", &task_path_for(id)]).map_err(io_err)
     }
 
-    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AutomationError> {
+    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AgentError> {
         // Query the Claudepot folder; CSV output for parseability.
         let out = match Command::new("schtasks")
             .args(["/Query", "/TN", r"\Claudepot\*", "/FO", "CSV", "/NH"])
@@ -134,7 +134,7 @@ impl Scheduler for SchtasksScheduler {
         trigger: &Trigger,
         from: DateTime<Utc>,
         n: usize,
-    ) -> Result<Vec<DateTime<Utc>>, AutomationError> {
+    ) -> Result<Vec<DateTime<Utc>>, AgentError> {
         match trigger {
             Trigger::Cron { cron, .. } => cron_next_runs(cron, from, n),
             Trigger::Manual => Ok(Vec::new()),
@@ -164,8 +164,8 @@ impl Scheduler for SchtasksScheduler {
     }
 }
 
-fn io_err(s: String) -> AutomationError {
-    AutomationError::Io(std::io::Error::other(s))
+fn io_err(s: String) -> AgentError {
+    AgentError::Io(std::io::Error::other(s))
 }
 
 fn run_schtasks(args: &[&str]) -> Result<(), String> {
@@ -185,28 +185,28 @@ fn run_schtasks(args: &[&str]) -> Result<(), String> {
     ))
 }
 
-/// Render Task Scheduler XML for one automation. Pure: no OS calls.
+/// Render Task Scheduler XML for one agent. Pure: no OS calls.
 /// Output is byte-stable for golden tests.
-pub fn render_xml(automation: &Automation) -> Result<String, AutomationError> {
-    let auto_dir = automation_dir(&automation.id);
+pub fn render_xml(agent: &Agent) -> Result<String, AgentError> {
+    let auto_dir = agent_dir(&agent.id);
     let shim_path = auto_dir.join("run.cmd");
-    let display_label = automation
+    let display_label = agent
         .display_name
         .clone()
-        .unwrap_or_else(|| automation.name.clone());
+        .unwrap_or_else(|| agent.name.clone());
     let user_id = std::env::var("USERNAME")
         .ok()
         .or_else(|| std::env::var("USER").ok())
         .unwrap_or_else(|| String::from("user"));
 
-    let slots = match &automation.trigger {
+    let slots = match &agent.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,
         // Manual triggers short-circuit `register`; this arm is
         // unreachable in practice.
         Trigger::Manual => return Ok(String::new()),
     };
 
-    let opts = &automation.platform_options;
+    let opts = &agent.platform_options;
     // We force `InteractiveToken` until the credential-capture flow
     // for `run_when_logged_out=true` ships. Capabilities() returns
     // `false` for this knob, so the UI shouldn't even let it through;
@@ -225,7 +225,7 @@ pub fn render_xml(automation: &Automation) -> Result<String, AutomationError> {
     xml.push_str("<RegistrationInfo>\n");
     indent(&mut xml, 2);
     xml.push_str(&format!(
-        "<Description>Claudepot automation: {}</Description>\n",
+        "<Description>Claudepot agent: {}</Description>\n",
         xml_escape(&display_label)
     ));
     indent(&mut xml, 2);
@@ -233,7 +233,7 @@ pub fn render_xml(automation: &Automation) -> Result<String, AutomationError> {
     indent(&mut xml, 2);
     xml.push_str(&format!(
         "<URI>{}</URI>\n",
-        xml_escape(&task_path_for(&automation.id))
+        xml_escape(&task_path_for(&agent.id))
     ));
     indent(&mut xml, 1);
     xml.push_str("</RegistrationInfo>\n");
@@ -306,7 +306,7 @@ pub fn render_xml(automation: &Automation) -> Result<String, AutomationError> {
     indent(&mut xml, 3);
     xml.push_str(&format!(
         "<WorkingDirectory>{}</WorkingDirectory>\n",
-        xml_escape(&automation.cwd)
+        xml_escape(&agent.cwd)
     ));
     indent(&mut xml, 2);
     xml.push_str("</Exec>\n");
@@ -480,19 +480,19 @@ fn emit_calendar_trigger(out: &mut String, level: usize, slot: &LaunchSlot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automations::types::*;
+    use crate::agent::types::*;
     use chrono::Utc;
     use uuid::Uuid;
 
-    fn auto(name: &str, cron: &str) -> Automation {
+    fn auto(name: &str, cron: &str) -> Agent {
         let now = Utc::now();
-        Automation {
+        Agent {
             id: Uuid::nil(),
             name: name.into(),
             display_name: Some("Pretty".into()),
             description: None,
             enabled: true,
-            binary: AutomationBinary::FirstParty,
+            binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
             cwd: r"C:\Users\me\repo".into(),
             prompt: "say hi".into(),
@@ -527,7 +527,7 @@ mod tests {
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-16\"?>"));
         assert!(xml.contains("<Source>claudepot</Source>"));
         assert!(
-            xml.contains("<URI>\\Claudepot\\automation_00000000-0000-0000-0000-000000000000</URI>")
+            xml.contains("<URI>\\Claudepot\\agent_00000000-0000-0000-0000-000000000000</URI>")
         );
         assert!(xml.contains("<CalendarTrigger>"));
         assert!(xml.contains("<StartBoundary>2000-01-01T09:00:00</StartBoundary>"));
@@ -579,7 +579,7 @@ mod tests {
         let id = Uuid::nil();
         assert_eq!(
             task_path_for(&id),
-            r"\Claudepot\automation_00000000-0000-0000-0000-000000000000"
+            r"\Claudepot\agent_00000000-0000-0000-0000-000000000000"
         );
     }
 

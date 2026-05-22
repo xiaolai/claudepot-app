@@ -1,10 +1,10 @@
 //! Linux scheduler adapter — systemd-user timers.
 //!
-//! Each automation maps to a pair of unit files in
+//! Each agent maps to a pair of unit files in
 //! `~/.config/systemd/user/`:
 //!
-//! - `claudepot-automation-<id>.service` — runs the helper shim once.
-//! - `claudepot-automation-<id>.timer` — fires the service on cron.
+//! - `claudepot-agent-<id>.service` — runs the helper shim once.
+//! - `claudepot-agent-<id>.timer` — fires the service on cron.
 //!
 //! Operations: `daemon-reload` after writing units, then
 //! `enable --now <name>.timer` to register, `disable --now` to
@@ -20,50 +20,50 @@ use std::process::Command;
 
 use chrono::{DateTime, Utc};
 
-use crate::automations::cron::{self, LaunchSlot};
-use crate::automations::error::AutomationError;
-use crate::automations::store::automation_dir;
-use crate::automations::types::{Automation, AutomationId, Trigger};
+use crate::agent::cron::{self, LaunchSlot};
+use crate::agent::error::AgentError;
+use crate::agent::store::agent_dir;
+use crate::agent::types::{Agent, AgentId, Trigger};
 
 use super::{cron_next_runs, RegisteredEntry, Scheduler, SchedulerCapabilities};
 
-const UNIT_PREFIX: &str = "claudepot-automation-";
+const UNIT_PREFIX: &str = "claudepot-agent-";
 
 pub struct SystemdScheduler;
 
-pub fn unit_base_for(id: &AutomationId) -> String {
+pub fn unit_base_for(id: &AgentId) -> String {
     format!("{UNIT_PREFIX}{id}")
 }
 
-pub fn unit_dir() -> Result<PathBuf, AutomationError> {
-    let home = dirs::home_dir().ok_or(AutomationError::NoHomeDir)?;
+pub fn unit_dir() -> Result<PathBuf, AgentError> {
+    let home = dirs::home_dir().ok_or(AgentError::NoHomeDir)?;
     Ok(home.join(".config").join("systemd").join("user"))
 }
 
-pub fn timer_path_for(id: &AutomationId) -> Result<PathBuf, AutomationError> {
+pub fn timer_path_for(id: &AgentId) -> Result<PathBuf, AgentError> {
     Ok(unit_dir()?.join(format!("{UNIT_PREFIX}{id}.timer")))
 }
 
-pub fn service_path_for(id: &AutomationId) -> Result<PathBuf, AutomationError> {
+pub fn service_path_for(id: &AgentId) -> Result<PathBuf, AgentError> {
     Ok(unit_dir()?.join(format!("{UNIT_PREFIX}{id}.service")))
 }
 
 impl Scheduler for SystemdScheduler {
-    fn register(&self, automation: &Automation) -> Result<(), AutomationError> {
+    fn register(&self, agent: &Agent) -> Result<(), AgentError> {
         // Manual triggers don't materialize systemd units. Best-
         // effort cleanup of any prior schedule artifact, then
         // success.
-        if automation.trigger.is_manual() {
-            let _ = self.unregister(&automation.id);
+        if agent.trigger.is_manual() {
+            let _ = self.unregister(&agent.id);
             return Ok(());
         }
 
-        let timer_path = timer_path_for(&automation.id)?;
-        let service_path = service_path_for(&automation.id)?;
-        let (timer, service) = render_units(automation)?;
+        let timer_path = timer_path_for(&agent.id)?;
+        let service_path = service_path_for(&agent.id)?;
+        let (timer, service) = render_units(agent)?;
 
         // Idempotent unregister-first.
-        let base = unit_base_for(&automation.id);
+        let base = unit_base_for(&agent.id);
         let _ = run_systemctl(&["--user", "disable", "--now", &format!("{base}.timer")]);
 
         if let Some(parent) = timer_path.parent() {
@@ -76,7 +76,7 @@ impl Scheduler for SystemdScheduler {
         Ok(())
     }
 
-    fn unregister(&self, id: &AutomationId) -> Result<(), AutomationError> {
+    fn unregister(&self, id: &AgentId) -> Result<(), AgentError> {
         let base = unit_base_for(id);
         let _ = run_systemctl(&["--user", "disable", "--now", &format!("{base}.timer")]);
         if let Ok(p) = timer_path_for(id) {
@@ -93,12 +93,12 @@ impl Scheduler for SystemdScheduler {
         Ok(())
     }
 
-    fn kickstart(&self, id: &AutomationId) -> Result<(), AutomationError> {
+    fn kickstart(&self, id: &AgentId) -> Result<(), AgentError> {
         let base = unit_base_for(id);
         run_systemctl(&["--user", "start", &format!("{base}.service")]).map_err(io_err)
     }
 
-    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AutomationError> {
+    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AgentError> {
         let dir = match unit_dir() {
             Ok(d) => d,
             Err(_) => return Ok(Vec::new()),
@@ -137,7 +137,7 @@ impl Scheduler for SystemdScheduler {
         trigger: &Trigger,
         from: DateTime<Utc>,
         n: usize,
-    ) -> Result<Vec<DateTime<Utc>>, AutomationError> {
+    ) -> Result<Vec<DateTime<Utc>>, AgentError> {
         match trigger {
             Trigger::Cron { cron, .. } => cron_next_runs(cron, from, n),
             Trigger::Manual => Ok(Vec::new()),
@@ -155,8 +155,8 @@ impl Scheduler for SystemdScheduler {
     }
 }
 
-fn io_err(s: String) -> AutomationError {
-    AutomationError::Io(std::io::Error::other(s))
+fn io_err(s: String) -> AgentError {
+    AgentError::Io(std::io::Error::other(s))
 }
 
 fn run_systemctl(args: &[&str]) -> Result<(), String> {
@@ -177,7 +177,7 @@ fn run_systemctl(args: &[&str]) -> Result<(), String> {
 }
 
 /// Check whether `loginctl show-user $USER --property=Linger` reports `Linger=yes`.
-pub fn linger_status() -> Result<bool, AutomationError> {
+pub fn linger_status() -> Result<bool, AgentError> {
     let user = std::env::var("USER").unwrap_or_else(|_| String::from("nobody"));
     let out = Command::new("loginctl")
         .args(["show-user", &user, "--property=Linger"])
@@ -194,15 +194,15 @@ pub fn linger_status() -> Result<bool, AutomationError> {
     Ok(stdout.trim().eq_ignore_ascii_case("Linger=yes"))
 }
 
-/// Render `(timer, service)` unit-file contents for an automation.
+/// Render `(timer, service)` unit-file contents for an agent.
 /// Pure: no OS calls. Outputs are byte-stable for goldens.
-pub fn render_units(automation: &Automation) -> Result<(String, String), AutomationError> {
-    let auto_dir = automation_dir(&automation.id);
+pub fn render_units(agent: &Agent) -> Result<(String, String), AgentError> {
+    let auto_dir = agent_dir(&agent.id);
     let shim_path = auto_dir.join("run.sh");
-    let display_label = automation
+    let display_label = agent
         .display_name
         .clone()
-        .unwrap_or_else(|| automation.name.clone());
+        .unwrap_or_else(|| agent.name.clone());
 
     // --- service ---
     let mut svc = String::new();
@@ -213,7 +213,7 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     ));
     svc.push_str("[Unit]\n");
     svc.push_str(&format!(
-        "Description=Claudepot automation: {}\n",
+        "Description=Claudepot agent: {}\n",
         unit_value_escape(&display_label)
     ));
     svc.push('\n');
@@ -221,7 +221,7 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     svc.push_str("Type=oneshot\n");
     svc.push_str(&format!(
         "WorkingDirectory={}\n",
-        unit_value_escape(&automation.cwd)
+        unit_value_escape(&agent.cwd)
     ));
     // Quote ExecStart's argument so paths with spaces (or any
     // shell-relevant char) don't get split by systemd's tokenizer.
@@ -238,7 +238,7 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     svc.push_str("Nice=5\n");
 
     // --- timer ---
-    let slots = match &automation.trigger {
+    let slots = match &agent.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,
         // Manual triggers short-circuit `register` before reaching
         // unit rendering, so this arm is unreachable in practice.
@@ -252,7 +252,7 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     ));
     timer.push_str("[Unit]\n");
     timer.push_str(&format!(
-        "Description=Claudepot automation timer: {}\n",
+        "Description=Claudepot agent timer: {}\n",
         unit_value_escape(&display_label)
     ));
     timer.push('\n');
@@ -262,7 +262,7 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     }
     timer.push_str(&format!(
         "Persistent={}\n",
-        if automation.platform_options.catch_up_if_missed {
+        if agent.platform_options.catch_up_if_missed {
             "true"
         } else {
             "false"
@@ -270,13 +270,13 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     ));
     timer.push_str(&format!(
         "WakeSystem={}\n",
-        if automation.platform_options.wake_to_run {
+        if agent.platform_options.wake_to_run {
             "true"
         } else {
             "false"
         }
     ));
-    timer.push_str(&format!("Unit={UNIT_PREFIX}{}.service\n", automation.id));
+    timer.push_str(&format!("Unit={UNIT_PREFIX}{}.service\n", agent.id));
     timer.push('\n');
     timer.push_str("[Install]\n");
     timer.push_str("WantedBy=timers.target\n");
@@ -333,19 +333,19 @@ fn unit_value_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automations::types::*;
+    use crate::agent::types::*;
     use chrono::Utc;
     use uuid::Uuid;
 
-    fn auto(name: &str, cron: &str) -> Automation {
+    fn auto(name: &str, cron: &str) -> Agent {
         let now = Utc::now();
-        Automation {
+        Agent {
             id: Uuid::nil(),
             name: name.into(),
             display_name: Some("Pretty Name".into()),
             description: None,
             enabled: true,
-            binary: AutomationBinary::FirstParty,
+            binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
             cwd: "/home/me/repo".into(),
             prompt: "say hi".into(),
@@ -436,7 +436,7 @@ mod tests {
         let id = Uuid::nil();
         assert_eq!(
             unit_base_for(&id),
-            "claudepot-automation-00000000-0000-0000-0000-000000000000"
+            "claudepot-agent-00000000-0000-0000-0000-000000000000"
         );
     }
 }

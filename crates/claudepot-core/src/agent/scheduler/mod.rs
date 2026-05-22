@@ -17,8 +17,8 @@
 
 use chrono::{DateTime, Utc};
 
-use super::error::AutomationError;
-use super::types::{Automation, AutomationId, Trigger};
+use super::error::AgentError;
+use super::types::{Agent, AgentId, Trigger};
 
 pub mod noop;
 pub mod xml;
@@ -67,20 +67,20 @@ pub trait Scheduler {
     /// Render the OS artifact and register it. Idempotent —
     /// replacing a registration always goes through unregister
     /// + register internally.
-    fn register(&self, automation: &Automation) -> Result<(), AutomationError>;
+    fn register(&self, agent: &Agent) -> Result<(), AgentError>;
 
     /// Remove the registration and delete the artifact. Idempotent
     /// — "not found" is success.
-    fn unregister(&self, id: &AutomationId) -> Result<(), AutomationError>;
+    fn unregister(&self, id: &AgentId) -> Result<(), AgentError>;
 
     /// Trigger an out-of-schedule run via the OS scheduler.
     /// Distinct from the in-process Run-Now path, which spawns
     /// the helper shim directly under tokio.
-    fn kickstart(&self, id: &AutomationId) -> Result<(), AutomationError>;
+    fn kickstart(&self, id: &AgentId) -> Result<(), AgentError>;
 
     /// Enumerate all `claudepot_managed` registrations the OS
     /// reports.
-    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AutomationError>;
+    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AgentError>;
 
     /// Compute the next `n` fire times for a given trigger, in
     /// UTC. Pure function — does not touch the OS. Returns an
@@ -90,7 +90,7 @@ pub trait Scheduler {
         trigger: &Trigger,
         from: DateTime<Utc>,
         n: usize,
-    ) -> Result<Vec<DateTime<Utc>>, AutomationError>;
+    ) -> Result<Vec<DateTime<Utc>>, AgentError>;
 
     /// Surface the capability matrix.
     fn capabilities(&self) -> SchedulerCapabilities;
@@ -126,7 +126,7 @@ pub fn cron_next_runs(
     cron_expr: &str,
     from: DateTime<Utc>,
     n: usize,
-) -> Result<Vec<DateTime<Utc>>, AutomationError> {
+) -> Result<Vec<DateTime<Utc>>, AgentError> {
     use super::cron;
     let slots = cron::expand(cron_expr)?;
     if slots.is_empty() || n == 0 {
@@ -145,7 +145,7 @@ pub fn cron_next_runs(
         .with_timezone(&Utc)
         .checked_add_signed(chrono::Duration::seconds(60))
         .ok_or_else(|| {
-            AutomationError::InvalidCron(cron_expr.into(), "time arithmetic overflow".into())
+            AgentError::InvalidCron(cron_expr.into(), "time arithmetic overflow".into())
         })?;
     cursor = truncate_to_minute(cursor);
 

@@ -12,7 +12,7 @@ mod dto_activity;
 mod dto_activity_cards;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
-mod dto_automations;
+mod dto_agents;
 mod dto_cc_doctor;
 mod dto_cc_tips;
 mod dto_desktop;
@@ -860,22 +860,22 @@ pub fn run() {
             commands::routes::routes_zero_secret,
             commands::routes::routes_desktop_running,
             commands::routes::routes_desktop_restart,
-            commands::automations::automations_list,
-            commands::automations::automations_get,
-            commands::automations::automations_add,
-            commands::automations::automations_update,
-            commands::automations::automations_remove,
-            commands::automations::automations_set_enabled,
-            commands::automations::automations_run_now_start,
-            commands::automations::automations_runs_list,
-            commands::automations::automations_run_get,
-            commands::automations::automations_validate_name,
-            commands::automations::automations_validate_cron,
-            commands::automations::automations_scheduler_capabilities,
-            commands::automations::automations_dry_run_artifact,
-            commands::automations::automations_open_artifact_dir,
-            commands::automations::automations_linger_status,
-            commands::automations::automations_linger_enable,
+            commands::agents::agents_list,
+            commands::agents::agents_get,
+            commands::agents::agents_add,
+            commands::agents::agents_update,
+            commands::agents::agents_remove,
+            commands::agents::agents_set_enabled,
+            commands::agents::agents_run_now_start,
+            commands::agents::agents_runs_list,
+            commands::agents::agents_run_get,
+            commands::agents::agents_validate_name,
+            commands::agents::agents_validate_cron,
+            commands::agents::agents_scheduler_capabilities,
+            commands::agents::agents_dry_run_artifact,
+            commands::agents::agents_open_artifact_dir,
+            commands::agents::agents_linger_status,
+            commands::agents::agents_linger_enable,
             commands::templates::templates_list,
             commands::templates::templates_get,
             commands::templates::templates_sample_report,

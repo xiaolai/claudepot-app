@@ -1,14 +1,14 @@
 //! macOS scheduler adapter — launchd LaunchAgents.
 //!
-//! Each automation maps to one `~/Library/LaunchAgents/<label>.plist`
+//! Each agent maps to one `~/Library/LaunchAgents/<label>.plist`
 //! registered via `launchctl bootstrap gui/$UID <plist>`. Operations
 //! are idempotent: replacing a registration unloads + reloads;
 //! "not found" on unregister is a success.
 //!
 //! The plist's `ProgramArguments` invokes `/bin/sh <run.sh>` (the
-//! per-automation helper shim from `super::super::shim`), not
+//! per-agent helper shim from `super::super::shim`), not
 //! `claude` directly. The shim handles per-run dir allocation,
-//! prompt-via-stdin, and the post-exit `claudepot automation
+//! prompt-via-stdin, and the post-exit `claudepot agent
 //! _record-run` callback.
 //!
 //! launchd LaunchAgents intentionally do not support
@@ -21,26 +21,26 @@ use std::process::Command;
 
 use chrono::{DateTime, Utc};
 
-use crate::automations::cron::{self, LaunchSlot};
-use crate::automations::error::AutomationError;
-use crate::automations::store::automation_dir;
-use crate::automations::types::{Automation, AutomationId, Trigger};
+use crate::agent::cron::{self, LaunchSlot};
+use crate::agent::error::AgentError;
+use crate::agent::store::agent_dir;
+use crate::agent::types::{Agent, AgentId, Trigger};
 
 use super::xml::{indent, xml_escape};
 use super::{cron_next_runs, RegisteredEntry, Scheduler, SchedulerCapabilities};
 
-const LABEL_PREFIX: &str = "io.claudepot.automation.";
+const LABEL_PREFIX: &str = "io.claudepot.agent.";
 
 pub struct LaunchdScheduler;
 
-/// Top-level reverse-DNS label for an automation.
-pub fn label_for(id: &AutomationId) -> String {
+/// Top-level reverse-DNS label for an agent.
+pub fn label_for(id: &AgentId) -> String {
     format!("{LABEL_PREFIX}{id}")
 }
 
-/// Path to the plist this adapter writes for the given automation.
-pub fn plist_path_for(id: &AutomationId) -> Result<PathBuf, AutomationError> {
-    let home = dirs::home_dir().ok_or(AutomationError::NoHomeDir)?;
+/// Path to the plist this adapter writes for the given agent.
+pub fn plist_path_for(id: &AgentId) -> Result<PathBuf, AgentError> {
+    let home = dirs::home_dir().ok_or(AgentError::NoHomeDir)?;
     Ok(home
         .join("Library")
         .join("LaunchAgents")
@@ -48,19 +48,19 @@ pub fn plist_path_for(id: &AutomationId) -> Result<PathBuf, AutomationError> {
 }
 
 impl Scheduler for LaunchdScheduler {
-    fn register(&self, automation: &Automation) -> Result<(), AutomationError> {
+    fn register(&self, agent: &Agent) -> Result<(), AgentError> {
         // Manual triggers never get a scheduler artifact. Run-Now
         // is the only entry point. Best-effort unregister of any
         // stale plist from a prior schedule keeps the on-disk
         // state honest.
-        if automation.trigger.is_manual() {
-            let _ = self.unregister(&automation.id);
+        if agent.trigger.is_manual() {
+            let _ = self.unregister(&agent.id);
             return Ok(());
         }
 
-        let label = label_for(&automation.id);
-        let plist_path = plist_path_for(&automation.id)?;
-        let xml = render_plist(automation)?;
+        let label = label_for(&agent.id);
+        let plist_path = plist_path_for(&agent.id)?;
+        let xml = render_plist(agent)?;
 
         // Best-effort unload first so a stale registration is
         // replaced cleanly.
@@ -74,7 +74,7 @@ impl Scheduler for LaunchdScheduler {
         // `<auto_dir>/runs/<run-id>/`, so these stable files only
         // capture out-of-band launchd noise (registration errors,
         // pre-shim failures) — useful for forensics.
-        let auto_dir = automation_dir(&automation.id);
+        let auto_dir = agent_dir(&agent.id);
         std::fs::create_dir_all(&auto_dir)?;
         for f in ["launchd-stdout.log", "launchd-stderr.log"] {
             let _ = std::fs::OpenOptions::new()
@@ -95,14 +95,14 @@ impl Scheduler for LaunchdScheduler {
             plist_path.to_str().unwrap_or(""),
         ])
         .map_err(|e| {
-            AutomationError::Io(std::io::Error::other(format!(
+            AgentError::Io(std::io::Error::other(format!(
                 "launchctl bootstrap failed for {label}: {e}"
             )))
         })?;
         Ok(())
     }
 
-    fn unregister(&self, id: &AutomationId) -> Result<(), AutomationError> {
+    fn unregister(&self, id: &AgentId) -> Result<(), AgentError> {
         let label = label_for(id);
         // bootout is idempotent — non-zero exit on "not loaded" is fine.
         let _ = run_launchctl(&["bootout", &gui_target(&label)]);
@@ -114,17 +114,17 @@ impl Scheduler for LaunchdScheduler {
         Ok(())
     }
 
-    fn kickstart(&self, id: &AutomationId) -> Result<(), AutomationError> {
+    fn kickstart(&self, id: &AgentId) -> Result<(), AgentError> {
         let label = label_for(id);
         run_launchctl(&["kickstart", "-k", &gui_target(&label)]).map_err(|e| {
-            AutomationError::Io(std::io::Error::other(format!(
+            AgentError::Io(std::io::Error::other(format!(
                 "launchctl kickstart failed for {label}: {e}"
             )))
         })
     }
 
-    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AutomationError> {
-        let home = dirs::home_dir().ok_or(AutomationError::NoHomeDir)?;
+    fn list_managed(&self) -> Result<Vec<RegisteredEntry>, AgentError> {
+        let home = dirs::home_dir().ok_or(AgentError::NoHomeDir)?;
         let dir = home.join("Library").join("LaunchAgents");
         if !dir.exists() {
             return Ok(Vec::new());
@@ -160,7 +160,7 @@ impl Scheduler for LaunchdScheduler {
         trigger: &Trigger,
         from: DateTime<Utc>,
         n: usize,
-    ) -> Result<Vec<DateTime<Utc>>, AutomationError> {
+    ) -> Result<Vec<DateTime<Utc>>, AgentError> {
         match trigger {
             Trigger::Cron { cron, .. } => cron_next_runs(cron, from, n),
             Trigger::Manual => Ok(Vec::new()),
@@ -206,18 +206,18 @@ fn run_launchctl(args: &[&str]) -> Result<(), String> {
     ))
 }
 
-/// Render a launchd plist for an automation. Pure: does not touch
+/// Render a launchd plist for an agent. Pure: does not touch
 /// the OS. Output is byte-stable for golden tests.
-pub fn render_plist(automation: &Automation) -> Result<String, AutomationError> {
-    let label = label_for(&automation.id);
-    let auto_dir = automation_dir(&automation.id);
+pub fn render_plist(agent: &Agent) -> Result<String, AgentError> {
+    let label = label_for(&agent.id);
+    let auto_dir = agent_dir(&agent.id);
     let shim_path = auto_dir.join("run.sh");
     // launchd opens StandardOutPath/StandardErrorPath BEFORE
     // launching ProgramArguments, so the target path must already
     // exist as a writeable file (or be in a directory that does).
     // The previous design pointed at `runs/.latest/stdout.log` but
     // `.latest` was created by the shim AFTER launchd's open(2),
-    // racing the redirect. We instead point at stable per-automation
+    // racing the redirect. We instead point at stable per-agent
     // log files that the shim appends to from inside its own
     // per-run dir; launchd captures any out-of-band stderr
     // (e.g. shim startup errors before mkdir) into these stable
@@ -225,12 +225,12 @@ pub fn render_plist(automation: &Automation) -> Result<String, AutomationError> 
     let stdout_target = auto_dir.join("launchd-stdout.log");
     let stderr_target = auto_dir.join("launchd-stderr.log");
 
-    let slots = match &automation.trigger {
+    let slots = match &agent.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,
         // `register` short-circuits Manual before reaching here,
         // so this arm is unreachable in production. Returning
         // an empty plist is the fail-safe; a render-call against
-        // a Manual-trigger automation would produce a plist
+        // a Manual-trigger agent would produce a plist
         // with no calendar trigger, which launchd would simply
         // never fire — equivalent to Manual semantics — but we
         // never write it to disk.
@@ -257,7 +257,7 @@ pub fn render_plist(automation: &Automation) -> Result<String, AutomationError> 
     indent(&mut xml, 1);
     xml.push_str("</array>\n");
 
-    push_kv_string(&mut xml, 1, "WorkingDirectory", &automation.cwd);
+    push_kv_string(&mut xml, 1, "WorkingDirectory", &agent.cwd);
     push_kv_string(
         &mut xml,
         1,
@@ -352,19 +352,19 @@ fn push_string(out: &mut String, level: usize, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automations::types::*;
+    use crate::agent::types::*;
     use chrono::Utc;
     use uuid::Uuid;
 
-    fn auto(name: &str, cron: &str) -> Automation {
+    fn auto(name: &str, cron: &str) -> Agent {
         let now = Utc::now();
-        Automation {
+        Agent {
             id: Uuid::nil(),
             name: name.into(),
             display_name: None,
             description: None,
             enabled: true,
-            binary: AutomationBinary::FirstParty,
+            binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
             cwd: "/Users/me/repo".into(),
             prompt: "say hi".into(),
@@ -397,7 +397,7 @@ mod tests {
         let id = Uuid::nil();
         assert_eq!(
             label_for(&id),
-            "io.claudepot.automation.00000000-0000-0000-0000-000000000000"
+            "io.claudepot.agent.00000000-0000-0000-0000-000000000000"
         );
     }
 
@@ -408,7 +408,7 @@ mod tests {
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist"));
         assert!(xml.contains("<key>Label</key>"));
         assert!(xml.contains(
-            "<string>io.claudepot.automation.00000000-0000-0000-0000-000000000000</string>"
+            "<string>io.claudepot.agent.00000000-0000-0000-0000-000000000000</string>"
         ));
         assert!(xml.contains("<key>ProgramArguments</key>"));
         assert!(xml.contains("<string>/bin/sh</string>"));

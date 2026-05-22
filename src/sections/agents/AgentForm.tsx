@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Button } from "../../components/primitives/Button";
 import { api } from "../../api";
 import type {
-  AutomationCreateDto,
-  AutomationDetailsDto,
+  AgentCreateDto,
+  AgentDetailsDto,
   OutputFormat,
   PermissionMode,
   PlatformOptionsDto,
@@ -12,14 +12,14 @@ import type {
 } from "../../types";
 import { CronInput } from "./CronInput";
 
-interface AutomationFormProps {
+interface AgentFormProps {
   /** When provided, the form is in edit mode and shows current values. */
-  initial?: AutomationDetailsDto;
+  initial?: AgentDetailsDto;
   routes: RouteSummaryDto[];
   capabilities: SchedulerCapabilitiesDto | null;
   busy: boolean;
   submitLabel: string;
-  onSubmit: (dto: AutomationCreateDto) => void;
+  onSubmit: (dto: AgentCreateDto) => void;
   onCancel: () => void;
 }
 
@@ -42,7 +42,7 @@ const CWD_HINT =
  * (name is the URL-safe slug; renames would invalidate scheduler
  * registrations and run history, so we don't support them in v1).
  */
-export function AutomationForm({
+export function AgentForm({
   initial,
   routes,
   capabilities,
@@ -50,7 +50,7 @@ export function AutomationForm({
   submitLabel,
   onSubmit,
   onCancel,
-}: AutomationFormProps) {
+}: AgentFormProps) {
   const [name, setName] = useState(initial?.summary.name ?? "");
   const [displayName, setDisplayName] = useState(
     initial?.summary.display_name ?? "",
@@ -111,7 +111,7 @@ export function AutomationForm({
     let cancelled = false;
     (async () => {
       try {
-        const v = await api.automationsValidateName(name);
+        const v = await api.agentsValidateName(name);
         if (!cancelled) {
           setNameError(v.valid ? null : v.error ?? "invalid name");
         }
@@ -155,7 +155,7 @@ export function AutomationForm({
     (binaryKind === "first_party" || !!routeId);
 
   function handleSubmit() {
-    const dto: AutomationCreateDto = {
+    const dto: AgentCreateDto = {
       name: name.trim(),
       display_name: displayName.trim() || null,
       description: description.trim() || null,

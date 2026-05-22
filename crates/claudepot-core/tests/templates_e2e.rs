@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use claudepot_core::automations::types::HostPlatform;
+use claudepot_core::agent::types::HostPlatform;
 use claudepot_core::routes::Route;
 use claudepot_core::templates::apply::{
     apply_selected, validate_item, ItemOutcome, Operation, PendingChanges, PendingGroup,
@@ -327,7 +327,7 @@ async fn apply_executor_moves_files_inside_scope() {
     let apply = apply_config_for(tmp.path(), &["move", "mkdir"]);
     let pending = PendingChanges {
         schema_version: 1,
-        automation_id: "test-auto".into(),
+        agent_id: "test-auto".into(),
         run_id: "test-run".into(),
         generated_at: "2026-05-02T00:00:00Z".into(),
         summary: "1 move".into(),
@@ -584,7 +584,7 @@ fn caregiver_consent_file_is_mode_0600() {
 
     let record = ConsentRecord {
         id: ConsentRecord::new_id(),
-        automation_id: "auto-1".into(),
+        agent_id: "auto-1".into(),
         blueprint_id: "caregiver.weekly-report".into(),
         blueprint_version: 1,
         dependent_label: "Dad's MacBook".into(),
@@ -616,7 +616,7 @@ fn caregiver_consent_record_is_active_until_revoked() {
     let r = store
         .create(ConsentRecord {
             id: ConsentRecord::new_id(),
-            automation_id: "auto-1".into(),
+            agent_id: "auto-1".into(),
             blueprint_id: "caregiver.heartbeat".into(),
             blueprint_version: 1,
             dependent_label: "x".into(),

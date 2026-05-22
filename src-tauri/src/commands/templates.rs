@@ -9,7 +9,7 @@
 //! - `templates_capable_routes` — Routes that can run a given
 //!   template (filtered by capability + privacy)
 //! - `templates_install` — instantiate + persist as a regular
-//!   automation
+//!   agent
 //!
 //! Routes flag derivation (`is_local`, `is_private_cloud`,
 //! `capabilities_override`) is partial today: `is_local` is
@@ -17,8 +17,8 @@
 //! defaults to false until the routes module exposes a flag.
 //! `capabilities_override` is read when present.
 
-use claudepot_core::automations::types::HostPlatform;
-use claudepot_core::automations::AutomationStore;
+use claudepot_core::agent::types::HostPlatform;
+use claudepot_core::agent::AgentStore;
 use claudepot_core::paths::claudepot_data_dir;
 use claudepot_core::routes::{Route, RouteProvider, RouteStore};
 use claudepot_core::templates::apply::{apply_selected, sidecar, ApplyReceipt, PendingChanges};
@@ -28,7 +28,7 @@ use claudepot_core::templates::{
 };
 use serde::Serialize;
 
-use crate::dto_automations::{AutomationCreateDto, AutomationSummaryDto, PlatformOptionsDto};
+use crate::dto_agents::{AgentCreateDto, AgentSummaryDto, PlatformOptionsDto};
 use crate::dto_templates::{TemplateDetailsDto, TemplateInstanceDto, TemplateSummaryDto};
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,7 +55,7 @@ fn registry() -> Result<&'static TemplateRegistry, String> {
 
 #[tauri::command]
 pub async fn templates_list() -> Result<Vec<TemplateSummaryDto>, String> {
-    use claudepot_core::automations::types::HostPlatform;
+    use claudepot_core::agent::types::HostPlatform;
     let r = registry()?;
     // Filter to templates that declare support for the current
     // host. Without this, every macOS-shaped blueprint shows up
@@ -113,37 +113,37 @@ pub async fn templates_pending_changes(path: String) -> Result<PendingChanges, S
 /// the receipt as `Rejected` (and are never executed).
 #[tauri::command]
 pub async fn templates_apply_pending(
-    automation_id: String,
+    agent_id: String,
     pending_path: String,
     selected_ids: Vec<String>,
 ) -> Result<ApplyReceipt, String> {
     let pending = templates_pending_changes(pending_path).await?;
 
     // Refuse to apply pending changes whose recorded
-    // `automation_id` doesn't match the caller's argument.
-    // Otherwise a sidecar from automation A could be paired with
-    // automation B's broader apply policy and execute under the
+    // `agent_id` doesn't match the caller's argument.
+    // Otherwise a sidecar from agent A could be paired with
+    // agent B's broader apply policy and execute under the
     // wrong scope.
-    if pending.automation_id != automation_id {
+    if pending.agent_id != agent_id {
         return Err(format!(
-            "pending-changes file belongs to automation {} but apply was requested for {}",
-            pending.automation_id, automation_id
+            "pending-changes file belongs to agent {} but apply was requested for {}",
+            pending.agent_id, agent_id
         ));
     }
 
-    // Resolve the blueprint via the automation's template_id.
+    // Resolve the blueprint via the agent's template_id.
     let store =
-        AutomationStore::open().map_err(|e| format!("automations store open failed: {e}"))?;
+        AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
     let auto = store
         .list()
         .iter()
-        .find(|a| a.id.to_string() == automation_id)
-        .ok_or_else(|| format!("automation {automation_id} not found"))?
+        .find(|a| a.id.to_string() == agent_id)
+        .ok_or_else(|| format!("agent {agent_id} not found"))?
         .clone();
     let template_id = auto
         .template_id
         .clone()
-        .ok_or_else(|| format!("automation {automation_id} is not template-driven"))?;
+        .ok_or_else(|| format!("agent {agent_id} is not template-driven"))?;
     let r = registry()?;
     let bp = r
         .get(&template_id)
@@ -277,7 +277,7 @@ pub async fn templates_capable_routes(id: String) -> Result<Vec<RouteSummaryDto>
 #[tauri::command]
 pub async fn templates_install(
     instance: TemplateInstanceDto,
-) -> Result<AutomationSummaryDto, String> {
+) -> Result<AgentSummaryDto, String> {
     let r = registry()?;
     let bp = r
         .get(&instance.blueprint_id)
@@ -309,14 +309,14 @@ pub async fn templates_install(
 
     let resolved = tpl::instantiate(bp, &core_inst).map_err(|e| e.to_string())?;
 
-    // Translate `ResolvedAutomation` into the existing
-    // `AutomationCreateDto` shape and feed it into the existing
-    // automation-add path. The two stores (templates registry +
-    // automations store) are independent — no cross-store
+    // Translate `ResolvedAgent` into the existing
+    // `AgentCreateDto` shape and feed it into the existing
+    // agent-add path. The two stores (templates registry +
+    // agents store) are independent — no cross-store
     // transaction needed since template installation produces
-    // exactly one automation row.
+    // exactly one agent row.
     let unique_name = derive_unique_name(&resolved.name)?;
-    let dto = AutomationCreateDto {
+    let dto = AgentCreateDto {
         name: unique_name,
         display_name: resolved.display_name,
         description: resolved.description,
@@ -351,7 +351,7 @@ pub async fn templates_install(
         template_id: Some(resolved.template_id),
     };
 
-    crate::commands::automations::automations_add(dto).await
+    crate::commands::agents::agents_add(dto).await
 }
 
 // ---------- Helpers ----------
@@ -506,7 +506,7 @@ fn decode_placeholder_values(
 /// uniqueness rule. Append a numeric suffix until unique.
 fn derive_unique_name(base: &str) -> Result<String, String> {
     let store =
-        AutomationStore::open().map_err(|e| format!("automations store open failed: {e}"))?;
+        AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
     let existing: std::collections::HashSet<String> =
         store.list().iter().map(|a| a.name.clone()).collect();
     if !existing.contains(base) {
@@ -519,6 +519,6 @@ fn derive_unique_name(base: &str) -> Result<String, String> {
         }
     }
     Err(format!(
-        "failed to derive a unique automation name for {base:?}"
+        "failed to derive a unique agent name for {base:?}"
     ))
 }

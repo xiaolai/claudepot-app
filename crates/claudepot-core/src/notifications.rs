@@ -55,7 +55,10 @@ pub enum Category {
     KeyAdded,
     KeyRemoved,
     ConfigEdited,
-    AutomationRan,
+    // serialized value kept as "automationRan" (persisted in
+    // notifications.json + prefs); renamed by the Phase 1 migration.
+    #[serde(rename = "automationRan")]
+    AgentRan,
     RotationApplied,
     /// Auto-rotation swap attempt failed. The audit log has the full
     /// reason; the toast carries a concise summary. Separate from
@@ -203,7 +206,7 @@ impl Category {
 
             // P2 — Acknowledge
             AccountVerified | AccountSwitched | ProjectRenamed | ProjectRepaired
-            | SessionPruned | KeyCopied | KeyAdded | KeyRemoved | ConfigEdited | AutomationRan
+            | SessionPruned | KeyCopied | KeyAdded | KeyRemoved | ConfigEdited | AgentRan
             | RotationApplied | RotationFailed | BannerResolved => P2Acknowledge,
 
             // P3 — Ambient
@@ -241,7 +244,7 @@ impl Category {
             KeyAdded => ("Key added", "Actions", true),
             KeyRemoved => ("Key removed", "Actions", true),
             ConfigEdited => ("Config edited", "Actions", true),
-            AutomationRan => ("Automation ran", "Actions", true),
+            AgentRan => ("Agent ran", "Actions", true),
             RotationApplied => ("Account rotation applied", "Actions", true),
             RotationFailed => ("Account rotation failed", "Actions", true),
             BannerResolved => ("Banner resolved", "Actions", true),
@@ -287,7 +290,7 @@ impl Category {
             KeyAdded,
             KeyRemoved,
             ConfigEdited,
-            AutomationRan,
+            AgentRan,
             RotationApplied,
             RotationFailed,
             BannerResolved,
