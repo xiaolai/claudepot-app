@@ -130,6 +130,25 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
         updated_at: now,
         claudepot_managed: true,
         template_id: dto.template_id.clone(),
+        disallowed_tools: dto.disallowed_tools,
+        mcp_servers: dto.mcp_servers.into_iter().map(Into::into).collect(),
+        // Empty string from the form = "run as the active account".
+        run_as: dto.run_as.filter(|s| !s.is_empty()),
+        // 0 from the form = "no per-run token ceiling".
+        task_budget: dto.task_budget.filter(|&t| t != 0),
+        // An all-null RateLimit means "no limit"; collapse it.
+        rate_limit: dto.rate_limit.map(Into::into).filter(|r: &claudepot_core::agent::RateLimit| {
+            r.min_interval_secs.is_some() || r.max_per_day.is_some()
+        }),
+        // Phase 1: the GUI Add-Agent flow both creates AND arms the
+        // agent (`agents_add` registers it with the OS scheduler), so
+        // a GUI-created agent is `Installed`. The `Draft` lifecycle
+        // exists in the data model for the Phase-2 `agent draft` CLI
+        // path; the human-only draft->install gate is also Phase 2.
+        // `drafted_by` carries the audit actor when set by an AI /
+        // template path.
+        lifecycle: claudepot_core::agent::Lifecycle::Installed,
+        drafted_by: dto.drafted_by.clone(),
     })
 }
 
@@ -206,6 +225,15 @@ fn build_patch_from_update(
         run_when_logged_out: po.run_when_logged_out,
     });
 
+    // Phase-1 spec fields. `mcp_servers` converts each wire ref to
+    // its core form; `rate_limit` converts the wire DTO. The store's
+    // `update` already collapses an all-null rate limit / a zero
+    // task budget / an empty `run_as` string to `None`.
+    let mcp_servers = dto
+        .mcp_servers
+        .map(|v| v.into_iter().map(Into::into).collect());
+    let rate_limit = dto.rate_limit.map(Into::into);
+
     let patch = AgentPatch {
         display_name: dto.display_name,
         description: dto.description,
@@ -227,6 +255,11 @@ fn build_patch_from_update(
         trigger,
         platform_options,
         log_retention_runs: dto.log_retention_runs,
+        disallowed_tools: dto.disallowed_tools,
+        mcp_servers,
+        run_as: dto.run_as,
+        task_budget: dto.task_budget,
+        rate_limit,
     };
 
     // Cross-field invariant: bypassPermissions + non-empty

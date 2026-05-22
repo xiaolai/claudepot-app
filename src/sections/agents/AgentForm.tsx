@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components/primitives/Button";
+import { Tag } from "../../components/primitives/Tag";
 import { api } from "../../api";
 import type {
   AgentCreateDto,
   AgentDetailsDto,
+  McpServerRef,
   OutputFormat,
   PermissionMode,
   PlatformOptionsDto,
@@ -90,6 +92,30 @@ export function AgentForm({
     (initial?.output_format as OutputFormat) ?? "json",
   );
   const [bareMode, setBareMode] = useState(initial?.bare ?? false);
+  // ---- Agent-spec fields (Phase 1) ----
+  const [disallowedToolsText, setDisallowedToolsText] = useState(
+    (initial?.disallowed_tools ?? []).join(", "),
+  );
+  // MCP servers. Phase 1 surfaces a one-click "Attach Claudepot
+  // memory" toggle; custom servers carried on an edited agent are
+  // preserved verbatim but not editable in this form.
+  const [mcpServers, setMcpServers] = useState<McpServerRef[]>(
+    initial?.mcp_servers ?? [],
+  );
+  const [runAs, setRunAs] = useState(initial?.run_as ?? "");
+  const [taskBudget, setTaskBudget] = useState<string>(
+    initial?.task_budget != null ? String(initial.task_budget) : "",
+  );
+  const [rateMinInterval, setRateMinInterval] = useState<string>(
+    initial?.rate_limit?.min_interval_secs != null
+      ? String(initial.rate_limit.min_interval_secs)
+      : "",
+  );
+  const [rateMaxPerDay, setRateMaxPerDay] = useState<string>(
+    initial?.rate_limit?.max_per_day != null
+      ? String(initial.rate_limit.max_per_day)
+      : "",
+  );
   const [cron, setCron] = useState(initial?.summary.cron ?? "0 9 * * *");
   const [cronValid, setCronValid] = useState(true);
   const [platformOptions, setPlatformOptions] = useState<PlatformOptionsDto>(
@@ -129,9 +155,54 @@ export function AgentForm({
   // their own spaces. We walk character by character, tracking
   // paren depth, and only break on top-level separators.
   const allowedTools = parseAllowedTools(allowedToolsText);
+  const disallowedTools = parseAllowedTools(disallowedToolsText);
 
   const bypassWithoutTools =
     permissionMode === "bypassPermissions" && allowedTools.length === 0;
+
+  // Task budget: empty = "no ceiling" (null); otherwise a positive
+  // integer token count. Zero / negative / non-finite are rejected.
+  const taskBudgetTrimmed = taskBudget.trim();
+  const taskBudgetParsed: number | null =
+    taskBudgetTrimmed === "" ? null : Number(taskBudgetTrimmed);
+  const taskBudgetInvalid =
+    taskBudgetParsed !== null &&
+    (!Number.isFinite(taskBudgetParsed) ||
+      !Number.isInteger(taskBudgetParsed) ||
+      taskBudgetParsed <= 0);
+
+  // Rate limit: each field empty = "no limit". A populated field
+  // must be a positive integer.
+  const minIntervalTrimmed = rateMinInterval.trim();
+  const minIntervalParsed: number | null =
+    minIntervalTrimmed === "" ? null : Number(minIntervalTrimmed);
+  const minIntervalInvalid =
+    minIntervalParsed !== null &&
+    (!Number.isInteger(minIntervalParsed) || minIntervalParsed <= 0);
+  const maxPerDayTrimmed = rateMaxPerDay.trim();
+  const maxPerDayParsed: number | null =
+    maxPerDayTrimmed === "" ? null : Number(maxPerDayTrimmed);
+  const maxPerDayInvalid =
+    maxPerDayParsed !== null &&
+    (!Number.isInteger(maxPerDayParsed) || maxPerDayParsed <= 0);
+  const rateLimitInvalid = minIntervalInvalid || maxPerDayInvalid;
+
+  const memoryAttached = mcpServers.some(
+    (s) => s.kind === "claudepot_memory",
+  );
+  const customMcpServers = mcpServers.filter((s) => s.kind === "custom");
+
+  function toggleMemoryServer() {
+    setMcpServers((prev) =>
+      prev.some((s) => s.kind === "claudepot_memory")
+        ? prev.filter((s) => s.kind !== "claudepot_memory")
+        : [...prev, { kind: "claudepot_memory" }],
+    );
+  }
+
+  // Lifecycle is read-only in the form. A new (un-`initial`) agent
+  // is armed on create by the GUI flow, so it shows as "installed".
+  const lifecycle = initial?.summary.lifecycle ?? "installed";
 
   // Budget: empty string = "no cap" (null), otherwise must be a
   // finite non-negative number. NaN/negative are rejected before
@@ -151,6 +222,8 @@ export function AgentForm({
     !nameError &&
     !bypassWithoutTools &&
     !budgetInvalid &&
+    !taskBudgetInvalid &&
+    !rateLimitInvalid &&
     !busy &&
     (binaryKind === "first_party" || !!routeId);
 
@@ -190,6 +263,20 @@ export function AgentForm({
       timezone: initial?.summary.timezone ?? null,
       platform_options: platformOptions,
       log_retention_runs: initial?.log_retention_runs ?? 50,
+      // ---- Agent-spec fields (Phase 1) ----
+      disallowed_tools: disallowedTools,
+      mcp_servers: mcpServers,
+      run_as: runAs.trim() || null,
+      task_budget: taskBudgetParsed,
+      rate_limit:
+        minIntervalParsed === null && maxPerDayParsed === null
+          ? null
+          : {
+              min_interval_secs: minIntervalParsed,
+              max_per_day: maxPerDayParsed,
+            },
+      // Audit field — only the (Phase 2) AI-drafting path sets this.
+      drafted_by: null,
     };
     onSubmit(dto);
   }
@@ -409,6 +496,143 @@ export function AgentForm({
             disabled={busy}
             label="Skip hooks, plugin sync, attribution, auto-memory, keychain reads, CLAUDE.md auto-discovery"
           />
+        </Field>
+      </Group>
+
+      {/* Agent spec — the richer construction knobs (Phase 1) */}
+      <Group title="Agent spec">
+        <Field label="Disallowed tools (comma- or space-separated; optional)">
+          <input
+            type="text"
+            value={disallowedToolsText}
+            disabled={busy}
+            onChange={(e) => setDisallowedToolsText(e.target.value)}
+            placeholder="WebFetch Bash(rm *)"
+            spellCheck={false}
+            style={{ ...inputStyle(), fontFamily: "var(--ff-mono)" }}
+          />
+          <Hint>
+            Prefer the allowed-tools whitelist above. Use this only to
+            carve specific tools out of an otherwise broad grant.
+          </Hint>
+        </Field>
+
+        <Field label="MCP servers">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--sp-8)",
+              flexWrap: "wrap",
+            }}
+          >
+            <Button
+              variant={memoryAttached ? "subtle" : "outline"}
+              onClick={toggleMemoryServer}
+              disabled={busy}
+            >
+              {memoryAttached
+                ? "Detach Claudepot memory"
+                : "Attach Claudepot memory"}
+            </Button>
+            {memoryAttached && (
+              <Tag tone="accent">claudepot-memory</Tag>
+            )}
+            {customMcpServers.map((s) => (
+              <Tag key={s.name} tone="neutral" title="Custom MCP server">
+                {s.name}
+              </Tag>
+            ))}
+          </div>
+          <Hint>
+            Attaching Claudepot memory passes a stdio MCP server
+            running `claudepot mcp memory-server` to the agent. Custom
+            MCP servers carried on this agent are preserved but not
+            editable here.
+          </Hint>
+        </Field>
+
+        <Field label="Run as (account email; empty = active account)">
+          <input
+            type="text"
+            value={runAs}
+            disabled={busy}
+            onChange={(e) => setRunAs(e.target.value)}
+            placeholder="you@example.com"
+            spellCheck={false}
+            style={inputStyle()}
+          />
+          <Hint>
+            Phase 1 records this but still runs as the CLI-active
+            account; per-run credential pinning lands in a later
+            release.
+          </Hint>
+        </Field>
+
+        <Field label="Task budget (tokens per run; empty = no ceiling)">
+          <input
+            type="number"
+            step="1"
+            min="1"
+            value={taskBudget}
+            disabled={busy}
+            onChange={(e) => setTaskBudget(e.target.value)}
+            placeholder="50000"
+            style={inputStyle(taskBudgetInvalid)}
+          />
+          {taskBudgetInvalid && (
+            <Hint kind="error">
+              Task budget must be a positive whole number of tokens.
+            </Hint>
+          )}
+        </Field>
+
+        <Field label="Rate limit — minimum seconds between runs (optional)">
+          <input
+            type="number"
+            step="1"
+            min="1"
+            value={rateMinInterval}
+            disabled={busy}
+            onChange={(e) => setRateMinInterval(e.target.value)}
+            placeholder="3600"
+            style={inputStyle(minIntervalInvalid)}
+          />
+          {minIntervalInvalid && (
+            <Hint kind="error">
+              Minimum interval must be a positive whole number of
+              seconds.
+            </Hint>
+          )}
+        </Field>
+        <Field label="Rate limit — maximum runs per day (optional)">
+          <input
+            type="number"
+            step="1"
+            min="1"
+            value={rateMaxPerDay}
+            disabled={busy}
+            onChange={(e) => setRateMaxPerDay(e.target.value)}
+            placeholder="24"
+            style={inputStyle(maxPerDayInvalid)}
+          />
+          {maxPerDayInvalid && (
+            <Hint kind="error">
+              Maximum runs per day must be a positive whole number.
+            </Hint>
+          )}
+        </Field>
+
+        <Field label="Lifecycle">
+          <div>
+            <Tag tone={lifecycle === "installed" ? "ok" : "neutral"}>
+              {lifecycle}
+            </Tag>
+          </div>
+          <Hint>
+            Read-only. A draft is inert until armed; the GUI Add Agent
+            flow arms agents on create.
+          </Hint>
         </Field>
       </Group>
 

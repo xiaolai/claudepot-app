@@ -143,6 +143,14 @@ export function EditAgentModal({
         timezone: dto.timezone,
         platform_options: dto.platform_options,
         log_retention_runs: dto.log_retention_runs,
+        // Phase-1 spec fields.
+        disallowed_tools: dto.disallowed_tools,
+        mcp_servers: dto.mcp_servers,
+        run_as: dto.run_as,
+        // 0 = "clear the budget" on the update path; the form sends
+        // 0 when the field is empty.
+        task_budget: dto.task_budget ?? 0,
+        rate_limit: dto.rate_limit,
       };
       const updated = await api.agentsUpdate(update);
       onUpdated(updated);

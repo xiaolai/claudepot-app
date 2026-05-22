@@ -14,6 +14,25 @@ export type AgentBinaryKind = "first_party" | "route";
 
 export type TriggerKind = "scheduled" | "manual";
 
+/** Agent lifecycle. A draft is inert; only the GUI arms an agent. */
+export type Lifecycle = "draft" | "installed";
+
+/**
+ * Reference to an MCP server the agent attaches via `--mcp-config`.
+ * `claudepot_memory` resolves to Claudepot's own memory server;
+ * `custom` carries a name + an opaque MCP server config object.
+ * Mirrors the Rust `McpServerRef` enum (`#[serde(tag = "kind")]`).
+ */
+export type McpServerRef =
+  | { kind: "claudepot_memory" }
+  | { kind: "custom"; name: string; config: unknown };
+
+/** Claudepot-enforced run-frequency limit. Mirrors Rust `RateLimit`. */
+export interface RateLimit {
+  min_interval_secs: number | null;
+  max_per_day: number | null;
+}
+
 export type ArtifactKind =
   | "report"
   | "pending_changes"
@@ -62,6 +81,8 @@ export interface AgentSummaryDto {
   trigger_kind: string;
   cron: string | null;
   timezone: string | null;
+  /** "draft" or "installed". Read-only — the GUI arms an agent. */
+  lifecycle: string;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +100,14 @@ export interface AgentDetailsDto {
   extra_env: Record<string, string>;
   platform_options: PlatformOptionsDto;
   log_retention_runs: number;
+  // ---- Agent-spec fields (Phase 1) ----
+  disallowed_tools: string[];
+  mcp_servers: McpServerRef[];
+  run_as: string | null;
+  task_budget: number | null;
+  rate_limit: RateLimit | null;
+  /** Audit field: who drafted this agent. Read-only. */
+  drafted_by: string | null;
 }
 
 export interface AgentCreateDto {
@@ -105,6 +134,16 @@ export interface AgentCreateDto {
   timezone: string | null;
   platform_options: PlatformOptionsDto;
   log_retention_runs: number;
+  // ---- Agent-spec fields (Phase 1) ----
+  disallowed_tools: string[];
+  mcp_servers: McpServerRef[];
+  /** Account email; empty string = run as the active account. */
+  run_as: string | null;
+  /** Per-run token ceiling; 0 / null = no ceiling. */
+  task_budget: number | null;
+  rate_limit: RateLimit | null;
+  /** Audit field; the regular Add Agent flow leaves it null. */
+  drafted_by: string | null;
 }
 
 /**
@@ -137,6 +176,15 @@ export interface AgentUpdateDto {
   timezone?: string | null;
   platform_options?: PlatformOptionsDto;
   log_retention_runs?: number;
+  // ---- Agent-spec fields (Phase 1) ----
+  disallowed_tools?: string[];
+  mcp_servers?: McpServerRef[];
+  /** Empty string clears `run_as`; a non-empty email pins it. */
+  run_as?: string | null;
+  /** 0 clears the budget; a positive value sets it. */
+  task_budget?: number | null;
+  /** A populated value sets the rate limit; all-null clears it. */
+  rate_limit?: RateLimit | null;
 }
 
 export interface RunResultDto {
