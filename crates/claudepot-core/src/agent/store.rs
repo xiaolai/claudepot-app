@@ -60,7 +60,10 @@ use crate::paths::claudepot_data_dir;
 mod lock;
 use lock::StoreLock;
 
-use super::draft::{validate_cwd, validate_trigger_timezone};
+use super::draft::{
+    validate_cwd, validate_event_trigger_numerics, validate_rate_limit_numerics,
+    validate_trigger_timezone,
+};
 use super::error::AgentError;
 use super::slug::validate_name;
 use super::types::{Agent, AgentId, Lifecycle};
@@ -390,6 +393,12 @@ impl AgentStore {
         // scheduler adapter honors it (grill finding F11). This
         // gates the GUI Add-Agent path too, not just the CLI draft.
         validate_trigger_timezone(&agent.trigger)?;
+        // Numeric bounds (grill finding F20). Gates the GUI path
+        // too — a `debounce_secs` past the 7-day ceiling, or a
+        // zero-valued rate-limit slot, is rejected here as well as
+        // at draft time.
+        validate_event_trigger_numerics(&agent.trigger)?;
+        validate_rate_limit_numerics(agent.rate_limit.as_ref())?;
         if matches!(
             agent.permission_mode,
             super::types::PermissionMode::BypassPermissions
@@ -558,6 +567,11 @@ impl AgentStore {
         // A patch that switches to (or keeps) a cron trigger with an
         // IANA timezone is rejected — no adapter honors it (F11).
         validate_trigger_timezone(&a.trigger)?;
+        // Numeric bounds (F20) re-checked on update so a patch that
+        // sets `debounce_secs` past the ceiling, or zeroes a
+        // rate-limit slot, is rejected before persistence.
+        validate_event_trigger_numerics(&a.trigger)?;
+        validate_rate_limit_numerics(a.rate_limit.as_ref())?;
         a.updated_at = chrono::Utc::now();
         // Commit the validated clone back into the live store. Any
         // earlier `Err` return path leaves `self.file.agents[idx]`
@@ -949,6 +963,7 @@ mod tests {
             rate_limit: None,
             lifecycle: Lifecycle::Installed,
             drafted_by: None,
+            created_via: crate::agent::types::CreatedVia::Gui,
         }
     }
 
@@ -964,10 +979,18 @@ mod tests {
     fn add_save_reopen_preserves_records() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("agents.json");
+        // The first store must DROP before the second open — the F7
+        // advisory lock is exclusive and serializes same-process
+        // re-acquires too (the explicit unsupported pattern in the
+        // `lock.rs` doc: two `StoreLock`s alive on one thread is a
+        // self-deadlock). The original pre-lock pattern (`let mut
+        // store = …; …; let reopened = …`) deadlocks after F7
+        // landed; an explicit `drop` makes the lifetime obvious.
         let mut store = AgentStore::open_at(path.clone()).unwrap();
         store.add(sample("morning-pr")).unwrap();
         store.add(sample("evening-summary")).unwrap();
         store.save().unwrap();
+        drop(store);
 
         let reopened = AgentStore::open_at(path).unwrap();
         let names: Vec<&str> = reopened.list().iter().map(|a| a.name.as_str()).collect();
@@ -1098,13 +1121,17 @@ mod tests {
     fn migrate_v1_is_idempotent() {
         // Re-opening after a migration loads the v2 file directly and
         // does not re-run the migration (the legacy file is gone).
+        // The first store must DROP before the second open — see the
+        // analogous explanation in `add_save_reopen_preserves_records`.
         let dir = tempdir().unwrap();
         let v2_path = dir.path().join("agents.json");
         let v1_path = dir.path().join("automations.json");
         std::fs::write(&v1_path, V1_FIXTURE).unwrap();
 
-        let first = AgentStore::open_at(v2_path.clone()).unwrap();
-        assert_eq!(first.list().len(), 1);
+        {
+            let first = AgentStore::open_at(v2_path.clone()).unwrap();
+            assert_eq!(first.list().len(), 1);
+        }
 
         let second = AgentStore::open_at(v2_path.clone()).unwrap();
         assert_eq!(second.list().len(), 1);
@@ -1133,6 +1160,10 @@ mod tests {
         let id = a.id;
         store.add(a.clone()).unwrap();
         store.save().unwrap();
+        // Drop the first store so the lock releases — see the
+        // analogous comment in `add_save_reopen_preserves_records`
+        // for why this is mandatory under the F7 advisory lock.
+        drop(store);
 
         // The on-disk envelope is v2 with the native `agents` key.
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -1437,6 +1468,10 @@ mod tests {
         let id = a.id;
         seed.add(a).unwrap();
         seed.save().unwrap();
+        // Drop the seed store so the lock releases before the second
+        // open below (F7 lock is exclusive; see lock.rs's contract
+        // for why two same-thread holders deadlock).
+        drop(seed);
 
         // A stale v1 file is *also* present, with a different agent.
         std::fs::write(&v1_path, V1_FIXTURE).unwrap();

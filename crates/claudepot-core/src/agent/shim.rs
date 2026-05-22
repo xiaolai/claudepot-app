@@ -550,6 +550,7 @@ mod tests {
             rate_limit: None,
             lifecycle: Lifecycle::Installed,
             drafted_by: None,
+            created_via: crate::agent::types::CreatedVia::Gui,
         }
     }
 

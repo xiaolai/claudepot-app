@@ -876,6 +876,7 @@ pub fn run() {
             commands::agents::agents_get,
             commands::agents::agents_add,
             commands::agents::agent_install,
+            commands::agents::agent_add_from_template,
             commands::agents::agents_update,
             commands::agents::agents_remove,
             commands::agents::agents_set_enabled,

@@ -106,8 +106,17 @@ export interface AgentDetailsDto {
   run_as: string | null;
   task_budget: number | null;
   rate_limit: RateLimit | null;
-  /** Audit field: who drafted this agent. Read-only. */
+  /** Audit field: who drafted this agent. Read-only and free-text. */
   drafted_by: string | null;
+  /**
+   * Immutable audit signal stamped by the code path that produced
+   * this agent. `"gui"` = hand-authored via the GUI Add form;
+   * `"cli_draft"` = AI-drafted via the `agent draft` CLI verb;
+   * `"template"` = instantiated from a built-in template. Unlike
+   * `drafted_by`, this is not caller-supplied and cannot be
+   * spoofed — the install review flags every non-`"gui"` record.
+   */
+  created_via: string;
 }
 
 export interface AgentCreateDto {

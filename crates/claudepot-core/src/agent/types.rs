@@ -11,6 +11,12 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// `RouteDecision` is a routes-domain concept (which backend a run
+/// used, and why). It lives in [`crate::routes`]; it is re-exported
+/// here only because [`AgentRun`] carries one as its single
+/// cross-domain field — the run's recorded route outcome.
+pub use crate::routes::RouteDecision;
+
 /// Stable identifier for an agent. Mirrors `RouteId`; we use
 /// the same Uuid alias so callers don't have to learn a new shape.
 pub type AgentId = Uuid;
@@ -48,6 +54,49 @@ pub struct RateLimit {
     /// Maximum number of runs allowed in a rolling 24-hour window.
     #[serde(default)]
     pub max_per_day: Option<u32>,
+}
+
+/// The path that produced this agent record. Immutable —
+/// **stamped by the creating code path itself, not supplied by the
+/// caller** — and distinct from the free-text [`Agent::drafted_by`]
+/// audit string. Where `drafted_by` answers "who claims to have
+/// drafted this?", `created_via` answers "which Claudepot code path
+/// actually produced it?", which the GUI install review can flag
+/// (every non-`Gui` agent is one the user did not author by hand,
+/// and the bypassPermissions / cwd / MCP-server fields therefore
+/// deserve extra scrutiny — grill finding F19).
+///
+/// `#[serde(default)]` on the [`Agent`] field keeps older records
+/// (which predate this enum) deserializing cleanly. Default is
+/// [`CreatedVia::Gui`] — the safest assumption for a record that
+/// already exists on disk and has been operating without
+/// `created_via` tagging.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CreatedVia {
+    /// The GUI Add-Agent flow created this record. The user
+    /// authored every field with the form in front of them.
+    #[default]
+    Gui,
+    /// The `claudepot agent draft` CLI verb created this record
+    /// from an AI-supplied JSON spec. Stamped inside `build_draft`;
+    /// the AI-facing CLI cannot override it.
+    CliDraft,
+    /// A built-in template (e.g. Session Narrator) instantiated
+    /// this record. Stamped inside the template-instantiate code
+    /// path; templates cannot override it either.
+    Template,
+}
+
+impl CreatedVia {
+    /// Human label for review surfaces.
+    pub fn label(self) -> &'static str {
+        match self {
+            CreatedVia::Gui => "gui",
+            CreatedVia::CliDraft => "cli-draft",
+            CreatedVia::Template => "template",
+        }
+    }
 }
 
 /// Agent lifecycle. A `Draft` carries **no automatic or scheduled
@@ -160,8 +209,21 @@ pub struct Agent {
     /// template-drafted (e.g. `claude-code@2026-05-22`,
     /// `template:session-narrator`). Audit trail; `None` for
     /// agents created via the regular Add Agent flow.
+    ///
+    /// **Spoofable** — set by whichever caller invoked the create
+    /// path. The trustworthy "who really made this?" answer is
+    /// [`created_via`](Self::created_via), which is stamped by the
+    /// code path itself and cannot be supplied through the CLI/IPC
+    /// surface.
     #[serde(default)]
     pub drafted_by: Option<String>,
+    /// Which Claudepot code path produced this record. Immutable
+    /// audit signal — see [`CreatedVia`] for why this is distinct
+    /// from [`drafted_by`](Self::drafted_by) (grill finding F19).
+    /// `#[serde(default)]` keeps older records (no field on disk)
+    /// deserializing to `CreatedVia::Gui`.
+    #[serde(default)]
+    pub created_via: CreatedVia,
 }
 
 fn default_enabled() -> bool {
@@ -289,9 +351,8 @@ pub enum Trigger {
     /// **no OS scheduler artifact** (launchd/cron cannot watch for
     /// "session settled"). Scheduler adapters treat this exactly
     /// like [`Trigger::Manual`] — install the shim, register
-    /// nothing with the OS; the orchestrator
-    /// (`src-tauri/src/agent_event_orchestrator.rs`) is what fires
-    /// them.
+    /// nothing with the OS; the in-app event orchestrator (the
+    /// Tauri layer) is what fires them.
     Event { event: EventKind },
 }
 
@@ -377,9 +438,12 @@ pub struct AgentRun {
     /// for runs whose template generated nothing yet.
     #[serde(default)]
     pub output_artifacts: Vec<OutputArtifact>,
-    /// Decision recorded by the pre-run gate (`claudepot
-    /// agent _prerun`). `None` when the run skipped the
-    /// gate (legacy agents) or when no route was assigned.
+    /// The run's route outcome — an intentional cross-domain field.
+    /// [`RouteDecision`] is a routes-domain type (re-exported from
+    /// [`crate::routes`]); `AgentRun` records one because a run's
+    /// "which backend, and why" is part of its history. `None` when
+    /// the run skipped the pre-run gate (legacy agents) or when no
+    /// route was assigned.
     #[serde(default)]
     pub route_decision: Option<RouteDecision>,
 }
@@ -413,34 +477,6 @@ pub enum ArtifactKind {
     /// Email body/subject artifact for caregiver-style
     /// templates that deliver via SMTP.
     Email,
-}
-
-/// Decision recorded by the pre-run gate before invoking
-/// `claude -p`. The gate runs route-reachability probes and
-/// applies the blueprint's `fallback_policy`.
-///
-/// See `dev-docs/templates-implementation-plan.md` §5.3 for the
-/// truth table.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RouteDecision {
-    /// Run proceeded against the assigned route (or the default
-    /// route if `route_id` is `None`).
-    Ran { route_id: Option<String> },
-    /// Assigned route was unreachable; fell back to the default
-    /// route. Only legal when `privacy != local`.
-    Fallback {
-        from: String,
-        to: Option<String>,
-        reason: String,
-    },
-    /// Run skipped silently (assigned route unreachable + policy
-    /// = `skip`, or the route was outright invalid).
-    Skipped { reason: String },
-    /// Run skipped and a notification was posted (policy =
-    /// `alert`, or `privacy = local` and the local route is
-    /// unreachable).
-    SkippedAlerted { reason: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -573,10 +609,34 @@ mod tests {
             rate_limit: None,
             lifecycle: Lifecycle::Draft,
             drafted_by: None,
+            created_via: CreatedVia::Gui,
         };
         let s = serde_json::to_string(&a).unwrap();
         let back: Agent = serde_json::from_str(&s).unwrap();
         assert_eq!(a, back);
+    }
+
+    #[test]
+    fn created_via_defaults_to_gui_when_field_absent() {
+        // F19: older on-disk records have no `created_via`. They
+        // must deserialize cleanly with the default Gui value, so
+        // the GUI install review treats them as user-authored.
+        let raw = r#"{"id":"00000000-0000-0000-0000-000000000001","name":"x","enabled":true,"binary":{"kind":"first_party"},"cwd":"/tmp","prompt":"p","permission_mode":"default","trigger":{"kind":"manual"},"created_at":"2026-05-22T00:00:00Z","updated_at":"2026-05-22T00:00:00Z","lifecycle":"draft"}"#;
+        let a: Agent = serde_json::from_str(raw).unwrap();
+        assert_eq!(a.created_via, CreatedVia::Gui);
+    }
+
+    #[test]
+    fn created_via_round_trips_snake_case() {
+        for (v, s) in [
+            (CreatedVia::Gui, "\"gui\""),
+            (CreatedVia::CliDraft, "\"cli_draft\""),
+            (CreatedVia::Template, "\"template\""),
+        ] {
+            assert_eq!(serde_json::to_string(&v).unwrap(), s);
+            let back: CreatedVia = serde_json::from_str(s).unwrap();
+            assert_eq!(v, back);
+        }
     }
 
     #[test]

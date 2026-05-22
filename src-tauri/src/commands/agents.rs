@@ -8,7 +8,8 @@ use chrono::Utc;
 use claudepot_core::agent::{
     active_scheduler, current_claudepot_cli, install_shim, read_run as core_read_run,
     resolve_binary, scheduler::cron_next_runs, store::agent_runs_dir, Agent,
-    AgentBinary, AgentId, AgentPatch, AgentStore, PlatformOptions, Trigger,
+    AgentBinary, AgentId, AgentPatch, AgentStore, CreatedVia, PlatformOptions,
+    Trigger,
 };
 use claudepot_core::routes::RouteStore;
 use uuid::Uuid;
@@ -149,6 +150,18 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
         // template path.
         lifecycle: claudepot_core::agent::Lifecycle::Installed,
         drafted_by: dto.drafted_by.clone(),
+        // F19: `created_via` is stamped by the create path itself,
+        // never accepted from the wire. The GUI Add-Agent form
+        // arrives here with `template_id == None`; a
+        // `templates_install` call arrives with `template_id ==
+        // Some(_)` (the blueprint id). The free-text `drafted_by`
+        // is advisory; `created_via` is the trustworthy signal the
+        // install review can flag.
+        created_via: if dto.template_id.is_some() {
+            CreatedVia::Template
+        } else {
+            CreatedVia::Gui
+        },
     })
 }
 
@@ -285,6 +298,51 @@ fn build_patch_from_update(
 }
 
 // ---------- commands ----------
+
+/// F21: instantiate a built-in agent template as a fresh draft.
+///
+/// v1 ships exactly one template — the **Session Narrator** — so
+/// this command takes a single `template_id` string and dispatches
+/// on it. The resulting record is added to the store as `Draft`
+/// (the template constructor stamps `Lifecycle::Draft` and
+/// `created_via = Template`); the human reviews and arms it via
+/// the existing `agent_install` flow. Catalog growth is explicit
+/// v2 (PRD §13), so the dispatch is a `match` rather than a
+/// registry — additions are visible and a new arm forces a code
+/// change.
+#[tauri::command]
+pub async fn agent_add_from_template(
+    template_id: String,
+    cwd: String,
+) -> Result<AgentSummaryDto, String> {
+    let agent = match template_id.as_str() {
+        "session-narrator" => {
+            // `session_narrator` is a pure constructor; the cwd is
+            // the project the narrator watches (event scope rule).
+            claudepot_core::agent::templates::session_narrator(
+                &cwd,
+                Utc::now(),
+            )
+        }
+        other => return Err(format!("unknown template id: {other}")),
+    };
+
+    // Re-validate at the store boundary — `cwd` shape, name shape,
+    // numeric bounds — so a template that drifts past the rules
+    // surfaces here, not as a later failure during install.
+    let mut store = open_store()?;
+    if store.get_by_name(&agent.name).is_some() {
+        return Err(format!(
+            "an agent named '{}' already exists — rename or remove \
+             it before instantiating this template again",
+            agent.name
+        ));
+    }
+    let summary = AgentSummaryDto::from(&agent);
+    store.add(agent).map_err(err)?;
+    store.save().map_err(err)?;
+    Ok(summary)
+}
 
 #[tauri::command]
 pub async fn agents_list() -> Result<Vec<AgentSummaryDto>, String> {

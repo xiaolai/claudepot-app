@@ -6,9 +6,9 @@
 //! this boundary — agents don't carry credentials.
 
 use claudepot_core::agent::{
-    Agent, AgentBinary, AgentRun, Lifecycle, McpServerRef, OutputFormat,
-    PermissionMode, PlatformOptions, RateLimit, RunResult, SchedulerCapabilities,
-    Trigger, TriggerKind,
+    Agent, AgentBinary, AgentRun, CreatedVia, Lifecycle, McpServerRef,
+    OutputFormat, PermissionMode, PlatformOptions, RateLimit, RunResult,
+    SchedulerCapabilities, Trigger, TriggerKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -113,8 +113,28 @@ pub struct AgentDetailsDto {
     pub run_as: Option<String>,
     pub task_budget: Option<u64>,
     pub rate_limit: Option<RateLimitDto>,
-    /// Audit field: who drafted this agent. Read-only.
+    /// Audit field: who drafted this agent. Read-only. Free-text;
+    /// `created_via` is the trustworthy signal.
     pub drafted_by: Option<String>,
+    /// Immutable audit signal stamped by the code path that
+    /// produced this agent. Wire form is the snake_case
+    /// [`CreatedVia`] variant: `"gui"` / `"cli_draft"` / `"template"`.
+    /// `#[serde(default)]` so older clients without the field
+    /// continue to deserialize (default `"gui"`).
+    #[serde(default = "default_created_via")]
+    pub created_via: String,
+}
+
+fn default_created_via() -> String {
+    "gui".to_string()
+}
+
+fn created_via_str(c: CreatedVia) -> &'static str {
+    match c {
+        CreatedVia::Gui => "gui",
+        CreatedVia::CliDraft => "cli_draft",
+        CreatedVia::Template => "template",
+    }
 }
 
 impl From<&Agent> for AgentDetailsDto {
@@ -142,6 +162,7 @@ impl From<&Agent> for AgentDetailsDto {
             task_budget: a.task_budget,
             rate_limit: a.rate_limit.as_ref().map(RateLimitDto::from),
             drafted_by: a.drafted_by.clone(),
+            created_via: created_via_str(a.created_via).to_string(),
         }
     }
 }
@@ -420,7 +441,8 @@ pub enum RouteDecisionDto {
 
 impl From<AgentRun> for AgentRunDto {
     fn from(r: AgentRun) -> Self {
-        use claudepot_core::agent::types::{ArtifactKind, RouteDecision};
+        use claudepot_core::agent::types::ArtifactKind;
+        use claudepot_core::routes::RouteDecision;
         let output_artifacts = r
             .output_artifacts
             .into_iter()
@@ -563,8 +585,9 @@ mod tests {
     fn artifact_kind_renders_snake_case_strings() {
         use chrono::Utc;
         use claudepot_core::agent::types::{
-            ArtifactKind, AgentRun, HostPlatform, OutputArtifact, RouteDecision, TriggerKind,
+            AgentRun, ArtifactKind, HostPlatform, OutputArtifact, TriggerKind,
         };
+        use claudepot_core::routes::RouteDecision;
 
         let make = |kind: ArtifactKind| AgentRun {
             id: format!("r-{}", Utc::now().timestamp_micros()),

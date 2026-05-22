@@ -223,6 +223,7 @@ mod tests {
             rate_limit: None,
             lifecycle: crate::agent::types::Lifecycle::Installed,
             drafted_by: None,
+            created_via: crate::agent::types::CreatedVia::Gui,
         }
     }
 

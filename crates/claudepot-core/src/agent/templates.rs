@@ -20,8 +20,9 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::types::{
-    Agent, AgentBinary, EventKind, Lifecycle, McpServerRef, OutputFormat,
-    PermissionMode, PlatformOptions, RateLimit, Trigger, DEFAULT_DEBOUNCE_SECS,
+    Agent, AgentBinary, CreatedVia, EventKind, Lifecycle, McpServerRef,
+    OutputFormat, PermissionMode, PlatformOptions, RateLimit, Trigger,
+    DEFAULT_DEBOUNCE_SECS,
 };
 
 /// Stable id recorded in `drafted_by` for Session-Narrator drafts.
@@ -161,6 +162,10 @@ pub fn session_narrator(cwd: &str, now: DateTime<Utc>) -> Agent {
         }),
         lifecycle: Lifecycle::Draft,
         drafted_by: Some(SESSION_NARRATOR_DRAFTED_BY.to_string()),
+        // Stamped here, never overridable by the caller — the
+        // install review distinguishes a template-instantiated
+        // record from a hand-authored one (grill finding F19).
+        created_via: CreatedVia::Template,
     }
 }
 
@@ -232,6 +237,42 @@ mod tests {
         let schema: serde_json::Value =
             serde_json::from_str(a.json_schema.as_deref().unwrap()).unwrap();
         assert_eq!(schema["type"], "object");
+    }
+
+    #[test]
+    fn session_narrator_stamps_template_provenance() {
+        // F21 wiring: the template-instantiate path is the only
+        // call site that produces this constructor's output, so it
+        // is responsible for stamping `created_via = Template`.
+        // The GUI install review uses this signal to flag the
+        // record as non-hand-authored.
+        let a = session_narrator("/home/u/proj", now());
+        assert_eq!(a.created_via, CreatedVia::Template);
+    }
+
+    #[test]
+    fn session_narrator_passes_store_validation() {
+        // F21 regression: the produced draft must be accepted by
+        // `AgentStore::add` so the (new) `agent_add_from_template`
+        // Tauri command actually persists. This pins the contract:
+        // every constraint added to `add` (event-trigger rate
+        // limit, debounce-secs ceiling, cwd shape, …) must let
+        // this template through. If a future rule grows tighter
+        // than the template, the test breaks and forces the
+        // template's defaults to be adjusted in lock step.
+        use super::super::draft::{
+            validate_cwd, validate_event_trigger_numerics,
+            validate_rate_limit_numerics, validate_trigger_timezone,
+        };
+        use super::super::slug::validate_name;
+
+        let a = session_narrator("/home/u/proj", now());
+        validate_name(&a.name).expect("name");
+        validate_cwd(&a.cwd).expect("cwd");
+        validate_trigger_timezone(&a.trigger).expect("tz");
+        validate_event_trigger_numerics(&a.trigger).expect("debounce");
+        validate_rate_limit_numerics(a.rate_limit.as_ref())
+            .expect("rate limit");
     }
 
     #[test]
