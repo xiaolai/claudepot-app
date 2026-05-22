@@ -1,137 +1,112 @@
-//! Hidden CLI surface for the Agents feature.
+//! CLI surface for the Agents feature.
 //!
-//! v1 exposes exactly one verb — `_record-run` — invoked by the
-//! per-agent helper shim after `claude -p` exits. It parses
-//! the redirected `stdout.log`, assembles an [`AgentRun`]
-//! record, and writes `result.json` next to the logs.
+//! The `agent` command carries two kinds of verb:
 //!
-//! The leading underscore is intentional: this is plumbing, not a
-//! user-facing surface. The Agents GUI section is the
-//! sanctioned way to manage agents.
+//! * **Plumbing** — `_record-run` (leading underscore, `hide`d):
+//!   invoked by the per-agent helper shim after `claude -p` exits.
+//!   See [`record_run`].
+//! * **The AI-drafting path (Phase 2)** — `draft` / `list` /
+//!   `show`: a user-/AI-facing surface that lets an AI client
+//!   *propose* an agent and lets anyone *read* the agent store.
+//!   See [`draft`] and [`inspect`].
+//!
+//! ## The draft / install / edit gate — the security spine (D8)
+//!
+//! This CLI is deliberately **incomplete by design**. It exposes:
+//!
+//! * `draft` — *create* a `lifecycle = Draft` agent. A draft is
+//!   inert: it sits in `agents.json`, no scheduler artifact is
+//!   materialized, nothing fires.
+//! * `list` / `show` — *read* the agent store.
+//!
+//! It does **not** expose — and must never grow — an `install`
+//! verb or an `edit` verb. An AI client driving this CLI via Bash
+//! can therefore only *create drafts* and *read*. It can never:
+//!
+//! * arm an agent (draft -> installed + materialize the scheduler
+//!   artifact) — that is a human action in the Claudepot GUI;
+//! * mutate an already-armed (`Installed`) agent — to change an
+//!   installed agent, the AI drafts a *new* replacement and a
+//!   human installs it.
+//!
+//! That asymmetry IS the gate. A scheduled `claude -p` (possibly
+//! `bypassPermissions`) baked into a launchd plist is structurally
+//! a persistence mechanism; keeping arming and edit-of-armed
+//! human-only means an AI can author but never silently arm or
+//! re-arm one. Adding an `install`/`edit` verb here would
+//! dismantle the gate — do not.
+//!
+//! Submodules reach this entry file's private helpers via
+//! `use super::*;`.
 
-use std::path::PathBuf;
+use anyhow::Result;
+use claudepot_core::agent::Agent;
 
-use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, TimeZone, Utc};
-use claudepot_core::agent::{
-    agent_runs_dir, record_run, AgentId, RecordInputs, TriggerKind,
-};
-use uuid::Uuid;
+mod draft;
+mod inspect;
+mod record_run;
 
-/// Trigger-kind name as accepted on the CLI.
-fn parse_trigger(s: &str) -> Result<TriggerKind> {
-    match s {
-        "scheduled" => Ok(TriggerKind::Scheduled),
-        "manual" => Ok(TriggerKind::Manual),
-        other => Err(anyhow!(
-            "unknown --trigger value '{other}' (expected 'scheduled' or 'manual')"
-        )),
+pub use draft::{draft_cmd, DraftArgs};
+pub use inspect::{list_cmd, show_cmd};
+pub use record_run::record_run_cmd;
+
+// ---------- shared formatters ----------
+
+/// One-line trigger summary for the `list` table and `show`.
+pub(super) fn trigger_summary(agent: &Agent) -> String {
+    use claudepot_core::agent::Trigger;
+    match &agent.trigger {
+        Trigger::Cron { cron, timezone } => match timezone {
+            Some(tz) => format!("cron {cron} ({tz})"),
+            None => format!("cron {cron}"),
+        },
+        Trigger::Manual => "manual".to_string(),
     }
 }
 
-/// Parse a unix timestamp (seconds, integer string). Empty input
-/// falls back to "now" — useful when the calling shim can't
-/// reliably compute timestamps (e.g. Task Scheduler contexts that
-/// don't inherit PowerShell on PATH).
-fn parse_unix_seconds(raw: &str) -> Result<DateTime<Utc>> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(Utc::now());
-    }
-    let secs: i64 = trimmed
-        .parse()
-        .with_context(|| format!("invalid unix timestamp: {raw:?}"))?;
-    Utc.timestamp_opt(secs, 0)
-        .single()
-        .ok_or_else(|| anyhow!("ambiguous or out-of-range unix timestamp: {secs}"))
+/// Render one agent as a pretty JSON value. Shared by `draft`
+/// (`--json` confirmation), `list`, and `show` so the on-the-wire
+/// shape never drifts between verbs.
+pub(super) fn agent_to_json(agent: &Agent) -> serde_json::Value {
+    serde_json::json!({
+        "id": agent.id.to_string(),
+        "name": agent.name,
+        "display_name": agent.display_name,
+        "description": agent.description,
+        "enabled": agent.enabled,
+        "lifecycle": match agent.lifecycle {
+            claudepot_core::agent::Lifecycle::Draft => "draft",
+            claudepot_core::agent::Lifecycle::Installed => "installed",
+        },
+        "drafted_by": agent.drafted_by,
+        "model": agent.model,
+        "cwd": agent.cwd,
+        "prompt": agent.prompt,
+        "system_prompt": agent.system_prompt,
+        "append_system_prompt": agent.append_system_prompt,
+        "permission_mode": agent.permission_mode.as_cli_flag(),
+        "allowed_tools": agent.allowed_tools,
+        "disallowed_tools": agent.disallowed_tools,
+        "output_format": agent.output_format.as_cli_flag(),
+        "mcp_servers": agent.mcp_servers,
+        "run_as": agent.run_as,
+        "task_budget": agent.task_budget,
+        "rate_limit": agent.rate_limit,
+        "trigger": agent.trigger,
+        "trigger_summary": trigger_summary(agent),
+        "created_at": agent.created_at.to_rfc3339(),
+        "updated_at": agent.updated_at.to_rfc3339(),
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn record_run_cmd(
-    agent_id: &str,
-    run_id: &str,
-    exit: i32,
-    start: &str,
-    end: &str,
-    trigger: &str,
-    run_dir: Option<&str>,
-) -> Result<()> {
-    let id: AgentId = Uuid::parse_str(agent_id.trim())
-        .with_context(|| format!("invalid agent id: {agent_id:?}"))?;
-    let trigger_kind = parse_trigger(trigger)?;
-    let started_at = parse_unix_seconds(start)?;
-    let ended_at = parse_unix_seconds(end)?;
-    if ended_at < started_at {
-        return Err(anyhow!(
-            "ended_at ({ended_at}) is before started_at ({started_at})"
-        ));
+/// Print the result of a verb either as human text (via `human`)
+/// or as a single JSON value (`value`). Centralized so every verb
+/// honors `--json` identically per `rules/commands.md`.
+pub(super) fn emit(json: bool, value: serde_json::Value, human: &str) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        println!("{human}");
     }
-
-    // Locate the run directory. The shim passes --run-dir explicitly
-    // (the authoritative source); fall back to the default layout for
-    // backward compat / manual invocation.
-    let run_dir: PathBuf = match run_dir {
-        Some(p) => PathBuf::from(p),
-        None => agent_runs_dir(&id).join(run_id),
-    };
-    if !run_dir.exists() {
-        return Err(anyhow!(
-            "run directory does not exist: {} — did the shim run?",
-            run_dir.display()
-        ));
-    }
-    let stdout_log = run_dir.join("stdout.log");
-    let stderr_log = run_dir.join("stderr.log");
-
-    let inputs = RecordInputs {
-        agent_id: id,
-        run_id,
-        exit_code: exit,
-        started_at,
-        ended_at,
-        trigger_kind,
-        stdout_log_path: &stdout_log,
-        stderr_log_path: &stderr_log,
-        claudepot_version: env!("CARGO_PKG_VERSION"),
-    };
-    let _run = record_run(&inputs).with_context(|| {
-        format!(
-            "failed to record run: agent={id} run={run_id} dir={}",
-            run_dir.display()
-        )
-    })?;
-
-    // The shim sets exit code from the underlying `claude -p`; we
-    // just confirm we wrote the record.
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_trigger_accepts_known() {
-        assert_eq!(parse_trigger("scheduled").unwrap(), TriggerKind::Scheduled);
-        assert_eq!(parse_trigger("manual").unwrap(), TriggerKind::Manual);
-        assert!(parse_trigger("nope").is_err());
-    }
-
-    #[test]
-    fn parse_unix_seconds_round_trip() {
-        let dt = parse_unix_seconds("1745836800").unwrap();
-        assert_eq!(dt.timestamp(), 1745836800);
-        assert!(parse_unix_seconds("not a number").is_err());
-    }
-
-    #[test]
-    fn parse_unix_seconds_empty_falls_back_to_now() {
-        let dt = parse_unix_seconds("").unwrap();
-        let now = Utc::now();
-        // Within 5 seconds of "now" — the shim falls back to
-        // current time when it can't compute its own.
-        assert!((now - dt).num_seconds().abs() < 5);
-        let dt2 = parse_unix_seconds("   ").unwrap();
-        assert!((now - dt2).num_seconds().abs() < 5);
-    }
 }

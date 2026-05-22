@@ -467,6 +467,38 @@ impl AgentStore {
         Ok(())
     }
 
+    /// Arm a draft agent: flip its `lifecycle` from `Draft` to
+    /// `Installed` and return a clone of the now-armed record.
+    ///
+    /// This is the in-memory half of the human-only draft->install
+    /// gate (PRD §8.2 / D8). It is the **only** way a `lifecycle`
+    /// reaches `Installed` outside the v1->v2 migration: there is no
+    /// patch field for `lifecycle`, so `update` cannot touch it. The
+    /// caller (the GUI's `agent_install` Tauri command) materializes
+    /// the scheduler artifact *after* this returns and *before*
+    /// `save`, so a failed registration can be rolled back.
+    ///
+    /// Refuses an agent that is already `Installed` — arming is not
+    /// idempotent at this layer; a second call is a caller bug
+    /// (double-click, stale UI) and surfaces as an error rather
+    /// than silently re-materializing an artifact.
+    pub fn arm(&mut self, id: &AgentId) -> Result<Agent, AgentError> {
+        let idx = self
+            .file
+            .agents
+            .iter()
+            .position(|a| &a.id == id)
+            .ok_or_else(|| AgentError::NotFound(id.to_string()))?;
+        if self.file.agents[idx].lifecycle == Lifecycle::Installed {
+            return Err(AgentError::InvalidEnv(format!(
+                "agent {id} is already installed — drafts arm exactly once"
+            )));
+        }
+        self.file.agents[idx].lifecycle = Lifecycle::Installed;
+        self.file.agents[idx].updated_at = chrono::Utc::now();
+        Ok(self.file.agents[idx].clone())
+    }
+
     /// Remove and return the agent with the given id.
     pub fn remove(&mut self, id: &AgentId) -> Result<Agent, AgentError> {
         let idx = self
@@ -826,6 +858,43 @@ mod tests {
         assert!(matches!(
             store.add(bad),
             Err(AgentError::InvalidName(..))
+        ));
+    }
+
+    #[test]
+    fn arm_flips_draft_to_installed() {
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut draft = sample("draft-agent");
+        draft.lifecycle = Lifecycle::Draft;
+        let id = draft.id;
+        store.add(draft).unwrap();
+        assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Draft);
+
+        let armed = store.arm(&id).unwrap();
+        assert_eq!(armed.lifecycle, Lifecycle::Installed);
+        assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Installed);
+    }
+
+    #[test]
+    fn arm_rejects_already_installed_agent() {
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        // `sample` returns an Installed agent.
+        let installed = sample("armed-agent");
+        let id = installed.id;
+        store.add(installed).unwrap();
+        let err = store.arm(&id).unwrap_err();
+        assert!(matches!(err, AgentError::InvalidEnv(_)));
+    }
+
+    #[test]
+    fn arm_unknown_id_returns_not_found() {
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        assert!(matches!(
+            store.arm(&Uuid::new_v4()),
+            Err(AgentError::NotFound(_))
         ));
     }
 }

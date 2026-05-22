@@ -62,18 +62,25 @@ enum Commands {
         #[command(subcommand)]
         action: ProjectAction,
     },
-    /// Hidden plumbing for the Agents feature. Not a
-    /// user-facing surface — invoked by the per-agent helper
-    /// shim. The Agents GUI section is the sanctioned way
-    /// to define and manage agents.
+    /// Draft, list, and inspect agents (scheduled `claude -p`
+    /// runs). `agent draft` lets an AI client *propose* an agent;
+    /// `list` / `show` read the store. Arming a draft — and any
+    /// edit of an armed agent — is human-only in the Claudepot
+    /// GUI; this CLI deliberately has no `install` or `edit` verb.
+    /// The hidden `_record-run` plumbing verb is invoked by the
+    /// per-agent helper shim.
     //
     // `alias = "automation"` keeps already-installed agent shims
     // (which call `claudepot automation _record-run …`) working
     // across the Phase 1 rename.
-    #[command(name = "agent", alias = "automation", hide = true)]
+    #[command(name = "agent", alias = "automation")]
     Agent {
+        // Boxed: `AgentAction::Draft` carries ~16 optional flags,
+        // which would otherwise make `Commands` itself a
+        // large-variant enum. The box keeps the `Commands`
+        // discriminant small; the enum is parsed once at startup.
         #[command(subcommand)]
-        action: AgentAction,
+        action: Box<AgentAction>,
     },
     /// Export the current project's CC state to a portable bundle
     /// (`*.claudepot.tar.zst`).
@@ -705,8 +712,90 @@ enum TrashAction {
     },
 }
 
+// The `Draft` variant carries ~16 optional clap flags, so it is
+// much larger than the `_record-run` plumbing variant. This enum is
+// parsed exactly once at process start and immediately destructured
+// — it is never stored in bulk — so the size-difference cost the
+// lint warns about does not apply here.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum AgentAction {
+    /// Draft an inert agent from a spec. Accepts Claudepot-native
+    /// JSON or `AgentDefinition`-shaped JSON via `--from-json`
+    /// (file path, or `-` for stdin), and/or `--name/--cwd/--prompt`
+    /// flags. The new agent has `lifecycle = draft`: it sits in
+    /// `agents.json`, no scheduler artifact is created, NOTHING
+    /// fires. Arming a draft is a human-only action in the
+    /// Claudepot GUI — there is deliberately no `install` verb.
+    Draft {
+        /// Spec JSON source: a file path, or `-` to read stdin.
+        /// Accepts both Claudepot-native and `AgentDefinition`
+        /// shapes; the persisted form is always Claudepot-native.
+        #[arg(long = "from-json", value_name = "FILE|-")]
+        from_json: Option<String>,
+        /// Agent name (a-z, 0-9, dash; 1-64). Required for a
+        /// flags-only draft and for any `AgentDefinition`-shaped
+        /// JSON (which carries no Claudepot name). Overrides the
+        /// JSON `name` when both are present.
+        #[arg(long)]
+        name: Option<String>,
+        /// Working directory the agent runs in. Required for a
+        /// flags-only draft and for `AgentDefinition`-shaped JSON.
+        #[arg(long)]
+        cwd: Option<String>,
+        /// The `claude -p` prompt. Required for a flags-only draft.
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Optional human-friendly display name.
+        #[arg(long = "display-name")]
+        display_name: Option<String>,
+        /// Optional one-line description.
+        #[arg(long)]
+        description: Option<String>,
+        /// Model id (e.g. `claude-haiku-4-5`). Empty = CLI default.
+        #[arg(long)]
+        model: Option<String>,
+        /// Permission mode: default | acceptEdits | bypassPermissions
+        /// | dontAsk | plan | auto.
+        #[arg(long = "permission-mode")]
+        permission_mode: Option<String>,
+        /// Comma-/space-separated allowed-tools whitelist.
+        #[arg(long = "allowed-tools")]
+        allowed_tools: Option<String>,
+        /// Comma-/space-separated disallowed-tools list.
+        #[arg(long = "disallowed-tools")]
+        disallowed_tools: Option<String>,
+        /// Five-field cron expression. Sets a cron trigger; absent
+        /// = a manual trigger (the safe default for a draft).
+        #[arg(long)]
+        cron: Option<String>,
+        /// IANA timezone for the cron trigger. Requires `--cron`.
+        #[arg(long)]
+        timezone: Option<String>,
+        /// Pin the agent to a specific account email. Empty =
+        /// the CLI-active account at fire time.
+        #[arg(long = "run-as")]
+        run_as: Option<String>,
+        /// Per-run token ceiling.
+        #[arg(long = "task-budget")]
+        task_budget: Option<u64>,
+        /// Attach Claudepot's own MCP memory server to the draft.
+        #[arg(long = "attach-memory")]
+        attach_memory: bool,
+        /// Audit actor id recorded as `drafted_by` (e.g.
+        /// `claude-code@2026-05-22`). Defaults to `cli`.
+        #[arg(long = "drafted-by", default_value = "cli")]
+        drafted_by: String,
+    },
+    /// List every agent with its id, name, lifecycle, and trigger
+    /// summary. Read-only.
+    List,
+    /// Print one agent's full spec. Accepts an agent id or name.
+    /// Read-only.
+    Show {
+        /// Agent UUID or name.
+        id: String,
+    },
     /// Plumbing: invoked by an agent's helper shim after
     /// `claude -p` exits. Reads the redirected `stdout.log` from
     /// the per-run directory, parses the terminal `result` event,
@@ -1192,7 +1281,47 @@ async fn main() -> Result<()> {
                 all,
             )?,
         },
-        Commands::Agent { action } => match action {
+        Commands::Agent { action } => match *action {
+            AgentAction::Draft {
+                from_json,
+                name,
+                cwd,
+                prompt,
+                display_name,
+                description,
+                model,
+                permission_mode,
+                allowed_tools,
+                disallowed_tools,
+                cron,
+                timezone,
+                run_as,
+                task_budget,
+                attach_memory,
+                drafted_by,
+            } => commands::agent::draft_cmd(
+                cli.json,
+                commands::agent::DraftArgs {
+                    from_json,
+                    name,
+                    cwd,
+                    prompt,
+                    display_name,
+                    description,
+                    model,
+                    permission_mode,
+                    allowed_tools,
+                    disallowed_tools,
+                    cron,
+                    timezone,
+                    run_as,
+                    task_budget,
+                    attach_memory,
+                    drafted_by,
+                },
+            )?,
+            AgentAction::List => commands::agent::list_cmd(cli.json)?,
+            AgentAction::Show { id } => commands::agent::show_cmd(cli.json, &id)?,
             AgentAction::RecordRun {
                 agent_id,
                 run_id,

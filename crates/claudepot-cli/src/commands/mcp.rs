@@ -996,6 +996,25 @@ mod snippet_tests {
     }
 
     #[test]
+    fn snippet_teaches_the_agent_draft_verb() {
+        // Phase 2: the installed snippet must teach the AI-drafting
+        // path — the `agent draft` verb and the human-only install
+        // gate. The canonical assertions live in
+        // `mcp_snippet::tests`; this re-checks via the CLI's
+        // re-exported `snippet_body` so a drift in the install path
+        // is caught here too.
+        let body = snippet_body();
+        assert!(
+            body.contains("claudepot agent draft"),
+            "installed snippet must name the `agent draft` verb"
+        );
+        assert!(
+            body.contains("Review & install") || body.contains("inert"),
+            "installed snippet must teach that drafts are inert until installed"
+        );
+    }
+
+    #[test]
     fn install_snippet_writes_idempotently() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("nested").join("snippet.md");
