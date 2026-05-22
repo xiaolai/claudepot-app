@@ -18,7 +18,7 @@ import { memoryHealthApi } from "./memory-health";
 import { memoryApi } from "./memory";
 import { migrateApi } from "./migrate";
 import { routeApi } from "./route";
-import { automationApi } from "./automation";
+import { agentApi } from "./agent";
 import { templateApi } from "./template";
 import { usageApi } from "./usage";
 import { notificationApi } from "./notification";
@@ -47,7 +47,7 @@ export const api = {
   ...memoryHealthApi,
   ...memoryApi,
   ...routeApi,
-  ...automationApi,
+  ...agentApi,
   ...templateApi,
   ...usageApi,
   ...notificationApi,

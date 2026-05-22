@@ -62,6 +62,7 @@ export type Category =
   | "keyAdded"
   | "keyRemoved"
   | "configEdited"
+  // category value kept as "automationRan" — persisted wire format
   | "automationRan"
   | "rotationApplied"
   | "rotationFailed"
@@ -99,6 +100,7 @@ export const CATEGORY_NAMES: readonly Category[] = [
   "keyAdded",
   "keyRemoved",
   "configEdited",
+  // category value kept as "automationRan" — persisted wire format
   "automationRan",
   "rotationApplied",
   "rotationFailed",
@@ -278,6 +280,7 @@ export function priorityForCategory(category: Category): Priority {
     case "keyAdded":
     case "keyRemoved":
     case "configEdited":
+    // category value kept as "automationRan" — persisted wire format
     case "automationRan":
     case "rotationApplied":
     case "rotationFailed":

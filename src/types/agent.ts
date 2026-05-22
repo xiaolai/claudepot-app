@@ -1,4 +1,4 @@
-// Automation DTOs. Mirrors src-tauri/src/dto_automations.rs.
+// Agent DTOs. Mirrors src-tauri/src/dto_agents.rs.
 
 export type PermissionMode =
   | "default"
@@ -10,7 +10,7 @@ export type PermissionMode =
 
 export type OutputFormat = "text" | "json" | "stream-json";
 
-export type AutomationBinaryKind = "first_party" | "route";
+export type AgentBinaryKind = "first_party" | "route";
 
 export type TriggerKind = "scheduled" | "manual";
 
@@ -46,13 +46,13 @@ export interface PlatformOptionsDto {
   run_when_logged_out: boolean;
 }
 
-export interface AutomationSummaryDto {
+export interface AgentSummaryDto {
   id: string;
   name: string;
   display_name: string | null;
   description: string | null;
   enabled: boolean;
-  binary_kind: AutomationBinaryKind;
+  binary_kind: AgentBinaryKind;
   binary_route_id: string | null;
   model: string | null;
   cwd: string;
@@ -66,8 +66,8 @@ export interface AutomationSummaryDto {
   updated_at: string;
 }
 
-export interface AutomationDetailsDto {
-  summary: AutomationSummaryDto;
+export interface AgentDetailsDto {
+  summary: AgentSummaryDto;
   prompt: string;
   system_prompt: string | null;
   append_system_prompt: string | null;
@@ -81,11 +81,11 @@ export interface AutomationDetailsDto {
   log_retention_runs: number;
 }
 
-export interface AutomationCreateDto {
+export interface AgentCreateDto {
   name: string;
   display_name: string | null;
   description: string | null;
-  binary_kind: AutomationBinaryKind;
+  binary_kind: AgentBinaryKind;
   binary_route_id: string | null;
   model: string | null;
   cwd: string;
@@ -112,9 +112,9 @@ export interface AutomationCreateDto {
  * send a value to overwrite. There is no way to explicitly clear an
  * optional field to null via this DTO — to clear, use the appropriate
  * empty-shape value (e.g. empty string for cleared display name).
- * Mirrors the Rust `Option<T>` patch fields in `dto_automations.rs`.
+ * Mirrors the Rust `Option<T>` patch fields in `dto_agents.rs`.
  */
-export interface AutomationUpdateDto {
+export interface AgentUpdateDto {
   id: string;
   display_name?: string | null;
   description?: string | null;
@@ -149,9 +149,9 @@ export interface RunResultDto {
   errors: string[];
 }
 
-export interface AutomationRunDto {
+export interface AgentRunDto {
   id: string;
-  automation_id: string;
+  agent_id: string;
   started_at: string;
   ended_at: string;
   duration_ms: number;

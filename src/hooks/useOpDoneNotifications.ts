@@ -10,7 +10,7 @@ import { redactSecrets } from "../lib/redactSecrets";
  * channel emitted by `src-tauri/src/ops.rs::emit_terminal`, which is
  * the single point through which every op (verify_all, project rename,
  * session prune/slim/share/move, account login/register, clean
- * projects, automation run) signals completion.
+ * projects, agent run) signals completion.
  *
  * Phase 3 migration: the legacy hook called `dispatchOsNotification`
  * directly and gated on the `notify_on_op_done` scalar pref. The

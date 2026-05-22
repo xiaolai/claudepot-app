@@ -48,6 +48,7 @@ const COLD_START_ENABLED_BY_DEFAULT: ReadonlyArray<Category> = [
   "keyAdded",
   "keyRemoved",
   "configEdited",
+  // category value kept as "automationRan" — persisted in prefs
   "automationRan",
   "rotationApplied",
   "rotationFailed",

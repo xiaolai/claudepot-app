@@ -1,9 +1,9 @@
-//! Bundled automation templates.
+//! Bundled agent templates.
 //!
 //! A template is a curated, parameterized blueprint for an
-//! [`crate::automations::types::Automation`]. The user picks a
+//! [`crate::agent::types::Agent`]. The user picks a
 //! template from the gallery, fills any placeholders, and the
-//! template is materialized into the existing automations runtime.
+//! template is materialized into the existing agents runtime.
 //!
 //! See `dev-docs/templates-implementation-plan.md` for the
 //! authoritative spec.
@@ -22,7 +22,7 @@
 //!   this module.
 //!
 //! Runtime integration (instantiation into an
-//! `AutomationCreateDto`, the `_prerun` subcommand, the
+//! `AgentCreateDto`, the `_prerun` subcommand, the
 //! `record_run` extension for output-artifact discovery, and the
 //! apply pipeline) lives in later tiers per the build plan and
 //! is not exposed here yet.
@@ -45,7 +45,7 @@ pub use blueprint::{
 pub use capabilities::{default_capabilities_for, CapabilitySet};
 pub use error::TemplateError;
 pub use instantiate::{
-    instantiate, schedule_to_cron, PlaceholderValue, ResolvedAutomation, ResolvedSchedule,
+    instantiate, schedule_to_cron, PlaceholderValue, ResolvedAgent, ResolvedSchedule,
     ScheduleDto, TemplateInstance, Weekday,
 };
 pub use registry::TemplateRegistry;

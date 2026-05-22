@@ -1,4 +1,4 @@
-//! Errors raised by `claudepot-core::automations`.
+//! Errors raised by `claudepot-core::agent`.
 //!
 //! One enum at the module boundary. CLI/Tauri callers convert via
 //! `Display` (or `?`-into-anyhow at the top level).
@@ -6,17 +6,17 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum AutomationError {
+pub enum AgentError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("automation not found: {0}")]
+    #[error("agent not found: {0}")]
     NotFound(String),
 
-    #[error("automation name already taken: {0}")]
+    #[error("agent name already taken: {0}")]
     DuplicateName(String),
 
     #[error("invalid name '{0}': {1}")]
@@ -43,6 +43,6 @@ pub enum AutomationError {
     #[error("operation not supported on this platform: {0}")]
     UnsupportedPlatform(&'static str),
 
-    #[error("automation file at {0} is not managed by Claudepot — refusing to overwrite")]
+    #[error("agent file at {0} is not managed by Claudepot — refusing to overwrite")]
     NotManaged(String),
 }

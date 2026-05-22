@@ -154,9 +154,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let nav_third_party = MenuItemBuilder::with_id("app-menu:nav:third-party", "Third-parties")
         .build(app)
         .map_err(|e| format!("nav-third-party: {e}"))?;
-    let nav_automations = MenuItemBuilder::with_id("app-menu:nav:automations", "Automations")
+    let nav_agents = MenuItemBuilder::with_id("app-menu:nav:agents", "Agents")
         .build(app)
-        .map_err(|e| format!("nav-automations: {e}"))?;
+        .map_err(|e| format!("nav-agents: {e}"))?;
     let nav_global = MenuItemBuilder::with_id("app-menu:nav:global", "Global")
         .build(app)
         .map_err(|e| format!("nav-global: {e}"))?;
@@ -179,7 +179,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .item(&nav_projects)
         .item(&nav_keys)
         .item(&nav_third_party)
-        .item(&nav_automations)
+        .item(&nav_agents)
         .item(&nav_global)
         .item(&nav_settings)
         .separator()
@@ -443,7 +443,7 @@ fn inflight_label(op: &crate::ops::RunningOpInfo) -> String {
         OpKind::AccountLogin => "Account login".to_string(),
         OpKind::AccountRegister => "Adding account".to_string(),
         OpKind::VerifyAll => "Verifying accounts".to_string(),
-        OpKind::AutomationRun => "Running automation".to_string(),
+        OpKind::AgentRun => "Running agent".to_string(),
     }
 }
 

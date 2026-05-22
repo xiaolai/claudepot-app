@@ -1,18 +1,18 @@
-//! DTOs for the Automations Tauri surface.
+//! DTOs for the Agents Tauri surface.
 //!
-//! Outbound DTOs are projections of `claudepot_core::automations`
+//! Outbound DTOs are projections of `claudepot_core::agent`
 //! types into a JS-friendly shape. Inbound DTOs are the user's
 //! form input plus a slug for the binary picker. No secrets cross
-//! this boundary — automations don't carry credentials.
+//! this boundary — agents don't carry credentials.
 
-use claudepot_core::automations::{
-    Automation, AutomationBinary, AutomationRun, OutputFormat, PermissionMode, PlatformOptions,
+use claudepot_core::agent::{
+    Agent, AgentBinary, AgentRun, OutputFormat, PermissionMode, PlatformOptions,
     RunResult, SchedulerCapabilities, Trigger, TriggerKind,
 };
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutomationSummaryDto {
+pub struct AgentSummaryDto {
     pub id: String,
     pub name: String,
     pub display_name: Option<String>,
@@ -32,11 +32,11 @@ pub struct AutomationSummaryDto {
     pub updated_at: String,
 }
 
-impl From<&Automation> for AutomationSummaryDto {
-    fn from(a: &Automation) -> Self {
+impl From<&Agent> for AgentSummaryDto {
+    fn from(a: &Agent) -> Self {
         let (binary_kind, binary_route_id) = match &a.binary {
-            AutomationBinary::FirstParty => ("first_party".to_string(), None),
-            AutomationBinary::Route { route_id } => {
+            AgentBinary::FirstParty => ("first_party".to_string(), None),
+            AgentBinary::Route { route_id } => {
                 ("route".to_string(), Some(route_id.to_string()))
             }
         };
@@ -46,7 +46,7 @@ impl From<&Automation> for AutomationSummaryDto {
             }
             Trigger::Manual => ("manual".to_string(), None, None),
         };
-        AutomationSummaryDto {
+        AgentSummaryDto {
             id: a.id.to_string(),
             name: a.name.clone(),
             display_name: a.display_name.clone(),
@@ -69,8 +69,8 @@ impl From<&Automation> for AutomationSummaryDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutomationDetailsDto {
-    pub summary: AutomationSummaryDto,
+pub struct AgentDetailsDto {
+    pub summary: AgentSummaryDto,
     pub prompt: String,
     pub system_prompt: Option<String>,
     pub append_system_prompt: Option<String>,
@@ -84,10 +84,10 @@ pub struct AutomationDetailsDto {
     pub log_retention_runs: u32,
 }
 
-impl From<&Automation> for AutomationDetailsDto {
-    fn from(a: &Automation) -> Self {
-        AutomationDetailsDto {
-            summary: AutomationSummaryDto::from(a),
+impl From<&Agent> for AgentDetailsDto {
+    fn from(a: &Agent) -> Self {
+        AgentDetailsDto {
+            summary: AgentSummaryDto::from(a),
             prompt: a.prompt.clone(),
             system_prompt: a.system_prompt.clone(),
             append_system_prompt: a.append_system_prompt.clone(),
@@ -128,7 +128,7 @@ impl From<PlatformOptionsDto> for PlatformOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutomationCreateDto {
+pub struct AgentCreateDto {
     pub name: String,
     pub display_name: Option<String>,
     pub description: Option<String>,
@@ -150,7 +150,7 @@ pub struct AutomationCreateDto {
     pub extra_env: std::collections::BTreeMap<String, String>,
     /// Kind of trigger to install. Defaults to `"cron"` so existing
     /// call sites stay unchanged. `"manual"` builds a `Trigger::Manual`
-    /// automation (no scheduler artifact, only Run-Now).
+    /// agent (no scheduler artifact, only Run-Now).
     #[serde(default)]
     pub trigger_kind: Option<String>,
     pub cron: String,
@@ -158,7 +158,7 @@ pub struct AutomationCreateDto {
     pub platform_options: PlatformOptionsDto,
     #[serde(default = "default_log_retention")]
     pub log_retention_runs: u32,
-    /// Set when this automation was instantiated from a bundled
+    /// Set when this agent was instantiated from a bundled
     /// template. Drives template-aware post-run behavior.
     #[serde(default)]
     pub template_id: Option<String>,
@@ -176,7 +176,7 @@ fn default_log_retention() -> u32 {
 /// sends an appropriate empty value (e.g. an empty string), and the
 /// patch builder converts it on the way to the store.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AutomationUpdateDto {
+pub struct AgentUpdateDto {
     pub id: String,
     #[serde(default)]
     pub display_name: Option<String>,
@@ -223,9 +223,9 @@ pub struct AutomationUpdateDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutomationRunDto {
+pub struct AgentRunDto {
     pub id: String,
-    pub automation_id: String,
+    pub agent_id: String,
     pub started_at: String,
     pub ended_at: String,
     pub duration_ms: i64,
@@ -238,7 +238,7 @@ pub struct AutomationRunDto {
     pub host_platform: String,
     pub claudepot_version: String,
     /// Files the run produced under its blueprint's output path.
-    /// Empty for non-template automations and for runs whose
+    /// Empty for non-template agents and for runs whose
     /// template generated nothing yet.
     #[serde(default)]
     pub output_artifacts: Vec<OutputArtifactDto>,
@@ -274,9 +274,9 @@ pub enum RouteDecisionDto {
     },
 }
 
-impl From<AutomationRun> for AutomationRunDto {
-    fn from(r: AutomationRun) -> Self {
-        use claudepot_core::automations::types::{ArtifactKind, RouteDecision};
+impl From<AgentRun> for AgentRunDto {
+    fn from(r: AgentRun) -> Self {
+        use claudepot_core::agent::types::{ArtifactKind, RouteDecision};
         let output_artifacts = r
             .output_artifacts
             .into_iter()
@@ -301,9 +301,9 @@ impl From<AutomationRun> for AutomationRunDto {
             RouteDecision::Skipped { reason } => RouteDecisionDto::Skipped { reason },
             RouteDecision::SkippedAlerted { reason } => RouteDecisionDto::SkippedAlerted { reason },
         });
-        AutomationRunDto {
+        AgentRunDto {
             id: r.id,
-            automation_id: r.automation_id.to_string(),
+            agent_id: r.agent_id.to_string(),
             started_at: r.started_at.to_rfc3339(),
             ended_at: r.ended_at.to_rfc3339(),
             duration_ms: r.duration_ms,
@@ -414,17 +414,17 @@ mod tests {
     /// "report" / "pending_changes" / "apply_receipt" / "email".
     /// If a new ArtifactKind is added in core, the From impl must
     /// add an arm — this test fails before the bug reaches
-    /// AutomationsSection's report-button rendering.
+    /// AgentsSection's report-button rendering.
     #[test]
     fn artifact_kind_renders_snake_case_strings() {
         use chrono::Utc;
-        use claudepot_core::automations::types::{
-            ArtifactKind, AutomationRun, HostPlatform, OutputArtifact, RouteDecision, TriggerKind,
+        use claudepot_core::agent::types::{
+            ArtifactKind, AgentRun, HostPlatform, OutputArtifact, RouteDecision, TriggerKind,
         };
 
-        let make = |kind: ArtifactKind| AutomationRun {
+        let make = |kind: ArtifactKind| AgentRun {
             id: format!("r-{}", Utc::now().timestamp_micros()),
-            automation_id: uuid::Uuid::new_v4(),
+            agent_id: uuid::Uuid::new_v4(),
             started_at: Utc::now(),
             ended_at: Utc::now(),
             duration_ms: 0,
@@ -452,7 +452,7 @@ mod tests {
             (ArtifactKind::Email, "email"),
         ];
         for (kind, expected) in cases {
-            let dto = AutomationRunDto::from(make(kind));
+            let dto = AgentRunDto::from(make(kind));
             assert_eq!(dto.output_artifacts[0].kind, expected);
             assert_eq!(dto.output_artifacts[0].path, "/tmp/r.md");
             assert_eq!(dto.output_artifacts[0].bytes, 1024);
@@ -498,14 +498,14 @@ mod tests {
     #[test]
     fn run_dto_omits_trigger_kind_manual_label_consistently() {
         // Manual + Scheduled are both surfaced as lowercase strings.
-        // This pins the literal that AutomationCard / RunHistoryPanel
+        // This pins the literal that AgentCard / RunHistoryPanel
         // assume when filtering / labeling rows.
         use chrono::Utc;
-        use claudepot_core::automations::types::{AutomationRun, HostPlatform, TriggerKind};
+        use claudepot_core::agent::types::{AgentRun, HostPlatform, TriggerKind};
 
-        let mut r = AutomationRun {
+        let mut r = AgentRun {
             id: "r1".into(),
-            automation_id: uuid::Uuid::new_v4(),
+            agent_id: uuid::Uuid::new_v4(),
             started_at: Utc::now(),
             ended_at: Utc::now(),
             duration_ms: 0,
@@ -520,8 +520,8 @@ mod tests {
             output_artifacts: vec![],
             route_decision: None,
         };
-        assert_eq!(AutomationRunDto::from(r.clone()).trigger_kind, "manual");
+        assert_eq!(AgentRunDto::from(r.clone()).trigger_kind, "manual");
         r.trigger_kind = TriggerKind::Scheduled;
-        assert_eq!(AutomationRunDto::from(r).trigger_kind, "scheduled");
+        assert_eq!(AgentRunDto::from(r).trigger_kind, "scheduled");
     }
 }

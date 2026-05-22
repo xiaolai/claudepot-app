@@ -1,24 +1,24 @@
-//! Domain types for automations.
+//! Domain types for agents.
 //!
-//! `Automation` is the on-disk record. `AutomationRun` is one
+//! `Agent` is the on-disk record. `AgentRun` is one
 //! historical execution. Both are platform-agnostic; per-platform
 //! materialization (launchd plist, Task Scheduler XML, systemd
 //! units) is the concern of `super::scheduler`, not these types.
 //!
-//! See `dev-docs/automations-implementation-plan.md` §3 for the
+//! See `dev-docs/agents-implementation-plan.md` §3 for the
 //! authoritative schema description.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Stable identifier for an automation. Mirrors `RouteId`; we use
+/// Stable identifier for an agent. Mirrors `RouteId`; we use
 /// the same Uuid alias so callers don't have to learn a new shape.
-pub type AutomationId = Uuid;
+pub type AgentId = Uuid;
 
 /// One scheduled or manually-triggered `claude -p` run definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Automation {
-    pub id: AutomationId,
+pub struct Agent {
+    pub id: AgentId,
     pub name: String,
     #[serde(default)]
     pub display_name: Option<String>,
@@ -26,7 +26,7 @@ pub struct Automation {
     pub description: Option<String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    pub binary: AutomationBinary,
+    pub binary: AgentBinary,
     #[serde(default)]
     pub model: Option<String>,
     pub cwd: String,
@@ -61,11 +61,11 @@ pub struct Automation {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     #[serde(default = "default_managed")]
     pub claudepot_managed: bool,
-    /// Set when this automation was instantiated from a bundled
+    /// Set when this agent was instantiated from a bundled
     /// template. Drives template-aware post-run behavior in
     /// `record_run` (output-artifact discovery, apply-sidecar
-    /// parsing, caregiver SMTP delivery). `None` for automations
-    /// created via the regular Add Automation flow.
+    /// parsing, caregiver SMTP delivery). `None` for agents
+    /// created via the regular Add Agent flow.
     #[serde(default)]
     pub template_id: Option<String>,
 }
@@ -85,7 +85,7 @@ fn default_managed() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AutomationBinary {
+pub enum AgentBinary {
     /// `which claude` at run time. Honors whatever account is in
     /// the Claudepot CLI slot.
     FirstParty,
@@ -149,7 +149,7 @@ pub enum Trigger {
         timezone: Option<String>,
     },
     /// On-demand only — never fires from a scheduler artifact.
-    /// Required by template-driven automations (caregiver
+    /// Required by template-driven agents (caregiver
     /// heartbeat, on-demand diagnostics) where Run Now is the
     /// sole entry point.
     ///
@@ -175,7 +175,7 @@ impl Trigger {
 /// Cross-platform behavior toggles. Each scheduler adapter honors
 /// what its OS supports; unsupported toggles are silently ignored
 /// at the adapter level (and surfaced as greyed-out controls in
-/// the UI per `automations_scheduler_capabilities`).
+/// the UI per `agents_scheduler_capabilities`).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlatformOptions {
     #[serde(default)]
@@ -200,11 +200,14 @@ fn default_catch_up() -> bool {
     true
 }
 
-/// One historical run of an automation.
+/// One historical run of an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AutomationRun {
+pub struct AgentRun {
     pub id: String,
-    pub automation_id: AutomationId,
+    // on-disk JSON key kept as "automation_id" (persisted in
+    // per-run result.json); renamed by the Phase 1 migration.
+    #[serde(rename = "automation_id")]
+    pub agent_id: AgentId,
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub ended_at: chrono::DateTime<chrono::Utc>,
     pub duration_ms: i64,
@@ -218,15 +221,15 @@ pub struct AutomationRun {
     pub trigger_kind: TriggerKind,
     pub host_platform: HostPlatform,
     pub claudepot_version: String,
-    /// Files the automation produced under its blueprint's
+    /// Files the agent produced under its blueprint's
     /// `output.path_template`. Discovered by `record_run` after
-    /// `claude -p` exits. Empty for non-template automations and
+    /// `claude -p` exits. Empty for non-template agents and
     /// for runs whose template generated nothing yet.
     #[serde(default)]
     pub output_artifacts: Vec<OutputArtifact>,
     /// Decision recorded by the pre-run gate (`claudepot
-    /// automation _prerun`). `None` when the run skipped the
-    /// gate (legacy automations) or when no route was assigned.
+    /// agent _prerun`). `None` when the run skipped the
+    /// gate (legacy agents) or when no route was assigned.
     #[serde(default)]
     pub route_decision: Option<RouteDecision>,
 }
@@ -380,15 +383,15 @@ mod tests {
     }
 
     #[test]
-    fn automation_round_trip_minimal() {
+    fn agent_round_trip_minimal() {
         let now = chrono::Utc::now();
-        let a = Automation {
+        let a = Agent {
             id: Uuid::new_v4(),
             name: "morning-pr".into(),
             display_name: None,
             description: None,
             enabled: true,
-            binary: AutomationBinary::FirstParty,
+            binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
             cwd: "/tmp".into(),
             prompt: "say hi".into(),
@@ -415,7 +418,7 @@ mod tests {
             template_id: None,
         };
         let s = serde_json::to_string(&a).unwrap();
-        let back: Automation = serde_json::from_str(&s).unwrap();
+        let back: Agent = serde_json::from_str(&s).unwrap();
         assert_eq!(a, back);
     }
 }

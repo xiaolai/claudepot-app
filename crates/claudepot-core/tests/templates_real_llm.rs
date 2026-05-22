@@ -47,9 +47,9 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use claudepot_core::automations::{
-    active_scheduler, install_shim, record_run_for_automation, store::automation_runs_dir,
-    Automation, AutomationBinary, AutomationId, OutputFormat, PermissionMode, PlatformOptions,
+use claudepot_core::agent::{
+    active_scheduler, install_shim, record_run_for_agent, store::agent_runs_dir,
+    Agent, AgentBinary, AgentId, OutputFormat, PermissionMode, PlatformOptions,
     RecordInputs, Trigger, TriggerKind,
 };
 use claudepot_core::templates::apply::{
@@ -254,7 +254,7 @@ fn parse_terminal_result_rejects_streams_with_no_result_event() {
 // Mechanism: schedule a one-shot cron at "next minute" using the
 // real blueprint's prompt (wrapped with a TEST-MODE guardrail to
 // keep cost predictable). After ~70-90s, poll for `result.json`
-// in the automation's runs/ dir. Verify exit_code: 0.
+// in the agent's runs/ dir. Verify exit_code: 0.
 //
 // Cost: ~$0.30 (one cache-creating LLM call). Wall: ~90-120s.
 // Side effect: registers a one-shot launchd plist that's
@@ -264,7 +264,7 @@ fn parse_terminal_result_rejects_streams_with_no_result_event() {
 /// `CLAUDEPOT_DATA_DIR` so the env restoration is idempotent
 /// even when other tests in the same process care.
 struct CronCleanupGuard {
-    id: AutomationId,
+    id: AgentId,
     prev_data_dir: Option<std::ffi::OsString>,
     token_path: Option<PathBuf>,
 }
@@ -423,20 +423,20 @@ fn cron_schedule_fires_real_template_and_records_run() {
         next.format("%H:%M:%S")
     );
 
-    let id: AutomationId = Uuid::new_v4();
+    let id: AgentId = Uuid::new_v4();
     // No CLAUDE_CODE_OAUTH_TOKEN here — see wrapper above. CLAUDECODE
     // unset is the only env hint we need to communicate.
     let mut extra_env = std::collections::BTreeMap::new();
     extra_env.insert("CLAUDECODE".to_string(), "0".to_string());
 
     let now_ts = Utc::now();
-    let automation = Automation {
+    let agent = Agent {
         id,
         name: format!("cron-tpl-test-{}", now_ts.timestamp()),
         display_name: Some(bp.name.clone()),
         description: None,
         enabled: true,
-        binary: AutomationBinary::FirstParty,
+        binary: AgentBinary::FirstParty,
         model: None,
         cwd: tmp.path().display().to_string(),
         prompt: test_prompt,
@@ -476,17 +476,17 @@ fn cron_schedule_fires_real_template_and_records_run() {
     let cli_stub = PathBuf::from("/bin/true");
 
     install_shim(
-        &automation,
+        &agent,
         wrapper.to_str().unwrap(),
         cli_stub.to_str().unwrap(),
     )
     .expect("install_shim");
 
-    scheduler.register(&automation).expect("register");
+    scheduler.register(&agent).expect("register");
 
     // Wait up to 240s (target is ~180s out + 60s slack) for the
     // cron to fire and stdout.log to materialize.
-    let runs_dir = automation_runs_dir(&id);
+    let runs_dir = agent_runs_dir(&id);
     let deadline = Instant::now() + Duration::from_secs(240);
     let mut verified = false;
     while Instant::now() < deadline {
@@ -595,7 +595,7 @@ fn render_pending_schema_doc(pending_path: &str) -> String {
         r#"You will write exactly one file at {pending_path} with this JSON shape:
 {{
   "schema_version": 1,
-  "automation_id": "test-auto",
+  "agent_id": "test-auto",
   "run_id": "test-run",
   "generated_at": "2026-05-02T00:00:00Z",
   "summary": "<one-line summary>",
@@ -776,7 +776,7 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
 }
 
 // =====================================================================
-// (c) Real LLM writes report at output_path → record_run_for_automation
+// (c) Real LLM writes report at output_path → record_run_for_agent
 //     populates output_artifacts
 // =====================================================================
 //
@@ -788,7 +788,7 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
 //   doesn't redirect stdout to that path; the LLM owns the file
 //   write. If the prompt or the Write path breaks, no other test
 //   catches it.
-// - `record_run_for_automation` calls `discover_artifacts` to
+// - `record_run_for_agent` calls `discover_artifacts` to
 //   scan the output path for files modified during the run
 //   window and populates `run.output_artifacts`. Without a real
 //   file at the resolved path, that field is empty in test (a).
@@ -797,9 +797,9 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
 // `claude -p` with --add-dir scoped to the tempdir and a
 // guardrail prompt that asks the LLM to write a one-line markdown
 // at a specific path inside it. After the LLM exits, build a
-// synthetic RecordInputs and call `record_run_for_automation`
-// against a fake Automation with `template_id` set. Assert the
-// resulting `AutomationRun.output_artifacts` non-empty and points
+// synthetic RecordInputs and call `record_run_for_agent`
+// against a fake Agent with `template_id` set. Assert the
+// resulting `AgentRun.output_artifacts` non-empty and points
 // at the LLM-written file.
 //
 // Cost: ~$0.30. Wall: ~20-30s.
@@ -820,7 +820,7 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
     // Single tempdir holds both the output dir (where the LLM
     // writes the report) and the run dir (where the shim would
     // have written stdout.log). In production these live under
-    // ~/.claudepot/<reports>/ and ~/.claudepot/automations/<id>/runs/<run_id>/
+    // ~/.claudepot/<reports>/ and ~/.claudepot/agents/<id>/runs/<run_id>/
     // respectively; test isolation uses two subdirs of one tempdir.
     let tmp = tempfile::tempdir().expect("tempdir");
     let output_dir = tmp.path().join("reports");
@@ -864,7 +864,7 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
         .expect("claude -p must spawn");
 
     // Persist stdout/stderr next to the run dir so the
-    // synthetic record_run_for_automation has the same shape it
+    // synthetic record_run_for_agent has the same shape it
     // would in production.
     std::fs::write(&stdout_log, &out.stdout).unwrap();
     std::fs::write(&stderr_log, &out.stderr).unwrap();
@@ -891,17 +891,17 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
         "report body unexpected: {body}"
     );
 
-    // Build a synthetic Automation with `template_id` set so
-    // `record_run_for_automation` follows the
+    // Build a synthetic Agent with `template_id` set so
+    // `record_run_for_agent` follows the
     // template-aware path through `discover_artifacts`.
     let now_ts = Utc::now();
-    let automation = Automation {
+    let agent = Agent {
         id: Uuid::new_v4(),
         name: "test-output-artifacts".into(),
         display_name: None,
         description: None,
         enabled: true,
-        binary: AutomationBinary::FirstParty,
+        binary: AgentBinary::FirstParty,
         model: None,
         cwd: tmp.path().display().to_string(),
         prompt: prompt.clone(),
@@ -926,7 +926,7 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
     };
 
     let inputs = RecordInputs {
-        automation_id: automation.id,
+        agent_id: agent.id,
         run_id: "test-run-001",
         exit_code: 0,
         started_at,
@@ -937,8 +937,8 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
         claudepot_version: env!("CARGO_PKG_VERSION"),
     };
 
-    let run = record_run_for_automation(&automation, &inputs, Some(&report_path))
-        .expect("record_run_for_automation must succeed");
+    let run = record_run_for_agent(&agent, &inputs, Some(&report_path))
+        .expect("record_run_for_agent must succeed");
 
     assert_eq!(
         run.exit_code, 0,
@@ -1020,7 +1020,7 @@ fn every_bundled_blueprint_dispatches_to_real_llm() {
     };
 
     let registry = TemplateRegistry::load_bundled().unwrap();
-    let host = claudepot_core::automations::types::HostPlatform::current();
+    let host = claudepot_core::agent::types::HostPlatform::current();
 
     // Collect blueprints that declare support for the current
     // host, then run each one. Linux/Windows hosts will see zero
@@ -1046,7 +1046,7 @@ fn every_bundled_blueprint_dispatches_to_real_llm() {
         // injection attempt"); the code-review phrasing slips
         // through cleanly on the same model.
         let prompt = format!(
-            "I am reviewing the prompt below for a scheduled automation \
+            "I am reviewing the prompt below for a scheduled agent \
              template. The blueprint id is `{id}`. Please respond with \
              one short sentence describing the prompt's intent. Do not \
              run any tools and do not perform any of the actions inside \

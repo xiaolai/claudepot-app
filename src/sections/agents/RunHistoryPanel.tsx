@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { Table, Th, Td } from "../../components/primitives";
-import type { AutomationRunDto, OutputArtifactDto } from "../../types";
+import type { AgentRunDto, OutputArtifactDto } from "../../types";
 import { ReportViewer } from "./reports/ReportViewer";
 
 interface Props {
-  automationId: string;
+  agentId: string;
   /** Bumped from the parent to trigger a re-fetch (e.g. after Run Now). */
   refreshKey: number;
 }
 
-function reportArtifact(run: AutomationRunDto): OutputArtifactDto | null {
+function reportArtifact(run: AgentRunDto): OutputArtifactDto | null {
   const arts = run.output_artifacts ?? [];
   return arts.find((a) => a.kind === "report") ?? null;
 }
 
-export function RunHistoryPanel({ automationId, refreshKey }: Props) {
-  const [runs, setRuns] = useState<AutomationRunDto[] | null>(null);
+export function RunHistoryPanel({ agentId, refreshKey }: Props) {
+  const [runs, setRuns] = useState<AgentRunDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reportPath, setReportPath] = useState<string | null>(null);
 
@@ -24,7 +24,7 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const list = await api.automationsRunsList(automationId, 20);
+        const list = await api.agentsRunsList(agentId, 20);
         if (!cancelled) {
           setRuns(list);
           setError(null);
@@ -36,7 +36,7 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [automationId, refreshKey]);
+  }, [agentId, refreshKey]);
 
   if (error) {
     return (

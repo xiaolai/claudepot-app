@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::automations::types::HostPlatform;
+use crate::agent::types::HostPlatform;
 
 use super::error::TemplateError;
 
@@ -414,7 +414,7 @@ impl Blueprint {
         // Schedule shape: if `default` is the literal "manual", the
         // shapes list must include `manual`; otherwise the cron
         // expression is validated downstream by the existing
-        // `automations::cron` parser. We don't re-validate here.
+        // `agent::cron` parser. We don't re-validate here.
         if bp.schedule.default == "manual"
             && !bp.schedule.allowed_shapes.contains(&ScheduleShape::Manual)
         {

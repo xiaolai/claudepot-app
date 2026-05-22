@@ -7,37 +7,37 @@ import { NF } from "../icons";
 import { api } from "../api";
 import { useAppState } from "../providers/AppStateProvider";
 import type {
-  AutomationSummaryDto,
+  AgentSummaryDto,
   RouteSummaryDto,
   SchedulerCapabilitiesDto,
 } from "../types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
-  AddAutomationModal,
-  EditAutomationModal,
-} from "./automations/AutomationModals";
-import { AutomationCard } from "./automations/AutomationCard";
+  AddAgentModal,
+  EditAgentModal,
+} from "./agents/AgentModals";
+import { AgentCard } from "./agents/AgentCard";
 import { TemplateGallery } from "./templates/TemplateGallery";
 
 /**
- * Automations section — define + run scheduled `claude -p` jobs.
+ * Agents section — define + run scheduled `claude -p` jobs.
  *
  * Mental model:
- * - Definitions live in `~/.claudepot/automations.json`.
+ * - Definitions live in `~/.claudepot/agents.json`.
  * - Each one materializes into the OS's native scheduler
  *   (launchd plist on macOS, systemd-user timer on Linux,
- *   Task Scheduler XML on Windows) plus a per-automation
- *   helper shim under `~/.claudepot/automations/<id>/run.sh`.
+ *   Task Scheduler XML on Windows) plus a per-agent
+ *   helper shim under `~/.claudepot/agents/<id>/run.sh`.
  * - "Run now" spawns the same shim out-of-band — distinct
  *   from scheduled runs which the OS scheduler invokes.
  *
  * v1: cron + manual triggers only. Reactive triggers
  * (fs-watch, webhook) are explicit v2.
  */
-export function AutomationsSection() {
+export function AgentsSection() {
   const { pushToast } = useAppState();
-  const [automations, setAutomations] =
-    useState<AutomationSummaryDto[] | null>(null);
+  const [agents, setAgents] =
+    useState<AgentSummaryDto[] | null>(null);
   const [routes, setRoutes] = useState<RouteSummaryDto[]>([]);
   const [capabilities, setCapabilities] =
     useState<SchedulerCapabilitiesDto | null>(null);
@@ -46,19 +46,19 @@ export function AutomationsSection() {
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [editTarget, setEditTarget] =
-    useState<AutomationSummaryDto | null>(null);
+    useState<AgentSummaryDto | null>(null);
   const [removeTarget, setRemoveTarget] =
-    useState<AutomationSummaryDto | null>(null);
+    useState<AgentSummaryDto | null>(null);
   const [runsRefreshKey, setRunsRefreshKey] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
       const [list, rs, caps] = await Promise.all([
-        api.automationsList(),
+        api.agentsList(),
         api.routesList(),
-        api.automationsSchedulerCapabilities(),
+        api.agentsSchedulerCapabilities(),
       ]);
-      setAutomations(list);
+      setAgents(list);
       setRoutes(rs);
       setCapabilities(caps);
       setLoadError(null);
@@ -99,7 +99,7 @@ export function AutomationsSection() {
       }
     };
     try {
-      const opId = await api.automationsRunNowStart(id);
+      const opId = await api.agentsRunNowStart(id);
       // Listen for the terminal event on this op channel. The
       // backend (src-tauri/src/ops.rs::ProgressEvent) emits the
       // terminal event as `{phase: "op", status: "complete" | "error", ...}`.
@@ -137,11 +137,11 @@ export function AutomationsSection() {
   async function handleToggle(id: string, enabled: boolean) {
     setBusy(id, true);
     try {
-      await api.automationsSetEnabled(id, enabled);
+      await api.agentsSetEnabled(id, enabled);
       await refresh();
       pushToast(
         "info",
-        `Automation ${enabled ? "enabled" : "disabled"}.`,
+        `Agent ${enabled ? "enabled" : "disabled"}.`,
       );
     } catch (e) {
       pushToast("error", String(e));
@@ -155,10 +155,10 @@ export function AutomationsSection() {
     const id = removeTarget.id;
     setBusy(id, true);
     try {
-      await api.automationsRemove(id);
+      await api.agentsRemove(id);
       setRemoveTarget(null);
       await refresh();
-      pushToast("info", "Automation removed.");
+      pushToast("info", "Agent removed.");
     } catch (e) {
       pushToast("error", String(e));
     } finally {
@@ -176,7 +176,7 @@ export function AutomationsSection() {
       }}
     >
       <ScreenHeader
-        title="Automations"
+        title="Agents"
         subtitle={`Scheduled and manual claude -p runs · ${
           capabilities?.native_label ?? "no scheduler"
         }`}
@@ -186,7 +186,7 @@ export function AutomationsSection() {
               variant="ghost"
               glyph={NF.refresh}
               onClick={refresh}
-              disabled={automations === null}
+              disabled={agents === null}
             >
               Refresh
             </Button>
@@ -197,13 +197,13 @@ export function AutomationsSection() {
             >
               From template…
             </Button>
-            {automations !== null && automations.length > 0 && (
+            {agents !== null && agents.length > 0 && (
               <Button
                 variant="solid"
                 glyph={NF.plus}
                 onClick={() => setShowAdd(true)}
               >
-                Add automation
+                Add agent
               </Button>
             )}
           </>
@@ -225,9 +225,9 @@ export function AutomationsSection() {
         </div>
       )}
 
-      {automations === null ? (
+      {agents === null ? (
         <SkeletonList rows={3} />
-      ) : automations.length === 0 ? (
+      ) : agents.length === 0 ? (
         <EmptyState onAdd={() => setShowAdd(true)} />
       ) : (
         <div
@@ -237,10 +237,10 @@ export function AutomationsSection() {
             gap: "var(--sp-8)",
           }}
         >
-          {automations.map((a) => (
-            <AutomationCard
+          {agents.map((a) => (
+            <AgentCard
               key={a.id}
-              automation={a}
+              agent={a}
               busy={busyIds.has(a.id)}
               runsRefreshKey={runsRefreshKey}
               onRun={handleRun}
@@ -252,14 +252,14 @@ export function AutomationsSection() {
         </div>
       )}
 
-      <AddAutomationModal
+      <AddAgentModal
         open={showAdd}
         routes={routes}
         capabilities={capabilities}
         onClose={() => setShowAdd(false)}
         onCreated={() => {
           refresh();
-          pushToast("info", "Automation created.");
+          pushToast("info", "Agent created.");
         }}
       />
 
@@ -281,7 +281,7 @@ export function AutomationsSection() {
         }}
       />
 
-      <EditAutomationModal
+      <EditAgentModal
         open={!!editTarget}
         target={editTarget}
         routes={routes}
@@ -289,13 +289,13 @@ export function AutomationsSection() {
         onClose={() => setEditTarget(null)}
         onUpdated={() => {
           refresh();
-          pushToast("info", "Automation updated.");
+          pushToast("info", "Agent updated.");
         }}
       />
 
       {removeTarget && (
         <ConfirmDialog
-          title="Delete automation?"
+          title="Delete agent?"
           body={`'${removeTarget.display_name || removeTarget.name}' will be unregistered from the OS scheduler and its run history removed.`}
           confirmLabel="Delete"
           confirmDanger
@@ -331,7 +331,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         complex jobs versioned in your repo.
       </p>
       <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
-        Add automation
+        Add agent
       </Button>
     </div>
   );

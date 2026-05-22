@@ -43,10 +43,10 @@ pub enum OpKind {
     /// Per-account `/profile` reconcile loop. Carries per-account events
     /// alongside the standard phase channel.
     VerifyAll,
-    /// Manual "Run Now" of an automation. Spawns the helper shim
+    /// Manual "Run Now" of an agent. Spawns the helper shim
     /// out-of-band of the OS scheduler and emits phase events
     /// (prepare → spawn → record → done).
-    AutomationRun,
+    AgentRun,
 }
 
 /// Post-op summary surfaced to the UI on success, so we can render
@@ -484,7 +484,7 @@ fn op_terminal_label(op: &RunningOpInfo) -> String {
             ),
             None => "Verified accounts".to_string(),
         },
-        OpKind::AutomationRun => "Automation run".to_string(),
+        OpKind::AgentRun => "Agent run".to_string(),
     }
 }
 

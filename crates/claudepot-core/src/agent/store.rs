@@ -1,4 +1,5 @@
-//! Automation definitions persisted as `~/.claudepot/automations.json`.
+//! Agent definitions persisted as `~/.claudepot/automations.json`.
+//! (On-disk file name kept; renamed by the Phase 1 store migration.)
 //!
 //! JSON over SQLite for the same reasons routes use it: different
 //! shape from accounts (no migrations, no live state, no
@@ -13,19 +14,20 @@ use serde::{Deserialize, Serialize};
 use crate::fs_utils;
 use crate::paths::claudepot_data_dir;
 
-use super::error::AutomationError;
+use super::error::AgentError;
 use super::slug::validate_name;
-use super::types::{Automation, AutomationId};
+use super::types::{Agent, AgentId};
 
 /// On-disk envelope. The `version` field is bumped only when the
 /// shape changes incompatibly; serde's `default` handles
 /// forward-compat field additions without touching the version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AutomationsFile {
+struct AgentsFile {
     #[serde(default = "default_version")]
     version: u32,
-    #[serde(default)]
-    automations: Vec<Automation>,
+    // on-disk JSON key kept as "automations"; renamed by the Phase 1 store migration
+    #[serde(default, rename = "automations")]
+    agents: Vec<Agent>,
 }
 
 /// The schema version this build understands. Bump when the shape
@@ -36,28 +38,28 @@ fn default_version() -> u32 {
     CURRENT_VERSION
 }
 
-impl Default for AutomationsFile {
+impl Default for AgentsFile {
     fn default() -> Self {
         Self {
             version: default_version(),
-            automations: Vec::new(),
+            agents: Vec::new(),
         }
     }
 }
 
 /// Patch struct for partial updates. `None` means "leave unchanged".
-/// Adding fields to `Automation` requires adding them here too —
+/// Adding fields to `Agent` requires adding them here too —
 /// kept verbose deliberately so a missing field is a compile error,
 /// not a silent drop.
 ///
 /// String/numeric fields whose underlying type is `Option<T>` on
-/// `Automation` collapse here to `Option<T>` (single-level): we
+/// `Agent` collapse here to `Option<T>` (single-level): we
 /// can set or leave alone, but cannot explicitly clear via patch.
 /// Callers that want to clear send the form's empty value (empty
 /// string / NaN / etc.); the patch builder converts that to the
 /// underlying `None` before applying.
 #[derive(Debug, Default, Clone)]
-pub struct AutomationPatch {
+pub struct AgentPatch {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub enabled: Option<bool>,
@@ -85,31 +87,31 @@ pub struct AutomationPatch {
 /// Internally serializes every mutation through atomic writes,
 /// so cross-process safety is best-effort (concurrent claudepot
 /// CLI + GUI mutations may stomp each other).
-pub struct AutomationStore {
+pub struct AgentStore {
     path: PathBuf,
-    file: AutomationsFile,
+    file: AgentsFile,
 }
 
-impl AutomationStore {
+impl AgentStore {
     /// Open or create the store at `<claudepot_data_dir>/automations.json`.
-    pub fn open() -> Result<Self, AutomationError> {
-        Self::open_at(automations_file_path())
+    pub fn open() -> Result<Self, AgentError> {
+        Self::open_at(agents_file_path())
     }
 
     /// Open or create at an explicit path. Used by tests and any
     /// caller that wants to override the data dir.
-    pub fn open_at(path: PathBuf) -> Result<Self, AutomationError> {
+    pub fn open_at(path: PathBuf) -> Result<Self, AgentError> {
         let file = if path.exists() {
             let raw = std::fs::read(&path)?;
             if raw.is_empty() {
-                AutomationsFile::default()
+                AgentsFile::default()
             } else {
-                let parsed: AutomationsFile = serde_json::from_slice(&raw)?;
+                let parsed: AgentsFile = serde_json::from_slice(&raw)?;
                 // Refuse to load files newer than this binary
                 // understands — saving them back could downgrade
                 // their schema and lose data the future format adds.
                 if parsed.version > CURRENT_VERSION {
-                    return Err(AutomationError::InvalidEnv(format!(
+                    return Err(AgentError::InvalidEnv(format!(
                         "automations.json schema version {} is newer than this build (supports up to {}); upgrade Claudepot",
                         parsed.version, CURRENT_VERSION
                     )));
@@ -117,78 +119,78 @@ impl AutomationStore {
                 parsed
             }
         } else {
-            AutomationsFile::default()
+            AgentsFile::default()
         };
         Ok(Self { path, file })
     }
 
-    pub fn list(&self) -> &[Automation] {
-        &self.file.automations
+    pub fn list(&self) -> &[Agent] {
+        &self.file.agents
     }
 
-    pub fn get(&self, id: &AutomationId) -> Option<&Automation> {
-        self.file.automations.iter().find(|a| &a.id == id)
+    pub fn get(&self, id: &AgentId) -> Option<&Agent> {
+        self.file.agents.iter().find(|a| &a.id == id)
     }
 
-    pub fn get_by_name(&self, name: &str) -> Option<&Automation> {
-        self.file.automations.iter().find(|a| a.name == name)
+    pub fn get_by_name(&self, name: &str) -> Option<&Agent> {
+        self.file.agents.iter().find(|a| a.name == name)
     }
 
-    /// Insert a new automation. The caller is responsible for
-    /// having validated every field on `Automation`; the store
+    /// Insert a new agent. The caller is responsible for
+    /// having validated every field on `Agent`; the store
     /// only enforces uniqueness of `name` and `id` plus the
     /// cross-field invariant that `bypassPermissions` carries a
     /// non-empty allow-list.
-    pub fn add(&mut self, automation: Automation) -> Result<(), AutomationError> {
+    pub fn add(&mut self, agent: Agent) -> Result<(), AgentError> {
         // Defensive name re-validation — cheap, prevents malformed
         // names from sneaking in via deserialization.
-        validate_name(&automation.name)?;
+        validate_name(&agent.name)?;
         if matches!(
-            automation.permission_mode,
+            agent.permission_mode,
             super::types::PermissionMode::BypassPermissions
-        ) && automation.allowed_tools.is_empty()
+        ) && agent.allowed_tools.is_empty()
         {
-            return Err(AutomationError::InvalidEnv(
+            return Err(AgentError::InvalidEnv(
                 "bypassPermissions requires a non-empty allowed_tools whitelist".into(),
             ));
         }
         if self
             .file
-            .automations
+            .agents
             .iter()
-            .any(|a| a.name == automation.name)
+            .any(|a| a.name == agent.name)
         {
-            return Err(AutomationError::DuplicateName(automation.name));
+            return Err(AgentError::DuplicateName(agent.name));
         }
-        if self.file.automations.iter().any(|a| a.id == automation.id) {
-            return Err(AutomationError::DuplicateName(format!(
+        if self.file.agents.iter().any(|a| a.id == agent.id) {
+            return Err(AgentError::DuplicateName(format!(
                 "id {}",
-                automation.id
+                agent.id
             )));
         }
-        self.file.automations.push(automation);
+        self.file.agents.push(agent);
         Ok(())
     }
 
-    /// Apply a patch to an existing automation. Bumps `updated_at`.
+    /// Apply a patch to an existing agent. Bumps `updated_at`.
     pub fn update(
         &mut self,
-        id: &AutomationId,
-        patch: AutomationPatch,
-    ) -> Result<(), AutomationError> {
+        id: &AgentId,
+        patch: AgentPatch,
+    ) -> Result<(), AgentError> {
         let idx = self
             .file
-            .automations
+            .agents
             .iter()
             .position(|a| &a.id == id)
-            .ok_or_else(|| AutomationError::NotFound(id.to_string()))?;
+            .ok_or_else(|| AgentError::NotFound(id.to_string()))?;
         // Apply the patch to a clone first; only swap into the live
         // store after the cross-field invariant check passes. The
         // previous code mutated in place and only validated at the
         // end, so a rejected patch (e.g. bypassPermissions with an
         // empty allow-list) would leave the live record in a state
         // that disagreed with what `save()` would persist.
-        let mut a = self.file.automations[idx].clone();
+        let mut a = self.file.agents[idx].clone();
         // Helper: empty string in a single-level patch means "clear to None".
         fn nz(v: String) -> Option<String> {
             if v.is_empty() {
@@ -270,32 +272,32 @@ impl AutomationStore {
             super::types::PermissionMode::BypassPermissions
         ) && a.allowed_tools.is_empty()
         {
-            return Err(AutomationError::InvalidEnv(
+            return Err(AgentError::InvalidEnv(
                 "bypassPermissions requires a non-empty allowed_tools whitelist".into(),
             ));
         }
         a.updated_at = chrono::Utc::now();
         // Commit the validated clone back into the live store. Any
-        // earlier `Err` return path leaves `self.file.automations[idx]`
+        // earlier `Err` return path leaves `self.file.agents[idx]`
         // untouched, preserving the previous valid record.
-        self.file.automations[idx] = a;
+        self.file.agents[idx] = a;
         Ok(())
     }
 
-    /// Remove and return the automation with the given id.
-    pub fn remove(&mut self, id: &AutomationId) -> Result<Automation, AutomationError> {
+    /// Remove and return the agent with the given id.
+    pub fn remove(&mut self, id: &AgentId) -> Result<Agent, AgentError> {
         let idx = self
             .file
-            .automations
+            .agents
             .iter()
             .position(|a| &a.id == id)
-            .ok_or_else(|| AutomationError::NotFound(id.to_string()))?;
-        Ok(self.file.automations.remove(idx))
+            .ok_or_else(|| AgentError::NotFound(id.to_string()))?;
+        Ok(self.file.agents.remove(idx))
     }
 
     /// Persist in-memory state to disk. Atomic write, mode 0600.
     /// Creates parent directories on first save.
-    pub fn save(&self) -> Result<(), AutomationError> {
+    pub fn save(&self) -> Result<(), AgentError> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -311,39 +313,41 @@ impl AutomationStore {
 }
 
 /// Canonical path: `<claudepot_data_dir>/automations.json`.
-pub fn automations_file_path() -> PathBuf {
+pub fn agents_file_path() -> PathBuf {
+    // on-disk name kept; renamed by the Phase 1 store migration
     claudepot_data_dir().join("automations.json")
 }
 
-/// Per-automation directory inside the data dir.
-pub fn automation_dir(id: &AutomationId) -> PathBuf {
+/// Per-agent directory inside the data dir.
+pub fn agent_dir(id: &AgentId) -> PathBuf {
     claudepot_data_dir()
+        // on-disk name kept; renamed by the Phase 1 store migration
         .join("automations")
         .join(id.to_string())
 }
 
-/// Per-automation runs directory.
-pub fn automation_runs_dir(id: &AutomationId) -> PathBuf {
-    automation_dir(id).join("runs")
+/// Per-agent runs directory.
+pub fn agent_runs_dir(id: &AgentId) -> PathBuf {
+    agent_dir(id).join("runs")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automations::types::*;
+    use crate::agent::types::*;
     use chrono::Utc;
     use tempfile::tempdir;
     use uuid::Uuid;
 
-    fn sample(name: &str) -> Automation {
+    fn sample(name: &str) -> Agent {
         let now = Utc::now();
-        Automation {
+        Agent {
             id: Uuid::new_v4(),
             name: name.into(),
             display_name: None,
             description: None,
             enabled: true,
-            binary: AutomationBinary::FirstParty,
+            binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
             cwd: "/tmp".into(),
             prompt: "say hi".into(),
@@ -374,21 +378,21 @@ mod tests {
     #[test]
     fn open_missing_returns_empty() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("automations.json");
-        let store = AutomationStore::open_at(path).unwrap();
+        let path = dir.path().join("agents.json");
+        let store = AgentStore::open_at(path).unwrap();
         assert!(store.list().is_empty());
     }
 
     #[test]
     fn add_save_reopen_preserves_records() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("automations.json");
-        let mut store = AutomationStore::open_at(path.clone()).unwrap();
+        let path = dir.path().join("agents.json");
+        let mut store = AgentStore::open_at(path.clone()).unwrap();
         store.add(sample("morning-pr")).unwrap();
         store.add(sample("evening-summary")).unwrap();
         store.save().unwrap();
 
-        let reopened = AutomationStore::open_at(path).unwrap();
+        let reopened = AgentStore::open_at(path).unwrap();
         let names: Vec<&str> = reopened.list().iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, vec!["morning-pr", "evening-summary"]);
     }
@@ -396,16 +400,16 @@ mod tests {
     #[test]
     fn duplicate_name_rejected() {
         let dir = tempdir().unwrap();
-        let mut store = AutomationStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
         store.add(sample("morning-pr")).unwrap();
         let err = store.add(sample("morning-pr")).unwrap_err();
-        assert!(matches!(err, AutomationError::DuplicateName(_)));
+        assert!(matches!(err, AgentError::DuplicateName(_)));
     }
 
     #[test]
     fn update_applies_patch_and_bumps_timestamp() {
         let dir = tempdir().unwrap();
-        let mut store = AutomationStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
         let mut a = sample("morning-pr");
         let original_updated = a.updated_at;
         // Backdate to make timestamp bump observable on fast machines.
@@ -413,10 +417,10 @@ mod tests {
         let id = a.id;
         store.add(a).unwrap();
 
-        let patch = AutomationPatch {
+        let patch = AgentPatch {
             enabled: Some(false),
             prompt: Some("new prompt".into()),
-            ..AutomationPatch::default()
+            ..AgentPatch::default()
         };
         store.update(&id, patch).unwrap();
 
@@ -429,7 +433,7 @@ mod tests {
     #[test]
     fn remove_deletes_record() {
         let dir = tempdir().unwrap();
-        let mut store = AutomationStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
         let a = sample("morning-pr");
         let id = a.id;
         store.add(a).unwrap();
@@ -446,12 +450,14 @@ mod tests {
         // tolerates them.)
         let dir = tempdir().unwrap();
         let path = dir.path().join("a.json");
+        // On-disk JSON key is "automations" (kept by the Phase 1
+        // store migration); exercise that wire form here.
         std::fs::write(
             &path,
             r#"{"version":1,"automations":[],"future_field":"ignored"}"#,
         )
         .unwrap();
-        let store = AutomationStore::open_at(path).unwrap();
+        let store = AgentStore::open_at(path).unwrap();
         assert!(store.list().is_empty());
     }
 
@@ -459,7 +465,7 @@ mod tests {
     fn save_creates_parent_dirs() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("nested").join("dir").join("a.json");
-        let store = AutomationStore::open_at(path.clone()).unwrap();
+        let store = AgentStore::open_at(path.clone()).unwrap();
         store.save().unwrap();
         assert!(path.exists());
     }
@@ -467,12 +473,12 @@ mod tests {
     #[test]
     fn add_with_invalid_name_rejected() {
         let dir = tempdir().unwrap();
-        let mut store = AutomationStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
         let mut bad = sample("x");
         bad.name = "INVALID".into();
         assert!(matches!(
             store.add(bad),
-            Err(AutomationError::InvalidName(..))
+            Err(AgentError::InvalidName(..))
         ));
     }
 }

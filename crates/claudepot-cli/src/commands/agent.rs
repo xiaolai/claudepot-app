@@ -1,20 +1,20 @@
-//! Hidden CLI surface for the Automations feature.
+//! Hidden CLI surface for the Agents feature.
 //!
 //! v1 exposes exactly one verb — `_record-run` — invoked by the
-//! per-automation helper shim after `claude -p` exits. It parses
-//! the redirected `stdout.log`, assembles an [`AutomationRun`]
+//! per-agent helper shim after `claude -p` exits. It parses
+//! the redirected `stdout.log`, assembles an [`AgentRun`]
 //! record, and writes `result.json` next to the logs.
 //!
 //! The leading underscore is intentional: this is plumbing, not a
-//! user-facing surface. The Automations GUI section is the
-//! sanctioned way to manage automations.
+//! user-facing surface. The Agents GUI section is the
+//! sanctioned way to manage agents.
 
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use claudepot_core::automations::{
-    automation_runs_dir, record_run, AutomationId, RecordInputs, TriggerKind,
+use claudepot_core::agent::{
+    agent_runs_dir, record_run, AgentId, RecordInputs, TriggerKind,
 };
 use uuid::Uuid;
 
@@ -48,7 +48,7 @@ fn parse_unix_seconds(raw: &str) -> Result<DateTime<Utc>> {
 
 #[allow(clippy::too_many_arguments)]
 pub fn record_run_cmd(
-    automation_id: &str,
+    agent_id: &str,
     run_id: &str,
     exit: i32,
     start: &str,
@@ -56,8 +56,8 @@ pub fn record_run_cmd(
     trigger: &str,
     run_dir: Option<&str>,
 ) -> Result<()> {
-    let id: AutomationId = Uuid::parse_str(automation_id.trim())
-        .with_context(|| format!("invalid automation id: {automation_id:?}"))?;
+    let id: AgentId = Uuid::parse_str(agent_id.trim())
+        .with_context(|| format!("invalid agent id: {agent_id:?}"))?;
     let trigger_kind = parse_trigger(trigger)?;
     let started_at = parse_unix_seconds(start)?;
     let ended_at = parse_unix_seconds(end)?;
@@ -72,7 +72,7 @@ pub fn record_run_cmd(
     // backward compat / manual invocation.
     let run_dir: PathBuf = match run_dir {
         Some(p) => PathBuf::from(p),
-        None => automation_runs_dir(&id).join(run_id),
+        None => agent_runs_dir(&id).join(run_id),
     };
     if !run_dir.exists() {
         return Err(anyhow!(
@@ -84,7 +84,7 @@ pub fn record_run_cmd(
     let stderr_log = run_dir.join("stderr.log");
 
     let inputs = RecordInputs {
-        automation_id: id,
+        agent_id: id,
         run_id,
         exit_code: exit,
         started_at,
@@ -96,7 +96,7 @@ pub fn record_run_cmd(
     };
     let _run = record_run(&inputs).with_context(|| {
         format!(
-            "failed to record run: automation={id} run={run_id} dir={}",
+            "failed to record run: agent={id} run={run_id} dir={}",
             run_dir.display()
         )
     })?;

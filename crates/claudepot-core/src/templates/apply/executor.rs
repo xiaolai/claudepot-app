@@ -37,7 +37,9 @@ pub struct ApplyOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ApplyReceipt {
     pub schema_version: u32,
-    pub automation_id: String,
+    // on-disk JSON key kept as "automation_id"; renamed by the Phase 1 migration.
+    #[serde(rename = "automation_id")]
+    pub agent_id: String,
     pub run_id: String,
     pub applied_at: String,
     pub outcomes: Vec<ApplyOutcome>,
@@ -69,7 +71,7 @@ pub async fn apply_selected(
     }
     ApplyReceipt {
         schema_version: 1,
-        automation_id: pending.automation_id.clone(),
+        agent_id: pending.agent_id.clone(),
         run_id: pending.run_id.clone(),
         applied_at: chrono::Utc::now().to_rfc3339(),
         outcomes,
@@ -208,7 +210,7 @@ mod tests {
     fn pending(items: Vec<PendingItem>) -> PendingChanges {
         PendingChanges {
             schema_version: 1,
-            automation_id: "auto".into(),
+            agent_id: "auto".into(),
             run_id: "run".into(),
             generated_at: "now".into(),
             summary: format!("{} changes", items.len()),

@@ -1,14 +1,14 @@
-//! Scheduled `claude -p` runs — the **Automation** noun.
+//! Scheduled `claude -p` runs — the **Agent** noun.
 //!
-//! An automation is a `(binary, prompt, schedule, cwd, …)` record
+//! An agent is a `(binary, prompt, schedule, cwd, …)` record
 //! that materializes into a per-OS scheduler artifact (launchd
 //! plist on macOS, Task Scheduler XML on Windows, systemd-user
 //! timer + service unit on Linux). Each run produces a structured
 //! `result.json` plus stdout/stderr logs, browsable from the
-//! Automations sidebar section.
+//! Agents sidebar section.
 //!
 //! Cardinality and design notes live in
-//! `dev-docs/automations-implementation-plan.md`. CLI surface
+//! `dev-docs/agents-implementation-plan.md`. CLI surface
 //! survey (the `claude -p` flag table this module is built on)
 //! lives in `dev-docs/agents-cli-surface.md`.
 //!
@@ -17,8 +17,8 @@
 //!
 //! ## Module layout
 //!
-//! - [`error`] — `AutomationError` enum (one boundary error type).
-//! - [`types`] — `Automation`, `AutomationRun`, `Trigger`,
+//! - [`error`] — `AgentError` enum (one boundary error type).
+//! - [`types`] — `Agent`, `AgentRun`, `Trigger`,
 //!   `PermissionMode`, `OutputFormat`, `PlatformOptions`, etc.
 //! - [`slug`] — name validation (lowercase ASCII alnum + dash,
 //!   1–64, unique per store).
@@ -26,8 +26,8 @@
 //!   that scheduler adapters translate to native triggers.
 //! - [`env`] — env-var whitelist for user-supplied `extra_env`
 //!   plus the curated default `PATH` segments.
-//! - [`store`] — `AutomationStore`: JSON read-modify-write over
-//!   `~/.claudepot/automations.json`.
+//! - [`store`] — `AgentStore`: JSON read-modify-write over
+//!   `~/.claudepot/agents.json`.
 //! - [`shim`] — per-OS helper-shim emitter (`.sh` / `.cmd`) used
 //!   by every scheduler artifact instead of calling `claude`
 //!   directly.
@@ -44,10 +44,10 @@ pub mod slug;
 pub mod store;
 pub mod types;
 
-pub use error::AutomationError;
+pub use error::AgentError;
 pub use install::{current_claudepot_cli, install_shim, resolve_binary};
 pub use run::{
-    list_run_ids, parse_result_event, read_run, record_run, record_run_for_automation, run_now,
+    list_run_ids, parse_result_event, read_run, record_run, record_run_for_agent, run_now,
     RecordInputs,
 };
 pub use scheduler::{
@@ -57,9 +57,9 @@ pub use scheduler::{
 pub use shim::{render_unix, render_windows, ShimInputs};
 pub use slug::validate_name;
 pub use store::{
-    automation_dir, automation_runs_dir, automations_file_path, AutomationPatch, AutomationStore,
+    agent_dir, agent_runs_dir, agents_file_path, AgentPatch, AgentStore,
 };
 pub use types::{
-    Automation, AutomationBinary, AutomationId, AutomationRun, HostPlatform, OutputFormat,
+    Agent, AgentBinary, AgentId, AgentRun, HostPlatform, OutputFormat,
     PermissionMode, PlatformOptions, RunResult, Trigger, TriggerKind,
 };

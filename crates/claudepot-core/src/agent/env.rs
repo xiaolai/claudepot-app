@@ -1,4 +1,4 @@
-//! Environment-variable whitelist for automation runs.
+//! Environment-variable whitelist for agent runs.
 //!
 //! launchd, Task Scheduler, and systemd-user all run with a
 //! stripped environment by default. We materialize a curated set
@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use super::error::AutomationError;
+use super::error::AgentError;
 
 /// Keys we set ourselves on every run; user can't override.
 const RESERVED_EXACT: &[&str] = &["PATH", "HOME", "LANG", "LC_ALL", "TERM"];
@@ -28,9 +28,9 @@ const RESERVED_EXACT: &[&str] = &["PATH", "HOME", "LANG", "LC_ALL", "TERM"];
 const RESERVED_PREFIXES: &[&str] = &["ANTHROPIC_", "CLAUDE_"];
 
 /// Validate a single user-supplied env entry. Returns `Ok(())` if
-/// the entry is allowed; an [`AutomationError::InvalidEnv`]
+/// the entry is allowed; an [`AgentError::InvalidEnv`]
 /// describing the reason otherwise.
-pub fn validate_entry(key: &str, value: &str) -> Result<(), AutomationError> {
+pub fn validate_entry(key: &str, value: &str) -> Result<(), AgentError> {
     validate_key(key)?;
     validate_value(value)?;
     Ok(())
@@ -38,25 +38,25 @@ pub fn validate_entry(key: &str, value: &str) -> Result<(), AutomationError> {
 
 /// Validate every entry in the user's `extra_env`. Returns the map
 /// unchanged on success.
-pub fn validate_map(map: &BTreeMap<String, String>) -> Result<(), AutomationError> {
+pub fn validate_map(map: &BTreeMap<String, String>) -> Result<(), AgentError> {
     for (k, v) in map {
         validate_entry(k, v)?;
     }
     Ok(())
 }
 
-fn validate_key(key: &str) -> Result<(), AutomationError> {
+fn validate_key(key: &str) -> Result<(), AgentError> {
     if key.is_empty() {
-        return Err(AutomationError::InvalidEnv("empty key".into()));
+        return Err(AgentError::InvalidEnv("empty key".into()));
     }
     if key.len() > 256 {
-        return Err(AutomationError::InvalidEnv(format!(
+        return Err(AgentError::InvalidEnv(format!(
             "key '{key}' exceeds 256 characters"
         )));
     }
     let bytes = key.as_bytes();
     if !matches!(bytes[0], b'A'..=b'Z' | b'a'..=b'z' | b'_') {
-        return Err(AutomationError::InvalidEnv(format!(
+        return Err(AgentError::InvalidEnv(format!(
             "key '{key}' must start with a letter or underscore"
         )));
     }
@@ -64,12 +64,12 @@ fn validate_key(key: &str) -> Result<(), AutomationError> {
         .iter()
         .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
     {
-        return Err(AutomationError::InvalidEnv(format!(
+        return Err(AgentError::InvalidEnv(format!(
             "key '{key}' must be ASCII alnum + underscore only"
         )));
     }
     if RESERVED_EXACT.iter().any(|r| r.eq_ignore_ascii_case(key)) {
-        return Err(AutomationError::InvalidEnv(format!(
+        return Err(AgentError::InvalidEnv(format!(
             "key '{key}' is set by Claudepot and cannot be overridden"
         )));
     }
@@ -77,28 +77,28 @@ fn validate_key(key: &str) -> Result<(), AutomationError> {
         .iter()
         .any(|p| key.to_ascii_uppercase().starts_with(p))
     {
-        return Err(AutomationError::InvalidEnv(format!(
+        return Err(AgentError::InvalidEnv(format!(
             "key '{key}' is reserved (ANTHROPIC_*/CLAUDE_* belong to the binary picker)"
         )));
     }
     Ok(())
 }
 
-fn validate_value(value: &str) -> Result<(), AutomationError> {
+fn validate_value(value: &str) -> Result<(), AgentError> {
     if value.len() > 4096 {
-        return Err(AutomationError::InvalidEnv(format!(
+        return Err(AgentError::InvalidEnv(format!(
             "value exceeds 4096 characters ({})",
             value.len()
         )));
     }
     for &b in value.as_bytes() {
         if b == b'\n' || b == b'\r' || b == 0 {
-            return Err(AutomationError::InvalidEnv(
+            return Err(AgentError::InvalidEnv(
                 "value contains newline or NUL".into(),
             ));
         }
         if !(b == b'\t' || (0x20..=0x7e).contains(&b)) {
-            return Err(AutomationError::InvalidEnv(
+            return Err(AgentError::InvalidEnv(
                 "value must be printable ASCII".into(),
             ));
         }
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn default_path_segments_unix_covers_known_install_locations() {
         // The shim's PATH must reach every place a `claude` binary
-        // realistically lives, since FirstParty automations now
+        // realistically lives, since FirstParty agents now
         // resolve by name at run time inside the shim.
         let _guard = ENV_LOCK.lock();
         let prior = std::env::var_os("HOME");

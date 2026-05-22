@@ -62,14 +62,18 @@ enum Commands {
         #[command(subcommand)]
         action: ProjectAction,
     },
-    /// Hidden plumbing for the Automations feature. Not a
-    /// user-facing surface — invoked by the per-automation helper
-    /// shim. The Automations GUI section is the sanctioned way
-    /// to define and manage automations.
-    #[command(name = "automation", hide = true)]
-    Automation {
+    /// Hidden plumbing for the Agents feature. Not a
+    /// user-facing surface — invoked by the per-agent helper
+    /// shim. The Agents GUI section is the sanctioned way
+    /// to define and manage agents.
+    //
+    // `alias = "automation"` keeps already-installed agent shims
+    // (which call `claudepot automation _record-run …`) working
+    // across the Phase 1 rename.
+    #[command(name = "agent", alias = "automation", hide = true)]
+    Agent {
         #[command(subcommand)]
-        action: AutomationAction,
+        action: AgentAction,
     },
     /// Export the current project's CC state to a portable bundle
     /// (`*.claudepot.tar.zst`).
@@ -702,15 +706,17 @@ enum TrashAction {
 }
 
 #[derive(Subcommand)]
-enum AutomationAction {
-    /// Plumbing: invoked by an automation's helper shim after
+enum AgentAction {
+    /// Plumbing: invoked by an agent's helper shim after
     /// `claude -p` exits. Reads the redirected `stdout.log` from
     /// the per-run directory, parses the terminal `result` event,
     /// and writes `result.json` next to the logs.
     #[command(name = "_record-run")]
     RecordRun {
-        #[arg(long)]
-        automation_id: String,
+        // `--automation-id` alias keeps already-installed agent shims
+        // (which pass `--automation-id`) working across the rename.
+        #[arg(long = "agent-id", alias = "automation-id")]
+        agent_id: String,
         #[arg(long)]
         run_id: String,
         #[arg(long)]
@@ -1186,17 +1192,17 @@ async fn main() -> Result<()> {
                 all,
             )?,
         },
-        Commands::Automation { action } => match action {
-            AutomationAction::RecordRun {
-                automation_id,
+        Commands::Agent { action } => match action {
+            AgentAction::RecordRun {
+                agent_id,
                 run_id,
                 exit,
                 start,
                 end,
                 trigger,
                 run_dir,
-            } => commands::automation::record_run_cmd(
-                &automation_id,
+            } => commands::agent::record_run_cmd(
+                &agent_id,
                 &run_id,
                 exit,
                 &start,

@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
-import type { AutomationSummaryDto } from "../../types";
+import type { AgentSummaryDto } from "../../types";
 import { RunHistoryPanel } from "./RunHistoryPanel";
 
 interface Props {
-  automation: AutomationSummaryDto;
+  agent: AgentSummaryDto;
   busy: boolean;
   /** Increments when a run completes — RunHistoryPanel re-fetches. */
   runsRefreshKey: number;
   onRun: (id: string) => void;
-  onEdit: (a: AutomationSummaryDto) => void;
+  onEdit: (a: AgentSummaryDto) => void;
   onToggle: (id: string, enabled: boolean) => void;
-  onRemove: (a: AutomationSummaryDto) => void;
+  onRemove: (a: AgentSummaryDto) => void;
 }
 
-export function AutomationCard({
-  automation,
+export function AgentCard({
+  agent,
   busy,
   runsRefreshKey,
   onRun,
@@ -53,7 +53,7 @@ export function AutomationCard({
             color: "var(--fg)",
           }}
         >
-          {automation.display_name || automation.name}
+          {agent.display_name || agent.name}
         </h3>
         <span
           style={{
@@ -62,15 +62,15 @@ export function AutomationCard({
             color: "var(--fg-3)",
           }}
         >
-          {automation.name}
+          {agent.name}
         </span>
         <span style={{ flex: 1 }} />
-        <Tag tone={automation.enabled ? "ok" : "ghost"}>
-          {automation.enabled ? "enabled" : "disabled"}
+        <Tag tone={agent.enabled ? "ok" : "ghost"}>
+          {agent.enabled ? "enabled" : "disabled"}
         </Tag>
       </header>
 
-      {automation.description && (
+      {agent.description && (
         <p
           style={{
             margin: 0,
@@ -78,7 +78,7 @@ export function AutomationCard({
             color: "var(--fg-2)",
           }}
         >
-          {automation.description}
+          {agent.description}
         </p>
       )}
 
@@ -93,23 +93,23 @@ export function AutomationCard({
       >
         <span style={{ color: "var(--fg-3)" }}>cron</span>
         <span style={{ fontFamily: "var(--ff-mono)" }}>
-          {automation.cron ?? "—"}
+          {agent.cron ?? "—"}
         </span>
         <span style={{ color: "var(--fg-3)" }}>cwd</span>
-        <span style={{ fontFamily: "var(--ff-mono)" }}>{automation.cwd}</span>
+        <span style={{ fontFamily: "var(--ff-mono)" }}>{agent.cwd}</span>
         <span style={{ color: "var(--fg-3)" }}>binary</span>
         <span>
-          {automation.binary_kind === "first_party"
+          {agent.binary_kind === "first_party"
             ? "claude (first-party)"
-            : `route (${automation.binary_route_id ?? "?"})`}
-          {automation.model && (
-            <span style={{ color: "var(--fg-3)" }}> · {automation.model}</span>
+            : `route (${agent.binary_route_id ?? "?"})`}
+          {agent.model && (
+            <span style={{ color: "var(--fg-3)" }}> · {agent.model}</span>
           )}
         </span>
         <span style={{ color: "var(--fg-3)" }}>permissions</span>
         <span>
-          {automation.permission_mode}
-          {automation.allowed_tools.length > 0 && (
+          {agent.permission_mode}
+          {agent.allowed_tools.length > 0 && (
             <span
               style={{
                 color: "var(--fg-3)",
@@ -117,14 +117,14 @@ export function AutomationCard({
                 marginLeft: "var(--sp-4)",
               }}
             >
-              [{automation.allowed_tools.join(", ")}]
+              [{agent.allowed_tools.join(", ")}]
             </span>
           )}
         </span>
-        {automation.max_budget_usd !== null && (
+        {agent.max_budget_usd !== null && (
           <>
             <span style={{ color: "var(--fg-3)" }}>budget</span>
-            <span>${automation.max_budget_usd.toFixed(2)}</span>
+            <span>${agent.max_budget_usd.toFixed(2)}</span>
           </>
         )}
       </div>
@@ -138,28 +138,28 @@ export function AutomationCard({
       >
         <Button
           variant="solid"
-          onClick={() => onRun(automation.id)}
+          onClick={() => onRun(agent.id)}
           disabled={busy}
         >
           Run now
         </Button>
         <Button
           variant="ghost"
-          onClick={() => onEdit(automation)}
+          onClick={() => onEdit(agent)}
           disabled={busy}
         >
           Edit
         </Button>
         <Button
           variant="ghost"
-          onClick={() => onToggle(automation.id, !automation.enabled)}
+          onClick={() => onToggle(agent.id, !agent.enabled)}
           disabled={busy}
         >
-          {automation.enabled ? "Disable" : "Enable"}
+          {agent.enabled ? "Disable" : "Enable"}
         </Button>
         <Button
           variant="ghost"
-          onClick={() => onRemove(automation)}
+          onClick={() => onRemove(agent)}
           disabled={busy}
         >
           Delete
@@ -172,7 +172,7 @@ export function AutomationCard({
 
       {open && (
         <RunHistoryPanel
-          automationId={automation.id}
+          agentId={agent.id}
           refreshKey={runsRefreshKey}
         />
       )}

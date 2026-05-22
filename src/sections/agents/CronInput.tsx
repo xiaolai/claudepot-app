@@ -36,7 +36,7 @@ export function CronInput({
     let cancelled = false;
     debounceRef.current = window.setTimeout(async () => {
       try {
-        const result = await api.automationsValidateCron(value);
+        const result = await api.agentsValidateCron(value);
         if (cancelled) return;
         setValid(result.valid);
         setError(result.error);

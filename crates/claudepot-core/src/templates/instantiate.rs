@@ -1,5 +1,5 @@
 //! Materialize a [`Blueprint`] + user input into an
-//! `AutomationCreateDto` ready for the existing automations
+//! `AgentCreateDto` ready for the existing agents
 //! runtime.
 //!
 //! Per `dev-docs/templates-implementation-plan.md` §5.4.
@@ -12,13 +12,13 @@
 //! 2. Substitute placeholders into the prompt and the output
 //!    path template (`{name}` → user value).
 //! 3. Convert the user-chosen schedule shape to a cron string
-//!    (or to `manual` for `Trigger::Manual` automations).
+//!    (or to `manual` for `Trigger::Manual` agents).
 //! 4. Project blueprint runtime fields into the DTO shape.
 //!
 //! Routes are not resolved here — the DTO carries `binary_kind`
 //! and `binary_route_id`, and the install command on the Tauri
-//! side translates that to `AutomationBinary::FirstParty` or
-//! `AutomationBinary::Route { route_id }`.
+//! side translates that to `AgentBinary::FirstParty` or
+//! `AgentBinary::Route { route_id }`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -86,7 +86,7 @@ impl PlaceholderValue {
 
 /// User-chosen schedule. Cron-shaped variants serialize to a
 /// concrete cron string at instantiation time. `Manual` is the
-/// only path that produces a `Trigger::Manual` automation.
+/// only path that produces a `Trigger::Manual` agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScheduleDto {
@@ -139,7 +139,7 @@ impl Weekday {
 
 /// Resolved cron expression and associated trigger kind. Returned
 /// by [`schedule_to_cron`] for the install path to feed into the
-/// existing [`AutomationCreateDto`].
+/// existing [`AgentCreateDto`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSchedule {
     /// `"cron"` or `"manual"`.
@@ -224,11 +224,11 @@ pub fn schedule_to_cron(s: &ScheduleDto) -> Result<ResolvedSchedule, TemplateErr
 }
 
 /// Resolved DTO that mirrors the Tauri-side
-/// `AutomationCreateDto`. Returned by [`instantiate`] as a
+/// `AgentCreateDto`. Returned by [`instantiate`] as a
 /// transport-agnostic shape; the Tauri command translates this
-/// into the wire DTO and creates the automation.
+/// into the wire DTO and creates the agent.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedAutomation {
+pub struct ResolvedAgent {
     pub name: String,
     pub display_name: Option<String>,
     pub description: Option<String>,
@@ -251,13 +251,13 @@ pub struct ResolvedAutomation {
     pub output_path: String,
 }
 
-/// Resolve a blueprint + instance into a concrete automation
+/// Resolve a blueprint + instance into a concrete agent
 /// shape. Pure function — no I/O. Validation errors carry the
 /// blueprint id for context.
 pub fn instantiate(
     blueprint: &Blueprint,
     instance: &TemplateInstance,
-) -> Result<ResolvedAutomation, TemplateError> {
+) -> Result<ResolvedAgent, TemplateError> {
     // 1. id + version sanity
     if instance.blueprint_id != blueprint.id().0 {
         return Err(TemplateError::malformed(
@@ -336,7 +336,7 @@ pub fn instantiate(
         .clone()
         .or_else(|| Some(blueprint.name.clone()));
 
-    Ok(ResolvedAutomation {
+    Ok(ResolvedAgent {
         name,
         display_name,
         description: Some(blueprint.tagline.clone()),
