@@ -330,6 +330,32 @@ fn merge_cli_overrides(spec: &mut DraftSpec, ov: &CliOverrides) {
     }
 }
 
+/// Validate an agent's working directory. It must be an **absolute**
+/// path (`Path::is_absolute` per `.claude/rules/paths.md` — never a
+/// `starts_with("/")` check, so Windows drive paths resolve) and free
+/// of `..` components. `claude -p` runs in this directory and honors
+/// its project-local config (`.mcp.json`, hooks, `CLAUDE.md`); a
+/// relative or traversal-laden `cwd` is a code-execution vector
+/// (grill finding F4). Existence is intentionally not required — a
+/// draft may be authored before its project exists.
+pub fn validate_cwd(cwd: &str) -> Result<(), AgentError> {
+    let path = std::path::Path::new(cwd);
+    if !path.is_absolute() {
+        return Err(AgentError::InvalidEnv(format!(
+            "cwd must be an absolute path, got {cwd:?}"
+        )));
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(AgentError::InvalidEnv(format!(
+            "cwd must not contain '..' components, got {cwd:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Build a **draft** [`Agent`] from a normalized [`DraftSpec`].
 ///
 /// The resulting record has `lifecycle = Draft` and `drafted_by`
@@ -364,6 +390,29 @@ pub fn build_draft(
 
     // Validate any user-supplied env vars against the whitelist.
     super::env::validate_map(&spec.extra_env)?;
+
+    // The working directory must be absolute and traversal-free —
+    // `claude -p` runs there and honors that directory's project-
+    // local config, so an unvalidated `cwd` is a code-execution
+    // vector (grill finding F4).
+    validate_cwd(&spec.cwd)?;
+
+    // A drafted agent may attach only Claudepot's own memory MCP
+    // server. A `Custom` MCP server carries an arbitrary `command`
+    // that `claude -p --mcp-config` would spawn as a child process;
+    // an AI client authoring a draft must not be able to inject one
+    // (grill finding F3). `--attach-memory` covers the legitimate
+    // case.
+    if let Some(McpServerRef::Custom { name, .. }) = spec
+        .mcp_servers
+        .iter()
+        .find(|m| matches!(m, McpServerRef::Custom { .. }))
+    {
+        return Err(AgentError::InvalidEnv(format!(
+            "custom MCP server {name:?} is not allowed in a drafted agent — \
+             only the Claudepot memory server may be attached"
+        )));
+    }
 
     // A cron trigger's expression must parse — fail the draft now,
     // not at install time.
@@ -471,10 +520,7 @@ mod tests {
             "description": "Reviews diffs for security issues",
             "prompt": "You are a security reviewer.",
             "tools": ["Read", "Grep"],
-            "model": "claude-haiku-4-5",
-            "mcpServers": {
-                "fs": { "command": "mcp-fs", "args": ["/tmp"] }
-            }
+            "model": "claude-haiku-4-5"
         }"#;
         let ov = CliOverrides {
             name: Some("sec-review".into()),
@@ -492,12 +538,7 @@ mod tests {
             agent.description.as_deref(),
             Some("Reviews diffs for security issues")
         );
-        // The SDK `mcpServers` map became a Custom McpServerRef.
-        assert_eq!(agent.mcp_servers.len(), 1);
-        assert!(matches!(
-            &agent.mcp_servers[0],
-            McpServerRef::Custom { name, .. } if name == "fs"
-        ));
+        assert!(agent.mcp_servers.is_empty());
         assert_eq!(agent.lifecycle, Lifecycle::Draft);
     }
 
@@ -638,5 +679,64 @@ mod tests {
             .unwrap();
         let agent = build_draft(spec, "t", now()).unwrap();
         assert_eq!(agent.lifecycle, Lifecycle::Draft);
+    }
+
+    #[test]
+    fn relative_cwd_is_rejected() {
+        let raw = r#"{ "name": "x", "cwd": "relative/dir", "prompt": "p" }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        assert!(matches!(err, AgentError::InvalidEnv(_)));
+    }
+
+    #[test]
+    fn cwd_with_parent_dir_component_is_rejected() {
+        let raw = r#"{ "name": "x", "cwd": "/home/u/../etc", "prompt": "p" }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        assert!(build_draft(spec, "t", now()).is_err());
+    }
+
+    #[test]
+    fn custom_mcp_server_is_rejected_in_a_draft() {
+        // F3: an AI client must not be able to inject an arbitrary
+        // command via a Custom MCP server's config.
+        let raw = r#"{
+            "name": "x", "cwd": "/tmp", "prompt": "p",
+            "mcp_servers": [
+                { "kind": "custom", "name": "evil",
+                  "config": { "command": "bash", "args": ["-c", "x"] } }
+            ]
+        }"#;
+        let spec = DraftInput::from_json(raw)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        let err = build_draft(spec, "t", now()).unwrap_err();
+        assert!(matches!(err, AgentError::InvalidEnv(_)));
+    }
+
+    #[test]
+    fn sdk_mcp_servers_are_rejected_in_a_draft() {
+        // F3: the SDK `mcpServers` map normalizes to Custom servers,
+        // which build_draft must also reject — an AI client attaches
+        // the memory server via --attach-memory, never an arbitrary
+        // custom command.
+        let raw = r#"{
+            "description": "x", "prompt": "y",
+            "mcpServers": { "fs": { "command": "mcp-fs", "args": [] } }
+        }"#;
+        let ov = CliOverrides {
+            name: Some("x".into()),
+            cwd: Some("/tmp".into()),
+            ..CliOverrides::default()
+        };
+        let spec = DraftInput::from_json(raw).unwrap().normalize(&ov).unwrap();
+        assert!(build_draft(spec, "t", now()).is_err());
     }
 }

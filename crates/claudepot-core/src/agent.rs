@@ -51,7 +51,7 @@ pub mod store;
 pub mod templates;
 pub mod types;
 
-pub use draft::{build_draft, CliOverrides, DraftInput, DraftSpec};
+pub use draft::{build_draft, validate_cwd, CliOverrides, DraftInput, DraftSpec};
 pub use error::AgentError;
 pub use events::{
     evaluate as evaluate_events, AgentEventsError, AgentRunStats, EventFire,

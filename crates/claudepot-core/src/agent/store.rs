@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use crate::fs_utils;
 use crate::paths::claudepot_data_dir;
 
+use super::draft::validate_cwd;
 use super::error::AgentError;
 use super::slug::validate_name;
 use super::types::{Agent, AgentId, Lifecycle};
@@ -305,6 +306,9 @@ impl AgentStore {
         // Defensive name re-validation — cheap, prevents malformed
         // names from sneaking in via deserialization.
         validate_name(&agent.name)?;
+        // Re-validate the working directory at the store boundary —
+        // the last gate before persistence (grill finding F4).
+        validate_cwd(&agent.cwd)?;
         if matches!(
             agent.permission_mode,
             super::types::PermissionMode::BypassPermissions

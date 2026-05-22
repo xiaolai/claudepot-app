@@ -28,6 +28,17 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// Standard filename inside `claudepot_data_dir()`.
 pub const EVENTS_FILENAME: &str = "agent-events.json";
 
+/// Hard cap on ledger entries. `prune` drops pairs whose agent or
+/// session is gone, but it only runs when the orchestrator ticks,
+/// and a long-lived project accumulates one entry per (agent,
+/// session) fire. This cap is the backstop against unbounded growth
+/// (grill findings F1/F13): when it is exceeded, the oldest fires
+/// (by `fired_at`) are evicted. Evicting a still-live pair lets it
+/// fire once more — bounded and self-correcting (it is re-recorded
+/// immediately), far cheaper than an unbounded file. Sized well
+/// above any realistic agent × session fan-out.
+const MAX_FIRED_ENTRIES: usize = 2000;
+
 fn default_schema_version() -> u32 {
     SCHEMA_VERSION
 }
@@ -108,6 +119,13 @@ impl EventsFile {
             session_id: session_id.to_string(),
             fired_at,
         });
+        // Backstop against unbounded growth: keep only the newest
+        // MAX_FIRED_ENTRIES by `fired_at`.
+        if self.fired.len() > MAX_FIRED_ENTRIES {
+            self.fired.sort_by_key(|e| e.fired_at);
+            let overflow = self.fired.len() - MAX_FIRED_ENTRIES;
+            self.fired.drain(0..overflow);
+        }
     }
 
     /// Drop ledger entries whose agent is no longer installed OR
@@ -325,5 +343,29 @@ mod tests {
         save_to(&p, &EventsFile::default()).unwrap();
         let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn test_events_store_record_fire_caps_ledger_size() {
+        let mut f = EventsFile::default();
+        let base = ts();
+        for i in 0..(MAX_FIRED_ENTRIES + 50) {
+            f.record_fire(
+                "agent",
+                &format!("sess-{i}"),
+                base + chrono::Duration::seconds(i as i64),
+            );
+        }
+        assert_eq!(
+            f.fired.len(),
+            MAX_FIRED_ENTRIES,
+            "the ledger is capped at MAX_FIRED_ENTRIES"
+        );
+        // The oldest entries were evicted; the newest survive.
+        assert!(!f.has_fired("agent", "sess-0"), "oldest entry evicted");
+        assert!(
+            f.has_fired("agent", &format!("sess-{}", MAX_FIRED_ENTRIES + 49)),
+            "newest entry kept"
+        );
     }
 }

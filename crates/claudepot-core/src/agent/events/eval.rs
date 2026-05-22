@@ -74,6 +74,16 @@ pub enum SkipReason {
 /// Pure evaluator. Returns the (agent, session) pairs that should
 /// fire this tick. Tests inject `now`.
 ///
+/// **At most one `EventFire` per agent per tick.** The evaluator is
+/// pure — within one tick it cannot observe the runs it would itself
+/// authorize, so it cannot let one agent fire for several sessions at
+/// once without blowing past `max_per_day` / `min_interval` (the D9
+/// cost-runaway guard). Each agent therefore fires for the single
+/// **oldest-settled** eligible session; the remaining settled
+/// sessions fire on later ticks, each re-gated by the rate limit.
+/// Oldest-first is also deterministic and fair — the session idle
+/// longest is narrated first.
+///
 /// Arguments:
 /// - `agents` — the **installed** agents carrying an `Event` trigger.
 ///   The caller filters to `lifecycle == Installed && enabled`; a
@@ -104,47 +114,53 @@ pub fn evaluate(
             _ => continue,
         };
         let agent_id = agent.id.to_string();
-        let agent_project = normalize_project(&agent.cwd);
-        let stats = run_stats(&agent_id);
 
+        // (4) Rate-limit (D9) — checked once per agent. Because the
+        //     agent fires at most once per tick (below), a single
+        //     check against its prior run stats is exact: there are
+        //     no intra-tick fires for the stats to miss. A throttled
+        //     agent fires for no session this tick.
+        let stats = run_stats(&agent_id);
+        if rate_limit_blocks(agent.rate_limit.as_ref(), &stats, now).is_some() {
+            continue;
+        }
+
+        let agent_project = normalize_project(&agent.cwd);
+
+        // Of every eligible settled session, fire for the single
+        // oldest one. Eligibility, in cheapest-first order:
+        //   (3) self-trigger exclusion (D7) — a session produced by
+        //       an agent run never fires, or the Session Narrator
+        //       would narrate its own output forever;
+        //   (1) settled — transcript idle for >= debounce_secs;
+        //   (5) scope — the session's project matches the agent cwd;
+        //   (2) fire-once — the pair is not already in the ledger.
+        let mut oldest: Option<&SessionRow> = None;
         for session in sessions {
-            // (3) Self-trigger exclusion (D7) — a session produced
-            //     by an agent run never fires. Checked first: it is
-            //     the cheapest *and* the correctness-critical guard.
             if agent_session_ids.contains(&session.session_id) {
                 continue;
             }
-
-            // (1) Settled — transcript idle for >= debounce_secs.
             if !is_settled(session, debounce_secs, now) {
                 continue;
             }
-
-            // (5) Scope — the session's project must match the
-            //     agent's `cwd` project.
             if normalize_project(&session.project_path) != agent_project {
                 continue;
             }
-
-            // (2) Fire-once — skip a pair already in the ledger.
             if fired_pairs
                 .contains(&(agent_id.clone(), session.session_id.clone()))
             {
                 continue;
             }
-
-            // (4) Rate-limit (D9). An `Event` agent must carry a
-            //     `rate_limit` (install validation enforces it); a
-            //     missing one is treated as the most conservative
-            //     possible limit rather than "unlimited".
-            if rate_limit_blocks(agent.rate_limit.as_ref(), &stats, now)
-                .is_some()
-            {
-                // The agent is throttled — once it is blocked, no
-                // further session can fire it this tick either.
-                break;
+            // Track the oldest-settled eligible session. Ties keep
+            // the first seen, so the result is deterministic.
+            match oldest {
+                Some(best)
+                    if last_activity(best) <= last_activity(session) => {}
+                _ => oldest = Some(session),
             }
+        }
 
+        if let Some(session) = oldest {
             out.push(EventFire {
                 agent_id: agent_id.clone(),
                 session_id: session.session_id.clone(),
@@ -651,7 +667,11 @@ mod tests {
     }
 
     #[test]
-    fn multiple_settled_sessions_all_fire_one_agent() {
+    fn multiple_settled_sessions_fire_oldest_first_one_per_tick() {
+        // One agent, two settled sessions in one tick → exactly ONE
+        // fire, for the oldest-settled session (s2, idle 20 min, vs
+        // s1's 15). The other fires on a later tick. This is the
+        // guard against a rate-limited agent firing N runs at once.
         let agent = event_agent("/home/u/proj", 600, Some(RateLimit::default()));
         let s1 = session(
             "sess-1",
@@ -671,6 +691,49 @@ mod tests {
             &stats_fn(HashMap::new()),
             fixed_now(),
         );
-        assert_eq!(fires.len(), 2);
+        assert_eq!(fires.len(), 1);
+        assert_eq!(
+            fires[0].session_id, "sess-2",
+            "the oldest-settled session fires first"
+        );
+    }
+
+    #[test]
+    fn rate_limited_agent_never_overshoots_in_one_tick() {
+        // F2 regression guard: a never-run agent with `max_per_day`
+        // and many settled sessions must fire AT MOST ONCE this tick.
+        // The pure evaluator cannot see the runs it would itself
+        // authorize, so it authorizes exactly one and lets later
+        // ticks re-gate the rest. Before the fix this fired 50 runs.
+        let agent = event_agent(
+            "/home/u/proj",
+            600,
+            Some(RateLimit {
+                min_interval_secs: None,
+                max_per_day: Some(5),
+            }),
+        );
+        let sessions: Vec<SessionRow> = (0..50)
+            .map(|i| {
+                session(
+                    &format!("sess-{i}"),
+                    "/home/u/proj",
+                    Some(fixed_now() - Duration::minutes(15)),
+                )
+            })
+            .collect();
+        let fires = evaluate(
+            &[agent],
+            &sessions,
+            &HashSet::new(),
+            &HashSet::new(),
+            &stats_fn(HashMap::new()),
+            fixed_now(),
+        );
+        assert_eq!(
+            fires.len(),
+            1,
+            "a never-run agent must not fire 50 runs in one tick"
+        );
     }
 }
