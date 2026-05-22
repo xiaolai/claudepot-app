@@ -548,11 +548,20 @@ fn walk_for_filename(dir: &Path, target: &str, depth_remaining: u32) -> Option<P
 /// resulting [`AgentRun`]. Used by the "Run Now" button —
 /// distinct from scheduled runs which the OS scheduler invokes
 /// directly. Phase events are emitted on `sink`.
+///
+/// `extra_env` is layered onto the spawned shim process — used by
+/// the event orchestrator to pass `CLAUDEPOT_EVENT_SESSION_ID` and
+/// `CLAUDEPOT_EVENT_SESSION_PATH` for `session-settled` triggers
+/// so the prompt can reference the firing session. Keys here do NOT
+/// pass through the env whitelist (those checks are for renderer-
+/// supplied user env on the agent record); the orchestrator is
+/// trusted Rust code injecting bounded `CLAUDEPOT_*` keys.
 pub async fn run_now(
     agent: &Agent,
     binary_abs_path: &str,
     claudepot_cli_abs_path: &str,
     sink: &dyn ProgressSink,
+    extra_env: &std::collections::BTreeMap<String, String>,
 ) -> Result<AgentRun, AgentError> {
     tracing::info!(
         agent_id = %agent.id,
@@ -591,6 +600,9 @@ pub async fn run_now(
         c
     };
     cmd.env("CLAUDEPOT_RUN_ID", &run_id);
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
     let status = cmd.status().await.map_err(|e| {
         AgentError::Io(std::io::Error::other(format!("failed to spawn shim: {e}")))
     })?;

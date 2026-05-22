@@ -78,9 +78,13 @@ export interface AgentSummaryDto {
   permission_mode: string;
   allowed_tools: string[];
   max_budget_usd: number | null;
+  /** `"cron"`, `"manual"`, or `"event"`. */
   trigger_kind: string;
   cron: string | null;
   timezone: string | null;
+  /** v1: `"session_settled"` when `trigger_kind === "event"`. */
+  event_kind: string | null;
+  event_debounce_secs: number | null;
   /** "draft" or "installed". Read-only — the GUI arms an agent. */
   lifecycle: string;
   created_at: string;
@@ -139,8 +143,21 @@ export interface AgentCreateDto {
   json_schema: string | null;
   bare: boolean;
   extra_env: Record<string, string>;
+  /**
+   * `"cron"` (default), `"manual"`, or `"event"`. When `"event"`,
+   * the `cron` field is unused and `event_kind` /
+   * `event_debounce_secs` must be set.
+   */
+  trigger_kind?: string | null;
   cron: string;
   timezone: string | null;
+  /** v1: `"session_settled"`. Required when `trigger_kind === "event"`. */
+  event_kind?: string | null;
+  /**
+   * Debounce window for a session-settled trigger, in seconds.
+   * Required when `trigger_kind === "event"`.
+   */
+  event_debounce_secs?: number | null;
   platform_options: PlatformOptionsDto;
   log_retention_runs: number;
   // ---- Agent-spec fields (Phase 1) ----

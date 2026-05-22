@@ -65,6 +65,18 @@ async fn run_tick(app: &AppHandle) {
     // this awaits a single task that walks all projects sequentially.
     pr_tick(app).await;
 
+    // Fire session-settled event agents — also independent of the
+    // active Anthropic account (an event agent can run as any
+    // configured route / binary). Returns immediately when no
+    // event-triggered agents are installed; otherwise loads the
+    // ledger, evaluates, and dispatches `claude -p`. The "record
+    // ledger first, dispatch second" invariant lives inside the
+    // orchestrator — see `agent_event_orchestrator::tick`'s
+    // doc-comment, and the F1/F14/F17 constraints in
+    // `claudepot_core::agent::events`'s module-doc.
+    let config_dir = claudepot_core::paths::claude_config_dir();
+    crate::agent_event_orchestrator::tick(app, config_dir).await;
+
     // Open store + list accounts under one blocking scope so the
     // SQLite open and the .list() call aren't ping-ponging into
     // the async runtime.

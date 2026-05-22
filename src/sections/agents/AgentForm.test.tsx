@@ -150,6 +150,120 @@ describe("AgentForm — clear-sentinel conversions + submit gating", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("blocks submit when an event-triggered agent has no rate-limit", async () => {
+    // Event-triggered agents must carry a rate-limit (PRD D9). The
+    // backend store invariant rejects an unthrottled event agent;
+    // the form surfaces this BEFORE submit so the user sees the
+    // problem inline.
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <AgentForm
+        routes={[]}
+        capabilities={caps}
+        busy={false}
+        submitLabel="Create"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await fillRequiredFields(user);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create" })).toBeEnabled(),
+    );
+    // Switch to the event trigger; rate-limit fields are still empty.
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: /Trigger type/i }),
+      "event",
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Create" }),
+      ).toBeDisabled(),
+    );
+    expect(
+      screen.getByText(
+        /Event-triggered agents must carry a rate-limit/i,
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("emits an event-triggered DTO when a debounce + rate-limit are set", async () => {
+    const onSubmit = vi.fn<(dto: AgentCreateDto) => void>();
+    const user = userEvent.setup();
+    render(
+      <AgentForm
+        routes={[]}
+        capabilities={caps}
+        busy={false}
+        submitLabel="Create"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await fillRequiredFields(user);
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: /Trigger type/i }),
+      "event",
+    );
+    // Provide a rate-limit so the form opens for an event agent.
+    await user.type(screen.getByPlaceholderText("24"), "10");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const dto = onSubmit.mock.calls[0][0];
+    expect(dto.trigger_kind).toBe("event");
+    expect(dto.event_kind).toBe("session_settled");
+    // Default debounce is 10 minutes; the form pre-fills 600.
+    expect(dto.event_debounce_secs).toBe(600);
+    // Event-trigger DTOs carry an empty cron string (the backend
+    // ignores it for event triggers).
+    expect(dto.cron).toBe("");
+    expect(dto.rate_limit?.max_per_day).toBe(10);
+  });
+
+  it("blocks submit when an event-triggered agent has a non-positive debounce", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <AgentForm
+        routes={[]}
+        capabilities={caps}
+        busy={false}
+        submitLabel="Create"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await fillRequiredFields(user);
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: /Trigger type/i }),
+      "event",
+    );
+    // Set a rate-limit so the rate-limit gate passes.
+    await user.type(screen.getByPlaceholderText("24"), "10");
+    // Now clobber the debounce with `0` — invalid for the
+    // u64-based evaluator.
+    const debounceInput = screen.getByRole("spinbutton", {
+      name: /Debounce/i,
+    });
+    await user.clear(debounceInput);
+    await user.type(debounceInput, "0");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Create" }),
+      ).toBeDisabled(),
+    );
+    expect(
+      screen.getByText(/Debounce must be a positive whole number/i),
+    ).toBeInTheDocument();
+  });
+
   it("blocks submit when bypassPermissions has an empty allowed-tools list", async () => {
     // bypassPermissions without a whitelist is the cross-field
     // invariant the form must refuse before the DTO crosses IPC.

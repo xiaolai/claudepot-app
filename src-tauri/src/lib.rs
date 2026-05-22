@@ -36,6 +36,7 @@ mod dto_usage;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
+mod agent_event_orchestrator;
 mod permission_orchestrator;
 mod pr_orchestrator;
 mod preferences;
@@ -640,6 +641,13 @@ pub fn run() {
         .manage(notification_log_state)
         .manage(commands::service_status::ServiceStatusState::new())
         .manage(rotation_orchestrator)
+        // Event orchestrator state — a single boolean
+        // (`booted`) used to apply the first-tick catch-up cap.
+        // Zero overhead when no event-triggered agents exist; the
+        // orchestrator early-returns before consulting any state.
+        .manage(std::sync::Arc::new(
+            agent_event_orchestrator::EventOrchestrator::new(),
+        ))
         // Per-project PR detection cache + tick. Zero overhead until
         // the orchestrator's `tick_all` is called from
         // `usage_snapshot::run_tick`; `project_list` reads the cache
