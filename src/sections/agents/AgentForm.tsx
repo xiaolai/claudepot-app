@@ -40,6 +40,19 @@ const CWD_HINT =
   "CC discovers .claude (commands, agents, skills) from cwd up to git-root. Set this to your project root for slash-commands to work.";
 
 /**
+ * Trigger shape the form authors. `"event"` is v1's session-settled
+ * reactive trigger (PRD §7); `"cron"` is the default; `"manual"`
+ * is run-now-only.
+ */
+type FormTriggerKind = "cron" | "event" | "manual";
+
+/**
+ * Default debounce for a session-settled event trigger, in seconds.
+ * Mirrors `claudepot_core::agent::DEFAULT_DEBOUNCE_SECS` (PRD §7.1).
+ */
+const DEFAULT_EVENT_DEBOUNCE_SECS = 600;
+
+/**
  * One form for create + edit. Edit mode disables the `name` field
  * (name is the URL-safe slug; renames would invalidate scheduler
  * registrations and run history, so we don't support them in v1).
@@ -118,6 +131,21 @@ export function AgentForm({
   );
   const [cron, setCron] = useState(initial?.summary.cron ?? "0 9 * * *");
   const [cronValid, setCronValid] = useState(true);
+  // Trigger-type selector. Reads the existing record's
+  // `trigger_kind` in edit mode; defaults to "cron" on create so
+  // the historical Add-Agent flow is unchanged.
+  const [triggerKind, setTriggerKind] = useState<FormTriggerKind>(() => {
+    const k = initial?.summary.trigger_kind;
+    if (k === "event" || k === "manual") return k;
+    return "cron";
+  });
+  // Debounce window for a session-settled event trigger. Stored
+  // as a free-form string so the user can clear it; parsed below.
+  const [eventDebounceSecs, setEventDebounceSecs] = useState<string>(() => {
+    const secs = initial?.summary.event_debounce_secs;
+    if (secs != null) return String(secs);
+    return String(DEFAULT_EVENT_DEBOUNCE_SECS);
+  });
   const [platformOptions, setPlatformOptions] = useState<PlatformOptionsDto>(
     initial?.platform_options ?? {
       wake_to_run: false,
@@ -186,6 +214,34 @@ export function AgentForm({
     maxPerDayParsed !== null &&
     (!Number.isInteger(maxPerDayParsed) || maxPerDayParsed <= 0);
   const rateLimitInvalid = minIntervalInvalid || maxPerDayInvalid;
+  /**
+   * Event-trigger rate-limit guard (PRD D9). The store-side
+   * invariant rejects an event-triggered agent that carries no
+   * usable rate-limit; surface that here so the user sees the
+   * problem before submit, not as a backend error toast.
+   */
+  const rateLimitMissingForEvent =
+    triggerKind === "event" &&
+    minIntervalParsed === null &&
+    maxPerDayParsed === null;
+
+  // Event-trigger debounce validation. An empty / non-positive
+  // integer is rejected — the evaluator treats `debounce_secs`
+  // as `u64`, and a debounce of 0 would fire while the session
+  // was still active.
+  const eventDebounceTrimmed = eventDebounceSecs.trim();
+  const eventDebounceParsed: number | null =
+    triggerKind === "event"
+      ? eventDebounceTrimmed === ""
+        ? null
+        : Number(eventDebounceTrimmed)
+      : null;
+  const eventDebounceInvalid =
+    triggerKind === "event" &&
+    (eventDebounceParsed === null ||
+      !Number.isFinite(eventDebounceParsed) ||
+      !Number.isInteger(eventDebounceParsed) ||
+      eventDebounceParsed <= 0);
 
   const memoryAttached = mcpServers.some(
     (s) => s.kind === "claudepot_memory",
@@ -213,12 +269,21 @@ export function AgentForm({
   const budgetInvalid =
     budgetParsed !== null && (!Number.isFinite(budgetParsed) || budgetParsed < 0);
 
+  // Trigger gate: cron requires a valid cron expression; event
+  // requires a positive debounce + a usable rate-limit; manual
+  // has no per-tick gate (Run-Now is the only path).
+  const triggerOk =
+    triggerKind === "manual" ||
+    (triggerKind === "cron" && !!cron && cronValid) ||
+    (triggerKind === "event" &&
+      !eventDebounceInvalid &&
+      !rateLimitMissingForEvent);
+
   const canSubmit =
     !!name &&
     !!cwd &&
     !!prompt &&
-    !!cron &&
-    cronValid &&
+    triggerOk &&
     !nameError &&
     !bypassWithoutTools &&
     !budgetInvalid &&
@@ -259,7 +324,19 @@ export function AgentForm({
       json_schema: initial?.json_schema ?? null,
       bare: bareMode,
       extra_env: initial?.extra_env ?? {},
-      cron: cron.trim(),
+      // Trigger fields. Cron-mode keeps the historical wire shape
+      // (`trigger_kind` omitted → defaults to "cron" on the
+      // backend). Event-mode sets `trigger_kind = "event"` and
+      // sends `event_kind` + `event_debounce_secs` (the cron
+      // string is still serialized for back-compat but ignored).
+      trigger_kind: triggerKind,
+      event_kind:
+        triggerKind === "event" ? "session_settled" : null,
+      event_debounce_secs:
+        triggerKind === "event"
+          ? eventDebounceParsed ?? DEFAULT_EVENT_DEBOUNCE_SECS
+          : null,
+      cron: triggerKind === "cron" ? cron.trim() : "",
       timezone: initial?.summary.timezone ?? null,
       platform_options: platformOptions,
       log_retention_runs: initial?.log_retention_runs ?? 50,
@@ -638,12 +715,71 @@ export function AgentForm({
 
       {/* When it runs */}
       <Group title="When it runs">
-        <CronInput
-          value={cron}
-          onChange={setCron}
-          onValidityChange={setCronValid}
-          disabled={busy}
-        />
+        <Field label="Trigger type">
+          <select
+            value={triggerKind}
+            disabled={busy}
+            onChange={(e) =>
+              setTriggerKind(e.target.value as FormTriggerKind)
+            }
+            style={inputStyle()}
+          >
+            <option value="cron">Cron schedule</option>
+            <option value="event">Event — session settled (reactive)</option>
+            <option value="manual">Manual — Run-Now only</option>
+          </select>
+          <Hint>
+            {triggerKind === "event"
+              ? "Fires when a CC session in this agent's cwd has been idle for the debounce window. Requires a rate-limit (set below) to bound cost."
+              : triggerKind === "manual"
+                ? "No scheduler artifact is created. The agent only runs when you click Run Now."
+                : "Five-field cron expression; an IANA timezone is optional."}
+          </Hint>
+        </Field>
+
+        {triggerKind === "cron" && (
+          <CronInput
+            value={cron}
+            onChange={setCron}
+            onValidityChange={setCronValid}
+            disabled={busy}
+          />
+        )}
+
+        {triggerKind === "event" && (
+          <Field label="Debounce — seconds of session inactivity before firing">
+            <input
+              type="number"
+              step="1"
+              min="1"
+              value={eventDebounceSecs}
+              disabled={busy}
+              onChange={(e) => setEventDebounceSecs(e.target.value)}
+              placeholder={String(DEFAULT_EVENT_DEBOUNCE_SECS)}
+              style={inputStyle(eventDebounceInvalid)}
+              aria-invalid={eventDebounceInvalid}
+            />
+            {eventDebounceInvalid ? (
+              <Hint kind="error">
+                Debounce must be a positive whole number of seconds.
+              </Hint>
+            ) : (
+              <Hint>
+                Default {DEFAULT_EVENT_DEBOUNCE_SECS}s (10 min). A
+                session quiet for this long has almost certainly
+                ended.
+              </Hint>
+            )}
+            {rateLimitMissingForEvent && (
+              <Hint kind="error">
+                Event-triggered agents must carry a rate-limit
+                (above): set a minimum interval and/or a maximum
+                runs-per-day. Without one, a busy project could
+                fire dozens of billed runs an hour.
+              </Hint>
+            )}
+          </Field>
+        )}
       </Group>
 
       {/* Platform behavior */}

@@ -281,12 +281,22 @@ pub struct AgentCreateDto {
     pub bare: bool,
     pub extra_env: std::collections::BTreeMap<String, String>,
     /// Kind of trigger to install. Defaults to `"cron"` so existing
-    /// call sites stay unchanged. `"manual"` builds a `Trigger::Manual`
-    /// agent (no scheduler artifact, only Run-Now).
+    /// call sites stay unchanged. `"manual"` builds a
+    /// [`Trigger::Manual`] agent (no scheduler artifact, only
+    /// Run-Now). `"event"` builds a `Trigger::Event` agent and
+    /// requires `event_kind` + `event_debounce_secs`.
     #[serde(default)]
     pub trigger_kind: Option<String>,
     pub cron: String,
     pub timezone: Option<String>,
+    /// Event variant for `trigger_kind == "event"`. v1 value:
+    /// `"session_settled"` (PRD §7.1). Ignored otherwise.
+    #[serde(default)]
+    pub event_kind: Option<String>,
+    /// Debounce window (seconds) for a `session_settled` event
+    /// trigger. Ignored otherwise.
+    #[serde(default)]
+    pub event_debounce_secs: Option<u64>,
     pub platform_options: PlatformOptionsDto,
     #[serde(default = "default_log_retention")]
     pub log_retention_runs: u32,

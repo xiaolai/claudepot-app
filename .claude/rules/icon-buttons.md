@@ -100,7 +100,7 @@ Use when:
 ## Surfaces already correct (do not touch in routine refactors)
 
 - Modal footers (Cancel / Confirm / Move to / Empty trash — confirm).
-- Empty-state CTAs ("Add account", "Add automation", "Verify all").
+- Empty-state CTAs ("Add account", "Add agent", "Verify all").
 - Toggle-state buttons in cards (Show runs / Hide runs, Enable /
   Disable).
 - Domain-specific actions without icon mapping ("Sync from current",

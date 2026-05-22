@@ -342,6 +342,12 @@ pub async fn templates_install(
         trigger_kind: Some(resolved.trigger_kind),
         cron: resolved.cron,
         timezone: resolved.timezone,
+        // Pre-Phase-3 templates produce cron / manual triggers
+        // only; the Session Narrator (which is event-triggered)
+        // is installed via the dedicated `agent_add_from_template`
+        // path, not this DTO. Leave the event fields unset.
+        event_kind: None,
+        event_debounce_secs: None,
         platform_options: PlatformOptionsDto {
             wake_to_run: false,
             catch_up_if_missed: true,

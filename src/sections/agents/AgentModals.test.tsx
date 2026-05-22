@@ -39,6 +39,8 @@ const summary = (overrides?: Partial<AgentSummaryDto>): AgentSummaryDto => ({
   trigger_kind: "cron",
   cron: "0 9 * * *",
   timezone: null,
+  event_kind: null,
+  event_debounce_secs: null,
   lifecycle: "draft",
   created_at: "2026-05-22T00:00:00Z",
   updated_at: "2026-05-22T00:00:00Z",

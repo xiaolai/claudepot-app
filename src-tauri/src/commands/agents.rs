@@ -36,7 +36,7 @@ fn parse_id(s: &str) -> Result<AgentId, String> {
     Uuid::parse_str(s.trim()).map_err(|e| format!("invalid agent id: {e}"))
 }
 
-fn route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
+pub(crate) fn route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
     move |id: &Uuid| -> Option<String> {
         let store = RouteStore::open().ok()?;
         // The route's `wrapper_name` is the canonical, on-disk
@@ -82,8 +82,44 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
         other => return Err(format!("unknown binary_kind: {other}")),
     };
 
-    // Validate cron now so we fail fast.
-    let _ = claudepot_core::agent::cron::expand(&dto.cron).map_err(err)?;
+    // Determine trigger ahead of cron validation: event/manual
+    // agents don't carry a cron string, so validating one would
+    // either fail spuriously (empty string) or pin the trigger
+    // shape unnecessarily.
+    let trigger_kind = dto.trigger_kind.as_deref();
+    let trigger = match trigger_kind {
+        Some("event") => {
+            // v1 only ships the session-settled kind. An absent
+            // `event_kind` defaults to it (the form's only
+            // option); an unknown value is a strong "this
+            // payload was hand-crafted" signal — reject loudly
+            // rather than silently treat it as session_settled.
+            let event_str =
+                dto.event_kind.as_deref().unwrap_or("session_settled");
+            if event_str != "session_settled" {
+                return Err(format!("unknown event_kind: {event_str}"));
+            }
+            let debounce_secs = dto
+                .event_debounce_secs
+                .unwrap_or(claudepot_core::agent::DEFAULT_DEBOUNCE_SECS);
+            Trigger::Event {
+                event: claudepot_core::agent::EventKind::SessionSettled {
+                    debounce_secs,
+                },
+            }
+        }
+        Some("manual") => Trigger::Manual,
+        _ => {
+            // Default = "cron". Validate the cron string before
+            // anything else so we fail fast on bad input.
+            let _ =
+                claudepot_core::agent::cron::expand(&dto.cron).map_err(err)?;
+            Trigger::Cron {
+                cron: dto.cron.clone(),
+                timezone: dto.timezone.clone(),
+            }
+        }
+    };
 
     let now = Utc::now();
     Ok(Agent {
@@ -107,20 +143,7 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
         json_schema: dto.json_schema,
         bare: dto.bare,
         extra_env: dto.extra_env,
-        trigger: match dto.trigger_kind.as_deref() {
-            // Templates with `default_schedule = "manual"` arrive
-            // with `trigger_kind = "manual"` and an empty `cron`
-            // string from the install path. The cron field is
-            // ignored on this path.
-            Some("manual") => Trigger::Manual,
-            // Default = "cron" — same as the historical shape;
-            // an unspecified `trigger_kind` keeps the existing
-            // call sites unchanged.
-            _ => Trigger::Cron {
-                cron: dto.cron,
-                timezone: dto.timezone,
-            },
-        },
+        trigger,
         platform_options: PlatformOptions {
             wake_to_run: dto.platform_options.wake_to_run,
             catch_up_if_missed: dto.platform_options.catch_up_if_missed,
@@ -592,9 +615,19 @@ pub async fn agents_run_now_start(
                 let binary_path =
                     resolve_binary(&agent, &route_lookup_fn()).map_err(|e| e.to_string())?;
                 let cli_path = current_claudepot_cli().map_err(|e| e.to_string())?;
-                claudepot_core::agent::run_now(&agent, &binary_path, &cli_path, &sink)
-                    .await
-                    .map_err(|e| e.to_string())
+                // Manual Run-Now never injects event env vars; the
+                // event orchestrator passes a populated map to this
+                // function only for `session-settled` dispatches.
+                let empty_env = std::collections::BTreeMap::<String, String>::new();
+                claudepot_core::agent::run_now(
+                    &agent,
+                    &binary_path,
+                    &cli_path,
+                    &sink,
+                    &empty_env,
+                )
+                .await
+                .map_err(|e| e.to_string())
             });
             match result {
                 Ok(_run) => emit_terminal(&app, &ops, &op_id, None),
