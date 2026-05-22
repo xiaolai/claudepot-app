@@ -52,6 +52,8 @@ const COLD_START_ENABLED_BY_DEFAULT: ReadonlyArray<Category> = [
   "automationRan",
   "rotationApplied",
   "rotationFailed",
+  "agentEventFailed",
+  "agentEventBurstCapped",
   "bannerResolved",
   // P3 — ambient default on (they're log-only by route)
   "memoryChanged",
