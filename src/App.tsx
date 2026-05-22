@@ -169,6 +169,7 @@ import { useCardNotifications } from "./sections/events/useCardNotifications";
 import { useOpDoneNotifications } from "./hooks/useOpDoneNotifications";
 import { useUsageThresholdNotifications } from "./hooks/useUsageThresholdNotifications";
 import { useRotationEvents } from "./hooks/useRotationEvents";
+import { useAgentEventToasts } from "./hooks/useAgentEventToasts";
 import { useBackgroundChangeEmits } from "./hooks/useBackgroundChangeEmits";
 import {
   consumeRecentTarget,
@@ -544,6 +545,13 @@ function AppShell() {
   // with a Switch action; auto-mode swaps surface as info toasts;
   // failures as errors. See src/hooks/useRotationEvents.ts.
   useRotationEvents();
+
+  // Agent-event orchestrator toasts: surfaces firing failures and
+  // first-tick catch-up cap. The successful-fire dispatched event
+  // is intentionally NOT subscribed — runs land in the run-history
+  // panel with structured output, so a toast per fire would spam.
+  // See src/hooks/useAgentEventToasts.ts.
+  useAgentEventToasts();
 
   // Phase 2 audit fix: route `memory:changed` and `config-tree-patch`
   // events into the notification log so they reach the bell popover

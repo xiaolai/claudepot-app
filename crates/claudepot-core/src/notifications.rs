@@ -65,6 +65,14 @@ pub enum Category {
     /// `RotationApplied` so a user can mute success-acks while still
     /// hearing about failures.
     RotationFailed,
+    /// An event-triggered agent fire failed — the orchestrator's
+    /// dispatch returned an error. Separate from `AgentRan` so a
+    /// user can mute success-acks while still hearing failures.
+    AgentEventFailed,
+    /// First-tick catch-up dropped excess agent-event fires (bounded
+    /// burst protection per PRD D6). One emission per affected tick,
+    /// not one per dropped fire.
+    AgentEventBurstCapped,
     /// Paired "resolved" event emitted when a banner clears. Lets the
     /// bell timeline show "auth-rejected → resolved" instead of just
     /// "auth-rejected appeared one hour ago, presumably still bad."
@@ -207,7 +215,8 @@ impl Category {
             // P2 — Acknowledge
             AccountVerified | AccountSwitched | ProjectRenamed | ProjectRepaired
             | SessionPruned | KeyCopied | KeyAdded | KeyRemoved | ConfigEdited | AgentRan
-            | RotationApplied | RotationFailed | BannerResolved => P2Acknowledge,
+            | RotationApplied | RotationFailed | AgentEventFailed
+            | AgentEventBurstCapped | BannerResolved => P2Acknowledge,
 
             // P3 — Ambient
             MemoryChanged | ConfigTreePatched | ServiceStatusChanged | UpdateAvailable => P3Ambient,
@@ -247,6 +256,8 @@ impl Category {
             AgentRan => ("Agent ran", "Actions", true),
             RotationApplied => ("Account rotation applied", "Actions", true),
             RotationFailed => ("Account rotation failed", "Actions", true),
+            AgentEventFailed => ("Agent fire failed", "Actions", true),
+            AgentEventBurstCapped => ("Agent events burst capped", "Actions", true),
             BannerResolved => ("Banner resolved", "Actions", true),
 
             MemoryChanged => ("CLAUDE.md changed externally", "Background", true),
@@ -293,6 +304,8 @@ impl Category {
             AgentRan,
             RotationApplied,
             RotationFailed,
+            AgentEventFailed,
+            AgentEventBurstCapped,
             BannerResolved,
             MemoryChanged,
             ConfigTreePatched,
@@ -408,7 +421,7 @@ mod tests {
         // Synthetic exhaustive match: this fails to compile if a new
         // variant is added without updating `all()`. Update the
         // counter and the match arms in lockstep with the enum.
-        const EXPECTED: usize = 29;
+        const EXPECTED: usize = 31;
         let actual = Category::all().len();
         assert_eq!(
             actual, EXPECTED,

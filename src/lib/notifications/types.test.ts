@@ -20,11 +20,11 @@ import {
 // category's priority agrees with `priorityForCategory`.
 
 describe("notification category mirror", () => {
-  it("CATEGORY_NAMES contains 29 entries (matches Rust Category::all())", () => {
+  it("CATEGORY_NAMES contains 31 entries (matches Rust Category::all())", () => {
     // If you add or remove a Rust variant, update this number and
     // the CATEGORY_NAMES array. The Rust side has a corresponding
     // EXPECTED counter that fails compile when the lockstep breaks.
-    expect(CATEGORY_NAMES.length).toBe(29);
+    expect(CATEGORY_NAMES.length).toBe(31);
   });
 
   it("every CATEGORY_NAMES entry has a priority binding", () => {

@@ -66,6 +66,8 @@ export type Category =
   | "automationRan"
   | "rotationApplied"
   | "rotationFailed"
+  | "agentEventFailed"
+  | "agentEventBurstCapped"
   | "bannerResolved"
   // P3 — Ambient
   | "memoryChanged"
@@ -104,6 +106,8 @@ export const CATEGORY_NAMES: readonly Category[] = [
   "automationRan",
   "rotationApplied",
   "rotationFailed",
+  "agentEventFailed",
+  "agentEventBurstCapped",
   "bannerResolved",
   "memoryChanged",
   "configTreePatched",
@@ -284,6 +288,8 @@ export function priorityForCategory(category: Category): Priority {
     case "automationRan":
     case "rotationApplied":
     case "rotationFailed":
+    case "agentEventFailed":
+    case "agentEventBurstCapped":
     case "bannerResolved":
       return "p2Acknowledge";
     case "memoryChanged":

@@ -1,34 +1,191 @@
 {
   "_schema": "Canonical snapshot of `Category::all().iter().map(|c| c.display_meta())` from claudepot-core. Both sides validate against this file: cargo test `test_categories_fixture_matches_rust` asserts the Rust source produces this JSON; vitest `Rust metadata mirror via fixture` asserts the TS mirror agrees. Update by running `cargo test --workspace -- categories_fixture` (writes the file when CLAUDEPOT_REGEN_FIXTURES=1) and committing the diff.",
   "categories": [
-    {"id": "accountAuthRejected", "priority": "p0Blocking", "group": "Setup", "defaultEnabled": true},
-    {"id": "keychainLocked", "priority": "p0Blocking", "group": "Setup", "defaultEnabled": true},
-    {"id": "ccSlotDrift", "priority": "p0Blocking", "group": "Setup", "defaultEnabled": true},
-    {"id": "desktopDrift", "priority": "p0Blocking", "group": "Setup", "defaultEnabled": true},
-    {"id": "repairConflict", "priority": "p0Blocking", "group": "Setup", "defaultEnabled": true},
-    {"id": "sessionWaiting", "priority": "p1Stalled", "group": "Live work", "defaultEnabled": true},
-    {"id": "sessionStuck", "priority": "p1Stalled", "group": "Live work", "defaultEnabled": false},
-    {"id": "sessionErrorBurst", "priority": "p1Stalled", "group": "Live work", "defaultEnabled": false},
-    {"id": "opDoneUnfocused", "priority": "p1Stalled", "group": "Live work", "defaultEnabled": false},
-    {"id": "rotationSuggested", "priority": "p1Stalled", "group": "Live work", "defaultEnabled": true},
-    {"id": "usageThreshold", "priority": "p1Stalled", "group": "Live work", "defaultEnabled": true},
-    {"id": "updateInstallReady", "priority": "p1Stalled", "group": "Live work", "defaultEnabled": true},
-    {"id": "accountVerified", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "accountSwitched", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "projectRenamed", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "projectRepaired", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "sessionPruned", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "keyCopied", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "keyAdded", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "keyRemoved", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "configEdited", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "automationRan", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "rotationApplied", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "rotationFailed", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "bannerResolved", "priority": "p2Acknowledge", "group": "Actions", "defaultEnabled": true},
-    {"id": "memoryChanged", "priority": "p3Ambient", "group": "Background", "defaultEnabled": true},
-    {"id": "configTreePatched", "priority": "p3Ambient", "group": "Background", "defaultEnabled": true},
-    {"id": "serviceStatusChanged", "priority": "p3Ambient", "group": "Background", "defaultEnabled": true},
-    {"id": "updateAvailable", "priority": "p3Ambient", "group": "Background", "defaultEnabled": true}
+    {
+      "defaultEnabled": true,
+      "group": "Setup",
+      "id": "accountAuthRejected",
+      "priority": "p0Blocking"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Setup",
+      "id": "keychainLocked",
+      "priority": "p0Blocking"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Setup",
+      "id": "ccSlotDrift",
+      "priority": "p0Blocking"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Setup",
+      "id": "desktopDrift",
+      "priority": "p0Blocking"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Setup",
+      "id": "repairConflict",
+      "priority": "p0Blocking"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Live work",
+      "id": "sessionWaiting",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": false,
+      "group": "Live work",
+      "id": "sessionStuck",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": false,
+      "group": "Live work",
+      "id": "sessionErrorBurst",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": false,
+      "group": "Live work",
+      "id": "opDoneUnfocused",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Live work",
+      "id": "rotationSuggested",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Live work",
+      "id": "usageThreshold",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Live work",
+      "id": "updateInstallReady",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "accountVerified",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "accountSwitched",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "projectRenamed",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "projectRepaired",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "sessionPruned",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "keyCopied",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "keyAdded",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "keyRemoved",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "configEdited",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "automationRan",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "rotationApplied",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "rotationFailed",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "agentEventFailed",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "agentEventBurstCapped",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Actions",
+      "id": "bannerResolved",
+      "priority": "p2Acknowledge"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Background",
+      "id": "memoryChanged",
+      "priority": "p3Ambient"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Background",
+      "id": "configTreePatched",
+      "priority": "p3Ambient"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Background",
+      "id": "serviceStatusChanged",
+      "priority": "p3Ambient"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Background",
+      "id": "updateAvailable",
+      "priority": "p3Ambient"
+    }
   ]
 }
