@@ -42,6 +42,7 @@ pub mod env;
 pub mod error;
 pub mod events;
 pub mod install;
+pub mod install_gate;
 pub mod prerun;
 pub mod run;
 pub mod scheduler;
@@ -58,6 +59,7 @@ pub use events::{
     EventsFile, FiredEntry,
 };
 pub use install::{current_claudepot_cli, install_shim, resolve_binary};
+pub use install_gate::{install_draft, InstallOutcome};
 pub use run::{
     list_run_ids, parse_result_event, read_run, record_run, record_run_for_agent, run_now,
     RecordInputs,

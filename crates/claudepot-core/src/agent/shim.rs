@@ -102,6 +102,12 @@ EXIT=$?
 set -e
 END_TS=$(date -u +%s)
 
+# `|| true` keeps a failed `_record-run` from aborting the shim
+# before it re-raises the real `claude -p` exit code below
+# (`set -e` is active here). That alone would make a broken
+# record-run invisible — so `_record-run` itself drops a
+# `record-run-error.txt` breadcrumb in the run dir on failure
+# (grill F5). Its stderr is also captured to `record-run.log`.
 {cli} agent _record-run \
   --agent-id "$AUTO_ID" \
   --run-id "$RUN_ID" \
@@ -109,7 +115,7 @@ END_TS=$(date -u +%s)
   --start "$START_TS" \
   --end "$END_TS" \
   --trigger scheduled \
-  --run-dir "$RUN_DIR" || true
+  --run-dir "$RUN_DIR" 2>"$RUN_DIR/record-run.log" || true
 
 exit $EXIT
 "#,
@@ -218,10 +224,15 @@ pub fn render_windows(agent: &Agent, inputs: &ShimInputs<'_>) -> String {
         "for /f \"usebackq delims=\" %%t in (`powershell -NoProfile -Command \
 \"[int][double]::Parse((Get-Date -UFormat %%s))\"`) do set END_TS=%%t\r\n",
     );
+    // `%EXIT%` already holds the real `claude -p` exit code, so a
+    // failed `_record-run` cannot mask it (`exit /b %EXIT%` below
+    // re-raises it regardless). `_record-run` itself drops a
+    // `record-run-error.txt` breadcrumb in the run dir on failure
+    // (grill F5); its stderr is captured to `record-run.log`.
     s.push_str(&format!(
         "{cli} agent _record-run --agent-id \"%AUTO_ID%\" --run-id \"%RUN_ID%\" \
 --exit \"%EXIT%\" --start \"%START_TS%\" --end \"%END_TS%\" --trigger scheduled \
---run-dir \"%RUN_DIR%\"\r\n",
+--run-dir \"%RUN_DIR%\" 2> \"%RUN_DIR%\\record-run.log\"\r\n",
         cli = cmd_quote_arg(inputs.claudepot_cli_abs_path),
     ));
     s.push_str("exit /b %EXIT%\r\n");
