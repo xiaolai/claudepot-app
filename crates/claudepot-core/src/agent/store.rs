@@ -514,6 +514,31 @@ impl AgentStore {
         Ok(self.file.agents[idx].clone())
     }
 
+    /// Force an agent's `lifecycle` to a specific value in memory.
+    ///
+    /// Unlike [`arm`](Self::arm) — the *only* sanctioned Draft →
+    /// Installed transition — this is an unconditional setter used
+    /// for **rollback**: the install gate ([`install_gate`]) calls
+    /// it to revert a failed arm back to `Draft` so a reused store
+    /// object never claims an agent is installed when its scheduler
+    /// artifact never materialized. No-op (and not an error) when
+    /// the id is unknown — there is nothing to roll back.
+    ///
+    /// [`install_gate`]: super::install_gate
+    pub fn set_lifecycle(&mut self, id: &AgentId, lifecycle: Lifecycle) {
+        if let Some(a) = self.file.agents.iter_mut().find(|a| &a.id == id) {
+            a.lifecycle = lifecycle;
+        }
+    }
+
+    /// Re-point the store at a different path. A test seam only —
+    /// lets a test force a `save` failure by aiming the store at an
+    /// un-creatable path after seeding it through a writable one.
+    #[cfg(test)]
+    pub fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
     /// Remove and return the agent with the given id.
     pub fn remove(&mut self, id: &AgentId) -> Result<Agent, AgentError> {
         let idx = self
@@ -937,5 +962,126 @@ mod tests {
             store.arm(&Uuid::new_v4()),
             Err(AgentError::NotFound(_))
         ));
+    }
+
+    // ---- grill F6: the migration's dangerous paths ----
+
+    #[test]
+    fn migrate_v1_succeeds_when_runs_dir_rename_is_a_noop() {
+        // GOLDEN (F6a): the runs-dir rename is best-effort — when it
+        // is a no-op (the legacy `automations/` runs dir is absent)
+        // OR is skipped (the destination already exists), the
+        // migration must still succeed. This case exercises the
+        // no-op: the legacy file migrates, but there is no legacy
+        // runs dir to move, so the rename branch is a no-op and the
+        // migration completes cleanly.
+        //
+        // The migration's runs-dir logic reads the process-global
+        // `claudepot_data_dir()`; a no-op runs-dir rename is the one
+        // shape that is deterministic regardless of that global, so
+        // the assertion here is exactly "the migration still
+        // succeeds" — which is the load-bearing F6a claim.
+        let dir = tempdir().unwrap();
+        let v2_path = dir.path().join("agents.json");
+        let v1_path = dir.path().join("automations.json");
+        std::fs::write(&v1_path, V1_FIXTURE).unwrap();
+        // Deliberately do NOT create an `automations/` runs dir
+        // beside the legacy file — the rename branch becomes a no-op.
+
+        let store = AgentStore::open_at(v2_path.clone()).unwrap();
+        // The load-bearing claim: a no-op runs-dir rename does not
+        // abort the migration — every record still migrates.
+        assert_eq!(store.list().len(), 1, "migration must still succeed");
+        assert_eq!(store.list()[0].name, "morning-pr");
+        assert_eq!(store.list()[0].lifecycle, Lifecycle::Installed);
+        assert!(v2_path.exists(), "v2 agents.json was written");
+        // The legacy file is backed up, not destroyed.
+        assert!(!v1_path.exists());
+        assert!(dir.path().join("automations.json.pre-v2-backup").exists());
+    }
+
+    #[test]
+    fn migrate_v1_corrupt_legacy_file_is_an_error_not_a_panic() {
+        // GOLDEN (F6b): a corrupt (non-JSON) `automations.json` must
+        // surface as a clean `AgentError`, never a panic, and must
+        // NOT silently produce an empty store (that would mask data
+        // loss). The backup/v2 writes must not have run.
+        let dir = tempdir().unwrap();
+        let v2_path = dir.path().join("agents.json");
+        let v1_path = dir.path().join("automations.json");
+        std::fs::write(&v1_path, b"{ this is not valid json").unwrap();
+
+        match AgentStore::open_at(v2_path.clone()) {
+            Err(AgentError::Json(_)) => { /* expected */ }
+            Err(other) => panic!("expected a JSON error, got {other:?}"),
+            Ok(_) => panic!("a corrupt legacy file must not load as a store"),
+        }
+        // The migration aborted before writing v2 or backing up the
+        // legacy file — the corrupt file is left untouched for the
+        // user to inspect.
+        assert!(!v2_path.exists(), "v2 file must not exist after a failed migration");
+        assert!(v1_path.exists(), "corrupt legacy file is left in place");
+        assert!(
+            !dir.path().join("automations.json.pre-v2-backup").exists(),
+            "no backup is created when the migration aborts"
+        );
+    }
+
+    #[test]
+    fn migrate_v1_empty_legacy_file_yields_empty_v2_store() {
+        // GOLDEN (F6c): a zero-byte `automations.json` is a benign
+        // legacy state (the user never created an automation). It
+        // migrates to a fresh, empty v2 store — and still writes the
+        // v2 file + backs up the legacy file so the next open is a
+        // clean v2 load.
+        let dir = tempdir().unwrap();
+        let v2_path = dir.path().join("agents.json");
+        let v1_path = dir.path().join("automations.json");
+        std::fs::write(&v1_path, b"").unwrap();
+
+        let store = AgentStore::open_at(v2_path.clone()).unwrap();
+        assert!(store.list().is_empty());
+
+        // v2 file written, version 2.
+        let raw = std::fs::read_to_string(&v2_path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["version"], 2);
+        // Legacy file backed up, not deleted.
+        assert!(!v1_path.exists());
+        assert!(dir.path().join("automations.json.pre-v2-backup").exists());
+    }
+
+    #[test]
+    fn open_at_prefers_v2_and_ignores_a_leftover_legacy_file() {
+        // GOLDEN (F6d): crash-mid-migration simulation. Both
+        // `agents.json` (v2) and a leftover `automations.json` (v1)
+        // are on disk — e.g. the process died after the v2 write but
+        // before the legacy backup rename. `open_at` must load the
+        // v2 file and IGNORE the legacy file entirely; it must never
+        // re-run the migration and clobber the newer v2 data.
+        let dir = tempdir().unwrap();
+        let v2_path = dir.path().join("agents.json");
+        let v1_path = dir.path().join("automations.json");
+
+        // The v2 file holds the authoritative record.
+        let mut seed = AgentStore::open_at(v2_path.clone()).unwrap();
+        let mut a = sample("post-crash-agent");
+        a.prompt = "the v2 truth".into();
+        let id = a.id;
+        seed.add(a).unwrap();
+        seed.save().unwrap();
+
+        // A stale v1 file is *also* present, with a different agent.
+        std::fs::write(&v1_path, V1_FIXTURE).unwrap();
+
+        let store = AgentStore::open_at(v2_path.clone()).unwrap();
+        // Exactly the v2 record — the legacy `morning-pr` is ignored.
+        assert_eq!(store.list().len(), 1);
+        assert_eq!(store.get(&id).unwrap().prompt, "the v2 truth");
+        assert!(store.get_by_name("morning-pr").is_none());
+        // The legacy file is left exactly as-is — the migration did
+        // not run, so it was not backed up or consumed.
+        assert!(v1_path.exists());
+        assert!(!dir.path().join("automations.json.pre-v2-backup").exists());
     }
 }

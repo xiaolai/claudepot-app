@@ -94,16 +94,44 @@ pub fn record_run_cmd(
         stderr_log_path: &stderr_log,
         claudepot_version: env!("CARGO_PKG_VERSION"),
     };
-    let _run = record_run(&inputs).with_context(|| {
-        format!(
-            "failed to record run: agent={id} run={run_id} dir={}",
-            run_dir.display()
-        )
-    })?;
-
-    // The shim sets exit code from the underlying `claude -p`; we
-    // just confirm we wrote the record.
-    Ok(())
+    match record_run(&inputs) {
+        Ok(_run) => {
+            // The shim sets exit code from the underlying `claude -p`;
+            // we just confirm we wrote the record.
+            Ok(())
+        }
+        Err(e) => {
+            // The shim invokes `_record-run` with a trailing `|| true`
+            // so a failed record-run cannot abort the shim before it
+            // re-raises the real `claude -p` exit code (grill F5).
+            // That makes a broken record-run *invisible* from the
+            // shim's side. So `_record-run` drops a breadcrumb file
+            // in the run dir on its own failure: a non-empty
+            // `record-run-error.txt` next to the (missing or stale)
+            // `result.json` is the durable signal that this run's
+            // result was never recorded. The breadcrumb write itself
+            // is best-effort — if even that fails we still propagate
+            // the original error.
+            let breadcrumb = run_dir.join("record-run-error.txt");
+            let body = format!(
+                "record-run failed for agent={id} run={run_id}\n\
+                 dir={}\nexit_code={exit}\n\nerror: {e:#}\n",
+                run_dir.display()
+            );
+            if let Err(write_err) = std::fs::write(&breadcrumb, body) {
+                eprintln!(
+                    "claudepot: record-run failed AND its breadcrumb write \
+                     failed ({write_err}) — run {run_id} is unrecorded"
+                );
+            }
+            Err(e).with_context(|| {
+                format!(
+                    "failed to record run: agent={id} run={run_id} dir={}",
+                    run_dir.display()
+                )
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -133,5 +161,49 @@ mod tests {
         assert!((now - dt).num_seconds().abs() < 5);
         let dt2 = parse_unix_seconds("   ").unwrap();
         assert!((now - dt2).num_seconds().abs() < 5);
+    }
+
+    #[test]
+    fn record_run_cmd_drops_breadcrumb_when_recording_fails() {
+        // grill F5: a failed `_record-run` must not be invisible.
+        // Force `record_run` to fail by occupying the `result.json`
+        // path with a *directory* — `atomic_write` cannot replace a
+        // directory with a file. The run dir itself stays writable,
+        // so the `record-run-error.txt` breadcrumb must land.
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path().join("run-1");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        // A stdout.log so the read step succeeds; the failure we
+        // want is the result.json *write*.
+        let mut f = std::fs::File::create(run_dir.join("stdout.log")).unwrap();
+        f.write_all(b"[]").unwrap();
+        drop(f);
+        // result.json is a NON-EMPTY directory → renaming a file
+        // over it (the last step of `atomic_write`) fails.
+        std::fs::create_dir_all(run_dir.join("result.json")).unwrap();
+        std::fs::write(run_dir.join("result.json").join("occupant"), b"x").unwrap();
+
+        let agent_id = Uuid::new_v4().to_string();
+        let res = record_run_cmd(
+            &agent_id,
+            "run-1",
+            0,
+            "1745836800",
+            "1745836810",
+            "scheduled",
+            Some(run_dir.to_str().unwrap()),
+        );
+
+        assert!(res.is_err(), "record-run must fail when result.json is a dir");
+        let breadcrumb = run_dir.join("record-run-error.txt");
+        assert!(
+            breadcrumb.exists(),
+            "expected a record-run-error.txt breadcrumb on failure"
+        );
+        let body = std::fs::read_to_string(&breadcrumb).unwrap();
+        assert!(body.contains("record-run failed"));
+        assert!(body.contains("run-1"));
     }
 }

@@ -58,7 +58,43 @@ pub struct RecordInputs<'a> {
 /// back to a synthetic [`RunResult`] reflecting the OS exit code
 /// so the run row still gets recorded.
 pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AgentRun, AgentError> {
-    let stdout_bytes = std::fs::read(inputs.stdout_log_path).unwrap_or_default();
+    tracing::info!(
+        agent_id = %inputs.agent_id,
+        run_id = %inputs.run_id,
+        exit_code = inputs.exit_code,
+        trigger = ?inputs.trigger_kind,
+        "agent record-run: started"
+    );
+    // Read the shim's stdout.log. A missing file is legitimately
+    // empty output (the shim may have failed before redirecting), so
+    // `NotFound` degrades to empty bytes. Any *other* I/O error —
+    // permission denied, a truncated/locked file — is a real failure
+    // we must not paper over as "no output": log it loudly so a
+    // run whose result looks empty-but-failed is visible, then still
+    // degrade so the run row gets recorded.
+    let stdout_bytes = match std::fs::read(inputs.stdout_log_path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::debug!(
+                agent_id = %inputs.agent_id,
+                run_id = %inputs.run_id,
+                path = %inputs.stdout_log_path.display(),
+                "agent record-run: stdout.log absent — treating output as empty"
+            );
+            Vec::new()
+        }
+        Err(e) => {
+            tracing::error!(
+                agent_id = %inputs.agent_id,
+                run_id = %inputs.run_id,
+                path = %inputs.stdout_log_path.display(),
+                error = %e,
+                "agent record-run: failed to read stdout.log — \
+                 recording the run with empty parsed output"
+            );
+            Vec::new()
+        }
+    };
     let result = parse_result_event(&stdout_bytes);
     let session_jsonl_path = result
         .as_ref()
@@ -89,6 +125,15 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AgentRun, AgentError> {
     };
 
     write_result_json(&run, inputs.stdout_log_path)?;
+    tracing::info!(
+        agent_id = %inputs.agent_id,
+        run_id = %inputs.run_id,
+        exit_code = inputs.exit_code,
+        duration_ms = run.duration_ms,
+        cost_usd = run.result.as_ref().and_then(|r| r.total_cost_usd),
+        is_error = run.result.as_ref().and_then(|r| r.is_error),
+        "agent record-run: finished"
+    );
     Ok(run)
 }
 
@@ -424,6 +469,11 @@ pub async fn run_now(
     claudepot_cli_abs_path: &str,
     sink: &dyn ProgressSink,
 ) -> Result<AgentRun, AgentError> {
+    tracing::info!(
+        agent_id = %agent.id,
+        agent_name = %agent.name,
+        "agent run-now: started"
+    );
     sink.phase("prepare", PhaseStatus::Running);
     let shim_path = install_shim(agent, binary_abs_path, claudepot_cli_abs_path)?;
 
@@ -473,22 +523,70 @@ pub async fn run_now(
         let raw = std::fs::read(&result_path)?;
         serde_json::from_slice(&raw)?
     } else {
+        // The shim's `_record-run` callback did not write
+        // `result.json` (record-run failed, or the shim crashed
+        // before reaching it). Synthesize a record AND persist it
+        // so the run history still reflects every attempt.
+        tracing::warn!(
+            agent_id = %agent.id,
+            run_id = %run_id,
+            run_dir = %run_dir.display(),
+            exit_code,
+            "agent run-now: shim wrote no result.json — synthesizing a run record"
+        );
         let synth = synthesize_run(agent, started_at, ended_at, exit_code, &run_dir);
         // Persist the synthesized record so the run history has a
         // row for it. Best-effort — don't fail the whole run-now
         // if the persist itself errors (that would mask the actual
-        // run outcome).
+        // run outcome) — but a failed persist must not be silent.
         if !run_dir.exists() {
-            let _ = std::fs::create_dir_all(&run_dir);
+            if let Err(e) = std::fs::create_dir_all(&run_dir) {
+                tracing::error!(
+                    agent_id = %agent.id,
+                    run_id = %run_id,
+                    run_dir = %run_dir.display(),
+                    error = %e,
+                    "agent run-now: failed to create run dir for the \
+                     synthesized record — the run will have no on-disk row"
+                );
+            }
         }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&synth) {
-            let _ = crate::fs_utils::atomic_write(&result_path, &bytes);
+        match serde_json::to_vec_pretty(&synth) {
+            Ok(bytes) => {
+                if let Err(e) = crate::fs_utils::atomic_write(&result_path, &bytes) {
+                    tracing::error!(
+                        agent_id = %agent.id,
+                        run_id = %run_id,
+                        path = %result_path.display(),
+                        error = %e,
+                        "agent run-now: failed to persist the synthesized \
+                         result.json — the run will have no on-disk row"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    agent_id = %agent.id,
+                    run_id = %run_id,
+                    error = %e,
+                    "agent run-now: failed to serialize the synthesized \
+                     run record — the run will have no on-disk row"
+                );
+            }
         }
         synth
     };
     sink.phase("record", PhaseStatus::Complete);
 
     sink.phase("done", PhaseStatus::Complete);
+    tracing::info!(
+        agent_id = %agent.id,
+        run_id = %run.id,
+        exit_code,
+        duration_ms = run.duration_ms,
+        cost_usd = run.result.as_ref().and_then(|r| r.total_cost_usd),
+        "agent run-now: finished"
+    );
     Ok(run)
 }
 
@@ -752,6 +850,37 @@ mod tests {
             on_disk.result.as_ref().and_then(|r| r.subtype.as_deref()),
             Some("success")
         );
+    }
+
+    #[test]
+    fn record_run_treats_absent_stdout_log_as_empty_output() {
+        // grill F5: a *missing* stdout.log is legitimately empty
+        // output — `record_run` must degrade to an empty parse, not
+        // error. (An unreadable-but-present file logs an error and
+        // also degrades; both end with a recorded run row.)
+        let dir = tempdir().unwrap();
+        // Deliberately do NOT create stdout.log. result.json must
+        // still land next to the (absent) stdout.log path.
+        let stdout_path = dir.path().join("stdout.log");
+        let stderr_path = dir.path().join("stderr.log");
+
+        let id = Uuid::new_v4();
+        let started = Utc::now();
+        let inputs = RecordInputs {
+            agent_id: id,
+            run_id: "r-absent",
+            exit_code: 70,
+            started_at: started,
+            ended_at: started + chrono::Duration::seconds(1),
+            trigger_kind: TriggerKind::Scheduled,
+            stdout_log_path: &stdout_path,
+            stderr_log_path: &stderr_path,
+            claudepot_version: "0.0.5",
+        };
+        let run = record_run(&inputs).unwrap();
+        assert_eq!(run.exit_code, 70);
+        assert!(run.result.is_none());
+        assert!(dir.path().join("result.json").exists());
     }
 
     #[test]
