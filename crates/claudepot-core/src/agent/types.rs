@@ -226,12 +226,44 @@ impl OutputFormat {
     }
 }
 
+/// The signal an [`Trigger::Event`] reacts to.
+///
+/// Phase 3 (PRD §7) ships exactly one variant: [`EventKind::SessionSettled`].
+/// `fs-watch` / `webhook` / `usage-threshold` are PRD-deferred siblings
+/// (§13) — do NOT add them here without a PRD update.
+///
+/// `#[serde(tag = "kind")]` keeps the wire form forward-compatible: a
+/// future variant added by a newer build deserializes cleanly here
+/// only if this build knows it, so the enum is versioned by its own
+/// variant set rather than a schema number.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EventKind {
+    /// A CC/Codex session whose `.jsonl` transcript has been idle
+    /// (unchanged) for `debounce_secs` — i.e. the session has
+    /// *finished*, not merely *grown*. Fires exactly once per
+    /// (agent, session) pair via the event-state ledger.
+    SessionSettled {
+        /// Seconds of transcript inactivity before the session is
+        /// considered settled. Defaults to [`DEFAULT_DEBOUNCE_SECS`]
+        /// when absent so older / hand-authored records stay valid.
+        #[serde(default = "default_debounce_secs")]
+        debounce_secs: u64,
+    },
+}
+
+/// Default `session-settled` debounce: 10 minutes. A session quiet
+/// for this long has almost certainly ended (PRD §7.1).
+pub const DEFAULT_DEBOUNCE_SECS: u64 = 600;
+
+fn default_debounce_secs() -> u64 {
+    DEFAULT_DEBOUNCE_SECS
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Trigger {
-    /// Five-field cron with optional IANA timezone. Reactive
-    /// triggers (fs-watch, webhook) land in v2 as additional
-    /// variants here.
+    /// Five-field cron with optional IANA timezone.
     Cron {
         cron: String,
         #[serde(default)]
@@ -246,6 +278,16 @@ pub enum Trigger {
     /// launchd plist, no systemd unit, no Task Scheduler XML
     /// is materialized; `next_runs` returns an empty vec.
     Manual,
+    /// Reactive — fires when an in-app event matches (PRD §7).
+    /// The Claudepot app process evaluates these in `run_tick`;
+    /// they do **not** fire while the app is closed, and there is
+    /// **no OS scheduler artifact** (launchd/cron cannot watch for
+    /// "session settled"). Scheduler adapters treat this exactly
+    /// like [`Trigger::Manual`] — install the shim, register
+    /// nothing with the OS; the orchestrator
+    /// (`src-tauri/src/agent_event_orchestrator.rs`) is what fires
+    /// them.
+    Event { event: EventKind },
 }
 
 impl Trigger {
@@ -258,6 +300,20 @@ impl Trigger {
     /// True for `Trigger::Cron { .. }`.
     pub fn is_cron(&self) -> bool {
         matches!(self, Trigger::Cron { .. })
+    }
+
+    /// True for `Trigger::Event { .. }`.
+    pub fn is_event(&self) -> bool {
+        matches!(self, Trigger::Event { .. })
+    }
+
+    /// True when the trigger carries **no OS scheduler artifact** —
+    /// `Manual` and `Event`. Scheduler adapters short-circuit
+    /// registration on this: the shim is installed but launchd /
+    /// systemd / Task Scheduler register nothing. `Manual` is
+    /// Run-Now only; `Event` is fired by the in-app orchestrator.
+    pub fn has_no_os_schedule(&self) -> bool {
+        matches!(self, Trigger::Manual | Trigger::Event { .. })
     }
 }
 
@@ -550,6 +606,66 @@ mod tests {
         // Wire form pin: the tag is `kind` with snake_case values.
         let v = serde_json::to_value(McpServerRef::ClaudepotMemory).unwrap();
         assert_eq!(v["kind"], "claudepot_memory");
+    }
+
+    #[test]
+    fn event_trigger_round_trips() {
+        let t = Trigger::Event {
+            event: EventKind::SessionSettled {
+                debounce_secs: 900,
+            },
+        };
+        let s = serde_json::to_string(&t).unwrap();
+        let back: Trigger = serde_json::from_str(&s).unwrap();
+        assert_eq!(t, back);
+        assert!(t.is_event());
+        assert!(t.has_no_os_schedule());
+        assert!(!t.is_manual());
+        assert!(!t.is_cron());
+    }
+
+    #[test]
+    fn event_trigger_debounce_defaults_when_absent() {
+        // A hand-authored / forward-compat record with no
+        // `debounce_secs` deserializes to the 10-minute default.
+        let raw =
+            r#"{"kind":"event","event":{"kind":"session_settled"}}"#;
+        let t: Trigger = serde_json::from_str(raw).unwrap();
+        match t {
+            Trigger::Event {
+                event: EventKind::SessionSettled { debounce_secs },
+            } => assert_eq!(debounce_secs, DEFAULT_DEBOUNCE_SECS),
+            other => panic!("expected SessionSettled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn event_trigger_wire_form_is_tagged() {
+        let t = Trigger::Event {
+            event: EventKind::SessionSettled {
+                debounce_secs: DEFAULT_DEBOUNCE_SECS,
+            },
+        };
+        let v = serde_json::to_value(&t).unwrap();
+        assert_eq!(v["kind"], "event");
+        assert_eq!(v["event"]["kind"], "session_settled");
+        assert_eq!(v["event"]["debounce_secs"], DEFAULT_DEBOUNCE_SECS);
+    }
+
+    #[test]
+    fn manual_and_event_have_no_os_schedule_cron_does() {
+        assert!(Trigger::Manual.has_no_os_schedule());
+        assert!(Trigger::Event {
+            event: EventKind::SessionSettled {
+                debounce_secs: DEFAULT_DEBOUNCE_SECS
+            }
+        }
+        .has_no_os_schedule());
+        assert!(!Trigger::Cron {
+            cron: "0 9 * * *".into(),
+            timezone: None
+        }
+        .has_no_os_schedule());
     }
 
     #[test]
