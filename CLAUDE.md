@@ -4,7 +4,7 @@ Control center for Claude Code and Claude Desktop. Tauri 2 + Rust + React.
 
 The seed was multi-account credential switching. The shipped surface
 is broader: accounts, projects, sessions, API keys, third-party
-integrations, automations, memory (CLAUDE.md files), usage/cost
+integrations, agents, memory (CLAUDE.md files), usage/cost
 tracking, updates, service status, and notifications — all under one
 Tauri shell with tray + menubar integration.
 
@@ -222,8 +222,9 @@ See `dev-docs/implementation-plan.md` for the full plan.
   Accounts, Activities (id `events` for localStorage compatibility,
   label "Activities" — live + today/month dashboard + cards stream),
   Projects (hosts per-project sessions in ProjectDetail's
-  master-detail pane), Keys, Third-parties, Automations, Global,
-  Settings. Eight top-level tabs total.
+  master-detail pane), Keys, Third-parties, Agents, Global,
+  Settings. Eight top-level tabs total. The Agents section id is
+  still `automations` in the registry (localStorage compatibility).
   Cleanup (session prune + trash) lives at Settings → Cleanup.
 - Long-running ops (project rename, repair resume/rollback) flow
   through a single op-progress pipeline:
