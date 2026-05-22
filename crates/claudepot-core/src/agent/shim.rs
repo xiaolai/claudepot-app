@@ -290,14 +290,14 @@ fn build_cli_flags(a: &Agent, inputs: &ShimInputs<'_>) -> Vec<String> {
         v.push("    --include-partial-messages".to_string());
     }
     // Phase 1: `run_as` is recorded on the agent but per-run
-    // credential injection is not yet wired — the shim still runs
-    // as whatever account is CLI-active. A later refinement scopes
-    // the pinned account's credential to the child env. The global
-    // CLI slot is never swapped.
-    if a.run_as.is_some() {
-        // Phase 1: run_as not yet wired — defaults to active account.
-        v.push("    # Phase 1: run_as not yet wired — defaults to active account".to_string());
-    }
+    // credential injection is not yet wired — the run uses whatever
+    // account is CLI-active. The shim emits *nothing* for it: the
+    // flag list is backslash-continued into the piped `claude`
+    // command, so a `#`-comment here would start a shell comment
+    // that swallows the rest of the logical line — including the
+    // stdout/stderr redirects. `run_as` is a true no-op here,
+    // matching `build_cli_flags_windows`. The global CLI slot is
+    // never swapped.
     v
 }
 
@@ -629,9 +629,12 @@ mod tests {
         assert!(s.contains("claudepot-memory"));
         assert!(s.contains("mcp"));
         assert!(s.contains("memory-server"));
-        // run_as is a Phase-1 placeholder — recorded as a comment,
-        // never an actual account swap.
-        assert!(s.contains("run_as not yet wired"));
+        // run_as is a Phase-1 no-op: the shim must emit nothing for
+        // it. A `#`-comment in the backslash-continued flag list
+        // would swallow the stdout/stderr redirects — so assert the
+        // comment is absent AND the redirects survive.
+        assert!(!s.contains("run_as not yet wired"));
+        assert!(s.contains(">\"$RUN_DIR/stdout.log\""));
     }
 
     #[test]
