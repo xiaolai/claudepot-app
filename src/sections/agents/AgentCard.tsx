@@ -13,6 +13,8 @@ interface Props {
   onEdit: (a: AgentSummaryDto) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onRemove: (a: AgentSummaryDto) => void;
+  /** Open the review/install modal for a draft agent. */
+  onReview: (a: AgentSummaryDto) => void;
 }
 
 export function AgentCard({
@@ -23,8 +25,14 @@ export function AgentCard({
   onEdit,
   onToggle,
   onRemove,
+  onReview,
 }: Props) {
   const [open, setOpen] = useState(false);
+  // A draft is inert — no scheduler artifact, never fires. The
+  // footer below swaps the run/toggle controls for "Review &
+  // install" because none of those actions are meaningful until a
+  // human arms the agent.
+  const isDraft = agent.lifecycle === "draft";
 
   return (
     <article
@@ -65,10 +73,32 @@ export function AgentCard({
           {agent.name}
         </span>
         <span style={{ flex: 1 }} />
-        <Tag tone={agent.enabled ? "ok" : "ghost"}>
-          {agent.enabled ? "enabled" : "disabled"}
-        </Tag>
+        {isDraft ? (
+          <Tag tone="warn">draft</Tag>
+        ) : (
+          <Tag tone={agent.enabled ? "ok" : "ghost"}>
+            {agent.enabled ? "enabled" : "disabled"}
+          </Tag>
+        )}
       </header>
+
+      {isDraft && (
+        <p
+          role="note"
+          style={{
+            margin: 0,
+            padding: "var(--sp-6) var(--sp-8)",
+            border: "var(--bw-hair) solid var(--warn)",
+            borderRadius: "var(--r-2)",
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-2)",
+            background: "var(--bg)",
+          }}
+        >
+          This agent is a draft — it is inert and will not run.
+          Review the spec and install it to arm it.
+        </p>
+      )}
 
       {agent.description && (
         <p
@@ -136,41 +166,65 @@ export function AgentCard({
           flexWrap: "wrap",
         }}
       >
-        <Button
-          variant="solid"
-          onClick={() => onRun(agent.id)}
-          disabled={busy}
-        >
-          Run now
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => onEdit(agent)}
-          disabled={busy}
-        >
-          Edit
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => onToggle(agent.id, !agent.enabled)}
-          disabled={busy}
-        >
-          {agent.enabled ? "Disable" : "Enable"}
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => onRemove(agent)}
-          disabled={busy}
-        >
-          Delete
-        </Button>
-        <span style={{ flex: 1 }} />
-        <Button variant="ghost" onClick={() => setOpen((o) => !o)}>
-          {open ? "Hide runs" : "Show runs"}
-        </Button>
+        {isDraft ? (
+          <>
+            {/* A draft has exactly one primary action: review the
+                spec and arm it. Run / Edit / Toggle / runs history
+                are all meaningless for an inert record. */}
+            <Button
+              variant="solid"
+              onClick={() => onReview(agent)}
+              disabled={busy}
+            >
+              Review & install
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => onRemove(agent)}
+              disabled={busy}
+            >
+              Delete
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              variant="solid"
+              onClick={() => onRun(agent.id)}
+              disabled={busy}
+            >
+              Run now
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => onEdit(agent)}
+              disabled={busy}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => onToggle(agent.id, !agent.enabled)}
+              disabled={busy}
+            >
+              {agent.enabled ? "Disable" : "Enable"}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => onRemove(agent)}
+              disabled={busy}
+            >
+              Delete
+            </Button>
+            <span style={{ flex: 1 }} />
+            <Button variant="ghost" onClick={() => setOpen((o) => !o)}>
+              {open ? "Hide runs" : "Show runs"}
+            </Button>
+          </>
+        )}
       </footer>
 
-      {open && (
+      {!isDraft && open && (
         <RunHistoryPanel
           agentId={agent.id}
           refreshKey={runsRefreshKey}

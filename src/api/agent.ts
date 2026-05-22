@@ -23,6 +23,13 @@ export const agentApi = {
   agentsAdd: (dto: AgentCreateDto) =>
     invoke<AgentSummaryDto>("agents_add", { dto }),
 
+  /**
+   * Arm a draft agent (draft -> installed + materialize the
+   * scheduler artifact). Human-only — the CLI cannot do this.
+   */
+  agentInstall: (id: string) =>
+    invoke<AgentSummaryDto>("agent_install", { id }),
+
   agentsUpdate: (dto: AgentUpdateDto) =>
     invoke<AgentSummaryDto>("agents_update", { dto }),
 

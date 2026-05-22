@@ -31,8 +31,12 @@
 //! - [`shim`] — per-OS helper-shim emitter (`.sh` / `.cmd`) used
 //!   by every scheduler artifact instead of calling `claude`
 //!   directly.
+//! - [`draft`] — the Phase-2 AI-drafting path: normalize a JSON
+//!   spec (Claudepot-native or SDK `AgentDefinition`-shaped) into
+//!   an inert `lifecycle = Draft` agent.
 
 pub mod cron;
+pub mod draft;
 pub mod env;
 pub mod error;
 pub mod install;
@@ -44,6 +48,7 @@ pub mod slug;
 pub mod store;
 pub mod types;
 
+pub use draft::{build_draft, CliOverrides, DraftInput, DraftSpec};
 pub use error::AgentError;
 pub use install::{current_claudepot_cli, install_shim, resolve_binary};
 pub use run::{

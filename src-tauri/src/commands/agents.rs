@@ -381,6 +381,55 @@ pub async fn agents_update(dto: AgentUpdateDto) -> Result<AgentSummaryDto, Strin
     Ok(AgentSummaryDto::from(&updated))
 }
 
+/// Arm a draft agent: flip `lifecycle` to `Installed` and
+/// materialize the scheduler artifact. This is the **human-only**
+/// half of the Phase-2 draft/install gate (PRD §8.2 / D8) — the CLI
+/// deliberately has no `install` verb, so an AI client that drafted
+/// an agent can never arm it; only this GUI-invoked command can.
+///
+/// Refuses an agent that is already `Installed`: `AgentStore::arm`
+/// returns an error rather than re-materializing an artifact, so a
+/// double-click / stale-UI install is a no-op-with-error, not a
+/// silent re-register.
+///
+/// Ordering mirrors `agents_add`'s leak-prevention rationale, but
+/// inverted: arming is a pure in-memory flag flip, so we arm +
+/// install the shim + register FIRST and only `save` once
+/// registration succeeds. Any earlier failure leaves the on-disk
+/// record untouched — still an inert `Draft`.
+#[tauri::command]
+pub async fn agent_install(id: String) -> Result<AgentSummaryDto, String> {
+    let mut store = open_store()?;
+    let aid = parse_id(&id)?;
+
+    // `arm` rejects an already-installed agent and returns the
+    // armed (Installed) clone. The store mutation is in-memory only
+    // until `save` below.
+    let armed = store.arm(&aid).map_err(err)?;
+
+    // Materialize the shim + register with the OS scheduler, reusing
+    // the exact path the GUI Add-Agent flow already uses.
+    let binary_path = resolve_binary(&armed, &route_lookup_fn()).map_err(err)?;
+    let cli_path = current_claudepot_cli().map_err(err)?;
+    install_shim(&armed, &binary_path, &cli_path).map_err(err)?;
+
+    // Only an enabled agent registers a live scheduler artifact —
+    // same rule as `agents_add`. A disabled draft is armed but not
+    // scheduled until the user enables it.
+    if armed.enabled {
+        let scheduler = active_scheduler();
+        scheduler.register(&armed).map_err(err)?;
+    }
+
+    // Registration (or shim install) succeeded — commit the
+    // Draft -> Installed flip to disk. If `save` itself fails we may
+    // leak a scheduler artifact with a still-Draft record; that is
+    // the same failure window `agents_add` accepts, and is far
+    // rarer than a registration failure.
+    store.save().map_err(err)?;
+    Ok(AgentSummaryDto::from(&armed))
+}
+
 #[tauri::command]
 pub async fn agents_remove(id: String) -> Result<(), String> {
     let mut store = open_store()?;

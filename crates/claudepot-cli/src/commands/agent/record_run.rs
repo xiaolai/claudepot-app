@@ -1,0 +1,137 @@
+//! The `_record-run` plumbing verb.
+//!
+//! Invoked by the per-agent helper shim after `claude -p` exits.
+//! It parses the redirected `stdout.log`, assembles an [`AgentRun`]
+//! record, and writes `result.json` next to the logs.
+//!
+//! The leading underscore is intentional: this is plumbing, not a
+//! user-facing surface. The user-/AI-facing verbs (`draft` /
+//! `list` / `show`) live in sibling modules; see the `agent.rs`
+//! entry file for the draft/install gate this surface is part of.
+
+use std::path::PathBuf;
+
+use anyhow::{anyhow, Context, Result};
+use chrono::{DateTime, TimeZone, Utc};
+use claudepot_core::agent::{
+    agent_runs_dir, record_run, AgentId, RecordInputs, TriggerKind,
+};
+use uuid::Uuid;
+
+/// Trigger-kind name as accepted on the CLI.
+fn parse_trigger(s: &str) -> Result<TriggerKind> {
+    match s {
+        "scheduled" => Ok(TriggerKind::Scheduled),
+        "manual" => Ok(TriggerKind::Manual),
+        other => Err(anyhow!(
+            "unknown --trigger value '{other}' (expected 'scheduled' or 'manual')"
+        )),
+    }
+}
+
+/// Parse a unix timestamp (seconds, integer string). Empty input
+/// falls back to "now" — useful when the calling shim can't
+/// reliably compute timestamps (e.g. Task Scheduler contexts that
+/// don't inherit PowerShell on PATH).
+fn parse_unix_seconds(raw: &str) -> Result<DateTime<Utc>> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(Utc::now());
+    }
+    let secs: i64 = trimmed
+        .parse()
+        .with_context(|| format!("invalid unix timestamp: {raw:?}"))?;
+    Utc.timestamp_opt(secs, 0)
+        .single()
+        .ok_or_else(|| anyhow!("ambiguous or out-of-range unix timestamp: {secs}"))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn record_run_cmd(
+    agent_id: &str,
+    run_id: &str,
+    exit: i32,
+    start: &str,
+    end: &str,
+    trigger: &str,
+    run_dir: Option<&str>,
+) -> Result<()> {
+    let id: AgentId = Uuid::parse_str(agent_id.trim())
+        .with_context(|| format!("invalid agent id: {agent_id:?}"))?;
+    let trigger_kind = parse_trigger(trigger)?;
+    let started_at = parse_unix_seconds(start)?;
+    let ended_at = parse_unix_seconds(end)?;
+    if ended_at < started_at {
+        return Err(anyhow!(
+            "ended_at ({ended_at}) is before started_at ({started_at})"
+        ));
+    }
+
+    // Locate the run directory. The shim passes --run-dir explicitly
+    // (the authoritative source); fall back to the default layout for
+    // backward compat / manual invocation.
+    let run_dir: PathBuf = match run_dir {
+        Some(p) => PathBuf::from(p),
+        None => agent_runs_dir(&id).join(run_id),
+    };
+    if !run_dir.exists() {
+        return Err(anyhow!(
+            "run directory does not exist: {} — did the shim run?",
+            run_dir.display()
+        ));
+    }
+    let stdout_log = run_dir.join("stdout.log");
+    let stderr_log = run_dir.join("stderr.log");
+
+    let inputs = RecordInputs {
+        agent_id: id,
+        run_id,
+        exit_code: exit,
+        started_at,
+        ended_at,
+        trigger_kind,
+        stdout_log_path: &stdout_log,
+        stderr_log_path: &stderr_log,
+        claudepot_version: env!("CARGO_PKG_VERSION"),
+    };
+    let _run = record_run(&inputs).with_context(|| {
+        format!(
+            "failed to record run: agent={id} run={run_id} dir={}",
+            run_dir.display()
+        )
+    })?;
+
+    // The shim sets exit code from the underlying `claude -p`; we
+    // just confirm we wrote the record.
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_trigger_accepts_known() {
+        assert_eq!(parse_trigger("scheduled").unwrap(), TriggerKind::Scheduled);
+        assert_eq!(parse_trigger("manual").unwrap(), TriggerKind::Manual);
+        assert!(parse_trigger("nope").is_err());
+    }
+
+    #[test]
+    fn parse_unix_seconds_round_trip() {
+        let dt = parse_unix_seconds("1745836800").unwrap();
+        assert_eq!(dt.timestamp(), 1745836800);
+        assert!(parse_unix_seconds("not a number").is_err());
+    }
+
+    #[test]
+    fn parse_unix_seconds_empty_falls_back_to_now() {
+        let dt = parse_unix_seconds("").unwrap();
+        let now = Utc::now();
+        // Within 5 seconds of "now" — the shim falls back to
+        // current time when it can't compute its own.
+        assert!((now - dt).num_seconds().abs() < 5);
+        let dt2 = parse_unix_seconds("   ").unwrap();
+        assert!((now - dt2).num_seconds().abs() < 5);
+    }
+}

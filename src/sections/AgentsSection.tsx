@@ -15,6 +15,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   AddAgentModal,
   EditAgentModal,
+  ReviewInstallModal,
 } from "./agents/AgentModals";
 import { AgentCard } from "./agents/AgentCard";
 import { TemplateGallery } from "./templates/TemplateGallery";
@@ -46,6 +47,8 @@ export function AgentsSection() {
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [editTarget, setEditTarget] =
+    useState<AgentSummaryDto | null>(null);
+  const [reviewTarget, setReviewTarget] =
     useState<AgentSummaryDto | null>(null);
   const [removeTarget, setRemoveTarget] =
     useState<AgentSummaryDto | null>(null);
@@ -247,6 +250,7 @@ export function AgentsSection() {
               onEdit={setEditTarget}
               onToggle={handleToggle}
               onRemove={setRemoveTarget}
+              onReview={setReviewTarget}
             />
           ))}
         </div>
@@ -290,6 +294,16 @@ export function AgentsSection() {
         onUpdated={() => {
           refresh();
           pushToast("info", "Agent updated.");
+        }}
+      />
+
+      <ReviewInstallModal
+        open={!!reviewTarget}
+        target={reviewTarget}
+        onClose={() => setReviewTarget(null)}
+        onInstalled={() => {
+          refresh();
+          pushToast("info", "Agent installed.");
         }}
       />
 
