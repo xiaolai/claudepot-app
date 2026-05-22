@@ -109,9 +109,9 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 ![Third-parties tab](assets/screenshots/third-parties.png)
 
-**Automations** — Schedule a `claude -p` prompt to run on a cron expression (every weekday at 8am, every Monday morning, anything cron can express) or on demand. Each run lands in a history pane with stdout, stderr, and exit code. macOS uses launchd, Windows uses Task Scheduler, Linux uses systemd-user timers — set up for you, not by hand.
+**Agents** — Schedule a `claude -p` prompt to run on a cron expression (every weekday at 8am, every Monday morning, anything cron can express) or on demand. Each run lands in a history pane with stdout, stderr, and exit code. macOS uses launchd, Windows uses Task Scheduler, Linux uses systemd-user timers — set up for you, not by hand.
 
-![Automations tab](assets/screenshots/automations.png)
+![Agents tab](assets/screenshots/automations.png)
 
 **Global** — Read-only inspection of your machine-wide Claude Code state across four sub-tabs: **Config** (cascade view of managed policy / user prefs / global config / plugins / cross-project memory), **Memory** (CLAUDE.md health — bloat, lines past CC's truncation cutoff), **Tips** (the CC tips ledger, searchable + filterable), and **Updates** (Claude Code CLI + Claude Desktop versions, channel, install). Claudepot's *own* updates live under Settings → About.
 
