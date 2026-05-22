@@ -522,6 +522,31 @@ pub async fn agents_remove(id: String) -> Result<(), String> {
 pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), String> {
     let mut store = open_store()?;
     let aid = parse_id(&id)?;
+
+    // grill X1: a Draft agent must NOT acquire a scheduler artifact
+    // via the enabled toggle — that bypasses the install review
+    // gate. `agents_run_now_start` has the same check (F16); the
+    // enabled toggle is a strictly stronger surface because it
+    // materializes a recurring artifact, not a one-shot run. The
+    // Phase 2 helper extraction will move this check into the gate
+    // itself so every lifecycle-transition verb enforces it.
+    {
+        let existing = store
+            .get(&aid)
+            .ok_or_else(|| format!("agent {aid} not found"))?;
+        if matches!(
+            existing.lifecycle,
+            claudepot_core::agent::Lifecycle::Draft
+        ) {
+            return Err(format!(
+                "agent '{}' is a draft — review and install it before \
+                 enabling. A draft cannot acquire a scheduler artifact \
+                 via the enabled toggle.",
+                existing.name
+            ));
+        }
+    }
+
     let patch = AgentPatch {
         enabled: Some(enabled),
         ..AgentPatch::default()
