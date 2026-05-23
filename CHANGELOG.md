@@ -6,6 +6,50 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.41 — beta (unreleased)
+
+The Agents release. Reframes the old "Automations" tab as
+**Agents** — schedule-and-event-triggered tasks that fire `claude
+-p` runs on your behalf, with an AI-drafting path, a human
+install review, and a session-settled event trigger that narrates
+sessions when they go idle. The third-party LLM routes tab is
+renamed **Providers** for consistency with the rest of the
+ecosystem (LiteLLM, OpenRouter, Aider, Cline).
+
+### Added
+
+- **Agents tab (renamed from Automations).** A draft/install gate
+  for AI-authored agents, an event trigger that fires when a CC
+  session settles, a Session Narrator built-in template, and a
+  structured-output run-history panel.
+- **Providers tab (renamed from Third-parties).**
+- Toast subscribers for the new agent-event channels (failed,
+  burst-capped) with deduped categories.
+
+### Changed
+
+- Agent-event orchestrator is panic-guarded; per-fire dispatch is
+  detached from the 5-min snapshot tick so a long `claude -p` run
+  no longer blocks rotation/PR/snapshot.
+- `apply_lifecycle_change` is the one install-ordering helper used
+  by every GUI verb (add / update / install / set-enabled), with
+  a unified rollback matrix and the Draft install-gate enforced in
+  one place.
+- F1 record-before-dispatch invariant fully restored; ledger
+  eviction now logs.
+- `EnvFilter` default covers the lib crate name so orchestrator
+  tracing actually reaches the formatter at runtime.
+
+### Fixed
+
+- Pre-spawn dispatch failures (resolve_binary, current_claudepot_cli)
+  now leave a synthetic `result.json` so the failure surfaces in
+  the run-history panel instead of being a transient toast.
+- `_record-run` no longer blocks on the GUI's store lock when
+  resolving retention; falls back to a debug-logged skip.
+- `agents_update` re-validates Custom MCP servers against the prior
+  record (the F3 hardening previously only applied to drafts).
+
 ## 0.1.40 — beta (unreleased)
 
 A feature release: opt-in beta updates, a safety net for the
