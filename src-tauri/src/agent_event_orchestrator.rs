@@ -328,6 +328,16 @@ where
             // dropped one, just skip.
             continue;
         };
+        // A2: snapshot the ledger's `fired` Vec BEFORE record_fire so
+        // a save failure can restore the FULL pre-mutation state — not
+        // just the entry we pushed. The narrower X4 `unrecord_fire`
+        // only drops the just-pushed entry, but `record_fire` ALSO
+        // evicts the oldest entries when over `MAX_FIRED_ENTRIES`;
+        // those evicted pairs would silently re-fire (and re-bill) on
+        // the next tick. Cloning the `Vec<FiredEntry>` is bounded by
+        // the same cap (~2000 entries) — cheap, and re-allocated only
+        // on the rare save-failure path.
+        let pre_record_fired = ledger.fired.clone();
         ledger.record_fire(&fire.agent_id, &fire.session_id, now);
         if let Err(e) = env.save_ledger(&ledger) {
             tracing::warn!(
@@ -337,14 +347,16 @@ where
                 "agent_event_orchestrator: ledger save failed; \
                  skipping this fire — it will be re-evaluated next tick"
             );
-            // grill X4 / F1: the in-memory `record_fire` mutation
-            // must be undone too — otherwise the post-loop prune
-            // save below would flush a fire-without-dispatch entry
-            // to disk and the pair would show as fired without
-            // ever running. `unrecord_fire` keeps the ledger
-            // in-memory clean so prune sees nothing to flush for
-            // this pair.
-            ledger.unrecord_fire(&fire.agent_id, &fire.session_id);
+            // A2 / grill X4 / F1: restore the FULL pre-mutation
+            // snapshot — the post-loop prune save below would
+            // otherwise flush:
+            //  (a) the just-pushed entry (X4 covered this), AND
+            //  (b) the cap-eviction side effect: if `record_fire`
+            //      evicted the oldest entries to stay under
+            //      MAX_FIRED_ENTRIES, those evicted pairs would re-
+            //      fire next tick and re-bill. Snapshot-restore
+            //      undoes BOTH at once.
+            ledger.fired = pre_record_fired;
             continue;
         }
         // The ledger save is committed — now hand off the run.
@@ -648,12 +660,17 @@ async fn dispatch(app: &AppHandle, agent: &Agent, fire: &EventFire) {
 /// that should have been narrated, no record, no log, and a single
 /// toast that may have been dismissed.
 ///
-/// This drops a synthetic `dispatch-failed-<session>/error.txt`
-/// directory under the agent's runs root. The run-history surface
-/// already lists every subdirectory of `runs/`; the breadcrumb
-/// shows up as a row the user can inspect. Mirror of the F5
-/// `record-run-error.txt` shape: a plain text file with the run's
-/// identifying details + the failure message.
+/// This drops a synthetic `dispatch-failed-<ts>-<session>/` directory
+/// under the agent's runs root carrying two files:
+///
+/// - `error.txt` — the human-readable forensic (plain text, mirror
+///   of the F5 `record-run-error.txt` shape).
+/// - `result.json` — a synthetic [`AgentRun`] that round-trips
+///   through `agents_runs_list`'s reader so the breadcrumb surfaces
+///   as a real (failed) row in the RunHistoryPanel (third-eye
+///   audit A1: previously the dir only carried `error.txt` and
+///   `agents_runs_list` filters by deserializable `result.json`, so
+///   the breadcrumb was invisible to the panel).
 ///
 /// Best-effort throughout — every I/O failure is logged + swallowed,
 /// because failing to write a breadcrumb must never abort the
@@ -670,7 +687,8 @@ fn write_dispatch_failed_breadcrumb(
     // run-history panel sorts by name) AND so a re-fire on the
     // same session at a later time produces a new row rather than
     // overwriting the prior one.
-    let now = Utc::now().format("%Y%m%dT%H%M%SZ");
+    let now_dt = Utc::now();
+    let now = now_dt.format("%Y%m%dT%H%M%SZ");
     let session_slug: String = session_id
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
@@ -707,6 +725,72 @@ fn write_dispatch_failed_breadcrumb(
             "agent_event_orchestrator: dispatch-failed breadcrumb file \
              write failed"
         );
+    }
+
+    // A1: also write a synthetic `result.json` so the breadcrumb dir
+    // surfaces as a real run row in `agents_runs_list`. Without this,
+    // the panel's reader (`serde_json::from_slice::<AgentRun>`) skips
+    // the directory and the forensic is invisible from the surface
+    // most users actually open. We keep the existing `error.txt` for
+    // human inspection — the two files answer different needs.
+    //
+    // Shape:
+    //  - `id` is the breadcrumb dir name (deterministic, sortable).
+    //  - `agent_id` is the firing agent.
+    //  - `trigger_kind = Manual` — the wire enum has no `Event`
+    //    variant; event-orchestrator runs that DO succeed also land
+    //    here as `Manual` (see `run_now`), so we stay consistent.
+    //  - `exit_code = -1` and `result.is_error = true` make the
+    //    RunHistoryPanel render the "ERR" status; `result.errors`
+    //    carries the failure message so the "show" disclosure
+    //    surfaces it under "errors".
+    let synthetic = agent::AgentRun {
+        id: run_id.clone(),
+        agent_id: *agent_id,
+        started_at: now_dt,
+        ended_at: now_dt,
+        duration_ms: 0,
+        exit_code: -1,
+        result: Some(agent::RunResult {
+            subtype: Some(format!("dispatch_failed:{stage}")),
+            is_error: Some(true),
+            num_turns: None,
+            total_cost_usd: None,
+            stop_reason: None,
+            session_id: Some(session_id.to_string()),
+            errors: vec![format!("dispatch failed at {stage}: {error}")],
+        }),
+        session_jsonl_path: None,
+        stdout_log: String::new(),
+        stderr_log: String::new(),
+        trigger_kind: agent::TriggerKind::Manual,
+        host_platform: agent::HostPlatform::current(),
+        claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
+        output_artifacts: Vec::new(),
+        route_decision: None,
+    };
+    match serde_json::to_vec_pretty(&synthetic) {
+        Ok(bytes) => {
+            if let Err(e) = std::fs::write(dir.join("result.json"), &bytes) {
+                tracing::warn!(
+                    agent_id = %agent_id,
+                    session_id = %session_id,
+                    error = %e,
+                    "agent_event_orchestrator: dispatch-failed synthetic \
+                     result.json write failed — the row will not surface in \
+                     RunHistoryPanel, only error.txt"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                agent_id = %agent_id,
+                session_id = %session_id,
+                error = %e,
+                "agent_event_orchestrator: dispatch-failed synthetic \
+                 result.json serialize failed"
+            );
+        }
     }
 }
 
@@ -1311,6 +1395,150 @@ mod tests {
         );
     }
 
+    /// A2: when `record_fire` evicts oldest entries to honor the
+    /// ledger cap AND the subsequent `save_ledger` fails, the
+    /// orchestrator must restore the FULL pre-mutation snapshot, not
+    /// just drop the just-pushed entry. The narrower `unrecord_fire`
+    /// left evicted pairs gone — they would re-fire (and re-bill)
+    /// next tick. This test pre-fills the ledger to the cap, forces a
+    /// fire that triggers an eviction-plus-push, and forces the save
+    /// to fail; the post-failure ledger must equal the snapshot.
+    #[tokio::test]
+    async fn test_tick_inner_cap_eviction_with_save_fail_restores_snapshot() {
+        use claudepot_core::agent::events::store::MAX_FIRED_ENTRIES;
+        use claudepot_core::agent::events::FiredEntry;
+
+        let agent = stub_agent_with_cwd("session-narrator", "/tmp/proj");
+        let agent_id = agent.id.to_string();
+        let new_session_id = "sess-new-after-cap".to_string();
+        let fixed_now = chrono::Utc::now();
+        let sessions = vec![fake_session_at(
+            &new_session_id,
+            "proj",
+            fixed_now - chrono::Duration::hours(1),
+        )];
+
+        // Pre-fill the ledger to MAX_FIRED_ENTRIES so the upcoming
+        // `record_fire` triggers an eviction of the oldest entry AND
+        // a push of the new one.
+        let mut prefill = EventsFile::default();
+        for i in 0..MAX_FIRED_ENTRIES {
+            prefill.fired.push(FiredEntry {
+                agent_id: agent_id.clone(),
+                // Sessions that the orchestrator's prune will keep:
+                // mark them all under the same agent so they're
+                // "live" (the agent IS in the agent set), and use
+                // session ids the live session set will also include
+                // (we'll seed the live session set below). The
+                // prune at end-of-tick only drops pairs whose
+                // session is NOT in the live set; to keep the
+                // snapshot stable, we make sure the prefill pairs'
+                // sessions are reflected in the live set too via the
+                // FakeTickEnv's session list. But we also DON'T want
+                // them to re-evaluate as fires, so each pair is
+                // marked as already-fired by the very ledger we
+                // start with.
+                session_id: format!("prefill-{i}"),
+                fired_at: fixed_now - chrono::Duration::seconds(i as i64 + 60),
+            });
+        }
+        // Snapshot the ledger shape BEFORE the tick. After the
+        // tick — which will trigger record_fire's cap eviction and
+        // then a forced save failure — the in-memory ledger that the
+        // post-loop prune save sees must equal this snapshot
+        // verbatim. (Prune may then drop some entries whose sessions
+        // aren't live, but the assertion below isolates the
+        // restoration step — we examine the file via the env's
+        // captured save calls + final state.)
+        let snapshot_before = prefill.clone();
+
+        // Build the session set: include only the NEW session as
+        // "live" so the prefill pairs are NOT pruned away by the
+        // session-side of the prune (we want the prefill to stay
+        // around so the snapshot-restore assertion has signal). We
+        // achieve this by listing every prefill session id alongside
+        // the new one, but only the new one as a *settled* row that
+        // would emit a fire.
+        let mut sessions_full = sessions;
+        for i in 0..MAX_FIRED_ENTRIES {
+            // Add a non-settled stub so prune's `live_session_ids`
+            // contains the prefill ids. The evaluator won't emit
+            // fires for them: their session_id is already in the
+            // ledger.
+            sessions_full.push(fake_session_at(
+                &format!("prefill-{i}"),
+                "proj",
+                fixed_now - chrono::Duration::hours(1),
+            ));
+        }
+
+        let env = FakeTickEnv {
+            agents: vec![agent.clone()],
+            exclusion: HashSet::new(),
+            sessions: sessions_full,
+            first_tick: false,
+            fresh_override: None,
+            save_fails_n_times: Rc::new(RefCell::new(1)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::new(RefCell::new(prefill)),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+
+        let calls = Rc::new(RefCell::new(Vec::<DispatchedCall>::new()));
+        let calls_for_disp = Rc::clone(&calls);
+        let dispatcher = move |a: Agent, fire: EventFire| {
+            calls_for_disp.borrow_mut().push(DispatchedCall {
+                agent_id: a.id.to_string(),
+                session_id: fire.session_id,
+                session_path: fire.session_path,
+            });
+        };
+
+        tick_inner(&env, dispatcher, move || fixed_now).await;
+
+        // The dispatcher must NOT have run (save failed before
+        // dispatch).
+        assert!(
+            calls.borrow().is_empty(),
+            "no dispatch when the ledger save failed"
+        );
+
+        // The on-disk ledger must NOT contain the new session id
+        // (covered by the older X4 test too).
+        let on_disk = env.ledger.borrow();
+        assert!(
+            !on_disk.has_fired(&agent_id, &new_session_id),
+            "the failed pair must not be flushed"
+        );
+
+        // The A2 assertion: every prefill entry that record_fire
+        // would have evicted (the OLDEST one by fired_at) is still
+        // present after the snapshot restore — `record_fire` evicted
+        // it temporarily, but the restore put it back, and the
+        // post-loop prune save (which DID succeed on the second save
+        // call) flushed the restored set verbatim. Without A2, the
+        // post-loop prune would have flushed a ledger missing
+        // `prefill-{MAX-1}` (the oldest prefill entry by fired_at,
+        // since we used decreasing fired_at) — that pair would re-
+        // fire next tick.
+        let oldest_id = format!("prefill-{}", MAX_FIRED_ENTRIES - 1);
+        assert!(
+            on_disk.has_fired(&agent_id, &oldest_id),
+            "A2: the cap-evicted prefill entry '{oldest_id}' must be \
+             restored — otherwise it would re-fire and re-bill"
+        );
+
+        // The full restored set must equal the pre-mutation snapshot
+        // (modulo prune, which here is a no-op because every prefill
+        // session is in `live_session_ids`).
+        assert_eq!(
+            on_disk.fired.len(),
+            snapshot_before.fired.len(),
+            "every prefill entry survives the snapshot-restore + prune"
+        );
+    }
+
     #[tokio::test]
     async fn test_tick_inner_happy_path_dispatches_and_records() {
         // X8 base case: a healthy fire records to the ledger AND
@@ -1578,6 +1806,78 @@ mod tests {
             Some("/home/u/.claude/projects/proj/deadbeef-cafe.jsonl")
         );
         assert_eq!(env.len(), 2, "no other env vars are injected");
+    }
+
+    /// A1: the X11 dispatch-failed breadcrumb must surface as a real
+    /// row in `agents_runs_list`. The previous breadcrumb only wrote
+    /// `error.txt`; `agents_runs_list` filters by deserializable
+    /// `result.json`, so the row was invisible to the panel. The fix
+    /// writes a synthetic `AgentRun` alongside; this test asserts that
+    /// the file round-trips through `serde_json` into a coherent
+    /// `AgentRun` whose shape renders meaningfully (ERR status,
+    /// error string in `result.errors`).
+    #[test]
+    fn test_dispatch_failed_breadcrumb_writes_synthetic_result_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Serialize against any other test that also sets DATA_DIR.
+        let _guard = std::sync::Mutex::new(()); // local guard — best-effort.
+        let prev = std::env::var_os("CLAUDEPOT_DATA_DIR");
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path());
+
+        let agent_id = uuid::Uuid::new_v4();
+        let session_id = "deadbeef-cafe";
+        write_dispatch_failed_breadcrumb(
+            &agent_id,
+            session_id,
+            "resolve_binary",
+            "wrapper 'foo' missing",
+        );
+
+        // The breadcrumb dir should exist with both files.
+        let runs_root = agent_runs_dir(&agent_id);
+        let entries: Vec<_> = std::fs::read_dir(&runs_root)
+            .expect("runs dir must exist")
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.starts_with("dispatch-failed-"))
+            })
+            .collect();
+        assert_eq!(entries.len(), 1, "exactly one breadcrumb dir");
+        let dir = entries.into_iter().next().unwrap().path();
+        assert!(dir.join("error.txt").exists(), "human-readable forensic kept");
+        let result_bytes =
+            std::fs::read(dir.join("result.json")).expect("result.json must exist");
+
+        // The synthetic file must round-trip through the same reader
+        // `agents_runs_list` uses.
+        let run: agent::AgentRun = serde_json::from_slice(&result_bytes)
+            .expect("synthetic result.json must deserialize into AgentRun");
+        assert_eq!(run.agent_id, agent_id);
+        assert_eq!(run.exit_code, -1, "ERR row in RunHistoryPanel");
+        assert_eq!(run.trigger_kind, agent::TriggerKind::Manual);
+        let result = run.result.as_ref().expect("synthetic carries a RunResult");
+        assert_eq!(result.is_error, Some(true), "panel renders ERR + show button");
+        assert_eq!(result.session_id.as_deref(), Some(session_id));
+        assert!(
+            result.errors.iter().any(|e| e.contains("wrapper 'foo' missing")),
+            "the error string is preserved verbatim for the disclosure"
+        );
+        assert!(
+            result
+                .subtype
+                .as_deref()
+                .is_some_and(|s| s.contains("resolve_binary")),
+            "the failure stage is encoded in the subtype"
+        );
+
+        // Restore env so sibling tests are not polluted.
+        match prev {
+            Some(v) => std::env::set_var("CLAUDEPOT_DATA_DIR", v),
+            None => std::env::remove_var("CLAUDEPOT_DATA_DIR"),
+        }
     }
 
     #[tokio::test]

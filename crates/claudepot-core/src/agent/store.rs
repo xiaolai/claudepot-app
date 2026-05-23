@@ -786,6 +786,20 @@ impl AgentStore {
     pub fn set_updated_at(&mut self, id: &AgentId, updated_at: chrono::DateTime<chrono::Utc>) {
         if let Some(a) = self.file.agents.iter_mut().find(|a| &a.id == id) {
             a.updated_at = updated_at;
+        } else {
+            // A7: previously a silent no-op. The helper at
+            // `install_gate::apply_lifecycle_change` calls this from
+            // every rollback branch; if the rollback closure removed
+            // the agent (the `agents_add` shape), the id is genuinely
+            // absent and the no-op is correct. Log at DEBUG so the
+            // rare "rollback removed the row, then helper still tried
+            // to restore its timestamp" sequence is visible during
+            // diagnosis without spamming the typical happy path.
+            tracing::debug!(
+                agent_id = %id,
+                "set_updated_at: id not found; no-op (typical for an \
+                 add-shaped rollback that already removed the record)"
+            );
         }
     }
 
@@ -1649,6 +1663,55 @@ mod tests {
             ..AgentPatch::default()
         };
         store.update(&id, patch).expect("no-op rewrite must be allowed");
+    }
+
+    /// A8b polish on grill X3: the no-op-rewrite gate compares via
+    /// `McpServerRef`'s derived `PartialEq`, which delegates to
+    /// `serde_json::Value`'s `PartialEq` for the `config` field.
+    /// `Value::Object` deduplicates and orders keys via the inner
+    /// map, so two JSON strings that differ only in key order parse
+    /// to the SAME `Value` and `==` returns `true`. This test pins
+    /// that contract: a `Custom` MCP server whose `config` JSON is
+    /// hand-typed with a different key ordering must still be
+    /// accepted as a no-op rewrite (otherwise round-tripping through
+    /// any JSON formatter that reorders keys would fail the X3 gate).
+    #[test]
+    fn update_allows_identical_custom_with_reordered_json_object_keys() {
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+
+        // Two semantically-identical JSON strings, but the second has
+        // its top-level keys (`command`, `args`, `env`) in a different
+        // order. `serde_json::from_str` materializes them into
+        // structurally-equal `Value::Object`s — the X3 prior-equality
+        // check must therefore accept the second as a no-op rewrite.
+        let original_config: serde_json::Value = serde_json::from_str(
+            r#"{"command":"/bin/echo","args":["hi"],"env":{"KEY":"val"}}"#,
+        )
+        .unwrap();
+        let reordered_config: serde_json::Value = serde_json::from_str(
+            r#"{"env":{"KEY":"val"},"args":["hi"],"command":"/bin/echo"}"#,
+        )
+        .unwrap();
+
+        let mut a = sample("reorder-canary");
+        a.mcp_servers = vec![McpServerRef::Custom {
+            name: "fs".into(),
+            config: original_config,
+        }];
+        let id = a.id;
+        store.add(a).unwrap();
+
+        let patch = AgentPatch {
+            mcp_servers: Some(vec![McpServerRef::Custom {
+                name: "fs".into(),
+                config: reordered_config,
+            }]),
+            ..AgentPatch::default()
+        };
+        store
+            .update(&id, patch)
+            .expect("reordered-keys rewrite of the same Custom MCP must pass the X3 gate");
     }
 
     #[test]

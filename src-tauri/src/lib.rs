@@ -1,6 +1,12 @@
 mod app_menu;
 mod cc_doctor_watcher;
-mod commands;
+// `pub` so integration tests in `tests/*.rs` can reach
+// `commands::agents::route_lookup_fn` and drive the EXACT closure
+// shape the Tauri command builds (grill X27 / audit A5). All public
+// items inside this module were already reachable via the Tauri IPC
+// surface; widening to `pub` only exposes them to external Rust
+// callers, which is acceptable for the lib crate's test surface.
+pub mod commands;
 mod config_dto;
 mod config_watch;
 mod config_watch_types;
@@ -671,10 +677,16 @@ pub fn run() {
         .manage(notification_log_state)
         .manage(commands::service_status::ServiceStatusState::new())
         .manage(rotation_orchestrator)
-        // Event orchestrator state — a single boolean
-        // (`booted`) used to apply the first-tick catch-up cap.
-        // Zero overhead when no event-triggered agents exist; the
-        // orchestrator early-returns before consulting any state.
+        // Event orchestrator state — a `Mutex<HashSet<AgentId>>` of
+        // agent ids the orchestrator has already seen in at least
+        // one tick this process (grill X16 replaced the earlier
+        // single-boolean "booted" flag). `mark_seen` does a HashMap
+        // probe per agent per tick — small, but unconditional once
+        // any event-triggered agent exists. The orchestrator's
+        // tick still early-returns when no `Installed && enabled`
+        // event-triggered agents are present, so it remains
+        // free-with-no-agents; the cost only appears once a real
+        // event agent is in the store.
         .manage(std::sync::Arc::new(
             agent_event_orchestrator::EventOrchestrator::new(),
         ))

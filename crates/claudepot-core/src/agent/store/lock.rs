@@ -81,6 +81,23 @@ impl StoreLock {
     /// retention lookup, where the cost of waiting on a slow GUI
     /// writer is higher than the cost of skipping a single
     /// retention pass.
+    ///
+    /// ## Lock shape — NOT a shared/read lock
+    ///
+    /// Audit follow-up A6: earlier docs (and the grill report) framed
+    /// reader paths built on this — e.g. `AgentStore::lifecycle_of`
+    /// — as a "shared-lock read". They are not. `try_acquire` calls
+    /// `fs2::FileExt::try_lock_exclusive`, which means two concurrent
+    /// `lifecycle_of` lookups still serialize against each other (and
+    /// against any writer). The "non-blocking" qualifier describes
+    /// the WAIT behavior (return `Ok(None)` instead of parking the
+    /// caller), not the CONFLICT shape (still mutually exclusive).
+    ///
+    /// A future variant that actually permits concurrent readers
+    /// would need `fs2::FileExt::try_lock_shared` and a new
+    /// `try_acquire_shared` constructor; the read-path callers would
+    /// also need auditing for self-consistency guarantees that an
+    /// exclusive lock currently provides for free.
     pub(super) fn try_acquire(store_path: &Path) -> Result<Option<Self>, AgentError> {
         let file = open_lock_file(store_path)?;
         match file.try_lock_exclusive() {

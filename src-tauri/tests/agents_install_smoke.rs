@@ -33,6 +33,11 @@ use claudepot_core::agent::{
     Lifecycle, OutputFormat, PermissionMode, PlatformOptions, Scheduler,
     Trigger,
 };
+// A5: import the REAL route_lookup_fn the Tauri command builds. A
+// refactor that changes its signature (e.g. adds an `&AccountStore`
+// parameter) now fails to compile here — the smoke test no longer
+// re-implements the wiring it claims to lock down.
+use claudepot_tauri_lib::commands::agents::route_lookup_fn;
 use uuid::Uuid;
 
 /// A Scheduler stub that records the agents it registered. Same shape
@@ -133,14 +138,6 @@ fn sample_draft(name: &str) -> Agent {
     }
 }
 
-/// Mirror of `commands::agents::route_lookup_fn`. The real one reaches
-/// the route store on disk; this test fixture has no routes, so it
-/// returns `None` for every id — which is correct for a first-party
-/// agent (the closure never asks for a route).
-fn test_route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
-    |_id: &Uuid| -> Option<String> { None }
-}
-
 /// Env tests share a process; `CLAUDEPOT_DATA_DIR` and
 /// `CLAUDEPOT_CLI_PATH` are process-global. Serialize the tests so
 /// they don't trample each other.
@@ -182,7 +179,10 @@ fn agent_install_closure_shape_drives_install_draft_happy_path() {
     // `resolve_binary`, or `install_shim` changes its signature, this
     // block fails to compile — the regression signal X27 exists for.
     let cli_path = current_claudepot_cli().expect("CLAUDEPOT_CLI_PATH resolves");
-    let lookup = test_route_lookup_fn();
+    // A5: drive the REAL route_lookup_fn from `commands::agents`.
+    // With no routes registered in this temp CLAUDEPOT_DATA_DIR, it
+    // returns `None` for every id — correct for a first-party agent.
+    let lookup = route_lookup_fn();
 
     let outcome = install_draft(&mut store, &id, &scheduler, |a| {
         let binary_path = resolve_binary(a, &lookup)?;
@@ -294,13 +294,23 @@ fn agent_install_closure_shape_rejects_register_failure_cleanly() {
 
     let store_path = dir.path().join("agents.json");
     let mut store = AgentStore::open_at(store_path.clone()).unwrap();
-    let agent = sample_draft("rollback-victim");
+    let mut agent = sample_draft("rollback-victim");
+    // A5 + A4 cross-test: stamp a clearly-old `updated_at` so the
+    // X24 rollback-restore assertion below is unambiguous. After the
+    // failed install_draft, the on-disk agent must still carry THIS
+    // timestamp — not a fresh `now()` bumped by the in-flight `arm`
+    // call that the helper rolled back.
+    let original_updated_at = Utc::now() - chrono::Duration::days(6);
+    agent.updated_at = original_updated_at;
     let id = agent.id;
     store.add(agent).unwrap();
     store.save().unwrap();
 
     let cli_path = current_claudepot_cli().expect("CLAUDEPOT_CLI_PATH resolves");
-    let lookup = test_route_lookup_fn();
+    // A5: drive the REAL route_lookup_fn from `commands::agents`.
+    // With no routes registered in this temp CLAUDEPOT_DATA_DIR, it
+    // returns `None` for every id — correct for a first-party agent.
+    let lookup = route_lookup_fn();
 
     let result = install_draft(&mut store, &id, &FailingScheduler, |a| {
         let binary_path = resolve_binary(a, &lookup)?;
@@ -314,10 +324,24 @@ fn agent_install_closure_shape_rejects_register_failure_cleanly() {
     // assertion fires.
     drop(store);
     let reopened = AgentStore::open_at(store_path).unwrap();
+    let after = reopened.get(&id).expect("agent still present");
     assert_eq!(
-        reopened.get(&id).unwrap().lifecycle,
+        after.lifecycle,
         Lifecycle::Draft,
         "on-disk lifecycle must be rolled back after a register failure"
+    );
+    // A5 ties to A4: the rollback must ALSO restore `updated_at`.
+    // The `arm` call inside `mutate` bumps `updated_at = now()`; the
+    // rollback closure calls `set_lifecycle` which does NOT bump, so
+    // without the helper's X24 timestamp snapshot the rolled-back
+    // agent would claim it was just edited.
+    assert!(
+        (after.updated_at - original_updated_at).num_seconds().abs() < 2,
+        "X24 / A4: updated_at must be restored to its pre-mutation \
+         value after a register-failure rollback \
+         (original={original_updated_at}, after={ts}, delta={delta}s)",
+        ts = after.updated_at,
+        delta = (after.updated_at - original_updated_at).num_seconds(),
     );
 
     std::env::remove_var("CLAUDEPOT_DATA_DIR");
