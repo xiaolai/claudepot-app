@@ -246,14 +246,26 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_enriched_path_omits_nonexistent_dirs() {
-        // A tool dir that does not exist must not pollute the PATH.
+        // Production contract: `enriched_path` must not ADD a tool_dir
+        // that does not exist on disk. It does NOT promise to scrub
+        // nonexistent dirs that are already on the inherited PATH —
+        // we trust the user's environment as-is and only refuse to
+        // pollute it further. Compute the delta (enriched − inherited)
+        // and assert against that, so this test passes on CI runners
+        // whose PATH contains e.g. `/opt/homebrew/bin` on Ubuntu.
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let inherited_entries: Vec<PathBuf> = std::env::split_paths(&inherited).collect();
         let enriched = enriched_path();
-        let entries: Vec<PathBuf> = std::env::split_paths(&enriched).collect();
+        let enriched_entries: Vec<PathBuf> = std::env::split_paths(&enriched).collect();
+        let added: Vec<&PathBuf> = enriched_entries
+            .iter()
+            .filter(|d| !inherited_entries.contains(d))
+            .collect();
         for dir in tool_dirs() {
             if !dir.is_dir() {
                 assert!(
-                    !entries.contains(&dir),
-                    "nonexistent dir {dir:?} must not be on the enriched PATH"
+                    !added.contains(&&dir),
+                    "nonexistent dir {dir:?} must not be ADDED to the enriched PATH"
                 );
             }
         }
