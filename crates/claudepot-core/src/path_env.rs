@@ -167,7 +167,10 @@ mod tests {
             ],
             "tool dirs must be appended after the inherited PATH"
         );
-        let usr_bin = out.iter().position(|d| d == &PathBuf::from("/usr/bin")).unwrap();
+        let usr_bin = out
+            .iter()
+            .position(|d| d == &PathBuf::from("/usr/bin"))
+            .unwrap();
         let brew = out
             .iter()
             .position(|d| d == &PathBuf::from("/opt/homebrew/bin"))

@@ -113,9 +113,17 @@ fn draft_accepts_claudepot_native_json() {
 
     let (stdout, stderr, code) = run_agent(
         &env,
-        &["draft", "--json", "--from-json", spec_path.to_str().unwrap()],
+        &[
+            "draft",
+            "--json",
+            "--from-json",
+            spec_path.to_str().unwrap(),
+        ],
     );
-    assert_eq!(code, 0, "native-JSON draft should succeed; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "native-JSON draft should succeed; stderr: {stderr}"
+    );
     let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["name"], "native-agent");
     assert_eq!(payload["model"], "claude-haiku-4-5");

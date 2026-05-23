@@ -350,10 +350,7 @@ impl AgentStore {
     /// `automations/` directory. If even the copy fails the
     /// migration aborts with an error — run history is not
     /// discarded silently.
-    fn migrate_v1_to_v2(
-        legacy_path: &Path,
-        v2_path: &Path,
-    ) -> Result<AgentsFile, AgentError> {
+    fn migrate_v1_to_v2(legacy_path: &Path, v2_path: &Path) -> Result<AgentsFile, AgentError> {
         let raw = std::fs::read(legacy_path)?;
         let mut file = if raw.is_empty() {
             AgentsFile::default()
@@ -450,10 +447,7 @@ impl AgentStore {
 
     /// Path-injected variant of [`lifecycle_of`](Self::lifecycle_of)
     /// for tests.
-    pub fn lifecycle_of_at(
-        path: PathBuf,
-        id: &AgentId,
-    ) -> Result<Option<Lifecycle>, AgentError> {
+    pub fn lifecycle_of_at(path: PathBuf, id: &AgentId) -> Result<Option<Lifecycle>, AgentError> {
         match Self::try_open_at(path)? {
             Some(store) => Ok(store.get(id).map(|a| a.lifecycle)),
             None => Ok(None),
@@ -510,30 +504,18 @@ impl AgentStore {
         // × Claude is the dominant cost-runaway risk. It must not be
         // possible to install an unthrottled event agent.
         validate_event_rate_limit(&agent)?;
-        if self
-            .file
-            .agents
-            .iter()
-            .any(|a| a.name == agent.name)
-        {
+        if self.file.agents.iter().any(|a| a.name == agent.name) {
             return Err(AgentError::DuplicateName(agent.name));
         }
         if self.file.agents.iter().any(|a| a.id == agent.id) {
-            return Err(AgentError::DuplicateName(format!(
-                "id {}",
-                agent.id
-            )));
+            return Err(AgentError::DuplicateName(format!("id {}", agent.id)));
         }
         self.file.agents.push(agent);
         Ok(())
     }
 
     /// Apply a patch to an existing agent. Bumps `updated_at`.
-    pub fn update(
-        &mut self,
-        id: &AgentId,
-        patch: AgentPatch,
-    ) -> Result<(), AgentError> {
+    pub fn update(&mut self, id: &AgentId, patch: AgentPatch) -> Result<(), AgentError> {
         let idx = self
             .file
             .agents
@@ -944,7 +926,9 @@ pub fn reconcile_with_scheduler() -> Vec<OrphanInstalled> {
 /// lets the wiring (store-load → list_managed → identifier match →
 /// log) be exercised end-to-end via a `FakeScheduler` in an
 /// integration test.
-pub fn reconcile_with_scheduler_using(scheduler: &dyn super::scheduler::Scheduler) -> Vec<OrphanInstalled> {
+pub fn reconcile_with_scheduler_using(
+    scheduler: &dyn super::scheduler::Scheduler,
+) -> Vec<OrphanInstalled> {
     let store = match AgentStore::open() {
         Ok(s) => s,
         Err(e) => {
@@ -1119,9 +1103,10 @@ fn validate_event_rate_limit(agent: &Agent) -> Result<(), AgentError> {
     if !agent.trigger.is_event() {
         return Ok(());
     }
-    let has_usable_limit = agent.rate_limit.as_ref().is_some_and(|r| {
-        r.min_interval_secs.is_some() || r.max_per_day.is_some()
-    });
+    let has_usable_limit = agent
+        .rate_limit
+        .as_ref()
+        .is_some_and(|r| r.min_interval_secs.is_some() || r.max_per_day.is_some());
     if !has_usable_limit {
         return Err(AgentError::InvalidEnv(
             "an event-triggered agent must carry a rate_limit \
@@ -1232,9 +1217,7 @@ fn legacy_backup_path_for(legacy_path: &Path) -> PathBuf {
 
 /// Per-agent directory inside the data dir.
 pub fn agent_dir(id: &AgentId) -> PathBuf {
-    claudepot_data_dir()
-        .join("agents")
-        .join(id.to_string())
+    claudepot_data_dir().join("agents").join(id.to_string())
 }
 
 /// Per-agent runs directory.
@@ -1534,10 +1517,7 @@ mod tests {
         let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
         let mut bad = sample("x");
         bad.name = "INVALID".into();
-        assert!(matches!(
-            store.add(bad),
-            Err(AgentError::InvalidName(..))
-        ));
+        assert!(matches!(store.add(bad), Err(AgentError::InvalidName(..))));
     }
 
     // ---- grill X13: F18 caps + control-char gate at the
@@ -1629,7 +1609,10 @@ mod tests {
         let err = store.update(&id, patch).unwrap_err();
         match err {
             AgentError::InvalidEnv(m) => {
-                assert!(m.contains("evil"), "rejection must name the server, got {m}");
+                assert!(
+                    m.contains("evil"),
+                    "rejection must name the server, got {m}"
+                );
             }
             other => panic!("expected InvalidEnv for new Custom MCP, got {other:?}"),
         }
@@ -1662,7 +1645,9 @@ mod tests {
             mcp_servers: Some(vec![custom.clone()]),
             ..AgentPatch::default()
         };
-        store.update(&id, patch).expect("no-op rewrite must be allowed");
+        store
+            .update(&id, patch)
+            .expect("no-op rewrite must be allowed");
     }
 
     /// A8b polish on grill X3: the no-op-rewrite gate compares via
@@ -1685,14 +1670,12 @@ mod tests {
         // order. `serde_json::from_str` materializes them into
         // structurally-equal `Value::Object`s — the X3 prior-equality
         // check must therefore accept the second as a no-op rewrite.
-        let original_config: serde_json::Value = serde_json::from_str(
-            r#"{"command":"/bin/echo","args":["hi"],"env":{"KEY":"val"}}"#,
-        )
-        .unwrap();
-        let reordered_config: serde_json::Value = serde_json::from_str(
-            r#"{"env":{"KEY":"val"},"args":["hi"],"command":"/bin/echo"}"#,
-        )
-        .unwrap();
+        let original_config: serde_json::Value =
+            serde_json::from_str(r#"{"command":"/bin/echo","args":["hi"],"env":{"KEY":"val"}}"#)
+                .unwrap();
+        let reordered_config: serde_json::Value =
+            serde_json::from_str(r#"{"env":{"KEY":"val"},"args":["hi"],"command":"/bin/echo"}"#)
+                .unwrap();
 
         let mut a = sample("reorder-canary");
         a.mcp_servers = vec![McpServerRef::Custom {
@@ -1736,7 +1719,9 @@ mod tests {
             mcp_servers: Some(vec![McpServerRef::ClaudepotMemory]),
             ..AgentPatch::default()
         };
-        store.update(&id, patch).expect("dropping a Custom must be allowed");
+        store
+            .update(&id, patch)
+            .expect("dropping a Custom must be allowed");
         assert_eq!(
             store.get(&id).unwrap().mcp_servers,
             vec![McpServerRef::ClaudepotMemory]
@@ -1837,7 +1822,10 @@ mod tests {
         // The migration aborted before writing v2 or backing up the
         // legacy file — the corrupt file is left untouched for the
         // user to inspect.
-        assert!(!v2_path.exists(), "v2 file must not exist after a failed migration");
+        assert!(
+            !v2_path.exists(),
+            "v2 file must not exist after a failed migration"
+        );
         assert!(v1_path.exists(), "corrupt legacy file is left in place");
         assert!(
             !dir.path().join("automations.json.pre-v2-backup").exists(),
@@ -1946,11 +1934,9 @@ mod tests {
         a.id = Uuid::nil();
         let mut registered = std::collections::HashSet::new();
         registered.insert(format!("io.claudepot.agent.{}", a.id));
-        let orphans = reconcile_installed_agents(
-            std::slice::from_ref(&a),
-            &registered,
-            |id| format!("io.claudepot.agent.{id}"),
-        );
+        let orphans = reconcile_installed_agents(std::slice::from_ref(&a), &registered, |id| {
+            format!("io.claudepot.agent.{id}")
+        });
         assert!(orphans.is_empty(), "an agent with a live artifact is fine");
     }
 
@@ -1970,11 +1956,10 @@ mod tests {
         disabled.enabled = false;
 
         let agents = vec![draft, manual, disabled];
-        let orphans = reconcile_installed_agents(
-            &agents,
-            &std::collections::HashSet::new(),
-            |id| format!("io.claudepot.agent.{id}"),
-        );
+        let orphans =
+            reconcile_installed_agents(&agents, &std::collections::HashSet::new(), |id| {
+                format!("io.claudepot.agent.{id}")
+            });
         assert!(
             orphans.is_empty(),
             "draft / manual / disabled agents are never reconciliation orphans"
@@ -1997,8 +1982,9 @@ mod tests {
         // `expected_identifier` matches. The artifact will fire on
         // schedule with no visible record — exactly the hand-edit
         // hazard X9 exists to surface.
-        let installed: std::collections::HashSet<String> =
-            ["io.claudepot.agent.alive".to_string()].into_iter().collect();
+        let installed: std::collections::HashSet<String> = ["io.claudepot.agent.alive".to_string()]
+            .into_iter()
+            .collect();
         let reported = vec![
             registered("io.claudepot.agent.alive", true),
             registered("io.claudepot.agent.orphan", true),
@@ -2014,14 +2000,16 @@ mod tests {
         // never installed. The `claudepot_managed` filter must keep
         // them out of the orphan list — otherwise every machine
         // would light up with false positives at boot.
-        let installed: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let installed: std::collections::HashSet<String> = std::collections::HashSet::new();
         let reported = vec![
             registered("com.apple.something.else", false),
             registered("io.claudepot.agent.foo", false),
         ];
         let orphans = reconcile_orphan_artifacts(&installed, &reported);
-        assert!(orphans.is_empty(), "unmanaged entries must never be flagged");
+        assert!(
+            orphans.is_empty(),
+            "unmanaged entries must never be flagged"
+        );
     }
 
     #[test]
@@ -2185,7 +2173,9 @@ mod tests {
 
     #[test]
     fn reconcile_with_scheduler_using_flags_an_installed_agent_with_no_artifact() {
-        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = RECONCILE_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 
@@ -2203,7 +2193,9 @@ mod tests {
 
     #[test]
     fn reconcile_with_scheduler_using_silent_when_artifact_present() {
-        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = RECONCILE_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 
@@ -2216,14 +2208,19 @@ mod tests {
         let sched = ScriptedScheduler::with(vec![entry]);
 
         let orphans = reconcile_with_scheduler_using(&sched);
-        assert!(orphans.is_empty(), "wired reconcile is quiet on healthy state");
+        assert!(
+            orphans.is_empty(),
+            "wired reconcile is quiet on healthy state"
+        );
 
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }
 
     #[test]
     fn reconcile_with_scheduler_using_returns_empty_on_list_managed_error() {
-        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = RECONCILE_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 
@@ -2245,7 +2242,9 @@ mod tests {
 
     #[test]
     fn reconcile_orphan_artifacts_using_flags_unmatched_managed_artifact() {
-        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = RECONCILE_ENV_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 

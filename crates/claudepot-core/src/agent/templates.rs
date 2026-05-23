@@ -20,9 +20,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::types::{
-    Agent, AgentBinary, CreatedVia, EventKind, Lifecycle, McpServerRef,
-    OutputFormat, PermissionMode, PlatformOptions, RateLimit, Trigger,
-    DEFAULT_DEBOUNCE_SECS,
+    Agent, AgentBinary, CreatedVia, EventKind, Lifecycle, McpServerRef, OutputFormat,
+    PermissionMode, PlatformOptions, RateLimit, Trigger, DEFAULT_DEBOUNCE_SECS,
 };
 
 /// Stable id recorded in `drafted_by` for Session-Narrator drafts.
@@ -183,14 +182,8 @@ mod tests {
         let a = session_narrator("/home/u/proj", now());
         // It is a draft — inert until a human installs it.
         assert_eq!(a.lifecycle, Lifecycle::Draft);
-        assert_eq!(
-            a.drafted_by.as_deref(),
-            Some(SESSION_NARRATOR_DRAFTED_BY)
-        );
-        assert_eq!(
-            a.template_id.as_deref(),
-            Some(SESSION_NARRATOR_TEMPLATE_ID)
-        );
+        assert_eq!(a.drafted_by.as_deref(), Some(SESSION_NARRATOR_DRAFTED_BY));
+        assert_eq!(a.template_id.as_deref(), Some(SESSION_NARRATOR_TEMPLATE_ID));
         // The name passes the same validation the store enforces.
         validate_name(&a.name).expect("narrator name must be valid");
         assert_eq!(a.cwd, "/home/u/proj");
@@ -261,8 +254,8 @@ mod tests {
         // than the template, the test breaks and forces the
         // template's defaults to be adjusted in lock step.
         use super::super::draft::{
-            validate_cwd, validate_event_trigger_numerics,
-            validate_rate_limit_numerics, validate_trigger_timezone,
+            validate_cwd, validate_event_trigger_numerics, validate_rate_limit_numerics,
+            validate_trigger_timezone,
         };
         use super::super::slug::validate_name;
 
@@ -271,8 +264,7 @@ mod tests {
         validate_cwd(&a.cwd).expect("cwd");
         validate_trigger_timezone(&a.trigger).expect("tz");
         validate_event_trigger_numerics(&a.trigger).expect("debounce");
-        validate_rate_limit_numerics(a.rate_limit.as_ref())
-            .expect("rate limit");
+        validate_rate_limit_numerics(a.rate_limit.as_ref()).expect("rate limit");
     }
 
     #[test]

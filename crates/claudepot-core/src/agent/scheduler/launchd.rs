@@ -422,9 +422,8 @@ mod tests {
         let xml = render_plist(&a).unwrap();
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist"));
         assert!(xml.contains("<key>Label</key>"));
-        assert!(xml.contains(
-            "<string>io.claudepot.agent.00000000-0000-0000-0000-000000000000</string>"
-        ));
+        assert!(xml
+            .contains("<string>io.claudepot.agent.00000000-0000-0000-0000-000000000000</string>"));
         assert!(xml.contains("<key>ProgramArguments</key>"));
         assert!(xml.contains("<string>/bin/sh</string>"));
         assert!(xml.contains("run.sh"));

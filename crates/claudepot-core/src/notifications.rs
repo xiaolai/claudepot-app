@@ -213,10 +213,21 @@ impl Category {
             | RotationSuggested | UsageThreshold | UpdateInstallReady => P1Stalled,
 
             // P2 — Acknowledge
-            AccountVerified | AccountSwitched | ProjectRenamed | ProjectRepaired
-            | SessionPruned | KeyCopied | KeyAdded | KeyRemoved | ConfigEdited | AgentRan
-            | RotationApplied | RotationFailed | AgentEventFailed
-            | AgentEventBurstCapped | BannerResolved => P2Acknowledge,
+            AccountVerified
+            | AccountSwitched
+            | ProjectRenamed
+            | ProjectRepaired
+            | SessionPruned
+            | KeyCopied
+            | KeyAdded
+            | KeyRemoved
+            | ConfigEdited
+            | AgentRan
+            | RotationApplied
+            | RotationFailed
+            | AgentEventFailed
+            | AgentEventBurstCapped
+            | BannerResolved => P2Acknowledge,
 
             // P3 — Ambient
             MemoryChanged | ConfigTreePatched | ServiceStatusChanged | UpdateAvailable => P3Ambient,

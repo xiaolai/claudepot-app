@@ -143,14 +143,8 @@ pub fn draft_cmd(json: bool, args: DraftArgs) -> Result<()> {
         }
         (None, None) => None,
     };
-    let allowed_tools = args
-        .allowed_tools
-        .as_deref()
-        .map(parse_tool_list);
-    let disallowed_tools = args
-        .disallowed_tools
-        .as_deref()
-        .map(parse_tool_list);
+    let allowed_tools = args.allowed_tools.as_deref().map(parse_tool_list);
+    let disallowed_tools = args.disallowed_tools.as_deref().map(parse_tool_list);
 
     let overrides = CliOverrides {
         name: args.name.clone(),
@@ -170,28 +164,27 @@ pub fn draft_cmd(json: bool, args: DraftArgs) -> Result<()> {
     // The spec body. `--from-json` provides it; without that flag we
     // synthesize a minimal Claudepot-native spec from `--name`,
     // `--cwd`, and `--prompt` (all three then required).
-    let spec = match read_spec_json(args.from_json.as_deref())? {
-        Some(raw) => DraftInput::from_json(&raw)?.normalize(&overrides)?,
-        None => {
-            let name = args
-                .name
-                .as_deref()
-                .ok_or_else(|| anyhow!("flags-only draft requires --name (or pass --from-json)"))?;
-            let cwd = args
-                .cwd
-                .as_deref()
-                .ok_or_else(|| anyhow!("flags-only draft requires --cwd (or pass --from-json)"))?;
-            let prompt = args.prompt.as_deref().ok_or_else(|| {
-                anyhow!("flags-only draft requires --prompt (or pass --from-json)")
-            })?;
-            let synthetic = serde_json::json!({
-                "name": name,
-                "cwd": cwd,
-                "prompt": prompt,
-            });
-            DraftInput::from_json(&synthetic.to_string())?.normalize(&overrides)?
-        }
-    };
+    let spec =
+        match read_spec_json(args.from_json.as_deref())? {
+            Some(raw) => DraftInput::from_json(&raw)?.normalize(&overrides)?,
+            None => {
+                let name = args.name.as_deref().ok_or_else(|| {
+                    anyhow!("flags-only draft requires --name (or pass --from-json)")
+                })?;
+                let cwd = args.cwd.as_deref().ok_or_else(|| {
+                    anyhow!("flags-only draft requires --cwd (or pass --from-json)")
+                })?;
+                let prompt = args.prompt.as_deref().ok_or_else(|| {
+                    anyhow!("flags-only draft requires --prompt (or pass --from-json)")
+                })?;
+                let synthetic = serde_json::json!({
+                    "name": name,
+                    "cwd": cwd,
+                    "prompt": prompt,
+                });
+                DraftInput::from_json(&synthetic.to_string())?.normalize(&overrides)?
+            }
+        };
 
     // Build the inert draft record. `build_draft` validates the
     // name shape, the bypassPermissions invariant, env vars, and
@@ -228,10 +221,7 @@ mod tests {
     #[test]
     fn parse_tool_list_keeps_paren_patterns() {
         let got = parse_tool_list("Read, Grep, Bash(git status), Bash(cat *)");
-        assert_eq!(
-            got,
-            vec!["Read", "Grep", "Bash(git status)", "Bash(cat *)"]
-        );
+        assert_eq!(got, vec!["Read", "Grep", "Bash(git status)", "Bash(cat *)"]);
     }
 
     #[test]

@@ -251,9 +251,7 @@ pub fn render_units(agent: &Agent) -> Result<(String, String), AgentError> {
         // Manual + Event triggers short-circuit `register` before
         // reaching unit rendering, so these arms are unreachable in
         // practice.
-        Trigger::Manual | Trigger::Event { .. } => {
-            return Ok((String::new(), String::new()))
-        }
+        Trigger::Manual | Trigger::Event { .. } => return Ok((String::new(), String::new())),
     };
     let mut timer = String::new();
     timer.push_str("# claudepot_managed: true\n");
@@ -388,6 +386,7 @@ mod tests {
             rate_limit: None,
             lifecycle: crate::agent::types::Lifecycle::Installed,
             drafted_by: None,
+            created_via: crate::agent::types::CreatedVia::Gui,
         }
     }
 

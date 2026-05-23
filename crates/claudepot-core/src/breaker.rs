@@ -284,7 +284,10 @@ mod tests {
         assert_eq!(evaluate(&trip, now()), BreakerVerdict::Allow); // probe due
         let after_failed_probe = record_failure(&trip, now());
         assert_eq!(after_failed_probe.consecutive, THRESHOLD + 1);
-        assert_eq!(evaluate(&after_failed_probe, now()), BreakerVerdict::Tripped);
+        assert_eq!(
+            evaluate(&after_failed_probe, now()),
+            BreakerVerdict::Tripped
+        );
     }
 
     #[test]

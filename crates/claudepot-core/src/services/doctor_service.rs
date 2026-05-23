@@ -376,9 +376,13 @@ mod tests {
         let _env = setup_test_data_dir();
 
         let fresh = make_account("fresh@example.com");
-        swap::save_private(fresh.uuid, &fresh_blob_json()).await.unwrap();
+        swap::save_private(fresh.uuid, &fresh_blob_json())
+            .await
+            .unwrap();
         let expired = make_account("expired@example.com");
-        swap::save_private(expired.uuid, &expired_blob_json()).await.unwrap();
+        swap::save_private(expired.uuid, &expired_blob_json())
+            .await
+            .unwrap();
 
         let health = build_account_health(&[fresh.clone(), expired.clone()]).await;
         assert_eq!(health.len(), 2);

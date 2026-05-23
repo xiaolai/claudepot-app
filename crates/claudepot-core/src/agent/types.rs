@@ -676,9 +676,7 @@ mod tests {
     #[test]
     fn event_trigger_round_trips() {
         let t = Trigger::Event {
-            event: EventKind::SessionSettled {
-                debounce_secs: 900,
-            },
+            event: EventKind::SessionSettled { debounce_secs: 900 },
         };
         let s = serde_json::to_string(&t).unwrap();
         let back: Trigger = serde_json::from_str(&s).unwrap();
@@ -693,8 +691,7 @@ mod tests {
     fn event_trigger_debounce_defaults_when_absent() {
         // A hand-authored / forward-compat record with no
         // `debounce_secs` deserializes to the 10-minute default.
-        let raw =
-            r#"{"kind":"event","event":{"kind":"session_settled"}}"#;
+        let raw = r#"{"kind":"event","event":{"kind":"session_settled"}}"#;
         let t: Trigger = serde_json::from_str(raw).unwrap();
         match t {
             Trigger::Event {

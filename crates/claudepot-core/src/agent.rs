@@ -76,19 +76,18 @@ pub mod templates;
 pub mod types;
 
 pub use draft::{
-    build_draft, validate_agent_inputs, validate_cwd, validate_trigger_timezone,
-    CliOverrides, DraftInput, DraftSpec,
+    build_draft, validate_agent_inputs, validate_cwd, validate_trigger_timezone, CliOverrides,
+    DraftInput, DraftSpec,
 };
 pub use error::AgentError;
 pub use events::{
-    evaluate as evaluate_events, AgentEventsError, AgentRunStats, EventFire,
-    EventsFile, FiredEntry,
+    evaluate as evaluate_events, AgentEventsError, AgentRunStats, EventFire, EventsFile, FiredEntry,
 };
 pub use install::{current_claudepot_cli, install_shim, resolve_binary};
 pub use install_gate::{apply_lifecycle_change, install_draft, InstallOutcome};
 pub use run::{
-    list_run_ids, parse_result_event, prune_run_dirs, read_run, record_run,
-    record_run_for_agent, run_now, RecordInputs,
+    list_run_ids, parse_result_event, prune_run_dirs, read_run, record_run, record_run_for_agent,
+    run_now, RecordInputs,
 };
 pub use scheduler::{
     active_scheduler, cron_next_runs, noop::NoopScheduler, RegisteredEntry, Scheduler,
@@ -98,14 +97,13 @@ pub use shim::{render_unix, render_windows, ShimInputs};
 pub use slug::validate_name;
 pub use store::{
     agent_dir, agent_runs_dir, agents_file_path, reconcile_installed_agents,
-    reconcile_orphan_artifacts, reconcile_orphan_artifacts_now,
-    reconcile_orphan_artifacts_using, reconcile_with_scheduler,
-    reconcile_with_scheduler_using, AgentPatch, AgentStore, OrphanArtifact,
-    OrphanInstalled,
+    reconcile_orphan_artifacts, reconcile_orphan_artifacts_now, reconcile_orphan_artifacts_using,
+    reconcile_with_scheduler, reconcile_with_scheduler_using, AgentPatch, AgentStore,
+    OrphanArtifact, OrphanInstalled,
 };
 pub use templates::session_narrator;
 pub use types::{
-    Agent, AgentBinary, AgentId, AgentRun, CreatedVia, EventKind, HostPlatform,
-    Lifecycle, McpServerRef, OutputFormat, PermissionMode, PlatformOptions,
-    RateLimit, RunResult, Trigger, TriggerKind, DEFAULT_DEBOUNCE_SECS,
+    Agent, AgentBinary, AgentId, AgentRun, CreatedVia, EventKind, HostPlatform, Lifecycle,
+    McpServerRef, OutputFormat, PermissionMode, PlatformOptions, RateLimit, RunResult, Trigger,
+    TriggerKind, DEFAULT_DEBOUNCE_SECS,
 };

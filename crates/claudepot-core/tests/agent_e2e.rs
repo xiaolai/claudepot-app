@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use claudepot_core::agent::{
-    active_scheduler, install_shim, store::agent_runs_dir, Agent, AgentBinary,
-    AgentId, OutputFormat, PermissionMode, PlatformOptions, Trigger,
+    active_scheduler, install_shim, store::agent_runs_dir, Agent, AgentBinary, AgentId,
+    OutputFormat, PermissionMode, PlatformOptions, Trigger,
 };
 use uuid::Uuid;
 
@@ -144,12 +144,8 @@ fn end_to_end_register_kickstart_unregister() {
     let agent = make_agent(&format!("e2e-test-{}", Utc::now().timestamp()));
     let _guard = CleanupGuard { id: agent.id };
 
-    install_shim(
-        &agent,
-        fake_claude.to_str().unwrap(),
-        cli.to_str().unwrap(),
-    )
-    .expect("install_shim");
+    install_shim(&agent, fake_claude.to_str().unwrap(), cli.to_str().unwrap())
+        .expect("install_shim");
 
     let scheduler = active_scheduler();
     eprintln!("scheduler: {}", scheduler.capabilities().native_label);

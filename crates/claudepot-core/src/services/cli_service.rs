@@ -287,7 +287,9 @@ mod tests {
         let saved = cli_backend::swap::load_private(account.uuid).await.unwrap();
         assert_eq!(saved, blob_json);
 
-        cli_backend::swap::delete_private(account.uuid).await.unwrap();
+        cli_backend::swap::delete_private(account.uuid)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
