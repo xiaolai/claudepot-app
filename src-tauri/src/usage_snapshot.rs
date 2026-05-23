@@ -178,10 +178,28 @@ async fn run_tick(app: &AppHandle) {
 /// (grill X6). The future is wrapped in `AssertUnwindSafe` because
 /// the orchestrators' shared state (Tauri `AppHandle`, store locks,
 /// `Arc<…>` handles) is not auto-`UnwindSafe`; a panic here is
-/// surfaced via `tracing::error!` and the loop continues. With
-/// `panic = "abort"` (release profile) the wrapper is a no-op — that
-/// is the documented trade-off; the value of the guard is in dev,
-/// tests, and any future profile that allows unwinding.
+/// surfaced via `tracing::error!` and the loop continues.
+///
+/// ## Release-profile caveat — the guard is a no-op in production
+///
+/// Audit follow-up A8a: the workspace's `[profile.release]` sets
+/// `panic = "abort"`. Under that profile a panic inside `fut`
+/// immediately aborts the entire process; `AssertUnwindSafe(fut)
+/// .catch_unwind()` never observes a payload because there is no
+/// unwinding to catch. The protection this function provides is
+/// therefore **limited to debug builds, tests, and any future
+/// profile that opts back into `panic = "unwind"`**. Production
+/// (the `--release` Tauri bundle the user installs) does NOT enjoy
+/// the X6 isolation — a panic in any sub-orchestrator takes the
+/// whole GUI down.
+///
+/// This is a deliberate cost/benefit: switching the release profile
+/// to `panic = "unwind"` would grow binary size and incur a small
+/// runtime cost on every fallible path. The guard still earns its
+/// place by catching panic-shaped bugs in CI before they reach a
+/// release; for true production resilience, individual orchestrators
+/// must use `Result`-shaped error handling rather than relying on
+/// this wrapper.
 async fn guarded<F>(name: &'static str, fut: F)
 where
     F: std::future::Future<Output = ()>,

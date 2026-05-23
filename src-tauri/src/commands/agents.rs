@@ -36,7 +36,17 @@ fn parse_id(s: &str) -> Result<AgentId, String> {
     Uuid::parse_str(s.trim()).map_err(|e| format!("invalid agent id: {e}"))
 }
 
-pub(crate) fn route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
+/// Build the route-id → wrapper-name lookup closure used by every
+/// agent verb that resolves a `Route` binary.
+///
+/// **Public for the X27 / A5 integration smoke test** at
+/// `tests/agents_install_smoke.rs`: the test must drive the EXACT
+/// closure shape the Tauri command builds so a refactor of this
+/// function's signature surfaces as a compile error rather than as
+/// silent runtime drift. `#[doc(hidden)]` because no non-test caller
+/// outside this crate should reach in.
+#[doc(hidden)]
+pub fn route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
     move |id: &Uuid| -> Option<String> {
         let store = RouteStore::open().ok()?;
         // The route's `wrapper_name` is the canonical, on-disk

@@ -979,6 +979,139 @@ mod tests {
         );
     }
 
+    /// A4 (audit follow-up): the X24 timestamp restore must hold on
+    /// EVERY rollback path. The existing tests covered the X1
+    /// rejection and the register-failure branch; this one covers
+    /// the shim-failure branch — earliest rollback point, before
+    /// save. A refactor that drops the `set_updated_at` call from
+    /// the shim-failure branch would have landed green without this.
+    #[test]
+    fn apply_change_shim_failure_restores_updated_at() {
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut a = installed_agent("shim-ts-victim", false);
+        let original_ts = Utc::now() - chrono::Duration::days(5);
+        a.updated_at = original_ts;
+        let original_enabled = a.enabled;
+        let id = a.id;
+        store.add(a).unwrap();
+        store.save().unwrap();
+
+        // The mutate closure enables the agent (bumping `updated_at`
+        // inside `update`); the shim closure errors so the rollback
+        // branch fires before save.
+        let sched = FakeScheduler::ok();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(true),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                store.update(&id, patch)?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(original_enabled),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                let _ = store.update(&id, patch);
+            },
+            |_a| Err(AgentError::InvalidPath("/x".into(), "shim forced to fail")),
+            &sched,
+        );
+        assert!(result.is_err(), "shim failure must surface as Err");
+
+        let after = store.get(&id).expect("agent still present");
+        assert_eq!(
+            after.enabled, original_enabled,
+            "rollback must restore the prior `enabled` bit"
+        );
+        assert!(
+            (after.updated_at - original_ts).num_seconds().abs() < 2,
+            "shim-failure rollback must restore `updated_at` \
+             (original={original_ts}, after={ts}, delta={delta}s)",
+            ts = after.updated_at,
+            delta = (after.updated_at - original_ts).num_seconds(),
+        );
+        // No artifact was registered (shim failed before save and
+        // before register).
+        assert!(sched.registered.borrow().is_empty());
+    }
+
+    /// A4 (audit follow-up): the save-failure branch is the OTHER
+    /// path the existing tests didn't cover for `updated_at`. The
+    /// mutate-closure's `store.update` bumps `updated_at` in memory;
+    /// the save then fails (un-creatable path); the rollback closure
+    /// fires; the helper must also restore `updated_at`.
+    #[test]
+    fn apply_change_save_failure_restores_updated_at() {
+        let dir = tempdir().unwrap();
+        // Seed via a writable path so the agent ends up in the store,
+        // THEN re-point at an un-creatable path so `save` fails on
+        // the next call.
+        let seed_path = dir.path().join("seed.json");
+        let mut store = AgentStore::open_at(seed_path).unwrap();
+        let mut a = installed_agent("save-ts-victim", false);
+        let original_ts = Utc::now() - chrono::Duration::days(4);
+        a.updated_at = original_ts;
+        let original_enabled = a.enabled;
+        let id = a.id;
+        store.add(a).unwrap();
+        store.save().unwrap();
+
+        // Re-point: parent is a regular file, so `create_dir_all`
+        // inside `save` will fail.
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"not a dir").unwrap();
+        let unwritable = blocker.join("nested").join("agents.json");
+        store.set_path(unwritable);
+
+        let sched = FakeScheduler::ok();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(true),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                store.update(&id, patch)?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(original_enabled),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                let _ = store.update(&id, patch);
+            },
+            |_a| Ok(()),
+            &sched,
+        );
+        assert!(result.is_err(), "save failure must surface as Err");
+
+        let after = store.get(&id).expect("agent still present in-memory");
+        assert_eq!(after.enabled, original_enabled, "rollback restored enabled");
+        assert!(
+            (after.updated_at - original_ts).num_seconds().abs() < 2,
+            "save-failure rollback must restore `updated_at` \
+             (original={original_ts}, after={ts}, delta={delta}s)",
+            ts = after.updated_at,
+            delta = (after.updated_at - original_ts).num_seconds(),
+        );
+        // Register was never reached (save failed before register).
+        assert!(sched.registered.borrow().is_empty());
+    }
+
     #[test]
     fn apply_change_x1_rejection_also_restores_updated_at() {
         // X24 cross-test: the Draft + enabled X1 rejection runs

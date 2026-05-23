@@ -39,7 +39,7 @@ pub const EVENTS_FILENAME: &str = "agent-events.json";
 /// fire once more — bounded and self-correcting (it is re-recorded
 /// immediately), far cheaper than an unbounded file. Sized well
 /// above any realistic agent × session fan-out.
-const MAX_FIRED_ENTRIES: usize = 2000;
+pub const MAX_FIRED_ENTRIES: usize = 2000;
 
 fn default_schema_version() -> u32 {
     SCHEMA_VERSION
