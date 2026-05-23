@@ -36,7 +36,7 @@ export interface SettingsTabEventDetail {
 
 /**
  * Trigger the "open Add Route" deep-link. Called from the panel's
- * onUseThirdParty handler. Sets sessionStorage AND dispatches the
+ * onUseProvider handler. Sets sessionStorage AND dispatches the
  * CustomEvent so both cold-mount and hot-mount consumers fire.
  */
 export function triggerOpenAddRoute(): void {

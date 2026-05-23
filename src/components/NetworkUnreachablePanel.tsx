@@ -13,10 +13,8 @@ interface Props {
   onDismiss: () => void;
   /** Navigate to Providers section and surface the Add Route
    *  modal. The panel doesn't know about routing — the parent
-   *  component (App.tsx) wires this up. Prop name kept as
-   *  `onUseThirdParty` for internal-contract stability — same
-   *  precedent as the section id staying "third-party". */
-  onUseThirdParty: () => void;
+   *  component (App.tsx) wires this up. */
+  onUseProvider: () => void;
   /** Navigate to Settings → Network. Same wiring rationale. */
   onConfigureProxy: () => void;
 }
@@ -42,7 +40,7 @@ export function NetworkUnreachablePanel({
   diagnosis,
   onRetry,
   onDismiss,
-  onUseThirdParty,
+  onUseProvider,
   onConfigureProxy,
 }: Props) {
   const copy = copyForDiagnosis(diagnosis);
@@ -112,7 +110,7 @@ export function NetworkUnreachablePanel({
           alignItems: "center",
         }}
       >
-        <Button variant="solid" glyph={NF.bolt} onClick={onUseThirdParty}>
+        <Button variant="solid" glyph={NF.bolt} onClick={onUseProvider}>
           Use a provider
         </Button>
         <Button variant="ghost" glyph={NF.globe} onClick={onConfigureProxy}>
