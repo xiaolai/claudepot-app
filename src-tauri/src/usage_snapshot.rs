@@ -18,11 +18,13 @@
 //! costs no tokens, so the call budget is well within reason for
 //! typical 1–5 account households.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
 use claudepot_core::services::usage_cache::UsageCache;
 use claudepot_core::services::usage_snapshot;
+use futures_util::FutureExt;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -52,18 +54,31 @@ pub fn spawn(app: AppHandle) {
 }
 
 async fn run_tick(app: &AppHandle) {
+    // grill X6: each sub-orchestrator call is wrapped in a
+    // `catch_unwind` so a single panic anywhere in the pipeline
+    // cannot silently kill *every* orchestrator for the GUI's
+    // lifetime. The previous shape — `loop { run_tick().await;
+    // sleep().await; }` with zero panic isolation — meant a malformed
+    // `result.json`, an unmanaged `app.state::<…>()` call, or any
+    // subprocess panic stopped permission revert + PR refresh + the
+    // event orchestrator + snapshot writer + rotation all at once.
+    // Note `panic = "abort"` in the release profile defeats this in
+    // production binaries, but the guard still pays off in dev,
+    // tests, and any future profile change.
+
     // Revert any expired permission grants first — this is independent
     // of account state, so it must run before the early returns below
     // (no accounts / no CLI credentials). Returns after one cheap file
     // read when no grants exist.
-    crate::permission_orchestrator::tick(app).await;
+    guarded("permission_orchestrator", crate::permission_orchestrator::tick(app))
+        .await;
 
     // Refresh per-project PR detection. Independent of accounts (a
     // user can have projects without an Anthropic account); runs
     // before the account-state early returns. The orchestrator
     // dispatches each detect via `spawn_blocking` internally, so
     // this awaits a single task that walks all projects sequentially.
-    pr_tick(app).await;
+    guarded("pr_orchestrator", pr_tick(app)).await;
 
     // Fire session-settled event agents — also independent of the
     // active Anthropic account (an event agent can run as any
@@ -75,7 +90,11 @@ async fn run_tick(app: &AppHandle) {
     // doc-comment, and the F1/F14/F17 constraints in
     // `claudepot_core::agent::events`'s module-doc.
     let config_dir = claudepot_core::paths::claude_config_dir();
-    crate::agent_event_orchestrator::tick(app, config_dir).await;
+    guarded(
+        "agent_event_orchestrator",
+        crate::agent_event_orchestrator::tick(app, config_dir),
+    )
+    .await;
 
     // Open store + list accounts under one blocking scope so the
     // SQLite open and the .list() call aren't ping-ponging into
@@ -146,8 +165,49 @@ async fn run_tick(app: &AppHandle) {
     if let Some(active_uuid) = active_cli_uuid(&accounts) {
         let orchestrator = app.state::<Arc<RotationOrchestrator>>();
         let orchestrator: Arc<RotationOrchestrator> = Arc::clone(&orchestrator);
-        orchestrator.tick(app, &snapshot, active_uuid).await;
+        guarded(
+            "rotation_orchestrator",
+            orchestrator.tick(app, &snapshot, active_uuid),
+        )
+        .await;
     }
+}
+
+/// Run a sub-orchestrator future inside a `catch_unwind` so a panic
+/// in one tick cannot kill every orchestrator for the GUI's lifetime
+/// (grill X6). The future is wrapped in `AssertUnwindSafe` because
+/// the orchestrators' shared state (Tauri `AppHandle`, store locks,
+/// `Arc<…>` handles) is not auto-`UnwindSafe`; a panic here is
+/// surfaced via `tracing::error!` and the loop continues. With
+/// `panic = "abort"` (release profile) the wrapper is a no-op — that
+/// is the documented trade-off; the value of the guard is in dev,
+/// tests, and any future profile that allows unwinding.
+async fn guarded<F>(name: &'static str, fut: F)
+where
+    F: std::future::Future<Output = ()>,
+{
+    if let Err(payload) = AssertUnwindSafe(fut).catch_unwind().await {
+        let msg = panic_payload_msg(&payload);
+        tracing::error!(
+            orchestrator = name,
+            panic_msg = %msg,
+            "usage_snapshot::run_tick: sub-orchestrator panicked; other \
+             orchestrators continue running on the next tick"
+        );
+    }
+}
+
+/// Best-effort extraction of a printable message from a panic
+/// payload. The std panic hook accepts `&str` and `String`; anything
+/// else surfaces as "<non-string panic payload>".
+fn panic_payload_msg(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        return (*s).to_string();
+    }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    "<non-string panic payload>".to_string()
 }
 
 /// Pick the active-CLI account's uuid from the list. Returns `None`
@@ -195,4 +255,50 @@ async fn pr_tick(app: &AppHandle) {
     };
 
     orch.tick_all(roots).await;
+}
+
+#[cfg(test)]
+mod tests {
+    //! grill X6: the panic guard is the load-bearing claim, so the
+    //! `guarded` helper has its own test. The full `run_tick`
+    //! requires a Tauri `AppHandle` and is exercised by the
+    //! integration shape; here we verify the *isolation* contract.
+
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn guarded_swallows_panic_and_logs() {
+        // A panicking future inside `guarded` must not propagate the
+        // panic. Two `guarded` calls in sequence: the first panics,
+        // the second runs to completion — proving the loop survives.
+        guarded("panicker", async {
+            panic!("synthetic panic in a sub-orchestrator");
+        })
+        .await;
+
+        let ran = AtomicBool::new(false);
+        // Re-borrow into the async block (closure can't move
+        // `&AtomicBool` non-'static — but the future does not
+        // outlive `ran`).
+        guarded("after-panic", async {
+            ran.store(true, Ordering::SeqCst);
+        })
+        .await;
+        assert!(
+            ran.load(Ordering::SeqCst),
+            "guarded must allow subsequent ticks to run after a panic"
+        );
+    }
+
+    #[tokio::test]
+    async fn guarded_returns_normally_when_future_completes() {
+        // Sanity: the happy path is just an `await`.
+        let ran = AtomicBool::new(false);
+        guarded("happy", async {
+            ran.store(true, Ordering::SeqCst);
+        })
+        .await;
+        assert!(ran.load(Ordering::SeqCst));
+    }
 }

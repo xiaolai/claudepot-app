@@ -16,6 +16,13 @@ license = "ISC"
 [workspace.dependencies]
 # Async
 tokio = { version = "1", features = ["full"] }
+# `FutureExt::catch_unwind` — used by `usage_snapshot::run_tick` to
+# isolate panics from each sub-orchestrator so one panicking tick can
+# never silently kill all the other orchestrators for the GUI's
+# lifetime (grill X6). Only the `futures-util` shape we need; the
+# umbrella `futures` crate would pull in the executor and channel
+# subcrates we don't use.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # HTTP
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }

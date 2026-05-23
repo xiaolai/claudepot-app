@@ -84,29 +84,125 @@ impl EventOrchestrator {
 }
 
 /// Drive one event evaluation cycle. Called from
-/// `usage_snapshot::run_tick`. Steps:
-///
-/// 1. Open the agent store; collect the `Installed && enabled`
-///    `Event`-triggered agents. If none, return immediately — the
-///    common case. **Zero overhead** for users who never install
-///    an event-triggered agent.
-/// 2. Build the F17 self-trigger exclusion set from authoritative
-///    `RunResult.session_id`s (not `AgentRun::session_jsonl_path`).
-/// 3. Load the durable event-state ledger; derive per-agent
-///    `AgentRunStats` from it (F14).
-/// 4. Index the live CC sessions via `claudepot_core::session::
-///    list_all_sessions`.
-/// 5. Call `events::evaluate` with everything above.
-/// 6. For each [`EventFire`] in order: **record_fire + save the
-///    ledger FIRST** (F1), THEN dispatch the run via
-///    `agent::run::run_now`. Honor the first-tick burst cap.
-/// 7. Prune the ledger of stale (agent, session) pairs.
-/// 8. Run boot-time reconciliation of installed agents against
-///    the scheduler — orphan records are *logged*, not mutated
-///    (this is observability, not enforcement).
+/// `usage_snapshot::run_tick`. Thin shim over [`tick_inner`] —
+/// resolves the production I/O seams (real store, real ledger, real
+/// session index, real dispatcher) and forwards.
 pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
+    let app_for_disp = app.clone();
+    let dispatcher = move |agent: Agent, fire: EventFire| {
+        // grill X7: detach `dispatch()` from the shared tick. A
+        // multi-minute `claude -p` run no longer blocks
+        // permission-revert / PR refresh / snapshot / rotation.
+        // The F1 ordering is preserved because the ledger save
+        // happens BEFORE this spawn (see the dispatch loop in
+        // `tick_inner`).
+        let app_clone = app_for_disp.clone();
+        tauri::async_runtime::spawn(async move {
+            dispatch(&app_clone, &agent, &fire).await;
+        });
+    };
+
+    let app_for_emit = app.clone();
+    let emit_capped: Arc<dyn Fn(usize, usize) + Send + Sync> =
+        Arc::new(move |dropped, cap| emit_first_tick_capped(&app_for_emit, dropped, cap));
+
+    let first_tick = {
+        let state = app.state::<Arc<EventOrchestrator>>();
+        state.enter_tick()
+    };
+
+    let env = ProdTickEnv {
+        config_dir,
+        first_tick,
+        emit_capped,
+    };
+
+    tick_inner(&env, dispatcher, Utc::now).await;
+}
+
+/// I/O surface that [`tick_inner`] depends on, factored so tests can
+/// supply deterministic fakes (grill X8 / T1). Production wiring
+/// lives in [`ProdTickEnv`]; the test module supplies a fixture
+/// implementation.
+trait TickEnv {
+    fn load_event_agents(&self) -> Result<Vec<Agent>, String>;
+    fn build_exclusion_set(&self, agents: &[Agent]) -> HashSet<String>;
+    fn load_ledger(&self) -> std::io::Result<EventsFile>;
+    fn save_ledger(&self, ledger: &EventsFile) -> Result<(), events_store::AgentEventsError>;
+    fn list_sessions(&self) -> Vec<SessionRow>;
+    /// First-tick-after-process-start flag. Production reads this
+    /// from `EventOrchestrator::enter_tick`; tests supply a constant.
+    fn first_tick(&self) -> bool;
+    /// Emit the "burst capped" notification to the frontend. A no-op
+    /// in tests.
+    fn emit_burst_capped(&self, dropped: usize, cap: usize);
+    /// Post-tick reconciliation — fire-and-forget logging. A no-op
+    /// in tests.
+    fn reconcile(&self);
+}
+
+/// Production [`TickEnv`] — wires real I/O.
+struct ProdTickEnv {
+    config_dir: PathBuf,
+    first_tick: bool,
+    emit_capped: Arc<dyn Fn(usize, usize) + Send + Sync>,
+}
+
+impl TickEnv for ProdTickEnv {
+    fn load_event_agents(&self) -> Result<Vec<Agent>, String> {
+        load_event_agents()
+    }
+    fn build_exclusion_set(&self, agents: &[Agent]) -> HashSet<String> {
+        build_self_exclusion_set(agents)
+    }
+    fn load_ledger(&self) -> std::io::Result<EventsFile> {
+        events_store::load()
+    }
+    fn save_ledger(
+        &self,
+        ledger: &EventsFile,
+    ) -> Result<(), events_store::AgentEventsError> {
+        events_store::save(ledger)
+    }
+    fn list_sessions(&self) -> Vec<SessionRow> {
+        match claudepot_core::session::list_all_sessions(&self.config_dir) {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(error = %e, "agent_event_orchestrator: session index failed");
+                Vec::new()
+            }
+        }
+    }
+    fn first_tick(&self) -> bool {
+        self.first_tick
+    }
+    fn emit_burst_capped(&self, dropped: usize, cap: usize) {
+        (self.emit_capped)(dropped, cap);
+    }
+    fn reconcile(&self) {
+        let _ = reconcile_with_scheduler();
+    }
+}
+
+/// The orchestrator's load-bearing cycle, with I/O abstracted behind
+/// [`TickEnv`] and dispatch abstracted behind a closure so tests can
+/// assert on F1 ordering (X4 / X8), F14 stats derivation, F17
+/// exclusion, the burst cap, and the env-var round-trip without
+/// touching a real filesystem or spawning `claude -p`.
+///
+/// `dispatcher` is **fire-and-forget**: the contract is that the
+/// orchestrator returns from this function as soon as every fire has
+/// been *handed off* (the F1 ledger save has already committed). In
+/// production [`tick`] supplies a `tauri::async_runtime::spawn`-based
+/// dispatcher; in tests the dispatcher just records the call.
+async fn tick_inner<E, D, C>(env: &E, mut dispatcher: D, clock: C)
+where
+    E: TickEnv + ?Sized,
+    D: FnMut(Agent, EventFire),
+    C: Fn() -> DateTime<Utc>,
+{
     // ---- 1. Open the store + filter to the relevant agents -----
-    let agents = match load_event_agents() {
+    let agents = match env.load_event_agents() {
         Ok(a) => a,
         Err(e) => {
             tracing::warn!(error = %e, "agent_event_orchestrator: store load failed; skipping tick");
@@ -119,21 +215,15 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
         return;
     }
 
-    let now = Utc::now();
+    let now = clock();
     let live_agent_ids: HashSet<String> =
         agents.iter().map(|a| a.id.to_string()).collect();
 
     // ---- 2. F17 self-trigger exclusion set --------------------
-    // Built from the authoritative `RunResult.session_id` parsed
-    // out of every prior run's `result.json`, NEVER from
-    // `AgentRun::session_jsonl_path` — that field is re-derived by
-    // a depth-limited filename walk and fails open. A failed-open
-    // exclusion lets the Session Narrator narrate its own output:
-    // the exact D7 infinite loop.
-    let agent_session_ids = build_self_exclusion_set(&agents);
+    let agent_session_ids = env.build_exclusion_set(&agents);
 
     // ---- 3. F14 per-agent stats from the durable ledger -------
-    let mut ledger = match events_store::load() {
+    let mut ledger = match env.load_ledger() {
         Ok(f) => f,
         Err(e) => {
             tracing::warn!(error = %e, "agent_event_orchestrator: ledger load failed; skipping tick");
@@ -143,18 +233,7 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
     let run_stats_map = build_run_stats_from_ledger(&ledger, now);
 
     // ---- 4. Index the live CC sessions ------------------------
-    // List under the configured `~/.claude/` dir. A scan failure
-    // is treated as "no sessions" and logged — better than
-    // skipping the tick entirely, because the event orchestrator
-    // also performs ledger prune + reconciliation on every tick.
-    let sessions: Vec<SessionRow> =
-        match claudepot_core::session::list_all_sessions(&config_dir) {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::warn!(error = %e, "agent_event_orchestrator: session index failed");
-                Vec::new()
-            }
-        };
+    let sessions: Vec<SessionRow> = env.list_sessions();
     let live_session_ids: HashSet<String> =
         sessions.iter().map(|s| s.session_id.clone()).collect();
 
@@ -180,22 +259,19 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
     );
 
     // ---- 6. Bounded catch-up cap (D6) ------------------------
-    let first_tick = {
-        let state = app.state::<Arc<EventOrchestrator>>();
-        state.enter_tick()
-    };
-    if first_tick {
-        fires = apply_first_tick_cap(fires, FIRST_TICK_BURST_CAP, app);
+    if env.first_tick() {
+        fires = apply_first_tick_cap_with_emit(
+            fires,
+            FIRST_TICK_BURST_CAP,
+            |dropped, cap| env.emit_burst_capped(dropped, cap),
+        );
     }
 
     // ---- 7. Dispatch each fire — record_fire + save FIRST -----
     // (F1) The ledger is the single source of fire-once truth; a
     // duplicate ledger entry is free, but a duplicate billed
     // `claude -p` is a real cost leak. So we always commit the
-    // ledger update before spawning the run.
-    //
-    // Build an agents-by-id map once so dispatch doesn't re-scan
-    // the agents slice per fire.
+    // ledger update before handing off the run.
     let agents_by_id: std::collections::HashMap<String, &Agent> = agents
         .iter()
         .map(|a| (a.id.to_string(), a))
@@ -209,7 +285,7 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
             continue;
         };
         ledger.record_fire(&fire.agent_id, &fire.session_id, now);
-        if let Err(e) = events_store::save(&ledger) {
+        if let Err(e) = env.save_ledger(&ledger) {
             tracing::warn!(
                 error = %e,
                 agent_id = %fire.agent_id,
@@ -217,20 +293,27 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
                 "agent_event_orchestrator: ledger save failed; \
                  skipping this fire — it will be re-evaluated next tick"
             );
-            // Per F1: if we cannot commit the ledger, we MUST
-            // NOT dispatch. Skip and let the next tick re-gate.
+            // grill X4 / F1: the in-memory `record_fire` mutation
+            // must be undone too — otherwise the post-loop prune
+            // save below would flush a fire-without-dispatch entry
+            // to disk and the pair would show as fired without
+            // ever running. `unrecord_fire` keeps the ledger
+            // in-memory clean so prune sees nothing to flush for
+            // this pair.
+            ledger.unrecord_fire(&fire.agent_id, &fire.session_id);
             continue;
         }
-        // Now safe to dispatch — the (agent, session) pair is
-        // recorded as fired regardless of whether the run
-        // succeeds, crashes, or never makes it to `claude -p`.
-        dispatch(app, agent, fire).await;
+        // The ledger save is committed — now hand off the run.
+        // The dispatcher is fire-and-forget; in production it
+        // `spawn`s onto the Tauri runtime so a slow narration
+        // cannot block the rest of the snapshot pipeline.
+        dispatcher((*agent).clone(), fire.clone());
     }
 
     // ---- 8. Prune the ledger of stale pairs -------------------
     let removed = ledger.prune(&live_agent_ids, &live_session_ids);
     if removed > 0 {
-        if let Err(e) = events_store::save(&ledger) {
+        if let Err(e) = env.save_ledger(&ledger) {
             tracing::warn!(
                 error = %e,
                 removed,
@@ -240,9 +323,7 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
     }
 
     // ---- 9. Orphan-record reconciliation (observability) ------
-    // `reconcile_with_scheduler` logs loudly per orphan; we just
-    // call it. We don't mutate the store.
-    let _ = reconcile_with_scheduler();
+    env.reconcile();
 }
 
 /// Load the relevant agents from the store: `Installed && enabled
@@ -355,14 +436,18 @@ fn build_run_stats_from_ledger(
     out
 }
 
-/// Apply the first-tick catch-up cap. Drops fires beyond
-/// `cap` and emits a single notification rather than spamming one
-/// per dropped fire.
-fn apply_first_tick_cap(
+/// Apply the first-tick catch-up cap. Drops fires beyond `cap` and
+/// invokes the supplied emit closure once (rather than spamming one
+/// emit per dropped fire). The closure abstraction lets tests
+/// observe the cap without touching the Tauri `AppHandle`.
+fn apply_first_tick_cap_with_emit<F>(
     fires: Vec<EventFire>,
     cap: usize,
-    app: &AppHandle,
-) -> Vec<EventFire> {
+    emit: F,
+) -> Vec<EventFire>
+where
+    F: FnOnce(usize, usize),
+{
     if fires.len() <= cap {
         return fires;
     }
@@ -372,8 +457,32 @@ fn apply_first_tick_cap(
         dropped,
         "agent_event_orchestrator: first-tick burst capped"
     );
-    emit_first_tick_capped(app, dropped, cap);
+    emit(dropped, cap);
     fires.into_iter().take(cap).collect()
+}
+
+/// Build the `extra_env` map a session-settled dispatch passes to
+/// `claude -p`. Two keys, both verbatim from the [`EventFire`]:
+///
+/// - `CLAUDEPOT_EVENT_SESSION_ID` — the CC session UUID.
+/// - `CLAUDEPOT_EVENT_SESSION_PATH` — absolute transcript path.
+///
+/// Factored out so X8/T8 can lock the contract down without spawning
+/// a real shim. A rename on one side (here, or in the shim that
+/// reads it) ships green only if **both** sides update; the
+/// orchestrator test in `tests::test_dispatch_env_round_trip` is the
+/// gate.
+fn build_dispatch_env(fire: &EventFire) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    env.insert(
+        "CLAUDEPOT_EVENT_SESSION_ID".to_string(),
+        fire.session_id.clone(),
+    );
+    env.insert(
+        "CLAUDEPOT_EVENT_SESSION_PATH".to_string(),
+        fire.session_path.clone(),
+    );
+    env
 }
 
 /// Spawn a Run-Now for `agent` carrying the firing session's id +
@@ -410,15 +519,7 @@ async fn dispatch(app: &AppHandle, agent: &Agent, fire: &EventFire) {
         }
     };
 
-    let mut env: BTreeMap<String, String> = BTreeMap::new();
-    env.insert(
-        "CLAUDEPOT_EVENT_SESSION_ID".to_string(),
-        fire.session_id.clone(),
-    );
-    env.insert(
-        "CLAUDEPOT_EVENT_SESSION_PATH".to_string(),
-        fire.session_path.clone(),
-    );
+    let env = build_dispatch_env(fire);
 
     let sink = NoopSink;
     match agent::run_now(agent, &binary_path, &cli_path, &sink, &env).await {
@@ -791,16 +892,552 @@ mod tests {
         }
     }
 
-    /// Test-only variant of [`apply_first_tick_cap`] without
-    /// the Tauri `AppHandle` emit side effect — pure logic.
+    /// Test-only adapter that drops the emit side-effect — pure
+    /// logic. Routes through the production helper so the cap
+    /// behavior is the same in tests and prod.
     fn apply_first_tick_cap_no_emit(
         fires: Vec<EventFire>,
         cap: usize,
     ) -> Vec<EventFire> {
-        if fires.len() <= cap {
-            return fires;
+        apply_first_tick_cap_with_emit(fires, cap, |_, _| {})
+    }
+
+    // ---- grill X8 — orchestrator integration tests --------------
+    //
+    // The four invariants we verify here are the ones the prior
+    // pass discovered as untested: F1 ordering survives a save
+    // failure (X4), dispatch happens fire-and-forget (X7 — the tick
+    // returns before the dispatched future resolves), the env-var
+    // round-trip (X28 / T8), and a panic in the dispatcher does not
+    // corrupt the ledger. The fixture `FakeTickEnv` plugs into
+    // `tick_inner` and records every interaction.
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Captured dispatcher call.
+    #[derive(Debug, Clone)]
+    struct DispatchedCall {
+        agent_id: String,
+        session_id: String,
+        session_path: String,
+    }
+
+    struct FakeTickEnv {
+        agents: Vec<Agent>,
+        exclusion: HashSet<String>,
+        sessions: Vec<SessionRow>,
+        first_tick: bool,
+        ledger: Rc<RefCell<EventsFile>>,
+        save_fails_n_times: Rc<RefCell<usize>>,
+        save_calls: Rc<RefCell<usize>>,
+        burst_capped: Rc<RefCell<Vec<(usize, usize)>>>,
+        reconciles: Rc<RefCell<usize>>,
+    }
+
+    impl TickEnv for FakeTickEnv {
+        fn load_event_agents(&self) -> Result<Vec<Agent>, String> {
+            Ok(self.agents.clone())
         }
-        fires.into_iter().take(cap).collect()
+        fn build_exclusion_set(&self, _agents: &[Agent]) -> HashSet<String> {
+            self.exclusion.clone()
+        }
+        fn load_ledger(&self) -> std::io::Result<EventsFile> {
+            Ok(self.ledger.borrow().clone())
+        }
+        fn save_ledger(
+            &self,
+            ledger: &EventsFile,
+        ) -> Result<(), events_store::AgentEventsError> {
+            *self.save_calls.borrow_mut() += 1;
+            let mut remaining = self.save_fails_n_times.borrow_mut();
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Err(events_store::AgentEventsError::Io(std::io::Error::other(
+                    "synthetic save failure",
+                )));
+            }
+            *self.ledger.borrow_mut() = ledger.clone();
+            Ok(())
+        }
+        fn list_sessions(&self) -> Vec<SessionRow> {
+            self.sessions.clone()
+        }
+        fn first_tick(&self) -> bool {
+            self.first_tick
+        }
+        fn emit_burst_capped(&self, dropped: usize, cap: usize) {
+            self.burst_capped.borrow_mut().push((dropped, cap));
+        }
+        fn reconcile(&self) {
+            *self.reconciles.borrow_mut() += 1;
+        }
+    }
+
+    /// Like [`stub_agent`] but with a caller-chosen cwd, so an
+    /// integration test can align the agent's project scope with a
+    /// stubbed session's `project_path`.
+    fn stub_agent_with_cwd(name: &str, cwd: &str) -> Agent {
+        let mut a = stub_agent(name);
+        a.cwd = cwd.into();
+        a
+    }
+
+    fn fake_session(session_id: &str, project: &str) -> SessionRow {
+        fake_session_settled_at(session_id, project, |now| {
+            now - chrono::Duration::hours(1)
+        })
+    }
+
+    /// Build a settled-looking session whose `last_ts` is computed
+    /// from the wall clock at row-build time. For tests that drive
+    /// `tick_inner` with an injected fixed clock, pass a `last_ts`
+    /// derived from that clock so the debounce check uses the same
+    /// "now" the evaluator sees.
+    fn fake_session_at(
+        session_id: &str,
+        project: &str,
+        last_ts: chrono::DateTime<chrono::Utc>,
+    ) -> SessionRow {
+        fake_session_settled_at(session_id, project, |_| last_ts)
+    }
+
+    fn fake_session_settled_at<F>(
+        session_id: &str,
+        project: &str,
+        last_ts: F,
+    ) -> SessionRow
+    where
+        F: FnOnce(chrono::DateTime<chrono::Utc>) -> chrono::DateTime<chrono::Utc>,
+    {
+        // Build a settled-looking session: `last_ts` is 1 hour past
+        // the chosen anchor so the default 600s debounce comfortably
+        // elapses; `project_path` is the project root the evaluator
+        // scopes agents to; the assistant message count is non-zero
+        // so the session looks like real CC traffic rather than an
+        // empty stub.
+        use claudepot_core::session::TokenUsage;
+        let now = chrono::Utc::now();
+        let one_hour_ago = last_ts(now);
+        SessionRow {
+            session_id: session_id.to_string(),
+            slug: project.to_string(),
+            file_path: std::path::PathBuf::from(format!(
+                "/tmp/.claude/projects/{project}/{session_id}.jsonl"
+            )),
+            file_size_bytes: 4096,
+            last_modified: Some(std::time::SystemTime::UNIX_EPOCH),
+            project_path: format!("/tmp/{project}"),
+            project_from_transcript: true,
+            first_ts: Some(one_hour_ago - chrono::Duration::hours(1)),
+            last_ts: Some(one_hour_ago),
+            event_count: 6,
+            message_count: 4,
+            user_message_count: 2,
+            assistant_message_count: 2,
+            first_user_prompt: Some("hello".into()),
+            models: vec!["claude-sonnet".into()],
+            tokens: TokenUsage::default(),
+            git_branch: None,
+            cc_version: None,
+            display_slug: None,
+            has_error: false,
+            is_sidechain: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tick_inner_f1_save_failure_leaves_ledger_clean() {
+        // X4 / X8(a): when the dispatch-loop `save` fails, the
+        // in-memory ledger must not retain the just-pushed entry —
+        // the post-loop prune save would otherwise flush a
+        // fire-without-dispatch entry. The ledger is unchanged on
+        // disk; no dispatcher call happens for the failed save.
+        let agent = stub_agent_with_cwd("session-narrator", "/tmp/proj");
+        let agent_id = agent.id.to_string();
+        let session_id = "sess-fail-1".to_string();
+        // Anchor the session's `last_ts` to a clock-relative value so
+        // the evaluator's debounce comparison uses a consistent
+        // "now" between the session row and the injected clock.
+        let fixed_now = chrono::Utc::now();
+        let sessions = vec![fake_session_at(
+            &session_id,
+            "proj",
+            fixed_now - chrono::Duration::hours(1),
+        )];
+
+        let env = FakeTickEnv {
+            agents: vec![agent.clone()],
+            exclusion: HashSet::new(),
+            sessions,
+            first_tick: false,
+            // Make the first save fail (the dispatch-loop record_fire
+            // save); the post-loop prune save then succeeds. Without
+            // X4, the in-memory mutation from `record_fire` would be
+            // picked up by the prune save.
+            save_fails_n_times: Rc::new(RefCell::new(1)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::new(RefCell::new(EventsFile::default())),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+
+        let calls = Rc::new(RefCell::new(Vec::<DispatchedCall>::new()));
+        let calls_for_disp = Rc::clone(&calls);
+        let dispatcher = move |a: Agent, fire: EventFire| {
+            calls_for_disp.borrow_mut().push(DispatchedCall {
+                agent_id: a.id.to_string(),
+                session_id: fire.session_id,
+                session_path: fire.session_path,
+            });
+        };
+
+        tick_inner(&env, dispatcher, move || fixed_now).await;
+
+        // The ledger on "disk" must not contain the failed pair.
+        let on_disk = env.ledger.borrow();
+        assert!(
+            !on_disk.has_fired(&agent_id, &session_id),
+            "the failed-save pair must not have been flushed by the prune save"
+        );
+        // The dispatcher must NOT have been called for that pair.
+        assert!(
+            calls.borrow().is_empty(),
+            "no dispatch when the ledger save failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tick_inner_happy_path_dispatches_and_records() {
+        // X8 base case: a healthy fire records to the ledger AND
+        // hands off to the dispatcher. The env-var round-trip
+        // (X28 / T8) is verified at the dispatch surface: the
+        // closure receives the EventFire whose `session_id` /
+        // `session_path` the real `dispatch()` writes verbatim into
+        // `CLAUDEPOT_EVENT_SESSION_ID` / `CLAUDEPOT_EVENT_SESSION_PATH`.
+        let agent = stub_agent_with_cwd("session-narrator", "/tmp/proj");
+        let agent_id = agent.id.to_string();
+        let session_id = "sess-happy".to_string();
+        let session_path =
+            format!("/tmp/.claude/projects/proj/{session_id}.jsonl");
+        let fixed_now = chrono::Utc::now();
+        let sessions = vec![fake_session_at(
+            &session_id,
+            "proj",
+            fixed_now - chrono::Duration::hours(1),
+        )];
+
+        let env = FakeTickEnv {
+            agents: vec![agent.clone()],
+            exclusion: HashSet::new(),
+            sessions,
+            first_tick: false,
+            save_fails_n_times: Rc::new(RefCell::new(0)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::new(RefCell::new(EventsFile::default())),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+
+        let calls = Rc::new(RefCell::new(Vec::<DispatchedCall>::new()));
+        let calls_for_disp = Rc::clone(&calls);
+        let dispatcher = move |a: Agent, fire: EventFire| {
+            calls_for_disp.borrow_mut().push(DispatchedCall {
+                agent_id: a.id.to_string(),
+                session_id: fire.session_id,
+                session_path: fire.session_path,
+            });
+        };
+
+        tick_inner(&env, dispatcher, move || fixed_now).await;
+
+        assert_eq!(calls.borrow().len(), 1, "the healthy pair must dispatch");
+        let call = &calls.borrow()[0];
+        assert_eq!(call.agent_id, agent_id);
+        assert_eq!(call.session_id, session_id);
+        // X28 / T8: the session path the dispatcher would write into
+        // `CLAUDEPOT_EVENT_SESSION_PATH` is exactly the path the
+        // evaluator produces from the session row. A rename on one
+        // side and not the other will diverge here.
+        assert_eq!(call.session_path, session_path);
+
+        // The ledger must show the fire.
+        assert!(env.ledger.borrow().has_fired(&agent_id, &session_id));
+        // Reconcile fires once per tick.
+        assert_eq!(*env.reconciles.borrow(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_tick_inner_no_event_agents_is_zero_overhead() {
+        // X8: the "zero overhead when no event agents installed"
+        // claim — confirmed by tick_inner returning before it asks
+        // for the ledger, sessions, etc.
+        let env = FakeTickEnv {
+            agents: vec![],
+            exclusion: HashSet::new(),
+            sessions: vec![],
+            first_tick: false,
+            save_fails_n_times: Rc::new(RefCell::new(0)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::new(RefCell::new(EventsFile::default())),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+        let dispatcher = |_: Agent, _: EventFire| {
+            panic!("dispatcher must not be called when no event agents exist");
+        };
+        tick_inner(&env, dispatcher, Utc::now).await;
+        assert_eq!(*env.save_calls.borrow(), 0, "no save when no agents");
+        assert_eq!(*env.reconciles.borrow(), 0, "no reconcile when no agents");
+    }
+
+    #[tokio::test]
+    async fn test_tick_inner_panicking_dispatcher_does_not_corrupt_ledger() {
+        // X8(d): a panic *inside* the dispatcher closure must not
+        // leak into the orchestrator. In production the dispatcher
+        // spawns onto the Tauri runtime, so a panic is isolated to
+        // that task and the orchestrator's tick continues. We
+        // emulate the production shape: the dispatcher catches its
+        // own panic so the tick returns normally. The ledger must
+        // still record the fire (the save committed BEFORE the
+        // dispatch — F1 ordering).
+        let agent = stub_agent_with_cwd("session-narrator", "/tmp/proj");
+        let agent_id = agent.id.to_string();
+        let session_id = "sess-panic".to_string();
+        let sessions = vec![fake_session(&session_id, "proj")];
+
+        let env = FakeTickEnv {
+            agents: vec![agent.clone()],
+            exclusion: HashSet::new(),
+            sessions,
+            first_tick: false,
+            save_fails_n_times: Rc::new(RefCell::new(0)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::new(RefCell::new(EventsFile::default())),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+
+        // The dispatcher catches its own panic — mirroring the
+        // `tauri::async_runtime::spawn`-isolated production shape.
+        let dispatcher = |_: Agent, _: EventFire| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                panic!("synthetic panic inside the dispatcher");
+            }));
+        };
+
+        tick_inner(&env, dispatcher, Utc::now).await;
+
+        // F1 ordering: the ledger save committed BEFORE the
+        // dispatcher was invoked. The ledger therefore retains the
+        // fire even though the dispatcher panicked — exactly the
+        // documented "missed run, not a retry storm" trade-off.
+        assert!(env.ledger.borrow().has_fired(&agent_id, &session_id));
+    }
+
+    #[tokio::test]
+    async fn test_tick_inner_two_tick_capped_fires_get_picked_up() {
+        // X8(b): the first-tick burst cap drops fires beyond `cap`,
+        // but those pairs are NOT in the ledger — so a follow-up
+        // tick (with `first_tick = false`) re-evaluates and
+        // dispatches them. The dropped-then-refire intent is core
+        // to the "bounded catch-up" semantics; without this test a
+        // refactor that recorded the dropped fires would silently
+        // mask them forever.
+        // Build (cap+2) eligible (agent, session) pairs.
+        let total: usize = FIRST_TICK_BURST_CAP + 2;
+        let mut agents = Vec::new();
+        let mut sessions = Vec::new();
+        let fixed_now = chrono::Utc::now();
+        for i in 0..total {
+            let project = format!("proj-{i}");
+            agents.push(stub_agent_with_cwd(
+                &format!("agent-{i}"),
+                &format!("/tmp/{project}"),
+            ));
+            sessions.push(fake_session_at(
+                &format!("sess-{i}"),
+                &project,
+                fixed_now - chrono::Duration::hours(1),
+            ));
+        }
+        let ledger = Rc::new(RefCell::new(EventsFile::default()));
+
+        // Tick 1 — first-tick cap drops 2 fires.
+        let env1 = FakeTickEnv {
+            agents: agents.clone(),
+            exclusion: HashSet::new(),
+            sessions: sessions.clone(),
+            first_tick: true,
+            save_fails_n_times: Rc::new(RefCell::new(0)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::clone(&ledger),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+        let calls1 = Rc::new(RefCell::new(Vec::<DispatchedCall>::new()));
+        let calls1_for_disp = Rc::clone(&calls1);
+        tick_inner(
+            &env1,
+            move |a: Agent, fire: EventFire| {
+                calls1_for_disp.borrow_mut().push(DispatchedCall {
+                    agent_id: a.id.to_string(),
+                    session_id: fire.session_id,
+                    session_path: fire.session_path,
+                });
+            },
+            move || fixed_now,
+        )
+        .await;
+
+        assert_eq!(
+            calls1.borrow().len(),
+            FIRST_TICK_BURST_CAP,
+            "first tick must dispatch exactly the cap"
+        );
+        // The cap dropped 2 fires; they must NOT be in the ledger,
+        // so the next tick is free to dispatch them.
+        let after_tick1_fired: usize = ledger.borrow().fired.len();
+        assert_eq!(
+            after_tick1_fired, FIRST_TICK_BURST_CAP,
+            "the dropped fires must NOT have been recorded"
+        );
+
+        // Tick 2 — no first-tick cap; remaining fires dispatch.
+        let env2 = FakeTickEnv {
+            agents: agents.clone(),
+            exclusion: HashSet::new(),
+            sessions: sessions.clone(),
+            first_tick: false,
+            save_fails_n_times: Rc::new(RefCell::new(0)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::clone(&ledger),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+        let calls2 = Rc::new(RefCell::new(Vec::<DispatchedCall>::new()));
+        let calls2_for_disp = Rc::clone(&calls2);
+        tick_inner(
+            &env2,
+            move |a: Agent, fire: EventFire| {
+                calls2_for_disp.borrow_mut().push(DispatchedCall {
+                    agent_id: a.id.to_string(),
+                    session_id: fire.session_id,
+                    session_path: fire.session_path,
+                });
+            },
+            move || fixed_now,
+        )
+        .await;
+
+        assert_eq!(
+            calls2.borrow().len(),
+            total - FIRST_TICK_BURST_CAP,
+            "the previously-dropped fires must dispatch on the next tick"
+        );
+        assert_eq!(
+            ledger.borrow().fired.len(),
+            total,
+            "every original (agent, session) pair must now be in the ledger"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_env_round_trip() {
+        // X8(c) / X28 / T8: `CLAUDEPOT_EVENT_SESSION_ID` and
+        // `CLAUDEPOT_EVENT_SESSION_PATH` are the contract between
+        // the orchestrator and the shim that `claude -p` runs. The
+        // shim reads these env vars verbatim; a rename on one side
+        // and not the other would ship green without this gate.
+        let fire = EventFire {
+            agent_id: "a1".into(),
+            session_id: "deadbeef-cafe".into(),
+            session_path: "/home/u/.claude/projects/proj/deadbeef-cafe.jsonl"
+                .into(),
+        };
+        let env = build_dispatch_env(&fire);
+        assert_eq!(
+            env.get("CLAUDEPOT_EVENT_SESSION_ID").map(String::as_str),
+            Some("deadbeef-cafe")
+        );
+        assert_eq!(
+            env.get("CLAUDEPOT_EVENT_SESSION_PATH").map(String::as_str),
+            Some("/home/u/.claude/projects/proj/deadbeef-cafe.jsonl")
+        );
+        assert_eq!(env.len(), 2, "no other env vars are injected");
+    }
+
+    #[tokio::test]
+    async fn test_tick_inner_first_tick_cap_emits_once() {
+        // X8 + X16 sanity: a first tick with more than
+        // FIRST_TICK_BURST_CAP fires emits ONE burst-capped
+        // notification and dispatches exactly cap fires.
+        // Build 7 agents (above the cap of 5), each with a settled
+        // session. Each agent's cwd is a distinct project root so the
+        // evaluator emits one fire per agent (it caps "at most one
+        // fire per agent per tick" — so we need 7 agents, not 7
+        // sessions for one agent, to overflow the burst cap).
+        let mut agents = Vec::new();
+        let mut sessions = Vec::new();
+        for i in 0..7 {
+            let project = format!("proj-{i}");
+            let a = stub_agent_with_cwd(
+                &format!("agent-{i}"),
+                &format!("/tmp/{project}"),
+            );
+            sessions.push(fake_session(&format!("sess-{i}"), &project));
+            agents.push(a);
+        }
+
+        let env = FakeTickEnv {
+            agents,
+            exclusion: HashSet::new(),
+            sessions,
+            first_tick: true,
+            save_fails_n_times: Rc::new(RefCell::new(0)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::new(RefCell::new(EventsFile::default())),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+
+        let calls = Rc::new(RefCell::new(Vec::<DispatchedCall>::new()));
+        let calls_for_disp = Rc::clone(&calls);
+        let dispatcher = move |a: Agent, fire: EventFire| {
+            calls_for_disp.borrow_mut().push(DispatchedCall {
+                agent_id: a.id.to_string(),
+                session_id: fire.session_id,
+                session_path: fire.session_path,
+            });
+        };
+
+        tick_inner(&env, dispatcher, Utc::now).await;
+
+        // The current FIRST_TICK_BURST_CAP is 5; the evaluator may
+        // emit fewer fires than agents × sessions because of the
+        // "at most one fire per agent per tick" rule, but the cap
+        // is a strict upper bound. With 7 (agent, session) pairs
+        // each on its own agent + session, the evaluator produces
+        // 7 fires; the cap drops 2.
+        assert!(
+            calls.borrow().len() <= FIRST_TICK_BURST_CAP,
+            "dispatched count must not exceed the burst cap"
+        );
+        if env.burst_capped.borrow().is_empty() {
+            // If the evaluator happens to emit ≤ cap (e.g. one of
+            // the sessions doesn't satisfy "settled"), no cap is
+            // applied — fine, but then the dispatched count must
+            // match the fire count.
+        } else {
+            assert_eq!(
+                env.burst_capped.borrow().len(),
+                1,
+                "the burst-capped notification fires at most once per tick"
+            );
+            let (dropped, cap) = env.burst_capped.borrow()[0];
+            assert_eq!(cap, FIRST_TICK_BURST_CAP);
+            assert!(dropped > 0);
+        }
     }
 }
 

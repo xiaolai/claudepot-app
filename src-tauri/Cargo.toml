@@ -23,6 +23,12 @@ tokio.workspace = true
 # a deterministic fake. async-trait is the workspace's chosen polyfill
 # for async-in-traits (claudepot-core uses it elsewhere too).
 async-trait.workspace = true
+# `usage_snapshot::run_tick` wraps each sub-orchestrator in a
+# `catch_unwind` so one panicking sub-task cannot silently kill all
+# the others for the GUI's lifetime (grill X6). Only the `FutureExt`
+# shape we need; the umbrella `futures` crate would pull in extra
+# subcrates we don't use.
+futures-util.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 tracing.workspace = true
