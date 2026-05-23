@@ -53,8 +53,8 @@ pub mod templates;
 pub mod types;
 
 pub use draft::{
-    build_draft, validate_cwd, validate_trigger_timezone, CliOverrides, DraftInput,
-    DraftSpec,
+    build_draft, validate_agent_inputs, validate_cwd, validate_trigger_timezone,
+    CliOverrides, DraftInput, DraftSpec,
 };
 pub use error::AgentError;
 pub use events::{
@@ -75,7 +75,9 @@ pub use shim::{render_unix, render_windows, ShimInputs};
 pub use slug::validate_name;
 pub use store::{
     agent_dir, agent_runs_dir, agents_file_path, reconcile_installed_agents,
-    reconcile_with_scheduler, AgentPatch, AgentStore, OrphanInstalled,
+    reconcile_orphan_artifacts, reconcile_orphan_artifacts_now,
+    reconcile_with_scheduler, AgentPatch, AgentStore, OrphanArtifact,
+    OrphanInstalled,
 };
 pub use templates::session_narrator;
 pub use types::{

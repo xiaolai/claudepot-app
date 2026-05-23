@@ -65,20 +65,50 @@ impl StoreLock {
     /// the store refuses to open unlocked rather than silently
     /// degrading to the racy lock-free behavior.
     pub(super) fn acquire(store_path: &Path) -> Result<Self, AgentError> {
-        // Create the parent dir so a first-ever open succeeds.
-        if let Some(parent) = store_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let lock_path = lock_path_for(store_path);
-        let file = File::options()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&lock_path)?;
+        let file = open_lock_file(store_path)?;
         file.lock_exclusive()?;
         Ok(Self { _file: file })
     }
+
+    /// Non-blocking acquire (grill finding X10). Returns
+    /// `Ok(None)` if the lock is currently held by another
+    /// process/thread — the caller decides what to do (skip,
+    /// degrade, etc.) rather than blocking under the read path. A
+    /// real failure (file-system error, missing parent dir we
+    /// could not create) propagates as `Err`.
+    ///
+    /// Used by short-lived best-effort readers like `_record-run`'s
+    /// retention lookup, where the cost of waiting on a slow GUI
+    /// writer is higher than the cost of skipping a single
+    /// retention pass.
+    pub(super) fn try_acquire(store_path: &Path) -> Result<Option<Self>, AgentError> {
+        let file = open_lock_file(store_path)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(Self { _file: file })),
+            // `fs2` returns its own `WouldBlock`-shaped error when
+            // the lock is held by someone else; we treat that as
+            // "not now, try later" rather than a failure.
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+/// Open (and create if absent) the `<store>.lock` sidecar — shared
+/// implementation for [`StoreLock::acquire`] and
+/// [`StoreLock::try_acquire`].
+fn open_lock_file(store_path: &Path) -> Result<File, AgentError> {
+    // Create the parent dir so a first-ever open succeeds.
+    if let Some(parent) = store_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let lock_path = lock_path_for(store_path);
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    Ok(file)
 }
 
 /// The advisory-lock sidecar path for a store file:

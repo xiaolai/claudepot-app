@@ -250,8 +250,11 @@ fn contains_bad_control_chars(s: &str) -> bool {
 }
 
 /// Cap a text field's length and reject control characters. Used
-/// for fields that flow into a shell flag or a UI surface.
-fn validate_text_field(
+/// for fields that flow into a shell flag or a UI surface. `pub` so
+/// the F18 caps can be reused at the [`crate::agent::store::AgentStore`]
+/// persistence boundary (grill finding X13) — every write path
+/// (`add` / `update`) enforces the same shape, not just `build_draft`.
+pub fn validate_text_field(
     name: &'static str,
     value: &str,
     max_bytes: usize,
@@ -265,6 +268,55 @@ fn validate_text_field(
     if contains_bad_control_chars(value) {
         return Err(AgentError::InvalidEnv(format!(
             "{name} contains control characters (only \\n and \\t are allowed)"
+        )));
+    }
+    Ok(())
+}
+
+/// Hoist of the F18 per-field bounds + control-char gate from
+/// `build_draft` to the persistence boundary (grill finding X13).
+///
+/// `build_draft` already runs these checks for the AI-drafting path;
+/// `AgentStore::add` / `AgentStore::update` (the GUI's
+/// `agents_add`, `agents_update`, `agent_add_from_template`, and
+/// `agent_install` verbs all funnel through these) previously
+/// enforced only `validate_cwd` and the cross-field invariants —
+/// meaning a renderer-supplied DTO could push a 10 MB `prompt` or a
+/// control-character `system_prompt` straight into `agents.json`.
+///
+/// Adding the helper here keeps the rule in **one** module: the
+/// constants and the validator live next to `build_draft`, and
+/// `store::add` / `store::update` call this entry point. The check
+/// is intentionally a strict superset of what `build_draft` runs,
+/// so a future change to either side stays in lockstep.
+pub fn validate_agent_inputs(agent: &Agent) -> Result<(), AgentError> {
+    validate_text_field("prompt", &agent.prompt, MAX_PROMPT_BYTES)?;
+    if let Some(v) = agent.system_prompt.as_deref() {
+        validate_text_field("system_prompt", v, MAX_PROMPT_BYTES)?;
+    }
+    if let Some(v) = agent.append_system_prompt.as_deref() {
+        validate_text_field("append_system_prompt", v, MAX_PROMPT_BYTES)?;
+    }
+    if let Some(v) = agent.model.as_deref() {
+        validate_text_field("model", v, MAX_MODEL_BYTES)?;
+    }
+    validate_text_field("cwd", &agent.cwd, MAX_CWD_BYTES)?;
+    if agent.allowed_tools.len() > MAX_TOOL_LIST_ELEMS {
+        return Err(AgentError::InvalidEnv(format!(
+            "allowed_tools has {} entries, max {MAX_TOOL_LIST_ELEMS}",
+            agent.allowed_tools.len()
+        )));
+    }
+    if agent.disallowed_tools.len() > MAX_TOOL_LIST_ELEMS {
+        return Err(AgentError::InvalidEnv(format!(
+            "disallowed_tools has {} entries, max {MAX_TOOL_LIST_ELEMS}",
+            agent.disallowed_tools.len()
+        )));
+    }
+    if agent.mcp_servers.len() > MAX_MCP_SERVERS_ELEMS {
+        return Err(AgentError::InvalidEnv(format!(
+            "mcp_servers has {} entries, max {MAX_MCP_SERVERS_ELEMS}",
+            agent.mcp_servers.len()
         )));
     }
     Ok(())

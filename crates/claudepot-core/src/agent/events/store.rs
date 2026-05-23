@@ -124,6 +124,28 @@ impl EventsFile {
         if self.fired.len() > MAX_FIRED_ENTRIES {
             self.fired.sort_by_key(|e| e.fired_at);
             let overflow = self.fired.len() - MAX_FIRED_ENTRIES;
+            // grill X12: an eviction here is silent-by-default — the
+            // evicted (agent, session) pair will re-fire (and re-bill)
+            // the next time it shows up in the live session index. A
+            // user investigating "why did this agent run twice on the
+            // same session?" had no breadcrumb. Log loudly per batch
+            // so the trade-off is visible. We deliberately don't emit
+            // a one-shot notification: adding a category here requires
+            // the full lockstep change (Rust enum + priority +
+            // display_meta + all() + EXPECTED counter + TS Category
+            // union + CATEGORY_NAMES + priorityForCategory + prefs.ts
+            // + fixture regen). The log path is sufficient for the
+            // current operational shape; the notification can be
+            // promoted later if eviction starts firing in the wild.
+            let oldest = self.fired.first().map(|e| e.fired_at);
+            tracing::warn!(
+                evicted = overflow,
+                cap = MAX_FIRED_ENTRIES,
+                oldest_fired_at = ?oldest,
+                "agent_events_store: ledger cap reached; oldest pairs \
+                 evicted — they may re-fire (and re-bill) if still in \
+                 the live session index"
+            );
             self.fired.drain(0..overflow);
         }
     }
