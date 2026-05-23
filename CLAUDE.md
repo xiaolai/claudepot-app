@@ -222,7 +222,7 @@ See `dev-docs/implementation-plan.md` for the full plan.
   Accounts, Activities (id `events` for localStorage compatibility,
   label "Activities" — live + today/month dashboard + cards stream),
   Projects (hosts per-project sessions in ProjectDetail's
-  master-detail pane), Keys, Third-parties, Agents, Global,
+  master-detail pane), Keys, Providers, Agents, Global,
   Settings. Eight top-level tabs total. The Agents section id is
   still `automations` in the registry (localStorage compatibility).
   Cleanup (session prune + trash) lives at Settings → Cleanup.

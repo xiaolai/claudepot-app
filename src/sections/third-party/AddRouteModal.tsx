@@ -40,7 +40,7 @@ export function AddRouteModal({ open, onClose, onCreated }: AddRouteModalProps) 
               color: "var(--fg-strong)",
             }}
           >
-            Add a third-party route
+            Add a provider route
           </h2>
           <p
             style={{

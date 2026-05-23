@@ -23,7 +23,8 @@ export const sections: readonly SectionDef[] = [
   { id: "projects",      label: "Projects",      glyph: NF.folder    },
   { id: "shared-memory", label: "Memory",        glyph: NF.book      },
   { id: "keys",          label: "Keys",          glyph: NF.key       },
-  { id: "third-party",   label: "Third-parties", glyph: NF.cpu       },
+  // id kept as "third-party" for localStorage compatibility
+  { id: "third-party",   label: "Providers",     glyph: NF.cpu       },
   // id kept as "automations" for localStorage compatibility
   { id: "automations",   label: "Agents",        glyph: NF.clock     },
   { id: "global",        label: "Global",        glyph: NF.globe     },
