@@ -56,10 +56,23 @@ pub fn run() {
     // Mirror the CLI's tracing setup so GUI swaps, keychain fallback, and
     // Desktop lifecycle events surface in the terminal that launched the app.
     // Honors RUST_LOG; defaults to info-level for our crates.
+    //
+    // grill X5: the lib crate's name is `claudepot_tauri_lib` (see
+    // `Cargo.toml` `[lib] name`), and EnvFilter directive matching
+    // requires a `::` boundary — `claudepot_tauri` does NOT cover
+    // `claudepot_tauri_lib::…`, so without an explicit
+    // `claudepot_tauri_lib` directive every `tracing::warn!` /
+    // `info!` from the orchestrators and sibling modules is silently
+    // dropped. The seven `target = "claudepot_tauri"` overrides
+    // scattered through this file were the existing workaround;
+    // they remain in place (no harm) but new code in this crate
+    // does not need them.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("claudepot_core=info,claudepot_tauri=info")
+                tracing_subscriber::EnvFilter::new(
+                    "info,claudepot_core=info,claudepot_tauri=info,claudepot_tauri_lib=info",
+                )
             }),
         )
         .try_init();

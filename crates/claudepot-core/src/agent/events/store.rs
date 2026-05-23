@@ -128,6 +128,24 @@ impl EventsFile {
         }
     }
 
+    /// Undo a `record_fire` that was never persisted (grill finding
+    /// X4 — the F1 prune-save hole). The orchestrator's dispatch
+    /// loop calls `record_fire` and then `save`; if the save fails
+    /// the in-memory mutation is left behind, and the *post-loop*
+    /// prune save then flushes it to disk — the pair shows as fired
+    /// without ever running.
+    ///
+    /// Returns `true` iff a matching entry was found and removed
+    /// (so the caller can assert "the in-memory ledger is clean").
+    /// Idempotent: a second call on a now-clean ledger returns
+    /// `false`.
+    pub fn unrecord_fire(&mut self, agent_id: &str, session_id: &str) -> bool {
+        let before = self.fired.len();
+        self.fired
+            .retain(|e| !(e.agent_id == agent_id && e.session_id == session_id));
+        before != self.fired.len()
+    }
+
     /// Drop ledger entries whose agent is no longer installed OR
     /// whose session no longer exists in the index. Keeps the file
     /// from growing an unbounded set of stale pairs as agents and
@@ -343,6 +361,31 @@ mod tests {
         save_to(&p, &EventsFile::default()).unwrap();
         let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn test_events_store_unrecord_fire_removes_in_memory_entry() {
+        // X4: when the orchestrator records a fire and the
+        // post-record save fails, the in-memory mutation must be
+        // undoable so the post-loop prune-save does not flush it.
+        let mut f = EventsFile::default();
+        f.record_fire("a", "s1", ts());
+        f.record_fire("a", "s2", ts());
+        assert!(f.unrecord_fire("a", "s1"), "the (a, s1) pair was present");
+        assert!(!f.has_fired("a", "s1"), "the pair must be gone");
+        assert!(f.has_fired("a", "s2"), "other pairs are untouched");
+        assert!(
+            !f.unrecord_fire("a", "s1"),
+            "a second unrecord on the same pair returns false"
+        );
+    }
+
+    #[test]
+    fn test_events_store_unrecord_fire_unknown_pair_is_noop() {
+        let mut f = EventsFile::default();
+        f.record_fire("a", "s1", ts());
+        assert!(!f.unrecord_fire("nobody", "nothing"));
+        assert_eq!(f.fired.len(), 1, "ledger unchanged when the pair is absent");
     }
 
     #[test]

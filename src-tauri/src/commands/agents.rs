@@ -6,10 +6,10 @@
 
 use chrono::Utc;
 use claudepot_core::agent::{
-    active_scheduler, current_claudepot_cli, install_shim, read_run as core_read_run,
-    resolve_binary, scheduler::cron_next_runs, store::agent_runs_dir, Agent,
-    AgentBinary, AgentId, AgentPatch, AgentStore, CreatedVia, PlatformOptions,
-    Trigger,
+    active_scheduler, apply_lifecycle_change, current_claudepot_cli, install_shim,
+    read_run as core_read_run, resolve_binary, scheduler::cron_next_runs,
+    store::agent_runs_dir, Agent, AgentBinary, AgentId, AgentPatch, AgentStore,
+    CreatedVia, PlatformOptions, Trigger,
 };
 use claudepot_core::routes::RouteStore;
 use uuid::Uuid;
@@ -394,40 +394,51 @@ pub async fn agents_add(dto: AgentCreateDto) -> Result<AgentSummaryDto, String> 
         return Err(format!("agent name '{}' is already taken", dto.name));
     }
     let agent = build_agent_from_create(dto)?;
-
-    // Resolve binary + install shim before scheduler register so a
-    // failed render unwinds cleanly.
-    let binary_path = resolve_binary(&agent, &route_lookup_fn()).map_err(err)?;
-    let cli_path = current_claudepot_cli().map_err(err)?;
-    install_shim(&agent, &binary_path, &cli_path).map_err(err)?;
-
-    // Persist the record FIRST. If we registered with the OS scheduler
-    // first and then the JSON write failed, we'd leak an orphaned
-    // launchd plist / systemd unit / scheduled task with no matching
-    // record. Save first, then register; if registration then fails,
-    // remove from the store and return the error so the on-disk state
-    // stays consistent.
-    let summary = AgentSummaryDto::from(&agent);
     let id = agent.id;
-    let enabled = agent.enabled;
-    store.add(agent).map_err(err)?;
-    store.save().map_err(err)?;
 
-    if enabled {
-        let scheduler = active_scheduler();
-        if let Err(e) = scheduler.register(
+    // Resolve binary + CLI path ahead of the helper so a missing
+    // binary surfaces *before* we touch the store. (The helper's
+    // `install_shim` closure also surfaces it, but doing this lookup
+    // first matches the previous behavior — and `resolve_binary` is
+    // a pure path lookup with no side effects.)
+    let cli_path = current_claudepot_cli().map_err(err)?;
+    let lookup = route_lookup_fn();
+    let scheduler = active_scheduler();
+
+    // grill X2: route the add → shim → save → register sequence and
+    // its full rollback matrix through the shared helper in
+    // `install_gate`. `agents_add` previously had its own
+    // bespoke ordering (shim before save, then register-with-
+    // store-remove rollback); the helper enforces a single,
+    // tested shape for every enabling verb.
+    let inserted = apply_lifecycle_change(
+        &mut store,
+        &id,
+        // `mutate`: insert the record.
+        move |store| {
+            store.add(agent.clone())?;
             store
                 .get(&id)
-                .ok_or_else(|| String::from("agent vanished after save"))?,
-        ) {
-            // Roll back the store side so we don't leave a phantom
-            // record that the UI thinks is live.
+                .cloned()
+                .ok_or_else(|| {
+                    claudepot_core::agent::AgentError::NotFound(id.to_string())
+                })
+        },
+        // `rollback`: drop the just-inserted record.
+        |store| {
             let _ = store.remove(&id);
-            let _ = store.save();
-            return Err(err(e));
-        }
-    }
-    Ok(summary)
+        },
+        // `install_shim`: the real disk-touching render. The helper
+        // skips it for a disabled record.
+        |a| {
+            let binary_path = resolve_binary(a, &lookup)?;
+            install_shim(a, &binary_path, &cli_path).map(|_| ())
+        },
+        scheduler.as_ref(),
+    )
+    .map_err(err)?;
+
+    Ok(AgentSummaryDto::from(&inserted))
 }
 
 #[tauri::command]
@@ -435,32 +446,69 @@ pub async fn agents_update(dto: AgentUpdateDto) -> Result<AgentSummaryDto, Strin
     let mut store = open_store()?;
     let id = parse_id(&dto.id)?;
     // Snapshot the existing record so the patch builder can merge
-    // partial trigger fields (cron without timezone, etc.) and so
-    // we can validate cross-field invariants against the post-merge
-    // state.
+    // partial trigger fields (cron without timezone, etc.), so we
+    // can validate cross-field invariants against the post-merge
+    // state, and so the helper's rollback can restore it.
     let existing = store
         .get(&id)
         .ok_or_else(|| format!("agent {id} not found"))?
         .clone();
     let patch = build_patch_from_update(dto, &existing)?;
-    store.update(&id, patch).map_err(err)?;
-    // Persist BEFORE touching the OS scheduler — see comment in
-    // agents_add for the leak-prevention rationale.
-    store.save().map_err(err)?;
 
-    let updated = store
-        .get(&id)
-        .ok_or_else(|| format!("agent {id} not found after update"))?
-        .clone();
-    let binary_path = resolve_binary(&updated, &route_lookup_fn()).map_err(err)?;
     let cli_path = current_claudepot_cli().map_err(err)?;
-    install_shim(&updated, &binary_path, &cli_path).map_err(err)?;
-
+    let lookup = route_lookup_fn();
     let scheduler = active_scheduler();
-    let _ = scheduler.unregister(&id);
-    if updated.enabled {
-        scheduler.register(&updated).map_err(err)?;
-    }
+
+    // grill X2: previously, `agents_update` ran patch → save →
+    // unregister → shim → register with **no rollback** — a failed
+    // register left the patched record on disk *and* a stale or
+    // missing artifact (the F10 orphan, reintroduced). The helper
+    // owns the full rollback matrix; this verb just supplies the
+    // patch as the mutation and the prior record as the rollback.
+    let rollback_record = existing.clone();
+    let updated = apply_lifecycle_change(
+        &mut store,
+        &id,
+        move |store| {
+            store.update(&id, patch)?;
+            store
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| {
+                    claudepot_core::agent::AgentError::NotFound(id.to_string())
+                })
+        },
+        // Rollback: restore the pre-update record verbatim (drop the
+        // patched record and re-insert the prior). `set_lifecycle` is
+        // not enough — patch could have changed any field. Using
+        // `remove` + direct in-memory restore via the store's normal
+        // path keeps the rollback in-memory only; the helper decides
+        // whether to re-save.
+        move |store| {
+            let _ = store.remove(&id);
+            // Re-add the prior record. `add` re-runs validators —
+            // they passed when the prior record was first inserted,
+            // so they will pass again. A failure here is logged but
+            // we cannot meaningfully propagate it from a rollback
+            // closure; the helper's caller already has an Err.
+            if let Err(e) = store.add(rollback_record) {
+                tracing::error!(
+                    agent_id = %id,
+                    error = %e,
+                    "agents_update rollback: re-adding the prior record \
+                     failed; in-memory store may be inconsistent until \
+                     the next open"
+                );
+            }
+        },
+        |a| {
+            let binary_path = resolve_binary(a, &lookup)?;
+            install_shim(a, &binary_path, &cli_path).map(|_| ())
+        },
+        scheduler.as_ref(),
+    )
+    .map_err(err)?;
+
     Ok(AgentSummaryDto::from(&updated))
 }
 
@@ -523,54 +571,64 @@ pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), String>
     let mut store = open_store()?;
     let aid = parse_id(&id)?;
 
-    // grill X1: a Draft agent must NOT acquire a scheduler artifact
-    // via the enabled toggle — that bypasses the install review
-    // gate. `agents_run_now_start` has the same check (F16); the
-    // enabled toggle is a strictly stronger surface because it
-    // materializes a recurring artifact, not a one-shot run. The
-    // Phase 2 helper extraction will move this check into the gate
-    // itself so every lifecycle-transition verb enforces it.
-    {
-        let existing = store
-            .get(&aid)
-            .ok_or_else(|| format!("agent {aid} not found"))?;
-        if matches!(
-            existing.lifecycle,
-            claudepot_core::agent::Lifecycle::Draft
-        ) {
-            return Err(format!(
-                "agent '{}' is a draft — review and install it before \
-                 enabling. A draft cannot acquire a scheduler artifact \
-                 via the enabled toggle.",
-                existing.name
-            ));
-        }
-    }
+    // Snapshot the existing record so the rollback can restore it
+    // if a later step (shim render, save, register) fails. The
+    // helper's X1 gate rejects a Draft + enabled=true combination
+    // before any artifact is materialized; see install_gate.rs.
+    let existing = store
+        .get(&aid)
+        .ok_or_else(|| format!("agent {aid} not found"))?
+        .clone();
+    let rollback_enabled = existing.enabled;
 
-    let patch = AgentPatch {
-        enabled: Some(enabled),
-        ..AgentPatch::default()
-    };
-    store.update(&aid, patch).map_err(err)?;
-    // Persist BEFORE touching the OS scheduler — same rationale as
-    // agents_add/update/remove: a failed register/unregister
-    // can't leave the JSON store and the OS scheduler in
-    // disagreement.
-    store.save().map_err(err)?;
-
+    let cli_path = current_claudepot_cli().map_err(err)?;
+    let lookup = route_lookup_fn();
     let scheduler = active_scheduler();
-    if enabled {
-        let updated = store
-            .get(&aid)
-            .ok_or_else(|| format!("agent {aid} not found"))?
-            .clone();
-        let binary_path = resolve_binary(&updated, &route_lookup_fn()).map_err(err)?;
-        let cli_path = current_claudepot_cli().map_err(err)?;
-        install_shim(&updated, &binary_path, &cli_path).map_err(err)?;
-        scheduler.register(&updated).map_err(err)?;
-    } else {
-        let _ = scheduler.unregister(&aid);
-    }
+
+    // grill X2: previously this verb ran update → save → register
+    // with **no rollback** — the F10 orphan reintroduced. The
+    // helper owns the rollback matrix. The X1 Draft-rejection
+    // (a Draft must not acquire a scheduler artifact via the
+    // enabled toggle) is enforced inside the helper for every
+    // verb that materializes an artifact.
+    apply_lifecycle_change(
+        &mut store,
+        &aid,
+        move |store| {
+            let patch = AgentPatch {
+                enabled: Some(enabled),
+                ..AgentPatch::default()
+            };
+            store.update(&aid, patch)?;
+            store
+                .get(&aid)
+                .cloned()
+                .ok_or_else(|| {
+                    claudepot_core::agent::AgentError::NotFound(aid.to_string())
+                })
+        },
+        move |store| {
+            let patch = AgentPatch {
+                enabled: Some(rollback_enabled),
+                ..AgentPatch::default()
+            };
+            if let Err(e) = store.update(&aid, patch) {
+                tracing::error!(
+                    agent_id = %aid,
+                    error = %e,
+                    "agents_set_enabled rollback: restoring the prior \
+                     `enabled` flag failed"
+                );
+            }
+        },
+        |a| {
+            let binary_path = resolve_binary(a, &lookup)?;
+            install_shim(a, &binary_path, &cli_path).map(|_| ())
+        },
+        scheduler.as_ref(),
+    )
+    .map_err(err)?;
+
     Ok(())
 }
 

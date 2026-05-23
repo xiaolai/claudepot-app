@@ -528,6 +528,39 @@ impl AgentStore {
             a.disallowed_tools = v;
         }
         if let Some(v) = patch.mcp_servers {
+            // grill X3 / F26: the F3 fix banned `Custom` MCP servers
+            // in `build_draft`, but `update()` previously replaced
+            // `mcp_servers` wholesale with no re-validation — a
+            // compromised renderer (or any IPC caller) could swap a
+            // `Custom { command, args }` config onto an already-
+            // installed agent and `claude -p --mcp-config` would
+            // spawn it on every run. Hoist the gate to the
+            // persistence boundary: reject any `Custom` server in the
+            // patch that is not already present (verbatim) in the
+            // prior record. An unchanged update is a no-op (no new
+            // Custom entries); the v1->v2 migration of records that
+            // already carry a `Custom` server is unaffected.
+            //
+            // `McpServerRef` cannot derive `Hash`/`Eq` (it carries a
+            // `serde_json::Value`), so we use a linear scan + the
+            // existing `PartialEq` derive. The list is bounded by
+            // `MAX_MCP_SERVERS_ELEMS`, so O(n×m) is fine here.
+            let prior = &self.file.agents[idx].mcp_servers;
+            for entry in &v {
+                if matches!(entry, super::types::McpServerRef::Custom { .. })
+                    && !prior.iter().any(|p| p == entry)
+                {
+                    let name = match entry {
+                        super::types::McpServerRef::Custom { name, .. } => name.as_str(),
+                        _ => "?",
+                    };
+                    return Err(AgentError::InvalidEnv(format!(
+                        "custom MCP server {name:?} is not allowed via update — \
+                         only the Claudepot memory server may be attached \
+                         to an installed agent"
+                    )));
+                }
+            }
             a.mcp_servers = v;
         }
         if let Some(v) = patch.run_as {
@@ -1212,6 +1245,102 @@ mod tests {
             Err(AgentError::InvalidName(..))
         ));
     }
+
+    // ---- grill X3 / F26: Custom MCP gate on update ------------
+
+    #[test]
+    fn update_rejects_introducing_new_custom_mcp_server() {
+        // X3: the F3 ban on `Custom` MCP in drafts must also hold at
+        // the persistence boundary; a patch that introduces a Custom
+        // server not already present must be rejected so a
+        // compromised IPC caller cannot strap a malicious child
+        // process onto an already-installed agent.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut a = sample("victim-agent");
+        a.mcp_servers = vec![McpServerRef::ClaudepotMemory];
+        let id = a.id;
+        store.add(a).unwrap();
+
+        let patch = AgentPatch {
+            mcp_servers: Some(vec![
+                McpServerRef::ClaudepotMemory,
+                McpServerRef::Custom {
+                    name: "evil".into(),
+                    config: serde_json::json!({"command": "/usr/bin/curl"}),
+                },
+            ]),
+            ..AgentPatch::default()
+        };
+        let err = store.update(&id, patch).unwrap_err();
+        match err {
+            AgentError::InvalidEnv(m) => {
+                assert!(m.contains("evil"), "rejection must name the server, got {m}");
+            }
+            other => panic!("expected InvalidEnv for new Custom MCP, got {other:?}"),
+        }
+        // The store record is untouched — the update never committed.
+        let after = store.get(&id).unwrap();
+        assert_eq!(after.mcp_servers, vec![McpServerRef::ClaudepotMemory]);
+    }
+
+    #[test]
+    fn update_allows_no_op_rewrite_of_existing_custom_mcp_server() {
+        // X3: a record that already carries a `Custom` entry (e.g. a
+        // legacy install from before the F3 gate, or a v1->v2 record
+        // that inherited one) must NOT be rejected by a no-op
+        // round-trip — the gate is "introduces new Custom", not
+        // "carries any Custom". Otherwise every save-after-load
+        // round-trip would break.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let custom = McpServerRef::Custom {
+            name: "legacy".into(),
+            config: serde_json::json!({"command": "/bin/echo"}),
+        };
+        let mut a = sample("legacy-agent");
+        a.mcp_servers = vec![custom.clone()];
+        let id = a.id;
+        store.add(a).unwrap();
+
+        // Same Custom entry, possibly reordered — must pass.
+        let patch = AgentPatch {
+            mcp_servers: Some(vec![custom.clone()]),
+            ..AgentPatch::default()
+        };
+        store.update(&id, patch).expect("no-op rewrite must be allowed");
+    }
+
+    #[test]
+    fn update_allows_dropping_a_custom_mcp_server() {
+        // X3: the gate fires only on *introducing* a Custom server,
+        // not on dropping one. Removing a previously-attached Custom
+        // entry is a strict de-escalation and must pass.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut a = sample("draining-agent");
+        a.mcp_servers = vec![
+            McpServerRef::Custom {
+                name: "legacy".into(),
+                config: serde_json::json!({"command": "/bin/echo"}),
+            },
+            McpServerRef::ClaudepotMemory,
+        ];
+        let id = a.id;
+        store.add(a).unwrap();
+
+        let patch = AgentPatch {
+            mcp_servers: Some(vec![McpServerRef::ClaudepotMemory]),
+            ..AgentPatch::default()
+        };
+        store.update(&id, patch).expect("dropping a Custom must be allowed");
+        assert_eq!(
+            store.get(&id).unwrap().mcp_servers,
+            vec![McpServerRef::ClaudepotMemory]
+        );
+    }
+
+    // ---- arm + reconcile -------------------------------------
 
     #[test]
     fn arm_flips_draft_to_installed() {

@@ -1,4 +1,5 @@
-//! The draft → install gate, as a pure, testable core helper.
+//! The draft → install gate and the shared install-ordering helper,
+//! as pure, testable core helpers.
 //!
 //! [`install_draft`] is the engine behind the GUI's `agent_install`
 //! Tauri command (PRD §8.2 / D8 — the human-only half of the
@@ -10,6 +11,18 @@
 //! arm → install-shim → register → save ordering — and both of its
 //! rollback directions — is unit-testable without a real launchd /
 //! systemd / Task Scheduler artifact.
+//!
+//! [`apply_lifecycle_change`] hoists the same critical section out
+//! of the four parallel GUI Tauri commands (`agents_add`,
+//! `agents_update`, `agent_install`, `agents_set_enabled`) — grill
+//! finding X2. Before X2 each verb re-implemented the
+//! mutate → save → register sequence with **three different rollback
+//! shapes**, and two of them (`agents_update` and
+//! `agents_set_enabled`) had no rollback at all — reintroducing the
+//! F10 orphan that `install_draft` had already closed. The X2 fix
+//! is one helper; every verb delegates. The Draft-rejection gate
+//! (X1) lives inside the helper, so every enabling verb enforces
+//! it, not just `agents_set_enabled`.
 //!
 //! ## Ordering and rollback
 //!
@@ -73,75 +86,178 @@ pub fn install_draft<F>(
     store: &mut AgentStore,
     id: &AgentId,
     scheduler: &dyn Scheduler,
-    mut install_shim: F,
+    install_shim: F,
 ) -> Result<InstallOutcome, AgentError>
 where
-    F: FnMut(&Agent) -> Result<(), AgentError>,
+    F: FnOnce(&Agent) -> Result<(), AgentError>,
 {
-    // `arm` rejects an already-installed agent and returns the armed
-    // (Installed) clone. The store mutation is in-memory only until
-    // `save` below.
-    let armed = store.arm(id)?;
+    // Snapshot the original `Draft` lifecycle so the rollback closure
+    // restores exactly that state — the helper sees only "an in-memory
+    // mutation that needs materializing" and a way to undo it.
+    let original_id = *id;
+    let agent = apply_lifecycle_change(
+        store,
+        id,
+        // `mutate`: flip Draft → Installed in memory. `store.arm`
+        // already rejects an already-installed agent; the helper's
+        // Draft-rejection gate (X1) is irrelevant here because the
+        // post-mutation record is `Installed`.
+        |store| store.arm(&original_id),
+        // `rollback`: restore the in-memory `Draft` flip. The helper
+        // decides whether to also persist this rollback (it does iff
+        // the failure happens after the `save`).
+        |store| store.set_lifecycle(&original_id, Lifecycle::Draft),
+        // `install_shim`: caller-supplied.
+        install_shim,
+        scheduler,
+    )?;
+    Ok(InstallOutcome { agent })
+}
 
-    // Materialize the shim. On failure, undo the in-memory arm and
-    // leave the store unsaved — the agent on disk is still a Draft.
-    if let Err(e) = install_shim(&armed) {
-        rollback_to_draft(store, id, false);
-        return Err(e);
+/// The single critical section behind every GUI verb that mutates
+/// `agents.json` in a way that may materialize an OS scheduler
+/// artifact — `agents_add`, `agents_update`, `agent_install`, and
+/// `agents_set_enabled` (grill finding X2).
+///
+/// Each verb supplies:
+///
+/// - `mutate(&mut store)` — the in-memory store mutation (insert a
+///   new record, apply a patch, flip lifecycle, etc.), returning the
+///   post-mutation [`Agent`] clone. Anything that wants to leave the
+///   record visible on a successful save belongs here.
+/// - `rollback(&mut store)` — the inverse of `mutate`. Run when a
+///   later step (shim render, save, register) fails so the store
+///   never claims a record exists/installed/enabled when the
+///   artifact it implies never materialized. **MUST NOT** touch the
+///   filesystem; the helper decides whether to re-save the rolled-
+///   back state (it does iff the save already succeeded).
+/// - `install_shim(&Agent)` — the (impure, disk-touching) shim
+///   render. Injected so tests can supply a fake.
+/// - `scheduler` — the OS scheduler adapter; only consulted when the
+///   post-mutation record is `enabled`.
+///
+/// ## Invariants
+///
+/// 1. **Draft never acquires an artifact** (X1). Before any
+///    `install_shim` / scheduler call, the post-mutation record's
+///    lifecycle is checked. If it is `Draft` AND the agent is
+///    `enabled` — i.e. this mutation would materialize a scheduler
+///    artifact for a draft — the helper rolls back and errors. The
+///    Draft → Installed transition itself (the legitimate path,
+///    used by [`install_draft`]) is the *output* of `mutate`, so it
+///    arrives here already flipped to `Installed` and passes.
+/// 2. **`register` runs only on success-with-enabled** (F10): we
+///    `mutate` in memory → render the shim → `save` → `register`.
+///    Every failure direction rolls back to the pre-mutation state.
+///    A `Draft`-with-no-artifact (and a Disabled-with-no-artifact)
+///    is the safe failure shape.
+/// 3. **`unregister` for the disabled-or-removed direction is best-
+///    effort.** Failing to unregister is logged but does not roll
+///    back the in-store mutation — leaving a stale artifact behind
+///    is the same hazard `reconcile_with_scheduler` was built to
+///    surface, and refusing the mutation here would block the user
+///    from disabling/removing an agent because of a transient
+///    scheduler hiccup.
+pub fn apply_lifecycle_change<M, R, F>(
+    store: &mut AgentStore,
+    id: &AgentId,
+    mutate: M,
+    rollback: R,
+    install_shim: F,
+    scheduler: &dyn Scheduler,
+) -> Result<Agent, AgentError>
+where
+    M: FnOnce(&mut AgentStore) -> Result<Agent, AgentError>,
+    R: FnOnce(&mut AgentStore),
+    F: FnOnce(&Agent) -> Result<(), AgentError>,
+{
+    // Step 1 — in-memory mutation. A failure here means nothing has
+    // changed yet; surface it as-is.
+    let post = mutate(store)?;
+
+    // Step 2 — X1 gate. A `Draft` agent must NEVER acquire a live
+    // scheduler artifact. The legitimate Draft → Installed
+    // transition (`install_draft`) flips the lifecycle *inside*
+    // `mutate`, so by the time we get here the post-mutation record
+    // is already `Installed`. A `Draft` arriving here means a verb
+    // (likely `agents_set_enabled(true)` or an `agents_update` that
+    // toggles enabled on a draft) is trying to bypass the install
+    // review gate.
+    //
+    // We only refuse when the draft is also `enabled` — a
+    // disabled-Draft mutation has no scheduler consequence and is
+    // harmless. Tighten if a future invariant demands.
+    if post.lifecycle == Lifecycle::Draft && post.enabled {
+        let name = post.name.clone();
+        rollback(store);
+        return Err(AgentError::InvalidEnv(format!(
+            "agent '{name}' is a draft — review and install it before \
+             enabling. A draft cannot acquire a scheduler artifact via \
+             this verb; only the install-review flow may arm it."
+        )));
     }
 
-    // Persist the Draft -> Installed flip BEFORE registering the OS
-    // artifact (grill F10). A save failure here rolls back in memory
-    // and leaves the store unsaved; no artifact has been registered
-    // yet, so the on-disk record stays a coherent `Draft`.
-    if let Err(e) = store.save() {
-        rollback_to_draft(store, id, false);
-        return Err(e);
-    }
-
-    // Only an enabled agent registers a live scheduler artifact —
-    // same rule as `agents_add`. A disabled draft is armed but not
-    // scheduled until the user enables it.
-    if armed.enabled {
-        if let Err(e) = scheduler.register(&armed) {
-            // The `Installed` flip is already on disk. Roll the
-            // lifecycle back to `Draft` AND re-save so the record
-            // never claims `Installed` without a live artifact. A
-            // draft with no artifact is the safe failure state.
-            rollback_to_draft(store, id, true);
+    // Step 3 — shim render. The shim is the per-agent `.sh`/`.cmd`
+    // file the scheduler artifact ultimately invokes; without it,
+    // a register that succeeded would be loading a label that
+    // points at a missing executable. Render before save so a shim
+    // failure unwinds with no on-disk change.
+    if post.enabled {
+        if let Err(e) = install_shim(&post) {
+            rollback(store);
             return Err(e);
         }
     }
 
-    Ok(InstallOutcome { agent: armed })
-}
+    // Step 4 — persist BEFORE registering the OS artifact (F10). A
+    // save failure here unwinds in memory; no artifact has been
+    // registered, so the on-disk record is whatever it was before
+    // `mutate` ran.
+    if let Err(e) = store.save() {
+        rollback(store);
+        return Err(e);
+    }
 
-/// Flip an in-memory `Installed` record back to `Draft` after a
-/// failed install step, so the store is not left claiming an agent
-/// is installed when its scheduler artifact never materialized.
-///
-/// `persist` controls whether the rollback is also written to disk:
-/// pass `true` only when the `Installed` flip already reached disk
-/// (the register-failure path), so the on-disk record is corrected
-/// too. A failed re-save is logged but not propagated — the caller
-/// is already returning the original install error, and surfacing a
-/// second error would mask it; the in-memory rollback still keeps a
-/// reused [`AgentStore`] honest. Silent if the id vanished — there
-/// is nothing to roll back.
-fn rollback_to_draft(store: &mut AgentStore, id: &AgentId, persist: bool) {
-    store.set_lifecycle(id, Lifecycle::Draft);
-    if persist {
-        if let Err(e) = store.save() {
-            tracing::error!(
+    // Step 5 — register / unregister.
+    if post.enabled {
+        if let Err(e) = scheduler.register(&post) {
+            // The mutation IS on disk. Roll the in-memory state
+            // back AND re-save so the on-disk record never claims
+            // a live artifact that never materialized. A failed
+            // re-save is logged but not propagated — surfacing two
+            // errors would mask the original `register` failure.
+            rollback(store);
+            if let Err(save_err) = store.save() {
+                tracing::error!(
+                    agent_id = %id,
+                    error = %save_err,
+                    "apply_lifecycle_change: register failed and the \
+                     rollback re-save ALSO failed — the on-disk \
+                     record now claims a state with no live \
+                     scheduler artifact; the next boot reconciliation \
+                     will surface it"
+                );
+            }
+            return Err(e);
+        }
+    } else {
+        // Disabled (or just-disabled) record: best-effort unregister
+        // so a previously-registered artifact does not outlive the
+        // record's enabled bit. Failures are logged, not propagated
+        // — see the helper's doc-comment for the rationale.
+        if let Err(e) = scheduler.unregister(id) {
+            tracing::warn!(
                 agent_id = %id,
                 error = %e,
-                "install_draft: register failed and the rollback re-save \
-                 ALSO failed — the on-disk record still claims Installed \
-                 with no live scheduler artifact; the next boot \
-                 reconciliation will demote it"
+                "apply_lifecycle_change: scheduler unregister failed \
+                 on the disabled path; the record is saved but a stale \
+                 artifact may remain — reconcile_with_scheduler will \
+                 surface it"
             );
         }
     }
+
+    Ok(post)
 }
 
 #[cfg(test)]
@@ -421,5 +537,330 @@ mod tests {
             sched.registered.borrow().is_empty(),
             "register must not run after a save failure"
         );
+    }
+
+    // ---- grill X2: apply_lifecycle_change ----------------------
+    //
+    // The shared helper is the single critical section behind the
+    // four GUI verbs (`agents_add`, `agents_update`, `agent_install`,
+    // `agents_set_enabled`). Each of these tests exercises one of
+    // its four failure shapes plus the X1 Draft gate.
+
+    /// Build an already-`Installed` sample agent for the
+    /// apply-change tests, distinct from `draft_agent` which builds
+    /// a `Draft`.
+    fn installed_agent(name: &str, enabled: bool) -> Agent {
+        let mut a = draft_agent(name, enabled);
+        a.lifecycle = Lifecycle::Installed;
+        a
+    }
+
+    #[test]
+    fn apply_change_add_happy_path_inserts_saves_and_registers() {
+        // Models `agents_add`: `mutate` inserts a brand-new record;
+        // rollback removes it; helper renders shim, saves, registers.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("agents.json");
+        let mut store = AgentStore::open_at(path.clone()).unwrap();
+        let agent = installed_agent("morning-pr", true);
+        let id = agent.id;
+
+        let sched = FakeScheduler::ok();
+        let mut shim_calls = 0;
+        let agent_for_mutate = agent.clone();
+        let id_for_mutate = id;
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                store.add(agent_for_mutate.clone())?;
+                store
+                    .get(&id_for_mutate)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id_for_mutate.to_string()))
+            },
+            move |store| {
+                let _ = store.remove(&id_for_mutate);
+            },
+            |_a| {
+                shim_calls += 1;
+                Ok(())
+            },
+            &sched,
+        );
+
+        let post = result.expect("add happy path must succeed");
+        assert_eq!(post.lifecycle, Lifecycle::Installed);
+        assert_eq!(shim_calls, 1);
+        assert_eq!(sched.registered.borrow().len(), 1);
+        assert!(store.get(&id).is_some(), "the record is in the store");
+        // On disk: persisted.
+        drop(store);
+        let reopened = AgentStore::open_at(path).unwrap();
+        assert!(reopened.get(&id).is_some());
+    }
+
+    #[test]
+    fn apply_change_register_failure_rolls_back_add_on_disk() {
+        // Models `agents_add` with a failing scheduler: the helper
+        // must roll the just-inserted record back AND re-save so the
+        // store on disk does not retain a phantom record.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("agents.json");
+        let mut store = AgentStore::open_at(path.clone()).unwrap();
+        let agent = installed_agent("ghost", true);
+        let id = agent.id;
+
+        let sched = FakeScheduler::failing();
+        let agent_for_mutate = agent.clone();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                store.add(agent_for_mutate.clone())?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let _ = store.remove(&id);
+            },
+            |_a| Ok(()),
+            &sched,
+        );
+        assert!(result.is_err(), "register failure must surface as Err");
+
+        // In-memory: rolled back (record removed).
+        assert!(
+            store.get(&id).is_none(),
+            "the helper rolled the in-memory insert back"
+        );
+        // On disk: ALSO rolled back. The previous (pre-X2) per-verb
+        // code did this for `agents_add` but NOT for `agents_update`
+        // or `agents_set_enabled`; the helper hoists the invariant.
+        drop(store);
+        let reopened = AgentStore::open_at(path).unwrap();
+        assert!(reopened.get(&id).is_none());
+    }
+
+    #[test]
+    fn apply_change_save_failure_unwinds_with_no_artifact() {
+        // F10/X2 cross-test: a `save` failure must roll back the
+        // in-memory mutation and NEVER reach `register`. The helper
+        // shares this property with `install_draft` (delegates here);
+        // the test asserts it independently for an add-shaped change.
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"not a dir").unwrap();
+        let path = blocker.join("nested").join("agents.json");
+
+        let seed_path = dir.path().join("seed.json");
+        let mut store = AgentStore::open_at(seed_path).unwrap();
+        store.set_path(path);
+
+        let agent = installed_agent("brittle-add", true);
+        let id = agent.id;
+
+        let sched = FakeScheduler::ok();
+        let agent_for_mutate = agent.clone();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                store.add(agent_for_mutate.clone())?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let _ = store.remove(&id);
+            },
+            |_a| Ok(()),
+            &sched,
+        );
+        assert!(result.is_err(), "save failure must surface as Err");
+        assert!(
+            store.get(&id).is_none(),
+            "rollback must remove the just-inserted record"
+        );
+        assert!(
+            sched.registered.borrow().is_empty(),
+            "register must not run after a save failure"
+        );
+    }
+
+    #[test]
+    fn apply_change_shim_failure_unwinds_with_no_artifact() {
+        // A failing shim closure must surface as Err, roll back the
+        // in-memory mutation, never reach save, never reach register.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("agents.json");
+        let mut store = AgentStore::open_at(path.clone()).unwrap();
+        let agent = installed_agent("shim-fail", true);
+        let id = agent.id;
+
+        let sched = FakeScheduler::ok();
+        let agent_for_mutate = agent.clone();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                store.add(agent_for_mutate.clone())?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let _ = store.remove(&id);
+            },
+            |_a| {
+                Err(AgentError::InvalidPath(
+                    "/x".into(),
+                    "fake shim failure",
+                ))
+            },
+            &sched,
+        );
+        assert!(result.is_err());
+        assert!(store.get(&id).is_none(), "rollback must remove the record");
+        assert!(sched.registered.borrow().is_empty());
+
+        // On disk: nothing was persisted — `agents.json` may not even
+        // exist (no prior save in this test). What matters is that
+        // the rolled-back add is not on disk.
+        drop(store);
+        let reopened = AgentStore::open_at(path).unwrap();
+        assert!(reopened.get(&id).is_none());
+    }
+
+    #[test]
+    fn apply_change_x1_draft_enabled_is_rejected() {
+        // X1: the helper REFUSES to materialize an artifact for a
+        // Draft + enabled record. This is the headline fix:
+        // `agents_set_enabled(true)` on a Draft must error here, no
+        // matter which verb invokes the helper.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        // Seed a Draft + enabled agent the helper can find via id.
+        let mut a = draft_agent("draft-victim", true);
+        a.lifecycle = Lifecycle::Draft;
+        let id = a.id;
+        store.add(a.clone()).unwrap();
+
+        let sched = FakeScheduler::ok();
+        let mut shim_calls = 0;
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            |_store| {
+                // No-op rollback — the mutation is a no-op clone.
+            },
+            |_a| {
+                shim_calls += 1;
+                Ok(())
+            },
+            &sched,
+        );
+        match result {
+            Err(AgentError::InvalidEnv(m)) => assert!(
+                m.to_lowercase().contains("draft"),
+                "X1 rejection must name 'draft', got {m}"
+            ),
+            other => panic!("expected X1 InvalidEnv rejection, got {other:?}"),
+        }
+        assert_eq!(
+            shim_calls, 0,
+            "shim must NOT run when the helper rejects a draft"
+        );
+        assert!(sched.registered.borrow().is_empty());
+        // The record is still on disk as a Draft.
+        assert_eq!(store.get(&id).unwrap().lifecycle, Lifecycle::Draft);
+    }
+
+    #[test]
+    fn apply_change_draft_but_disabled_is_allowed() {
+        // The X1 gate fires only on Draft + enabled. A Draft +
+        // disabled mutation has no scheduler consequence and must
+        // not be rejected — e.g. a verb that disables a draft is
+        // benign.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut a = draft_agent("draft-disabled", false);
+        a.lifecycle = Lifecycle::Draft;
+        let id = a.id;
+        store.add(a.clone()).unwrap();
+
+        let sched = FakeScheduler::ok();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            |_store| {},
+            |_a| panic!("shim must not run for a disabled record"),
+            &sched,
+        );
+        assert!(result.is_ok(), "draft + disabled must be allowed");
+        assert!(sched.registered.borrow().is_empty());
+    }
+
+    #[test]
+    fn apply_change_disabled_record_unregisters() {
+        // Models `agents_set_enabled(false)`: the helper must call
+        // `scheduler.unregister` (best-effort) for a disabled
+        // record. The FakeScheduler's unregister is a no-op `Ok(())`;
+        // the assertion here is that the helper completes
+        // successfully and never tried to register.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let a = installed_agent("disabling", true);
+        let id = a.id;
+        store.add(a).unwrap();
+        store.save().unwrap();
+
+        let sched = FakeScheduler::ok();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                // Disable the record.
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(false),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                store.update(&id, patch)?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(true),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                let _ = store.update(&id, patch);
+            },
+            |_a| panic!("shim must not run for a disabled record"),
+            &sched,
+        );
+        let post = result.expect("set_enabled(false) must succeed");
+        assert!(!post.enabled);
+        assert!(sched.registered.borrow().is_empty(), "no register for disabled");
+        // Saved.
+        assert!(!store.get(&id).unwrap().enabled);
     }
 }
