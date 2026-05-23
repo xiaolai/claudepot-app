@@ -23,10 +23,16 @@
 //! # Constraints the orchestrator MUST honor (grill findings)
 //!
 //! The orchestrator that wires these pure pieces into `run_tick`
-//! does not exist on this branch. When it is written, four
-//! constraints are load-bearing — the obvious implementation gets
-//! each of them wrong, and none surfaces in a unit test (every test
-//! injects clean in-memory inputs):
+//! now lives at `src-tauri/src/agent_event_orchestrator.rs` and is
+//! hooked into `usage_snapshot::run_tick`. The four constraints
+//! below remain load-bearing — they are the contract every future
+//! re-implementation (test seam, refactor, alternative orchestrator)
+//! MUST preserve. The obvious implementation gets each of them
+//! wrong, and none surfaces in a unit test of the pure pieces
+//! alone (every test in this module injects clean in-memory
+//! inputs); the orchestrator's integration tests in
+//! `agent_event_orchestrator::tests` lock these invariants down at
+//! the wired level.
 //!
 //! ## F1 — record the fire BEFORE dispatching the run
 //!

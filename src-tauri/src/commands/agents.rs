@@ -639,6 +639,36 @@ pub async fn agents_run_now_start(
     ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let aid = parse_id(&id)?;
+
+    // grill X17: fast-path the Draft rejection without the
+    // exclusive store lock. `lifecycle_of` does a non-blocking
+    // `try_open` of the agents file; on a free lock it reads the
+    // record's lifecycle and drops the lock immediately. A draft
+    // never reaches Run-Now (see the matches!() check below), and
+    // failing here means we never block on a GUI mid-install just
+    // to reject a draft. Under contention the lookup falls through
+    // (returns `Ok(None)`) and the gate runs again under the full
+    // open below — same behavior as before, but at most one of the
+    // two paths actually serializes.
+    if let Ok(Some(claudepot_core::agent::Lifecycle::Draft)) =
+        claudepot_core::agent::AgentStore::lifecycle_of(&aid)
+    {
+        // Pull the agent name for the error message via the full
+        // open. The contended case is rare; the message format is
+        // the same as the original (post-lock) path so callers see
+        // identical text either way.
+        let store = open_store()?;
+        let name = store
+            .get(&aid)
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| aid.to_string());
+        return Err(format!(
+            "agent '{name}' is a draft — review and install it before running. \
+             A draft is never executed directly; arming it through the \
+             install review is the gate."
+        ));
+    }
+
     // Load the agent now so we fail fast on missing.
     let store = open_store()?;
     let agent = store
@@ -654,7 +684,11 @@ pub async fn agents_run_now_start(
     // hides "Run now" on a draft card (it shows only "Review &
     // install"); this is the backend enforcement of that contract.
     // A draft is exercised by arming it through the install review,
-    // not by Run-Now.
+    // not by Run-Now. Defense-in-depth: the X17 fast path above
+    // catches the uncontended case without the lock; this check
+    // remains the authoritative gate for the contended-fallback
+    // path (and for any future caller that builds `agent` without
+    // going through the X17 prelude).
     if matches!(
         agent.lifecycle,
         claudepot_core::agent::Lifecycle::Draft

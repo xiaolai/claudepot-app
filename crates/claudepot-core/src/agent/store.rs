@@ -425,6 +425,41 @@ impl AgentStore {
         self.file.agents.iter().find(|a| &a.id == id)
     }
 
+    /// Best-effort lookup of an agent's `lifecycle` field without
+    /// holding the store across the caller's whole operation.
+    ///
+    /// grill X17: `agents_run_now_start` was reading the store under
+    /// the exclusive open-lock just to gate on `Lifecycle::Draft`
+    /// before spawning the run. The full open is needed later (the
+    /// spawned task clones the agent for the closure), but the
+    /// pre-spawn validation is cheap and structurally "lock first,
+    /// validate second" — under GUI contention an installed-agent
+    /// run-now would block on a different user's mid-install for
+    /// nothing.
+    ///
+    /// Implementation reuses the X10 `try_open` machinery: on a
+    /// free lock we read the file, return the lifecycle, and drop
+    /// the lock before the caller proceeds to its real open. On
+    /// contention we return `Ok(None)` so the caller falls through
+    /// to the full open path — the gate will still run, just
+    /// behind the lock (the original behavior). A real I/O failure
+    /// propagates as `Err`.
+    pub fn lifecycle_of(id: &AgentId) -> Result<Option<Lifecycle>, AgentError> {
+        Self::lifecycle_of_at(agents_file_path(), id)
+    }
+
+    /// Path-injected variant of [`lifecycle_of`](Self::lifecycle_of)
+    /// for tests.
+    pub fn lifecycle_of_at(
+        path: PathBuf,
+        id: &AgentId,
+    ) -> Result<Option<Lifecycle>, AgentError> {
+        match Self::try_open_at(path)? {
+            Some(store) => Ok(store.get(id).map(|a| a.lifecycle)),
+            None => Ok(None),
+        }
+    }
+
     pub fn get_by_name(&self, name: &str) -> Option<&Agent> {
         self.file.agents.iter().find(|a| a.name == name)
     }
@@ -730,6 +765,30 @@ impl AgentStore {
         }
     }
 
+    /// Force an agent's `updated_at` to a specific value in memory.
+    ///
+    /// Test seam / rollback helper. Used by
+    /// [`install_gate::apply_lifecycle_change`] to restore the
+    /// pre-mutation timestamp when a rollback fires — `arm` and
+    /// `update` both bump `updated_at = now()`, so a rolled-back
+    /// mutation otherwise leaves the agent claiming it was just
+    /// edited even though every field is back to where it started
+    /// (grill X24). No-op when the id is unknown.
+    ///
+    /// Same trust posture as [`set_lifecycle`](Self::set_lifecycle):
+    /// the store-boundary API gives the install gate the
+    /// surgical-write seam it needs without widening `AgentPatch`
+    /// (which has no `updated_at` field by design — the timestamp
+    /// is not a renderer-supplied value).
+    ///
+    /// [`install_gate::apply_lifecycle_change`]:
+    ///     super::install_gate::apply_lifecycle_change
+    pub fn set_updated_at(&mut self, id: &AgentId, updated_at: chrono::DateTime<chrono::Utc>) {
+        if let Some(a) = self.file.agents.iter_mut().find(|a| &a.id == id) {
+            a.updated_at = updated_at;
+        }
+    }
+
     /// Re-point the store at a different path. A test seam only —
     /// lets a test force a `save` failure by aiming the store at an
     /// un-creatable path after seeding it through a writable one.
@@ -855,6 +914,23 @@ pub fn reconcile_installed_agents(
 /// it can run unconditionally at boot. Returns the orphan list for
 /// callers (and tests) that want to act on it.
 pub fn reconcile_with_scheduler() -> Vec<OrphanInstalled> {
+    let scheduler = super::scheduler::active_scheduler();
+    reconcile_with_scheduler_using(scheduler.as_ref())
+}
+
+/// Scheduler-injected variant of [`reconcile_with_scheduler`] for
+/// tests and for callers that want to drive the boot-time reconcile
+/// against a non-active scheduler.
+///
+/// grill X29: the wired form above takes the active scheduler from
+/// the host platform, which makes the outer wiring (open store + ask
+/// scheduler + log) impossible to exercise without booting real
+/// launchd/systemd/Task Scheduler. The pure
+/// [`reconcile_installed_agents`] predicate is covered; this seam
+/// lets the wiring (store-load → list_managed → identifier match →
+/// log) be exercised end-to-end via a `FakeScheduler` in an
+/// integration test.
+pub fn reconcile_with_scheduler_using(scheduler: &dyn super::scheduler::Scheduler) -> Vec<OrphanInstalled> {
     let store = match AgentStore::open() {
         Ok(s) => s,
         Err(e) => {
@@ -865,7 +941,6 @@ pub fn reconcile_with_scheduler() -> Vec<OrphanInstalled> {
             return Vec::new();
         }
     };
-    let scheduler = super::scheduler::active_scheduler();
     let registered: std::collections::HashSet<String> = match scheduler.list_managed() {
         Ok(entries) => entries.into_iter().map(|e| e.identifier).collect(),
         Err(e) => {
@@ -947,6 +1022,18 @@ pub fn reconcile_orphan_artifacts(
 /// (same conservative policy as [`reconcile_with_scheduler`]: a
 /// transient scheduler hiccup must not destroy a real registration).
 pub fn reconcile_orphan_artifacts_now() -> Vec<OrphanArtifact> {
+    let scheduler = super::scheduler::active_scheduler();
+    reconcile_orphan_artifacts_using(scheduler.as_ref())
+}
+
+/// Scheduler-injected variant of [`reconcile_orphan_artifacts_now`]
+/// for tests. Same X29 rationale as
+/// [`reconcile_with_scheduler_using`]: the inner predicate is pure
+/// and well-covered, but the *wiring* (open store + list_managed +
+/// identifier expansion + log) needs a seam.
+pub fn reconcile_orphan_artifacts_using(
+    scheduler: &dyn super::scheduler::Scheduler,
+) -> Vec<OrphanArtifact> {
     let store = match AgentStore::open() {
         Ok(s) => s,
         Err(e) => {
@@ -957,7 +1044,6 @@ pub fn reconcile_orphan_artifacts_now() -> Vec<OrphanArtifact> {
             return Vec::new();
         }
     };
-    let scheduler = super::scheduler::active_scheduler();
     let registered: Vec<super::scheduler::RegisteredEntry> = match scheduler.list_managed() {
         Ok(entries) => entries,
         Err(e) => {
@@ -1934,5 +2020,191 @@ mod tests {
         // not run, so it was not backed up or consumed.
         assert!(v1_path.exists());
         assert!(!dir.path().join("automations.json.pre-v2-backup").exists());
+    }
+
+    // ---- grill X29: outer reconcile_with_scheduler wiring ----
+    //
+    // The pure inner predicates are well-covered above. The outer
+    // wired functions add: open store + ask scheduler + log. The
+    // `_using` variants expose the scheduler seam so we can drive
+    // the wiring end-to-end with a `FakeScheduler` against a
+    // temp `CLAUDEPOT_DATA_DIR`.
+
+    use std::cell::RefCell;
+    use std::sync::Mutex;
+
+    /// Tests that set `CLAUDEPOT_DATA_DIR` share process env state;
+    /// serialize them so they don't see each other's stores.
+    static RECONCILE_ENV_GUARD: Mutex<()> = Mutex::new(());
+
+    /// Scheduler stub for the X29 wiring tests. Returns the
+    /// `list_managed` payload the test asks for, and synthesizes
+    /// `expected_identifier` so the orphan check has something to
+    /// match against.
+    struct ScriptedScheduler {
+        managed: RefCell<Vec<super::super::scheduler::RegisteredEntry>>,
+        list_managed_error: bool,
+    }
+
+    impl ScriptedScheduler {
+        fn with(entries: Vec<super::super::scheduler::RegisteredEntry>) -> Self {
+            Self {
+                managed: RefCell::new(entries),
+                list_managed_error: false,
+            }
+        }
+        fn list_managed_errors() -> Self {
+            Self {
+                managed: RefCell::new(Vec::new()),
+                list_managed_error: true,
+            }
+        }
+    }
+
+    impl super::super::scheduler::Scheduler for ScriptedScheduler {
+        fn register(&self, _agent: &Agent) -> Result<(), AgentError> {
+            Ok(())
+        }
+        fn unregister(&self, _id: &AgentId) -> Result<(), AgentError> {
+            Ok(())
+        }
+        fn kickstart(&self, _id: &AgentId) -> Result<(), AgentError> {
+            Ok(())
+        }
+        fn list_managed(
+            &self,
+        ) -> Result<Vec<super::super::scheduler::RegisteredEntry>, AgentError> {
+            if self.list_managed_error {
+                return Err(AgentError::UnsupportedPlatform(
+                    "scripted: list_managed forced to fail",
+                ));
+            }
+            Ok(self.managed.borrow().clone())
+        }
+        fn expected_identifier(&self, id: &AgentId) -> String {
+            format!("scripted.agent.{id}")
+        }
+        fn next_runs(
+            &self,
+            _trigger: &Trigger,
+            _from: chrono::DateTime<Utc>,
+            _n: usize,
+        ) -> Result<Vec<chrono::DateTime<Utc>>, AgentError> {
+            Ok(Vec::new())
+        }
+        fn capabilities(&self) -> super::super::scheduler::SchedulerCapabilities {
+            super::super::scheduler::SchedulerCapabilities {
+                wake_to_run: false,
+                catch_up_if_missed: false,
+                run_when_logged_out: false,
+                native_label: "scripted",
+                artifact_dir: None,
+            }
+        }
+    }
+
+    /// Seed an `Installed` cron agent at the given data dir. Returns
+    /// the agent id so callers can build the scheduler payload.
+    fn seed_installed_cron_agent(data_dir: &Path, name: &str) -> AgentId {
+        // The data dir override is set by the caller; build the
+        // store at the canonical path inside it so `AgentStore::open`
+        // (called by `_using`) finds it.
+        let store_path = data_dir.join("agents.json");
+        let mut store = AgentStore::open_at(store_path).unwrap();
+        let mut a = sample(name);
+        a.lifecycle = Lifecycle::Installed;
+        let id = a.id;
+        store.add(a).unwrap();
+        store.save().unwrap();
+        drop(store);
+        id
+    }
+
+    #[test]
+    fn reconcile_with_scheduler_using_flags_an_installed_agent_with_no_artifact() {
+        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
+
+        let _id = seed_installed_cron_agent(dir.path(), "ghost-cron");
+        // Scheduler reports nothing — every Installed agent is an
+        // orphan from the `Installed → artifact` direction.
+        let sched = ScriptedScheduler::with(Vec::new());
+
+        let orphans = reconcile_with_scheduler_using(&sched);
+        assert_eq!(orphans.len(), 1, "wired reconcile flags the orphan");
+        assert_eq!(orphans[0].name, "ghost-cron");
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    #[test]
+    fn reconcile_with_scheduler_using_silent_when_artifact_present() {
+        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
+
+        let id = seed_installed_cron_agent(dir.path(), "healthy-cron");
+        // Scheduler reports the expected identifier — no orphan.
+        let entry = super::super::scheduler::RegisteredEntry {
+            identifier: format!("scripted.agent.{id}"),
+            claudepot_managed: true,
+        };
+        let sched = ScriptedScheduler::with(vec![entry]);
+
+        let orphans = reconcile_with_scheduler_using(&sched);
+        assert!(orphans.is_empty(), "wired reconcile is quiet on healthy state");
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    #[test]
+    fn reconcile_with_scheduler_using_returns_empty_on_list_managed_error() {
+        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
+
+        let _id = seed_installed_cron_agent(dir.path(), "would-be-orphan");
+        let sched = ScriptedScheduler::list_managed_errors();
+
+        // `list_managed` failing must NOT promote every agent to
+        // orphan — that would mean a transient scheduler hiccup
+        // disarms every cron agent's audit signal. The wired
+        // function swallows + logs the error and returns empty.
+        let orphans = reconcile_with_scheduler_using(&sched);
+        assert!(
+            orphans.is_empty(),
+            "a transient scheduler failure must not be reported as orphans"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    #[test]
+    fn reconcile_orphan_artifacts_using_flags_unmatched_managed_artifact() {
+        let _lock = RECONCILE_ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
+
+        let id = seed_installed_cron_agent(dir.path(), "alive");
+        // Scheduler reports the alive agent's artifact AND an extra
+        // unmatched managed artifact — the latter is an orphan.
+        let entries = vec![
+            super::super::scheduler::RegisteredEntry {
+                identifier: format!("scripted.agent.{id}"),
+                claudepot_managed: true,
+            },
+            super::super::scheduler::RegisteredEntry {
+                identifier: "scripted.agent.ghost".to_string(),
+                claudepot_managed: true,
+            },
+        ];
+        let sched = ScriptedScheduler::with(entries);
+
+        let orphans = reconcile_orphan_artifacts_using(&sched);
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].identifier, "scripted.agent.ghost");
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }
 }

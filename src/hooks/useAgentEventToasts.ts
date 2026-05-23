@@ -101,8 +101,40 @@ export function useAgentEventToasts(): void {
           if (!active) fn();
           else unlisteners.push(fn);
         })
-        .catch(() => {
-          /* non-tauri env */
+        .catch((err: unknown) => {
+          // grill X18: previously this `.catch` swallowed every
+          // failure mode. A non-Tauri renderer (vitest under jsdom,
+          // a future preview build) raises a ReferenceError-shaped
+          // failure on the `__TAURI_IPC__` global; that is the
+          // expected silent-skip case. A *real* `listen()` failure
+          // (renderer reload race mid-mount, a renamed channel on
+          // a future addition, an unexpected throw inside the
+          // plugin's invoke layer) looks identical here and used
+          // to be invisible — debugging a missing toast meant
+          // staring at the bell-icon log with no upstream signal.
+          //
+          // Discriminate: a non-Tauri renderer (vitest under jsdom,
+          // a future preview build) raises a failure whose message
+          // mentions `__TAURI_*` or a missing tauri binding. That
+          // is the expected silent-skip case. Everything else gets
+          // a `console.warn` so a real channel-typo or runtime
+          // failure is debuggable. We deliberately avoid touching
+          // `process` here — the renderer is browser-context and
+          // doesn't carry `@types/node`; the message-shape filter
+          // is sufficient for the test surface (vitest's mock
+          // never throws this catch path).
+          const msg =
+            err instanceof Error ? err.message : String(err);
+          const isNonTauri =
+            /__TAURI/i.test(msg) ||
+            (/tauri/i.test(msg) && /undefined|not (a )?function/i.test(msg));
+          if (!isNonTauri) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `useAgentEventToasts: listen(${channel}) failed:`,
+              err,
+            );
+          }
         });
     };
 
