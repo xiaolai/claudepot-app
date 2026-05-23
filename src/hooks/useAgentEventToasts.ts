@@ -71,12 +71,17 @@ export function useAgentEventToasts(): void {
       const noun = p.dropped === 1 ? "session" : "sessions";
       void emit({
         category: "agentEventBurstCapped",
-        title: "Agent catch-up capped",
-        body: `${p.dropped} settled ${noun} were not narrated this tick (cap ${p.cap}). They will fire on later ticks.`,
-        // The orchestrator emits at most once per first-tick
-        // burst, but if the app restarts and a fresh first tick
-        // re-caps, a dedupe key keeps a near-instant repeat
-        // collapsed.
+        title: "Agent first-tick cap applied",
+        // grill X16: the cap is per-agent — every event agent
+        // gets its bounded catch-up the first time it
+        // participates in a tick this process (boot-time AND
+        // late-added agents alike). The dropped sessions stay
+        // OUT of the ledger so they will re-evaluate on later
+        // ticks.
+        body: `${p.dropped} settled ${noun} were held back on a fresh agent's first contact (cap ${p.cap}). They will fire on later ticks.`,
+        // The orchestrator emits at most once per first-contact
+        // burst per tick. The dedupe key collapses a near-
+        // instant repeat (e.g. a relaunch followed by a tick).
         dedupeKey: `agent-event-burst-capped:${p.cap}:${p.dropped}`,
       });
     },

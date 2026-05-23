@@ -85,13 +85,46 @@ pub fn record_run_cmd(
 
     // Resolve the agent's `log_retention_runs` so `record_run` can
     // prune old run dirs after writing this run's `result.json`
-    // (grill finding F12). `_record-run` is a short-lived CLI
-    // process spawned by the shim, so opening the store here is
-    // cheap. A store-open / agent-not-found failure resolves to
-    // `None` — the prune is skipped, never guessed.
-    let log_retention_runs = AgentStore::open()
-        .ok()
-        .and_then(|store| store.get(&id).map(|a| a.log_retention_runs));
+    // (grill findings F12 + X10).
+    //
+    // Previously this called the blocking `AgentStore::open()` —
+    // which acquires the store's exclusive advisory lock — just to
+    // read one field. Under GUI contention (the user mid-installing
+    // an agent while a different agent's `_record-run` shim runs)
+    // every `claude -p` exit stalled until the GUI released the
+    // lock. We now use the non-blocking `try_open`:
+    //
+    // - lock free → read the field, prune as usual.
+    // - lock held → log at `debug!` (skipped retention is harmless;
+    //   the next run will prune) and proceed without a count.
+    // - real I/O / migration error → log at `warn!` and proceed
+    //   without a count (the run record itself must still be
+    //   written).
+    //
+    // The retention behavior remains best-effort by design; skipping
+    // a single pass while the GUI mid-installs is the right trade.
+    let log_retention_runs = match AgentStore::try_open() {
+        Ok(Some(store)) => store.get(&id).map(|a| a.log_retention_runs),
+        Ok(None) => {
+            tracing::debug!(
+                agent_id = %id,
+                run_id = %run_id,
+                "record-run: agent store lock busy — skipping retention prune \
+                 this call (a later run will catch up)"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!(
+                agent_id = %id,
+                run_id = %run_id,
+                error = %e,
+                "record-run: agent store open failed — skipping retention prune \
+                 this call; the run record will still be written"
+            );
+            None
+        }
+    };
 
     let inputs = RecordInputs {
         agent_id: id,

@@ -557,16 +557,33 @@ pub fn run() {
             // `src-tauri/src/usage_snapshot.rs`.
             usage_snapshot::spawn(app.handle().clone());
 
-            // Boot-time agent reconciliation (grill finding F15).
-            // Loudly logs any agent marked `Installed` in
-            // `agents.json` for which the OS scheduler reports no
-            // live artifact — catches a hand-edited lifecycle field
-            // or an install rollback that could not re-save. It is
-            // observability only (no mutation) and best-effort, so
-            // it runs on a detached blocking task and never blocks
-            // setup. See `claudepot_core::agent::reconcile_with_scheduler`.
+            // Boot-time agent reconciliation (grill findings F15 +
+            // X9). Two directions:
+            //
+            // 1. `reconcile_with_scheduler` (F15): every
+            //    `Installed` agent must have a live scheduler
+            //    artifact. Loudly logs any record claiming
+            //    `Installed` whose artifact is missing — catches a
+            //    hand-edited lifecycle field or an install rollback
+            //    that could not re-save.
+            // 2. `reconcile_orphan_artifacts_now` (X9): every
+            //    Claudepot-managed scheduler artifact must have a
+            //    matching `Installed` agent record. Loudly logs any
+            //    artifact with no record behind it — catches
+            //    `agents.json` hand-edits or third-process artifact
+            //    writes that leave a `claude -p` firing on schedule
+            //    with no visible record. Observability only — never
+            //    removes the artifact, matching F15's conservative
+            //    policy.
+            //
+            // Both are best-effort and run on a detached blocking
+            // task so they never block setup. The reverse-direction
+            // check (X15) replaces the per-tick reconcile that was
+            // previously running every 5 min in the event
+            // orchestrator.
             tauri::async_runtime::spawn_blocking(|| {
                 claudepot_core::agent::reconcile_with_scheduler();
+                claudepot_core::agent::reconcile_orphan_artifacts_now();
             });
 
             // Background poller for CC CLI + Claude Desktop updates.

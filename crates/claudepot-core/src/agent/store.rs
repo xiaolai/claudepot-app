@@ -61,8 +61,8 @@ mod lock;
 use lock::StoreLock;
 
 use super::draft::{
-    validate_cwd, validate_event_trigger_numerics, validate_rate_limit_numerics,
-    validate_trigger_timezone,
+    validate_agent_inputs, validate_cwd, validate_event_trigger_numerics,
+    validate_rate_limit_numerics, validate_trigger_timezone,
 };
 use super::error::AgentError;
 use super::slug::validate_name;
@@ -233,6 +233,58 @@ impl AgentStore {
         })
     }
 
+    /// Best-effort non-blocking open (grill finding X10). Returns
+    /// `Ok(None)` when the advisory lock is currently held by
+    /// another process or thread, so the caller can degrade
+    /// gracefully instead of blocking the way [`open`](Self::open)
+    /// does. A real failure (FS error, corrupt v2 file, migration
+    /// problem) still propagates as `Err`.
+    ///
+    /// Designed for short-lived best-effort *readers* — the
+    /// `_record-run` CLI verb in particular needs only the agent's
+    /// `log_retention_runs` field to drive the post-record prune.
+    /// Blocking on the GUI's open mutex just to read a single
+    /// number stalls every `claude -p` exit; skipping a single
+    /// retention pass under contention is the correct trade-off.
+    /// New skip-on-contention readers should funnel through here so
+    /// the "no, but not an error" path stays in one place.
+    pub fn try_open() -> Result<Option<Self>, AgentError> {
+        Self::try_open_at(agents_file_path())
+    }
+
+    /// Non-blocking variant of [`open_at`](Self::open_at). See
+    /// [`try_open`](Self::try_open) for the rationale.
+    pub fn try_open_at(path: PathBuf) -> Result<Option<Self>, AgentError> {
+        let lock = match StoreLock::try_acquire(&path)? {
+            Some(l) => l,
+            None => return Ok(None),
+        };
+
+        if path.exists() {
+            return Ok(Some(Self {
+                file: Self::load_v2(&path)?,
+                path,
+                _lock: lock,
+            }));
+        }
+
+        let legacy_path = legacy_agents_file_path_for(&path);
+        if legacy_path.exists() {
+            let file = Self::migrate_v1_to_v2(&legacy_path, &path)?;
+            return Ok(Some(Self {
+                file,
+                path,
+                _lock: lock,
+            }));
+        }
+
+        Ok(Some(Self {
+            path,
+            file: AgentsFile::default(),
+            _lock: lock,
+        }))
+    }
+
     /// Read and validate a v2 `agents.json` from disk.
     ///
     /// **Threat-model note (grill finding F15).** `lifecycle` is a
@@ -389,6 +441,15 @@ impl AgentStore {
         // Re-validate the working directory at the store boundary —
         // the last gate before persistence (grill finding F4).
         validate_cwd(&agent.cwd)?;
+        // grill X13: hoist the F18 per-field caps + control-char
+        // gate to the persistence boundary. `build_draft` enforces
+        // these for the AI-drafting path; the GUI verbs go through
+        // `add`/`update`, which previously skipped them entirely —
+        // meaning a renderer-supplied 10 MB `prompt` or
+        // control-character `system_prompt` could land on disk.
+        // Defense-in-depth: a draft path already validated; an
+        // unchecked GUI/template path did not.
+        validate_agent_inputs(&agent)?;
         // Reject a cron trigger carrying an IANA timezone — no
         // scheduler adapter honors it (grill finding F11). This
         // gates the GUI Add-Agent path too, not just the CLI draft.
@@ -605,6 +666,13 @@ impl AgentStore {
         // rate-limit slot, is rejected before persistence.
         validate_event_trigger_numerics(&a.trigger)?;
         validate_rate_limit_numerics(a.rate_limit.as_ref())?;
+        // grill X13: per-field byte caps + control-char rejection
+        // (F18). Same rationale as `add` — the GUI's `agents_update`
+        // would otherwise let an arbitrary-size `prompt` /
+        // `system_prompt` patch reach disk. Validated against the
+        // post-merge clone so partial patches that *re-set* a now-
+        // oversize field are caught, not the pre-merge stale view.
+        validate_agent_inputs(&a)?;
         a.updated_at = chrono::Utc::now();
         // Commit the validated clone back into the live store. Any
         // earlier `Err` return path leaves `self.file.agents[idx]`
@@ -709,6 +777,26 @@ pub struct OrphanInstalled {
     pub name: String,
 }
 
+/// One discrepancy found by [`reconcile_orphan_artifacts`] — the
+/// **reverse** direction of [`OrphanInstalled`]: a Claudepot-managed
+/// scheduler artifact whose identifier corresponds to no `Installed`
+/// agent record (no record at all, or a `Draft`/removed record). The
+/// artifact will fire `claude -p` on schedule with no visible record
+/// behind it.
+///
+/// grill finding X9: a hand-edit to `agents.json` (or a third-process
+/// crash mid-install before the v2 `agents.json` was rewritten) can
+/// leave a stale launchd/systemd/schtasks artifact behind. The
+/// existing `reconcile_installed_agents` checks the
+/// `Installed → artifact` direction only; this struct + its
+/// reconciler close the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrphanArtifact {
+    /// The scheduler identifier the host reports (launchd label,
+    /// systemd unit, Task Scheduler path).
+    pub identifier: String,
+}
+
 /// Pure reconciliation core (grill finding F15).
 ///
 /// Compares every `Installed`, OS-scheduled agent against the set of
@@ -807,6 +895,112 @@ pub fn reconcile_with_scheduler() -> Vec<OrphanInstalled> {
         tracing::debug!(
             "agent reconciliation: every Installed agent has a live \
              scheduler artifact"
+        );
+    }
+    orphans
+}
+
+/// Pure reverse-direction reconciler (grill finding X9). Returns the
+/// scheduler artifacts the host reports that **do not** correspond to
+/// any `Installed` agent in the store.
+///
+/// `reconcile_installed_agents` checks one direction only:
+/// `Installed → artifact`. This closes the other:
+/// `artifact → Installed`. A `claudepot_managed` launchd/systemd/
+/// schtasks artifact whose identifier maps to no live `Installed`
+/// record will fire `claude -p` on schedule with no visible record
+/// behind it — the same blind-firing hazard the install gate (X1, X2)
+/// closes for the create direction, but reachable through a hand-edit
+/// to `agents.json` or a third-process artifact write.
+///
+/// `expected_identifier` maps an agent id to the scheduler identifier
+/// the active adapter would register for it (matches the
+/// [`reconcile_installed_agents`] seam). `installed_identifiers`
+/// pre-computes the set of identifiers for every `Installed` agent;
+/// any reported artifact whose id is not in that set is an orphan.
+///
+/// `registered_artifacts` is the list the scheduler reports. The
+/// `claudepot_managed` filter belongs to the caller — the wired
+/// [`reconcile_with_scheduler_full`] keeps only managed entries
+/// before passing them in. (Foreign launchd/systemd labels we never
+/// installed must not be flagged.)
+pub fn reconcile_orphan_artifacts(
+    installed_identifiers: &std::collections::HashSet<String>,
+    registered_artifacts: &[super::scheduler::RegisteredEntry],
+) -> Vec<OrphanArtifact> {
+    registered_artifacts
+        .iter()
+        .filter(|e| e.claudepot_managed)
+        .filter(|e| !installed_identifiers.contains(&e.identifier))
+        .map(|e| OrphanArtifact {
+            identifier: e.identifier.clone(),
+        })
+        .collect()
+}
+
+/// Boot-time wired version of [`reconcile_orphan_artifacts`]. Opens
+/// the store, asks the active scheduler what artifacts it holds, and
+/// **loudly logs** every Claudepot-managed artifact with no live
+/// `Installed` record. Best-effort: a store-open or scheduler-query
+/// failure logs + returns empty so it can run unconditionally at
+/// boot. **Observability only** — never removes the orphan artifact
+/// (same conservative policy as [`reconcile_with_scheduler`]: a
+/// transient scheduler hiccup must not destroy a real registration).
+pub fn reconcile_orphan_artifacts_now() -> Vec<OrphanArtifact> {
+    let store = match AgentStore::open() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "agent reverse reconciliation: store open failed; skipping"
+            );
+            return Vec::new();
+        }
+    };
+    let scheduler = super::scheduler::active_scheduler();
+    let registered: Vec<super::scheduler::RegisteredEntry> = match scheduler.list_managed() {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "agent reverse reconciliation: scheduler list_managed failed; skipping"
+            );
+            return Vec::new();
+        }
+    };
+    let installed: std::collections::HashSet<String> = store
+        .list()
+        .iter()
+        .filter(|a| a.lifecycle == Lifecycle::Installed)
+        // Same trigger guard as the other direction: an `Installed`
+        // Manual/Event agent legitimately has no scheduler artifact,
+        // so its `expected_identifier` would never appear in the
+        // host's report and would always look like an orphan from
+        // the artifact side too. Filter both sides identically.
+        .filter(|a| !a.trigger.has_no_os_schedule())
+        .map(|a| scheduler.expected_identifier(&a.id))
+        .collect();
+    let orphans = reconcile_orphan_artifacts(&installed, &registered);
+    for orphan in &orphans {
+        // Log loudly — same severity as the other direction. The
+        // file:line context comes from `tracing`'s metadata when the
+        // subscriber is configured for it.
+        tracing::error!(
+            identifier = %orphan.identifier,
+            "agent reverse reconciliation: a Claudepot-managed \
+             scheduler artifact exists with NO matching Installed \
+             agent — it will fire `claude -p` on schedule with no \
+             visible record. Either agents.json was hand-edited \
+             (removing the record but not the artifact), or a third \
+             process created the artifact. Inspect the artifact and \
+             unregister it manually if it is stale; Claudepot will \
+             NOT remove it automatically."
+        );
+    }
+    if orphans.is_empty() {
+        tracing::debug!(
+            "agent reverse reconciliation: every managed artifact has \
+             a matching Installed agent"
         );
     }
     orphans
@@ -1246,6 +1440,66 @@ mod tests {
         ));
     }
 
+    // ---- grill X13: F18 caps + control-char gate at the
+    // persistence boundary ----
+
+    #[test]
+    fn add_rejects_oversize_prompt_at_persistence_boundary() {
+        // X13: the byte caps that `build_draft` enforces must also
+        // fire when `agents_add` / `agent_add_from_template` go
+        // through `AgentStore::add`. A 200 KB prompt overflows the
+        // 128 KB `MAX_PROMPT_BYTES` ceiling.
+        use crate::agent::draft::MAX_PROMPT_BYTES;
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut bad = sample("oversize-agent");
+        bad.prompt = "x".repeat(MAX_PROMPT_BYTES + 1);
+        let err = store.add(bad).unwrap_err();
+        assert!(
+            matches!(err, AgentError::InvalidEnv(ref m) if m.contains("prompt")),
+            "expected InvalidEnv mentioning prompt, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn add_rejects_control_chars_in_system_prompt() {
+        // X13: control characters in any shell-flag-bound field
+        // must be rejected at persistence too (the draft path
+        // already rejects them).
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut bad = sample("ctrl-agent");
+        bad.system_prompt = Some(String::from("hello\u{0007}bell"));
+        let err = store.add(bad).unwrap_err();
+        assert!(
+            matches!(err, AgentError::InvalidEnv(ref m) if m.contains("control")),
+            "expected InvalidEnv mentioning control characters, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn update_rejects_oversize_prompt_at_persistence_boundary() {
+        // X13 paired test on the update path — `agents_update`
+        // hits this gate too, not just `add`.
+        use crate::agent::draft::MAX_PROMPT_BYTES;
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let a = sample("u-agent");
+        let id = a.id;
+        store.add(a).unwrap();
+        let patch = AgentPatch {
+            prompt: Some("y".repeat(MAX_PROMPT_BYTES + 1)),
+            ..Default::default()
+        };
+        let err = store.update(&id, patch).unwrap_err();
+        assert!(
+            matches!(err, AgentError::InvalidEnv(ref m) if m.contains("prompt")),
+            "expected InvalidEnv on oversize prompt patch, got {err:?}"
+        );
+        // The record must be unchanged.
+        assert_eq!(store.get(&id).unwrap().prompt, "say hi");
+    }
+
     // ---- grill X3 / F26: Custom MCP gate on update ------------
 
     #[test]
@@ -1576,6 +1830,72 @@ mod tests {
             orphans.is_empty(),
             "draft / manual / disabled agents are never reconciliation orphans"
         );
+    }
+
+    // ---- grill X9: reverse-direction reconciliation ----
+
+    fn registered(identifier: &str, managed: bool) -> super::super::scheduler::RegisteredEntry {
+        super::super::scheduler::RegisteredEntry {
+            identifier: identifier.to_string(),
+            claudepot_managed: managed,
+        }
+    }
+
+    #[test]
+    fn reverse_reconcile_flags_managed_artifact_with_no_installed_record() {
+        // GOLDEN (X9): the scheduler reports a managed artifact, but
+        // the store has no `Installed` record whose
+        // `expected_identifier` matches. The artifact will fire on
+        // schedule with no visible record — exactly the hand-edit
+        // hazard X9 exists to surface.
+        let installed: std::collections::HashSet<String> =
+            ["io.claudepot.agent.alive".to_string()].into_iter().collect();
+        let reported = vec![
+            registered("io.claudepot.agent.alive", true),
+            registered("io.claudepot.agent.orphan", true),
+        ];
+        let orphans = reconcile_orphan_artifacts(&installed, &reported);
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].identifier, "io.claudepot.agent.orphan");
+    }
+
+    #[test]
+    fn reverse_reconcile_ignores_foreign_unmanaged_artifacts() {
+        // The host can carry plenty of launchd / systemd entries we
+        // never installed. The `claudepot_managed` filter must keep
+        // them out of the orphan list — otherwise every machine
+        // would light up with false positives at boot.
+        let installed: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let reported = vec![
+            registered("com.apple.something.else", false),
+            registered("io.claudepot.agent.foo", false),
+        ];
+        let orphans = reconcile_orphan_artifacts(&installed, &reported);
+        assert!(orphans.is_empty(), "unmanaged entries must never be flagged");
+    }
+
+    #[test]
+    fn reverse_reconcile_empty_when_every_artifact_has_a_record() {
+        let installed: std::collections::HashSet<String> = [
+            "io.claudepot.agent.a".to_string(),
+            "io.claudepot.agent.b".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        let reported = vec![
+            registered("io.claudepot.agent.a", true),
+            registered("io.claudepot.agent.b", true),
+        ];
+        let orphans = reconcile_orphan_artifacts(&installed, &reported);
+        assert!(orphans.is_empty());
+    }
+
+    #[test]
+    fn reverse_reconcile_empty_when_nothing_registered() {
+        let installed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let orphans = reconcile_orphan_artifacts(&installed, &[]);
+        assert!(orphans.is_empty(), "empty inputs cannot produce orphans");
     }
 
     #[test]

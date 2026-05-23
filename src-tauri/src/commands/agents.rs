@@ -173,18 +173,18 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
         // template path.
         lifecycle: claudepot_core::agent::Lifecycle::Installed,
         drafted_by: dto.drafted_by.clone(),
-        // F19: `created_via` is stamped by the create path itself,
-        // never accepted from the wire. The GUI Add-Agent form
-        // arrives here with `template_id == None`; a
-        // `templates_install` call arrives with `template_id ==
-        // Some(_)` (the blueprint id). The free-text `drafted_by`
-        // is advisory; `created_via` is the trustworthy signal the
-        // install review can flag.
-        created_via: if dto.template_id.is_some() {
-            CreatedVia::Template
-        } else {
-            CreatedVia::Gui
-        },
+        // F19 + grill X14: `created_via` is stamped by the create
+        // *path*, never by the wire. The previous shape — branch on
+        // `dto.template_id.is_some()` — was launderable: a
+        // renderer-controlled `template_id` flipped the audit signal
+        // to `Template`, but the real template-instantiation flow is
+        // `agent_add_from_template`, which stamps `Template` itself.
+        // This path is the GUI Add-Agent form; the truthful stamp is
+        // always `Gui`. The `template_id` field is still persisted
+        // (it remains independent metadata on `Agent`), but it can no
+        // longer rewrite the provenance signal that the install
+        // review flags against.
+        created_via: CreatedVia::Gui,
     })
 }
 
@@ -905,5 +905,73 @@ pub async fn agents_linger_enable() -> Result<(), String> {
     #[cfg(not(target_os = "linux"))]
     {
         Err(String::from("linger is a Linux-only feature"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dto_agents::PlatformOptionsDto;
+
+    /// grill X14: the GUI Add-Agent create path stamps
+    /// `created_via = Gui` regardless of what the renderer puts in
+    /// `template_id`. The real template path is
+    /// `agent_add_from_template`, which stamps `Template` itself; a
+    /// renderer can no longer launder the provenance signal through
+    /// this verb's DTO.
+    #[test]
+    fn build_agent_from_create_always_stamps_gui_even_with_template_id() {
+        let dto = AgentCreateDto {
+            name: "x14-canary".into(),
+            display_name: None,
+            description: None,
+            binary_kind: "first_party".into(),
+            binary_route_id: None,
+            model: Some("sonnet".into()),
+            cwd: "/tmp".into(),
+            prompt: "hi".into(),
+            system_prompt: None,
+            append_system_prompt: None,
+            permission_mode: "default".into(),
+            allowed_tools: vec!["Read".into()],
+            add_dir: vec![],
+            max_budget_usd: None,
+            fallback_model: None,
+            output_format: "json".into(),
+            json_schema: None,
+            bare: false,
+            extra_env: Default::default(),
+            trigger_kind: Some("manual".into()),
+            cron: String::new(),
+            timezone: None,
+            event_kind: None,
+            event_debounce_secs: None,
+            platform_options: PlatformOptionsDto {
+                wake_to_run: false,
+                catch_up_if_missed: false,
+                run_when_logged_out: false,
+            },
+            log_retention_runs: 50,
+            // A renderer-supplied template id MUST NOT flip the
+            // provenance stamp — the GUI Add form has no template
+            // flow; only `agent_add_from_template` does.
+            template_id: Some("session-narrator".into()),
+            disallowed_tools: vec![],
+            mcp_servers: vec![],
+            run_as: None,
+            task_budget: None,
+            rate_limit: None,
+            drafted_by: None,
+        };
+        let agent = build_agent_from_create(dto).expect("build_agent_from_create");
+        assert!(
+            matches!(agent.created_via, CreatedVia::Gui),
+            "X14: agents_add must always stamp Gui, got {:?}",
+            agent.created_via
+        );
+        // `template_id` is retained as independent metadata — the
+        // path doesn't strip it, it just doesn't let it rewrite the
+        // provenance signal.
+        assert_eq!(agent.template_id.as_deref(), Some("session-narrator"));
     }
 }

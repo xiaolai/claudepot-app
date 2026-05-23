@@ -27,20 +27,17 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use claudepot_core::agent::{
     self,
+    agent_runs_dir,
     events::{
         evaluate as evaluate_events, store as events_store, AgentRunStats, EventFire,
         EventsFile,
     },
-    list_run_ids, read_run, reconcile_with_scheduler, resolve_binary, AgentStore,
-    Agent, Lifecycle, Trigger,
+    list_run_ids, read_run, resolve_binary, AgentStore, Agent, Lifecycle, Trigger,
 };
 use claudepot_core::agent::install::current_claudepot_cli;
 use claudepot_core::session::SessionRow;
@@ -53,33 +50,61 @@ use tauri::{AppHandle, Emitter, Manager};
 /// closed; without a cap the very first tick after launch would
 /// fire one run per settled session, in one go, for every event-
 /// triggered agent. The cap bounds blast radius to ~5 billed
-/// `claude -p` runs across the whole machine the first time.
-/// Subsequent ticks run uncapped — the steady state is at most
-/// one fire per agent per tick (the evaluator already enforces
-/// this).
+/// `claude -p` runs across the whole machine the first time an
+/// agent participates in a tick. Subsequent ticks for that agent
+/// run uncapped — the steady state is at most one fire per agent
+/// per tick (the evaluator already enforces this).
 const FIRST_TICK_BURST_CAP: usize = 5;
 
 /// Orchestrator state — `manage()`'d by the Tauri app, reachable
-/// via `app.state::<Arc<EventOrchestrator>>()`. The whole struct
-/// is a single boolean: "has at least one tick already run?". Used
-/// to apply [`FIRST_TICK_BURST_CAP`] only on the very first tick.
+/// via `app.state::<Arc<EventOrchestrator>>()`.
+///
+/// grill X16: previously this was a single per-process boolean —
+/// the cap fired exactly once at orchestrator boot, and any event
+/// agent ADDED LATER got uncapped first contact with the session
+/// index. Now the cap is per-agent: every agent gets its bounded
+/// catch-up the first time it appears in a tick, no matter when
+/// it was added. The set is in-process state (lost on relaunch),
+/// which means the cap fires again on every restart for every
+/// agent — exactly the conservative behavior the cap is for.
 #[derive(Default)]
 pub struct EventOrchestrator {
-    booted: AtomicBool,
+    /// Agent ids that have already participated in at least one
+    /// tick this process. An agent NOT in this set is "boot-fresh
+    /// from this orchestrator's perspective" and the first-tick
+    /// cap applies.
+    seen_agents: Mutex<HashSet<String>>,
 }
 
 impl EventOrchestrator {
     pub fn new() -> Self {
         Self {
-            booted: AtomicBool::new(false),
+            seen_agents: Mutex::new(HashSet::new()),
         }
     }
 
-    /// Mark the first tick as having run. Returns `true` iff this
-    /// call is the one that flipped the flag, i.e. the caller is
-    /// inside the first tick.
-    fn enter_tick(&self) -> bool {
-        !self.booted.swap(true, Ordering::SeqCst)
+    /// Return the set of agent ids that have NEVER been seen by
+    /// this process before this call, AND mark them as seen.
+    ///
+    /// The orchestrator uses this to decide which fires need to
+    /// pass through the first-tick burst cap: a fire belongs to a
+    /// "fresh" agent iff its id is in the returned set.
+    fn mark_seen(&self, ids: &[String]) -> HashSet<String> {
+        let mut guard = match self.seen_agents.lock() {
+            Ok(g) => g,
+            // A poisoned lock means a prior tick panicked while
+            // holding it — defensive: just take the inner without
+            // exploding. The cap may double-fire for these agents
+            // (correct trade-off vs. crashing the orchestrator).
+            Err(p) => p.into_inner(),
+        };
+        let mut fresh = HashSet::new();
+        for id in ids {
+            if guard.insert(id.clone()) {
+                fresh.insert(id.clone());
+            }
+        }
+        fresh
     }
 }
 
@@ -106,14 +131,15 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
     let emit_capped: Arc<dyn Fn(usize, usize) + Send + Sync> =
         Arc::new(move |dropped, cap| emit_first_tick_capped(&app_for_emit, dropped, cap));
 
-    let first_tick = {
-        let state = app.state::<Arc<EventOrchestrator>>();
-        state.enter_tick()
-    };
+    // grill X16: the cap is per-agent now. Capture the state handle
+    // so `tick_inner`'s env can ask it which agents are fresh on
+    // this tick — including agents added AFTER orchestrator boot,
+    // which the prior global boolean missed.
+    let state = app.state::<Arc<EventOrchestrator>>().inner().clone();
 
     let env = ProdTickEnv {
         config_dir,
-        first_tick,
+        orchestrator: state,
         emit_capped,
     };
 
@@ -130,9 +156,12 @@ trait TickEnv {
     fn load_ledger(&self) -> std::io::Result<EventsFile>;
     fn save_ledger(&self, ledger: &EventsFile) -> Result<(), events_store::AgentEventsError>;
     fn list_sessions(&self) -> Vec<SessionRow>;
-    /// First-tick-after-process-start flag. Production reads this
-    /// from `EventOrchestrator::enter_tick`; tests supply a constant.
-    fn first_tick(&self) -> bool;
+    /// Mark a slice of agent ids as having participated in a tick,
+    /// returning the subset that had never been seen before (grill
+    /// X16). The first-tick burst cap applies to fires belonging to
+    /// the returned set. Production delegates to
+    /// [`EventOrchestrator::mark_seen`]; tests supply a fixed set.
+    fn mark_agents_seen(&self, ids: &[String]) -> HashSet<String>;
     /// Emit the "burst capped" notification to the frontend. A no-op
     /// in tests.
     fn emit_burst_capped(&self, dropped: usize, cap: usize);
@@ -144,7 +173,7 @@ trait TickEnv {
 /// Production [`TickEnv`] — wires real I/O.
 struct ProdTickEnv {
     config_dir: PathBuf,
-    first_tick: bool,
+    orchestrator: Arc<EventOrchestrator>,
     emit_capped: Arc<dyn Fn(usize, usize) + Send + Sync>,
 }
 
@@ -173,14 +202,20 @@ impl TickEnv for ProdTickEnv {
             }
         }
     }
-    fn first_tick(&self) -> bool {
-        self.first_tick
+    fn mark_agents_seen(&self, ids: &[String]) -> HashSet<String> {
+        self.orchestrator.mark_seen(ids)
     }
     fn emit_burst_capped(&self, dropped: usize, cap: usize) {
         (self.emit_capped)(dropped, cap);
     }
     fn reconcile(&self) {
-        let _ = reconcile_with_scheduler();
+        // grill X15: dropped. Boot-time reconciliation in `lib.rs`
+        // (both F15 forward and X9 reverse) already catches every
+        // case the per-tick call was designed to surface. Running
+        // it 288 times a day per host was wasted work plus lock
+        // contention on the store. Kept as a no-op rather than
+        // removed from the trait so the test fixtures (and any
+        // future post-tick observability hook) stay wireable.
     }
 }
 
@@ -258,10 +293,19 @@ where
         now,
     );
 
-    // ---- 6. Bounded catch-up cap (D6) ------------------------
-    if env.first_tick() {
-        fires = apply_first_tick_cap_with_emit(
+    // ---- 6. Bounded catch-up cap (D6 + grill X16) -------------
+    // The cap applies per-agent: every event-triggered agent gets
+    // its bounded catch-up the FIRST time it participates in a
+    // tick this process. Agents added later (the X16 scenario) are
+    // capped on their first contact; long-running agents are not
+    // re-capped on every tick.
+    let agent_ids_this_tick: Vec<String> =
+        agents.iter().map(|a| a.id.to_string()).collect();
+    let fresh_agents = env.mark_agents_seen(&agent_ids_this_tick);
+    if !fresh_agents.is_empty() {
+        fires = apply_per_agent_first_tick_cap(
             fires,
+            &fresh_agents,
             FIRST_TICK_BURST_CAP,
             |dropped, cap| env.emit_burst_capped(dropped, cap),
         );
@@ -436,29 +480,61 @@ fn build_run_stats_from_ledger(
     out
 }
 
-/// Apply the first-tick catch-up cap. Drops fires beyond `cap` and
-/// invokes the supplied emit closure once (rather than spamming one
-/// emit per dropped fire). The closure abstraction lets tests
-/// observe the cap without touching the Tauri `AppHandle`.
-fn apply_first_tick_cap_with_emit<F>(
+/// Apply the per-agent first-tick burst cap (grill X16).
+///
+/// `fresh_agents` is the subset of agents that have NEVER
+/// participated in a tick this process before — agents added since
+/// orchestrator boot are tracked here just like boot-time agents.
+/// The cap bounds the **total fires emitted by fresh agents** on
+/// this tick (the "first contact blast radius" the cap was always
+/// designed to bound — the old global cap was the same number,
+/// just scoped to boot-time). Fires belonging to already-seen
+/// agents pass through uncapped: the evaluator's "at most one fire
+/// per agent per tick" guard suffices for the steady state.
+///
+/// Returns the kept fires in input order. The emit closure is
+/// invoked at most once per call with the total dropped count.
+/// Tests pass a fixture closure to observe without touching the
+/// Tauri `AppHandle`.
+fn apply_per_agent_first_tick_cap<F>(
     fires: Vec<EventFire>,
+    fresh_agents: &HashSet<String>,
     cap: usize,
     emit: F,
 ) -> Vec<EventFire>
 where
     F: FnOnce(usize, usize),
 {
-    if fires.len() <= cap {
+    // Fast path: if no fire belongs to a fresh agent, nothing to
+    // cap.
+    let any_fresh = fires.iter().any(|f| fresh_agents.contains(&f.agent_id));
+    if !any_fresh {
         return fires;
     }
-    let dropped = fires.len() - cap;
-    tracing::warn!(
-        cap,
-        dropped,
-        "agent_event_orchestrator: first-tick burst capped"
-    );
-    emit(dropped, cap);
-    fires.into_iter().take(cap).collect()
+    let mut kept = Vec::with_capacity(fires.len());
+    let mut fresh_kept = 0usize;
+    let mut dropped = 0usize;
+    for fire in fires {
+        let is_fresh = fresh_agents.contains(&fire.agent_id);
+        if is_fresh {
+            if fresh_kept >= cap {
+                dropped += 1;
+                continue;
+            }
+            fresh_kept += 1;
+        }
+        kept.push(fire);
+    }
+    if dropped > 0 {
+        tracing::warn!(
+            cap,
+            dropped,
+            fresh_agents = fresh_agents.len(),
+            "agent_event_orchestrator: per-agent first-tick burst capped"
+        );
+        emit(dropped, cap);
+    }
+    kept
 }
 
 /// Build the `extra_env` map a session-settled dispatch passes to
@@ -503,6 +579,18 @@ async fn dispatch(app: &AppHandle, agent: &Agent, fire: &EventFire) {
                 "agent_event_orchestrator: resolve_binary failed; \
                  fire is recorded but no run will be spawned"
             );
+            // grill X11: the ledger has the pair recorded (F1), so
+            // the next tick will skip this (agent, session) — without
+            // an on-disk breadcrumb the failed dispatch is invisible
+            // to the run-history surface. Drop a synthetic
+            // dispatch-failed dir so a user investigating "why was
+            // session X never narrated?" can find the row.
+            write_dispatch_failed_breadcrumb(
+                &agent.id,
+                &fire.session_id,
+                "resolve_binary",
+                &e.to_string(),
+            );
             emit_failed(app, &fire.agent_id, &fire.session_id, &e.to_string());
             return;
         }
@@ -513,6 +601,13 @@ async fn dispatch(app: &AppHandle, agent: &Agent, fire: &EventFire) {
             tracing::warn!(
                 error = %e,
                 "agent_event_orchestrator: current_claudepot_cli failed"
+            );
+            // grill X11: see resolve_binary branch above.
+            write_dispatch_failed_breadcrumb(
+                &agent.id,
+                &fire.session_id,
+                "current_claudepot_cli",
+                &e.to_string(),
             );
             emit_failed(app, &fire.agent_id, &fire.session_id, &e.to_string());
             return;
@@ -541,6 +636,77 @@ async fn dispatch(app: &AppHandle, agent: &Agent, fire: &EventFire) {
             );
             emit_failed(app, &fire.agent_id, &fire.session_id, &e.to_string());
         }
+    }
+}
+
+/// grill X11 — pre-spawn dispatch failure breadcrumb.
+///
+/// When `resolve_binary` / `current_claudepot_cli` fail BEFORE
+/// `run_now`, no run directory has been created and `record_run`
+/// never runs. The (agent, session) pair is in the ledger (F1) so
+/// the next tick will skip it — leaving the user with a session
+/// that should have been narrated, no record, no log, and a single
+/// toast that may have been dismissed.
+///
+/// This drops a synthetic `dispatch-failed-<session>/error.txt`
+/// directory under the agent's runs root. The run-history surface
+/// already lists every subdirectory of `runs/`; the breadcrumb
+/// shows up as a row the user can inspect. Mirror of the F5
+/// `record-run-error.txt` shape: a plain text file with the run's
+/// identifying details + the failure message.
+///
+/// Best-effort throughout — every I/O failure is logged + swallowed,
+/// because failing to write a breadcrumb must never abort the
+/// orchestrator. The ledger already captured the fire; the
+/// breadcrumb is an observability convenience on top.
+fn write_dispatch_failed_breadcrumb(
+    agent_id: &agent::AgentId,
+    session_id: &str,
+    stage: &str,
+    error: &str,
+) {
+    // Use an ISO timestamp + sanitized session prefix so the dir
+    // name sorts the same way `run-id` directories do (the
+    // run-history panel sorts by name) AND so a re-fire on the
+    // same session at a later time produces a new row rather than
+    // overwriting the prior one.
+    let now = Utc::now().format("%Y%m%dT%H%M%SZ");
+    let session_slug: String = session_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .take(40)
+        .collect();
+    let run_id = format!("dispatch-failed-{now}-{session_slug}");
+    let runs_root = agent_runs_dir(agent_id);
+    let dir = runs_root.join(&run_id);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(
+            agent_id = %agent_id,
+            session_id = %session_id,
+            error = %e,
+            "agent_event_orchestrator: dispatch-failed breadcrumb dir \
+             create failed; the user will not see this run in run-history"
+        );
+        return;
+    }
+    let body = format!(
+        "dispatch failed for agent={agent_id} session={session_id}\n\
+         stage={stage}\n\
+         at={now}\n\n\
+         error: {error}\n\n\
+         note: The (agent, session) pair has been recorded in the \
+         event ledger (F1 ordering), so the next tick will not re-fire \
+         it. To re-attempt narration, either delete the pair from \
+         ~/.claudepot/agent-events.json or use Run Now on the agent.\n"
+    );
+    if let Err(e) = std::fs::write(dir.join("error.txt"), body) {
+        tracing::warn!(
+            agent_id = %agent_id,
+            session_id = %session_id,
+            error = %e,
+            "agent_event_orchestrator: dispatch-failed breadcrumb file \
+             write failed"
+        );
     }
 }
 
@@ -709,20 +875,33 @@ mod tests {
     }
 
     #[test]
-    fn test_event_orchestrator_enter_tick_only_returns_true_once() {
-        // Catch-up cap must apply on the FIRST tick after process
-        // start and never again — subsequent ticks see the steady
-        // state, where the evaluator's "at most one fire per agent
-        // per tick" guard suffices.
+    fn test_event_orchestrator_mark_seen_returns_only_first_contact() {
+        // grill X16: `mark_seen` returns the subset of ids that
+        // had not been seen before. Every subsequent call with the
+        // same ids returns an empty set; brand-new ids appear in
+        // the fresh set on their first call. The catch-up cap is
+        // applied to fires for ids in the returned set, so the
+        // semantics are "an agent gets capped on its FIRST tick
+        // this process — whenever that tick happens to be."
         let o = EventOrchestrator::new();
-        assert!(o.enter_tick(), "the first tick is the first tick");
+        let fresh1 = o.mark_seen(&["a".to_string(), "b".to_string()]);
+        assert_eq!(fresh1.len(), 2, "both ids are brand new on the first call");
+        assert!(fresh1.contains("a") && fresh1.contains("b"));
+
+        let fresh2 = o.mark_seen(&["a".to_string(), "b".to_string()]);
         assert!(
-            !o.enter_tick(),
-            "subsequent ticks must NOT see the first-tick flag"
+            fresh2.is_empty(),
+            "ids that have already been marked must NOT reappear as fresh"
         );
-        assert!(
-            !o.enter_tick(),
-            "and not on the third either"
+
+        // Late-add scenario: a brand-new id "c" appears later. It
+        // is fresh (gets the cap on its first contact), while "a"
+        // and "b" continue to pass through uncapped.
+        let fresh3 = o.mark_seen(&["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            fresh3,
+            ["c".to_string()].into_iter().collect::<HashSet<_>>(),
+            "X16: a late-added agent participates as fresh on its first tick"
         );
     }
 
@@ -894,12 +1073,18 @@ mod tests {
 
     /// Test-only adapter that drops the emit side-effect — pure
     /// logic. Routes through the production helper so the cap
-    /// behavior is the same in tests and prod.
+    /// behavior is the same in tests and prod. The per-agent cap
+    /// (grill X16) treats every distinct `agent_id` in the input as
+    /// "fresh" for the legacy tests below, so the older
+    /// "global cap" semantics are preserved when each fire belongs
+    /// to a different agent.
     fn apply_first_tick_cap_no_emit(
         fires: Vec<EventFire>,
         cap: usize,
     ) -> Vec<EventFire> {
-        apply_first_tick_cap_with_emit(fires, cap, |_, _| {})
+        let fresh: HashSet<String> =
+            fires.iter().map(|f| f.agent_id.clone()).collect();
+        apply_per_agent_first_tick_cap(fires, &fresh, cap, |_, _| {})
     }
 
     // ---- grill X8 — orchestrator integration tests --------------
@@ -927,7 +1112,16 @@ mod tests {
         agents: Vec<Agent>,
         exclusion: HashSet<String>,
         sessions: Vec<SessionRow>,
+        /// grill X16: tests now control which agent ids count as
+        /// "fresh" (i.e. participating in their first tick this
+        /// process). Setting `first_tick = true` is preserved as a
+        /// shortcut — when true, every agent passed in is treated
+        /// as fresh, matching the old single-boolean semantics so
+        /// legacy tests are minimally disturbed. Setting it to
+        /// `false` AND populating `fresh_override` lets a test
+        /// drive the "agent added after boot" scenario directly.
         first_tick: bool,
+        fresh_override: Option<HashSet<String>>,
         ledger: Rc<RefCell<EventsFile>>,
         save_fails_n_times: Rc<RefCell<usize>>,
         save_calls: Rc<RefCell<usize>>,
@@ -963,8 +1157,17 @@ mod tests {
         fn list_sessions(&self) -> Vec<SessionRow> {
             self.sessions.clone()
         }
-        fn first_tick(&self) -> bool {
-            self.first_tick
+        fn mark_agents_seen(&self, ids: &[String]) -> HashSet<String> {
+            if let Some(fresh) = &self.fresh_override {
+                // Tests drive the fresh set directly.
+                fresh.clone()
+            } else if self.first_tick {
+                // Old "boot tick" semantics: every passed-in agent
+                // is fresh.
+                ids.iter().cloned().collect()
+            } else {
+                HashSet::new()
+            }
         }
         fn emit_burst_capped(&self, dropped: usize, cap: usize) {
             self.burst_capped.borrow_mut().push((dropped, cap));
@@ -1071,6 +1274,7 @@ mod tests {
             exclusion: HashSet::new(),
             sessions,
             first_tick: false,
+            fresh_override: None,
             // Make the first save fail (the dispatch-loop record_fire
             // save); the post-loop prune save then succeeds. Without
             // X4, the in-memory mutation from `record_fire` would be
@@ -1132,6 +1336,7 @@ mod tests {
             exclusion: HashSet::new(),
             sessions,
             first_tick: false,
+            fresh_override: None,
             save_fails_n_times: Rc::new(RefCell::new(0)),
             save_calls: Rc::new(RefCell::new(0)),
             ledger: Rc::new(RefCell::new(EventsFile::default())),
@@ -1163,7 +1368,11 @@ mod tests {
 
         // The ledger must show the fire.
         assert!(env.ledger.borrow().has_fired(&agent_id, &session_id));
-        // Reconcile fires once per tick.
+        // grill X15: the post-tick `reconcile` hook is still invoked
+        // by `tick_inner` (kept as a seam), but production wires it
+        // to a no-op; boot-time reconciliation (F15 + X9 in lib.rs)
+        // covers the discovery. The test fixture still counts hook
+        // invocations to lock the call shape down.
         assert_eq!(*env.reconciles.borrow(), 1);
     }
 
@@ -1177,6 +1386,7 @@ mod tests {
             exclusion: HashSet::new(),
             sessions: vec![],
             first_tick: false,
+            fresh_override: None,
             save_fails_n_times: Rc::new(RefCell::new(0)),
             save_calls: Rc::new(RefCell::new(0)),
             ledger: Rc::new(RefCell::new(EventsFile::default())),
@@ -1211,6 +1421,7 @@ mod tests {
             exclusion: HashSet::new(),
             sessions,
             first_tick: false,
+            fresh_override: None,
             save_fails_n_times: Rc::new(RefCell::new(0)),
             save_calls: Rc::new(RefCell::new(0)),
             ledger: Rc::new(RefCell::new(EventsFile::default())),
@@ -1269,6 +1480,7 @@ mod tests {
             exclusion: HashSet::new(),
             sessions: sessions.clone(),
             first_tick: true,
+            fresh_override: None,
             save_fails_n_times: Rc::new(RefCell::new(0)),
             save_calls: Rc::new(RefCell::new(0)),
             ledger: Rc::clone(&ledger),
@@ -1309,6 +1521,7 @@ mod tests {
             exclusion: HashSet::new(),
             sessions: sessions.clone(),
             first_tick: false,
+            fresh_override: None,
             save_fails_n_times: Rc::new(RefCell::new(0)),
             save_calls: Rc::new(RefCell::new(0)),
             ledger: Rc::clone(&ledger),
@@ -1394,6 +1607,7 @@ mod tests {
             exclusion: HashSet::new(),
             sessions,
             first_tick: true,
+            fresh_override: None,
             save_fails_n_times: Rc::new(RefCell::new(0)),
             save_calls: Rc::new(RefCell::new(0)),
             ledger: Rc::new(RefCell::new(EventsFile::default())),
@@ -1438,6 +1652,135 @@ mod tests {
             assert_eq!(cap, FIRST_TICK_BURST_CAP);
             assert!(dropped > 0);
         }
+    }
+
+    // ---- grill X16 — late-added agent gets per-agent cap --------
+
+    #[tokio::test]
+    async fn test_tick_inner_late_added_agent_is_capped_on_first_contact() {
+        // X16: an event agent ADDED after orchestrator boot must
+        // get its bounded catch-up on the tick it first
+        // participates in. The prior (single global boolean)
+        // design fired the cap only at orchestrator boot, so a
+        // late-added agent had uncapped first contact with the
+        // backlog. The per-agent fresh set fixes this.
+        //
+        // Scenario: the orchestrator has been running with agent
+        // "veteran" for a long time. The user adds "newcomer" at
+        // 2pm. On the tick that includes "newcomer" for the first
+        // time, the cap applies only to "newcomer"'s fires —
+        // "veteran"'s fires pass through uncapped.
+        //
+        // We model this with the FakeTickEnv's `fresh_override`:
+        // the test asserts that fires for the fresh agent are
+        // bounded, and fires for the seen agent are not.
+        let fixed_now = chrono::Utc::now();
+
+        // 1 veteran agent + 1 newcomer agent, each with several
+        // settled sessions. The evaluator caps "at most one fire
+        // per agent per tick", so each agent contributes exactly
+        // one fire — we use the fresh override to model a
+        // newcomer overflow by giving newcomer multiple eligible
+        // sessions and a low cap. Easier shape: drive the
+        // per-agent cap helper directly with many fires for a
+        // single fresh agent.
+        let fresh: HashSet<String> = ["newcomer".to_string()].into_iter().collect();
+        let mut fires: Vec<EventFire> = Vec::new();
+        // Veteran has its single steady-state fire.
+        fires.push(EventFire {
+            agent_id: "veteran".into(),
+            session_id: "vsess".into(),
+            session_path: "/tmp/.claude/projects/proj/vsess.jsonl".into(),
+        });
+        // Newcomer has CAP + 3 backlog fires.
+        for i in 0..(FIRST_TICK_BURST_CAP + 3) {
+            fires.push(EventFire {
+                agent_id: "newcomer".into(),
+                session_id: format!("nsess-{i}"),
+                session_path: format!(
+                    "/tmp/.claude/projects/proj/nsess-{i}.jsonl"
+                ),
+            });
+        }
+        let dropped_count = std::cell::Cell::new(0usize);
+        let kept = apply_per_agent_first_tick_cap(
+            fires,
+            &fresh,
+            FIRST_TICK_BURST_CAP,
+            |dropped, _| dropped_count.set(dropped),
+        );
+
+        // The veteran's fire passes through uncapped.
+        let veteran_kept =
+            kept.iter().filter(|f| f.agent_id == "veteran").count();
+        assert_eq!(
+            veteran_kept, 1,
+            "X16: a long-running agent's fires must NOT be capped"
+        );
+        // The newcomer is bounded to the cap.
+        let newcomer_kept =
+            kept.iter().filter(|f| f.agent_id == "newcomer").count();
+        assert_eq!(
+            newcomer_kept, FIRST_TICK_BURST_CAP,
+            "X16: a late-added agent gets the bounded first-tick cap"
+        );
+        // The dropped count covers only the newcomer's overflow.
+        assert_eq!(dropped_count.get(), 3);
+
+        // Silence warning about unused `fixed_now` if the
+        // optimizer doesn't fold the binding.
+        let _ = fixed_now;
+    }
+
+    #[tokio::test]
+    async fn test_tick_inner_no_fresh_agents_skips_the_cap_emit() {
+        // X16 negative side: when every agent participating in
+        // this tick has already been seen, NO emit fires and no
+        // fire is dropped — the steady state is uncapped.
+        let agent = stub_agent_with_cwd("veteran", "/tmp/proj");
+        let agent_id = agent.id.to_string();
+        let session_id = "vsess".to_string();
+        let fixed_now = chrono::Utc::now();
+        let sessions = vec![fake_session_at(
+            &session_id,
+            "proj",
+            fixed_now - chrono::Duration::hours(1),
+        )];
+        // `first_tick = false` AND `fresh_override = Some(empty)`
+        // models "every agent in this tick has been seen
+        // before". The cap path must not be taken.
+        let env = FakeTickEnv {
+            agents: vec![agent.clone()],
+            exclusion: HashSet::new(),
+            sessions,
+            first_tick: false,
+            fresh_override: Some(HashSet::new()),
+            save_fails_n_times: Rc::new(RefCell::new(0)),
+            save_calls: Rc::new(RefCell::new(0)),
+            ledger: Rc::new(RefCell::new(EventsFile::default())),
+            burst_capped: Rc::new(RefCell::new(Vec::new())),
+            reconciles: Rc::new(RefCell::new(0)),
+        };
+        let calls = Rc::new(RefCell::new(Vec::<DispatchedCall>::new()));
+        let calls_for_disp = Rc::clone(&calls);
+        tick_inner(
+            &env,
+            move |a: Agent, fire: EventFire| {
+                calls_for_disp.borrow_mut().push(DispatchedCall {
+                    agent_id: a.id.to_string(),
+                    session_id: fire.session_id,
+                    session_path: fire.session_path,
+                });
+            },
+            move || fixed_now,
+        )
+        .await;
+        assert_eq!(calls.borrow().len(), 1);
+        assert_eq!(calls.borrow()[0].agent_id, agent_id);
+        assert!(
+            env.burst_capped.borrow().is_empty(),
+            "no fresh agents => no burst-capped emit"
+        );
     }
 }
 
