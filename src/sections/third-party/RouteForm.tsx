@@ -145,7 +145,7 @@ export function RouteForm({
   const [submitting, setSubmitting] = useState(false);
 
   // Sticky hint: was this form opened via the network-detection
-  // panel's "Use a third-party LLM" button? Drives preset emphasis.
+  // panel's "Use a provider" button? Drives preset emphasis.
   // The breadcrumb key is read here without clearing — ThirdPartySection
   // clears it when the modal closes. See `lib/networkPanelDeepLink.ts`.
   const [fromNetworkPanel] = useState(() => readFromNetworkPanelBreadcrumb());

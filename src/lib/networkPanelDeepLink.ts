@@ -11,8 +11,8 @@
  *
  * Both paths have to work because `setSection` is a no-op when the
  * caller is already on the target section. Without the event path,
- * clicking "Use a third-party LLM" while already on Third-parties
- * does nothing (a real bug found in audit).
+ * clicking "Use a provider" while already on Providers does
+ * nothing (a real bug found in audit).
  *
  * Keys + event names live here (not at the call sites) so a typo or
  * rename fails loudly with a TypeScript error, not silently.

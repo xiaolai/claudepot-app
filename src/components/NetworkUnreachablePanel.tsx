@@ -11,9 +11,11 @@ interface Props {
   onRetry: () => void;
   /** Hide for the rest of this session. */
   onDismiss: () => void;
-  /** Navigate to Third-parties section and surface the Add Route
+  /** Navigate to Providers section and surface the Add Route
    *  modal. The panel doesn't know about routing — the parent
-   *  component (App.tsx) wires this up. */
+   *  component (App.tsx) wires this up. Prop name kept as
+   *  `onUseThirdParty` for internal-contract stability — same
+   *  precedent as the section id staying "third-party". */
   onUseThirdParty: () => void;
   /** Navigate to Settings → Network. Same wiring rationale. */
   onConfigureProxy: () => void;
@@ -24,8 +26,8 @@ interface Props {
  * `dev-docs/network-detection-panel.md`.
  *
  * Renders when `useNetworkGate` reports `api.anthropic.com` is
- * unreachable. Offers four remediation paths: third-party LLM,
- * proxy config, in-app docs, or dismiss-for-this-session. The
+ * unreachable. Offers four remediation paths: a provider, proxy
+ * config, in-app docs, or dismiss-for-this-session. The
  * underlying app remains usable — sections that don't need the
  * network (Sessions, Memory, Cleanup, Trash) keep working.
  *
@@ -111,7 +113,7 @@ export function NetworkUnreachablePanel({
         }}
       >
         <Button variant="solid" glyph={NF.bolt} onClick={onUseThirdParty}>
-          Use a third-party LLM
+          Use a provider
         </Button>
         <Button variant="ghost" glyph={NF.globe} onClick={onConfigureProxy}>
           Configure proxy
@@ -148,23 +150,23 @@ function copyForDiagnosis(d: NetworkDiagnosis): DiagnosisCopy {
     case "dns_failure":
       return {
         title: "Claudepot can't resolve api.anthropic.com",
-        body: "DNS lookup failed. This is the typical signature of a regional block (mainland China, Russia, Iran), a captive portal that hijacks DNS, or a broken local resolver. Use a third-party LLM to keep working, or fix the resolver below.",
+        body: "DNS lookup failed. This is the typical signature of a regional block (mainland China, Russia, Iran), a captive portal that hijacks DNS, or a broken local resolver. Use a provider to keep working, or fix the resolver below.",
       };
     case "timeout":
     case "connection_refused":
       return {
         title: "Claudepot can't reach api.anthropic.com",
-        body: "The path resolves but the connection is being dropped or refused. Often the result of a corporate firewall or a regional block. Use a third-party LLM, or configure a proxy your network allows.",
+        body: "The path resolves but the connection is being dropped or refused. Often the result of a corporate firewall or a regional block. Use a provider, or configure a proxy your network allows.",
       };
     case "tls_error":
       return {
         title: "TLS handshake to Anthropic failed",
-        body: "The connection started but the encrypted handshake didn't complete. Some networks intercept TLS traffic; others have outdated CA bundles. Configure your proxy if your organization manages one, or use a third-party LLM.",
+        body: "The connection started but the encrypted handshake didn't complete. Some networks intercept TLS traffic; others have outdated CA bundles. Configure your proxy if your organization manages one, or use a provider.",
       };
     case "http_error":
       return {
         title: "Anthropic responded with a service error",
-        body: "Reached api.anthropic.com but it isn't returning normal responses. This is usually an Anthropic-side issue — check status.claude.com. Retry in a moment, or use a third-party LLM if you need to keep working.",
+        body: "Reached api.anthropic.com but it isn't returning normal responses. This is usually an Anthropic-side issue — check status.claude.com. Retry in a moment, or use a provider if you need to keep working.",
       };
     case "unknown":
     default:
