@@ -154,6 +154,53 @@ jobs:
       - name: Tests (core + cli)
         run: cargo test -p claudepot-core -p claudepot-cli
 
+  # grill X26: `--ignored` integration tests are normally locked out
+  # of the default suite — they touch the real OS scheduler, hit
+  # live LLMs, or otherwise depend on infra that the matrix runners
+  # can't always reach. Without a lane in CI they ran nowhere, so
+  # the register→fire→record→prune path and the templates+LLM
+  # round-trip drifted unobserved.
+  #
+  # This job runs them in advisory mode: `continue-on-error: true`
+  # so a flake doesn't redden the merge gate, but failures are
+  # still visible on the Actions summary page. Promote to a hard
+  # gate once the infra-flakes are smoothed out.
+  e2e-ignored:
+    name: E2E (--ignored, advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Scheduler-touching E2E. On Linux the active scheduler is
+      # systemd-user; tests that require it self-skip when systemd
+      # isn't reachable inside the runner sandbox, so the lane stays
+      # green even when systemd is absent.
+      - name: Agent E2E (--ignored)
+        run: cargo test -p claudepot-core --test agent_e2e -- --ignored
+
+      # Templates + LLM round-trip. Self-skips when no API key is
+      # available (no secret on PRs from forks — the lane stays
+      # advisory either way).
+      - name: Templates real-LLM (--ignored)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: cargo test -p claudepot-core --test templates_real_llm -- --ignored
+
   frontend-test:
     name: Frontend tests (Vitest)
     runs-on: ubuntu-latest

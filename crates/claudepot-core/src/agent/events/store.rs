@@ -8,7 +8,9 @@
 //! so the fired set needs its own authoritative home.
 //!
 //! Mirrors `rotation::breaker_store` exactly: missing file → empty;
-//! corrupt/invalid file → renamed aside to `<path>.corrupt`, return
+//! corrupt/invalid file → renamed aside to
+//! `<path>.corrupt.<unix-ts>` (grill X23: timestamped so repeated
+//! corruption events do not overwrite the forensic copy), return
 //! empty, log a warn; a *real* I/O failure (permission denied, disk
 //! gone) propagates as `Err` so the orchestrator skips the tick
 //! instead of clobbering the user's real ledger on the next save.
@@ -238,9 +240,44 @@ pub fn load_from(path: &Path) -> std::io::Result<EventsFile> {
     }
 }
 
+/// Rename a corrupt ledger out of the way so the next `load`
+/// starts empty. grill X23: previously the corrupt filename was a
+/// fixed `.json.corrupt` and the rename's failure was silently
+/// dropped — repeated corruption events would overwrite the forensic
+/// copy, and a permission/EXDEV/disk-full rename failure looked
+/// identical to a successful move-aside from the caller's side.
+///
+/// Two changes:
+///
+/// 1. The corrupt filename carries a unix-second suffix
+///    (`<path>.corrupt.<unix-ts>`) so two corruption events seconds
+///    apart land on different files and neither overwrites the
+///    other. The seconds-resolution timestamp matches the rest of
+///    Claudepot's filesystem breadcrumbs (run dirs,
+///    `dispatch-failed-<ts>-<session>`) and keeps the filename
+///    sortable.
+/// 2. A rename failure is logged at `warn!` with the original path,
+///    the corrupt target, and the OS error so a recurring corruption
+///    (e.g. read-only home, parent dir missing) is visible. The
+///    caller still recovers by returning the default ledger — losing
+///    a single forensic copy is preferable to refusing to load.
 fn move_aside(path: &Path) {
-    let corrupt = path.with_extension("json.corrupt");
-    let _ = std::fs::rename(path, corrupt);
+    let suffix = chrono::Utc::now().timestamp();
+    let mut corrupt = path.to_path_buf();
+    let filename = path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "agent-events".to_string());
+    corrupt.set_file_name(format!("{filename}.corrupt.{suffix}"));
+    if let Err(e) = std::fs::rename(path, &corrupt) {
+        tracing::warn!(
+            from = %path.display(),
+            to = %corrupt.display(),
+            error = %e,
+            "agent_events_store: failed to move corrupt ledger aside; \
+             the next load will retry but the forensic copy was lost"
+        );
+    }
 }
 
 /// Log + swallow real I/O errors, always returning a usable file.
@@ -326,6 +363,35 @@ mod tests {
         assert!(f.has_fired("live-agent", "live-sess"));
     }
 
+    /// Find every sibling whose filename matches
+    /// `<orig>.corrupt.<digits>` — the X23 timestamped corrupt-copy
+    /// shape. Returns an empty vec when no copy exists.
+    fn corrupt_copies(orig: &Path) -> Vec<PathBuf> {
+        let dir = orig.parent().expect("test path has a parent");
+        let base = orig
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .expect("test path has a basename");
+        let prefix = format!("{base}.corrupt.");
+        std::fs::read_dir(dir)
+            .map(|it| {
+                it.flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.file_name()
+                            .and_then(|s| s.to_str())
+                            .is_some_and(|n| {
+                                n.starts_with(&prefix)
+                                    && n[prefix.len()..]
+                                        .chars()
+                                        .all(|c| c.is_ascii_digit())
+                            })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    }
+
     #[test]
     fn test_events_store_corrupt_file_is_moved_aside() {
         let tmp = tempfile::tempdir().unwrap();
@@ -333,9 +399,11 @@ mod tests {
         std::fs::write(&p, b"this is not json").unwrap();
         let f = load_from(&p).unwrap();
         assert!(f.fired.is_empty());
-        assert!(
-            p.with_extension("json.corrupt").exists(),
-            "corrupt file should be moved aside"
+        let copies = corrupt_copies(&p);
+        assert_eq!(
+            copies.len(),
+            1,
+            "corrupt file should be moved aside under a timestamped name"
         );
     }
 
@@ -346,7 +414,47 @@ mod tests {
         std::fs::write(&p, br#"{"schema_version":99,"fired":[]}"#).unwrap();
         let f = load_from(&p).unwrap();
         assert!(f.fired.is_empty());
-        assert!(p.with_extension("json.corrupt").exists());
+        let copies = corrupt_copies(&p);
+        assert_eq!(copies.len(), 1);
+    }
+
+    #[test]
+    fn test_events_store_repeated_corruption_does_not_overwrite_forensic_copy() {
+        // grill X23: previously every corrupt-load wrote to a fixed
+        // `<path>.json.corrupt` and the second corruption clobbered
+        // the first forensic copy. With the timestamp suffix, each
+        // corruption that surfaces in a different second lands on a
+        // different file and accumulates.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("agent-events.json");
+
+        std::fs::write(&p, b"first corruption").unwrap();
+        let _ = load_from(&p).unwrap();
+        let copies1 = corrupt_copies(&p);
+        assert_eq!(copies1.len(), 1);
+
+        // Sleep just past the 1-second timestamp resolution before
+        // the second corruption — otherwise the second rename would
+        // try to land on the same name and would be a noop overwrite
+        // (or a clobber of the first copy on platforms where rename
+        // is destructive). The assertion below is intentionally
+        // permissive in the same-second case: the bug fixed is
+        // "every corruption silently overwrites the prior copy", not
+        // "every corruption N milliseconds apart gets its own copy".
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        std::fs::write(&p, b"second corruption").unwrap();
+        let _ = load_from(&p).unwrap();
+        let copies2 = corrupt_copies(&p);
+        assert!(
+            !copies2.is_empty(),
+            "at least one forensic copy must always exist"
+        );
+        // The first copy is still on disk — repeated failures no
+        // longer destroy earlier evidence.
+        assert!(
+            copies2.iter().any(|c| c == &copies1[0]),
+            "the first forensic copy is not clobbered by a later corruption"
+        );
     }
 
     #[test]

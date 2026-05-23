@@ -171,6 +171,34 @@ where
     R: FnOnce(&mut AgentStore),
     F: FnOnce(&Agent) -> Result<(), AgentError>,
 {
+    // grill X24: snapshot the pre-mutation `updated_at` so a
+    // rolled-back failed install does not leave the agent claiming
+    // it was just edited.
+    //
+    // - `arm` and `update` both bump `updated_at = now()` inside
+    //   the mutate closure.
+    // - The verb-supplied rollback closure restores every other
+    //   field but does NOT know to revert `updated_at`:
+    //     * `agents_update`'s rollback is `remove + add(prior)` —
+    //       `add` does not bump `updated_at`, so the prior value
+    //       (from the verb's snapshot) is restored. ✓
+    //     * `agents_set_enabled`'s rollback calls `update` again
+    //       with the old enabled bit — `update` bumps `updated_at`
+    //       a second time. ✗ The UI then shows "updated 3 seconds
+    //       ago" after a failure.
+    //     * `install_draft`'s rollback calls `set_lifecycle` which
+    //       does NOT bump — but the earlier `arm` call (inside
+    //       `mutate`) did. ✗ Same shape.
+    //     * `agents_add`'s rollback removes the record; there is
+    //       nothing to restore. ✓
+    //
+    // We capture the pre-mutation timestamp here, run mutate, and
+    // — if any post-mutation step rolls back — restore the snapshot
+    // value via `store.set_updated_at`. The capture is `None` when
+    // the agent didn't exist pre-mutation (the `agents_add` shape);
+    // restoring `None` is a no-op.
+    let pre_updated_at = store.get(id).map(|a| a.updated_at);
+
     // Step 1 — in-memory mutation. A failure here means nothing has
     // changed yet; surface it as-is.
     let post = mutate(store)?;
@@ -190,6 +218,12 @@ where
     if post.lifecycle == Lifecycle::Draft && post.enabled {
         let name = post.name.clone();
         rollback(store);
+        // X24: also restore the pre-mutation `updated_at` so a
+        // rejected draft mutation does not leave the agent
+        // claiming it was just edited.
+        if let Some(ts) = pre_updated_at {
+            store.set_updated_at(id, ts);
+        }
         return Err(AgentError::InvalidEnv(format!(
             "agent '{name}' is a draft — review and install it before \
              enabling. A draft cannot acquire a scheduler artifact via \
@@ -205,6 +239,9 @@ where
     if post.enabled {
         if let Err(e) = install_shim(&post) {
             rollback(store);
+            if let Some(ts) = pre_updated_at {
+                store.set_updated_at(id, ts);
+            }
             return Err(e);
         }
     }
@@ -215,6 +252,9 @@ where
     // `mutate` ran.
     if let Err(e) = store.save() {
         rollback(store);
+        if let Some(ts) = pre_updated_at {
+            store.set_updated_at(id, ts);
+        }
         return Err(e);
     }
 
@@ -227,6 +267,9 @@ where
             // re-save is logged but not propagated — surfacing two
             // errors would mask the original `register` failure.
             rollback(store);
+            if let Some(ts) = pre_updated_at {
+                store.set_updated_at(id, ts);
+            }
             if let Err(save_err) = store.save() {
                 tracing::error!(
                     agent_id = %id,
@@ -862,5 +905,131 @@ mod tests {
         assert!(sched.registered.borrow().is_empty(), "no register for disabled");
         // Saved.
         assert!(!store.get(&id).unwrap().enabled);
+    }
+
+    #[test]
+    fn apply_change_rollback_restores_pre_mutation_updated_at() {
+        // grill X24: a failed install / failed shim / failed
+        // register / failed save / X1 rejection must leave the
+        // agent's `updated_at` at its pre-mutation value, not at
+        // the timestamp `arm`/`update` stamped while the mutation
+        // was in flight. Otherwise the UI shows "updated 3 seconds
+        // ago" on a record that is logically unchanged after the
+        // rollback.
+        //
+        // Models the `agents_set_enabled` shape: the verb passes a
+        // mutate closure that calls `store.update`, and a rollback
+        // closure that calls `store.update` with the old enabled
+        // bit. Both `update` calls bump `updated_at = now()`; the
+        // helper must reverse that.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut a = installed_agent("ts-victim", false);
+        // Seed the agent with a clearly-old `updated_at` so the
+        // bumped-then-restored value is unambiguous.
+        let original_ts = Utc::now() - chrono::Duration::days(7);
+        a.updated_at = original_ts;
+        let id = a.id;
+        store.add(a).unwrap();
+        store.save().unwrap();
+
+        // The mutate closure flips enabled to true (triggering the
+        // X1 Draft check via a normal Installed agent — so the
+        // Draft gate does NOT fire; pick a failing scheduler so the
+        // rollback path is the register-failure branch).
+        let sched = FakeScheduler::failing();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(true),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                store.update(&id, patch)?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(false),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                let _ = store.update(&id, patch);
+            },
+            |_a| Ok(()),
+            &sched,
+        );
+        assert!(result.is_err(), "register failure must surface as Err");
+
+        // The agent on disk should carry the ORIGINAL `updated_at`,
+        // not a freshly-bumped one. Use a wide tolerance — we just
+        // need to prove the helper restored to "around the original"
+        // and not "around now()".
+        let after = store.get(&id).expect("agent still present");
+        assert!(
+            (after.updated_at - original_ts).num_seconds().abs() < 2,
+            "after a rolled-back failed install, `updated_at` must \
+             equal the pre-mutation value (original={original_ts}, \
+             after={ts}, delta={delta}s)",
+            ts = after.updated_at,
+            delta = (after.updated_at - original_ts).num_seconds(),
+        );
+    }
+
+    #[test]
+    fn apply_change_x1_rejection_also_restores_updated_at() {
+        // X24 cross-test: the Draft + enabled X1 rejection runs
+        // the rollback closure too, and must restore `updated_at`
+        // the same way.
+        let dir = tempdir().unwrap();
+        let mut store = AgentStore::open_at(dir.path().join("a.json")).unwrap();
+        let mut a = draft_agent("draft-ts", false);
+        a.lifecycle = Lifecycle::Draft;
+        let original_ts = Utc::now() - chrono::Duration::days(3);
+        a.updated_at = original_ts;
+        let id = a.id;
+        store.add(a).unwrap();
+        store.save().unwrap();
+
+        let sched = FakeScheduler::ok();
+        let result = apply_lifecycle_change(
+            &mut store,
+            &id,
+            move |store| {
+                // Mutation that would enable the draft — exactly the
+                // shape X1 exists to refuse.
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(true),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                store.update(&id, patch)?;
+                store
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AgentError::NotFound(id.to_string()))
+            },
+            move |store| {
+                let patch = crate::agent::store::AgentPatch {
+                    enabled: Some(false),
+                    ..crate::agent::store::AgentPatch::default()
+                };
+                let _ = store.update(&id, patch);
+            },
+            |_a| Ok(()),
+            &sched,
+        );
+        match result {
+            Err(AgentError::InvalidEnv(_)) => {}
+            other => panic!("expected X1 rejection, got {other:?}"),
+        }
+
+        let after = store.get(&id).expect("agent still present");
+        assert!(
+            (after.updated_at - original_ts).num_seconds().abs() < 2,
+            "X1 rollback must also restore `updated_at`"
+        );
     }
 }
