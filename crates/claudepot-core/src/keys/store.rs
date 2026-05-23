@@ -7,6 +7,7 @@
 
 use super::error::KeyError;
 use super::types::{ApiKey, OauthToken};
+use crate::db_pragmas::apply_standard_pragmas;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -65,8 +66,7 @@ impl KeyStore {
                 .map_err(|e| KeyError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))?;
         }
         let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL;")?;
-        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        apply_standard_pragmas(&db)?;
         db.execute_batch(SCHEMA)?;
         migrate_add_secret_and_purge(&db, "api_keys")?;
         migrate_add_secret_and_purge(&db, "oauth_tokens")?;

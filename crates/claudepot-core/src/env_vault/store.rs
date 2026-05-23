@@ -16,6 +16,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use super::error::VaultError;
+use crate::db_pragmas::apply_standard_pragmas;
 use crate::env_vault::env_file::is_valid_key;
 
 const SCHEMA: &str = r#"
@@ -65,8 +66,7 @@ impl VaultStore {
             std::fs::create_dir_all(parent)?;
         }
         let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL;")?;
-        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        apply_standard_pragmas(&db)?;
         db.execute_batch(SCHEMA)?;
 
         #[cfg(unix)]
