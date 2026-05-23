@@ -1277,7 +1277,7 @@ function AppShell() {
               diagnosis={networkGate.state.diagnosis}
               onRetry={networkGate.retry}
               onDismiss={networkGate.dismiss}
-              onUseThirdParty={() => {
+              onUseProvider={() => {
                 // triggerOpenAddRoute sets sessionStorage (cold-mount
                 // path) AND dispatches a CustomEvent (hot-mount path
                 // for when ThirdPartySection is already mounted).
