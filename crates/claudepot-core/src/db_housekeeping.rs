@@ -94,7 +94,7 @@ fn checkpoint_one(db_path: &Path) -> rusqlite::Result<u64> {
     // *is* in WAL mode, the journal_mode pragma is a no-op.
     // The checkpoint pragma works on any WAL-mode DB and is a
     // no-op on a non-WAL DB.
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     drop(conn);
 
     let after = wal_size(&wal_path);
