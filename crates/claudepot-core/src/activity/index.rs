@@ -22,6 +22,7 @@ use std::sync::{Mutex, MutexGuard};
 use thiserror::Error;
 
 use super::card::{Card, CardKind, HelpRef, Severity, SourceRef};
+use crate::db_pragmas::apply_standard_pragmas;
 
 /// Errors that escape the activity index.
 #[derive(Debug, Error)]
@@ -90,8 +91,7 @@ impl ActivityIndex {
     /// at `Connection::open`.
     fn init_connection(path: &Path) -> Result<Connection, ActivityIndexError> {
         let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL;")?;
-        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        apply_standard_pragmas(&db)?;
         apply_schema(&db)?;
         // Force WAL/SHM sidecars to materialize NOW so the chmod
         // loop in open() can narrow their perms. Without this, the

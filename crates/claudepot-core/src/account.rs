@@ -1,3 +1,4 @@
+use crate::db_pragmas::apply_standard_pragmas;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use std::sync::{Mutex, MutexGuard};
@@ -77,11 +78,7 @@ impl AccountStore {
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         }
         let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL;")?;
-        // Wait up to 5 s on writer contention before returning SQLITE_BUSY.
-        // Without this, simultaneous CLI + GUI access on the same db file
-        // would fail immediately with "database is locked".
-        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        apply_standard_pragmas(&db)?;
         db.execute_batch(SCHEMA)?;
         Self::migrate_add_verification_columns(&db)?;
 

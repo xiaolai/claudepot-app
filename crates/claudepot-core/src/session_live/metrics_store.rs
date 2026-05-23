@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use thiserror::Error;
 
+use crate::db_pragmas::apply_standard_pragmas;
 use crate::paths;
 use crate::session_live::types::{LiveSessionSummary, Status};
 
@@ -72,7 +73,10 @@ impl MetricsStore {
     /// Open a store at the given path. Used by tests against tempdir.
     pub fn open(path: &Path) -> Result<Self, MetricsError> {
         let conn = Connection::open(path)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
+        apply_standard_pragmas(&conn)?;
+        // Live metrics are rebuildable from session JSONL — accepting
+        // the small power-loss risk for a NORMAL synchronous mode is
+        // a fair trade for the write-rate this store sees.
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA)?;
         #[cfg(unix)]
