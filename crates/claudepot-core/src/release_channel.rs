@@ -206,10 +206,7 @@ mod tests {
 
     #[test]
     fn test_endpoints_returns_the_single_channel_url() {
-        assert_eq!(
-            ReleaseChannel::Stable.endpoints(),
-            vec![STABLE_ENDPOINT]
-        );
+        assert_eq!(ReleaseChannel::Stable.endpoints(), vec![STABLE_ENDPOINT]);
         assert_eq!(ReleaseChannel::Beta.endpoints(), vec![BETA_ENDPOINT]);
     }
 

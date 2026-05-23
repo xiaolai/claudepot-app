@@ -30,8 +30,7 @@ use super::install::install_shim;
 use super::prerun::PrerunDecision;
 use super::store::agent_runs_dir;
 use super::types::{
-    Agent, AgentId, AgentRun, ArtifactKind, HostPlatform, OutputArtifact,
-    RunResult, TriggerKind,
+    Agent, AgentId, AgentRun, ArtifactKind, HostPlatform, OutputArtifact, RunResult, TriggerKind,
 };
 use crate::routes::RouteDecision;
 
@@ -603,9 +602,10 @@ pub async fn run_now(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
-    let status = cmd.status().await.map_err(|e| {
-        AgentError::Io(std::io::Error::other(format!("failed to spawn shim: {e}")))
-    })?;
+    let status = cmd
+        .status()
+        .await
+        .map_err(|e| AgentError::Io(std::io::Error::other(format!("failed to spawn shim: {e}"))))?;
     let ended_at = Utc::now();
     let exit_code = status.code().unwrap_or(-1);
     sink.phase("spawn", PhaseStatus::Complete);
@@ -774,10 +774,7 @@ pub fn list_run_ids(id: &AgentId) -> Result<Vec<String>, AgentError> {
 /// safe filename component and pins the resolved path under the
 /// agent's runs dir so a malicious caller cannot escape with
 /// `..` or absolute paths.
-pub fn read_run(
-    agent_id: &AgentId,
-    run_id: &str,
-) -> Result<AgentRun, AgentError> {
+pub fn read_run(agent_id: &AgentId, run_id: &str) -> Result<AgentRun, AgentError> {
     validate_run_id(run_id)?;
     let runs_root = agent_runs_dir(agent_id);
     let path = runs_root.join(run_id).join("result.json");

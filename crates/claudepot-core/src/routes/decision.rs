@@ -72,8 +72,7 @@ mod tests {
         for (d, kind) in cases {
             let v = serde_json::to_value(&d).unwrap();
             assert_eq!(v["kind"], kind);
-            let back: RouteDecision =
-                serde_json::from_value(v).unwrap();
+            let back: RouteDecision = serde_json::from_value(v).unwrap();
             assert_eq!(d, back);
         }
     }

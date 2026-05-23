@@ -904,13 +904,17 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let uuid = uuid::Uuid::new_v4();
-        crate::cli_backend::swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+        crate::cli_backend::swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
 
         let (fetcher, _) = MockFetcher::new(0.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
         let token = cache.load_access_token(uuid).await.unwrap();
         assert_eq!(token.as_deref(), Some("sk-ant-oat01-test"));
-        crate::cli_backend::swap::delete_private(uuid).await.unwrap();
+        crate::cli_backend::swap::delete_private(uuid)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -918,7 +922,9 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let uuid = uuid::Uuid::new_v4();
-        crate::cli_backend::swap::save_private(uuid, &crate::testing::expired_blob_json()).await.unwrap();
+        crate::cli_backend::swap::save_private(uuid, &crate::testing::expired_blob_json())
+            .await
+            .unwrap();
 
         let (fetcher, _) = MockFetcher::new(0.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
@@ -926,7 +932,9 @@ mod tests {
             cache.load_access_token(uuid).await,
             Err(UsageFetchError::TokenExpired)
         ));
-        crate::cli_backend::swap::delete_private(uuid).await.unwrap();
+        crate::cli_backend::swap::delete_private(uuid)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -946,7 +954,9 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let uuid = uuid::Uuid::new_v4();
-        crate::cli_backend::swap::save_private(uuid, "not-json-at-all").await.unwrap();
+        crate::cli_backend::swap::save_private(uuid, "not-json-at-all")
+            .await
+            .unwrap();
 
         let (fetcher, _) = MockFetcher::new(0.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
@@ -954,6 +964,8 @@ mod tests {
             cache.load_access_token(uuid).await,
             Err(UsageFetchError::FetchFailed(_))
         ));
-        crate::cli_backend::swap::delete_private(uuid).await.unwrap();
+        crate::cli_backend::swap::delete_private(uuid)
+            .await
+            .unwrap();
     }
 }

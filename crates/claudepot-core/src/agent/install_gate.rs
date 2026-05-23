@@ -306,9 +306,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::scheduler::{
-        cron_next_runs, RegisteredEntry, SchedulerCapabilities,
-    };
+    use crate::agent::scheduler::{cron_next_runs, RegisteredEntry, SchedulerCapabilities};
     use crate::agent::types::*;
     use chrono::{DateTime, Utc};
     use std::cell::RefCell;
@@ -759,12 +757,7 @@ mod tests {
             move |store| {
                 let _ = store.remove(&id);
             },
-            |_a| {
-                Err(AgentError::InvalidPath(
-                    "/x".into(),
-                    "fake shim failure",
-                ))
-            },
+            |_a| Err(AgentError::InvalidPath("/x".into(), "fake shim failure")),
             &sched,
         );
         assert!(result.is_err());
@@ -902,7 +895,10 @@ mod tests {
         );
         let post = result.expect("set_enabled(false) must succeed");
         assert!(!post.enabled);
-        assert!(sched.registered.borrow().is_empty(), "no register for disabled");
+        assert!(
+            sched.registered.borrow().is_empty(),
+            "no register for disabled"
+        );
         // Saved.
         assert!(!store.get(&id).unwrap().enabled);
     }

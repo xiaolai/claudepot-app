@@ -107,12 +107,7 @@ impl EventsFile {
     /// Record a fire. Idempotent — a pair already present is not
     /// duplicated, so a double `record_fire` cannot inflate the
     /// ledger.
-    pub fn record_fire(
-        &mut self,
-        agent_id: &str,
-        session_id: &str,
-        fired_at: DateTime<Utc>,
-    ) {
+    pub fn record_fire(&mut self, agent_id: &str, session_id: &str, fired_at: DateTime<Utc>) {
         if self.has_fired(agent_id, session_id) {
             return;
         }
@@ -183,8 +178,7 @@ impl EventsFile {
     ) -> usize {
         let before = self.fired.len();
         self.fired.retain(|e| {
-            live_agent_ids.contains(&e.agent_id)
-                && live_session_ids.contains(&e.session_id)
+            live_agent_ids.contains(&e.agent_id) && live_session_ids.contains(&e.session_id)
         });
         before - self.fired.len()
     }
@@ -353,10 +347,8 @@ mod tests {
         f.record_fire("live-agent", "live-sess", ts());
         f.record_fire("dead-agent", "live-sess", ts());
         f.record_fire("live-agent", "dead-sess", ts());
-        let live_agents: HashSet<String> =
-            ["live-agent".to_string()].into_iter().collect();
-        let live_sessions: HashSet<String> =
-            ["live-sess".to_string()].into_iter().collect();
+        let live_agents: HashSet<String> = ["live-agent".to_string()].into_iter().collect();
+        let live_sessions: HashSet<String> = ["live-sess".to_string()].into_iter().collect();
         let removed = f.prune(&live_agents, &live_sessions);
         assert_eq!(removed, 2);
         assert_eq!(f.fired.len(), 1);
@@ -378,14 +370,10 @@ mod tests {
                 it.flatten()
                     .map(|e| e.path())
                     .filter(|p| {
-                        p.file_name()
-                            .and_then(|s| s.to_str())
-                            .is_some_and(|n| {
-                                n.starts_with(&prefix)
-                                    && n[prefix.len()..]
-                                        .chars()
-                                        .all(|c| c.is_ascii_digit())
-                            })
+                        p.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
+                            n.starts_with(&prefix)
+                                && n[prefix.len()..].chars().all(|c| c.is_ascii_digit())
+                        })
                     })
                     .collect::<Vec<_>>()
             })

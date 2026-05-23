@@ -48,9 +48,9 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use claudepot_core::agent::{
-    active_scheduler, install_shim, record_run_for_agent, store::agent_runs_dir,
-    Agent, AgentBinary, AgentId, Lifecycle, OutputFormat, PermissionMode,
-    PlatformOptions, RecordInputs, Trigger, TriggerKind,
+    active_scheduler, install_shim, record_run_for_agent, store::agent_runs_dir, Agent,
+    AgentBinary, AgentId, Lifecycle, OutputFormat, PermissionMode, PlatformOptions, RecordInputs,
+    Trigger, TriggerKind,
 };
 use claudepot_core::templates::apply::{
     apply_selected, validate_item, ItemOutcome, PendingChanges,

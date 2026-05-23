@@ -45,7 +45,7 @@ pub use blueprint::{
 pub use capabilities::{default_capabilities_for, CapabilitySet};
 pub use error::TemplateError;
 pub use instantiate::{
-    instantiate, schedule_to_cron, PlaceholderValue, ResolvedAgent, ResolvedSchedule,
-    ScheduleDto, TemplateInstance, Weekday,
+    instantiate, schedule_to_cron, PlaceholderValue, ResolvedAgent, ResolvedSchedule, ScheduleDto,
+    TemplateInstance, Weekday,
 };
 pub use registry::TemplateRegistry;

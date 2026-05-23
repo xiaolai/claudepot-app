@@ -37,10 +37,7 @@ pub fn install_shim(
     };
 
     let (shim_path, contents) = if cfg!(target_os = "windows") {
-        (
-            auto_dir.join("run.cmd"),
-            render_windows(agent, &inputs),
-        )
+        (auto_dir.join("run.cmd"), render_windows(agent, &inputs))
     } else {
         (auto_dir.join("run.sh"), render_unix(agent, &inputs))
     };
@@ -164,9 +161,8 @@ pub fn current_claudepot_cli() -> Result<String, AgentError> {
     //    known-broken state when called from a GUI process — we
     //    return the path so callers can register, but the shim's
     //    record-run callback will fail at runtime in the GUI case.
-    let current = std::env::current_exe().map_err(|e| {
-        AgentError::Io(std::io::Error::other(format!("current_exe failed: {e}")))
-    })?;
+    let current = std::env::current_exe()
+        .map_err(|e| AgentError::Io(std::io::Error::other(format!("current_exe failed: {e}"))))?;
     Ok(current.display().to_string())
 }
 

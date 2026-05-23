@@ -91,7 +91,6 @@ pub mod store;
 
 pub use eval::{evaluate, AgentRunStats, EventFire, SkipReason};
 pub use store::{
-    events_path, load, load_from, load_or_default, save, save_to,
-    AgentEventsError, EventsFile, FiredEntry, EVENTS_FILENAME,
-    SCHEMA_VERSION,
+    events_path, load, load_from, load_or_default, save, save_to, AgentEventsError, EventsFile,
+    FiredEntry, EVENTS_FILENAME, SCHEMA_VERSION,
 };

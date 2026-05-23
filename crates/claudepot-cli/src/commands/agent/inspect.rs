@@ -150,7 +150,10 @@ pub fn show_cmd(json: bool, id_or_name: &str) -> Result<()> {
             out.push_str(&format!("  rate-limit:   {}\n", parts.join(", ")));
         }
     }
-    out.push_str(&format!("  output:       {}\n", agent.output_format.as_cli_flag()));
+    out.push_str(&format!(
+        "  output:       {}\n",
+        agent.output_format.as_cli_flag()
+    ));
     out.push_str("  prompt:\n");
     for line in agent.prompt.lines() {
         out.push_str(&format!("    {line}\n"));

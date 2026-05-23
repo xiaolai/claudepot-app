@@ -1304,9 +1304,7 @@ pub enum ReconcileError {
 ///
 /// Idempotent: a second pass on a converged store returns an empty `Vec`.
 /// Errors short-circuit on the first sqlite failure (read or write).
-pub async fn reconcile_cli_flags(
-    store: &AccountStore,
-) -> Result<Vec<CliFlagFlip>, ReconcileError> {
+pub async fn reconcile_cli_flags(store: &AccountStore) -> Result<Vec<CliFlagFlip>, ReconcileError> {
     let accounts = store
         .list()
         .map_err(|e| ReconcileError::Store(e.to_string()))?;

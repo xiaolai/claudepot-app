@@ -476,9 +476,8 @@ pub fn recover_orphan_backup_with_verifier(
             // (and we don't auto-recover the same suspicious backup
             // on the next launch). Surface as `OrphanRecovery::Failed`.
             if let Err(verify_err) = verifier(target) {
-                let quarantine_path = target.with_file_name(format!(
-                    "{target_name}.bak-restored-but-unverified-{ts}"
-                ));
+                let quarantine_path = target
+                    .with_file_name(format!("{target_name}.bak-restored-but-unverified-{ts}"));
                 let quarantine_attempted = std::fs::rename(target, &quarantine_path);
                 tracing::error!(
                     target = %target.display(),
@@ -490,9 +489,7 @@ pub fn recover_orphan_backup_with_verifier(
                 return OrphanRecovery::Failed {
                     backup_path,
                     target_path: target.to_path_buf(),
-                    error: format!(
-                        "restored bundle failed codesign verification: {verify_err}"
-                    ),
+                    error: format!("restored bundle failed codesign verification: {verify_err}"),
                 };
             }
 
@@ -693,7 +690,11 @@ mod tests {
         }
         // Target restored from backup; backup name no longer present.
         assert!(target.exists());
-        assert!(!target.parent().unwrap().join("Claude.app.bak-1700000000").exists());
+        assert!(!target
+            .parent()
+            .unwrap()
+            .join("Claude.app.bak-1700000000")
+            .exists());
         // The content from the backup followed the rename.
         let marker = fs::read_to_string(target.join("marker.txt")).unwrap();
         assert_eq!(marker, "only-bak");
@@ -717,9 +718,21 @@ mod tests {
         // The newest backup was restored; the other two remain.
         let marker = fs::read_to_string(target.join("marker.txt")).unwrap();
         assert_eq!(marker, "newest");
-        assert!(target.parent().unwrap().join("Claude.app.bak-1700000000").exists());
-        assert!(target.parent().unwrap().join("Claude.app.bak-1750000000").exists());
-        assert!(!target.parent().unwrap().join("Claude.app.bak-1800000000").exists());
+        assert!(target
+            .parent()
+            .unwrap()
+            .join("Claude.app.bak-1700000000")
+            .exists());
+        assert!(target
+            .parent()
+            .unwrap()
+            .join("Claude.app.bak-1750000000")
+            .exists());
+        assert!(!target
+            .parent()
+            .unwrap()
+            .join("Claude.app.bak-1800000000")
+            .exists());
     }
 
     #[test]
@@ -788,6 +801,10 @@ mod tests {
         assert_eq!(marker, "tainted");
         // The original bak-<ts> name is gone because the rename moved
         // it to target first, then to the quarantine name.
-        assert!(!target.parent().unwrap().join("Claude.app.bak-1900000000").exists());
+        assert!(!target
+            .parent()
+            .unwrap()
+            .join("Claude.app.bak-1900000000")
+            .exists());
     }
 }

@@ -629,7 +629,9 @@ async fn test_swap_auto_refresh_writes_fresh_blob() {
     seed_account(&store, target_id);
 
     // Store an expired blob for the target
-    save_private(target_id, &crate::testing::expired_blob_json()).await.unwrap();
+    save_private(target_id, &crate::testing::expired_blob_json())
+        .await
+        .unwrap();
 
     let platform = MockPlatform::new(None);
     let refresher = MockRefresher::success();
@@ -717,7 +719,9 @@ async fn test_swap_auto_refresh_failure_aborts_before_mutation() {
     let (store, _dir) = test_store();
     let target_id = Uuid::new_v4();
 
-    save_private(target_id, &crate::testing::expired_blob_json()).await.unwrap();
+    save_private(target_id, &crate::testing::expired_blob_json())
+        .await
+        .unwrap();
 
     let platform = MockPlatform::new(Some("original-cc-blob"));
     let refresher = MockRefresher::failing("network error");
@@ -749,7 +753,9 @@ async fn test_swap_auto_refresh_rollback_works_after_refresh() {
     let target_id = Uuid::new_v4();
 
     save_private(current_id, "original_current").await.unwrap();
-    save_private(target_id, &crate::testing::expired_blob_json()).await.unwrap();
+    save_private(target_id, &crate::testing::expired_blob_json())
+        .await
+        .unwrap();
 
     // Platform will fail on write
     let platform = MockPlatform::failing();
@@ -933,7 +939,9 @@ async fn test_swap_db_failure_restores_cc_credentials() {
     let target_id = Uuid::new_v4();
 
     // Any older private content for current — not what rollback restores.
-    save_private(current_id, "older_private_from_prior_swap").await.unwrap();
+    save_private(current_id, "older_private_from_prior_swap")
+        .await
+        .unwrap();
     save_private(target_id, "target_blob").await.unwrap();
 
     let platform = MockPlatform::new(Some("outgoing_cc_blob"));
@@ -981,7 +989,9 @@ async fn test_swap_aborts_when_target_blob_belongs_to_different_account() {
     let (store, _dir) = test_store();
     let target_id = Uuid::new_v4();
     seed_account(&store, target_id); // stored email: seed-{uuid}@example.com
-    save_private(target_id, &crate::testing::fresh_blob_json()).await.unwrap();
+    save_private(target_id, &crate::testing::fresh_blob_json())
+        .await
+        .unwrap();
 
     let platform = MockPlatform::new(None);
     let refresher = MockRefresher::success();
@@ -1035,7 +1045,9 @@ async fn test_swap_drift_on_outgoing_blob_skips_backup_but_completes() {
     save_private(target_id, &target_blob).await.unwrap();
     // Pre-existing blob for current (a valid earlier backup). We'll
     // verify it stays UNCHANGED by this swap (we skipped the backup save).
-    save_private(current_id, "original-current-backup").await.unwrap();
+    save_private(current_id, "original-current-backup")
+        .await
+        .unwrap();
 
     let cc_blob = target_blob.clone();
     let platform = MockPlatform::new(Some(&cc_blob));
@@ -1137,8 +1149,12 @@ async fn test_swap_auto_refresh_then_db_failure_does_not_misfile() {
     let current_id = Uuid::new_v4();
     let target_id = Uuid::new_v4();
 
-    save_private(current_id, "older_private_from_prior_swap").await.unwrap();
-    save_private(target_id, &crate::testing::expired_blob_json()).await.unwrap();
+    save_private(current_id, "older_private_from_prior_swap")
+        .await
+        .unwrap();
+    save_private(target_id, &crate::testing::expired_blob_json())
+        .await
+        .unwrap();
 
     let platform = MockPlatform::new(Some("outgoing_cc_blob"));
     let refresher = MockRefresher::success();
@@ -1222,7 +1238,9 @@ async fn test_switch_aborts_on_post_switch_read_returns_none() {
     let (store, _dir) = test_store();
     let target_id = Uuid::new_v4();
     seed_account(&store, target_id);
-    save_private(target_id, &crate::testing::fresh_blob_json()).await.unwrap();
+    save_private(target_id, &crate::testing::fresh_blob_json())
+        .await
+        .unwrap();
 
     let platform = MockPlatformDropsOnRead::new(None);
     let refresher = MockRefresher::success();
@@ -1298,7 +1316,9 @@ async fn test_switch_aborts_and_rolls_back_on_post_switch_identity_mismatch() {
     let replacement = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-intruder","refreshToken":"sk-ant-ort01-intruder","expiresAt":9999999999999,"scopes":["user:inference"],"subscriptionType":"pro","rateLimitTier":"default_claude_pro"}}"#;
 
     save_private(current_id, &initial_cc_blob).await.unwrap();
-    save_private(target_id, &crate::testing::fresh_blob_json()).await.unwrap();
+    save_private(target_id, &crate::testing::fresh_blob_json())
+        .await
+        .unwrap();
     store.set_active_cli(current_id).unwrap();
 
     let platform = MockPlatformReadReplacesBlob::new(&initial_cc_blob, replacement);

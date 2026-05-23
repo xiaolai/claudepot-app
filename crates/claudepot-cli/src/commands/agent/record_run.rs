@@ -240,7 +240,10 @@ mod tests {
             Some(run_dir.to_str().unwrap()),
         );
 
-        assert!(res.is_err(), "record-run must fail when result.json is a dir");
+        assert!(
+            res.is_err(),
+            "record-run must fail when result.json is a dir"
+        );
         let breadcrumb = run_dir.join("record-run-error.txt");
         assert!(
             breadcrumb.exists(),

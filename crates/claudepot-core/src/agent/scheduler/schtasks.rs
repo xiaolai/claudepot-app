@@ -533,6 +533,7 @@ mod tests {
             rate_limit: None,
             lifecycle: crate::agent::types::Lifecycle::Installed,
             drafted_by: None,
+            created_via: crate::agent::types::CreatedVia::Gui,
         }
     }
 
@@ -542,9 +543,7 @@ mod tests {
         let xml = render_xml(&a).unwrap();
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-16\"?>"));
         assert!(xml.contains("<Source>claudepot</Source>"));
-        assert!(
-            xml.contains("<URI>\\Claudepot\\agent_00000000-0000-0000-0000-000000000000</URI>")
-        );
+        assert!(xml.contains("<URI>\\Claudepot\\agent_00000000-0000-0000-0000-000000000000</URI>"));
         assert!(xml.contains("<CalendarTrigger>"));
         assert!(xml.contains("<StartBoundary>2000-01-01T09:00:00</StartBoundary>"));
         assert!(xml.contains("<ScheduleByDay>"));

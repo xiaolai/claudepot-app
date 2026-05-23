@@ -185,7 +185,9 @@ mod tests {
         let (store, _db_dir) = test_store();
         let acct = make_account("valid@example.com");
         insert(&store, &acct);
-        swap::save_private(acct.uuid, &fresh_blob_json()).await.unwrap();
+        swap::save_private(acct.uuid, &fresh_blob_json())
+            .await
+            .unwrap();
 
         let views = list_summaries(&store).await.unwrap();
         assert_eq!(views.len(), 1);

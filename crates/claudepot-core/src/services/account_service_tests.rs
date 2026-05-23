@@ -430,7 +430,9 @@ async fn test_token_health_expired_token() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
     let id = Uuid::new_v4();
-    swap::save_private(id, &crate::testing::expired_blob_json()).await.unwrap();
+    swap::save_private(id, &crate::testing::expired_blob_json())
+        .await
+        .unwrap();
 
     let health = token_health(id, true).await;
     assert_eq!(health.status, "expired");
@@ -460,7 +462,9 @@ async fn test_remove_deletes_credential_file() {
     let account = insert_account(&store, "cred@example.com");
 
     // Save a credential file
-    swap::save_private(account.uuid, r#"{"test":"blob"}"#).await.unwrap();
+    swap::save_private(account.uuid, r#"{"test":"blob"}"#)
+        .await
+        .unwrap();
     assert!(swap::load_private(account.uuid).await.is_ok());
 
     remove_account(&store, account.uuid, None).await.unwrap();
@@ -1063,7 +1067,9 @@ async fn test_remove_account_preserves_files_on_db_failure() {
     let (store, _db) = test_store();
 
     let account = insert_account(&store, "dbfail@example.com");
-    swap::save_private(account.uuid, "credential-content").await.unwrap();
+    swap::save_private(account.uuid, "credential-content")
+        .await
+        .unwrap();
     let profile_dir = paths::desktop_profile_dir(account.uuid);
     std::fs::create_dir_all(&profile_dir).unwrap();
     std::fs::write(profile_dir.join("config.json"), "{}").unwrap();
@@ -1160,7 +1166,9 @@ async fn test_reconcile_cli_flags_flips_stale_false_to_true() {
     let mut acct = make_account("stale-false@example.com");
     acct.has_cli_credentials = false;
     store.insert(&acct).unwrap();
-    swap::save_private(acct.uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+    swap::save_private(acct.uuid, &crate::testing::fresh_blob_json())
+        .await
+        .unwrap();
 
     let flips = reconcile_cli_flags(&store).await.unwrap();
     assert_eq!(flips.len(), 1);
@@ -1190,7 +1198,9 @@ async fn test_reconcile_cli_flags_idempotent() {
     let mut a_yes = make_account("yes@example.com");
     a_yes.has_cli_credentials = false; // start drifted
     store.insert(&a_yes).unwrap();
-    swap::save_private(a_yes.uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+    swap::save_private(a_yes.uuid, &crate::testing::fresh_blob_json())
+        .await
+        .unwrap();
 
     // First pass converges the drifted row.
     let first = reconcile_cli_flags(&store).await.unwrap();
@@ -1435,9 +1445,13 @@ async fn test_verify_all_with_progress_emits_started_then_per_account_then_done(
 
     // Two accounts both with credentials and a fresh blob.
     let a1 = insert_account(&store, "alice@example.com");
-    swap::save_private(a1.uuid, &fresh_blob_json()).await.unwrap();
+    swap::save_private(a1.uuid, &fresh_blob_json())
+        .await
+        .unwrap();
     let a2 = insert_account(&store, "bob@example.com");
-    swap::save_private(a2.uuid, &fresh_blob_json()).await.unwrap();
+    swap::save_private(a2.uuid, &fresh_blob_json())
+        .await
+        .unwrap();
 
     // Simple fetcher that returns "alice@example.com" for every call —
     // a1 is Ok, a2 is Drift (label "bob" vs server "alice").
@@ -1488,7 +1502,9 @@ async fn test_verify_all_with_progress_skips_accounts_without_credentials() {
 
     // alice has credentials.
     let a1 = insert_account(&store, "alice@example.com");
-    swap::save_private(a1.uuid, &fresh_blob_json()).await.unwrap();
+    swap::save_private(a1.uuid, &fresh_blob_json())
+        .await
+        .unwrap();
     // bob does NOT — flip the flag explicitly. No swap::save_private
     // here so the blob is genuinely absent on disk too.
     let mut acc = make_account("nocreds@example.com");
@@ -1527,11 +1543,17 @@ async fn test_verify_all_with_progress_uses_200ms_stagger_only_between_calls() {
     let (store, _dir) = test_store();
 
     let a1 = insert_account(&store, "a1@example.com");
-    swap::save_private(a1.uuid, &fresh_blob_json()).await.unwrap();
+    swap::save_private(a1.uuid, &fresh_blob_json())
+        .await
+        .unwrap();
     let a2 = insert_account(&store, "a2@example.com");
-    swap::save_private(a2.uuid, &fresh_blob_json()).await.unwrap();
+    swap::save_private(a2.uuid, &fresh_blob_json())
+        .await
+        .unwrap();
     let a3 = insert_account(&store, "a3@example.com");
-    swap::save_private(a3.uuid, &fresh_blob_json()).await.unwrap();
+    swap::save_private(a3.uuid, &fresh_blob_json())
+        .await
+        .unwrap();
 
     let fetcher = VerifyFetcher::new().returns("any", "a1@example.com");
     let sink = RecordingVerifySink::new();

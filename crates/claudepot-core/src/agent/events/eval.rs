@@ -146,16 +146,13 @@ pub fn evaluate(
             if normalize_project(&session.project_path) != agent_project {
                 continue;
             }
-            if fired_pairs
-                .contains(&(agent_id.clone(), session.session_id.clone()))
-            {
+            if fired_pairs.contains(&(agent_id.clone(), session.session_id.clone())) {
                 continue;
             }
             // Track the oldest-settled eligible session. Ties keep
             // the first seen, so the result is deterministic.
             match oldest {
-                Some(best)
-                    if last_activity(best) <= last_activity(session) => {}
+                Some(best) if last_activity(best) <= last_activity(session) => {}
                 _ => oldest = Some(session),
             }
         }
@@ -184,11 +181,7 @@ pub fn evaluate(
 /// extreme debounce into "fire immediately". A negative idle
 /// duration (clock skew) cannot satisfy any positive debounce, so
 /// it is returned as `false` directly.
-pub fn is_settled(
-    session: &SessionRow,
-    debounce_secs: u64,
-    now: DateTime<Utc>,
-) -> bool {
+pub fn is_settled(session: &SessionRow, debounce_secs: u64, now: DateTime<Utc>) -> bool {
     let last_activity = match last_activity(session) {
         Some(t) => t,
         None => return false,
@@ -208,9 +201,7 @@ fn last_activity(session: &SessionRow) -> Option<DateTime<Utc>> {
         return Some(ts);
     }
     // Fall back to the file mtime. `SystemTime` -> `DateTime<Utc>`.
-    session
-        .last_modified
-        .map(|st| DateTime::<Utc>::from(st))
+    session.last_modified.map(|st| DateTime::<Utc>::from(st))
 }
 
 /// Returns `Some(reason)` when the agent's rate limit forbids a run
@@ -229,12 +220,9 @@ fn rate_limit_blocks(
             // future-dated run history) is treated as "no interval
             // has elapsed at all" — block the fire rather than let
             // a sign flip slip past the limit.
-            let elapsed_ok = secs_since_last >= 0
-                && (secs_since_last as u64) >= min_interval;
+            let elapsed_ok = secs_since_last >= 0 && (secs_since_last as u64) >= min_interval;
             if !elapsed_ok {
-                return Some(SkipReason::RateLimitedMinInterval {
-                    secs_since_last,
-                });
+                return Some(SkipReason::RateLimitedMinInterval { secs_since_last });
             }
         }
     }
@@ -257,9 +245,7 @@ fn rate_limit_blocks(
 /// on Linux.
 fn normalize_project(path: &str) -> String {
     let simplified = simplify_windows_path(path);
-    let trimmed = simplified
-        .trim_end_matches('/')
-        .trim_end_matches('\\');
+    let trimmed = simplified.trim_end_matches('/').trim_end_matches('\\');
     if cfg!(any(target_os = "windows", target_os = "macos")) {
         trimmed.to_lowercase()
     } else {
@@ -271,8 +257,7 @@ fn normalize_project(path: &str) -> String {
 mod tests {
     use super::*;
     use crate::agent::types::{
-        Agent, AgentBinary, Lifecycle, OutputFormat, PermissionMode,
-        PlatformOptions,
+        Agent, AgentBinary, Lifecycle, OutputFormat, PermissionMode, PlatformOptions,
     };
     use crate::session::TokenUsage;
     use chrono::{Duration, TimeZone};
@@ -329,17 +314,11 @@ mod tests {
     }
 
     /// A session row with `last_ts` set, rooted at `project_path`.
-    fn session(
-        session_id: &str,
-        project_path: &str,
-        last_ts: Option<DateTime<Utc>>,
-    ) -> SessionRow {
+    fn session(session_id: &str, project_path: &str, last_ts: Option<DateTime<Utc>>) -> SessionRow {
         SessionRow {
             session_id: session_id.into(),
             slug: "slug".into(),
-            file_path: PathBuf::from(format!(
-                "/home/u/.claude/projects/slug/{session_id}.jsonl"
-            )),
+            file_path: PathBuf::from(format!("/home/u/.claude/projects/slug/{session_id}.jsonl")),
             file_size_bytes: 1024,
             last_modified: None,
             project_path: project_path.into(),
@@ -363,9 +342,7 @@ mod tests {
 
     /// A `run_stats` closure backed by a map; missing agents get the
     /// default (never run, zero today).
-    fn stats_fn(
-        map: HashMap<String, AgentRunStats>,
-    ) -> impl Fn(&str) -> AgentRunStats {
+    fn stats_fn(map: HashMap<String, AgentRunStats>) -> impl Fn(&str) -> AgentRunStats {
         move |id: &str| map.get(id).cloned().unwrap_or_default()
     }
 
@@ -423,8 +400,7 @@ mod tests {
         let agent = event_agent("/home/u/proj", 600, Some(RateLimit::default()));
         let mut s = session("sess-1", "/home/u/proj", None);
         // No last_ts; fall back to file mtime 20 min ago.
-        let mtime: std::time::SystemTime =
-            (fixed_now() - Duration::minutes(20)).into();
+        let mtime: std::time::SystemTime = (fixed_now() - Duration::minutes(20)).into();
         s.last_modified = Some(mtime);
         let fires = evaluate(
             &[agent],
@@ -664,8 +640,7 @@ mod tests {
     fn cron_and_manual_agents_are_ignored() {
         // A non-event agent passed in by mistake is silently
         // skipped — `evaluate` only acts on `Trigger::Event`.
-        let mut cron_agent =
-            event_agent("/home/u/proj", 600, Some(RateLimit::default()));
+        let mut cron_agent = event_agent("/home/u/proj", 600, Some(RateLimit::default()));
         cron_agent.trigger = Trigger::Cron {
             cron: "0 9 * * *".into(),
             timezone: None,

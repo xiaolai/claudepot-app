@@ -383,7 +383,9 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
 
         let fetcher = MockFetcher::ok("alice@example.com");
         let outcome = verify_account_identity(&store, uuid, &fetcher)
@@ -408,7 +410,9 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
 
         let fetcher = MockFetcher::ok("bob@example.com");
         let outcome = verify_account_identity(&store, uuid, &fetcher)
@@ -428,7 +432,9 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
 
         let fetcher = MockFetcher::rejecting();
         let refresher = MockRefresher::rejecting();
@@ -449,7 +455,9 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
         store
             .update_verification(
                 uuid,
@@ -546,7 +554,9 @@ mod tests {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
-        swap::save_private(uuid, &crate::testing::fresh_blob_json()).await.unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
 
         // Seed a prior successful verification.
         store

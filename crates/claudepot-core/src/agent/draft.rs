@@ -36,8 +36,8 @@ use uuid::Uuid;
 use super::error::AgentError;
 use super::slug::validate_name;
 use super::types::{
-    Agent, AgentBinary, Lifecycle, McpServerRef, OutputFormat, PermissionMode,
-    PlatformOptions, RateLimit, Trigger,
+    Agent, AgentBinary, Lifecycle, McpServerRef, OutputFormat, PermissionMode, PlatformOptions,
+    RateLimit, Trigger,
 };
 
 /// The normalized, shape-agnostic draft spec. Whichever JSON shape
@@ -245,8 +245,7 @@ pub const MAX_MCP_SERVERS_ELEMS: usize = 32;
 /// control characters other than newline / tab. A `\u{0000}` is a
 /// shell-truncation hazard; ESC sequences corrupt terminal logs.
 fn contains_bad_control_chars(s: &str) -> bool {
-    s.chars()
-        .any(|c| c.is_control() && c != '\n' && c != '\t')
+    s.chars().any(|c| c.is_control() && c != '\n' && c != '\t')
 }
 
 /// Cap a text field's length and reject control characters. Used
@@ -491,8 +490,7 @@ fn merge_cli_overrides(spec: &mut DraftSpec, ov: &CliOverrides) {
 /// actually implement) is always accepted.
 pub fn validate_trigger_timezone(trigger: &Trigger) -> Result<(), AgentError> {
     if let Trigger::Cron {
-        timezone: Some(tz),
-        ..
+        timezone: Some(tz), ..
     } = trigger
     {
         return Err(AgentError::InvalidEnv(format!(
@@ -516,9 +514,7 @@ pub const MAX_EVENT_DEBOUNCE_SECS: u64 = 7 * 24 * 60 * 60;
 /// F20). Bounds `debounce_secs` to a sane ceiling so an extreme
 /// value can't silently wrap into a zero-debounce / fire-immediately
 /// case downstream. Non-event triggers pass through unchanged.
-pub fn validate_event_trigger_numerics(
-    trigger: &Trigger,
-) -> Result<(), AgentError> {
+pub fn validate_event_trigger_numerics(trigger: &Trigger) -> Result<(), AgentError> {
     if let Trigger::Event {
         event: super::types::EventKind::SessionSettled { debounce_secs },
     } = trigger
@@ -626,11 +622,7 @@ pub fn build_draft(
         validate_text_field("system_prompt", v, MAX_PROMPT_BYTES)?;
     }
     if let Some(v) = spec.append_system_prompt.as_deref() {
-        validate_text_field(
-            "append_system_prompt",
-            v,
-            MAX_PROMPT_BYTES,
-        )?;
+        validate_text_field("append_system_prompt", v, MAX_PROMPT_BYTES)?;
     }
     if let Some(v) = spec.model.as_deref() {
         validate_text_field("model", v, MAX_MODEL_BYTES)?;
@@ -719,9 +711,10 @@ pub fn build_draft(
     // unthrottled reactive agent — events × agents × Claude is the
     // dominant cost-runaway risk.
     if spec.trigger.is_event() {
-        let has_usable_limit = spec.rate_limit.as_ref().is_some_and(|r| {
-            r.min_interval_secs.is_some() || r.max_per_day.is_some()
-        });
+        let has_usable_limit = spec
+            .rate_limit
+            .as_ref()
+            .is_some_and(|r| r.min_interval_secs.is_some() || r.max_per_day.is_some());
         if !has_usable_limit {
             return Err(AgentError::InvalidEnv(
                 "an event-triggered agent must carry a rate_limit \
@@ -804,10 +797,7 @@ mod tests {
         assert_eq!(agent.name, "nightly-digest");
         assert_eq!(agent.cwd, "/tmp/proj");
         assert_eq!(agent.lifecycle, Lifecycle::Draft);
-        assert_eq!(
-            agent.drafted_by.as_deref(),
-            Some("claude-code@2026-05-22")
-        );
+        assert_eq!(agent.drafted_by.as_deref(), Some("claude-code@2026-05-22"));
         // Absent trigger normalizes to Manual — no OS artifact.
         assert!(agent.trigger.is_manual());
     }
@@ -1094,12 +1084,10 @@ mod tests {
     fn oversized_prompt_field_is_rejected_at_build_time() {
         // F18: an oversized `prompt` inside an otherwise-small spec
         // is caught at build time (after serde dispatch).
-        let mut spec = DraftInput::from_json(
-            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
-        )
-        .unwrap()
-        .normalize(&CliOverrides::default())
-        .unwrap();
+        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
         spec.prompt = "p".repeat(MAX_PROMPT_BYTES + 1);
         let err = build_draft(spec, "t", now()).unwrap_err();
         assert!(matches!(err, AgentError::InvalidEnv(_)));
@@ -1109,12 +1097,10 @@ mod tests {
     fn control_chars_in_prompt_rejected() {
         // F18: shell-bound text fields refuse control characters
         // other than \n and \t.
-        let mut spec = DraftInput::from_json(
-            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
-        )
-        .unwrap()
-        .normalize(&CliOverrides::default())
-        .unwrap();
+        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
         spec.prompt = "hello\u{001B}[31mred".to_string();
         let err = build_draft(spec, "t", now()).unwrap_err();
         match err {
@@ -1129,28 +1115,24 @@ mod tests {
     fn newline_and_tab_in_prompt_are_allowed() {
         // F18: the contains_bad_control_chars guard must allow the
         // two whitespace control chars legitimate prompts carry.
-        let mut spec = DraftInput::from_json(
-            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
-        )
-        .unwrap()
-        .normalize(&CliOverrides::default())
-        .unwrap();
+        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
         spec.prompt = "line one\nline two\twith tab".to_string();
-        build_draft(spec, "t", now())
-            .expect("\\n and \\t must pass the control-char gate");
+        build_draft(spec, "t", now()).expect("\\n and \\t must pass the control-char gate");
     }
 
     #[test]
     fn too_many_allowed_tools_rejected() {
         // F18: element-count cap.
-        let mut spec = DraftInput::from_json(
-            r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#,
-        )
-        .unwrap()
-        .normalize(&CliOverrides::default())
-        .unwrap();
-        spec.allowed_tools =
-            (0..MAX_TOOL_LIST_ELEMS + 1).map(|i| format!("T{i}")).collect();
+        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
+            .unwrap()
+            .normalize(&CliOverrides::default())
+            .unwrap();
+        spec.allowed_tools = (0..MAX_TOOL_LIST_ELEMS + 1)
+            .map(|i| format!("T{i}"))
+            .collect();
         let err = build_draft(spec, "t", now()).unwrap_err();
         assert!(matches!(err, AgentError::InvalidEnv(_)));
     }
@@ -1166,15 +1148,11 @@ mod tests {
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
-        let agent =
-            build_draft(spec, "manual-setup", now()).unwrap();
+        let agent = build_draft(spec, "manual-setup", now()).unwrap();
         // The caller's spoofy `drafted_by` is preserved (audit
         // trail, advisory) but `created_via` is the hard signal.
         assert_eq!(agent.drafted_by.as_deref(), Some("manual-setup"));
-        assert_eq!(
-            agent.created_via,
-            super::super::types::CreatedVia::CliDraft
-        );
+        assert_eq!(agent.created_via, super::super::types::CreatedVia::CliDraft);
     }
 
     #[test]
