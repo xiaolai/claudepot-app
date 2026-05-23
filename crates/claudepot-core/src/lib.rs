@@ -45,6 +45,8 @@ pub mod cc_tips;
 pub mod cli_backend;
 pub mod codex_session;
 pub mod config_view;
+pub mod db_housekeeping;
+pub mod db_pragmas;
 pub mod desktop_backend;
 pub mod desktop_identity;
 pub mod desktop_lock;
