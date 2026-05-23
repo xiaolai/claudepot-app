@@ -1345,7 +1345,7 @@ function AppShell() {
                 </ErrorBoundary>
               )}
               {section === "third-party" && (
-                <ErrorBoundary key="third-party" label="Third-parties">
+                <ErrorBoundary key="third-party" label="Providers">
                   <ThirdPartySection />
                 </ErrorBoundary>
               )}

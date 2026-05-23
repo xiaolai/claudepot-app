@@ -255,14 +255,14 @@ export function ThirdPartySection() {
       }}
     >
       <ScreenHeader
-        title="Third-parties"
+        title="Providers"
         subtitle="Run Claude Code and Claude Desktop with non-Anthropic LLMs"
         actions={
           <Button
             variant="solid"
             glyph={NF.plus}
             onClick={() => setShowAdd(true)}
-            title="Configure a new third-party route"
+            title="Configure a new provider route"
           >
             Add route
           </Button>

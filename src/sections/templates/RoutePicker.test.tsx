@@ -143,7 +143,7 @@ describe("RoutePicker — capability-filtered route surface", () => {
     expect(ineligible).toBeDisabled();
   });
 
-  it("surfaces a deep-link to Third-parties when privacy=local and zero local routes are configured", async () => {
+  it("surfaces a deep-link to Providers when privacy=local and zero local routes are configured", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
     render(
@@ -155,7 +155,7 @@ describe("RoutePicker — capability-filtered route surface", () => {
         onOpenThirdParties={onOpen}
       />,
     );
-    await user.click(screen.getByRole("button", { name: /Set one up in Third-parties/ }));
+    await user.click(screen.getByRole("button", { name: /Set one up in Providers/ }));
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 

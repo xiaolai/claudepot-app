@@ -19,8 +19,8 @@ interface Props {
  * - 1 capable route exists (silently used)
  *
  * Renders a dropdown when N>1. For `local-only` templates with
- * zero local routes, renders a deep-link to the Third-parties
- * tab — no inline setup wizard.
+ * zero local routes, renders a deep-link to the Providers tab
+ * — no inline setup wizard.
  */
 export function RoutePicker({
   routes,
@@ -78,7 +78,7 @@ export function RoutePicker({
             padding: 0,
           }}
         >
-          Set one up in Third-parties.
+          Set one up in Providers.
         </button>
       </div>
     );

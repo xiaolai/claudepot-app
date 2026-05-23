@@ -411,7 +411,7 @@ export function AgentForm({
             style={inputStyle()}
           >
             <option value="first_party">First-party `claude`</option>
-            <option value="route">Third-party route</option>
+            <option value="route">Provider route</option>
           </select>
           {binaryKind === "route" && (
             <select
