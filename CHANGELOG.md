@@ -6,6 +6,32 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.42 — beta (unreleased)
+
+The WAL-housekeeping patch. Stops every SQLite store from leaking
+WAL files between restarts — the 2026-05-24 incident showed
+`sessions.db-wal` could reach 6.3 GB while the actual database was
+only 114 MB.
+
+### Added
+
+- `claudepot-core::db_pragmas::apply_standard_pragmas` centralizes
+  `journal_mode=WAL` + `wal_autocheckpoint=1000` +
+  `journal_size_limit=64 MB` + `busy_timeout=5 s` across all seven
+  SQLite stores (accounts, keys, env-vault, sessions, activity,
+  memory log, live metrics).
+- `claudepot-core::db_housekeeping::checkpoint_known_db_files`
+  runs at CLI and GUI startup, opens each `~/.claudepot/*.db`
+  briefly with `SQLITE_OPEN_READ_WRITE` (no `CREATE`), runs
+  `PRAGMA wal_checkpoint(TRUNCATE)`, and closes. Recovers leaked
+  WALs from any prior exit — clean quit, SIGKILL, crash, power loss.
+
+### Fixed
+
+- `~/.claudepot/sessions.db-wal` (and every other `*.db-wal`) no
+  longer grows unbounded between restarts. Existing oversized WAL
+  files are truncated on first launch after the upgrade.
+
 ## 0.1.41 — beta (unreleased)
 
 The Agents release. Reframes the old "Automations" tab as
