@@ -54,6 +54,8 @@ fn run_agent(env: &Env, args: &[&str]) -> (String, String, i32) {
 #[test]
 fn draft_creates_draft_record_and_no_scheduler_artifact() {
     let env = make_env();
+    let proj_cwd = env.data_path.join("proj");
+    let proj_cwd = proj_cwd.to_str().unwrap();
     let (stdout, stderr, code) = run_agent(
         &env,
         &[
@@ -62,7 +64,7 @@ fn draft_creates_draft_record_and_no_scheduler_artifact() {
             "--name",
             "nightly-digest",
             "--cwd",
-            "/tmp/proj",
+            proj_cwd,
             "--prompt",
             "summarize today's work",
         ],
@@ -100,9 +102,10 @@ fn draft_creates_draft_record_and_no_scheduler_artifact() {
 #[test]
 fn draft_accepts_claudepot_native_json() {
     let env = make_env();
+    let native_cwd = env.data_path.join("native");
     let spec = serde_json::json!({
         "name": "native-agent",
-        "cwd": "/tmp/native",
+        "cwd": native_cwd.to_str().unwrap(),
         "prompt": "do the thing",
         "model": "claude-haiku-4-5",
         "allowed_tools": ["Read", "Grep"],
@@ -146,6 +149,8 @@ fn draft_accepts_agent_definition_shaped_json() {
     let spec_path = env.data_path.join("sdk-spec.json");
     fs::write(&spec_path, spec.to_string()).unwrap();
 
+    let repo_cwd = env.data_path.join("repo");
+    let repo_cwd_str = repo_cwd.to_str().unwrap();
     let (stdout, stderr, code) = run_agent(
         &env,
         &[
@@ -156,7 +161,7 @@ fn draft_accepts_agent_definition_shaped_json() {
             "--name",
             "sec-review",
             "--cwd",
-            "/tmp/repo",
+            repo_cwd_str,
         ],
     );
     assert_eq!(
@@ -165,7 +170,7 @@ fn draft_accepts_agent_definition_shaped_json() {
     );
     let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["name"], "sec-review");
-    assert_eq!(payload["cwd"], "/tmp/repo");
+    assert_eq!(payload["cwd"], repo_cwd_str);
     assert_eq!(payload["prompt"], "You are a security reviewer.");
     assert_eq!(payload["model"], "claude-haiku-4-5");
     assert_eq!(payload["lifecycle"], "draft");
@@ -176,6 +181,8 @@ fn draft_accepts_agent_definition_shaped_json() {
 #[test]
 fn list_and_show_round_trip_a_draft() {
     let env = make_env();
+    let rt_cwd = env.data_path.join("rt");
+    let rt_cwd_str = rt_cwd.to_str().unwrap();
     let (_, stderr, code) = run_agent(
         &env,
         &[
@@ -183,7 +190,7 @@ fn list_and_show_round_trip_a_draft() {
             "--name",
             "round-trip",
             "--cwd",
-            "/tmp/rt",
+            rt_cwd_str,
             "--prompt",
             "p",
         ],
@@ -202,7 +209,7 @@ fn list_and_show_round_trip_a_draft() {
     assert_eq!(show_code, 0);
     let shown: serde_json::Value = serde_json::from_str(&show_out).unwrap();
     assert_eq!(shown["name"], "round-trip");
-    assert_eq!(shown["cwd"], "/tmp/rt");
+    assert_eq!(shown["cwd"], rt_cwd_str);
 }
 
 #[test]
