@@ -92,7 +92,10 @@ mod tests {
     fn test_apply_standard_pragmas_sets_journal_size_limit() {
         let (_dir, conn) = open_temp();
         apply_standard_pragmas(&conn).unwrap();
-        assert_eq!(pragma_i64(&conn, "journal_size_limit"), WAL_SIZE_LIMIT_BYTES);
+        assert_eq!(
+            pragma_i64(&conn, "journal_size_limit"),
+            WAL_SIZE_LIMIT_BYTES
+        );
     }
 
     #[test]
@@ -115,7 +118,10 @@ mod tests {
         apply_standard_pragmas(&conn).unwrap();
         apply_standard_pragmas(&conn).unwrap();
         assert_eq!(pragma_string(&conn, "journal_mode").to_lowercase(), "wal");
-        assert_eq!(pragma_i64(&conn, "journal_size_limit"), WAL_SIZE_LIMIT_BYTES);
+        assert_eq!(
+            pragma_i64(&conn, "journal_size_limit"),
+            WAL_SIZE_LIMIT_BYTES
+        );
     }
 
     #[test]
