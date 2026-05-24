@@ -777,6 +777,7 @@ pub fn build_draft(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{test_cwd, test_cwd_sub};
 
     fn now() -> DateTime<Utc> {
         Utc::now()
@@ -784,18 +785,21 @@ mod tests {
 
     #[test]
     fn native_minimal_spec_builds_draft() {
-        let raw = r#"{
+        let cwd = test_cwd_sub("proj");
+        let raw = format!(
+            r#"{{
             "name": "nightly-digest",
-            "cwd": "/tmp/proj",
+            "cwd": {cwd:?},
             "prompt": "summarize today"
-        }"#;
-        let spec = DraftInput::from_json(raw)
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
         let agent = build_draft(spec, "claude-code@2026-05-22", now()).unwrap();
         assert_eq!(agent.name, "nightly-digest");
-        assert_eq!(agent.cwd, "/tmp/proj");
+        assert_eq!(agent.cwd, cwd);
         assert_eq!(agent.lifecycle, Lifecycle::Draft);
         assert_eq!(agent.drafted_by.as_deref(), Some("claude-code@2026-05-22"));
         // Absent trigger normalizes to Manual — no OS artifact.
@@ -813,15 +817,16 @@ mod tests {
             "tools": ["Read", "Grep"],
             "model": "claude-haiku-4-5"
         }"#;
+        let repo_cwd = test_cwd_sub("repo");
         let ov = CliOverrides {
             name: Some("sec-review".into()),
-            cwd: Some("/tmp/repo".into()),
+            cwd: Some(repo_cwd.clone()),
             ..CliOverrides::default()
         };
         let spec = DraftInput::from_json(raw).unwrap().normalize(&ov).unwrap();
         let agent = build_draft(spec, "claude-code@x", now()).unwrap();
         assert_eq!(agent.name, "sec-review");
-        assert_eq!(agent.cwd, "/tmp/repo");
+        assert_eq!(agent.cwd, repo_cwd);
         assert_eq!(agent.prompt, "You are a security reviewer.");
         assert_eq!(agent.model.as_deref(), Some("claude-haiku-4-5"));
         assert_eq!(agent.allowed_tools, vec!["Read", "Grep"]);
@@ -852,14 +857,17 @@ mod tests {
     fn native_shape_takes_precedence_when_description_absent() {
         // A native spec without `description` must NOT be misread
         // as an SDK AgentDefinition (which requires description).
-        let raw = r#"{
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
             "name": "x",
-            "cwd": "/tmp",
+            "cwd": {cwd:?},
             "prompt": "p",
             "allowed_tools": ["Read"],
             "permission_mode": "bypassPermissions"
-        }"#;
-        let spec = DraftInput::from_json(raw)
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -870,13 +878,16 @@ mod tests {
 
     #[test]
     fn bypass_without_tools_rejected_at_draft_time() {
-        let raw = r#"{
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
             "name": "danger",
-            "cwd": "/tmp",
+            "cwd": {cwd:?},
             "prompt": "p",
             "permission_mode": "bypassPermissions"
-        }"#;
-        let spec = DraftInput::from_json(raw)
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -886,8 +897,9 @@ mod tests {
 
     #[test]
     fn invalid_name_rejected_at_draft_time() {
-        let raw = r#"{ "name": "INVALID", "cwd": "/tmp", "prompt": "p" }"#;
-        let spec = DraftInput::from_json(raw)
+        let cwd = test_cwd();
+        let raw = format!(r#"{{ "name": "INVALID", "cwd": {cwd:?}, "prompt": "p" }}"#);
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -897,13 +909,16 @@ mod tests {
 
     #[test]
     fn cron_trigger_with_bad_expression_rejected() {
-        let raw = r#"{
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
             "name": "x",
-            "cwd": "/tmp",
+            "cwd": {cwd:?},
             "prompt": "p",
-            "trigger": { "kind": "cron", "cron": "not a cron" }
-        }"#;
-        let spec = DraftInput::from_json(raw)
+            "trigger": {{ "kind": "cron", "cron": "not a cron" }}
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -915,17 +930,20 @@ mod tests {
         // F11: a cron trigger carrying an IANA timezone must be
         // rejected at draft time — no scheduler adapter honors it,
         // so accepting it would be a silent lie.
-        let raw = r#"{
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
             "name": "tz-agent",
-            "cwd": "/tmp",
+            "cwd": {cwd:?},
             "prompt": "p",
-            "trigger": {
+            "trigger": {{
                 "kind": "cron",
                 "cron": "0 9 * * *",
                 "timezone": "America/Los_Angeles"
-            }
-        }"#;
-        let spec = DraftInput::from_json(raw)
+            }}
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -945,13 +963,16 @@ mod tests {
     fn cron_trigger_without_timezone_is_accepted() {
         // The complement: a cron trigger with no timezone (local
         // time, the only behavior the adapters implement) builds.
-        let raw = r#"{
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
             "name": "local-cron",
-            "cwd": "/tmp",
+            "cwd": {cwd:?},
             "prompt": "p",
-            "trigger": { "kind": "cron", "cron": "0 9 * * *" }
-        }"#;
-        let spec = DraftInput::from_json(raw)
+            "trigger": {{ "kind": "cron", "cron": "0 9 * * *" }}
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -961,22 +982,26 @@ mod tests {
 
     #[test]
     fn cli_overrides_replace_json_values() {
-        let raw = r#"{
+        let json_cwd = test_cwd_sub("json");
+        let flag_cwd = test_cwd_sub("flag");
+        let raw = format!(
+            r#"{{
             "name": "json-name",
-            "cwd": "/tmp/json",
+            "cwd": {json_cwd:?},
             "prompt": "p",
             "model": "sonnet"
-        }"#;
+        }}"#
+        );
         let ov = CliOverrides {
             name: Some("flag-name".into()),
-            cwd: Some("/tmp/flag".into()),
+            cwd: Some(flag_cwd.clone()),
             model: Some("opus".into()),
             attach_memory: true,
             ..CliOverrides::default()
         };
-        let spec = DraftInput::from_json(raw).unwrap().normalize(&ov).unwrap();
+        let spec = DraftInput::from_json(&raw).unwrap().normalize(&ov).unwrap();
         assert_eq!(spec.name, "flag-name");
-        assert_eq!(spec.cwd, "/tmp/flag");
+        assert_eq!(spec.cwd, flag_cwd);
         assert_eq!(spec.model.as_deref(), Some("opus"));
         // attach_memory adds the Claudepot memory server.
         assert!(spec
@@ -989,17 +1014,20 @@ mod tests {
     fn attach_memory_is_idempotent() {
         // A native spec that already carries claudepot_memory plus
         // --attach-memory must not double it.
-        let raw = r#"{
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
             "name": "x",
-            "cwd": "/tmp",
+            "cwd": {cwd:?},
             "prompt": "p",
-            "mcp_servers": [ { "kind": "claudepot_memory" } ]
-        }"#;
+            "mcp_servers": [ {{ "kind": "claudepot_memory" }} ]
+        }}"#
+        );
         let ov = CliOverrides {
             attach_memory: true,
             ..CliOverrides::default()
         };
-        let spec = DraftInput::from_json(raw).unwrap().normalize(&ov).unwrap();
+        let spec = DraftInput::from_json(&raw).unwrap().normalize(&ov).unwrap();
         let count = spec
             .mcp_servers
             .iter()
@@ -1012,8 +1040,9 @@ mod tests {
     fn build_draft_never_sets_installed() {
         // The whole security model rests on this: build_draft
         // cannot, by any input, produce an Installed agent.
-        let raw = r#"{ "name": "x", "cwd": "/tmp", "prompt": "p" }"#;
-        let spec = DraftInput::from_json(raw)
+        let cwd = test_cwd();
+        let raw = format!(r#"{{ "name": "x", "cwd": {cwd:?}, "prompt": "p" }}"#);
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -1046,14 +1075,17 @@ mod tests {
     fn custom_mcp_server_is_rejected_in_a_draft() {
         // F3: an AI client must not be able to inject an arbitrary
         // command via a Custom MCP server's config.
-        let raw = r#"{
-            "name": "x", "cwd": "/tmp", "prompt": "p",
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
+            "name": "x", "cwd": {cwd:?}, "prompt": "p",
             "mcp_servers": [
-                { "kind": "custom", "name": "evil",
-                  "config": { "command": "bash", "args": ["-c", "x"] } }
+                {{ "kind": "custom", "name": "evil",
+                  "config": {{ "command": "bash", "args": ["-c", "x"] }} }}
             ]
-        }"#;
-        let spec = DraftInput::from_json(raw)
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -1067,8 +1099,9 @@ mod tests {
     fn oversized_spec_json_is_rejected_before_parse() {
         // F18: a multi-MB spec is rejected at the input boundary,
         // not after serde walks every byte.
+        let cwd = test_cwd();
         let raw = format!(
-            "{{ \"name\":\"x\",\"cwd\":\"/tmp\",\"prompt\":\"{}\" }}",
+            r#"{{ "name":"x","cwd":{cwd:?},"prompt":"{}" }}"#,
             "p".repeat(MAX_SPEC_BYTES + 16)
         );
         let err = DraftInput::from_json(&raw).unwrap_err();
@@ -1084,10 +1117,12 @@ mod tests {
     fn oversized_prompt_field_is_rejected_at_build_time() {
         // F18: an oversized `prompt` inside an otherwise-small spec
         // is caught at build time (after serde dispatch).
-        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
-            .unwrap()
-            .normalize(&CliOverrides::default())
-            .unwrap();
+        let cwd = test_cwd();
+        let mut spec =
+            DraftInput::from_json(&format!(r#"{{ "name":"x","cwd":{cwd:?},"prompt":"p" }}"#))
+                .unwrap()
+                .normalize(&CliOverrides::default())
+                .unwrap();
         spec.prompt = "p".repeat(MAX_PROMPT_BYTES + 1);
         let err = build_draft(spec, "t", now()).unwrap_err();
         assert!(matches!(err, AgentError::InvalidEnv(_)));
@@ -1097,10 +1132,12 @@ mod tests {
     fn control_chars_in_prompt_rejected() {
         // F18: shell-bound text fields refuse control characters
         // other than \n and \t.
-        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
-            .unwrap()
-            .normalize(&CliOverrides::default())
-            .unwrap();
+        let cwd = test_cwd();
+        let mut spec =
+            DraftInput::from_json(&format!(r#"{{ "name":"x","cwd":{cwd:?},"prompt":"p" }}"#))
+                .unwrap()
+                .normalize(&CliOverrides::default())
+                .unwrap();
         spec.prompt = "hello\u{001B}[31mred".to_string();
         let err = build_draft(spec, "t", now()).unwrap_err();
         match err {
@@ -1115,10 +1152,12 @@ mod tests {
     fn newline_and_tab_in_prompt_are_allowed() {
         // F18: the contains_bad_control_chars guard must allow the
         // two whitespace control chars legitimate prompts carry.
-        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
-            .unwrap()
-            .normalize(&CliOverrides::default())
-            .unwrap();
+        let cwd = test_cwd();
+        let mut spec =
+            DraftInput::from_json(&format!(r#"{{ "name":"x","cwd":{cwd:?},"prompt":"p" }}"#))
+                .unwrap()
+                .normalize(&CliOverrides::default())
+                .unwrap();
         spec.prompt = "line one\nline two\twith tab".to_string();
         build_draft(spec, "t", now()).expect("\\n and \\t must pass the control-char gate");
     }
@@ -1126,10 +1165,12 @@ mod tests {
     #[test]
     fn too_many_allowed_tools_rejected() {
         // F18: element-count cap.
-        let mut spec = DraftInput::from_json(r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#)
-            .unwrap()
-            .normalize(&CliOverrides::default())
-            .unwrap();
+        let cwd = test_cwd();
+        let mut spec =
+            DraftInput::from_json(&format!(r#"{{ "name":"x","cwd":{cwd:?},"prompt":"p" }}"#))
+                .unwrap()
+                .normalize(&CliOverrides::default())
+                .unwrap();
         spec.allowed_tools = (0..MAX_TOOL_LIST_ELEMS + 1)
             .map(|i| format!("T{i}"))
             .collect();
@@ -1143,8 +1184,9 @@ mod tests {
         // `created_via = CliDraft` — the trustworthy "this was the
         // AI-drafting path" signal, regardless of what the caller
         // passes for `drafted_by`.
-        let raw = r#"{ "name":"x","cwd":"/tmp","prompt":"p" }"#;
-        let spec = DraftInput::from_json(raw)
+        let cwd = test_cwd();
+        let raw = format!(r#"{{ "name":"x","cwd":{cwd:?},"prompt":"p" }}"#);
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -1160,10 +1202,11 @@ mod tests {
         // F20: a `debounce_secs` past the 7-day ceiling is rejected
         // at draft time — the earlier `as i64` cast would let
         // `u64::MAX` wrap to -1 and fire immediately.
+        let cwd = test_cwd();
         let raw = format!(
             r#"{{
                 "name":"narrator",
-                "cwd":"/tmp",
+                "cwd":{cwd:?},
                 "prompt":"p",
                 "rate_limit": {{ "min_interval_secs": 60, "max_per_day": 5 }},
                 "trigger": {{ "kind":"event","event":{{ "kind":"session_settled", "debounce_secs": {} }} }}
@@ -1186,12 +1229,15 @@ mod tests {
     #[test]
     fn debounce_secs_zero_rejected() {
         // F20: zero debounce would fire on every transcript write.
-        let raw = r#"{
-            "name":"narrator","cwd":"/tmp","prompt":"p",
-            "rate_limit": { "min_interval_secs": 60, "max_per_day": 5 },
-            "trigger": { "kind":"event","event":{ "kind":"session_settled", "debounce_secs": 0 } }
-        }"#;
-        let spec = DraftInput::from_json(raw)
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
+            "name":"narrator","cwd":{cwd:?},"prompt":"p",
+            "rate_limit": {{ "min_interval_secs": 60, "max_per_day": 5 }},
+            "trigger": {{ "kind":"event","event":{{ "kind":"session_settled", "debounce_secs": 0 }} }}
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -1201,12 +1247,15 @@ mod tests {
     #[test]
     fn max_per_day_zero_rejected() {
         // F20: max_per_day = 0 is a silent never-fire; reject.
-        let raw = r#"{
-            "name":"narrator","cwd":"/tmp","prompt":"p",
-            "rate_limit": { "min_interval_secs": 60, "max_per_day": 0 },
-            "trigger": { "kind":"event","event":{ "kind":"session_settled", "debounce_secs": 600 } }
-        }"#;
-        let spec = DraftInput::from_json(raw)
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
+            "name":"narrator","cwd":{cwd:?},"prompt":"p",
+            "rate_limit": {{ "min_interval_secs": 60, "max_per_day": 0 }},
+            "trigger": {{ "kind":"event","event":{{ "kind":"session_settled", "debounce_secs": 600 }} }}
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -1223,12 +1272,15 @@ mod tests {
     fn min_interval_secs_zero_rejected() {
         // F20: a zero-second min-interval is a no-op; reject so
         // the user must spell out "no minimum interval" as null.
-        let raw = r#"{
-            "name":"narrator","cwd":"/tmp","prompt":"p",
-            "rate_limit": { "min_interval_secs": 0, "max_per_day": 5 },
-            "trigger": { "kind":"event","event":{ "kind":"session_settled", "debounce_secs": 600 } }
-        }"#;
-        let spec = DraftInput::from_json(raw)
+        let cwd = test_cwd();
+        let raw = format!(
+            r#"{{
+            "name":"narrator","cwd":{cwd:?},"prompt":"p",
+            "rate_limit": {{ "min_interval_secs": 0, "max_per_day": 5 }},
+            "trigger": {{ "kind":"event","event":{{ "kind":"session_settled", "debounce_secs": 600 }} }}
+        }}"#
+        );
+        let spec = DraftInput::from_json(&raw)
             .unwrap()
             .normalize(&CliOverrides::default())
             .unwrap();
@@ -1248,7 +1300,7 @@ mod tests {
         }"#;
         let ov = CliOverrides {
             name: Some("x".into()),
-            cwd: Some("/tmp".into()),
+            cwd: Some(test_cwd()),
             ..CliOverrides::default()
         };
         let spec = DraftInput::from_json(raw).unwrap().normalize(&ov).unwrap();
