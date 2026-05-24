@@ -41,6 +41,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::artifact_usage::{model::UsageEvent, store as usage_store};
+use crate::db_pragmas::apply_standard_pragmas;
 use crate::session::{scan_session, SessionRow, TurnRecord};
 
 /// Handle to the persistent session index.
@@ -134,14 +135,15 @@ impl SessionIndex {
     /// PRAGMA or schema DDL, not just at `Connection::open`.
     fn init_connection(path: &Path) -> Result<Connection, SessionIndexError> {
         let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL;")?;
+        apply_standard_pragmas(&db)?;
         // v4: enable FK enforcement on every connection. Pre-v4
         // shipped with FK declarations that never fired; the v4
         // schema adds `exchanges -> sessions` cascade that
         // depends on this pragma. SQLite requires it set per
-        // connection — there is no DB-level switch.
+        // connection — there is no DB-level switch. Kept here
+        // rather than in `apply_standard_pragmas` because most
+        // other stores don't want FK enforcement on by default.
         db.execute_batch("PRAGMA foreign_keys=ON;")?;
-        db.busy_timeout(std::time::Duration::from_secs(5))?;
         apply_schema(&db)?;
         // Force WAL/SHM sidecars to materialize NOW so the chmod
         // loop in open() can narrow their perms. Without this, the

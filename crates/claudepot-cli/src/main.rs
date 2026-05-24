@@ -1133,6 +1133,16 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("failed to create data dir: {}", data_dir.display()))?;
 
+    // WAL housekeeping before any store opens its connection. Cleans
+    // up leftover `*.db-wal` files that the previous claudepot exit
+    // (clean or otherwise) didn't truncate — see
+    // `crates/claudepot-core/src/db_housekeeping.rs` for context.
+    // Concurrent CLI/GUI processes safely back off via busy_timeout.
+    let reclaimed = claudepot_core::db_housekeeping::checkpoint_known_db_files(&data_dir);
+    if reclaimed > 0 {
+        tracing::debug!(bytes = reclaimed, "startup WAL checkpoint reclaimed bytes");
+    }
+
     // One-time: migrate the legacy `~/.claude/claudepot/` repair tree
     // into `~/.claudepot/repair/`. Idempotent; safe on every invocation.
     // Non-fatal: log on failure but continue — falling back to reading

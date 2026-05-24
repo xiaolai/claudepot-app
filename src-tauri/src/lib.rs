@@ -101,6 +101,25 @@ pub fn run() {
     // to run on every boot — no-ops when nothing needs recovery.
     let _ = claudepot_core::updates::desktop_driver::recover_orphan_backups_at_startup();
 
+    // Run the WAL housekeeping pass before any long-lived SQLite store
+    // takes its connection. Truncates leftover `*.db-wal` files that
+    // previous runs left behind — clean exits checkpoint cleanly, but
+    // SIGKILL / force-quit / crashes / power loss bypass that, and
+    // without `journal_size_limit` the WAL file high-water-marks even
+    // after auto-checkpoint folds pages in. The 2026-05-24 incident saw
+    // `sessions.db-wal` reach 6.3 GB this way. See
+    // `crates/claudepot-core/src/db_housekeeping.rs`.
+    let reclaimed = claudepot_core::db_housekeeping::checkpoint_known_db_files(
+        &claudepot_core::paths::claudepot_data_dir(),
+    );
+    if reclaimed > 0 {
+        tracing::info!(
+            target = "claudepot_tauri",
+            bytes = reclaimed,
+            "startup WAL checkpoint reclaimed bytes"
+        );
+    }
+
     // Load persisted preferences BEFORE the builder constructs anything
     // that might need them. `hide_dock_icon` in particular must reach
     // `set_activation_policy()` inside the very first `setup()` tick to
