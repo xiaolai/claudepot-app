@@ -27,12 +27,12 @@ use std::time::Duration;
 /// floor that any closed/idle DB settles to. Combined with the
 /// startup checkpoint in [`crate::db_housekeeping`], it bounds
 /// the worst-case WAL footprint to a few times this value.
-pub const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
+pub(crate) const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 
 /// Project-standard 5-second wait on writer contention before
 /// returning `SQLITE_BUSY`. Already applied store-by-store; the
 /// helper sets it centrally so new stores inherit it for free.
-pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Apply Claudepot's standard SQLite pragmas to a fresh connection.
 ///
@@ -41,13 +41,18 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// any schema DDL — see store call sites for the full ordering
 /// (open → pragmas → optional FK opt-in → schema → sidecar
 /// materialization → chmod).
+///
+/// `busy_timeout` is set first so the subsequent `PRAGMA
+/// journal_mode=WAL` (which needs a momentary exclusive lock to
+/// switch modes) can wait on a concurrent claudepot process
+/// instead of returning `SQLITE_BUSY` immediately.
 pub fn apply_standard_pragmas(conn: &Connection) -> rusqlite::Result<()> {
+    conn.busy_timeout(BUSY_TIMEOUT)?;
     conn.execute_batch(&format!(
         "PRAGMA journal_mode=WAL;\n\
          PRAGMA wal_autocheckpoint=1000;\n\
          PRAGMA journal_size_limit={WAL_SIZE_LIMIT_BYTES};"
     ))?;
-    conn.busy_timeout(BUSY_TIMEOUT)?;
     Ok(())
 }
 
