@@ -152,10 +152,17 @@ mod tests {
         assert!(!dirs.iter().any(|d| d == &PathBuf::from("/bin")));
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_ordered_segments_appends_extra_after_inherited() {
         // The security-relevant property: trusted inherited dirs
         // keep priority; tool dirs land strictly after them.
+        //
+        // Unix-only because the inherited PATH literal uses `:` as
+        // the separator; on Windows `ordered_segments` splits on
+        // `;` (via `std::env::split_paths`) and "/usr/bin:/bin" is
+        // therefore a single entry. The function logic is identical
+        // across platforms; only the test inputs are Unix-shaped.
         let inherited = OsStr::new("/usr/bin:/bin");
         let out = ordered_segments(inherited, vec![PathBuf::from("/opt/homebrew/bin")]);
         assert_eq!(
@@ -178,10 +185,13 @@ mod tests {
         assert!(usr_bin < brew, "/usr/bin must stay ahead of a tool dir");
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_ordered_segments_dedups_keeping_first_occurrence() {
         // A tool dir already on the inherited PATH is not re-added,
-        // and keeps its original (earlier) position.
+        // and keeps its original (earlier) position. Unix-only for
+        // the same `:` vs `;` reason as
+        // `test_ordered_segments_appends_extra_after_inherited`.
         let inherited = OsStr::new("/usr/bin:/opt/homebrew/bin:/bin");
         let out = ordered_segments(
             inherited,

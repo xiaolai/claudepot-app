@@ -172,6 +172,7 @@ pub fn session_narrator(cwd: &str, now: DateTime<Utc>) -> Agent {
 mod tests {
     use super::*;
     use crate::agent::slug::validate_name;
+    use crate::testing::test_cwd;
 
     fn now() -> DateTime<Utc> {
         Utc::now()
@@ -179,19 +180,20 @@ mod tests {
 
     #[test]
     fn session_narrator_builds_a_valid_draft() {
-        let a = session_narrator("/home/u/proj", now());
+        let cwd = test_cwd();
+        let a = session_narrator(&cwd, now());
         // It is a draft — inert until a human installs it.
         assert_eq!(a.lifecycle, Lifecycle::Draft);
         assert_eq!(a.drafted_by.as_deref(), Some(SESSION_NARRATOR_DRAFTED_BY));
         assert_eq!(a.template_id.as_deref(), Some(SESSION_NARRATOR_TEMPLATE_ID));
         // The name passes the same validation the store enforces.
         validate_name(&a.name).expect("narrator name must be valid");
-        assert_eq!(a.cwd, "/home/u/proj");
+        assert_eq!(a.cwd, cwd);
     }
 
     #[test]
     fn session_narrator_uses_haiku_and_session_settled_trigger() {
-        let a = session_narrator("/home/u/proj", now());
+        let a = session_narrator(&test_cwd(), now());
         assert_eq!(a.model.as_deref(), Some(SESSION_NARRATOR_MODEL));
         match &a.trigger {
             Trigger::Event {
@@ -204,7 +206,7 @@ mod tests {
     #[test]
     fn session_narrator_carries_a_rate_limit() {
         // An event-triggered agent MUST carry a rate limit (D9).
-        let a = session_narrator("/home/u/proj", now());
+        let a = session_narrator(&test_cwd(), now());
         let rl = a.rate_limit.expect("event agent must carry a rate_limit");
         assert!(rl.min_interval_secs.is_some());
         assert!(rl.max_per_day.is_some());
@@ -212,7 +214,7 @@ mod tests {
 
     #[test]
     fn session_narrator_attaches_claudepot_memory() {
-        let a = session_narrator("/home/u/proj", now());
+        let a = session_narrator(&test_cwd(), now());
         assert!(a
             .mcp_servers
             .iter()
@@ -223,7 +225,7 @@ mod tests {
     fn session_narrator_emits_structured_output() {
         // The digest must be structured so the Run-History panel can
         // render it as content (PRD §10).
-        let a = session_narrator("/home/u/proj", now());
+        let a = session_narrator(&test_cwd(), now());
         assert_eq!(a.output_format, OutputFormat::Json);
         assert!(a.json_schema.is_some());
         // The schema is itself valid JSON.
@@ -239,7 +241,7 @@ mod tests {
         // is responsible for stamping `created_via = Template`.
         // The GUI install review uses this signal to flag the
         // record as non-hand-authored.
-        let a = session_narrator("/home/u/proj", now());
+        let a = session_narrator(&test_cwd(), now());
         assert_eq!(a.created_via, CreatedVia::Template);
     }
 
@@ -259,7 +261,7 @@ mod tests {
         };
         use super::super::slug::validate_name;
 
-        let a = session_narrator("/home/u/proj", now());
+        let a = session_narrator(&test_cwd(), now());
         validate_name(&a.name).expect("name");
         validate_cwd(&a.cwd).expect("cwd");
         validate_trigger_timezone(&a.trigger).expect("tz");
@@ -270,7 +272,7 @@ mod tests {
     #[test]
     fn session_narrator_round_trips_through_serde() {
         // The produced draft must survive a store write/read cycle.
-        let a = session_narrator("/home/u/proj", now());
+        let a = session_narrator(&test_cwd(), now());
         let s = serde_json::to_string(&a).unwrap();
         let back: Agent = serde_json::from_str(&s).unwrap();
         assert_eq!(a, back);

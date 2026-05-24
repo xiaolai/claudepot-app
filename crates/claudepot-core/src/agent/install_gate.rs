@@ -308,6 +308,7 @@ mod tests {
     use super::*;
     use crate::agent::scheduler::{cron_next_runs, RegisteredEntry, SchedulerCapabilities};
     use crate::agent::types::*;
+    use crate::testing::test_cwd;
     use chrono::{DateTime, Utc};
     use std::cell::RefCell;
     use tempfile::tempdir;
@@ -388,7 +389,7 @@ mod tests {
             enabled,
             binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
-            cwd: "/tmp".into(),
+            cwd: test_cwd(),
             prompt: "say hi".into(),
             system_prompt: None,
             append_system_prompt: None,
