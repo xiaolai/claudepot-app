@@ -21,6 +21,7 @@
 //! path still works, but the surface stays minimal so unrelated edits
 //! don't pollute the log.
 
+use crate::db_pragmas::apply_standard_pragmas;
 use crate::memory_view::MemoryFileRole;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -28,7 +29,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
 
 /// Maximum file size we'll diff. Above this, the row is recorded with
 /// `diff_text = NULL` and a placeholder marker — the UI renders
@@ -247,8 +247,7 @@ impl MemoryLog {
 
     fn init_connection(path: &Path) -> Result<Connection, MemoryLogError> {
         let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL;")?;
-        db.busy_timeout(Duration::from_secs(5))?;
+        apply_standard_pragmas(&db)?;
         db.execute_batch(SCHEMA)?;
         // Touch meta + force WAL/SHM materialization so the chmod step
         // below narrows real files, not phantoms (mirrors the
