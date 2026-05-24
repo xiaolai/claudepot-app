@@ -60,6 +60,31 @@ pub fn expiring_soon_blob_json() -> String {
     sample_blob_json(chrono::Utc::now().timestamp_millis() + 120_000)
 }
 
+/// Cross-platform absolute path safe to use as an `Agent::cwd` value
+/// in tests. Returns `/tmp` on Unix, `C:\Users\<user>\AppData\Local\Temp`
+/// on Windows — both pass `Path::is_absolute()`, which is the only
+/// thing `crate::agent::draft::validate_cwd` checks beyond `..`
+/// component rejection.
+///
+/// Hardcoding `"/tmp"` in test fixtures Windows-fails because
+/// `/tmp` has no drive letter; this helper keeps tests platform-
+/// portable without leaking any `cfg!(windows)` branches into the
+/// call sites.
+pub fn test_cwd() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}
+
+/// [`test_cwd`] with a sub-component joined, returning a platform-
+/// correct absolute string. Useful when a test needs two distinct
+/// cwds (e.g. `test_cwd_sub("proj")` and `test_cwd_sub("repo")`) so
+/// it can verify they're handled distinctly.
+pub fn test_cwd_sub(name: &str) -> String {
+    std::env::temp_dir()
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// Create a test Account with sensible defaults.
 pub fn make_account(email: &str) -> crate::account::Account {
     crate::account::Account {

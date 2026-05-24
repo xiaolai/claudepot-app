@@ -1229,6 +1229,7 @@ pub fn agent_runs_dir(id: &AgentId) -> PathBuf {
 mod tests {
     use super::*;
     use crate::agent::types::*;
+    use crate::testing::test_cwd;
     use chrono::Utc;
     use tempfile::tempdir;
     use uuid::Uuid;
@@ -1243,7 +1244,7 @@ mod tests {
             enabled: true,
             binary: AgentBinary::FirstParty,
             model: Some("sonnet".into()),
-            cwd: "/tmp".into(),
+            cwd: test_cwd(),
             prompt: "say hi".into(),
             system_prompt: None,
             append_system_prompt: None,
