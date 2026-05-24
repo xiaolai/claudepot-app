@@ -12,14 +12,14 @@
 //! exit mechanism, because the cleanup runs on the *next* launch
 //! regardless of how the previous one ended.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, ErrorCode, OpenFlags};
 use std::path::Path;
 use std::time::Duration;
 
 /// Filenames Claudepot writes inside its data dir. Kept exhaustive
 /// so future stores added to `claudepot-core` show up here too —
 /// missing one only means a small `*.db-wal` leak, never data loss.
-pub const KNOWN_DB_FILENAMES: &[&str] = &[
+pub(crate) const KNOWN_DB_FILENAMES: &[&str] = &[
     "sessions.db",
     "activity_metrics.db",
     "memory_changes.db",
@@ -68,12 +68,23 @@ pub fn checkpoint_known_db_files(data_dir: &Path) -> u64 {
             }
             Err(e) => {
                 // Locked DB (another claudepot process running) is
-                // the common case — log quiet.
-                tracing::trace!(
-                    path = %db_path.display(),
-                    error = %e,
-                    "wal checkpoint skipped"
-                );
+                // the common case — log quiet at `trace`. Anything
+                // else (permission denied, corrupt header, I/O
+                // error) deserves visibility so a persistent
+                // cleanup failure surfaces in normal log output.
+                if is_lock_contention(&e) {
+                    tracing::trace!(
+                        path = %db_path.display(),
+                        error = %e,
+                        "wal checkpoint skipped (locked)"
+                    );
+                } else {
+                    tracing::warn!(
+                        path = %db_path.display(),
+                        error = %e,
+                        "wal checkpoint failed unexpectedly"
+                    );
+                }
             }
         }
     }
@@ -83,11 +94,17 @@ pub fn checkpoint_known_db_files(data_dir: &Path) -> u64 {
 /// Open one DB, checkpoint+truncate its WAL, close. The connection
 /// drops at end-of-scope which also runs SQLite's clean-close
 /// path. Returns bytes reclaimed from the `*.db-wal` sidecar.
+///
+/// Opens without `SQLITE_OPEN_CREATE` so a TOCTOU race against
+/// the caller's `is_file()` check cannot accidentally create an
+/// empty DB at the known path — housekeeping must never bring
+/// new files into existence.
 fn checkpoint_one(db_path: &Path) -> rusqlite::Result<u64> {
     let wal_path = db_path.with_extension("db-wal");
     let before = wal_size(&wal_path);
 
-    let conn = Connection::open(db_path)?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI;
+    let conn = Connection::open_with_flags(db_path, flags)?;
     conn.busy_timeout(STARTUP_BUSY_TIMEOUT)?;
     // Don't set journal_mode here — opening a non-WAL DB and
     // forcing WAL would write a new WAL header; for a DB that
@@ -103,6 +120,20 @@ fn checkpoint_one(db_path: &Path) -> rusqlite::Result<u64> {
 
 fn wal_size(wal_path: &Path) -> u64 {
     std::fs::metadata(wal_path).map(|m| m.len()).unwrap_or(0)
+}
+
+/// `true` for the expected "another process holds the DB" errors
+/// — these are quiet at `trace`. Everything else (permission
+/// errors, corrupt headers, I/O failures) is surfaced at `warn`.
+fn is_lock_contention(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(ffi, _)
+            if matches!(
+                ffi.code,
+                ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked
+            )
+    )
 }
 
 #[cfg(test)]
@@ -147,6 +178,25 @@ mod tests {
     fn test_checkpoint_on_empty_dir_returns_zero() {
         let dir = TempDir::new().unwrap();
         assert_eq!(checkpoint_known_db_files(dir.path()), 0);
+    }
+
+    #[test]
+    fn test_checkpoint_never_creates_a_db_file() {
+        // Regression: an earlier draft used `Connection::open`,
+        // which has `SQLITE_OPEN_CREATE` semantics. A TOCTOU race
+        // against `is_file()` could have caused housekeeping to
+        // create empty DB files at known names. The fix
+        // (`open_with_flags` without `CREATE`) prevents that.
+        let dir = TempDir::new().unwrap();
+        let _ = checkpoint_known_db_files(dir.path());
+        for name in KNOWN_DB_FILENAMES {
+            let p = dir.path().join(name);
+            assert!(
+                !p.exists(),
+                "housekeeping must not create {} from thin air",
+                name
+            );
+        }
     }
 
     #[test]
