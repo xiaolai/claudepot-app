@@ -5,6 +5,13 @@
       "args": [
         "@hypothesi/tauri-mcp-server"
       ]
+    },
+    "codex-cli": {
+      "type": "stdio",
+      "command": "codex",
+      "args": [
+        "mcp-server"
+      ]
     }
   }
 }
