@@ -208,6 +208,7 @@ fn evaluate_one(
         threshold_pct,
         is_extra_usage: false,
         cycle_resets_at,
+        bg_workers: snapshot.bg_workers,
     };
 
     // 2. Guard: min_interval_secs since the last swap by ANY rule.
@@ -302,6 +303,7 @@ fn trigger_summary_below(rule: &RotationRule, util: f64) -> RotationTriggerSumma
         threshold_pct,
         is_extra_usage: false,
         cycle_resets_at: None,
+        bg_workers: None,
     }
 }
 
@@ -606,6 +608,7 @@ mod tests {
             schema_version: 1,
             written_at: fixed_now(),
             accounts: map,
+            bg_workers: None,
         }
     }
 
@@ -742,6 +745,7 @@ mod tests {
                 threshold_pct: 90,
                 is_extra_usage: false,
                 cycle_resets_at: None,
+                bg_workers: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),
@@ -791,6 +795,7 @@ mod tests {
                 threshold_pct: 90,
                 is_extra_usage: false,
                 cycle_resets_at: None,
+                bg_workers: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),
@@ -853,6 +858,7 @@ mod tests {
                 threshold_pct: 90,
                 is_extra_usage: false,
                 cycle_resets_at: Some(prev_cycle),
+                bg_workers: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),
@@ -899,6 +905,7 @@ mod tests {
                 threshold_pct: 90,
                 is_extra_usage: false,
                 cycle_resets_at: Some(current_cycle),
+                bg_workers: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),
@@ -952,6 +959,7 @@ mod tests {
                 threshold_pct: 90,
                 is_extra_usage: false,
                 cycle_resets_at: None,
+                bg_workers: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),
