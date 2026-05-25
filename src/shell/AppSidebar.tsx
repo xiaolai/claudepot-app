@@ -6,6 +6,7 @@ import { SidebarItem } from "../components/primitives/SidebarItem";
 import { NF } from "../icons";
 import type { SectionDef } from "../sections/registry";
 import type { AccountSummary, LiveSessionSummary } from "../types";
+import { SidebarBgBadge } from "./SidebarBgBadge";
 import { SidebarLiveStrip } from "./SidebarLiveStrip";
 import {
   SidebarTargetSwitcher,
@@ -157,6 +158,12 @@ export function AppSidebar({
       {!collapsed && onOpenLiveSession && (
         <SidebarLiveStrip onOpenSession={onOpenLiveSession} />
       )}
+
+      {/* Background-worker chip — render-if-nonzero. CC's per-user
+          supervisor holds detached `/bg` sessions; this surfaces the
+          count so utilization burn isn't invisible.
+          See dev-docs/cc-daemon-research.md. */}
+      <SidebarBgBadge collapsed={collapsed} />
 
       <div style={{ flex: 1 }} />
 

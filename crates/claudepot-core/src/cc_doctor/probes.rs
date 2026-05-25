@@ -98,7 +98,7 @@ pub fn probe_version() -> Option<VersionProbe> {
 ///    unidirectional change — easy to widen later if real install
 ///    distribution data justifies it.
 /// 3. None — caller treats this as a missing-CC failure.
-pub(super) fn resolve_claude_binary() -> Option<PathBuf> {
+pub(crate) fn resolve_claude_binary() -> Option<PathBuf> {
     if let Some(p) = crate::fs_utils::find_claude_binary() {
         return Some(p);
     }

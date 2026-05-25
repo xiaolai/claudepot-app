@@ -85,6 +85,16 @@ pub struct RotationTriggerSummary {
     /// the server returned with `resets_at: null`).
     #[serde(default)]
     pub cycle_resets_at: Option<DateTime<chrono::FixedOffset>>,
+    /// Background-worker count from `claude daemon status` at fire
+    /// time. Frozen into the trigger so the audit entry remains
+    /// self-describing even if the daemon state later changes. The
+    /// React `AuditTable` renders this as a "5 bg workers active"
+    /// chip when > 0 — surfaces the "5 detached agents have been
+    /// chewing tokens" context that's otherwise invisible.
+    /// `None` when the snapshot was written before bg-worker tracking
+    /// shipped, or the scrape failed.
+    #[serde(default)]
+    pub bg_workers: Option<u32>,
 }
 
 /// One audit entry. Self-describing — the orchestrator may rotate
@@ -324,6 +334,7 @@ mod tests {
                 threshold_pct: 90,
                 is_extra_usage: false,
                 cycle_resets_at: None,
+                bg_workers: None,
             },
             "a@x.com",
             Some("b@x.com".into()),
