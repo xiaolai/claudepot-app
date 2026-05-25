@@ -35,6 +35,23 @@ fn validate_duration(secs: u64) -> Result<i64, String> {
     Ok(secs as i64)
 }
 
+/// Resolve a renderer-supplied `duration_secs` (None = sticky) into
+/// an `expires_at` deadline. Centralized so `permission_grant` and
+/// `permission_extend` honor the same rule: `None` → sticky grant
+/// (no deadline); `Some(n)` → must lie in `[MIN, MAX]` seconds.
+fn resolve_expires_at(
+    duration_secs: Option<u64>,
+    now: chrono::DateTime<Utc>,
+) -> Result<Option<chrono::DateTime<Utc>>, String> {
+    match duration_secs {
+        None => Ok(None),
+        Some(secs) => {
+            let seconds = validate_duration(secs)?;
+            Ok(Some(now + Duration::seconds(seconds)))
+        }
+    }
+}
+
 /// Resolve `project_path` to a `ProjectPermissionDto`, reading the
 /// current settings state and the active grant (if any) from disk.
 fn current_dto(project_path: &str) -> ProjectPermissionDto {
@@ -90,11 +107,14 @@ pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto
 /// Re-granting a project that already has a grant preserves the
 /// *original* `previous_mode` so revert still restores the true
 /// pre-Claudepot state.
+// `duration_secs`: `None` → sticky grant (no auto-revert);
+// `Some(secs)` → time-boxed, must lie in the `validate_duration`
+// range.
 #[tauri::command]
 pub async fn permission_grant(
     project_path: String,
     mode: String,
-    duration_secs: u64,
+    duration_secs: Option<u64>,
 ) -> Result<ProjectPermissionDto, String> {
     let granted_mode = PermissionMode::from_wire_str(&mode);
     if !granted_mode.is_known() {
@@ -102,7 +122,8 @@ pub async fn permission_grant(
             "`{mode}` is not a permission mode Claudepot can grant"
         ));
     }
-    let duration = validate_duration(duration_secs)?;
+    let now = Utc::now();
+    let expires_at = resolve_expires_at(duration_secs, now)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         validate_project_path(&project_path)?;
@@ -118,14 +139,13 @@ pub async fn permission_grant(
             None => resolve_default_mode(root).local_project_value,
         };
 
-        let now = Utc::now();
         let grant = Grant {
             project_path: project_path.clone(),
             layer: SettingsLayer::LocalProject,
             granted_mode: granted_mode.clone(),
             previous_mode,
             granted_at: now,
-            expires_at: now + Duration::seconds(duration),
+            expires_at,
             // Fresh grant — its revert circuit breaker starts clean.
             consecutive_failures: 0,
             last_failure_at: None,
@@ -177,14 +197,19 @@ pub async fn permission_revert(project_path: String) -> Result<ProjectPermission
     .map_err(|e| format!("permission_revert join: {e}"))?
 }
 
-/// Push a grant's deadline out to `duration_secs` from now. Errors if
-/// the project has no active grant.
+/// Update a grant's deadline. `Some(secs)` pushes the deadline out
+/// to `secs` from now (time-boxed); `None` converts the grant to
+/// **sticky** — no auto-revert. Errors if the project has no active
+/// grant.
+// `duration_secs`: `None` → convert to sticky (no deadline);
+// `Some(secs)` → push deadline out from now.
 #[tauri::command]
 pub async fn permission_extend(
     project_path: String,
-    duration_secs: u64,
+    duration_secs: Option<u64>,
 ) -> Result<ProjectPermissionDto, String> {
-    let duration = validate_duration(duration_secs)?;
+    let now = Utc::now();
+    let expires_at = resolve_expires_at(duration_secs, now)?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
         let grant = file
@@ -192,7 +217,7 @@ pub async fn permission_extend(
             .iter_mut()
             .find(|g| g.project_path == project_path)
             .ok_or_else(|| format!("no active grant for {project_path}"))?;
-        grant.expires_at = Utc::now() + Duration::seconds(duration);
+        grant.expires_at = expires_at;
         permission_store::save(&file).map_err(|e| format!("grants save failed: {e}"))?;
 
         Ok(current_dto(&project_path))

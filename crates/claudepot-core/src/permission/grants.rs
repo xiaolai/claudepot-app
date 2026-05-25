@@ -60,7 +60,16 @@ pub struct Grant {
     /// When the grant was created.
     pub granted_at: DateTime<Utc>,
     /// When the orchestrator must revert to `previous_mode`.
-    pub expires_at: DateTime<Utc>,
+    /// `None` means the grant is **sticky** — never auto-reverted; it
+    /// stays in effect until the user removes it explicitly via the
+    /// Permissions UI (or by hand-editing settings, which un-manages
+    /// it). Used for "auto mode" workflows where the elevated state
+    /// should outlive any time bound. The architecture-rule guidance
+    /// that "the elevated state is never left to memory" is honored
+    /// because the grant record is still persistent: revert is
+    /// available with one click and Claudepot still notices when the
+    /// user un-elevates by hand.
+    pub expires_at: Option<DateTime<Utc>>,
     /// Consecutive-failure circuit breaker state — number of revert
     /// attempts that have failed in an unbroken run. `#[serde(default)]`
     /// so `permission-grants.json` files written before the breaker
@@ -78,9 +87,20 @@ pub struct Grant {
 }
 
 impl Grant {
-    /// True once `now` has reached or passed `expires_at`.
+    /// True once `now` has reached or passed `expires_at`. Sticky
+    /// grants (`expires_at = None`) are never expired.
     pub fn is_expired(&self, now: DateTime<Utc>) -> bool {
-        now >= self.expires_at
+        match self.expires_at {
+            Some(deadline) => now >= deadline,
+            None => false,
+        }
+    }
+
+    /// True when the grant has no deadline (the "auto mode" / sticky
+    /// shape). Provided so UI + audit code don't pattern-match on the
+    /// raw Option at every call site.
+    pub fn is_sticky(&self) -> bool {
+        self.expires_at.is_none()
     }
 
     /// This grant's circuit-breaker ledger, read off the two breaker
@@ -184,10 +204,15 @@ impl Grant {
         if self.project_path.trim().is_empty() {
             return Err(ValidationError::EmptyProjectPath);
         }
-        if self.expires_at <= self.granted_at {
-            return Err(ValidationError::NonPositiveDuration(
-                self.project_path.clone(),
-            ));
+        // Time-boxed grants must have a positive duration. Sticky
+        // grants (`expires_at = None`) skip this check by design —
+        // they don't carry a deadline to validate against.
+        if let Some(deadline) = self.expires_at {
+            if deadline <= self.granted_at {
+                return Err(ValidationError::NonPositiveDuration(
+                    self.project_path.clone(),
+                ));
+            }
         }
         if matches!(self.layer, SettingsLayer::Project) {
             return Err(ValidationError::ProjectLayerNotAllowed(
@@ -214,9 +239,16 @@ mod tests {
             granted_mode: PermissionMode::BypassPermissions,
             previous_mode: Some(PermissionMode::Default),
             granted_at: ts(0),
-            expires_at: ts(7200),
+            expires_at: Some(ts(7200)),
             consecutive_failures: 0,
             last_failure_at: None,
+        }
+    }
+
+    fn sticky_grant(path: &str) -> Grant {
+        Grant {
+            expires_at: None,
+            ..sample_grant(path)
         }
     }
 
@@ -253,6 +285,42 @@ mod tests {
     }
 
     #[test]
+    fn sticky_grant_is_never_expired() {
+        let g = sticky_grant("/p/sticky");
+        assert!(!g.is_expired(ts(0)));
+        assert!(!g.is_expired(ts(86_400 * 365)));
+        assert!(!g.is_expired(ts(i32::MAX as i64)));
+        assert!(g.is_sticky());
+    }
+
+    #[test]
+    fn sticky_grant_passes_validate() {
+        let g = sticky_grant("/p/sticky");
+        assert!(g.validate().is_ok());
+    }
+
+    #[test]
+    fn sticky_grant_round_trips_through_json() {
+        let g = sticky_grant("/p/sticky");
+        let s = serde_json::to_string(&g).unwrap();
+        // expires_at must serialize as JSON null for the sticky shape.
+        assert!(s.contains("\"expires_at\":null"), "got: {s}");
+        let back: Grant = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, g);
+        assert!(back.is_sticky());
+    }
+
+    #[test]
+    fn time_boxed_grant_round_trips_through_json() {
+        // Lock the wire shape so old on-disk files still load.
+        let g = sample_grant("/p/timed");
+        let s = serde_json::to_string(&g).unwrap();
+        assert!(s.contains("\"expires_at\":\""), "got: {s}");
+        let back: Grant = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, g);
+    }
+
+    #[test]
     fn validate_rejects_unknown_schema_version() {
         let f = GrantsFile {
             schema_version: 99,
@@ -277,12 +345,12 @@ mod tests {
     #[test]
     fn validate_rejects_non_positive_duration() {
         let mut g = sample_grant("/p/a");
-        g.expires_at = g.granted_at;
+        g.expires_at = Some(g.granted_at);
         assert_eq!(
             g.validate(),
             Err(ValidationError::NonPositiveDuration("/p/a".into()))
         );
-        g.expires_at = ts(-1);
+        g.expires_at = Some(ts(-1));
         assert_eq!(
             g.validate(),
             Err(ValidationError::NonPositiveDuration("/p/a".into()))
