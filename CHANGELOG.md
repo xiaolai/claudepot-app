@@ -6,6 +6,55 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.43 — beta (unreleased)
+
+The auto-mode patch. Surfaces background CC sessions in the UI so
+the ten-detached-agents-burning-tokens case stops being invisible,
+and adds a "Never" expiration to permission grants for projects you
+run continuously in auto mode.
+
+### Added
+
+- **Background-session observability.** New `claude daemon status`
+  scraper (`claudepot-core::cc_daemon`) feeds three UI surfaces:
+  - Sidebar shows a render-if-nonzero chip with the number of
+    detached `/bg` workers held by CC's per-user supervisor.
+  - Activities → Live tile appends `+ N bg workers` (or shows the
+    count standalone when foreground is idle).
+  - Settings → Rotation audit table renders an `N bg workers
+    active` chip from the trigger summary frozen at fire time —
+    answers "why did rotation fire when I wasn't even at the
+    keyboard?"
+- **Sticky permission grants.** ProjectDetail → Permissions now
+  offers a `Never` preset alongside the existing 30 m / 2 h / 8 h
+  options. Selecting it creates a grant that doesn't auto-revert;
+  you remove it with the same Revert button when done. Use this
+  for projects you run continuously in CC auto mode.
+
+### Changed
+
+- `permission_grant` and `permission_extend` Tauri commands accept
+  `duration_secs: Option<u64>` — `None` for sticky, `Some(secs)`
+  for time-boxed.
+- `UsageSnapshot` schema additively grows
+  `bg_workers: Option<u32>`. No schema-version bump; snapshots
+  written before the upgrade deserialize as `None`.
+
+### Fixed
+
+- `claude daemon status` scrape no longer leaks a worker thread or
+  child process when the spawn hits its timeout. The child is now
+  owned and reaped via `Command::spawn` + `try_wait` +
+  kill-on-deadline.
+- A sticky permission grant whose underlying setting was hand-
+  edited away from `bypassPermissions` no longer renders as
+  "Bypass active" forever. The orchestrator tick now sweeps stale
+  grants from disk; the DTO also filters them out so they vanish
+  from the UI even before the next tick.
+- `useDaemonStatus` no longer clobbers a last-known-good status
+  with a transient parse failure, so the Sidebar bg-worker chip
+  doesn't flicker off when one scrape returns degraded.
+
 ## 0.1.42 — beta (unreleased)
 
 The WAL-housekeeping patch. Stops every SQLite store from leaking
