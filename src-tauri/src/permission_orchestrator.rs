@@ -18,7 +18,8 @@ use chrono::Utc;
 use claudepot_core::breaker;
 use claudepot_core::permission::grants::Grant;
 use claudepot_core::permission::settings::{
-    clear_default_mode, read_default_mode, write_default_mode, PermissionSettingsError,
+    clear_default_mode, read_default_mode, resolve_default_mode, write_default_mode,
+    PermissionSettingsError,
 };
 use claudepot_core::permission::{eval, store as permission_store};
 use serde::Serialize;
@@ -80,15 +81,44 @@ pub async fn tick(app: &AppHandle) {
     }
 
     let now = Utc::now();
+
+    // Sweep stale records first: any grant whose `granted_mode` no
+    // longer matches the project's LocalProject layer value means the
+    // user hand-edited settings since the grant was created. Time-
+    // boxed grants self-heal via `revert_grant`'s `skipped_user_changed`
+    // path on the expired-revert loop below, but sticky grants would
+    // otherwise linger on disk indefinitely. Drop them here so disk
+    // state matches what `current_dto::filter_stale` already hides
+    // from the UI.
+    let stale_paths: Vec<String> = file
+        .grants
+        .iter()
+        .filter(|g| {
+            let state = resolve_default_mode(std::path::Path::new(&g.project_path));
+            state.local_project_value.as_ref() != Some(&g.granted_mode)
+        })
+        .map(|g| g.project_path.clone())
+        .collect();
+    let mut changed = false;
+    for path in &stale_paths {
+        if file.remove(path).is_some() {
+            changed = true;
+        }
+    }
+
     let expired_paths: Vec<String> = eval::expired_grants(&file, now)
         .into_iter()
         .map(|g| g.project_path.clone())
         .collect();
     if expired_paths.is_empty() {
+        if changed {
+            if let Err(e) = permission_store::save(&file) {
+                tracing::warn!(error = %e, "permission_orchestrator: stale sweep save failed");
+            }
+        }
         return;
     }
 
-    let mut changed = false;
     for path in &expired_paths {
         // Re-fetch the grant from `file` each iteration so the
         // breaker mutations below land on the live struct.
