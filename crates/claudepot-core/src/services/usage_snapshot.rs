@@ -47,6 +47,14 @@ pub struct UsageSnapshot {
     /// Keyed by account uuid (string form). BTreeMap so the on-disk
     /// JSON has stable key ordering for diff-friendly reads.
     pub accounts: BTreeMap<String, AccountSnapshot>,
+    /// Active background-worker count from `claude daemon status` at
+    /// write time, or `None` if the scrape failed / hasn't run yet.
+    /// Additive field — old snapshots deserialize with `None`, so
+    /// no schema bump. Consumed by [`crate::rotation`] to suffix the
+    /// audit reason with "(N bg workers active)", answering "why
+    /// did rotation fire when I wasn't even at the keyboard?"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg_workers: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -132,7 +140,21 @@ impl UsageWindows {
 /// fetch outcomes. Accounts without an outcome are skipped — including
 /// them with a synthesized `status` would imply we know something we
 /// don't.
+///
+/// `bg_workers` defaults to `None` — callers that have scraped
+/// `claude daemon status` should use [`build_with_bg_workers`] to
+/// stamp the count. Existing call sites compile unchanged.
 pub fn build(accounts: &[Account], outcomes: &HashMap<Uuid, UsageOutcome>) -> UsageSnapshot {
+    build_with_bg_workers(accounts, outcomes, None)
+}
+
+/// Like [`build`] but lets the caller carry an already-scraped
+/// background-worker count into the snapshot.
+pub fn build_with_bg_workers(
+    accounts: &[Account],
+    outcomes: &HashMap<Uuid, UsageOutcome>,
+    bg_workers: Option<u32>,
+) -> UsageSnapshot {
     let now = Utc::now();
     let mut entries = BTreeMap::new();
     for a in accounts {
@@ -148,6 +170,7 @@ pub fn build(accounts: &[Account], outcomes: &HashMap<Uuid, UsageOutcome>) -> Us
         schema_version: 1,
         written_at: now,
         accounts: entries,
+        bg_workers,
     }
 }
 
