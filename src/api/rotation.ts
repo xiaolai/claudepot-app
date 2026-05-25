@@ -75,6 +75,17 @@ export interface RotationTriggerSummary {
   utilizationPct: number;
   thresholdPct: number;
   isExtraUsage: boolean;
+  /**
+   * Active background-worker count from `claude daemon status` at
+   * fire time. `null` for entries written before bg-worker tracking
+   * shipped, or when the daemon scrape failed.
+   *
+   * Surfaced as a chip in the audit table when > 0 — answers the
+   * "why did rotation fire when I wasn't even at the keyboard?"
+   * question by showing the detached agents that contributed to
+   * utilization.
+   */
+  bgWorkers?: number | null;
 }
 
 export type RotationOutcomeId =

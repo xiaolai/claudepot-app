@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
+import { useDaemonStatus } from "../../hooks/useDaemonStatus";
 import { useSessionLive } from "../../hooks/useSessionLive";
 import type { PriceTableDto, SessionRow } from "../../types";
 import {
@@ -29,6 +30,12 @@ import {
  */
 export function DashboardStrip() {
   const live = useSessionLive();
+  // Background CC supervisor + detached worker count. Surfaces in
+  // the "Live" card when > 0 so the user sees the full picture of
+  // active CC processes, not just the foreground ones their terminals
+  // are attached to. See `dev-docs/cc-daemon-research.md`.
+  const { status: daemon } = useDaemonStatus();
+  const bgWorkers = daemon?.running ? daemon.bgWorkers ?? 0 : 0;
   const { table: priceTable, loading: priceLoading } = usePriceTable();
   const [allSessions, setAllSessions] = useState<SessionRow[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -109,6 +116,16 @@ export function DashboardStrip() {
             {liveStats.models.length > 0 && (
               <Subline>{liveStats.models.join(" · ")}</Subline>
             )}
+            {bgWorkers > 0 && (
+              <Subline>
+                + {bgWorkers} bg worker{bgWorkers === 1 ? "" : "s"}
+              </Subline>
+            )}
+          </>
+        ) : bgWorkers > 0 ? (
+          <>
+            <BigValue value={bgWorkers} suffix={`bg worker${bgWorkers === 1 ? "" : "s"}`} />
+            <Subline>foreground idle</Subline>
           </>
         ) : (
           <IdleValue>idle</IdleValue>
