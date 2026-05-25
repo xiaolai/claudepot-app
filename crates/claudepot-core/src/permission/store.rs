@@ -115,7 +115,7 @@ mod tests {
             granted_mode: PermissionMode::BypassPermissions,
             previous_mode: Some(PermissionMode::Default),
             granted_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
-            expires_at: Utc.timestamp_opt(1_700_007_200, 0).unwrap(),
+            expires_at: Some(Utc.timestamp_opt(1_700_007_200, 0).unwrap()),
             consecutive_failures: 0,
             last_failure_at: None,
         }

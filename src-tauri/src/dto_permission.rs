@@ -27,7 +27,7 @@ pub struct ProjectPermissionDto {
     pub active_grant: Option<GrantDto>,
 }
 
-/// A live time-boxed grant.
+/// A live grant — time-boxed or sticky.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GrantDto {
@@ -38,8 +38,11 @@ pub struct GrantDto {
     pub previous_mode: Option<String>,
     /// Epoch-ms the grant was created.
     pub granted_at_ms: i64,
-    /// Epoch-ms the orchestrator will auto-revert.
-    pub expires_at_ms: i64,
+    /// Epoch-ms the orchestrator will auto-revert. `null` means the
+    /// grant is **sticky** — never auto-reverted; the user removes it
+    /// explicitly via the Permissions UI. See
+    /// `claudepot_core::permission::grants::Grant::is_sticky`.
+    pub expires_at_ms: Option<i64>,
 }
 
 impl From<&Grant> for GrantDto {
@@ -51,7 +54,7 @@ impl From<&Grant> for GrantDto {
                 .as_ref()
                 .map(|m| m.as_wire_str().to_string()),
             granted_at_ms: g.granted_at.timestamp_millis(),
-            expires_at_ms: g.expires_at.timestamp_millis(),
+            expires_at_ms: g.expires_at.map(|t| t.timestamp_millis()),
         }
     }
 }

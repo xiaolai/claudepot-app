@@ -21,7 +21,7 @@ export type PermissionDecisionSource =
   | "user_settings"
   | "default";
 
-/** A live, time-boxed Claudepot grant. */
+/** A live Claudepot grant — time-boxed or sticky. */
 export interface PermissionGrant {
   /** The mode Claudepot set (almost always `bypassPermissions`). */
   grantedMode: PermissionModeId;
@@ -29,7 +29,11 @@ export interface PermissionGrant {
    *  absent and revert will clear it. */
   previousMode: PermissionModeId | null;
   grantedAtMs: number;
-  expiresAtMs: number;
+  /** Auto-revert deadline. `null` means the grant is **sticky** —
+   *  the orchestrator never auto-reverts; the user removes it
+   *  explicitly. Used for "auto mode" workflows where the elevated
+   *  state should outlive any time bound. */
+  expiresAtMs: number | null;
 }
 
 /** One project row in the permission dashboard. */
@@ -70,10 +74,14 @@ export const permissionApi = {
   permissionList: () => invoke<ProjectPermission[]>("permission_list"),
   permissionGet: (projectPath: string) =>
     invoke<ProjectPermission>("permission_get", { projectPath }),
+  /**
+   * Create a grant. Pass `durationSecs: null` for a sticky grant
+   * (no auto-revert); pass a positive number for a time-boxed grant.
+   */
   permissionGrant: (
     projectPath: string,
     mode: PermissionModeId,
-    durationSecs: number,
+    durationSecs: number | null,
   ) =>
     invoke<ProjectPermission>("permission_grant", {
       projectPath,
@@ -82,7 +90,11 @@ export const permissionApi = {
     }),
   permissionRevert: (projectPath: string) =>
     invoke<ProjectPermission>("permission_revert", { projectPath }),
-  permissionExtend: (projectPath: string, durationSecs: number) =>
+  /**
+   * Update an existing grant's deadline. Pass `durationSecs: null`
+   * to convert a time-boxed grant to sticky.
+   */
+  permissionExtend: (projectPath: string, durationSecs: number | null) =>
     invoke<ProjectPermission>("permission_extend", {
       projectPath,
       durationSecs,
@@ -102,12 +114,15 @@ export function permissionModeLabel(mode: PermissionModeId): string {
   return PERMISSION_MODE_LABEL[mode] ?? mode;
 }
 
-/** Grant-duration presets the ProjectDetail control offers. */
+/** Grant-duration presets the ProjectDetail control offers.
+ *  `secs: null` is the "Never" / sticky option — the orchestrator
+ *  won't auto-revert; the user removes it via the same Revert action. */
 export const GRANT_DURATION_PRESETS: ReadonlyArray<{
   label: string;
-  secs: number;
+  secs: number | null;
 }> = [
   { label: "30 minutes", secs: 30 * 60 },
   { label: "2 hours", secs: 2 * 60 * 60 },
   { label: "8 hours", secs: 8 * 60 * 60 },
+  { label: "Never", secs: null },
 ];
