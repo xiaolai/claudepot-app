@@ -22,9 +22,10 @@
 //!   rotation fire when I wasn't even at the keyboard" question.
 
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::Command;
-use std::time::Duration;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// Wall-clock cap on the spawn. `claude daemon status` returns
 /// synchronously from a single Unix-socket probe; a 5-second cap
@@ -80,14 +81,6 @@ pub enum DaemonParseStatus {
     Failed { reason: String },
 }
 
-impl DaemonStatus {
-    /// "Daemon is reachable AND has live workers" — the condition
-    /// that makes the Sidebar bg-count badge render at all.
-    pub fn has_workers(&self) -> bool {
-        self.running && self.bg_workers.unwrap_or(0) > 0
-    }
-}
-
 /// Spawn `claude daemon status` and parse the result. Idempotent and
 /// cheap — safe to call on the same tick as
 /// [`crate::services::usage_snapshot`] writes.
@@ -119,30 +112,69 @@ fn capture_status() -> Result<String, String> {
     let claude_bin = crate::cc_doctor::probes::resolve_claude_binary()
         .ok_or_else(|| "claude binary not found in canonical install locations".to_string())?;
 
-    // Synchronous `Command::output` is fine — the CLI returns in
-    // ~50ms in the idle case. We still cap on a separate thread so a
-    // hung child doesn't pin the caller indefinitely.
-    let (tx, rx) = std::sync::mpsc::channel();
-    let bin = claude_bin.clone();
-    std::thread::spawn(move || {
-        let result = Command::new(&bin).arg("daemon").arg("status").output();
-        let _ = tx.send(result);
-    });
-
-    let output = rx
-        .recv_timeout(SCRAPE_TIMEOUT)
-        .map_err(|_| format!("status spawn timed out after {}s", SCRAPE_TIMEOUT.as_secs()))?
+    // Spawn directly with piped stdio so we own the child handle —
+    // a previous mpsc-based version leaked the spawned thread + the
+    // claude subprocess when the timeout fired (audit finding,
+    // dev-docs/cc-daemon-research.md). On timeout we kill the child
+    // and reap it before returning the error.
+    let mut child = Command::new(&claude_bin)
+        .arg("daemon")
+        .arg("status")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("spawn failed: {e}"))?;
+
+    // 50ms poll. CC's daemon status finishes in ~50ms idle; one or
+    // two cycles is enough. Polling tighter buys nothing because the
+    // child's own work dominates.
+    let poll_step = Duration::from_millis(50);
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) => {
+                if start.elapsed() >= SCRAPE_TIMEOUT {
+                    let _ = child.kill();
+                    // Best-effort reap so the OS isn't left with a
+                    // zombie. Ignore the error — kill already fired.
+                    let _ = child.wait();
+                    return Err(format!(
+                        "status spawn timed out after {}s",
+                        SCRAPE_TIMEOUT.as_secs()
+                    ));
+                }
+                std::thread::sleep(poll_step);
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("wait failed: {e}"));
+            }
+        }
+    }
+
+    // Drain pipes after the child has exited. CC daemon status
+    // output is sub-1KB so we don't need concurrent draining to
+    // avoid pipe-buffer deadlock.
+    let mut stdout_buf = String::new();
+    let mut stderr_buf = String::new();
+    if let Some(mut h) = child.stdout.take() {
+        let _ = h.read_to_string(&mut stdout_buf);
+    }
+    if let Some(mut h) = child.stderr.take() {
+        let _ = h.read_to_string(&mut stderr_buf);
+    }
 
     // Idle-daemon exits non-zero ("not running" path), so don't gate
     // on status. Combine stdout+stderr — observed output uses stdout
     // but the CLI is undocumented.
-    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
-    if !output.stderr.is_empty() {
+    let mut combined = stdout_buf;
+    if !stderr_buf.is_empty() {
         if !combined.is_empty() {
             combined.push('\n');
         }
-        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        combined.push_str(&stderr_buf);
     }
     Ok(combined)
 }
@@ -224,10 +256,21 @@ pub fn parse_status_output(text: &str) -> DaemonStatus {
         out.parse_status = DaemonParseStatus::Failed {
             reason: "empty status output".into(),
         };
-    } else if !saw_workers_line && !is_idle_with_no_section(text) {
-        out.parse_status = DaemonParseStatus::Degraded {
-            reason: "bg workers line missing".into(),
-        };
+    } else if !saw_workers_line {
+        if is_idle_with_no_section(text) {
+            // Clean idle without a "bg sessions:" block — the
+            // contract is that an idle daemon reports zero workers,
+            // not "unknown." Without this, an old CC version that
+            // ever ships a bare "not running" line would surface as
+            // Ok-but-None and the badge would correctly hide, but
+            // the rotation audit chip would read `None` instead of
+            // 0 workers.
+            out.bg_workers = Some(0);
+        } else {
+            out.parse_status = DaemonParseStatus::Degraded {
+                reason: "bg workers line missing".into(),
+            };
+        }
     }
 
     out
@@ -367,7 +410,6 @@ bg sessions:
         assert_eq!(s.roster_path, None);
         assert_eq!(s.log_path, None);
         assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
-        assert!(!s.has_workers());
     }
 
     #[test]
@@ -390,18 +432,17 @@ bg sessions:
         assert_eq!(s.bg_workers, Some(3));
         assert!(s.roster_path.is_some());
         assert!(s.log_path.is_some());
-        assert!(s.has_workers());
         assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
     }
 
     #[test]
     fn bare_not_running_no_section_parses_clean() {
         // Some future CC version may drop the "bg sessions:" block
-        // entirely when idle. Make sure we report Ok with workers=0,
-        // not Degraded.
+        // entirely when idle. Contract: clean idle reports Some(0),
+        // not None — "we measured and it's zero" beats "we don't know".
         let s = parse_status_output("not running\n");
         assert!(!s.running);
-        assert_eq!(s.bg_workers, None);
+        assert_eq!(s.bg_workers, Some(0));
         assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
     }
 
