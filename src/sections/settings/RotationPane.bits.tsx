@@ -160,7 +160,18 @@ export function AuditTable({ entries }: { entries: RotationAuditEntry[] }) {
               <Td>
                 <Tag>{ROTATION_OUTCOME_LABEL[e.outcome] ?? e.outcome}</Tag>
               </Td>
-              <Td style={{ color: "var(--fg-muted)" }}>{e.reason}</Td>
+              <Td style={{ color: "var(--fg-muted)" }}>
+                {e.reason}
+                {e.trigger.bgWorkers != null && e.trigger.bgWorkers > 0 && (
+                  <>
+                    {e.reason && " "}
+                    <Tag>
+                      {e.trigger.bgWorkers} bg worker
+                      {e.trigger.bgWorkers === 1 ? "" : "s"} active
+                    </Tag>
+                  </>
+                )}
+              </Td>
             </tr>
           ))}
         </tbody>

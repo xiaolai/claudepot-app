@@ -19,6 +19,7 @@ mod dto_activity_cards;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
 mod dto_agents;
+mod dto_cc_daemon;
 mod dto_cc_doctor;
 mod dto_cc_tips;
 mod dto_desktop;
@@ -981,6 +982,7 @@ pub fn run() {
             commands::notification::notification_categories_metadata,
             commands::cc_doctor::cc_doctor_snapshot,
             commands::cc_doctor::cc_doctor_open_parse_failures_log,
+            commands::cc_daemon::cc_daemon_status,
             commands::updates::updates_status_get,
             commands::updates::updates_check_now,
             commands::updates::updates_cli_install,

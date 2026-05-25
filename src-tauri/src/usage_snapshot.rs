@@ -141,7 +141,19 @@ async fn run_tick(app: &AppHandle) {
         cache.fetch_batch_detailed_verified(&store, &uuids).await
     };
 
-    let snapshot = usage_snapshot::build(&accounts, &outcomes);
+    // Scrape `claude daemon status` once per snapshot write so
+    // downstream consumers (rotation audit, Activities tile) see a
+    // consistent bg-worker count alongside the utilization numbers.
+    // Spawned blocking — the scrape is sync (process spawn + line
+    // parse, ~50ms in the idle case).
+    let bg_workers = tauri::async_runtime::spawn_blocking(|| {
+        let s = claudepot_core::cc_daemon::scrape_daemon_status();
+        s.bg_workers
+    })
+    .await
+    .unwrap_or(None);
+
+    let snapshot = usage_snapshot::build_with_bg_workers(&accounts, &outcomes, bg_workers);
     let path = usage_snapshot::snapshot_path();
     if let Err(e) = usage_snapshot::write(&path, &snapshot) {
         tracing::warn!(
@@ -153,6 +165,7 @@ async fn run_tick(app: &AppHandle) {
         tracing::debug!(
             path = %path.display(),
             accounts = snapshot.accounts.len(),
+            bg_workers = ?snapshot.bg_workers,
             "usage_snapshot: wrote"
         );
     }
