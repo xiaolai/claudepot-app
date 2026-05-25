@@ -45,7 +45,10 @@ export function PermissionPanel({
   const [perm, setPerm] = useState<ProjectPermission | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [durationSecs, setDurationSecs] = useState(
+  // `null` represents the "Never" preset → sticky grant. Initial
+  // value uses the first preset so common-case (time-boxed) is
+  // pre-selected; users opt into sticky deliberately.
+  const [durationSecs, setDurationSecs] = useState<number | null>(
     GRANT_DURATION_PRESETS[0].secs,
   );
   // Re-render tick so the countdown stays fresh without refetching.
@@ -130,12 +133,14 @@ export function PermissionPanel({
     };
   }, [projectPath, pushToast]);
 
-  // Tick once a minute while a grant is active so the countdown
-  // re-renders. Cleared as soon as there's no active grant.
-  const grantActive = !!perm?.activeGrant;
+  // Tick once a minute while a TIME-BOXED grant is active so the
+  // countdown re-renders. Sticky grants have no countdown — no
+  // ticker needed.
+  const timeBoxedGrantActive =
+    !!perm?.activeGrant && perm.activeGrant.expiresAtMs != null;
   const tickRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!grantActive) return;
+    if (!timeBoxedGrantActive) return;
     tickRef.current = window.setInterval(
       () => setNowTick((n) => n + 1),
       30_000,
@@ -143,7 +148,7 @@ export function PermissionPanel({
     return () => {
       if (tickRef.current != null) window.clearInterval(tickRef.current);
     };
-  }, [grantActive]);
+  }, [timeBoxedGrantActive]);
 
   const grant = useCallback(async () => {
     setBusy(true);
@@ -154,7 +159,12 @@ export function PermissionPanel({
         durationSecs,
       );
       setPerm(next);
-      pushToast("info", `Bypass granted — auto-reverts on schedule.`);
+      pushToast(
+        "info",
+        durationSecs == null
+          ? "Bypass granted — stays until you revert."
+          : "Bypass granted — auto-reverts on schedule.",
+      );
     } catch (e) {
       fail(`Grant failed: ${e}`);
     } finally {
@@ -167,7 +177,12 @@ export function PermissionPanel({
     try {
       const next = await api.permissionExtend(projectPath, durationSecs);
       setPerm(next);
-      pushToast("info", "Grant extended.");
+      pushToast(
+        "info",
+        durationSecs == null
+          ? "Grant set to never expire."
+          : "Grant extended.",
+      );
     } catch (e) {
       fail(`Extend failed: ${e}`);
     } finally {
@@ -200,7 +215,9 @@ export function PermissionPanel({
   }
 
   const g = perm.activeGrant;
-  const remainingMs = g ? g.expiresAtMs - Date.now() : 0;
+  const remainingMs =
+    g && g.expiresAtMs != null ? g.expiresAtMs - Date.now() : 0;
+  const isSticky = g != null && g.expiresAtMs == null;
   // Elevated, but no Claudepot grant — the user set this in their own
   // settings file. We surface it; we don't manage it.
   const elevatedByHand = perm.isElevated && !g;
@@ -223,8 +240,16 @@ export function PermissionPanel({
       {g ? (
         <div className="permission-grant-active" role="status">
           <span>
-            Bypass active — reverts in{" "}
-            <strong>{formatRemaining(remainingMs)}</strong>
+            {isSticky ? (
+              <>
+                Bypass active — <strong>stays until you revert</strong>
+              </>
+            ) : (
+              <>
+                Bypass active — reverts in{" "}
+                <strong>{formatRemaining(remainingMs)}</strong>
+              </>
+            )}
             {g.previousMode != null && (
               <span className="muted">
                 {" "}
@@ -239,7 +264,7 @@ export function PermissionPanel({
               disabled={busy}
             />
             <Button variant="outline" onClick={extend} disabled={busy} glyph={NF.clock}>
-              Extend
+              {durationSecs == null ? "Make sticky" : isSticky ? "Set deadline" : "Extend"}
             </Button>
             <Button variant="solid" onClick={revert} disabled={busy} glyph={NF.lock}>
               Revert now
@@ -255,9 +280,11 @@ export function PermissionPanel({
       ) : (
         <div className="permission-grant-form">
           <p className="muted small">
-            Grant a time-boxed <strong>bypassPermissions</strong> for this
-            project. Claudepot auto-reverts it when the timer ends — you don't
-            have to remember.
+            Grant <strong>bypassPermissions</strong> for this project.
+            Time-boxed grants auto-revert when the timer ends; the{" "}
+            <strong>Never</strong> preset is a sticky grant — Claudepot
+            won't auto-revert, you remove it with the Revert button when
+            you're done.
           </p>
           <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center" }}>
             <DurationSelect
@@ -275,21 +302,27 @@ export function PermissionPanel({
   );
 }
 
+// Sentinel for the "Never" preset in the <select>'s string-typed
+// value space — `<option value>` can't carry `null` directly.
+const NEVER_SENTINEL = "never";
+
 function DurationSelect({
   value,
   onChange,
   disabled,
 }: {
-  value: number;
-  onChange: (secs: number) => void;
+  value: number | null;
+  onChange: (secs: number | null) => void;
   disabled?: boolean;
 }) {
   return (
     <select
       className="mono"
-      value={value}
+      value={value == null ? NEVER_SENTINEL : String(value)}
       disabled={disabled}
-      onChange={(e) => onChange(Number(e.target.value))}
+      onChange={(e) =>
+        onChange(e.target.value === NEVER_SENTINEL ? null : Number(e.target.value))
+      }
       aria-label="Grant duration"
       style={{
         background: "var(--bg-raised)",
@@ -302,7 +335,10 @@ function DurationSelect({
       }}
     >
       {GRANT_DURATION_PRESETS.map((d) => (
-        <option key={d.secs} value={d.secs}>
+        <option
+          key={d.secs == null ? NEVER_SENTINEL : d.secs}
+          value={d.secs == null ? NEVER_SENTINEL : String(d.secs)}
+        >
           {d.label}
         </option>
       ))}

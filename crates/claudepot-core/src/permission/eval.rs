@@ -64,7 +64,7 @@ mod tests {
             granted_mode: PermissionMode::BypassPermissions,
             previous_mode: Some(PermissionMode::Default),
             granted_at: ts(granted),
-            expires_at: ts(expires),
+            expires_at: Some(ts(expires)),
             consecutive_failures: 0,
             last_failure_at: None,
         }
