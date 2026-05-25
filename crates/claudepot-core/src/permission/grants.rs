@@ -96,13 +96,6 @@ impl Grant {
         }
     }
 
-    /// True when the grant has no deadline (the "auto mode" / sticky
-    /// shape). Provided so UI + audit code don't pattern-match on the
-    /// raw Option at every call site.
-    pub fn is_sticky(&self) -> bool {
-        self.expires_at.is_none()
-    }
-
     /// This grant's circuit-breaker ledger, read off the two breaker
     /// fields. Pass to `claudepot_core::breaker::evaluate` to decide
     /// whether the orchestrator should attempt the revert.
@@ -290,7 +283,7 @@ mod tests {
         assert!(!g.is_expired(ts(0)));
         assert!(!g.is_expired(ts(86_400 * 365)));
         assert!(!g.is_expired(ts(i32::MAX as i64)));
-        assert!(g.is_sticky());
+        assert!(g.expires_at.is_none());
     }
 
     #[test]
@@ -307,7 +300,7 @@ mod tests {
         assert!(s.contains("\"expires_at\":null"), "got: {s}");
         let back: Grant = serde_json::from_str(&s).unwrap();
         assert_eq!(back, g);
-        assert!(back.is_sticky());
+        assert!(back.expires_at.is_none());
     }
 
     #[test]

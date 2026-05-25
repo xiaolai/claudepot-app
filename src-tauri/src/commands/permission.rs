@@ -58,7 +58,26 @@ fn current_dto(project_path: &str) -> ProjectPermissionDto {
     let state = resolve_default_mode(Path::new(project_path));
     let file = permission_store::load_or_default();
     let active = eval::active_grant(&file, project_path, Utc::now());
+    let active = filter_stale(&state, active);
     project_permission_dto(project_path.to_string(), &state, active)
+}
+
+/// Drop the grant from the DTO when the LocalProject layer's value
+/// no longer matches `granted_mode` — the user has hand-edited
+/// settings since the grant was created, so we're no longer managing
+/// the project's permission state.
+///
+/// Critical for sticky grants: a time-boxed grant self-heals on the
+/// orchestrator's next tick (via `revert_grant`'s
+/// `skipped_user_changed` path), but a sticky grant's expiration
+/// path never fires. Without this filter, a stale sticky grant
+/// would surface as "Bypass active" forever even after the user
+/// removed the elevation by hand.
+fn filter_stale<'a>(
+    state: &claudepot_core::permission::settings::PermissionState,
+    active: Option<&'a Grant>,
+) -> Option<&'a Grant> {
+    active.filter(|g| state.local_project_value.as_ref() == Some(&g.granted_mode))
 }
 
 /// Every CC project with its effective permission mode and any active
@@ -77,6 +96,7 @@ pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
             .map(|p| {
                 let state = resolve_default_mode(Path::new(&p.original_path));
                 let active = eval::active_grant(&file, &p.original_path, now);
+                let active = filter_stale(&state, active);
                 project_permission_dto(p.original_path.clone(), &state, active)
             })
             .collect())
@@ -96,6 +116,7 @@ pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto
         let file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
         let state = resolve_default_mode(Path::new(&project_path));
         let active = eval::active_grant(&file, &project_path, Utc::now());
+        let active = filter_stale(&state, active);
         Ok(project_permission_dto(project_path.clone(), &state, active))
     })
     .await
@@ -110,6 +131,16 @@ pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto
 // `duration_secs`: `None` → sticky grant (no auto-revert);
 // `Some(secs)` → time-boxed, must lie in the `validate_duration`
 // range.
+//
+// Wire-contract note: a missing `durationSecs` JSON key
+// deserializes the same as an explicit `null` (both → sticky).
+// This is acceptable under the IPC trust model documented in
+// `.claude/rules/architecture.md` ("Tauri 2 IPC is in-process — JS
+// bridge is not a cross-trust boundary"): the renderer is our own
+// code and the TS API (`src/api/permission.ts`) types the field as
+// `number | null`, forcing typed call sites to be explicit. A
+// hand-coded `invoke()` that omits the field would be a renderer
+// bug caught in review, not an exploit vector.
 #[tauri::command]
 pub async fn permission_grant(
     project_path: String,
@@ -224,4 +255,71 @@ pub async fn permission_extend(
     })
     .await
     .map_err(|e| format!("permission_extend join: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use claudepot_core::permission::grants::Grant;
+    use claudepot_core::permission::settings::{
+        PermissionDecisionSource, PermissionState,
+    };
+    use claudepot_core::permission::PermissionMode;
+    use claudepot_core::settings_writer::SettingsLayer;
+
+    fn state_with_local(value: Option<PermissionMode>) -> PermissionState {
+        PermissionState {
+            effective: value.clone().unwrap_or(PermissionMode::Default),
+            decided_by: PermissionDecisionSource::LocalProjectSettings,
+            local_project_value: value,
+            project_value: None,
+            user_value: None,
+        }
+    }
+
+    fn sticky_grant(granted: PermissionMode) -> Grant {
+        Grant {
+            project_path: "/p/a".into(),
+            layer: SettingsLayer::LocalProject,
+            granted_mode: granted,
+            previous_mode: Some(PermissionMode::Default),
+            granted_at: Utc::now(),
+            expires_at: None,
+            consecutive_failures: 0,
+            last_failure_at: None,
+        }
+    }
+
+    #[test]
+    fn filter_stale_keeps_grant_when_layer_matches() {
+        let g = sticky_grant(PermissionMode::BypassPermissions);
+        let state = state_with_local(Some(PermissionMode::BypassPermissions));
+        assert!(filter_stale(&state, Some(&g)).is_some());
+    }
+
+    #[test]
+    fn filter_stale_drops_grant_when_layer_diverges() {
+        // User hand-edited settings.local.json to plain `default` —
+        // the sticky grant record is now lying. We must NOT surface
+        // the grant in the DTO; that's the "stays elevated forever"
+        // bug Codex flagged.
+        let g = sticky_grant(PermissionMode::BypassPermissions);
+        let state = state_with_local(Some(PermissionMode::Default));
+        assert!(filter_stale(&state, Some(&g)).is_none());
+    }
+
+    #[test]
+    fn filter_stale_drops_grant_when_layer_cleared() {
+        // User removed the key entirely. Same defect class as above.
+        let g = sticky_grant(PermissionMode::BypassPermissions);
+        let state = state_with_local(None);
+        assert!(filter_stale(&state, Some(&g)).is_none());
+    }
+
+    #[test]
+    fn filter_stale_passes_through_no_grant() {
+        let state = state_with_local(None);
+        assert!(filter_stale(&state, None).is_none());
+    }
 }
