@@ -26,6 +26,7 @@ import { serviceStatusApi } from "./service-status";
 import { updatesApi } from "./updates";
 import { releaseUpdateApi } from "./releaseUpdate";
 import { ccTipsApi } from "./cc-tips";
+import { ccDaemonApi } from "./cc-daemon";
 import { ccDoctorApi } from "./cc-doctor";
 import { rotationApi } from "./rotation";
 import { permissionApi } from "./permission";
@@ -55,6 +56,7 @@ export const api = {
   ...updatesApi,
   ...releaseUpdateApi,
   ...ccTipsApi,
+  ...ccDaemonApi,
   ...ccDoctorApi,
   ...rotationApi,
   ...permissionApi,
