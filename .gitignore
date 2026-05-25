@@ -108,3 +108,24 @@ coverage/
 # Vite / Vitest caches.
 .vite/
 .vitest-cache/
+
+# >>> cc-suite >>>
+# AI assistant local state
+.claude/settings.local.json
+.claude/CLAUDE.local.md
+.claude/*.local.*
+CLAUDE.local.md
+
+# Codex CLI — local files, keep checked-in subdirs
+.codex/*
+!.codex/skills/
+!.codex/prompts/
+!.codex/hooks.json
+!.codex/hooks.cc-suite.json
+!.codex/config.toml
+
+# Gemini CLI — local files, keep checked-in subdirs
+.gemini/*
+!.gemini/skills/
+!.gemini/commands/
+# <<< cc-suite <<<
