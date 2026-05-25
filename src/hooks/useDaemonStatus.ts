@@ -28,18 +28,35 @@ export function useDaemonStatus(): {
     api
       .ccDaemonStatus()
       .then((next) => {
-        // Identity-skip when nothing meaningful changed — keep
-        // referential equality so memoized consumers don't churn on
-        // every poll. Three fields are load-bearing for the UI:
-        // running, bg workers, parse-status kind.
-        setStatus((prev) =>
-          prev !== null &&
-          prev.running === next.running &&
-          prev.bgWorkers === next.bgWorkers &&
-          prev.parseStatus.kind === next.parseStatus.kind
-            ? prev
-            : next,
-        );
+        setStatus((prev) => {
+          // A transient parse failure must not clear a valid
+          // last-known-good snapshot — that would flicker the
+          // Sidebar badge / Live tile off and on. Keep the good
+          // value until a fresh successful scrape arrives.
+          if (
+            next.parseStatus.kind !== "ok" &&
+            prev !== null &&
+            prev.parseStatus.kind === "ok"
+          ) {
+            return prev;
+          }
+          // Identity-skip when nothing meaningful changed — keep
+          // referential equality so memoized consumers don't churn
+          // on every poll. Three fields are load-bearing for the UI:
+          // running, bg workers, parse-status kind. The other
+          // DaemonStatus fields (pid, uptime, paths) aren't observed
+          // by any current renderer; comparing them would churn
+          // re-renders for invisible state.
+          if (
+            prev !== null &&
+            prev.running === next.running &&
+            prev.bgWorkers === next.bgWorkers &&
+            prev.parseStatus.kind === next.parseStatus.kind
+          ) {
+            return prev;
+          }
+          return next;
+        });
       })
       .catch((err) => {
         // Tauri IPC down or backend not yet ready — leave the prior
