@@ -6,6 +6,24 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.44 — beta (unreleased)
+
+Rotation-audit display patch. Settings → Rotation's "Recent
+activity" table was showing every row as "20578d ago" — a
+units mismatch where seconds were being handed to a milliseconds-
+based formatter, leaving the displayed delta roughly equal to the
+current wall-clock time in days since the epoch.
+
+### Fixed
+
+- **Rotation audit timestamps render correctly.** `RotationPane`'s
+  `When` column was passing `new Date(e.ts).getTime() / 1000` to
+  `formatRelative`, which expects milliseconds since epoch. The
+  resulting `Date.now() − seconds_value` left every delta ≈
+  `Date.now()` and floored to ~20578 days. Drop the `/ 1000` to
+  match every other `formatRelative` call site in the codebase
+  (NetworkPane, ArtifactTrashList, UsageBadge, ServiceStatusDot).
+
 ## 0.1.43 — beta (unreleased)
 
 The auto-mode patch. Surfaces background CC sessions in the UI so
