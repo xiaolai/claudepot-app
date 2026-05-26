@@ -30,16 +30,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use claudepot_core::agent::{
-    self,
-    agent_runs_dir,
-    events::{
-        evaluate as evaluate_events, store as events_store, AgentRunStats, EventFire,
-        EventsFile,
-    },
-    list_run_ids, read_run, resolve_binary, AgentStore, Agent, Lifecycle, Trigger,
-};
 use claudepot_core::agent::install::current_claudepot_cli;
+use claudepot_core::agent::{
+    self, agent_runs_dir,
+    events::{
+        evaluate as evaluate_events, store as events_store, AgentRunStats, EventFire, EventsFile,
+    },
+    list_run_ids, read_run, resolve_binary, Agent, AgentStore, Lifecycle, Trigger,
+};
 use claudepot_core::session::SessionRow;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -187,10 +185,7 @@ impl TickEnv for ProdTickEnv {
     fn load_ledger(&self) -> std::io::Result<EventsFile> {
         events_store::load()
     }
-    fn save_ledger(
-        &self,
-        ledger: &EventsFile,
-    ) -> Result<(), events_store::AgentEventsError> {
+    fn save_ledger(&self, ledger: &EventsFile) -> Result<(), events_store::AgentEventsError> {
         events_store::save(ledger)
     }
     fn list_sessions(&self) -> Vec<SessionRow> {
@@ -251,8 +246,7 @@ where
     }
 
     let now = clock();
-    let live_agent_ids: HashSet<String> =
-        agents.iter().map(|a| a.id.to_string()).collect();
+    let live_agent_ids: HashSet<String> = agents.iter().map(|a| a.id.to_string()).collect();
 
     // ---- 2. F17 self-trigger exclusion set --------------------
     let agent_session_ids = env.build_exclusion_set(&agents);
@@ -269,8 +263,7 @@ where
 
     // ---- 4. Index the live CC sessions ------------------------
     let sessions: Vec<SessionRow> = env.list_sessions();
-    let live_session_ids: HashSet<String> =
-        sessions.iter().map(|s| s.session_id.clone()).collect();
+    let live_session_ids: HashSet<String> = sessions.iter().map(|s| s.session_id.clone()).collect();
 
     // ---- 5. Pure evaluator -----------------------------------
     let fired_pairs: HashSet<(String, String)> = ledger
@@ -278,12 +271,7 @@ where
         .iter()
         .map(|e| (e.agent_id.clone(), e.session_id.clone()))
         .collect();
-    let stats_fn = |id: &str| {
-        run_stats_map
-            .get(id)
-            .cloned()
-            .unwrap_or_default()
-    };
+    let stats_fn = |id: &str| run_stats_map.get(id).cloned().unwrap_or_default();
     let mut fires = evaluate_events(
         &agents,
         &sessions,
@@ -299,8 +287,7 @@ where
     // tick this process. Agents added later (the X16 scenario) are
     // capped on their first contact; long-running agents are not
     // re-capped on every tick.
-    let agent_ids_this_tick: Vec<String> =
-        agents.iter().map(|a| a.id.to_string()).collect();
+    let agent_ids_this_tick: Vec<String> = agents.iter().map(|a| a.id.to_string()).collect();
     let fresh_agents = env.mark_agents_seen(&agent_ids_this_tick);
     if !fresh_agents.is_empty() {
         fires = apply_per_agent_first_tick_cap(
@@ -316,10 +303,8 @@ where
     // duplicate ledger entry is free, but a duplicate billed
     // `claude -p` is a real cost leak. So we always commit the
     // ledger update before handing off the run.
-    let agents_by_id: std::collections::HashMap<String, &Agent> = agents
-        .iter()
-        .map(|a| (a.id.to_string(), a))
-        .collect();
+    let agents_by_id: std::collections::HashMap<String, &Agent> =
+        agents.iter().map(|a| (a.id.to_string(), a)).collect();
 
     for fire in &fires {
         let Some(agent) = agents_by_id.get(&fire.agent_id) else {
@@ -430,11 +415,7 @@ fn build_self_exclusion_set(agents: &[Agent]) -> HashSet<String> {
             // Authoritative source: the parsed `RunResult`. We
             // deliberately ignore `run.session_jsonl_path` — see
             // F17 doc on `claudepot_core::agent::events`.
-            sids.push(
-                run.result
-                    .as_ref()
-                    .and_then(|r| r.session_id.clone()),
-            );
+            sids.push(run.result.as_ref().and_then(|r| r.session_id.clone()));
         }
         sids
     })
@@ -691,7 +672,13 @@ fn write_dispatch_failed_breadcrumb(
     let now = now_dt.format("%Y%m%dT%H%M%SZ");
     let session_slug: String = session_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .take(40)
         .collect();
     let run_id = format!("dispatch-failed-{now}-{session_slug}");
@@ -800,12 +787,7 @@ fn write_dispatch_failed_breadcrumb(
 /// (logged + event-emitted).
 struct NoopSink;
 impl claudepot_core::project_progress::ProgressSink for NoopSink {
-    fn phase(
-        &self,
-        _phase: &str,
-        _status: claudepot_core::project_progress::PhaseStatus,
-    ) {
-    }
+    fn phase(&self, _phase: &str, _status: claudepot_core::project_progress::PhaseStatus) {}
     fn sub_progress(&self, _phase: &str, _current: usize, _total: usize) {}
 }
 
@@ -876,8 +858,7 @@ mod tests {
     use claudepot_core::agent::events::FiredEntry;
 
     fn ts(min: i64) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 5, 22, 12, 0, 0).unwrap()
-            + ChronoDuration::minutes(min)
+        Utc.with_ymd_and_hms(2026, 5, 22, 12, 0, 0).unwrap() + ChronoDuration::minutes(min)
     }
 
     #[test]
@@ -1054,16 +1035,13 @@ mod tests {
         // observe.
         let a = stub_agent("agent-1");
         let b = stub_agent("agent-2");
-        let exclusion = build_self_exclusion_set_with(
-            &[a.clone(), b.clone()],
-            &|agent| {
-                if agent.name == "agent-1" {
-                    vec![Some("sess-A".to_string()), Some("sess-B".to_string())]
-                } else {
-                    vec![Some("sess-C".to_string())]
-                }
-            },
-        );
+        let exclusion = build_self_exclusion_set_with(&[a.clone(), b.clone()], &|agent| {
+            if agent.name == "agent-1" {
+                vec![Some("sess-A".to_string()), Some("sess-B".to_string())]
+            } else {
+                vec![Some("sess-C".to_string())]
+            }
+        });
         assert!(exclusion.contains("sess-A"));
         assert!(exclusion.contains("sess-B"));
         assert!(exclusion.contains("sess-C"));
@@ -1095,8 +1073,8 @@ mod tests {
 
     fn stub_agent(name: &str) -> Agent {
         use claudepot_core::agent::{
-            AgentBinary, CreatedVia, EventKind, OutputFormat, PermissionMode,
-            PlatformOptions, RateLimit, Trigger,
+            AgentBinary, CreatedVia, EventKind, OutputFormat, PermissionMode, PlatformOptions,
+            RateLimit, Trigger,
         };
         let now = Utc::now();
         Agent {
@@ -1149,9 +1127,7 @@ mod tests {
         EventFire {
             agent_id: agent_id.to_string(),
             session_id: session_id.to_string(),
-            session_path: format!(
-                "/home/u/.claude/projects/proj/{session_id}.jsonl"
-            ),
+            session_path: format!("/home/u/.claude/projects/proj/{session_id}.jsonl"),
         }
     }
 
@@ -1162,12 +1138,8 @@ mod tests {
     /// "fresh" for the legacy tests below, so the older
     /// "global cap" semantics are preserved when each fire belongs
     /// to a different agent.
-    fn apply_first_tick_cap_no_emit(
-        fires: Vec<EventFire>,
-        cap: usize,
-    ) -> Vec<EventFire> {
-        let fresh: HashSet<String> =
-            fires.iter().map(|f| f.agent_id.clone()).collect();
+    fn apply_first_tick_cap_no_emit(fires: Vec<EventFire>, cap: usize) -> Vec<EventFire> {
+        let fresh: HashSet<String> = fires.iter().map(|f| f.agent_id.clone()).collect();
         apply_per_agent_first_tick_cap(fires, &fresh, cap, |_, _| {})
     }
 
@@ -1223,10 +1195,7 @@ mod tests {
         fn load_ledger(&self) -> std::io::Result<EventsFile> {
             Ok(self.ledger.borrow().clone())
         }
-        fn save_ledger(
-            &self,
-            ledger: &EventsFile,
-        ) -> Result<(), events_store::AgentEventsError> {
+        fn save_ledger(&self, ledger: &EventsFile) -> Result<(), events_store::AgentEventsError> {
             *self.save_calls.borrow_mut() += 1;
             let mut remaining = self.save_fails_n_times.borrow_mut();
             if *remaining > 0 {
@@ -1271,9 +1240,7 @@ mod tests {
     }
 
     fn fake_session(session_id: &str, project: &str) -> SessionRow {
-        fake_session_settled_at(session_id, project, |now| {
-            now - chrono::Duration::hours(1)
-        })
+        fake_session_settled_at(session_id, project, |now| now - chrono::Duration::hours(1))
     }
 
     /// Build a settled-looking session whose `last_ts` is computed
@@ -1289,11 +1256,7 @@ mod tests {
         fake_session_settled_at(session_id, project, |_| last_ts)
     }
 
-    fn fake_session_settled_at<F>(
-        session_id: &str,
-        project: &str,
-        last_ts: F,
-    ) -> SessionRow
+    fn fake_session_settled_at<F>(session_id: &str, project: &str, last_ts: F) -> SessionRow
     where
         F: FnOnce(chrono::DateTime<chrono::Utc>) -> chrono::DateTime<chrono::Utc>,
     {
@@ -1550,8 +1513,7 @@ mod tests {
         let agent = stub_agent_with_cwd("session-narrator", "/tmp/proj");
         let agent_id = agent.id.to_string();
         let session_id = "sess-happy".to_string();
-        let session_path =
-            format!("/tmp/.claude/projects/proj/{session_id}.jsonl");
+        let session_path = format!("/tmp/.claude/projects/proj/{session_id}.jsonl");
         let fixed_now = chrono::Utc::now();
         let sessions = vec![fake_session_at(
             &session_id,
@@ -1793,8 +1755,7 @@ mod tests {
         let fire = EventFire {
             agent_id: "a1".into(),
             session_id: "deadbeef-cafe".into(),
-            session_path: "/home/u/.claude/projects/proj/deadbeef-cafe.jsonl"
-                .into(),
+            session_path: "/home/u/.claude/projects/proj/deadbeef-cafe.jsonl".into(),
         };
         let env = build_dispatch_env(&fire);
         assert_eq!(
@@ -1847,9 +1808,11 @@ mod tests {
             .collect();
         assert_eq!(entries.len(), 1, "exactly one breadcrumb dir");
         let dir = entries.into_iter().next().unwrap().path();
-        assert!(dir.join("error.txt").exists(), "human-readable forensic kept");
-        let result_bytes =
-            std::fs::read(dir.join("result.json")).expect("result.json must exist");
+        assert!(
+            dir.join("error.txt").exists(),
+            "human-readable forensic kept"
+        );
+        let result_bytes = std::fs::read(dir.join("result.json")).expect("result.json must exist");
 
         // The synthetic file must round-trip through the same reader
         // `agents_runs_list` uses.
@@ -1859,10 +1822,17 @@ mod tests {
         assert_eq!(run.exit_code, -1, "ERR row in RunHistoryPanel");
         assert_eq!(run.trigger_kind, agent::TriggerKind::Manual);
         let result = run.result.as_ref().expect("synthetic carries a RunResult");
-        assert_eq!(result.is_error, Some(true), "panel renders ERR + show button");
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "panel renders ERR + show button"
+        );
         assert_eq!(result.session_id.as_deref(), Some(session_id));
         assert!(
-            result.errors.iter().any(|e| e.contains("wrapper 'foo' missing")),
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("wrapper 'foo' missing")),
             "the error string is preserved verbatim for the disclosure"
         );
         assert!(
@@ -1894,10 +1864,7 @@ mod tests {
         let mut sessions = Vec::new();
         for i in 0..7 {
             let project = format!("proj-{i}");
-            let a = stub_agent_with_cwd(
-                &format!("agent-{i}"),
-                &format!("/tmp/{project}"),
-            );
+            let a = stub_agent_with_cwd(&format!("agent-{i}"), &format!("/tmp/{project}"));
             sessions.push(fake_session(&format!("sess-{i}"), &project));
             agents.push(a);
         }
@@ -1997,29 +1964,23 @@ mod tests {
             fires.push(EventFire {
                 agent_id: "newcomer".into(),
                 session_id: format!("nsess-{i}"),
-                session_path: format!(
-                    "/tmp/.claude/projects/proj/nsess-{i}.jsonl"
-                ),
+                session_path: format!("/tmp/.claude/projects/proj/nsess-{i}.jsonl"),
             });
         }
         let dropped_count = std::cell::Cell::new(0usize);
-        let kept = apply_per_agent_first_tick_cap(
-            fires,
-            &fresh,
-            FIRST_TICK_BURST_CAP,
-            |dropped, _| dropped_count.set(dropped),
-        );
+        let kept =
+            apply_per_agent_first_tick_cap(fires, &fresh, FIRST_TICK_BURST_CAP, |dropped, _| {
+                dropped_count.set(dropped)
+            });
 
         // The veteran's fire passes through uncapped.
-        let veteran_kept =
-            kept.iter().filter(|f| f.agent_id == "veteran").count();
+        let veteran_kept = kept.iter().filter(|f| f.agent_id == "veteran").count();
         assert_eq!(
             veteran_kept, 1,
             "X16: a long-running agent's fires must NOT be capped"
         );
         // The newcomer is bounded to the cap.
-        let newcomer_kept =
-            kept.iter().filter(|f| f.agent_id == "newcomer").count();
+        let newcomer_kept = kept.iter().filter(|f| f.agent_id == "newcomer").count();
         assert_eq!(
             newcomer_kept, FIRST_TICK_BURST_CAP,
             "X16: a late-added agent gets the bounded first-tick cap"
@@ -2083,4 +2044,3 @@ mod tests {
         );
     }
 }
-

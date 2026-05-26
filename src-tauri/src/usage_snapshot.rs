@@ -70,8 +70,11 @@ async fn run_tick(app: &AppHandle) {
     // of account state, so it must run before the early returns below
     // (no accounts / no CLI credentials). Returns after one cheap file
     // read when no grants exist.
-    guarded("permission_orchestrator", crate::permission_orchestrator::tick(app))
-        .await;
+    guarded(
+        "permission_orchestrator",
+        crate::permission_orchestrator::tick(app),
+    )
+    .await;
 
     // Refresh per-project PR detection. Independent of accounts (a
     // user can have projects without an Anthropic account); runs

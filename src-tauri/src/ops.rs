@@ -809,10 +809,9 @@ where
         // its own right) and the Tauri emit channel. We never
         // re-use captured state from the panicked closure on the
         // happy path past the catch_unwind call.
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                work(sink, app, ops, op_id);
-            }));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            work(sink, app, ops, op_id);
+        }));
         if let Err(panic_payload) = result {
             // Best-effort extraction of the panic message — the
             // payload is typically `&str` or `String`. Anything

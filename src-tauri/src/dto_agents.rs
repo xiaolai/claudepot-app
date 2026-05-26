@@ -6,9 +6,9 @@
 //! this boundary — agents don't carry credentials.
 
 use claudepot_core::agent::{
-    Agent, AgentBinary, AgentRun, CreatedVia, Lifecycle, McpServerRef,
-    OutputFormat, PermissionMode, PlatformOptions, RateLimit, RunResult,
-    SchedulerCapabilities, Trigger, TriggerKind,
+    Agent, AgentBinary, AgentRun, CreatedVia, Lifecycle, McpServerRef, OutputFormat,
+    PermissionMode, PlatformOptions, RateLimit, RunResult, SchedulerCapabilities, Trigger,
+    TriggerKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,9 +48,7 @@ impl From<&Agent> for AgentSummaryDto {
     fn from(a: &Agent) -> Self {
         let (binary_kind, binary_route_id) = match &a.binary {
             AgentBinary::FirstParty => ("first_party".to_string(), None),
-            AgentBinary::Route { route_id } => {
-                ("route".to_string(), Some(route_id.to_string()))
-            }
+            AgentBinary::Route { route_id } => ("route".to_string(), Some(route_id.to_string())),
         };
         let (trigger_kind, cron, tz) = match &a.trigger {
             Trigger::Cron { cron, timezone } => {
@@ -216,9 +214,7 @@ impl From<McpServerRefDto> for McpServerRef {
     fn from(d: McpServerRefDto) -> Self {
         match d {
             McpServerRefDto::ClaudepotMemory => McpServerRef::ClaudepotMemory,
-            McpServerRefDto::Custom { name, config } => {
-                McpServerRef::Custom { name, config }
-            }
+            McpServerRefDto::Custom { name, config } => McpServerRef::Custom { name, config },
         }
     }
 }

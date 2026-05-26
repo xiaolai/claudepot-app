@@ -29,9 +29,8 @@ use chrono::{DateTime, Utc};
 use claudepot_core::agent::{
     current_claudepot_cli, install_draft, install_shim, resolve_binary,
     scheduler::{RegisteredEntry, SchedulerCapabilities},
-    Agent, AgentBinary, AgentError, AgentId, AgentStore, CreatedVia,
-    Lifecycle, OutputFormat, PermissionMode, PlatformOptions, Scheduler,
-    Trigger,
+    Agent, AgentBinary, AgentError, AgentId, AgentStore, CreatedVia, Lifecycle, OutputFormat,
+    PermissionMode, PlatformOptions, Scheduler, Trigger,
 };
 // A5: import the REAL route_lookup_fn the Tauri command builds. A
 // refactor that changes its signature (e.g. adds an `&AccountStore`

@@ -6,6 +6,7 @@ mod cc_doctor_watcher;
 // items inside this module were already reachable via the Tauri IPC
 // surface; widening to `pub` only exposes them to external Rust
 // callers, which is acceptable for the lib crate's test surface.
+mod agent_event_orchestrator;
 pub mod commands;
 mod config_dto;
 mod config_watch;
@@ -16,9 +17,9 @@ mod dto;
 mod dto_account;
 mod dto_activity;
 mod dto_activity_cards;
+mod dto_agents;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
-mod dto_agents;
 mod dto_cc_daemon;
 mod dto_cc_doctor;
 mod dto_cc_tips;
@@ -43,7 +44,6 @@ mod dto_usage;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
-mod agent_event_orchestrator;
 mod permission_orchestrator;
 mod pr_orchestrator;
 mod preferences;
@@ -201,8 +201,8 @@ pub fn run() {
                 // `claudepot_core::retention` so the sibling
                 // metrics_tick prune in `LiveRuntime::start` can't
                 // drift out of sync.
-                let cutoff_ms = chrono::Utc::now().timestamp_millis()
-                    - claudepot_core::retention::RETENTION_MS;
+                let cutoff_ms =
+                    chrono::Utc::now().timestamp_millis() - claudepot_core::retention::RETENTION_MS;
                 match idx.prune_before(cutoff_ms) {
                     Ok(0) => {}
                     Ok(n) => tracing::info!(

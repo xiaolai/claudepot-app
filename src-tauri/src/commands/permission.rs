@@ -262,9 +262,7 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use claudepot_core::permission::grants::Grant;
-    use claudepot_core::permission::settings::{
-        PermissionDecisionSource, PermissionState,
-    };
+    use claudepot_core::permission::settings::{PermissionDecisionSource, PermissionState};
     use claudepot_core::permission::PermissionMode;
     use claudepot_core::settings_writer::SettingsLayer;
 

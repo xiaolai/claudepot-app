@@ -93,7 +93,11 @@ pub struct ReleaseUpdateCheckDto {
 /// `Progress` / `Finished`) so the renderer's progress handling
 /// stays structurally identical to the pre-rewire code.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "event", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "event",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum DownloadProgress {
     /// Download has begun. `content_length` is the total byte count
     /// when the server sent a `Content-Length`, else `None`.
@@ -109,7 +113,9 @@ pub enum DownloadProgress {
 }
 
 /// Read the persisted release channel from the preferences state.
-fn channel_from_prefs(prefs: &tauri::State<'_, PreferencesState>) -> Result<ReleaseChannel, String> {
+fn channel_from_prefs(
+    prefs: &tauri::State<'_, PreferencesState>,
+) -> Result<ReleaseChannel, String> {
     Ok(prefs
         .0
         .lock()
@@ -210,7 +216,10 @@ pub async fn release_update_check(
             // Up to date. Clear any previously-stashed handle so a
             // stale install can't fire against an outdated check.
             let current = app.package_info().version.to_string();
-            *state.0.lock().map_err(|e| format!("update state lock: {e}"))? = None;
+            *state
+                .0
+                .lock()
+                .map_err(|e| format!("update state lock: {e}"))? = None;
             Ok(ReleaseUpdateCheckDto {
                 update_available: false,
                 version: None,
@@ -234,7 +243,10 @@ pub async fn release_update_check(
                 pub_date,
                 channel: channel.as_str().to_string(),
             };
-            *state.0.lock().map_err(|e| format!("update state lock: {e}"))? = Some(update);
+            *state
+                .0
+                .lock()
+                .map_err(|e| format!("update state lock: {e}"))? = Some(update);
             Ok(dto)
         }
     }
@@ -260,13 +272,14 @@ pub async fn release_update_install(
     // against a consumed handle must fail loudly, not silently
     // re-download. On error below we put it back so a retry works.
     let update = {
-        let mut guard = state.0.lock().map_err(|e| format!("update state lock: {e}"))?;
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("update state lock: {e}"))?;
         guard.take()
     };
     let Some(update) = update else {
-        return Err(
-            "no update is staged — run a check first (release_update_check)".to_string(),
-        );
+        return Err("no update is staged — run a check first (release_update_check)".to_string());
     };
 
     // `app.emit` is best-effort — a failed emit only loses one
@@ -312,7 +325,10 @@ pub async fn release_update_install(
         Err(e) => {
             // Put the handle back so the renderer can retry the
             // install without re-running the check.
-            *state.0.lock().map_err(|e| format!("update state lock: {e}"))? = Some(update);
+            *state
+                .0
+                .lock()
+                .map_err(|e| format!("update state lock: {e}"))? = Some(update);
             Err(format!("update install failed: {e}"))
         }
     }
