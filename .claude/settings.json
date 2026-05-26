@@ -13,12 +13,10 @@
     ]
   },
   "enabledPlugins": {
-    "codex-toolkit@xiaolai": true,
+    "cc-suite@xiaolai": true,
     "loc-guardian@xiaolai": true,
     "grill@xiaolai": true,
     "tdd-guardian@xiaolai": true,
-    "frontend-design@claude-code-plugins": true,
-    "ui-tokenize@xiaolai": true,
-    "ui-responsive@xiaolai": true
+    "frontend-design@claude-code-plugins": true
   }
 }
