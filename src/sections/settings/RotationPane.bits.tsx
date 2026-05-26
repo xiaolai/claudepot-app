@@ -151,7 +151,7 @@ export function AuditTable({ entries }: { entries: RotationAuditEntry[] }) {
               key={e.id}
               style={{ borderTop: "var(--bw-hair) solid var(--line)" }}
             >
-              <Td>{formatRelative(new Date(e.ts).getTime() / 1000)}</Td>
+              <Td>{formatRelative(new Date(e.ts).getTime())}</Td>
               <Td>{e.ruleId}</Td>
               <Td>
                 {e.fromEmail}
