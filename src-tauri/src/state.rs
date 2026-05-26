@@ -169,7 +169,10 @@ mod tests {
         });
         let _ = join.join();
         // Confirm the mutex is actually poisoned now.
-        assert!(state.active.is_poisoned(), "test setup: mutex must be poisoned");
+        assert!(
+            state.active.is_poisoned(),
+            "test setup: mutex must be poisoned"
+        );
 
         // The fix: clear() recovers via `into_inner()` and drains the
         // slot, so a subsequent login_start can take it. Before the
@@ -185,7 +188,10 @@ mod tests {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
-        assert!(inner.is_none(), "clear() must drain the slot even on poison");
+        assert!(
+            inner.is_none(),
+            "clear() must drain the slot even on poison"
+        );
     }
 }
 

@@ -7,17 +7,16 @@
 use chrono::Utc;
 use claudepot_core::agent::{
     active_scheduler, apply_lifecycle_change, current_claudepot_cli, install_shim,
-    read_run as core_read_run, resolve_binary, scheduler::cron_next_runs,
-    store::agent_runs_dir, Agent, AgentBinary, AgentId, AgentPatch, AgentStore,
-    CreatedVia, PlatformOptions, Trigger,
+    read_run as core_read_run, resolve_binary, scheduler::cron_next_runs, store::agent_runs_dir,
+    Agent, AgentBinary, AgentId, AgentPatch, AgentStore, CreatedVia, PlatformOptions, Trigger,
 };
 use claudepot_core::routes::RouteStore;
 use uuid::Uuid;
 
 use crate::dto_agents::{
-    parse_output_format, parse_permission_mode, AgentCreateDto, AgentDetailsDto,
-    AgentRunDto, AgentSummaryDto, AgentUpdateDto, CronValidationDto,
-    NameValidationDto, SchedulerCapabilitiesDto,
+    parse_output_format, parse_permission_mode, AgentCreateDto, AgentDetailsDto, AgentRunDto,
+    AgentSummaryDto, AgentUpdateDto, CronValidationDto, NameValidationDto,
+    SchedulerCapabilitiesDto,
 };
 use crate::ops::{emit_terminal, new_running_op, OpKind, RunningOps};
 use tauri::{AppHandle, State};
@@ -104,8 +103,7 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
             // option); an unknown value is a strong "this
             // payload was hand-crafted" signal — reject loudly
             // rather than silently treat it as session_settled.
-            let event_str =
-                dto.event_kind.as_deref().unwrap_or("session_settled");
+            let event_str = dto.event_kind.as_deref().unwrap_or("session_settled");
             if event_str != "session_settled" {
                 return Err(format!("unknown event_kind: {event_str}"));
             }
@@ -113,17 +111,14 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
                 .event_debounce_secs
                 .unwrap_or(claudepot_core::agent::DEFAULT_DEBOUNCE_SECS);
             Trigger::Event {
-                event: claudepot_core::agent::EventKind::SessionSettled {
-                    debounce_secs,
-                },
+                event: claudepot_core::agent::EventKind::SessionSettled { debounce_secs },
             }
         }
         Some("manual") => Trigger::Manual,
         _ => {
             // Default = "cron". Validate the cron string before
             // anything else so we fail fast on bad input.
-            let _ =
-                claudepot_core::agent::cron::expand(&dto.cron).map_err(err)?;
+            let _ = claudepot_core::agent::cron::expand(&dto.cron).map_err(err)?;
             Trigger::Cron {
                 cron: dto.cron.clone(),
                 timezone: dto.timezone.clone(),
@@ -171,9 +166,11 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
         // 0 from the form = "no per-run token ceiling".
         task_budget: dto.task_budget.filter(|&t| t != 0),
         // An all-null RateLimit means "no limit"; collapse it.
-        rate_limit: dto.rate_limit.map(Into::into).filter(|r: &claudepot_core::agent::RateLimit| {
-            r.min_interval_secs.is_some() || r.max_per_day.is_some()
-        }),
+        rate_limit: dto.rate_limit.map(Into::into).filter(
+            |r: &claudepot_core::agent::RateLimit| {
+                r.min_interval_secs.is_some() || r.max_per_day.is_some()
+            },
+        ),
         // Phase 1: the GUI Add-Agent flow both creates AND arms the
         // agent (`agents_add` registers it with the OS scheduler), so
         // a GUI-created agent is `Installed`. The `Draft` lifecycle
@@ -202,10 +199,7 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
 /// merge `Trigger` correctly when the caller supplies only one of
 /// `cron`/`timezone` (preserving the other), and lets us validate
 /// the post-merge record's cross-field invariants.
-fn build_patch_from_update(
-    dto: AgentUpdateDto,
-    existing: &Agent,
-) -> Result<AgentPatch, String> {
+fn build_patch_from_update(dto: AgentUpdateDto, existing: &Agent) -> Result<AgentPatch, String> {
     // Resolve every fallible / branchy field BEFORE constructing the
     // patch — keeps the struct literal below a single, scannable
     // shape and avoids the field_reassign_with_default lint that
@@ -352,10 +346,7 @@ pub async fn agent_add_from_template(
         "session-narrator" => {
             // `session_narrator` is a pure constructor; the cwd is
             // the project the narrator watches (event scope rule).
-            claudepot_core::agent::templates::session_narrator(
-                &cwd,
-                Utc::now(),
-            )
+            claudepot_core::agent::templates::session_narrator(&cwd, Utc::now())
         }
         other => return Err(format!("unknown template id: {other}")),
     };
@@ -380,11 +371,7 @@ pub async fn agent_add_from_template(
 #[tauri::command]
 pub async fn agents_list() -> Result<Vec<AgentSummaryDto>, String> {
     let store = open_store()?;
-    Ok(store
-        .list()
-        .iter()
-        .map(AgentSummaryDto::from)
-        .collect())
+    Ok(store.list().iter().map(AgentSummaryDto::from).collect())
 }
 
 #[tauri::command]
@@ -430,9 +417,7 @@ pub async fn agents_add(dto: AgentCreateDto) -> Result<AgentSummaryDto, String> 
             store
                 .get(&id)
                 .cloned()
-                .ok_or_else(|| {
-                    claudepot_core::agent::AgentError::NotFound(id.to_string())
-                })
+                .ok_or_else(|| claudepot_core::agent::AgentError::NotFound(id.to_string()))
         },
         // `rollback`: drop the just-inserted record.
         |store| {
@@ -484,9 +469,7 @@ pub async fn agents_update(dto: AgentUpdateDto) -> Result<AgentSummaryDto, Strin
             store
                 .get(&id)
                 .cloned()
-                .ok_or_else(|| {
-                    claudepot_core::agent::AgentError::NotFound(id.to_string())
-                })
+                .ok_or_else(|| claudepot_core::agent::AgentError::NotFound(id.to_string()))
         },
         // Rollback: restore the pre-update record verbatim (drop the
         // patched record and re-insert the prior). `set_lifecycle` is
@@ -543,16 +526,12 @@ pub async fn agent_install(id: String) -> Result<AgentSummaryDto, String> {
     let lookup = route_lookup_fn();
     let scheduler = active_scheduler();
 
-    let outcome = claudepot_core::agent::install_draft(
-        &mut store,
-        &aid,
-        scheduler.as_ref(),
-        |agent| {
+    let outcome =
+        claudepot_core::agent::install_draft(&mut store, &aid, scheduler.as_ref(), |agent| {
             let binary_path = resolve_binary(agent, &lookup)?;
             install_shim(agent, &binary_path, &cli_path).map(|_| ())
-        },
-    )
-    .map_err(err)?;
+        })
+        .map_err(err)?;
 
     Ok(AgentSummaryDto::from(&outcome.agent))
 }
@@ -613,9 +592,7 @@ pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), String>
             store
                 .get(&aid)
                 .cloned()
-                .ok_or_else(|| {
-                    claudepot_core::agent::AgentError::NotFound(aid.to_string())
-                })
+                .ok_or_else(|| claudepot_core::agent::AgentError::NotFound(aid.to_string()))
         },
         move |store| {
             let patch = AgentPatch {
@@ -699,10 +676,7 @@ pub async fn agents_run_now_start(
     // remains the authoritative gate for the contended-fallback
     // path (and for any future caller that builds `agent` without
     // going through the X17 prelude).
-    if matches!(
-        agent.lifecycle,
-        claudepot_core::agent::Lifecycle::Draft
-    ) {
+    if matches!(agent.lifecycle, claudepot_core::agent::Lifecycle::Draft) {
         return Err(format!(
             "agent '{}' is a draft — review and install it before running. \
              A draft is never executed directly; arming it through the \
@@ -746,15 +720,9 @@ pub async fn agents_run_now_start(
                 // event orchestrator passes a populated map to this
                 // function only for `session-settled` dispatches.
                 let empty_env = std::collections::BTreeMap::<String, String>::new();
-                claudepot_core::agent::run_now(
-                    &agent,
-                    &binary_path,
-                    &cli_path,
-                    &sink,
-                    &empty_env,
-                )
-                .await
-                .map_err(|e| e.to_string())
+                claudepot_core::agent::run_now(&agent, &binary_path, &cli_path, &sink, &empty_env)
+                    .await
+                    .map_err(|e| e.to_string())
             });
             match result {
                 Ok(_run) => emit_terminal(&app, &ops, &op_id, None),
@@ -791,9 +759,7 @@ pub async fn agents_runs_list(
     for name in names.into_iter().take(cap) {
         let result_path = runs_dir.join(&name).join("result.json");
         if let Ok(raw) = std::fs::read(&result_path) {
-            if let Ok(run) =
-                serde_json::from_slice::<claudepot_core::agent::AgentRun>(&raw)
-            {
+            if let Ok(run) = serde_json::from_slice::<claudepot_core::agent::AgentRun>(&raw) {
                 out.push(AgentRunDto::from(run));
             }
         }
@@ -878,8 +844,7 @@ pub async fn agents_dry_run_artifact(id: String) -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
         let (timer, service) =
-            claudepot_core::agent::scheduler::systemd::render_units(agent)
-                .map_err(err)?;
+            claudepot_core::agent::scheduler::systemd::render_units(agent).map_err(err)?;
         return Ok(format!(
             "# {} ===== timer ======\n{}\n# ===== service =====\n{}",
             agent.id, timer, service
@@ -887,8 +852,7 @@ pub async fn agents_dry_run_artifact(id: String) -> Result<String, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        return claudepot_core::agent::scheduler::schtasks::render_xml(agent)
-            .map_err(err);
+        return claudepot_core::agent::scheduler::schtasks::render_xml(agent).map_err(err);
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {

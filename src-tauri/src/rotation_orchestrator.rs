@@ -156,8 +156,7 @@ impl RotationOrchestrator {
         // rotation), but corruption recovers to empty. The breaker
         // *logic* is pure `claudepot_core::breaker`; this is wiring.
         let breaker_file = breaker_store::load_or_default();
-        let live_rule_ids: HashSet<String> =
-            rules.rules.iter().map(|r| r.id.clone()).collect();
+        let live_rule_ids: HashSet<String> = rules.rules.iter().map(|r| r.id.clone()).collect();
         let active_rules = breaker_gated_rules(&rules.rules, &breaker_file, now);
 
         let audit_snapshot = self.audit.snapshot();
@@ -704,7 +703,9 @@ fn window_kind_str(k: claudepot_core::services::usage_alerts::UsageWindowKind) -
 mod tests {
     use super::*;
     use claudepot_core::breaker::FailureLedger;
-    use claudepot_core::rotation::rules::{Action, RotationGuards, RotationMode, Selector, Trigger};
+    use claudepot_core::rotation::rules::{
+        Action, RotationGuards, RotationMode, Selector, Trigger,
+    };
     use claudepot_core::services::usage_alerts::UsageWindowKind;
 
     fn rule(id: &str, enabled: bool) -> RotationRule {
@@ -756,7 +757,11 @@ mod tests {
         let mut bf = BreakerFile::default();
         bf.set_ledger("off", tripped_ledger(now));
         let gated = breaker_gated_rules(&[rule("off", false)], &bf, now);
-        assert_eq!(gated.len(), 1, "a disabled rule is not gated by the breaker");
+        assert_eq!(
+            gated.len(),
+            1,
+            "a disabled rule is not gated by the breaker"
+        );
     }
 
     #[test]
@@ -780,6 +785,10 @@ mod tests {
             },
         );
         let gated = breaker_gated_rules(&[rule("flapping", true)], &bf, now);
-        assert_eq!(gated.len(), 1, "below-threshold failures do not gate the rule");
+        assert_eq!(
+            gated.len(),
+            1,
+            "below-threshold failures do not gate the rule"
+        );
     }
 }

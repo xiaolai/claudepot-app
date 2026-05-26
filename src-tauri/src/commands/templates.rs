@@ -132,8 +132,7 @@ pub async fn templates_apply_pending(
     }
 
     // Resolve the blueprint via the agent's template_id.
-    let store =
-        AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
+    let store = AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
     let auto = store
         .list()
         .iter()
@@ -275,9 +274,7 @@ pub async fn templates_capable_routes(id: String) -> Result<Vec<RouteSummaryDto>
 }
 
 #[tauri::command]
-pub async fn templates_install(
-    instance: TemplateInstanceDto,
-) -> Result<AgentSummaryDto, String> {
+pub async fn templates_install(instance: TemplateInstanceDto) -> Result<AgentSummaryDto, String> {
     let r = registry()?;
     let bp = r
         .get(&instance.blueprint_id)
@@ -520,8 +517,7 @@ fn decode_placeholder_values(
 /// check"); two installs would collide on the existing-store
 /// uniqueness rule. Append a numeric suffix until unique.
 fn derive_unique_name(base: &str) -> Result<String, String> {
-    let store =
-        AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
+    let store = AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
     let existing: std::collections::HashSet<String> =
         store.list().iter().map(|a| a.name.clone()).collect();
     if !existing.contains(base) {
@@ -533,7 +529,5 @@ fn derive_unique_name(base: &str) -> Result<String, String> {
             return Ok(candidate);
         }
     }
-    Err(format!(
-        "failed to derive a unique agent name for {base:?}"
-    ))
+    Err(format!("failed to derive a unique agent name for {base:?}"))
 }

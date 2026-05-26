@@ -462,10 +462,7 @@ bg sessions:
 ";
         let s = parse_status_output(fixture);
         assert!(s.running);
-        assert!(matches!(
-            s.parse_status,
-            DaemonParseStatus::Degraded { .. }
-        ));
+        assert!(matches!(s.parse_status, DaemonParseStatus::Degraded { .. }));
     }
 
     #[test]
