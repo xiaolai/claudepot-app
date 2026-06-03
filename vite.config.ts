@@ -25,8 +25,10 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` and cargo's
+      // build output — on Windows, watching `target/` while cargo
+      // is writing .o files causes EBUSY FSWatcher crashes.
+      ignored: ["**/src-tauri/**", "**/target/**"],
     },
     // Pre-bundle these in dev so the webview doesn't fire 50+ separate
     // module requests to cold-compile React + Tauri wrappers on first

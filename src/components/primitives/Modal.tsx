@@ -148,8 +148,6 @@ export function Modal({
         alignItems: "center",
         justifyContent: "center",
         padding: "var(--sp-32)",
-        backdropFilter: "blur(var(--backdrop-blur-sm))",
-        WebkitBackdropFilter: "blur(var(--backdrop-blur-sm))",
       }}
     >
       <div
