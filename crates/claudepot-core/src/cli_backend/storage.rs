@@ -95,6 +95,16 @@ fn backend() -> CredBackend {
     {
         Some("file") => CredBackend::FileOnly,
         Some("keyring") => CredBackend::KeyringOnly,
+        // `Auto` resolves to Keychain-first on macOS. On every other
+        // platform the keychain stubs always return Err("not
+        // implemented"), and the fail-closed logic in `load()` treats
+        // that error as a real keychain denial — refusing to fall back
+        // to file storage even though credentials were saved there.
+        // Default to FileOnly on non-macOS so reads reach the file
+        // that saves already write on Windows / Linux.
+        #[cfg(not(target_os = "macos"))]
+        _ => CredBackend::FileOnly,
+        #[cfg(target_os = "macos")]
         _ => CredBackend::Auto,
     }
 }
