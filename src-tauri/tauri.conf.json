@@ -25,8 +25,7 @@
         "minHeight": 520,
         "resizable": true,
         "fullscreen": false,
-        "center": true,
-        "backgroundColor": [253, 248, 243, 255]
+        "center": true
       }
     ],
     "security": {

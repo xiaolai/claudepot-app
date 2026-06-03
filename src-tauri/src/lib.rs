@@ -385,6 +385,53 @@ pub fn run() {
                 if !show_window_on_startup {
                     let _ = window.hide();
                 }
+
+                // On Windows, set the WebView2 background color to match
+                // the OS dark/light theme so DWM repaints — which happen
+                // before WebView2 can repaint — show the same color as
+                // the page content instead of flashing white or the wrong
+                // theme color. Without this, a hardcoded static color in
+                // tauri.conf.json always mismatches one of the two themes.
+                //
+                // The registry value AppsUseLightTheme lives at:
+                //   HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
+                // 0x0 = dark mode, 0x1 = light mode.
+                // Colors are approximate sRGB equivalents of the CSS tokens:
+                //   light --bg: oklch(99% 0.003 60) ≈ rgb(253, 248, 243)
+                //   dark  --bg: oklch(16% 0.006 60) ≈ rgb( 40,  37,  32)
+                #[cfg(target_os = "windows")]
+                {
+                    let prefers_dark = std::process::Command::new("reg")
+                        .args([
+                            "query",
+                            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                            "/v",
+                            "AppsUseLightTheme",
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|o| o.status.success())
+                        .map(|o| {
+                            let s = String::from_utf8_lossy(&o.stdout);
+                            // Line format: "    AppsUseLightTheme    REG_DWORD    0x1"
+                            // 0x0 → dark, 0x1 → light
+                            !s.contains("0x1")
+                        })
+                        .unwrap_or(true); // default: assume dark if query fails
+
+                    let bg = if prefers_dark {
+                        tauri::utils::config::Color(40, 37, 32, 255)    // dark --bg
+                    } else {
+                        tauri::utils::config::Color(253, 248, 243, 255) // light --bg
+                    };
+                    let _ = window.set_background_color(Some(bg));
+                    tracing::info!(
+                        target = "claudepot_tauri",
+                        dark = prefers_dark,
+                        "Windows background color set to match OS theme"
+                    );
+                }
+
                 let win_for_handler = window.clone();
                 let win_for_tl = window.clone();
                 window.on_window_event(move |event| {
