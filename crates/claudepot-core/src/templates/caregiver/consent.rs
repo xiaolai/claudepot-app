@@ -6,6 +6,7 @@
 //! record is append-only by design — revoked records stay
 //! present so the user can audit history.
 
+use crate::proc_utils::NoWindowExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -195,6 +196,7 @@ fn tighten_consent_acl(path: &Path) {
         // two columns: `"Username","SID"`.
         let sid = std::process::Command::new("whoami")
             .args(["/user", "/fo", "csv", "/nh"])
+            .no_window()
             .output()
             .ok()
             .and_then(|o| {
@@ -227,6 +229,7 @@ fn tighten_consent_acl(path: &Path) {
                 "/grant:r",
                 "*S-1-5-18:F", // SYSTEM (well-known SID)
             ])
+            .no_window()
             .output();
         match out {
             Ok(o) if o.status.success() => {}

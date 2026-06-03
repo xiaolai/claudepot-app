@@ -34,6 +34,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+use crate::proc_utils::NoWindowExt;
 
 /// Result of [`probe_version`] — the identity triple for the running
 /// `claude` binary, sourced directly from disk + a 50-ms subprocess.
@@ -148,6 +149,7 @@ fn run_version_subprocess(binary: &Path) -> Option<String> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .no_window()
         .spawn()
         .ok()?;
 

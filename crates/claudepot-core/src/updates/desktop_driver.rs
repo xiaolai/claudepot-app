@@ -21,6 +21,7 @@
 // Linux falls into the explicit `cfg(target_os = "linux")` no-op
 // branch in `install_desktop_latest`; neither symbol is needed there.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::proc_utils::NoWindowExt;
 use crate::updates::detect::DesktopSource;
 use crate::updates::detect::{detect_desktop_install, is_desktop_running, DesktopInstall};
 use crate::updates::errors::{Result, UpdateError};
@@ -120,6 +121,7 @@ async fn winget_upgrade_cask() -> Result<DesktopUpdateOutcome> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .no_window()
         .output();
     let output = timeout(Duration::from_secs(600), fut)
         .await

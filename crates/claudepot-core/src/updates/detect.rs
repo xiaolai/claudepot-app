@@ -5,11 +5,11 @@
 //! by install method, and mark the one that `which claude` resolves
 //! to as `is_active`. Updates target the active install.
 
+use crate::path_utils::canonicalize_simplified;
+use crate::proc_utils::NoWindowExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-use crate::path_utils::canonicalize_simplified;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -565,6 +565,7 @@ fn read_windows_exe_version(exe: &Path) -> Option<String> {
             "-Command",
             &format!("(Get-Item '{exe_str}').VersionInfo.ProductVersion"),
         ])
+        .no_window()
         .output()
         .ok()?;
     if !output.status.success() {
@@ -582,6 +583,7 @@ fn read_windows_exe_version(exe: &Path) -> Option<String> {
 fn winget_package_installed(package_id: &str) -> bool {
     Command::new("winget")
         .args(["list", "--exact", "--id", package_id])
+        .no_window()
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
