@@ -6,6 +6,7 @@
 //! record is append-only by design — revoked records stay
 //! present so the user can audit history.
 
+#[cfg(windows)]
 use crate::proc_utils::NoWindowExt;
 use std::path::{Path, PathBuf};
 

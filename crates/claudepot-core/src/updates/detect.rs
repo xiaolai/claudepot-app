@@ -6,6 +6,7 @@
 //! to as `is_active`. Updates target the active install.
 
 use crate::path_utils::canonicalize_simplified;
+#[cfg(target_os = "windows")]
 use crate::proc_utils::NoWindowExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

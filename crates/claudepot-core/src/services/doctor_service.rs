@@ -1,6 +1,7 @@
 //! Doctor health checks — core business logic.
 
 use crate::account::AccountStore;
+#[cfg(target_os = "windows")]
 use crate::proc_utils::NoWindowExt;
 use std::path::PathBuf;
 

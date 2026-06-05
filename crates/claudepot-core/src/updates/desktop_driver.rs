@@ -20,8 +20,9 @@
 //
 // Linux falls into the explicit `cfg(target_os = "linux")` no-op
 // branch in `install_desktop_latest`; neither symbol is needed there.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use crate::proc_utils::NoWindowExt;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::updates::detect::DesktopSource;
 use crate::updates::detect::{detect_desktop_install, is_desktop_running, DesktopInstall};
 use crate::updates::errors::{Result, UpdateError};
