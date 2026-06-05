@@ -31,10 +31,10 @@
 //! would spam the dev console on every refresh in the (legitimate)
 //! "claude not installed yet" boot state.
 
+use crate::proc_utils::NoWindowExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
-use crate::proc_utils::NoWindowExt;
 
 /// Result of [`probe_version`] — the identity triple for the running
 /// `claude` binary, sourced directly from disk + a 50-ms subprocess.
