@@ -85,6 +85,7 @@ impl From<KeychainErr> for SwapError {
 enum CredBackend {
     FileOnly,
     KeyringOnly,
+    #[cfg(target_os = "macos")]
     Auto,
 }
 
@@ -95,6 +96,16 @@ fn backend() -> CredBackend {
     {
         Some("file") => CredBackend::FileOnly,
         Some("keyring") => CredBackend::KeyringOnly,
+        // `Auto` resolves to Keychain-first on macOS. On every other
+        // platform the keychain stubs always return Err("not
+        // implemented"), and the fail-closed logic in `load()` treats
+        // that error as a real keychain denial — refusing to fall back
+        // to file storage even though credentials were saved there.
+        // Default to FileOnly on non-macOS so reads reach the file
+        // that saves already write on Windows / Linux.
+        #[cfg(not(target_os = "macos"))]
+        _ => CredBackend::FileOnly,
+        #[cfg(target_os = "macos")]
         _ => CredBackend::Auto,
     }
 }
@@ -393,6 +404,7 @@ pub async fn save(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
         CredBackend::KeyringOnly => save_to_keyring(account_id, blob)
             .await
             .map_err(SwapError::from),
+        #[cfg(target_os = "macos")]
         CredBackend::Auto => match save_to_keyring(account_id, blob).await {
             Ok(()) => {
                 let _ = delete_file(account_id);
@@ -420,6 +432,7 @@ pub async fn load(account_id: Uuid) -> Result<String, SwapError> {
             Ok(None) => Err(SwapError::NoStoredCredentials(account_id)),
             Err(e) => Err(e.into()),
         },
+        #[cfg(target_os = "macos")]
         CredBackend::Auto => match load_from_keyring(account_id).await {
             Ok(Some(blob)) => {
                 let _ = delete_file(account_id);
@@ -455,6 +468,7 @@ pub async fn delete(account_id: Uuid) -> Result<(), SwapError> {
         CredBackend::KeyringOnly => delete_from_keyring(account_id)
             .await
             .map_err(SwapError::from),
+        #[cfg(target_os = "macos")]
         CredBackend::Auto => {
             // Audit fix for storage.rs:328 — fail-closed on real
             // keychain errors. The previous shape returned Ok if
