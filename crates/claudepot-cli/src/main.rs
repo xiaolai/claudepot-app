@@ -190,6 +190,21 @@ enum Commands {
     },
     /// Health check and diagnostics
     Doctor,
+    /// Diagnostic log file controls.
+    ///
+    /// Claudepot's Tauri GUI writes every `tracing` event and any
+    /// panic to a rolling daily log at the OS-standard log
+    /// directory (`~/Library/Logs/com.claudepot.app/` on macOS).
+    /// This subcommand resolves the directory path, optionally
+    /// opens it in the OS file manager, or tails the current log.
+    Logs {
+        /// Open the log directory in the OS file manager.
+        #[arg(long)]
+        open: bool,
+        /// Follow the current `claudepot.log` (tail -f equivalent).
+        #[arg(long, short = 'f')]
+        tail: bool,
+    },
     /// Ground-truth authentication status.
     ///
     /// Reads CC's shared credential slot, calls `/api/oauth/profile`,
@@ -1407,6 +1422,7 @@ async fn main() -> Result<()> {
             MigrateAction::Undo => commands::project_migrate::undo(&ctx)?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
+        Commands::Logs { open, tail } => commands::logs::run(open, tail).await?,
         Commands::Status => commands::status::run(&ctx).await?,
         Commands::Usage { action } => match action {
             UsageAction::Report { window } => commands::usage::report(&ctx, &window).await?,

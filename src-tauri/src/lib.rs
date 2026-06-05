@@ -60,9 +60,14 @@ mod usage_watcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Mirror the CLI's tracing setup so GUI swaps, keychain fallback, and
-    // Desktop lifecycle events surface in the terminal that launched the app.
-    // Honors RUST_LOG; defaults to info-level for our crates.
+    // Diagnostic logging — stderr (for `pnpm tauri dev`) plus a
+    // rolling daily file at `paths::log_dir()` (for "what happened
+    // before that self-quit?" forensics on Dock-launched builds
+    // where stderr goes nowhere). A global panic hook records
+    // location + payload + backtrace to the file sink before the
+    // default abort runs, so panics outside the orchestrator-scoped
+    // `catch_unwind` wrappers in usage_snapshot.rs / ops.rs /
+    // agent_event_orchestrator.rs no longer vanish silently.
     //
     // grill X5: the lib crate's name is `claudepot_tauri_lib` (see
     // `Cargo.toml` `[lib] name`), and EnvFilter directive matching
@@ -74,15 +79,75 @@ pub fn run() {
     // scattered through this file were the existing workaround;
     // they remain in place (no harm) but new code in this crate
     // does not need them.
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
+    let log_dir = claudepot_core::paths::log_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "claudepot.log");
+    let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
+    // The guard must outlive the process so the non-blocking writer
+    // keeps flushing. Drop = flush + close mid-run, which would
+    // truncate the very crash diagnostics this is supposed to
+    // capture. `Box::leak` is the standard pattern — single
+    // allocation, freed at process exit.
+    let _: &'static tracing_appender::non_blocking::WorkerGuard = Box::leak(Box::new(file_guard));
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        let env_filter =
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
                 tracing_subscriber::EnvFilter::new(
                     "info,claudepot_core=info,claudepot_tauri=info,claudepot_tauri_lib=info",
                 )
-            }),
-        )
-        .try_init();
+            });
+        let _ = tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(file_writer)
+                    .with_ansi(false),
+            )
+            .try_init();
+    }
+
+    // Global panic hook — records the panic to the file sink before
+    // deferring to the default abort behavior. Captures location,
+    // payload, and a forced backtrace (ignores RUST_BACKTRACE; one
+    // backtrace per process death is fine). Chains to the previous
+    // hook so existing abort behavior is unchanged.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&'static str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("<non-string panic payload>");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        tracing::error!(
+            target: "claudepot_panic",
+            location = %location,
+            payload = %payload,
+            backtrace = %backtrace,
+            "panic"
+        );
+        default_hook(info);
+    }));
+
+    // Drop rolled log files older than 7 days. Best-effort, silent
+    // on errors, runs after the subscriber is up so the line that
+    // reports the count actually lands in the file.
+    let pruned = claudepot_core::log_housekeeping::prune_old_logs(&log_dir);
+    if pruned > 0 {
+        tracing::info!(
+            target: "claudepot_tauri",
+            pruned,
+            "log housekeeping pruned old rolled files"
+        );
+    }
 
     // One-time: move the legacy `~/.claude/claudepot/` repair tree into
     // `~/.claudepot/repair/`. Idempotent and safe to run on every boot;
@@ -805,6 +870,7 @@ pub fn run() {
             commands::cli::sync_from_current_cc,
             commands::unlock_keychain,
             commands::reveal_in_finder,
+            commands::logs_dir_reveal,
             commands::account_list,
             commands::account_list_basic,
             commands::accounts_reconcile,
