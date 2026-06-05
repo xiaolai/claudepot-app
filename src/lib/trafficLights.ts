@@ -45,6 +45,22 @@ const apply = (m: TrafficLightMetrics): void => {
 };
 
 /**
+ * On Windows there are no traffic lights — the native min/max/close
+ * controls sit on the RIGHT side and are managed by Windows DWM. The
+ * 88px left inset in `--chrome-inset-left` is purely for macOS. On
+ * Windows we collapse it to a normal content-padding value so the
+ * breadcrumb doesn't float 88px from the left edge for no reason.
+ */
+function applyWindowsPlatformDefaults(): void {
+  const root = document.documentElement;
+  // Mark the platform on the HTML element so CSS can target it.
+  root.dataset.platform = "windows";
+  // Collapse the macOS traffic-light inset — Windows controls are on
+  // the right and don't need left clearance.
+  root.style.setProperty("--chrome-inset-left", "16px");
+}
+
+/**
  * Subscribe to the live metrics. Returns a teardown function — call
  * it from the same useEffect's cleanup so the listener doesn't leak
  * across hot-reloads.
@@ -55,6 +71,16 @@ const apply = (m: TrafficLightMetrics): void => {
  */
 export async function installTrafficLightSync(): Promise<UnlistenFn> {
   if (!isInTauri()) return () => {};
+
+  // Detect Windows via the user-agent string. WebView2 (the Windows
+  // Tauri runtime) includes "Windows" in its UA; WebKit (macOS) and
+  // WebKitGTK (Linux) do not.
+  if (navigator.userAgent.includes("Windows")) {
+    applyWindowsPlatformDefaults();
+    // Windows has no traffic-light metrics to subscribe to — return
+    // early with a no-op unlisten so callers don't need to branch.
+    return () => {};
+  }
 
   // Subscribe FIRST so the boot-time emit from Rust (300ms after
   // window creation, then again at 1300ms) doesn't race the

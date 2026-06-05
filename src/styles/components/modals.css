@@ -5,6 +5,19 @@
 
 /* ---------- modal ---------- */
 
+/* Scrim blur — skipped on Windows where GPU compositing overhead
+   causes DWM/WebView2 repaint-order flicker. Gated via the
+   data-platform="windows" attribute set by trafficLights.ts. */
+.modal-scrim {
+  backdrop-filter: blur(var(--backdrop-blur-sm));
+  -webkit-backdrop-filter: blur(var(--backdrop-blur-sm));
+}
+
+[data-platform="windows"] .modal-scrim {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
