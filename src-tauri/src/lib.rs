@@ -401,14 +401,18 @@ pub fn run() {
                 //   dark  --bg: oklch(16% 0.006 60) ≈ rgb( 40,  37,  32)
                 #[cfg(target_os = "windows")]
                 {
-                    let prefers_dark = std::process::Command::new("reg")
-                        .args([
-                            "query",
-                            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-                            "/v",
-                            "AppsUseLightTheme",
-                        ])
-                        .output()
+                    let prefers_dark = {
+                        use claudepot_core::proc_utils::NoWindowExt;
+                        std::process::Command::new("reg")
+                            .args([
+                                "query",
+                                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                                "/v",
+                                "AppsUseLightTheme",
+                            ])
+                            .no_window()
+                            .output()
+                    }
                         .ok()
                         .filter(|o| o.status.success())
                         .map(|o| {

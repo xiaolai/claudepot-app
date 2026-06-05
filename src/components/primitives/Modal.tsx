@@ -138,6 +138,7 @@ export function Modal({
 
   return (
     <div
+      className="modal-scrim"
       onClick={closeOnBackdrop ? onClose : undefined}
       style={{
         position: "fixed",
