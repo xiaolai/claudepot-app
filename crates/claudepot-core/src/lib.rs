@@ -73,6 +73,7 @@ pub mod path_utils;
 pub mod paths;
 pub mod permission;
 pub mod pricing;
+pub mod proc_utils;
 pub mod project;
 pub mod project_config_rewrite;
 pub mod project_display;
