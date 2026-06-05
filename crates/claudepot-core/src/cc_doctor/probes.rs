@@ -31,6 +31,7 @@
 //! would spam the dev console on every refresh in the (legitimate)
 //! "claude not installed yet" boot state.
 
+use crate::proc_utils::NoWindowExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -148,6 +149,7 @@ fn run_version_subprocess(binary: &Path) -> Option<String> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .no_window()
         .spawn()
         .ok()?;
 

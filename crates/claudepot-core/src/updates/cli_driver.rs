@@ -6,6 +6,7 @@
 //! capture its output, surface the result, and refuse cleanly if the
 //! user has opted out via `DISABLE_UPDATES=1`.
 
+use crate::proc_utils::NoWindowExt;
 use crate::updates::detect::{detect_cli_installs, CliInstall, CliInstallKind};
 use crate::updates::errors::{Result, UpdateError};
 use crate::updates::settings_bridge;
@@ -91,6 +92,7 @@ async fn invoke_claude_update(bin: &std::path::Path) -> Result<CliUpdateOutcome>
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .no_window()
         .output();
     let output = timeout(Duration::from_secs(300), fut)
         .await

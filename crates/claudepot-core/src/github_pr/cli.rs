@@ -12,6 +12,7 @@
 //! and well below the 5-minute tick cadence — a complete tick of
 //! 30 timed-out projects still finishes inside one tick window.
 
+use crate::proc_utils::NoWindowExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -140,7 +141,7 @@ async fn run_with_timeout(
     cmd: &mut Command,
     tool: &'static str,
 ) -> Result<std::process::Output, GhError> {
-    cmd.kill_on_drop(true);
+    cmd.kill_on_drop(true).no_window();
     // A Dock/Finder-launched app inherits a minimal PATH that lacks
     // Homebrew — where `gh` lives for nearly every user. Enrich it
     // so `git`/`gh` resolve regardless of how Claudepot was started.

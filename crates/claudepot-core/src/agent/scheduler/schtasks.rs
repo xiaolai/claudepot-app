@@ -13,6 +13,7 @@
 //! stored credentials, requires user typing the password into the
 //! OS prompt at registration).
 
+use crate::proc_utils::NoWindowExt;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -95,6 +96,7 @@ impl Scheduler for SchtasksScheduler {
         // Query the Claudepot folder; CSV output for parseability.
         let out = match Command::new("schtasks")
             .args(["/Query", "/TN", r"\Claudepot\*", "/FO", "CSV", "/NH"])
+            .no_window()
             .output()
         {
             Ok(o) => o,
@@ -180,6 +182,7 @@ fn io_err(s: String) -> AgentError {
 fn run_schtasks(args: &[&str]) -> Result<(), String> {
     let out = Command::new("schtasks")
         .args(args)
+        .no_window()
         .output()
         .map_err(|e| e.to_string())?;
     if out.status.success() {

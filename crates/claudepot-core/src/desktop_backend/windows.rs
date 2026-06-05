@@ -1,4 +1,5 @@
 use crate::error::DesktopSwapError;
+use crate::proc_utils::NoWindowExt;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -73,6 +74,7 @@ fn discover_package_family() -> Option<String> {
             // be selected instead of Claude Desktop itself.
             "(Get-AppxPackage | Where-Object { $_.PackageFamilyName -like 'Claude_*' } | Select-Object -First 1).PackageFamilyName",
         ])
+        .no_window()
         .output();
     if let Ok(out) = ps {
         if out.status.success() {
@@ -311,6 +313,7 @@ impl super::DesktopPlatform for WindowsDesktop {
         // profile on next launch.
         let _ = tokio::process::Command::new("taskkill")
             .args(["/IM", "Claude.exe", "/T"])
+            .no_window()
             .output()
             .await
             .map_err(DesktopSwapError::Io)?;
@@ -357,6 +360,7 @@ impl super::DesktopPlatform for WindowsDesktop {
         // nothing was launched, and the switch reported success.
         let out = tokio::process::Command::new("explorer.exe")
             .arg(format!("shell:AppsFolder\\{aumid}"))
+            .no_window()
             .output()
             .await
             .map_err(DesktopSwapError::Io)?;
