@@ -6,6 +6,42 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.46 — beta (unreleased)
+
+Diagnostic-logging patch. Self-quits used to leave no forensic
+trail — the existing `tracing_subscriber::fmt()` wrote to stderr
+only, and stderr from a Dock-launched bundled app goes nowhere
+visible on macOS.
+
+### Added
+
+- **Persistent diagnostic log.** Every `tracing::*` event from the
+  GUI is now also written to a rolling daily file at
+  `~/Library/Logs/com.claudepot.app/claudepot.log` (macOS),
+  `%LOCALAPPDATA%\com.claudepot.app\logs\claudepot.log` (Windows),
+  or `$XDG_STATE_HOME/com.claudepot.app/logs/claudepot.log`
+  (Linux). Rolled siblings older than 7 days are pruned at
+  startup; the active file is never pruned. stderr output is
+  preserved so `pnpm tauri dev` still streams to the terminal.
+
+- **Global panic hook.** Any panic that escapes the existing
+  `catch_unwind` scopes (`usage_snapshot`, `ops`,
+  `agent_event_orchestrator`) now records location + payload +
+  forced backtrace. The hook writes through the tracing pipeline
+  AND appends synchronously to a dedicated
+  `panic.log` (with `sync_data`) so the line survives a process
+  abort that kills the non-blocking tracing writer mid-drain. A
+  thread-local guard prevents re-entry recursion.
+
+- **`claudepot logs` CLI subcommand.** Prints the resolved log
+  directory path. `--open` opens it in the OS file manager;
+  `--tail` / `-f` follows the active file via `tail -f` (Unix)
+  or `Get-Content -Wait` (Windows).
+
+- **Settings → Cleanup → "Reveal logs folder" button.** The same
+  surface as the existing "Reveal in Finder" plumbing — uses the
+  per-OS reveal commands from `commands::mod::spawn_reveal`.
+
 ## 0.1.45 — beta (unreleased)
 
 Windows reliability patch. Four fixes from external contributor
