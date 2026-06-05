@@ -84,13 +84,7 @@ pub fn run() {
     // does not need them.
     let log_dir = claudepot_core::paths::log_dir();
     let _ = std::fs::create_dir_all(&log_dir);
-    let file_layer = match tracing_appender::rolling::RollingFileAppender::builder()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("claudepot.log")
-        .max_log_files(7)
-        .latest_symlink("claudepot.log")
-        .build(&log_dir)
-    {
+    let file_layer = match claudepot_core::diagnostic_logging::build_file_appender(&log_dir) {
         Ok(appender) => {
             let (writer, guard) = tracing_appender::non_blocking(appender);
             // The guard must outlive the process so the non-blocking
