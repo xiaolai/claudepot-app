@@ -647,6 +647,12 @@ pub(crate) async fn desktop_prelude<'a>(
     if platform.is_running().await {
         tracing::info!("Desktop op prelude — quitting Claude Desktop");
         platform.quit().await?;
+        // Windows: MSIX container virtualization releases file handles
+        // asynchronously after the process tree exits. Without this gap,
+        // snapshot/restore immediately tries to copy Cookies / Local Storage /
+        // IndexedDB and hits ERROR_SHARING_VIOLATION (os error 32).
+        #[cfg(target_os = "windows")]
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     }
 
     Ok(DesktopPrelude {
