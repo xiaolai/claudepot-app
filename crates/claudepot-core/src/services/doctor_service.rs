@@ -1,6 +1,8 @@
 //! Doctor health checks — core business logic.
 
 use crate::account::AccountStore;
+#[cfg(target_os = "windows")]
+use crate::proc_utils::NoWindowExt;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -148,6 +150,7 @@ fn detect_desktop() -> (bool, Option<String>) {
                 // Get version from powershell
                 let version = std::process::Command::new("powershell")
                     .args(["-Command", "(Get-AppxPackage Claude).Version"])
+                    .no_window()
                     .output()
                     .ok()
                     .and_then(|o| String::from_utf8(o.stdout).ok())

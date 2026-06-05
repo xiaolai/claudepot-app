@@ -17,6 +17,7 @@
 //! (via `claudepot agent _record-run`) and by the in-process
 //! Run-Now path.
 
+use crate::proc_utils::NoWindowExt;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -592,6 +593,7 @@ pub async fn run_now(
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = tokio::process::Command::new("cmd");
         c.arg("/C").arg(&shim_path);
+        c.no_window();
         c
     } else {
         let mut c = tokio::process::Command::new("/bin/sh");

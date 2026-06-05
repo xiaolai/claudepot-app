@@ -21,6 +21,7 @@
 //!   "(N bg workers active)" — answering the user's "why did
 //!   rotation fire when I wasn't even at the keyboard" question.
 
+use crate::proc_utils::NoWindowExt;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
@@ -122,6 +123,7 @@ fn capture_status() -> Result<String, String> {
         .arg("status")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .no_window()
         .spawn()
         .map_err(|e| format!("spawn failed: {e}"))?;
 
