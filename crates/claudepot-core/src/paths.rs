@@ -84,6 +84,49 @@ pub fn claudepot_repair_dirs() -> (PathBuf, PathBuf, PathBuf) {
     )
 }
 
+/// Diagnostic log directory. Honors `$CLAUDEPOT_LOG_DIR` for tests
+/// and overrides; otherwise resolves per platform convention:
+///
+/// - macOS: `$HOME/Library/Logs/com.claudepot.app/`
+/// - Windows: `%LOCALAPPDATA%\com.claudepot.app\logs\`
+/// - Linux: `$XDG_STATE_HOME/com.claudepot.app/logs/`
+///   (falls back to `$HOME/.local/state/com.claudepot.app/logs/`)
+///
+/// Used by the `tracing-appender` file sink + `claudepot logs`
+/// CLI subcommand + the Settings → Cleanup "Reveal logs" button.
+pub fn log_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("CLAUDEPOT_LOG_DIR") {
+        return PathBuf::from(dir);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("Library")
+            .join("Logs")
+            .join("com.claudepot.app")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("com.claudepot.app")
+            .join("logs")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        dirs::state_dir()
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("/tmp"))
+                    .join(".local")
+                    .join("state")
+            })
+            .join("com.claudepot.app")
+            .join("logs")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

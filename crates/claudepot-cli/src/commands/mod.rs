@@ -5,6 +5,7 @@ pub mod cli_ops;
 pub mod codex;
 pub mod desktop_ops;
 pub mod doctor;
+pub mod logs;
 pub mod mcp;
 pub mod memory;
 pub mod project;

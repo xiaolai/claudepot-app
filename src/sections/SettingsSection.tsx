@@ -1304,6 +1304,73 @@ function CleanupTabPane({
           projectRoot={null}
         />
       </div>
+
+      {/* Diagnostic logs — reveal the rolling log directory. The
+          GUI writes every `tracing` event and any panic there, so
+          this is the entry point when the user is filing a "the
+          app just quit" report. */}
+      <div
+        style={{
+          borderTop: "var(--bw-hair) solid var(--line)",
+          paddingTop: "var(--sp-16)",
+        }}
+      >
+        <DiagnosticLogsPane pushToast={pushToast} />
+      </div>
+    </div>
+  );
+}
+
+function DiagnosticLogsPane({
+  pushToast,
+}: {
+  pushToast: (kind: "info" | "error", text: string) => void;
+}) {
+  const onReveal = useCallback(async () => {
+    try {
+      await api.revealLogsDir();
+    } catch (e) {
+      toastError(pushToast, "Open log folder", e);
+    }
+  }, [pushToast]);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--sp-8)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "var(--fs-14)",
+          fontWeight: 600,
+          color: "var(--fg)",
+        }}
+      >
+        Diagnostic logs
+      </div>
+      <div
+        style={{
+          fontSize: "var(--fs-12)",
+          color: "var(--fg-mute)",
+          lineHeight: 1.5,
+        }}
+      >
+        Every <code>tracing</code> event and any panic the app emits is
+        written to a rolling daily log file. Open the folder to attach
+        the most recent file when reporting an unexpected quit. Files
+        older than 7 days are pruned at startup.
+      </div>
+      <div>
+        <Button
+          variant="ghost"
+          glyph={NF.folder}
+          onClick={onReveal}
+        >
+          Reveal logs folder
+        </Button>
+      </div>
     </div>
   );
 }
