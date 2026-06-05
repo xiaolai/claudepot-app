@@ -402,7 +402,7 @@ pub fn run() {
                 #[cfg(target_os = "windows")]
                 {
                     let prefers_dark = {
-                        use std::os::windows::process::CommandExt;
+                        use claudepot_core::proc_utils::NoWindowExt;
                         std::process::Command::new("reg")
                             .args([
                                 "query",
@@ -410,7 +410,7 @@ pub fn run() {
                                 "/v",
                                 "AppsUseLightTheme",
                             ])
-                            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                            .no_window()
                             .output()
                     }
                         .ok()
