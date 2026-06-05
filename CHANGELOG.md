@@ -16,13 +16,14 @@ visible on macOS.
 ### Added
 
 - **Persistent diagnostic log.** Every `tracing::*` event from the
-  GUI is now also written to a rolling daily file at
-  `~/Library/Logs/com.claudepot.app/claudepot.log` (macOS),
-  `%LOCALAPPDATA%\com.claudepot.app\logs\claudepot.log` (Windows),
-  or `$XDG_STATE_HOME/com.claudepot.app/logs/claudepot.log`
-  (Linux). Rolled siblings older than 7 days are pruned at
-  startup; the active file is never pruned. stderr output is
-  preserved so `pnpm tauri dev` still streams to the terminal.
+  GUI is now also written to a rolling daily file. `claudepot.log`
+  in the OS-standard log directory is a symlink that always points
+  to today's active file (`claudepot.log.YYYY-MM-DD`); rolled
+  siblings older than 7 days are pruned automatically. Paths:
+  `~/Library/Logs/com.claudepot.app/` (macOS),
+  `%LOCALAPPDATA%\com.claudepot.app\logs\` (Windows),
+  `$XDG_STATE_HOME/com.claudepot.app/logs/` (Linux). stderr output
+  is preserved so `pnpm tauri dev` still streams to the terminal.
 
 - **Global panic hook.** Any panic that escapes the existing
   `catch_unwind` scopes (`usage_snapshot`, `ops`,
