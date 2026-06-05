@@ -109,13 +109,33 @@ pub fn run() {
             .try_init();
     }
 
-    // Global panic hook — records the panic to the file sink before
-    // deferring to the default abort behavior. Captures location,
-    // payload, and a forced backtrace (ignores RUST_BACKTRACE; one
-    // backtrace per process death is fine). Chains to the previous
-    // hook so existing abort behavior is unchanged.
+    // Global panic hook — records the panic before deferring to
+    // the default abort. Captures location, payload, and a forced
+    // backtrace (ignores RUST_BACKTRACE; one backtrace per process
+    // death is fine). Writes BOTH to the tracing pipeline (lands in
+    // the rolled-daily file if the async writer is still alive)
+    // AND to a synchronous append-only `panic.log` next to it. The
+    // sync path is the guaranteed survivor: the non_blocking
+    // tracing writer flushes from a background thread, and the
+    // default panic hook calls `std::process::exit` / abort
+    // moments after this hook returns — killing that thread
+    // mid-drain. `panic.log` is `sync_data`'d before we hand off.
+    //
+    // A thread-local re-entry guard prevents infinite recursion if
+    // something in the hook body itself panics (e.g. a custom
+    // `Display` impl on a payload type). The recursive call defers
+    // straight to the default hook.
+    let log_dir_for_panic = log_dir.clone();
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        thread_local! {
+            static IN_HOOK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        if IN_HOOK.with(|f| f.replace(true)) {
+            // Already inside our hook on this thread — punt.
+            default_hook(info);
+            return;
+        }
         let location = info
             .location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
@@ -125,8 +145,12 @@ pub fn run() {
             .downcast_ref::<&'static str>()
             .copied()
             .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
-            .unwrap_or("<non-string panic payload>");
+            .unwrap_or("<non-string panic payload>")
+            .to_string();
         let backtrace = std::backtrace::Backtrace::force_capture();
+
+        // Best path: through the tracing pipeline so it lands in
+        // the rolled-daily file alongside surrounding context.
         tracing::error!(
             target: "claudepot_panic",
             location = %location,
@@ -134,6 +158,22 @@ pub fn run() {
             backtrace = %backtrace,
             "panic"
         );
+
+        // Guaranteed-survivor path: a sync append to panic.log with
+        // an explicit `sync_data` before the process aborts.
+        let panic_file = log_dir_for_panic.join("panic.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&panic_file)
+        {
+            use std::io::Write as _;
+            let ts = chrono::Utc::now().to_rfc3339();
+            let _ = writeln!(f, "[{ts}] {location} | {payload}\n{backtrace}\n---");
+            let _ = f.sync_data();
+        }
+
+        IN_HOOK.with(|f| f.set(false));
         default_hook(info);
     }));
 
