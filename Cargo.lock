@@ -857,6 +857,7 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tracing",
+ "tracing-appender",
  "trash",
  "unicode-normalization",
  "unicode-segmentation",
