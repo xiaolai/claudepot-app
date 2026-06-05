@@ -6,6 +6,59 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.45 — beta (unreleased)
+
+Windows reliability patch. Four fixes from external contributor
+@austen-wqm covering credential storage, console-window suppression,
+desktop swap reliability, and visual flicker reduction.
+
+### Fixed
+
+- **Credentials readable on Windows.** `cli_backend::storage::backend()`
+  returned `Auto` on every platform, but the keyring stub on
+  non-macOS always returns `Err`. The fail-closed branch in `load()`
+  treated that as a real keychain denial and refused to fall back to
+  file storage — leaving Windows installs with an unhealthy
+  credentials banner and no usage %, even though saves had been
+  writing to `<data_dir>/credentials/<uuid>.json` all along. `Auto`
+  is now gated to macOS only; non-macOS defaults to `FileOnly`, so
+  read and write paths agree. (#20)
+
+- **No more console popups on Windows.** Every `Command::new(…)`
+  that ran a console-mode binary (claude, powershell, reg, schtasks,
+  winget, taskkill, git, gh, whoami, icacls, explorer.exe) created
+  a visible terminal window because child processes inherit
+  Windows' default console-creation policy. New
+  `claudepot_core::proc_utils::NoWindowExt` trait adds `.no_window()`
+  to both `std::process::Command` and `tokio::process::Command`,
+  applied at all 14 background subprocess sites. No-op on
+  non-Windows. (#21)
+
+- **Desktop swap survives `ERROR_SHARING_VIOLATION` after quit.**
+  `is_running()` only matched `Claude.exe`, but Electron helper
+  processes (GPU, Renderer, Utility) hold file locks on the
+  Chromium profile (Cookies, Local Storage, IndexedDB) and outlive
+  the main process briefly after `taskkill /T`. The prelude
+  declared the app stopped while helpers still held locks, causing
+  os error 32 on the subsequent snapshot copy. Now matches
+  `Claude Helper*` too, with a 1 s post-quit settle delay and a
+  `copy_file_retried` (4 × 500 ms) belt-and-suspenders fallback for
+  slower machines. (#22)
+
+- **Less screen flicker on Windows.** `titleBarStyle: "Overlay"`
+  extends WebView2 into the DWM non-client frame, which DWM
+  repaints (on focus, move, hover-triggered repaints) before
+  WebView2 catches up — producing visible flashes. Four
+  mitigations: WebView2 background now dynamically matches the OS
+  dark/light theme via registry read so DWM-triggered repaints
+  show the page color instead of flashing white; the modal scrim's
+  `backdrop-filter: blur()` is Windows-gated to drop the extra GPU
+  compositing layer (kept on macOS); a Windows-only platform-defaults
+  pass collapses the macOS-traffic-light `--chrome-inset-left`;
+  `vite.config.ts` ignores `**/target/**` so Vite's watcher doesn't
+  EBUSY on cargo's in-progress `.o` writes (making `pnpm tauri dev`
+  usable on Windows). (#19)
+
 ## 0.1.44 — beta (unreleased)
 
 Rotation-audit display patch. Settings → Rotation's "Recent
