@@ -31,10 +31,44 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         } else if ft.is_dir() {
             copy_dir_recursive(&entry.path(), &dst_path)?;
         } else {
-            std::fs::copy(entry.path(), &dst_path)?;
+            copy_file_retried(&entry.path(), &dst_path)?;
         }
     }
     Ok(())
+}
+
+/// Copy a single file, retrying on Windows ERROR_SHARING_VIOLATION (os error 32).
+///
+/// MSIX-virtualized Chromium profile files (Cookies, Local Storage, IndexedDB)
+/// can stay transiently locked for up to ~2 s after the Electron process tree
+/// exits, even after `is_running()` returns false. The 1 s post-quit settle
+/// delay in `desktop_prelude` handles the common case; this retry is the
+/// belt-and-suspenders fallback for slower machines or heavier profiles.
+pub fn copy_file_retried(src: &Path, dst: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        const MAX_RETRIES: u32 = 4;
+        for attempt in 0..MAX_RETRIES {
+            match std::fs::copy(src, dst) {
+                Ok(_) => return Ok(()),
+                Err(e) if attempt + 1 < MAX_RETRIES && e.raw_os_error() == Some(32) => {
+                    tracing::debug!(
+                        "copy_file_retried: sharing violation on {}, retry {}/{}",
+                        src.display(),
+                        attempt + 1,
+                        MAX_RETRIES - 1
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        unreachable!()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::fs::copy(src, dst).map(|_| ())
+    }
 }
 
 /// Atomically write `contents` to `path`: write to a sibling temp file,

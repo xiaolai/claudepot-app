@@ -34,7 +34,7 @@ pub fn snapshot(
             if let Some(parent) = dst.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::copy(&src, &dst)?;
+            crate::fs_utils::copy_file_retried(&src, &dst)?;
         } else {
             // Missing in current session — purge any prior snapshot of
             // this item so the profile matches live state. Silent on
@@ -120,8 +120,7 @@ pub fn restore(
             let copy_result = if src.is_dir() {
                 copy_dir_recursive(&src, &dst).and_then(|_| std::fs::remove_dir_all(&src))
             } else {
-                std::fs::copy(&src, &dst)
-                    .map(|_| ())
+                crate::fs_utils::copy_file_retried(&src, &dst)
                     .and_then(|_| std::fs::remove_file(&src))
             };
             if let Err(e) = copy_result {

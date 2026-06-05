@@ -296,9 +296,16 @@ impl super::DesktopPlatform for WindowsDesktop {
     async fn is_running(&self) -> bool {
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        sys.processes()
-            .values()
-            .any(|p| p.name().to_string_lossy() == "Claude.exe")
+        sys.processes().values().any(|p| {
+            let name = p.name().to_string_lossy();
+            // Check the main process AND Electron helper variants.
+            // Helper processes (GPU, Renderer, Utility) hold file locks on
+            // the Chromium profile (Cookies, Local Storage, IndexedDB) and
+            // can outlive Claude.exe briefly after taskkill /T. Declaring the
+            // app "stopped" while helpers still run causes ERROR_SHARING_VIOLATION
+            // (os error 32) in the subsequent snapshot/restore.
+            name == "Claude.exe" || name.starts_with("Claude Helper")
+        })
     }
 
     async fn quit(&self) -> Result<(), DesktopSwapError> {
