@@ -268,6 +268,20 @@ pub async fn reveal_in_finder(path: String) -> Result<(), String> {
     spawn_reveal(&p).await
 }
 
+/// Open the diagnostic log directory in the OS file manager.
+/// Resolves the path via `claudepot_core::paths::log_dir()` and
+/// creates the directory if it doesn't exist yet (first-boot case
+/// where logging hasn't fired). Reuses the same per-OS reveal
+/// commands as `reveal_in_finder`.
+#[tauri::command]
+pub async fn logs_dir_reveal() -> Result<(), String> {
+    let dir = claudepot_core::paths::log_dir();
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir failed: {e}"))?;
+    }
+    spawn_reveal(&dir).await
+}
+
 async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
     use tokio::process::Command;
     #[cfg(target_os = "macos")]

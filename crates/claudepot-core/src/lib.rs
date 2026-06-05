@@ -58,6 +58,7 @@ pub mod github_pr;
 pub mod host_activate;
 pub mod keys;
 pub mod launcher;
+pub mod log_housekeeping;
 pub mod mcp_snippet;
 pub mod memory_health;
 pub mod memory_log;
