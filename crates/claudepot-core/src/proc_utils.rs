@@ -38,7 +38,8 @@ impl NoWindowExt for tokio::process::Command {
     fn no_window(&mut self) -> &mut Self {
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
+            // tokio::process::Command exposes creation_flags as an
+            // inherent method — no trait import needed.
             self.creation_flags(CREATE_NO_WINDOW);
         }
         self
