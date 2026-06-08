@@ -43,6 +43,39 @@ visible on macOS.
   surface as the existing "Reveal in Finder" plumbing — uses the
   per-OS reveal commands from `commands::mod::spawn_reveal`.
 
+- **macOS crash-report harvesting.** On startup Claudepot scans
+  `~/Library/Logs/DiagnosticReports/` for `.ips` crash reports it
+  hasn't seen yet, writes a one-line summary of each (signal,
+  faulting thread, top frame) to `crashes.log` in the log directory,
+  and surfaces them through the diagnostic log. Foreign-code aborts —
+  AppKit assertions, Obj-C exceptions, FFI faults — that the Rust
+  panic hook can't see are now visible in-app instead of buried in
+  the OS crash folder.
+
+- **Off-main-thread tripwire.** AppKit-touching code (tray,
+  traffic-light, Dock icon) now logs an error with a backtrace if it
+  ever runs off the main thread, naming the exact call site — turning
+  a deferred, mis-framed AppKit abort into an immediate, greppable
+  log line.
+
+- **Fatal-signal handler.** On Unix, `SIGSEGV` / `SIGABRT` / `SIGBUS`
+  / `SIGILL` / `SIGFPE` / `SIGTRAP` now append a synchronous,
+  async-signal-safe line (signal, thread, pid) to `crash.log` before
+  re-raising the default handler, capturing crashes on Linux where
+  there is no `.ips` equivalent. Runs on a dedicated alternate signal
+  stack so stack-overflow crashes are caught too.
+
+### Fixed
+
+- **Intermittent self-quit on macOS.** The menubar tray's
+  `NSStatusItem` was mutated (`set_menu` / `set_icon` /
+  `set_tooltip` / `set_title`) from background tokio workers; macOS
+  asserts the main thread for status-item changes and aborted the
+  process with `SIGTRAP` — the app vanished with no panic and no log.
+  All tray mutations now route through `run_on_main_thread`, and the
+  same off-main-thread hazard in the traffic-light IPC command was
+  closed as well.
+
 ## 0.1.45 — beta (unreleased)
 
 Windows reliability patch. Four fixes from external contributor
