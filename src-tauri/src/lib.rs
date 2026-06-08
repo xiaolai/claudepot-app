@@ -135,6 +135,53 @@ pub fn run() {
     // `claudepot_core::diagnostic_logging`.
     claudepot_core::diagnostic_logging::install_panic_hook(log_dir.clone());
 
+    // Fatal-signal capture — the foreign-code aborts the panic hook
+    // cannot see (AppKit assertions, Obj-C exceptions, an FFI SIGSEGV).
+    // Appends a synchronous line to `crash.log`, then re-raises so the
+    // OS still writes its own crash report. The v0.1.4x tray self-quits
+    // were exactly this class (an AppKit `abort()`) and left the panic
+    // hook silent. See `diagnostic_logging::install_signal_handler`.
+    claudepot_core::diagnostic_logging::install_signal_handler(&log_dir);
+
+    // Surface any prior macOS crash (`.ips`) in our own log dir so
+    // "Reveal logs" / `claudepot logs` show self-quits without anyone
+    // digging through ~/Library/Logs/DiagnosticReports. One-time
+    // backfill on first run, then quiet until the next crash. See
+    // `claudepot_core::crash_reports`.
+    #[cfg(target_os = "macos")]
+    if let Some(reports_dir) = claudepot_core::paths::diagnostic_reports_dir() {
+        let crashes_log = log_dir.join("crashes.log");
+        let state = log_dir.join(".crash-harvest-state");
+        match claudepot_core::crash_reports::harvest(
+            &reports_dir,
+            "claudepot-tauri",
+            &crashes_log,
+            &state,
+        ) {
+            Ok(new) => {
+                for s in &new {
+                    tracing::error!(
+                        target: "claudepot_crash",
+                        file = %s.file_name,
+                        signal = s.signal.as_deref().unwrap_or("?"),
+                        exception = s.exc_type.as_deref().unwrap_or("?"),
+                        thread = s.faulting_thread.as_deref().unwrap_or("?"),
+                        top_frame = s.top_frame.as_deref().unwrap_or("?"),
+                        "prior crash recorded by macOS (DiagnosticReports)"
+                    );
+                }
+                if !new.is_empty() {
+                    tracing::warn!(
+                        "harvested {} prior crash report(s) into {}",
+                        new.len(),
+                        crashes_log.display()
+                    );
+                }
+            }
+            Err(e) => tracing::warn!("crash-report harvest failed: {e}"),
+        }
+    }
+
     // One-time: move the legacy `~/.claude/claudepot/` repair tree into
     // `~/.claudepot/repair/`. Idempotent and safe to run on every boot;
     // any error here is non-fatal — the app still works against whatever

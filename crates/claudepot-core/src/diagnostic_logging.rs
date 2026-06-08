@@ -129,6 +129,385 @@ pub fn install_panic_hook(log_dir: PathBuf) {
     }));
 }
 
+/// Install handlers for the fatal signals that bypass the Rust panic
+/// hook — `SIGSEGV`, `SIGABRT`, `SIGBUS`, `SIGILL`, `SIGFPE`,
+/// `SIGTRAP`. These fire on foreign-code aborts (an AppKit assertion,
+/// an Obj-C exception, a fault inside an FFI dependency) that never
+/// reach `panic!`, so [`install_panic_hook`] is blind to them — the
+/// v0.1.4x tray self-quits were an AppKit `abort()` and left
+/// `panic.log` empty; only the OS `.ips` report caught them.
+///
+/// The handler is strictly async-signal-safe: it appends ONE
+/// pre-formatted line — signal, main-thread-ness, pid, epoch — to a
+/// pre-opened `<log_dir>/crash.log` via raw `write`/`fsync`, with no
+/// heap allocation, lock, or backtrace. The authoritative symbolicated
+/// backtrace comes from the OS `.ips` report on macOS (see
+/// [`crate::crash_reports`]); the running `tracing` file sink holds the
+/// breadcrumbs up to the crash. After writing, the handler restores the
+/// default disposition and re-raises, so the OS still produces its
+/// crash report and the process terminates normally.
+///
+/// Idempotent — safe to call once at process start. A re-entry guard
+/// keeps a fault *inside* the handler from looping. The handler runs on
+/// a dedicated alternate signal stack so a stack-overflow `SIGSEGV` is
+/// still captured.
+#[cfg(unix)]
+pub fn install_signal_handler(log_dir: &Path) {
+    signal_capture::install(log_dir);
+}
+
+/// No-op off Unix. Windows crash capture wants a Vectored Exception
+/// Handler / `SetUnhandledExceptionFilter` — tracked as a follow-up. On
+/// macOS the `.ips` harvest ([`crate::crash_reports`]) is the primary
+/// crash record and this signal handler is the belt-and-suspenders; on
+/// Linux the signal handler is the only crash record.
+#[cfg(not(unix))]
+pub fn install_signal_handler(_log_dir: &Path) {}
+
+#[cfg(unix)]
+mod signal_capture {
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+
+    /// Fatal signals we capture: synchronous faults plus the
+    /// abort/trap pair AppKit assertions raise.
+    const FATAL: [libc::c_int; 6] = [
+        libc::SIGSEGV,
+        libc::SIGABRT,
+        libc::SIGBUS,
+        libc::SIGILL,
+        libc::SIGFPE,
+        libc::SIGTRAP,
+    ];
+
+    /// fd of the pre-opened `crash.log`, or `-1` before install.
+    /// Opening a file inside the handler would not be
+    /// async-signal-safe, so we open once and stash the descriptor.
+    static CRASH_FD: AtomicI32 = AtomicI32::new(-1);
+    /// Re-entry guard — a fault inside the handler must not recurse.
+    static IN_HANDLER: AtomicBool = AtomicBool::new(false);
+    /// Raw `pthread_self()` of the thread that called [`install`],
+    /// captured once. The handler compares against this instead of
+    /// calling `pthread_main_np` — that BSD/macOS extension is NOT on
+    /// the POSIX async-signal-safe list, whereas `pthread_self` is. We
+    /// install from the process main thread (Tauri `setup()` /
+    /// `run()`), so "== this id" means "on the main thread". Stored as
+    /// `usize` because `pthread_t` is a pointer on macOS and a
+    /// `c_ulong` on Linux — both cast losslessly to `usize`. `0` is the
+    /// not-yet-captured sentinel (no real `pthread_t` is null).
+    static MAIN_THREAD_ID: AtomicUsize = AtomicUsize::new(0);
+
+    pub(super) fn install(log_dir: &Path) {
+        use std::os::unix::ffi::OsStrExt;
+
+        if CRASH_FD.load(Ordering::SeqCst) >= 0 {
+            return; // already installed
+        }
+
+        // Capture the installing thread's id up front (we run on the
+        // main thread). The handler reads this — see MAIN_THREAD_ID.
+        // SAFETY: `pthread_self` is a side-effect-free thread-local
+        // query with no preconditions.
+        MAIN_THREAD_ID.store(unsafe { libc::pthread_self() } as usize, Ordering::SeqCst);
+
+        let path = log_dir.join("crash.log");
+        let cpath = match std::ffi::CString::new(path.as_os_str().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => {
+                tracing::warn!("signal handler: crash.log path contains NUL; capture disabled");
+                return;
+            }
+        };
+        // SAFETY: open(2) with a valid C string and standard flags.
+        let fd = unsafe {
+            libc::open(
+                cpath.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            tracing::warn!("signal handler: cannot open crash.log; capture disabled");
+            return;
+        }
+        CRASH_FD.store(fd, Ordering::SeqCst);
+
+        // Only set SA_ONSTACK if the alternate stack actually
+        // registered — otherwise the kernel would try to run the
+        // handler on a stack that doesn't exist.
+        let on_alt_stack = install_alt_stack();
+
+        let mut installed = 0u32;
+        for &sig in &FATAL {
+            // SAFETY: a well-formed sigaction with our extern "C"
+            // handler. SA_ONSTACK runs it on the alternate stack (so a
+            // stack-overflow SIGSEGV is still catchable) when that stack
+            // registered; SA_RESTART avoids EINTR churn on interrupted
+            // syscalls.
+            let rc = unsafe {
+                let mut sa: libc::sigaction = std::mem::zeroed();
+                // `sighandler_t` is a `usize`; cast the fn item through
+                // a thin pointer first (the `function_casts_as_integer`
+                // lint rejects a direct fn-to-integer cast).
+                sa.sa_sigaction = handler as *const () as libc::sighandler_t;
+                libc::sigemptyset(&mut sa.sa_mask);
+                sa.sa_flags = (if on_alt_stack { libc::SA_ONSTACK } else { 0 }) | libc::SA_RESTART;
+                libc::sigaction(sig, &sa, std::ptr::null_mut())
+            };
+            if rc == 0 {
+                installed += 1;
+            } else {
+                tracing::warn!("signal handler: sigaction for signal {sig} failed (rc={rc})");
+            }
+        }
+        if installed == 0 {
+            // Every registration failed — the descriptor is open but no
+            // handler will ever fire. Say so rather than leave a false
+            // sense of capture.
+            tracing::warn!(
+                "signal handler: no fatal-signal handlers installed; crash capture disabled"
+            );
+        }
+    }
+
+    /// Register a process-lifetime alternate signal stack so the
+    /// handler can run even when the fault is a stack overflow (the
+    /// normal stack is unusable in that case). Returns whether the
+    /// stack registered.
+    fn install_alt_stack() -> bool {
+        const ALT_STACK_SIZE: usize = 64 * 1024;
+        let stack: &'static mut [u8] = vec![0u8; ALT_STACK_SIZE].leak();
+        // SAFETY: registering a valid, leaked (never-freed) stack of
+        // the size we report.
+        let rc = unsafe {
+            let ss = libc::stack_t {
+                ss_sp: stack.as_mut_ptr().cast(),
+                ss_size: ALT_STACK_SIZE,
+                ss_flags: 0,
+            };
+            libc::sigaltstack(&ss, std::ptr::null_mut())
+        };
+        if rc != 0 {
+            tracing::warn!(
+                "signal handler: sigaltstack failed (rc={rc}); stack-overflow crashes may be missed"
+            );
+        }
+        rc == 0
+    }
+
+    extern "C" fn handler(sig: libc::c_int) {
+        if IN_HANDLER.swap(true, Ordering::SeqCst) {
+            // A fault while handling — don't loop; go straight to the
+            // default disposition.
+            reraise_default(sig);
+            return;
+        }
+        let fd = CRASH_FD.load(Ordering::SeqCst);
+        if fd >= 0 {
+            write_record(fd, sig);
+        }
+        reraise_default(sig);
+    }
+
+    /// Append one record to `fd`. Every call here is on the POSIX
+    /// async-signal-safe list: `pthread_self`, `getpid`,
+    /// `clock_gettime`, `write`, `fsync`. No heap, no locks, no
+    /// formatting that allocates.
+    fn write_record(fd: libc::c_int, sig: libc::c_int) {
+        // Async-signal-safe main-thread test: compare `pthread_self()`
+        // (safe) against the id captured at install — NOT
+        // `pthread_main_np`, which is not on the safe list.
+        // SAFETY: side-effect-free thread-local query.
+        let on_main =
+            unsafe { libc::pthread_self() } as usize == MAIN_THREAD_ID.load(Ordering::SeqCst);
+        // SAFETY: side-effect-free query with no preconditions.
+        let pid = unsafe { libc::getpid() };
+        let epoch: i64 = unsafe {
+            let mut ts: libc::timespec = std::mem::zeroed();
+            if libc::clock_gettime(libc::CLOCK_REALTIME, &mut ts) == 0 {
+                // `time_t` is `i64` on every target we build (macOS and
+                // Linux, both 64-bit), so this binds without a cast.
+                ts.tv_sec
+            } else {
+                0
+            }
+        };
+
+        let mut buf = [0u8; 160];
+        let n = format_crash_record(&mut buf, sig, on_main, pid, epoch);
+        // SAFETY: write up to `n` valid bytes from our stack buffer to
+        // our own append-mode descriptor, advancing over short writes.
+        // A non-positive return (a hard error, or a possible EINTR) is
+        // retried a bounded number of times — no errno read needed, and
+        // the cap rules out a spin on a persistent error while we are
+        // mid-crash.
+        unsafe {
+            let mut off = 0usize;
+            let mut retries = 0u32;
+            while off < n && retries < 16 {
+                let rc = libc::write(fd, buf.as_ptr().add(off).cast(), n - off);
+                if rc > 0 {
+                    off += rc as usize;
+                } else {
+                    retries += 1;
+                }
+            }
+            let _ = libc::fsync(fd);
+        }
+    }
+
+    /// Restore the default disposition for `sig` and re-raise it, so the
+    /// OS performs its normal action (write the `.ips` crash report,
+    /// dump core, terminate). Synchronous faults re-trigger when the
+    /// handler returns; `raise` covers the asynchronous ones.
+    fn reraise_default(sig: libc::c_int) {
+        // SAFETY: resetting to SIG_DFL then re-raising is the standard
+        // "log-and-die" tail; no allocation or unwinding.
+        unsafe {
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_sigaction = libc::SIG_DFL;
+            libc::sigemptyset(&mut sa.sa_mask);
+            sa.sa_flags = 0;
+            libc::sigaction(sig, &sa, std::ptr::null_mut());
+            libc::raise(sig);
+        }
+    }
+
+    /// Fill `buf` with one crash line and return the byte count. Pure
+    /// and allocation-free so the signal handler and the unit tests
+    /// call the exact same code.
+    ///
+    /// `=== claudepot crash === signal=<NAME>(<n>) thread=<main|other> pid=<n> epoch=<n>\n`
+    fn format_crash_record(
+        buf: &mut [u8],
+        sig: libc::c_int,
+        on_main_thread: bool,
+        pid: libc::c_int,
+        epoch_secs: i64,
+    ) -> usize {
+        let mut w = SliceWriter::new(buf);
+        w.put(b"=== claudepot crash === signal=");
+        w.put(signal_name(sig).as_bytes());
+        w.put(b"(");
+        w.put_i64(i64::from(sig));
+        w.put(b") thread=");
+        w.put(if on_main_thread { b"main" } else { b"other" });
+        w.put(b" pid=");
+        w.put_i64(i64::from(pid));
+        w.put(b" epoch=");
+        w.put_i64(epoch_secs);
+        w.put(b"\n");
+        w.len()
+    }
+
+    fn signal_name(sig: libc::c_int) -> &'static str {
+        match sig {
+            libc::SIGSEGV => "SIGSEGV",
+            libc::SIGABRT => "SIGABRT",
+            libc::SIGBUS => "SIGBUS",
+            libc::SIGILL => "SIGILL",
+            libc::SIGFPE => "SIGFPE",
+            libc::SIGTRAP => "SIGTRAP",
+            _ => "SIG?",
+        }
+    }
+
+    /// Bounded, allocation-free byte writer over a fixed stack buffer.
+    /// Silently stops at capacity — a truncated record beats an
+    /// overflow in a signal handler.
+    struct SliceWriter<'a> {
+        buf: &'a mut [u8],
+        pos: usize,
+    }
+
+    impl<'a> SliceWriter<'a> {
+        fn new(buf: &'a mut [u8]) -> Self {
+            Self { buf, pos: 0 }
+        }
+
+        fn put(&mut self, bytes: &[u8]) {
+            for &b in bytes {
+                if self.pos < self.buf.len() {
+                    self.buf[self.pos] = b;
+                    self.pos += 1;
+                }
+            }
+        }
+
+        fn put_i64(&mut self, n: i64) {
+            if n < 0 {
+                self.put(b"-");
+            }
+            // Magnitude via i128 so i64::MIN doesn't overflow on negate.
+            let mut mag = i128::from(n).unsigned_abs();
+            let mut tmp = [0u8; 40];
+            let mut i = tmp.len();
+            if mag == 0 {
+                i -= 1;
+                tmp[i] = b'0';
+            }
+            while mag > 0 {
+                i -= 1;
+                tmp[i] = b'0' + (mag % 10) as u8;
+                mag /= 10;
+            }
+            self.put(&tmp[i..]);
+        }
+
+        fn len(&self) -> usize {
+            self.pos
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn format_crash_record_shape() {
+            let mut buf = [0u8; 160];
+            let n = format_crash_record(&mut buf, libc::SIGABRT, false, 12345, 1_733_000_000);
+            let s = std::str::from_utf8(&buf[..n]).unwrap();
+            assert_eq!(
+                s,
+                "=== claudepot crash === signal=SIGABRT(6) thread=other pid=12345 epoch=1733000000\n"
+            );
+        }
+
+        #[test]
+        fn format_crash_record_marks_main_thread() {
+            let mut buf = [0u8; 160];
+            let n = format_crash_record(&mut buf, libc::SIGSEGV, true, 1, 0);
+            let s = std::str::from_utf8(&buf[..n]).unwrap();
+            assert!(s.contains("signal=SIGSEGV(11)"), "got: {s}");
+            assert!(s.contains("thread=main"), "got: {s}");
+        }
+
+        #[test]
+        fn format_crash_record_never_overflows_small_buffer() {
+            let mut buf = [0u8; 8];
+            let n = format_crash_record(&mut buf, libc::SIGSEGV, true, 1, 0);
+            assert!(n <= 8, "writer must clamp to capacity, wrote {n}");
+        }
+
+        #[test]
+        fn put_i64_handles_zero_and_i64_min() {
+            let mut buf = [0u8; 40];
+            let mut w = SliceWriter::new(&mut buf);
+            w.put_i64(0);
+            assert_eq!(&w.buf[..w.pos], b"0");
+
+            let mut buf2 = [0u8; 40];
+            let mut w2 = SliceWriter::new(&mut buf2);
+            w2.put_i64(i64::MIN);
+            assert_eq!(
+                std::str::from_utf8(&w2.buf[..w2.pos]).unwrap(),
+                "-9223372036854775808"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
