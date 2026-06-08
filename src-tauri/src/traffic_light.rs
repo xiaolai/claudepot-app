@@ -100,9 +100,34 @@ fn compute<R: Runtime>(_win: &WebviewWindow<R>) -> Option<TrafficLightMetrics> {
 /// IPC command for cold-mount pulls. The renderer subscribes to the
 /// `traffic-light-metrics` event first, then invokes this once in case
 /// the boot-time emit fired before the listener was attached.
+///
+/// `compute` calls into AppKit and must run on the main thread, but
+/// Tauri dispatches commands on a worker thread — calling `compute`
+/// directly here is the same off-main-thread AppKit hazard that crashes
+/// the tray. So hop to the main thread and wait for the result over a
+/// channel. The `is_main_thread` fast path both avoids the hop when
+/// unnecessary and rules out a self-deadlock (blocking the main thread
+/// on a closure scheduled for the main thread).
 #[tauri::command]
 pub fn traffic_light_metrics<R: Runtime>(window: WebviewWindow<R>) -> Option<TrafficLightMetrics> {
-    compute(&window)
+    if claudepot_core::main_thread::is_main_thread() {
+        return compute(&window);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let win = window.clone();
+    if window
+        .run_on_main_thread(move || {
+            // The receiver may already be gone if the command future was
+            // dropped; ignore the send error in that case.
+            let _ = tx.send(compute(&win));
+        })
+        .is_err()
+    {
+        return None;
+    }
+    // The closure sends exactly once; a RecvError means the main thread
+    // went away, for which `None` is the right answer.
+    rx.recv().ok().flatten()
 }
 
 /// Emit the current metrics to the renderer if they can be computed.
@@ -118,6 +143,11 @@ pub fn traffic_light_metrics<R: Runtime>(window: WebviewWindow<R>) -> Option<Tra
 /// [`emit_on_main_thread`] instead, which routes through
 /// `WebviewWindow::run_on_main_thread`.
 pub fn emit<R: Runtime>(window: &WebviewWindow<R>) {
+    // `compute` calls into AppKit (NSWindow.standardWindowButton, …),
+    // which asserts the main thread. Surface any off-thread caller in
+    // the log before AppKit aborts the process. See
+    // `claudepot_core::main_thread`.
+    claudepot_core::main_thread::warn_if_off_main_thread("traffic_light::emit");
     if let Some(m) = compute(window) {
         let _ = window.emit("traffic-light-metrics", m);
     }

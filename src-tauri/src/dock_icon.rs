@@ -45,7 +45,17 @@ const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 /// Override the application icon on the main thread. Call once
 /// during `setup()`.
 pub fn override_application_icon() {
-    // SAFETY: `setup()` callbacks run on the main thread. Same
+    // `MainThreadMarker::new_unchecked` + `setApplicationIconImage` are
+    // main-thread-only; off the main thread they are UB. `setup()` runs
+    // on the main thread, so this guard never trips in practice — but if
+    // that assumption ever breaks, log loudly and skip rather than
+    // corrupt or abort silently. The early return is what makes the
+    // `new_unchecked` below sound.
+    if !claudepot_core::main_thread::is_main_thread() {
+        claudepot_core::main_thread::warn_if_off_main_thread("dock_icon::override_application_icon");
+        return;
+    }
+    // SAFETY: established above that we are on the main thread; same
     // unchecked-constructor pattern as Tauri's dev-mode path.
     let mtm = unsafe { MainThreadMarker::new_unchecked() };
     let app = NSApplication::sharedApplication(mtm);

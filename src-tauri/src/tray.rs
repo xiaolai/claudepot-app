@@ -55,6 +55,10 @@ const TRAY_ALERT_BYTES: &[u8] = include_bytes!("../icons/tray-iconAlertTemplate@
 /// `platform_impl/macos/mod.rs` — `set_icon` (~line 118, hard-codes
 /// `false`) vs. `set_icon_as_template` (~line 206, applies it back).
 fn apply_tray_icon(tray: &tauri::tray::TrayIcon, alert_count: u32) {
+    // set_icon mutates the live NSStatusItem — main-thread-only on
+    // macOS. Both current callers route through run_on_main_thread;
+    // this guards against a future direct caller that forgets to.
+    claudepot_core::main_thread::warn_if_off_main_thread("tray::apply_tray_icon");
     let bytes = if alert_count == 0 {
         TRAY_IDLE_BYTES
     } else {
@@ -246,39 +250,61 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| format!("menu build: {e}"))?;
 
-    if let Some(tray) = app.tray_by_id("main") {
-        tray.set_menu(Some(menu))
-            .map_err(|e| format!("set menu: {e}"))?;
-        // Pull the live alert count so the tooltip + macOS title text
-        // survive a full rebuild (account-list change shouldn't reset
-        // the alert badge to 0). State may be unmanaged in test
-        // harness builds — fall through with 0.
-        let alert_count = app
-            .try_state::<crate::state::TrayAlertState>()
+    // Pull the live alert count so the tooltip + macOS title text
+    // survive a full rebuild (account-list change shouldn't reset
+    // the alert badge to 0). State may be unmanaged in test
+    // harness builds — fall through with 0. These are plain managed-
+    // state reads; safe to do off the main thread.
+    let alert_count = app
+        .try_state::<crate::state::TrayAlertState>()
+        .map(|s| s.get())
+        .unwrap_or(0)
+        + app
+            .try_state::<crate::state::UpdatesAlertState>()
             .map(|s| s.get())
-            .unwrap_or(0)
-            + app
-                .try_state::<crate::state::UpdatesAlertState>()
-                .map(|s| s.get())
-                .unwrap_or(0);
-        let tooltip = compose_tooltip(cli_active, desktop_active, alert_count);
-        tray.set_tooltip(Some(&tooltip))
-            .map_err(|e| format!("tooltip: {e}"))?;
+            .unwrap_or(0);
+    let tooltip = compose_tooltip(cli_active, desktop_active, alert_count);
+
+    // Every NSStatusItem mutation below (set_menu / set_tooltip /
+    // set_title / set_icon) asserts the main thread on macOS. This
+    // function runs on a tokio worker for every watcher- and command-
+    // driven rebuild (cc_doctor, updates, notifications, live activity),
+    // so calling them inline trips AppKit's `assertBarrierOnQueue` and
+    // aborts the process with SIGTRAP — the crash signature behind the
+    // intermittent self-quits. Route the whole apply step through the
+    // main thread, mirroring `traffic_light::emit_on_main_thread`.
+    // Re-fetching the tray handle *inside* the closure also keeps its
+    // Drop (which calls `removeStatusItem`) on the main thread.
+    let app_for_main = app.clone();
+    app.run_on_main_thread(move || {
+        claudepot_core::main_thread::warn_if_off_main_thread("tray::rebuild");
+        let Some(tray) = app_for_main.tray_by_id("main") else {
+            // Reaching this branch means the "main" tray was never
+            // registered (setup hook failure or feature flag drift).
+            // Silently succeeding hid setup bugs in the past — log so
+            // the cause is diagnosable from the run log.
+            tracing::warn!(
+                "tray::rebuild: no tray registered with id \"main\"; menu update skipped"
+            );
+            return;
+        };
+        if let Err(e) = tray.set_menu(Some(menu)) {
+            tracing::warn!("tray::rebuild: set_menu failed: {e}");
+        }
+        if let Err(e) = tray.set_tooltip(Some(&tooltip)) {
+            tracing::warn!("tray::rebuild: set_tooltip failed: {e}");
+        }
         // The dot moved from a text title to the icon glyph itself
         // (alert variant has a 2×2 black square in the top-right
         // corner). Setting the title to None keeps the menubar
         // visually clean on macOS/KDE — and GNOME/Windows already
         // ignored it. Icon swap reaches every platform.
-        tray.set_title(None::<&str>)
-            .map_err(|e| format!("title: {e}"))?;
+        if let Err(e) = tray.set_title(None::<&str>) {
+            tracing::warn!("tray::rebuild: set_title failed: {e}");
+        }
         apply_tray_icon(&tray, alert_count);
-    } else {
-        // Reaching this branch means the "main" tray was never
-        // registered (setup hook failure or feature flag drift).
-        // Silently succeeding hid setup bugs in the past — log so
-        // the cause is diagnosable from the run log.
-        tracing::warn!("tray::rebuild: no tray registered with id \"main\"; menu update skipped");
-    }
+    })
+    .map_err(|e| format!("tray::rebuild: dispatch to main thread failed: {e}"))?;
 
     Ok(())
 }
@@ -316,31 +342,20 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
             .map(|s| s.get())
             .unwrap_or(0)
         + bell_unread;
-    let Some(tray) = app.tray_by_id("main") else {
-        return;
-    };
     // Recompute the tooltip with the same identity inputs the menu
     // build uses — but skip the per-account list lookup; this path
     // runs frequently and a stale tooltip is fine until the next
-    // rebuild lands. The dot now lives in the icon glyph (see
-    // `apply_tray_icon`), so we explicitly clear any prior title
-    // text to keep the previous "• N" remnant from sticking.
-    if let Err(e) = tray.set_title(None::<&str>) {
-        tracing::warn!("tray::refresh_alert_chrome: set_title failed: {e}");
-    }
-    apply_tray_icon(&tray, alert_count);
-    // For the tooltip, we need the active accounts; use the existing
-    // build by re-doing the (cheap) store lookup. Tray rebuilds run on
-    // the same hot path; this duplicates a few sync calls but stays
-    // well under a millisecond on the typical 0–10 account list.
-    if let Ok(store) = crate::commands::open_store() {
+    // rebuild lands. The store lookup + summary stub is plain sync
+    // I/O, so build the tooltip here (off the main thread) and hand the
+    // finished String to the main-thread closure below.
+    //
+    // refresh_alert_chrome is sync. The tooltip only needs `uuid` and
+    // `email` from each summary (see `tray_menu::build_tooltip`), so we
+    // build a minimal stub and skip the per-account keychain reads that
+    // `summary_for_account` would do. The full summary lands on the
+    // next `rebuild` (async) call.
+    let tooltip: Option<String> = if let Ok(store) = crate::commands::open_store() {
         if let Ok(accounts) = store.list() {
-            // refresh_alert_chrome is sync. The tooltip only needs
-            // `uuid` and `email` from each summary (see
-            // `tray_menu::build_tooltip`), so we build a minimal stub
-            // and skip the per-account keychain reads that
-            // `summary_for_account` would do. The full summary lands
-            // on the next `rebuild` (async) call.
             let summaries: Vec<crate::dto::AccountSummary> = accounts
                 .iter()
                 .map(|a| crate::dto::AccountSummary {
@@ -366,11 +381,39 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
                 .collect();
             let cli = summaries.iter().find(|a| a.is_cli_active);
             let desktop = summaries.iter().find(|a| a.is_desktop_active);
-            let tooltip = compose_tooltip(cli, desktop, alert_count);
-            if let Err(e) = tray.set_tooltip(Some(&tooltip)) {
+            Some(compose_tooltip(cli, desktop, alert_count))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // The dot now lives in the icon glyph (see `apply_tray_icon`), so we
+    // explicitly clear any prior title text to keep the previous "• N"
+    // remnant from sticking. set_title / set_icon / set_tooltip all
+    // mutate the NSStatusItem and assert the main thread on macOS;
+    // refresh_alert_chrome is called from watchers and Tauri commands
+    // (tokio workers), so route the apply step through the main thread
+    // exactly like `rebuild`. Re-fetching the tray inside the closure
+    // keeps its Drop on the main thread too.
+    let app_for_main = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || {
+        claudepot_core::main_thread::warn_if_off_main_thread("tray::refresh_alert_chrome");
+        let Some(tray) = app_for_main.tray_by_id("main") else {
+            return;
+        };
+        if let Err(e) = tray.set_title(None::<&str>) {
+            tracing::warn!("tray::refresh_alert_chrome: set_title failed: {e}");
+        }
+        apply_tray_icon(&tray, alert_count);
+        if let Some(ref tip) = tooltip {
+            if let Err(e) = tray.set_tooltip(Some(tip)) {
                 tracing::warn!("tray::refresh_alert_chrome: set_tooltip failed: {e}");
             }
         }
+    }) {
+        tracing::warn!("tray::refresh_alert_chrome: dispatch to main thread failed: {e}");
     }
 }
 

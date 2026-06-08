@@ -127,6 +127,21 @@ pub fn log_dir() -> PathBuf {
     }
 }
 
+/// macOS crash-report directory — `$HOME/Library/Logs/DiagnosticReports/`.
+///
+/// Where the OS writes per-process `.ips` crash dumps. `None` off
+/// macOS (no equivalent location; Linux/Windows crash capture goes
+/// through the synchronous signal handler instead). Honors
+/// `$CLAUDEPOT_DIAGNOSTIC_REPORTS_DIR` so the harvest path is testable
+/// without a real crash on disk. See `crate::crash_reports`.
+#[cfg(target_os = "macos")]
+pub fn diagnostic_reports_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("CLAUDEPOT_DIAGNOSTIC_REPORTS_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    dirs::home_dir().map(|h| h.join("Library").join("Logs").join("DiagnosticReports"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
