@@ -44,6 +44,62 @@ jobs:
           fi
           echo "OK: updater pubkey present (${#PUBKEY} chars)"
 
+      # Fail malformed tags here, before the build matrix burns 30+
+      # runner-minutes. The release job's channel classifier repeats
+      # this check (it also derives the channel outputs the upload
+      # steps consume) — this is the early gate, that's the backstop.
+      - name: Validate tag shape
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
+            echo "OK: tag '$TAG' is a supported release shape"
+          else
+            echo "::error::Tag '$TAG' is not a supported release tag shape."
+            echo "::error::Only bare 'vX.Y.Z' stable tags and 'vX.Y.Z-beta.N' prereleases are supported."
+            exit 1
+          fi
+
+      # The updater manifest version is derived from the git tag
+      # (VERSION="${TAG#v}" in the release job) while the built
+      # bundles carry the version baked into tauri.conf.json. If the
+      # two disagree, latest.json advertises a version the installed
+      # bundle doesn't report and every client enters a permanent
+      # download-install-still-outdated loop. /bump keeps the five
+      # version sites in lock-step, but nothing else enforces it —
+      # this step does, mechanically, before any build starts.
+      - name: Verify version lock-step (tag vs manifests vs banners)
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          VERSION="${TAG#v}"
+          FAIL=0
+          check() {
+            local name="$1" actual="$2"
+            if [ "$actual" = "$VERSION" ]; then
+              echo "OK: $name = $actual"
+            else
+              echo "::error::$name is '$actual' but the tag says '$VERSION'. Run /bump, commit, and re-tag."
+              FAIL=1
+            fi
+          }
+          check "Cargo.toml [workspace.package] version" \
+            "$(awk -F'"' '/^\[workspace\.package\]/{f=1} f && /^version[[:space:]]*=/{print $2; exit}' Cargo.toml)"
+          check "package.json version" \
+            "$(jq -r .version package.json)"
+          check "src-tauri/tauri.conf.json version" \
+            "$(jq -r .version src-tauri/tauri.conf.json)"
+          check "README.md status banner" \
+            "$(sed -n 's/^> \*\*Status: [a-z]*\*\* (`\([^`]*\)`).*/\1/p' README.md | head -1)"
+          check "web install page status banner" \
+            "$(sed -n 's/^> \*\*Status: [a-z]* (`\([^`]*\)`).*/\1/p' 'web/src/app/(reader)/app/install/page.mdx' | head -1)"
+          if [ "$FAIL" -ne 0 ]; then
+            exit 1
+          fi
+          echo "OK: all five version sites agree with the tag ($VERSION)"
+
   # ------------------------------------------------------------------
   # macOS — CLI (Developer-ID signed + notarized) + GUI (Tauri-managed signing + notarization)
   # ------------------------------------------------------------------
@@ -78,14 +134,15 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v5
+      # Swatinem/rust-cache keys on job id + toolchain + lockfile and
+      # prunes stale artifacts, unlike a raw actions/cache of target/
+      # keyed only on Cargo.lock (which froze at the first
+      # post-lockfile-change run and re-uploaded multi-GB archives).
+      # `key` disambiguates the two arch legs of this matrix job.
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.arch }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.arch }}
 
       - name: Install JS deps
         run: pnpm install --frozen-lockfile
@@ -244,14 +301,9 @@ jobs:
       - name: Install JS deps
         run: pnpm install --frozen-lockfile
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-x86_64-cargo-release-gui-${{ hashFiles('**/Cargo.lock') }}
+      # See build-macos for why rust-cache replaces actions/cache.
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Build CLI binary
         run: cargo build -p claudepot-cli --release
@@ -336,14 +388,9 @@ jobs:
           linker = "aarch64-linux-gnu-gcc"
           EOF
 
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-aarch64-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+      # See build-macos for why rust-cache replaces actions/cache.
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Build CLI
         run: cargo build -p claudepot-cli --release --target aarch64-unknown-linux-gnu
@@ -385,14 +432,9 @@ jobs:
       - name: Install JS deps
         run: pnpm install --frozen-lockfile
 
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-x86_64-cargo-release-gui-${{ hashFiles('**/Cargo.lock') }}
+      # See build-macos for why rust-cache replaces actions/cache.
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Build CLI
         run: cargo build -p claudepot-cli --release
@@ -566,9 +608,9 @@ jobs:
 
             ### In-app auto-update
             Versions ≥0.0.7 carry a minisign-signed updater bundle.
-            macOS, Linux AppImage, and Windows NSIS / MSI installs check
-            for new versions in Settings → About; `.deb` users update
-            via apt as before.
+            macOS, Linux AppImage, and Windows NSIS installs check for
+            new versions in Settings → About; `.msi` and `.deb` users
+            update via their installer / package manager.
 
       # Generate the Tauri-2 updater manifest from the four signature
       # files so the in-app updater can verify and install the new
@@ -681,22 +723,64 @@ jobs:
           PLATFORMS=$(jq -er '.platforms | length' "$MANIFEST")
           echo "OK: $MANIFEST validates with $PLATFORMS platform(s) — all required targets present"
 
-      # Upload the manifest to the endpoint the in-app updater reads.
+      # Upload the stable manifest to the endpoint the in-app updater
+      # reads: `latest.json` goes on the per-tag release. GitHub's
+      # `/releases/latest/download/latest.json` URL self-tracks the
+      # newest NON-prerelease release, so already-installed stable
+      # apps keep updating with no config change. Uploading while the
+      # release is still a draft is deliberate — the manifest becomes
+      # public atomically when the release publishes below.
       #
-      #  - Stable: `latest.json` goes on the per-tag release. GitHub's
-      #    `/releases/latest/download/latest.json` URL self-tracks the
-      #    newest NON-prerelease release, so already-installed stable
-      #    apps keep updating with no config change.
-      #  - Beta: `latest-beta.json` goes on the permanent fixed-tag
-      #    `updater-manifest` release. A prerelease has no
-      #    `/releases/latest/` URL of its own (that URL skips
-      #    prereleases), so beta needs this stable host. The
-      #    `updater-manifest` release is created once by hand — see
-      #    dev-docs/octoally-borrowings.md Item C; CI never creates it.
-      - name: Upload updater manifest
+      # The beta manifest (`latest-beta.json`) is uploaded AFTER the
+      # publish step instead — see "Update beta-channel manifest".
+      - name: Upload updater manifest (stable)
+        if: steps.channel.outputs.is_beta != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          MANIFEST: ${{ steps.channel.outputs.manifest }}
+        run: |
+          set -eu
+          gh release upload "$TAG" "$MANIFEST" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Uploaded $MANIFEST to release $TAG"
+
+      # Homebrew can't fetch draft release assets (they require auth),
+      # so the tap-update workflow needs a published release. Comment
+      # the publish + trigger steps out if you want a manual review
+      # gate instead.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+
+      # The beta channel reads ONE endpoint: the permanent fixed-tag
+      # `updater-manifest` release's `latest-beta.json`. A prerelease
+      # has no `/releases/latest/` URL of its own (that URL skips
+      # prereleases), so beta needs this stable host. The
+      # `updater-manifest` release is created once by hand — see
+      # dev-docs/octoally-borrowings.md Item C; CI never creates it.
+      #
+      # This step runs AFTER "Publish release" on purpose. The
+      # manifest's asset URLs point at the per-tag release; while that
+      # release is still a draft its assets require auth, so a
+      # manifest published earlier would advertise downloads that 404
+      # — and if the publish step then failed, the broken state would
+      # be durable until manual repair.
+      #
+      # Two writers keep the endpoint correct:
+      #  - a beta tag writes its own manifest;
+      #  - a stable tag ALSO writes its manifest there when the stable
+      #    version is newer than whatever the endpoint currently
+      #    advertises. Per the channel contract (release_channel.rs:
+      #    Beta = "stable releases plus prereleases"), a beta user on
+      #    0.2.0-beta.2 must be offered the subsequent 0.2.0. The
+      #    version guard keeps a stable hotfix (0.1.47) from
+      #    regressing a newer beta manifest (0.2.0-beta.1).
+      - name: Update beta-channel manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MANIFEST: ${{ steps.channel.outputs.manifest }}
           IS_BETA: ${{ steps.channel.outputs.is_beta }}
         run: |
@@ -709,22 +793,48 @@ jobs:
             fi
             gh release upload updater-manifest "$MANIFEST" --repo "$GITHUB_REPOSITORY" --clobber
             echo "Uploaded $MANIFEST to the updater-manifest host release"
-          else
-            gh release upload "$TAG" "$MANIFEST" --repo "$GITHUB_REPOSITORY" --clobber
-            echo "Uploaded $MANIFEST to release $TAG"
+            exit 0
           fi
 
-      # Homebrew can't fetch draft release assets (they require auth),
-      # so the tap-update workflow needs a published release. Comment
-      # the next two steps out if you want a manual review gate instead.
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: |
-          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          # Stable tag: advance the beta endpoint when this stable
+          # supersedes it. No host release = beta channel not in use.
+          if ! gh release view updater-manifest --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "No 'updater-manifest' host release — beta channel not in use; skipping."
+            exit 0
+          fi
+          CUR=""
+          if gh release download updater-manifest --repo "$GITHUB_REPOSITORY" \
+               --pattern 'latest-beta.json' --output current-beta.json 2>/dev/null; then
+            CUR=$(jq -r '.version // ""' current-beta.json 2>/dev/null || true)
+          fi
+          NEW=$(jq -r .version "$MANIFEST")
+          if [ -n "$CUR" ]; then
+            # SemVer comparison: compare numeric cores with sort -V;
+            # on an equal core the version WITHOUT a prerelease
+            # suffix wins (0.2.0 > 0.2.0-beta.2 — plain `sort -V`
+            # gets exactly that case wrong, so the suffix is handled
+            # explicitly).
+            CUR_CORE="${CUR%%-*}"
+            HIGHEST=$(printf '%s\n%s\n' "$CUR_CORE" "$NEW" | sort -V | tail -1)
+            if [ "$NEW" != "$HIGHEST" ]; then
+              echo "Beta endpoint at $CUR is newer than stable $NEW; leaving it alone."
+              exit 0
+            fi
+            if [ "$NEW" = "$CUR_CORE" ] && [ "$CUR" = "$CUR_CORE" ]; then
+              echo "Beta endpoint already at $CUR; nothing to do."
+              exit 0
+            fi
+          fi
+          cp "$MANIFEST" latest-beta.json
+          gh release upload updater-manifest latest-beta.json --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Beta endpoint advanced to stable $NEW (was '${CUR:-none}')"
 
+      # Stable releases only: a `-beta.N` prerelease must never reach
+      # the tap — `brew upgrade` would ship it to every stable-channel
+      # brew user. update-homebrew.yml rejects prerelease versions as
+      # defense in depth.
       - name: Trigger Homebrew tap update
+        if: steps.channel.outputs.is_beta != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
