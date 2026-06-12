@@ -19,6 +19,9 @@
 use std::path::{Path, PathBuf};
 
 use super::error::RouteError;
+// `wrapper_dir` is only consumed by the `#[cfg(unix)]` PATH helpers
+// below; gate the import so Windows doesn't see it as unused.
+#[cfg(unix)]
 use super::wrapper::wrapper_dir;
 
 /// Comment line stamped above the appended `export`, so a human
