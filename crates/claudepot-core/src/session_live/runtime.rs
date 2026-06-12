@@ -749,8 +749,9 @@ impl LiveRuntime {
             }
         }
 
-        // 4. Republish the aggregate list. Idempotent — watch
-        // subscribers see the latest even if they missed intermediate.
+        // 4. Derive the new aggregate list. Idempotent — watch
+        // subscribers see the latest even if they missed intermediate
+        // values. Published in step 6 only when it actually changed.
         let list: Vec<LiveSessionSummary> = state
             .values()
             .map(|s| summary_from_state(s, now_ms))
@@ -811,7 +812,23 @@ impl LiveRuntime {
             }
         }
 
-        self.aggregate.publish(list);
+        // 6. Publish the aggregate — only when it differs from what
+        // subscribers already hold. `watch::Sender::send` notifies
+        // every receiver unconditionally and the Tauri bridge
+        // re-emits `live-all` per notification, so an unconditional
+        // publish here re-rendered every frontend subscriber at 2 Hz
+        // forever, even with zero live sessions. The watch channel
+        // itself carries the last published list, so there is no
+        // separate dedup state to drift out of sync. `idle_ms` is
+        // recomputed from the wall clock each tick and would defeat
+        // naive equality; `aggregate_publish_equivalent` buckets it
+        // (5 s) so an idle-but-live session refreshes subscribers at
+        // most once per bucket, and an empty list publishes exactly
+        // once on the transition to empty.
+        let prev = self.aggregate.snapshot();
+        if !aggregate_publish_equivalent(&prev, &list) {
+            self.aggregate.publish(list);
+        }
         Ok(())
     }
 }
@@ -979,6 +996,68 @@ fn summary_from_state(s: &SessionState, now_ms: i64) -> LiveSessionSummary {
         idle_ms,
         seq: s.seq,
     }
+}
+
+/// Bucket width applied to `idle_ms` when `tick` compares the fresh
+/// aggregate list against the last published one. `idle_ms` is
+/// recomputed from the wall clock on every tick, so raw equality
+/// would never hold for a quiet session and the publish dedup would
+/// be dead code. Bucketing at 5 s keeps the published idle counter
+/// fresh enough for the UI's humanized display while cutting the
+/// steady-state publish rate for an idle session from 2 Hz to at
+/// most 0.2 Hz — and to zero when no sessions are live.
+const IDLE_PUBLISH_BUCKET_MS: i64 = 5_000;
+
+/// Whether two aggregate lists are equivalent for publishing
+/// purposes — element-wise [`publish_equivalent`]. Positional
+/// comparison is sound: the list is rebuilt from the same session
+/// map every tick and the map's iteration order only changes on
+/// insert/remove (which also changes the list's length or content),
+/// so a spurious order change can at worst cause one extra publish,
+/// never a suppressed real change.
+fn aggregate_publish_equivalent(prev: &[LiveSessionSummary], next: &[LiveSessionSummary]) -> bool {
+    prev.len() == next.len()
+        && prev
+            .iter()
+            .zip(next.iter())
+            .all(|(a, b)| publish_equivalent(a, b))
+}
+
+/// Field-wise equality with `idle_ms` quantized to
+/// [`IDLE_PUBLISH_BUCKET_MS`]. Exhaustive destructuring on purpose:
+/// adding a field to `LiveSessionSummary` breaks this compile,
+/// forcing the author to decide whether the new field participates
+/// in change detection (the safe default is yes — a field that
+/// doesn't participate suppresses real updates).
+fn publish_equivalent(a: &LiveSessionSummary, b: &LiveSessionSummary) -> bool {
+    let LiveSessionSummary {
+        source_kind,
+        session_id,
+        pid,
+        cwd,
+        transcript_path,
+        status,
+        current_action,
+        model,
+        waiting_for,
+        errored,
+        stuck,
+        idle_ms,
+        seq,
+    } = a;
+    *source_kind == b.source_kind
+        && *session_id == b.session_id
+        && *pid == b.pid
+        && *cwd == b.cwd
+        && *transcript_path == b.transcript_path
+        && *status == b.status
+        && *current_action == b.current_action
+        && *model == b.model
+        && *waiting_for == b.waiting_for
+        && *errored == b.errored
+        && *stuck == b.stuck
+        && idle_ms / IDLE_PUBLISH_BUCKET_MS == b.idle_ms / IDLE_PUBLISH_BUCKET_MS
+        && *seq == b.seq
 }
 
 #[cfg(test)]

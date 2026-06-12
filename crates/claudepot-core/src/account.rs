@@ -77,6 +77,12 @@ impl AccountStore {
             std::fs::create_dir_all(parent)
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         }
+        // Pre-create the DB file with user-only perms BEFORE rusqlite
+        // opens it at umask defaults — same M9 fix as
+        // `session_index::SessionIndex::open`; the post-init
+        // `set_permissions` below remains the backstop for files
+        // created by older builds.
+        crate::secure_perms::precreate_user_only(path);
         let db = Connection::open(path)?;
         apply_standard_pragmas(&db)?;
         db.execute_batch(SCHEMA)?;

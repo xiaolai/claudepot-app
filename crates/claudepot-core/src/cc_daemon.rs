@@ -350,11 +350,14 @@ fn parse_path_or_unreachable(value: &str) -> Option<PathBuf> {
             if close > open {
                 let inner = &v[open + 1..close];
                 // Pull the last whitespace-separated token that looks
-                // like an absolute path.
+                // like an absolute path. `is_absolute_path_str` (not a
+                // starts_with('/') check — .claude/rules/paths.md)
+                // covers Unix, drive-letter, UNC, and named-pipe
+                // (`\\.\pipe\...`) shapes.
                 if let Some(last) = inner
                     .split_whitespace()
                     .rev()
-                    .find(|tok| tok.starts_with('/'))
+                    .find(|tok| crate::path_utils::is_absolute_path_str(tok))
                 {
                     return Some(PathBuf::from(last));
                 }
@@ -382,6 +385,50 @@ fn parse_worker_count(value: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── sock-path recovery shapes (.claude/rules/paths.md) ──────
+    // Pure string ops — run on every host OS. Verbatim `\\?\` is not
+    // covered: the hint text is daemon-written, never canonicalize
+    // output.
+
+    #[test]
+    fn test_daemon_sock_recovery_handles_unix_hint() {
+        let v = "unreachable (connect ENOENT /tmp/cc-daemon-501/abc/control.sock)";
+        assert_eq!(
+            parse_path_or_unreachable(v),
+            Some(PathBuf::from("/tmp/cc-daemon-501/abc/control.sock"))
+        );
+    }
+
+    #[test]
+    fn test_daemon_sock_recovery_handles_windows_drive_hint() {
+        let v =
+            r"unreachable (connect ENOENT C:\Users\j\AppData\Local\Temp\cc-daemon\control.sock)";
+        assert_eq!(
+            parse_path_or_unreachable(v),
+            Some(PathBuf::from(
+                r"C:\Users\j\AppData\Local\Temp\cc-daemon\control.sock"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_daemon_sock_recovery_handles_named_pipe_hint() {
+        let v = r"unreachable (connect ENOENT \\.\pipe\cc-daemon-control)";
+        assert_eq!(
+            parse_path_or_unreachable(v),
+            Some(PathBuf::from(r"\\.\pipe\cc-daemon-control"))
+        );
+    }
+
+    #[test]
+    fn test_daemon_sock_recovery_returns_none_without_path_token() {
+        assert_eq!(
+            parse_path_or_unreachable("unreachable (connect refused)"),
+            None
+        );
+        assert_eq!(parse_path_or_unreachable("unreachable"), None);
+    }
 
     const IDLE_FIXTURE: &str = "\
 not running

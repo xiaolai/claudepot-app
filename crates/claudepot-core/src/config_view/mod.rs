@@ -9,6 +9,7 @@ pub mod discover;
 pub mod effective_io;
 pub mod effective_mcp;
 pub mod effective_settings;
+pub mod error;
 pub mod launcher;
 pub mod mask;
 pub mod memory_include;
@@ -24,6 +25,7 @@ pub mod search;
 pub mod service;
 pub mod watch;
 
+pub use error::ConfigViewError;
 pub use service::ConfigScanService;
 
 use std::path::Path;

@@ -9,6 +9,7 @@
 //! inside a tokio `spawn_blocking` task. Callers pass `CancelToken` to
 //! abort mid-stream.
 
+use crate::config_view::error::ConfigViewError;
 use crate::config_view::mask::mask_bytes;
 use crate::config_view::model::{ConfigTree, FileNode, Kind, Node};
 use regex::Regex;
@@ -71,16 +72,14 @@ enum Matcher {
 }
 
 impl Matcher {
-    fn build(query: &SearchQuery) -> Result<Self, String> {
+    fn build(query: &SearchQuery) -> Result<Self, ConfigViewError> {
         if query.regex {
             let pat = if query.case_sensitive {
                 query.text.clone()
             } else {
                 format!("(?i){}", query.text)
             };
-            return Regex::new(&pat)
-                .map(Matcher::Regex)
-                .map_err(|e| e.to_string());
+            return Ok(Regex::new(&pat).map(Matcher::Regex)?);
         }
         // Case-sensitive plain uses a cheap byte-level scanner. The
         // case-insensitive variant goes through the regex crate with an
@@ -94,9 +93,7 @@ impl Matcher {
             })
         } else {
             let pat = format!("(?i){}", regex::escape(&query.text));
-            Regex::new(&pat)
-                .map(Matcher::Regex)
-                .map_err(|e| e.to_string())
+            Ok(Regex::new(&pat).map(Matcher::Regex)?)
         }
     }
 
@@ -143,7 +140,7 @@ pub fn search<F: FnMut(SearchHit)>(
     query: SearchQuery,
     cancel: &CancelToken,
     mut on_hit: F,
-) -> Result<SearchSummary, String> {
+) -> Result<SearchSummary, ConfigViewError> {
     let matcher = Matcher::build(&query)?;
 
     let scope_filter: Option<std::collections::HashSet<&str>> = query

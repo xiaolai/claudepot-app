@@ -1,18 +1,19 @@
 //! Ring-buffer audit log of rotation activity.
 //!
 //! One entry per rotation attempt — applied, suggested, skipped (with
-//! reason), failed. Mirrors `notification_log` exactly: 500-entry cap,
-//! atomic write-through, mutex-poison recovery, corrupt-file
-//! rename-aside. Independent file (`~/.claudepot/rotation-audit.json`)
-//! so notification spam doesn't compete with rotation forensics.
+//! reason), failed. The 500-entry cap, atomic write-through,
+//! mutex-poison recovery, and corrupt-file rename-aside all come from
+//! the shared [`crate::json_store::CappedJsonLog`] engine (also used
+//! by `notification_log`); this module keeps the entry schema and
+//! the rotation-specific queries. Independent file
+//! (`~/.claudepot/rotation-audit.json`) so notification spam doesn't
+//! compete with rotation forensics.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
-use crate::fs_utils::atomic_write;
+use crate::json_store::{CappedJsonLog, HasId, LogConfig};
 use crate::services::usage_alerts::UsageWindowKind;
 
 /// Hard ring-buffer cap. Mirrors `notification_log::MAX_ENTRIES`. At
@@ -142,38 +143,26 @@ impl From<crate::rotation::rules::RotationMode> for AuditMode {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct PersistedDoc {
-    #[serde(default)]
-    entries: Vec<RotationAuditEntry>,
-}
-
-struct Inner {
-    path: PathBuf,
-    entries: VecDeque<RotationAuditEntry>,
-    next_id: u64,
-    /// When true, `persist_locked` returns Ok without touching disk.
-    /// Used by the in-memory test seam and the cold-boot fallback.
-    volatile: bool,
-}
-
-fn lock_inner(m: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
-    match m.lock() {
-        Ok(g) => g,
-        Err(poisoned) => {
-            tracing::warn!(
-                "rotation_audit: mutex was poisoned by an earlier panic; \
-                 recovering with under-lock data (advisory state, no \
-                 correctness guarantees ride on it)"
-            );
-            poisoned.into_inner()
-        }
+impl HasId for RotationAuditEntry {
+    fn id(&self) -> u64 {
+        self.id
+    }
+    fn set_id(&mut self, id: u64) {
+        self.id = id;
     }
 }
 
+/// Engine config: the name lands in log messages and poison-recovery
+/// warns; compact output matches the historical on-disk format.
+const LOG_CFG: LogConfig = LogConfig {
+    name: "rotation_audit",
+    cap: MAX_AUDIT_ENTRIES,
+    pretty: false,
+};
+
 /// Persistent ring-buffer log of rotation activity.
 pub struct RotationAuditLog {
-    inner: Mutex<Inner>,
+    log: CappedJsonLog<RotationAuditEntry>,
 }
 
 impl RotationAuditLog {
@@ -181,47 +170,16 @@ impl RotationAuditLog {
     /// touched. Used when the on-disk path can't be opened, and by
     /// tests that don't want filesystem dependencies.
     pub fn in_memory_only() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "claudepot-rotation-audit-volatile-{}",
-            std::process::id()
-        ));
         Self {
-            inner: Mutex::new(Inner {
-                path,
-                entries: VecDeque::new(),
-                next_id: 1,
-                volatile: true,
-            }),
+            log: CappedJsonLog::in_memory_only(LOG_CFG),
         }
     }
 
-    /// Open at `path`. Missing → empty. Corrupt → renamed aside,
-    /// empty.
+    /// Open at `path`. Missing → empty. Corrupt → renamed aside
+    /// (timestamped, see [`crate::json_store::move_aside`]), empty.
     pub fn open(path: PathBuf) -> std::io::Result<Self> {
-        let doc = match std::fs::read(&path) {
-            Ok(bytes) => match serde_json::from_slice::<PersistedDoc>(&bytes) {
-                Ok(d) => d,
-                Err(_) => {
-                    let corrupt = path.with_extension("json.corrupt");
-                    let _ = std::fs::rename(&path, corrupt);
-                    PersistedDoc::default()
-                }
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => PersistedDoc::default(),
-            Err(e) => return Err(e),
-        };
-        let mut entries: VecDeque<RotationAuditEntry> = doc.entries.into();
-        while entries.len() > MAX_AUDIT_ENTRIES {
-            entries.pop_front();
-        }
-        let next_id = entries.iter().map(|e| e.id).max().unwrap_or(0) + 1;
         Ok(Self {
-            inner: Mutex::new(Inner {
-                path,
-                entries,
-                next_id,
-                volatile: false,
-            }),
+            log: CappedJsonLog::open(path, LOG_CFG)?,
         })
     }
 
@@ -241,59 +199,38 @@ impl RotationAuditLog {
     }
 
     /// Append `entry`. Caller fills every field except `id` (assigned
-    /// here, monotonic per-process). Returns the assigned id.
-    pub fn append(&self, mut entry: RotationAuditEntry) -> std::io::Result<u64> {
-        let mut g = lock_inner(&self.inner);
-        let id = g.next_id;
-        g.next_id = g.next_id.saturating_add(1);
-        entry.id = id;
-        g.entries.push_back(entry);
-        while g.entries.len() > MAX_AUDIT_ENTRIES {
-            g.entries.pop_front();
-        }
-        Self::persist_locked(&g)?;
-        Ok(id)
+    /// by the engine, monotonic per-process). Returns the assigned id.
+    pub fn append(&self, entry: RotationAuditEntry) -> std::io::Result<u64> {
+        self.log.append(entry)
     }
 
     /// Newest-first list of entries, capped at `limit`.
     pub fn list(&self, limit: usize) -> Vec<RotationAuditEntry> {
-        let g = lock_inner(&self.inner);
-        g.entries.iter().rev().take(limit).cloned().collect()
+        self.log
+            .with(|s| s.entries.iter().rev().take(limit).cloned().collect())
     }
 
     /// All entries (cloned). Used by the evaluator for guard math.
     pub fn snapshot(&self) -> Vec<RotationAuditEntry> {
-        let g = lock_inner(&self.inner);
-        g.entries.iter().cloned().collect()
+        self.log.with(|s| s.entries.iter().cloned().collect())
     }
 
     /// Number of entries currently held.
     pub fn len(&self) -> usize {
-        lock_inner(&self.inner).entries.len()
+        self.log.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.log.is_empty()
     }
 
     /// Drop every entry. Used by the Settings → Rotation panel for an
     /// explicit "clear log" action; not exposed automatically.
     pub fn clear(&self) -> std::io::Result<()> {
-        let mut g = lock_inner(&self.inner);
-        g.entries.clear();
-        Self::persist_locked(&g)
-    }
-
-    fn persist_locked(g: &std::sync::MutexGuard<'_, Inner>) -> std::io::Result<()> {
-        if g.volatile {
-            return Ok(());
-        }
-        let doc = PersistedDoc {
-            entries: g.entries.iter().cloned().collect(),
-        };
-        let bytes = serde_json::to_vec(&doc)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        atomic_write(&g.path, &bytes)
+        self.log.with_mut(|s| {
+            s.entries.clear();
+            ((), true)
+        })
     }
 }
 
@@ -405,8 +342,11 @@ mod tests {
         std::fs::write(&p, b"not json").unwrap();
         let log = RotationAuditLog::open(p.clone()).unwrap();
         assert!(log.is_empty());
-        let corrupt = p.with_extension("json.corrupt");
-        assert!(corrupt.exists());
+        assert_eq!(
+            crate::json_store::corrupt_siblings(&p).len(),
+            1,
+            "corrupt file should be moved aside (timestamped)"
+        );
     }
 
     #[test]

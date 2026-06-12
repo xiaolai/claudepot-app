@@ -1,5 +1,6 @@
 pub mod claude_json;
 pub mod credfile;
+pub mod error;
 pub mod secret_file;
 pub mod storage;
 pub mod swap;
@@ -7,7 +8,7 @@ pub mod swap;
 #[cfg(target_os = "macos")]
 pub mod keychain;
 
-use crate::error::SwapError;
+pub use error::SwapError;
 
 /// Platform-agnostic interface for reading/writing CC CLI credentials.
 /// macOS: Keychain via `/usr/bin/security` subprocess.

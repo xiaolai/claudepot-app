@@ -106,8 +106,12 @@ pub fn resolve_subagents(
             Ok(a) => agents.push(a),
             Err(e) => {
                 // A single bad file shouldn't kill the whole list; leave
-                // a breadcrumb in the metrics and move on.
-                eprintln!("subagent parse error {}: {e}", path.display());
+                // a breadcrumb in the logs and move on.
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "subagent parse error"
+                );
             }
         }
     }

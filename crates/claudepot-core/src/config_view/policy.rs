@@ -16,6 +16,7 @@
 //!   `policy_resolve` accepts caller-provided bytes, so a cache layer or
 //!   registry reader can slot in without recompiling the resolver.
 
+use crate::config_view::error::ConfigViewError;
 use crate::config_view::model::PolicyOrigin;
 use serde_json::Value;
 
@@ -139,12 +140,18 @@ fn is_non_empty_object(v: &Value) -> bool {
 /// Load a single managed-settings JSON file. Returns `None` when the
 /// file is missing; a decoded `Value` when present; an error when
 /// present-but-malformed.
-pub fn load_managed_file(path: &std::path::Path) -> Result<Option<Value>, String> {
+pub fn load_managed_file(path: &std::path::Path) -> Result<Option<Value>, ConfigViewError> {
     if !path.is_file() {
         return Ok(None);
     }
-    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
-    let v: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let bytes = std::fs::read(path).map_err(|e| ConfigViewError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let v: Value = serde_json::from_slice(&bytes).map_err(|e| ConfigViewError::Parse {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     Ok(Some(v))
 }
 

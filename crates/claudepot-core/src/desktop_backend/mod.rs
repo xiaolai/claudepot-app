@@ -5,10 +5,12 @@ pub mod macos;
 pub mod windows;
 
 pub mod crypto;
+pub mod error;
 pub mod swap;
 pub mod token_cache;
 
-use crate::error::DesktopSwapError;
+pub use error::DesktopSwapError;
+
 use std::path::PathBuf;
 
 #[async_trait::async_trait]

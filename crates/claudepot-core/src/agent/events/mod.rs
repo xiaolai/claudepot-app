@@ -12,10 +12,14 @@
 //!   `~/.claudepot/agent-events.json`, recording which
 //!   `(agent_id, session_id)` pairs have already fired so each fires
 //!   exactly once.
+//! - [`policy`] — the pure orchestration policy: F14 stats derivation
+//!   from the ledger, the F17 exclusion-set construction (I/O
+//!   injected), the per-agent first-tick burst cap, and the dispatch
+//!   env contract.
 //!
 //! The runtime bridge — collecting the inputs, dispatching the runs,
-//! recording the ledger, the bounded catch-up cap — lives in the
-//! in-app event orchestrator (the Tauri layer), hooked into
+//! recording the ledger, applying the bounded catch-up cap — lives in
+//! the in-app event orchestrator (the Tauri layer), hooked into
 //! `usage_snapshot::run_tick` alongside the rotation + permission
 //! orchestrators. Zero overhead when no `Event`-triggered agents
 //! exist.
@@ -87,9 +91,14 @@
 //! each tick to drop pairs whose agent or session is gone.
 
 pub mod eval;
+pub mod policy;
 pub mod store;
 
 pub use eval::{evaluate, AgentRunStats, EventFire, SkipReason};
+pub use policy::{
+    apply_per_agent_first_tick_cap, build_dispatch_env, build_run_stats_from_ledger,
+    build_self_exclusion_set_with, FIRST_TICK_BURST_CAP,
+};
 pub use store::{
     events_path, load, load_from, load_or_default, save, save_to, AgentEventsError, EventsFile,
     FiredEntry, EVENTS_FILENAME, SCHEMA_VERSION,

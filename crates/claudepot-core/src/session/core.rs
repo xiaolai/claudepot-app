@@ -252,6 +252,22 @@ pub fn list_all_sessions(config_dir: &Path) -> Result<Vec<SessionRow>, SessionEr
         .map_err(|e| SessionError::Index(e.to_string()))
 }
 
+/// Like `list_all_sessions`, but returns only the sessions of one
+/// project slug. Same cache + freshness contract; the read side is an
+/// indexed `WHERE slug = ?` query, so per-project consumers don't pay
+/// for (or transfer) the rest of the index.
+pub fn list_sessions_by_slug(
+    config_dir: &Path,
+    slug: &str,
+) -> Result<Vec<SessionRow>, SessionError> {
+    let data_dir = crate::paths::claudepot_data_dir();
+    let db_path = data_dir.join("sessions.db");
+    let idx = crate::session_index::SessionIndex::open(&db_path)
+        .map_err(|e| SessionError::Index(e.to_string()))?;
+    idx.list_by_slug(config_dir, slug)
+        .map_err(|e| SessionError::Index(e.to_string()))
+}
+
 /// Direct (uncached) scan — used by tests that want to verify the
 /// JSONL-folding logic without pulling SQLite and the global data-dir
 /// lock into every unit test. Production callers go through
@@ -1129,5 +1145,5 @@ fn truncate_prompt(s: &str) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "session_tests.rs"]
+#[path = "core_tests.rs"]
 mod tests;

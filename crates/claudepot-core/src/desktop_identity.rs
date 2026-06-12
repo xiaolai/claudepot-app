@@ -690,7 +690,7 @@ mod tests {
                 "expiresAt": 1735689600000
             }
         }"#;
-        let key = crate::desktop_backend::crypto::macos::derive_key(&secret);
+        let key = crate::desktop_backend::crypto::macos::derive_key(&secret).expect("kdf");
         let iv = [b' '; 16];
         let ct = Enc::new_from_slices(&key, &iv)
             .unwrap()

@@ -670,5 +670,5 @@ fn redact_in_place(detail: &mut SessionDetail) {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "session_export_tests.rs"]
+#[path = "export_tests.rs"]
 mod tests;

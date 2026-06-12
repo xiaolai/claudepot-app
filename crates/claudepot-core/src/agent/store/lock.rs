@@ -9,13 +9,13 @@
 //! [`StoreLock`] closes that window. It is acquired when an
 //! `AgentStore` opens, held for the store's whole lifetime, and
 //! released on `Drop`. It is an `flock(2)`-style advisory exclusive
-//! lock (via the `fs2` crate — already a workspace dependency for
-//! the Desktop mutators' cross-process locking, see the root
-//! `Cargo.toml`) on a dedicated sibling `<store>.lock` file.
+//! lock (std's `File::lock` — `file_lock`, stable since 1.89; the
+//! same primitive the Desktop mutators' cross-process locking uses,
+//! see `desktop_lock.rs`) on a dedicated sibling `<store>.lock` file.
 //!
 //! ## Cross-process and cross-thread
 //!
-//! `fs2`'s exclusive lock is associated with the open file
+//! The exclusive lock is associated with the open file
 //! *description*. Every `StoreLock::acquire` opens its own
 //! description, so the lock conflicts — and therefore serializes —
 //! both across separate OS processes (CLI vs GUI) and across
@@ -46,8 +46,6 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
-
 use crate::agent::error::AgentError;
 
 /// An acquired advisory lock guarding one `agents.json` critical
@@ -66,7 +64,7 @@ impl StoreLock {
     /// degrading to the racy lock-free behavior.
     pub(super) fn acquire(store_path: &Path) -> Result<Self, AgentError> {
         let file = open_lock_file(store_path)?;
-        file.lock_exclusive()?;
+        file.lock()?;
         Ok(Self { _file: file })
     }
 
@@ -87,24 +85,26 @@ impl StoreLock {
     /// Audit follow-up A6: earlier docs (and the grill report) framed
     /// reader paths built on this — e.g. `AgentStore::lifecycle_of`
     /// — as a "shared-lock read". They are not. `try_acquire` calls
-    /// `fs2::FileExt::try_lock_exclusive`, which means two concurrent
-    /// `lifecycle_of` lookups still serialize against each other (and
-    /// against any writer). The "non-blocking" qualifier describes
-    /// the WAIT behavior (return `Ok(None)` instead of parking the
-    /// caller), not the CONFLICT shape (still mutually exclusive).
+    /// `File::try_lock` (an exclusive lock), which means two
+    /// concurrent `lifecycle_of` lookups still serialize against each
+    /// other (and against any writer). The "non-blocking" qualifier
+    /// describes the WAIT behavior (return `Ok(None)` instead of
+    /// parking the caller), not the CONFLICT shape (still mutually
+    /// exclusive).
     ///
     /// A future variant that actually permits concurrent readers
-    /// would need `fs2::FileExt::try_lock_shared` and a new
+    /// would need `File::try_lock_shared` and a new
     /// `try_acquire_shared` constructor; the read-path callers would
     /// also need auditing for self-consistency guarantees that an
     /// exclusive lock currently provides for free.
     pub(super) fn try_acquire(store_path: &Path) -> Result<Option<Self>, AgentError> {
         let file = open_lock_file(store_path)?;
-        match file.try_lock_exclusive() {
+        match file.try_lock() {
             Ok(()) => Ok(Some(Self { _file: file })),
-            // `fs2` returns its own `WouldBlock`-shaped error when
-            // the lock is held by someone else; we treat that as
-            // "not now, try later" rather than a failure.
+            // std file_lock surfaces `TryLockError::WouldBlock` when
+            // the lock is held by someone else; we treat that (and
+            // any I/O error, matching the old fs2 behavior) as "not
+            // now, try later" rather than a failure.
             Err(_) => Ok(None),
         }
     }

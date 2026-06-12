@@ -1389,6 +1389,102 @@ fn test_reachability_empty_path_is_unreachable() {
     assert_eq!(classify_reachability(""), PathReachability::Unreachable);
 }
 
+// ── classify_reachability shape goldens (.claude/rules/paths.md) ──
+// This function gates orphan deletion (`clean` skips only when the
+// classification is != Absent), so a foreign-OS shape silently
+// classified as Absent queues live data for deletion. Lock every
+// shape branch down per the four-shape discipline.
+
+#[test]
+fn test_reachability_existing_path_is_exists() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    let tmp = std::env::temp_dir();
+    assert_eq!(
+        classify_reachability(&tmp.to_string_lossy()),
+        PathReachability::Exists
+    );
+}
+
+#[test]
+fn test_reachability_missing_native_path_is_absent() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    let p = std::env::temp_dir().join("claudepot-no-such-dir-9f2c");
+    assert_eq!(
+        classify_reachability(&p.to_string_lossy()),
+        PathReachability::Absent
+    );
+}
+
+/// Windows drive-letter shape on a non-Windows host: the host would
+/// stat it as a relative path and report `Ok(false)` — Absent would
+/// mark live foreign-host data for deletion. Must be Unreachable.
+#[cfg(not(windows))]
+#[test]
+fn test_reachability_windows_drive_shape_is_unreachable_on_unix() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    assert_eq!(
+        classify_reachability(r"C:\Users\joker\proj"),
+        PathReachability::Unreachable
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_reachability_windows_unc_shape_is_unreachable_on_unix() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    assert_eq!(
+        classify_reachability(r"\\server\share\proj"),
+        PathReachability::Unreachable
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_reachability_windows_verbatim_shape_is_unreachable_on_unix() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    assert_eq!(
+        classify_reachability(r"\\?\C:\Users\joker\proj"),
+        PathReachability::Unreachable
+    );
+}
+
+/// Inverse case: a Unix shape on a Windows host would be joined to
+/// the current drive and stat'd — nonsense. Must be Unreachable.
+/// Runs on the windows-latest CI lane and the runner-b gate.
+#[cfg(windows)]
+#[test]
+fn test_reachability_unix_shape_is_unreachable_on_windows() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    assert_eq!(
+        classify_reachability("/Users/joker/proj"),
+        PathReachability::Unreachable
+    );
+}
+
+/// Absent-mount handling, Unix table: `/Volumes/<name>` whose mount
+/// point is missing means "volume unplugged", not "data deleted".
+#[cfg(unix)]
+#[test]
+fn test_reachability_absent_mount_volume_is_unreachable() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    assert_eq!(
+        classify_reachability("/Volumes/claudepot-no-such-volume-9f2c/data"),
+        PathReachability::Unreachable
+    );
+}
+
+/// Absent-mount handling, Windows UNC branch: a share whose root is
+/// unreachable means "share offline", not "data deleted".
+#[cfg(windows)]
+#[test]
+fn test_reachability_absent_unc_share_is_unreachable_on_windows() {
+    use crate::project_helpers::{classify_reachability, PathReachability};
+    assert_eq!(
+        classify_reachability(r"\\claudepot-no-such-host-9f2c\share\proj"),
+        PathReachability::Unreachable
+    );
+}
+
 /// Protected-paths guard: when an orphan's authoritative source
 /// path is in the protected set, the CC artifact dir is still
 /// removed, but `~/.claude.json` and `history.jsonl` entries for

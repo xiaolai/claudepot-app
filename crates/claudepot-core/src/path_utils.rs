@@ -112,9 +112,17 @@ pub fn canonicalize_simplified(path: &Path) -> std::io::Result<PathBuf> {
     Ok(canon)
 }
 
-/// Expand `~` or `~/...` against `$HOME`. Returns `None` if the input
-/// doesn't start with one of those two shapes, or if `$HOME` is
+/// Expand `~`, `~/...`, or `~\...` against `$HOME`. Returns `None` if
+/// the input doesn't start with one of those shapes, or if `$HOME` is
 /// unavailable.
+///
+/// `~\...` is the Windows-native form a Windows user types; it is
+/// accepted unconditionally (pure string op, golden-testable on every
+/// host) because `\` never legitimately follows `~` in a Unix tilde
+/// shape. The rest keeps its separators verbatim — on Unix a `~\x`
+/// input expands to a home-joined segment that still contains the
+/// backslashes, which fails loudly downstream as not-found instead of
+/// hard-erroring as "unsupported shape".
 ///
 /// Other tilde forms (`~user`, `~user/x`) are NOT expanded — Rust's
 /// stdlib has no portable user-database lookup, and silently passing
@@ -128,7 +136,7 @@ pub fn expand_tilde(p: &str) -> Option<String> {
     if p == "~" {
         return dirs::home_dir().map(|h| h.to_string_lossy().to_string());
     }
-    if let Some(rest) = p.strip_prefix("~/") {
+    if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix(r"~\")) {
         return dirs::home_dir().map(|h| h.join(rest).to_string_lossy().to_string());
     }
     None
@@ -309,6 +317,17 @@ mod tests {
         assert_eq!(expand_tilde("foo"), None);
         assert_eq!(expand_tilde("./foo"), None);
         assert_eq!(expand_tilde(""), None);
+    }
+
+    #[test]
+    fn test_expand_tilde_accepts_windows_backslash_subpath() {
+        // `~\dev\proj` is what a Windows user natively types. The rest
+        // keeps its separators verbatim (paths.md: never normalize
+        // them away) — `Path::join` yields the native form on Windows
+        // and a literal-backslash segment on Unix.
+        let home = dirs::home_dir().expect("HOME available in tests");
+        let expected = home.join(r"dev\proj").to_string_lossy().to_string();
+        assert_eq!(expand_tilde(r"~\dev\proj"), Some(expected));
     }
 
     #[test]

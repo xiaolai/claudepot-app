@@ -16,6 +16,14 @@ pub fn claude_credentials_file() -> PathBuf {
     claude_config_dir().join(".credentials.json")
 }
 
+/// CC's `.claude.json` state file. CC stores it at `$HOME/.claude.json`
+/// — a sibling of `~/.claude/`, not inside it. Central accessor so the
+/// CLI and the Tauri shell agree on the location. `None` when the home
+/// directory can't be resolved.
+pub fn claude_json_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".claude.json"))
+}
+
 /// Claude Desktop data directory (macOS / Windows). Returns None on Linux.
 pub fn claude_desktop_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
@@ -172,6 +180,17 @@ mod tests {
         let result = claude_credentials_file();
         assert_eq!(result, PathBuf::from("/test/config/.credentials.json"));
         std::env::remove_var("CLAUDE_CONFIG_DIR");
+    }
+
+    #[test]
+    fn test_claude_json_path_is_home_sibling() {
+        let _lock = lock_data_dir();
+        let result = claude_json_path();
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(result, Some(home.join(".claude.json")));
+        } else {
+            assert!(result.is_none());
+        }
     }
 
     #[test]

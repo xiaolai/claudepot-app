@@ -6,9 +6,10 @@
 //! our check and our rename.
 //!
 //! The lock file lives at `<scope_root>/.disabled/.lock` and is
-//! created on first use. We use `fs2::FileExt::lock_exclusive`
-//! (advisory `flock` on Unix, `LockFileEx` on Windows). The lock
-//! releases automatically when the returned `ScopeLock` is dropped.
+//! created on first use. We use std's `File::lock` (advisory
+//! `flock` on Unix, `LockFileEx` on Windows; stable since 1.89).
+//! The lock releases automatically when the returned `ScopeLock`
+//! is dropped.
 //!
 //! This is application-level cooperation only — a non-Claudepot
 //! process editing the same artifact tree won't see the lock. CC
@@ -17,7 +18,6 @@
 
 use crate::artifact_lifecycle::error::{LifecycleError, Result};
 use crate::artifact_lifecycle::paths::DISABLED_DIR;
-use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
@@ -51,8 +51,7 @@ pub fn acquire(scope_root: &Path) -> Result<ScopeLock> {
         .truncate(false)
         .open(&lock_path)
         .map_err(LifecycleError::io("open scope lock"))?;
-    file.lock_exclusive()
-        .map_err(LifecycleError::io("lock scope"))?;
+    file.lock().map_err(LifecycleError::io("lock scope"))?;
     Ok(ScopeLock { file })
 }
 

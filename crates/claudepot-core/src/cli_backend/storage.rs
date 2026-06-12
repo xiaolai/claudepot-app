@@ -81,7 +81,7 @@ impl From<KeychainErr> for SwapError {
 /// - "file"    → always file, no Keychain attempts (used by tests)
 /// - "keyring" → always Keychain (fail closed if unavailable)
 /// - unset/other → auto: Keychain on macOS if it works, else file
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 enum CredBackend {
     FileOnly,
     KeyringOnly,
@@ -90,10 +90,17 @@ enum CredBackend {
 }
 
 fn backend() -> CredBackend {
-    match std::env::var("CLAUDEPOT_CREDENTIAL_BACKEND")
-        .ok()
-        .as_deref()
-    {
+    backend_from(
+        std::env::var("CLAUDEPOT_CREDENTIAL_BACKEND")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Pure env-var → backend mapping (the env read lives in
+/// [`backend`]).
+fn backend_from(value: Option<&str>) -> CredBackend {
+    match value {
         Some("file") => CredBackend::FileOnly,
         Some("keyring") => CredBackend::KeyringOnly,
         // `Auto` resolves to Keychain-first on macOS. On every other
@@ -263,8 +270,17 @@ async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr
     // wraps its own subprocess in `tokio::time::timeout(KEYCHAIN_TIMEOUT,
     // ...)`, so this `.await` is bounded — see the design note above the
     // surrounding write block for why the two timeouts stay independent.
-    match load_from_keyring(account_id).await? {
-        Some(stored) if stored == blob => Ok(()),
+    verify_read_back(load_from_keyring(account_id).await?, blob)
+}
+
+/// Pure read-back verification decision for [`save_to_keyring`]:
+/// success is confirmed only when the freshly-read blob equals what
+/// was written. A mismatch or an absent item means the `security -i`
+/// add silently failed (TCC denial, ACL gate) despite exit 0.
+#[cfg(target_os = "macos")]
+fn verify_read_back(stored: Option<String>, expected: &str) -> Result<(), KeychainErr> {
+    match stored {
+        Some(stored) if stored == expected => Ok(()),
         Some(_) => Err(KeychainErr::Other(
             "keyring write did not take effect (read-back mismatch)".into(),
         )),
@@ -294,27 +310,41 @@ async fn load_from_keyring(account_id: Uuid) -> Result<Option<String>, KeychainE
     .await
     .map_err(|_| KeychainErr::Other("security find-generic-password timed out".into()))?
     .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
-    if out.status.success() {
-        let blob = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+    parse_find_output(
+        out.status.success(),
+        out.status.code().unwrap_or(-1),
+        &out.stdout,
+        &out.stderr,
+    )
+}
+
+/// Pure exit-status → outcome mapping for `security
+/// find-generic-password`.
+///
+/// Exit 44 = errSecItemNotFound. This is the only code that means
+/// "item not in keychain"; treat it as a clean miss so the Auto-mode
+/// caller can fall back to file storage. Everything else (36 locked,
+/// TCC denial, ACL gate, parse failure) is a real problem and must
+/// NOT fall back — see the KeychainErr docstring.
+#[cfg(target_os = "macos")]
+fn parse_find_output(
+    success: bool,
+    code: i32,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<Option<String>, KeychainErr> {
+    if success {
+        let blob = String::from_utf8_lossy(stdout).trim_end().to_string();
         Ok(Some(blob))
+    } else if code == 44 {
+        Ok(None)
+    } else if code == 36 {
+        Err(KeychainErr::Locked)
     } else {
-        let code = out.status.code().unwrap_or(-1);
-        // Exit 44 = errSecItemNotFound. This is the only code that
-        // means "item not in keychain"; treat it as a clean miss so
-        // the Auto-mode caller can fall back to file storage.
-        // Everything else (36 locked, TCC denial, ACL gate, parse
-        // failure) is a real problem and must NOT fall back —
-        // see the KeychainErr docstring.
-        if code == 44 {
-            Ok(None)
-        } else if code == 36 {
-            Err(KeychainErr::Locked)
-        } else {
-            Err(KeychainErr::Other(format!(
-                "security find-generic-password failed (code {code}): {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )))
-        }
+        Err(KeychainErr::Other(format!(
+            "security find-generic-password failed (code {code}): {}",
+            String::from_utf8_lossy(stderr).trim()
+        )))
     }
 }
 
@@ -337,16 +367,26 @@ async fn delete_from_keyring(account_id: Uuid) -> Result<(), KeychainErr> {
     .await
     .map_err(|_| KeychainErr::Other("security delete-generic-password timed out".into()))?
     .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
-    let code = out.status.code().unwrap_or(-1);
-    // success or exit 44 (item not found) → idempotent ok.
-    if out.status.success() || code == 44 {
+    parse_delete_status(
+        out.status.success(),
+        out.status.code().unwrap_or(-1),
+        &out.stderr,
+    )
+}
+
+/// Pure exit-status → outcome mapping for `security
+/// delete-generic-password`: success or exit 44 (item not found) →
+/// idempotent ok; 36 → locked; anything else fails closed.
+#[cfg(target_os = "macos")]
+fn parse_delete_status(success: bool, code: i32, stderr: &[u8]) -> Result<(), KeychainErr> {
+    if success || code == 44 {
         Ok(())
     } else if code == 36 {
         Err(KeychainErr::Locked)
     } else {
         Err(KeychainErr::Other(format!(
             "security delete-generic-password failed (code {code}): {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+            String::from_utf8_lossy(stderr).trim()
         )))
     }
 }
@@ -433,18 +473,12 @@ pub async fn load(account_id: Uuid) -> Result<String, SwapError> {
             Err(e) => Err(e.into()),
         },
         #[cfg(target_os = "macos")]
-        CredBackend::Auto => match load_from_keyring(account_id).await {
-            Ok(Some(blob)) => {
+        CredBackend::Auto => match classify_auto_load(load_from_keyring(account_id).await) {
+            AutoLoadAction::UseKeychain(blob) => {
                 let _ = delete_file(account_id);
                 Ok(blob)
             }
-            // Audit fix for storage.rs:289 — only `NotFound` falls
-            // back to file. A locked keychain or a TCC/ACL denial
-            // means the keychain IS reachable but is refusing us;
-            // falling back to file in that state would surface stale
-            // data after a real keychain that the attacker just
-            // forced unreachable. Fail closed.
-            Ok(None) => match load_from_file(account_id) {
+            AutoLoadAction::FallBackToFile => match load_from_file(account_id) {
                 Ok(blob) => {
                     if save_to_keyring(account_id, &blob).await.is_ok() {
                         let _ = delete_file(account_id);
@@ -453,8 +487,39 @@ pub async fn load(account_id: Uuid) -> Result<String, SwapError> {
                 }
                 Err(e) => Err(e),
             },
-            Err(e) => Err(e.into()),
+            AutoLoadAction::FailClosed(e) => Err(e.into()),
         },
+    }
+}
+
+/// What Auto-mode `load` does next, given the keyring read outcome.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+enum AutoLoadAction {
+    /// Keychain returned the blob — use it (and clean up any stale
+    /// file copy).
+    UseKeychain(String),
+    /// Keychain is reachable and reports a clean miss (exit 44) —
+    /// the only state where the file fallback + keychain import is
+    /// permitted.
+    FallBackToFile,
+    /// Keychain errored — fail closed without touching file storage.
+    FailClosed(KeychainErr),
+}
+
+/// Pure Auto-mode load policy — the audit-fix for storage.rs:289.
+///
+/// Only a clean keychain miss (`Ok(None)`) falls back to file. A
+/// locked keychain or a TCC/ACL denial means the keychain IS
+/// reachable but is refusing us; falling back to file in that state
+/// would surface stale data after a real keychain that the attacker
+/// just forced unreachable. Fail closed.
+#[cfg(target_os = "macos")]
+fn classify_auto_load(outcome: Result<Option<String>, KeychainErr>) -> AutoLoadAction {
+    match outcome {
+        Ok(Some(blob)) => AutoLoadAction::UseKeychain(blob),
+        Ok(None) => AutoLoadAction::FallBackToFile,
+        Err(e) => AutoLoadAction::FailClosed(e),
     }
 }
 
@@ -488,15 +553,254 @@ pub async fn delete(account_id: Uuid) -> Result<(), SwapError> {
             //     file is `Ok`. So a file Err is also a real failure.
             let keyring_result = delete_from_keyring(account_id).await;
             let file_result = delete_file(account_id);
+            combine_delete_results(keyring_result, file_result)
+        }
+    }
+}
 
-            match (keyring_result, file_result) {
-                (Ok(()), Ok(())) => Ok(()),
-                (Err(k), Ok(())) => Err(SwapError::from(k)),
-                (Ok(()), Err(f)) => Err(f),
-                (Err(k), Err(f)) => Err(SwapError::WriteFailed(format!(
-                    "both storage backends errored: keyring={k}, file={f}"
-                ))),
+/// Pure Auto-mode delete policy — the audit-fix for storage.rs:328.
+/// Both backends must report success; a real error on EITHER side is
+/// surfaced (keychain-side `NotFound` was already mapped to `Ok`
+/// inside `delete_from_keyring`, so it never reaches this match).
+#[cfg(target_os = "macos")]
+fn combine_delete_results(
+    keyring: Result<(), KeychainErr>,
+    file: Result<(), SwapError>,
+) -> Result<(), SwapError> {
+    match (keyring, file) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(k), Ok(())) => Err(SwapError::from(k)),
+        (Ok(()), Err(f)) => Err(f),
+        (Err(k), Err(f)) => Err(SwapError::WriteFailed(format!(
+            "both storage backends errored: keyring={k}, file={f}"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── backend selection (pure env-var mapping) ───────────────────
+
+    #[test]
+    fn test_backend_from_file_value_selects_file_only() {
+        assert_eq!(backend_from(Some("file")), CredBackend::FileOnly);
+    }
+
+    #[test]
+    fn test_backend_from_keyring_value_selects_keyring_only() {
+        assert_eq!(backend_from(Some("keyring")), CredBackend::KeyringOnly);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_backend_from_default_is_auto_on_macos() {
+        assert_eq!(backend_from(None), CredBackend::Auto);
+        assert_eq!(backend_from(Some("garbage")), CredBackend::Auto);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn test_backend_from_default_is_file_only_off_macos() {
+        // The keychain stubs always error off macOS; defaulting to
+        // Auto there would fail-closed every read of credentials the
+        // save path put in a file. See the comment in `backend_from`.
+        assert_eq!(backend_from(None), CredBackend::FileOnly);
+        assert_eq!(backend_from(Some("garbage")), CredBackend::FileOnly);
+    }
+
+    // ── macOS keyring decision helpers ─────────────────────────────
+
+    #[cfg(target_os = "macos")]
+    mod macos {
+        use super::super::*;
+
+        // validate_keychain_attr — the `security -i` quoting gate.
+
+        #[test]
+        fn test_validate_keychain_attr_accepts_uuid_and_service() {
+            validate_keychain_attr(&Uuid::new_v4().to_string()).unwrap();
+            validate_keychain_attr(KEYCHAIN_SERVICE).unwrap();
+        }
+
+        #[test]
+        fn test_validate_keychain_attr_rejects_quote_breakout_chars() {
+            for bad in ["a\"b", "a\nb", "a\rb", "a\\b"] {
+                assert!(
+                    validate_keychain_attr(bad).is_err(),
+                    "should reject {bad:?}"
+                );
             }
+        }
+
+        // parse_find_output — exit-code → outcome mapping.
+
+        #[test]
+        fn test_parse_find_output_success_trims_trailing_newline() {
+            let got = parse_find_output(true, 0, b"blob-bytes\n", b"").unwrap();
+            assert_eq!(got.as_deref(), Some("blob-bytes"));
+        }
+
+        #[test]
+        fn test_parse_find_output_exit_44_is_clean_miss() {
+            // errSecItemNotFound — the ONLY code allowed to read as
+            // "not there"; Auto-mode file fallback keys off this.
+            let got = parse_find_output(false, 44, b"", b"could not be found").unwrap();
+            assert!(got.is_none());
+        }
+
+        #[test]
+        fn test_parse_find_output_exit_36_is_locked() {
+            let err = parse_find_output(false, 36, b"", b"").unwrap_err();
+            assert!(matches!(err, KeychainErr::Locked), "err={err:?}");
+        }
+
+        #[test]
+        fn test_parse_find_output_unknown_exit_fails_closed() {
+            // TCC denial / ACL gate / anything unrecognized — a real
+            // failure, never a clean miss.
+            let err = parse_find_output(false, 51, b"", b"denied").unwrap_err();
+            match err {
+                KeychainErr::Other(msg) => {
+                    assert!(msg.contains("code 51"), "msg={msg}");
+                    assert!(msg.contains("denied"), "msg={msg}");
+                }
+                other => panic!("expected Other, got {other:?}"),
+            }
+        }
+
+        // parse_delete_status — idempotency + fail-closed mapping.
+
+        #[test]
+        fn test_parse_delete_status_success_is_ok() {
+            parse_delete_status(true, 0, b"").unwrap();
+        }
+
+        #[test]
+        fn test_parse_delete_status_exit_44_is_idempotent_ok() {
+            parse_delete_status(false, 44, b"not found").unwrap();
+        }
+
+        #[test]
+        fn test_parse_delete_status_exit_36_is_locked() {
+            let err = parse_delete_status(false, 36, b"").unwrap_err();
+            assert!(matches!(err, KeychainErr::Locked), "err={err:?}");
+        }
+
+        #[test]
+        fn test_parse_delete_status_unknown_exit_fails_closed() {
+            let err = parse_delete_status(false, 51, b"acl gate").unwrap_err();
+            match err {
+                KeychainErr::Other(msg) => {
+                    assert!(msg.contains("code 51"), "msg={msg}");
+                    assert!(msg.contains("acl gate"), "msg={msg}");
+                }
+                other => panic!("expected Other, got {other:?}"),
+            }
+        }
+
+        // verify_read_back — the `security -i` exit-0-lies guard.
+
+        #[test]
+        fn test_verify_read_back_matching_blob_is_ok() {
+            verify_read_back(Some("blob".to_string()), "blob").unwrap();
+        }
+
+        #[test]
+        fn test_verify_read_back_mismatch_is_error() {
+            let err = verify_read_back(Some("other".to_string()), "blob").unwrap_err();
+            match err {
+                KeychainErr::Other(msg) => assert!(msg.contains("read-back mismatch")),
+                other => panic!("expected Other, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn test_verify_read_back_absent_item_is_error() {
+            let err = verify_read_back(None, "blob").unwrap_err();
+            match err {
+                KeychainErr::Other(msg) => assert!(msg.contains("absent on read-back")),
+                other => panic!("expected Other, got {other:?}"),
+            }
+        }
+
+        // classify_auto_load — the fail-closed load matrix
+        // (audit fix for storage.rs:289).
+
+        #[test]
+        fn test_classify_auto_load_keychain_hit_uses_blob() {
+            let action = classify_auto_load(Ok(Some("blob".to_string())));
+            assert!(
+                matches!(action, AutoLoadAction::UseKeychain(ref b) if b == "blob"),
+                "action={action:?}"
+            );
+        }
+
+        #[test]
+        fn test_classify_auto_load_clean_miss_falls_back_to_file() {
+            let action = classify_auto_load(Ok(None));
+            assert!(
+                matches!(action, AutoLoadAction::FallBackToFile),
+                "action={action:?}"
+            );
+        }
+
+        #[test]
+        fn test_classify_auto_load_locked_keychain_fails_closed() {
+            // THE regression guard: a locked keychain must never read
+            // as "fall back to file" — that is the attacker-forces-
+            // stale-credentials path the audit fix closed.
+            let action = classify_auto_load(Err(KeychainErr::Locked));
+            assert!(
+                matches!(action, AutoLoadAction::FailClosed(KeychainErr::Locked)),
+                "action={action:?}"
+            );
+        }
+
+        #[test]
+        fn test_classify_auto_load_other_error_fails_closed() {
+            let action = classify_auto_load(Err(KeychainErr::Other("tcc denial".into())));
+            assert!(
+                matches!(action, AutoLoadAction::FailClosed(KeychainErr::Other(_))),
+                "action={action:?}"
+            );
+        }
+
+        // combine_delete_results — the four-arm delete matrix
+        // (audit fix for storage.rs:328).
+
+        #[test]
+        fn test_combine_delete_results_both_ok_is_ok() {
+            combine_delete_results(Ok(()), Ok(())).unwrap();
+        }
+
+        #[test]
+        fn test_combine_delete_results_keyring_error_surfaces_despite_file_ok() {
+            // The masked case the audit fix closed: keychain delete
+            // hit a TCC denial (secret still in the keychain) while
+            // the file path no-op-succeeded.
+            let err = combine_delete_results(Err(KeychainErr::Locked), Ok(())).unwrap_err();
+            assert!(matches!(err, SwapError::KeychainError(_)), "err={err:?}");
+        }
+
+        #[test]
+        fn test_combine_delete_results_file_error_surfaces_despite_keyring_ok() {
+            let file_err = SwapError::WriteFailed("io".into());
+            let err = combine_delete_results(Ok(()), Err(file_err)).unwrap_err();
+            assert!(matches!(err, SwapError::WriteFailed(_)), "err={err:?}");
+        }
+
+        #[test]
+        fn test_combine_delete_results_both_errors_reports_both() {
+            let err = combine_delete_results(
+                Err(KeychainErr::Other("kc".into())),
+                Err(SwapError::WriteFailed("fs".into())),
+            )
+            .unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("kc"), "msg={msg}");
+            assert!(msg.contains("fs"), "msg={msg}");
         }
     }
 }

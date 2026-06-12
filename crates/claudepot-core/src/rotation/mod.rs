@@ -22,6 +22,7 @@
 pub mod audit;
 pub mod breaker_store;
 pub mod eval;
+pub mod gating;
 pub mod rules;
 pub mod store;
 
@@ -31,6 +32,7 @@ pub use audit::{
 };
 pub use breaker_store::{BreakerFile, LedgerEntry, RotationBreakerError};
 pub use eval::{evaluate, NoCandidateReason, PendingSwap, SkipReason};
+pub use gating::breaker_gated_rules;
 pub use rules::{
     Action, RotationGuards, RotationMode, RotationRule, RotationRulesFile, Selector, Trigger,
     SCHEMA_VERSION,

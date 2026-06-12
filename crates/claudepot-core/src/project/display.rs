@@ -15,7 +15,7 @@ pub(crate) fn compute_dry_run_plan(
     _new_norm: &str,
     old_san: &str,
     new_san: &str,
-    scenario: &super::project::MoveScenario,
+    scenario: &super::core::MoveScenario,
 ) -> Result<DryRunPlan, ProjectError> {
     // Same long-path prefix-fallback as move_project (see spec §2).
     let cc_old_exact = config_dir.join("projects").join(old_san);
@@ -108,7 +108,7 @@ pub(crate) fn compute_dry_run_plan(
             .exists();
 
     Ok(DryRunPlan {
-        would_move_dir: *scenario == super::project::MoveScenario::MoveAndUpdate,
+        would_move_dir: *scenario == super::core::MoveScenario::MoveAndUpdate,
         old_cc_dir: old_san.to_string(),
         new_cc_dir: new_san.to_string(),
         session_count,
