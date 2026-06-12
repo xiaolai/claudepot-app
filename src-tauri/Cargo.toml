@@ -2,6 +2,7 @@
 name = "claudepot-tauri"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 description = "Claudepot — Tauri menu bar app"
 
@@ -14,7 +15,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 claudepot-core = { path = "../crates/claudepot-core" }
-keyring.workspace = true
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -34,6 +34,22 @@ uuid.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
+# Dev-only webview/IPC bridge for the hypothesi tauri-mcp-server
+# tooling. Registration is `#[cfg(debug_assertions)]`-gated in
+# lib.rs, so release builds never initialize it, and the release
+# profile (thin LTO + 1 CGU) strips the unreferenced plugin code
+# from the shipped binary. The dependency itself stays
+# unconditional on purpose: cargo cannot express profile-gated deps
+# (`[target.'cfg(debug_assertions)'.dependencies]` is never
+# matched — cargo only evaluates platform cfgs there), and the
+# feature-gate alternative (`optional = true` + `-f mcp-bridge`)
+# would silently drop the bridge from the documented
+# `pnpm tauri dev` entry point; the shared `"tauri": "tauri"` npm
+# script can't inject a dev-only flag portably because release.yml
+# runs `pnpm tauri build` under cmd.exe on the Windows runner.
+# Residual release cost: compile time + the dormant objc2 0.2/0.5
+# duplicate tree in the lockfile (the plugin still targets the old
+# objc2 generation as of 0.11.2).
 tauri-plugin-mcp-bridge = "0.11"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"

@@ -3,6 +3,7 @@ name = "claudepot-cli"
 description = "CLI for Claudepot — multi-account Claude Code/Desktop switcher"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 
 [[bin]]
@@ -24,9 +25,7 @@ uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-reqwest.workspace = true
 dirs.workspace = true
-keyring.workspace = true
 
 # WI-008 — Claudepot MCP memory server. Binary-only on the CLI;
 # claudepot-core stays free of the ~30-dep rmcp tree. Per the spike
