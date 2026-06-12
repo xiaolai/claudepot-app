@@ -90,76 +90,14 @@ enum Commands {
     /// over `claudepot-core::migrate::export_projects`.
     #[command(name = "export")]
     Export {
-        /// One or more project prefixes (resolved against the user's
-        /// CC project tree via the same exactly-one-prefix-match rule
-        /// as `account` resolution).
-        project_prefixes: Vec<String>,
-        /// Output path. Defaults to `<host>-<YYYYMMDD>.claudepot.tar.zst`
-        /// in the current working directory.
-        #[arg(long, short)]
-        out: Option<std::path::PathBuf>,
-        /// Include `~/.claude/CLAUDE.md`, `agents/`, `skills/`,
-        /// `commands/`, scrubbed `settings.json`, plugin registry.
-        /// Carries trust-gate items the importer must accept.
-        #[arg(long)]
-        include_global: bool,
-        /// Tarball the project's `<cwd>/.claude/**` and `<cwd>/CLAUDE.md`
-        /// alongside the session state. Use only when the project is
-        /// not in git (escape hatch — git is the right transport for
-        /// source).
-        #[arg(long)]
-        include_worktree: bool,
-        /// Best-effort snapshot of in-flight sessions. Marks them
-        /// `live_at_export: true` in the per-project manifest; the
-        /// importer surfaces a banner before applying.
-        #[arg(long)]
-        include_live: bool,
-        /// Include claudepot's own state (protected paths,
-        /// preferences, artifact-lifecycle). NOT credentials.
-        #[arg(long)]
-        include_claudepot_state: bool,
-        /// Skip the `file-history/<sid>/` dirs entirely. JSONL records
-        /// still ride along; only the on-disk backups are dropped.
-        #[arg(long)]
-        no_file_history: bool,
-        /// Encrypt the bundle with `age` (passphrase prompt). Default
-        /// for v1; v0 ships plaintext only.
-        #[arg(long)]
-        encrypt: bool,
-        /// Optional minisign signature over the manifest sha256.
-        #[arg(long, value_name = "KEYFILE")]
-        sign: Option<String>,
+        #[command(flatten)]
+        args: commands::project_migrate::ExportArgs,
     },
     /// Import a `*.claudepot.tar.zst` bundle into this machine.
     #[command(name = "import")]
     Import {
-        /// Path to the bundle file.
-        bundle: std::path::PathBuf,
-        /// Conflict-resolution mode. Default is `skip` (refuse on any
-        /// pre-existing slug); `merge` unions sessions; `replace`
-        /// archives the target slug to claudepot trash first
-        /// (requires `--yes`).
-        #[arg(long, value_enum, default_value_t = commands::project_migrate::ConflictModeArg::Skip)]
-        mode: commands::project_migrate::ConflictModeArg,
-        /// In `--mode=merge`, pick a side for any session-id collision.
-        #[arg(long, value_enum)]
-        prefer: Option<commands::project_migrate::MergePreferenceArg>,
-        /// Opt in to all bundled hooks (still printed to stderr).
-        #[arg(long)]
-        accept_hooks: bool,
-        /// Opt in to all needs-resolution MCP entries.
-        #[arg(long)]
-        accept_mcp: bool,
-        /// Override path substitution rule. Repeatable.
-        #[arg(long, value_name = "SOURCE=TARGET")]
-        remap: Vec<String>,
-        /// Import without repathing file-history (records ride along
-        /// but visual diffs for old turns are degraded).
-        #[arg(long)]
-        no_file_history: bool,
-        /// Plan only — don't apply.
-        #[arg(long)]
-        dry_run: bool,
+        #[command(flatten)]
+        args: commands::project_migrate::ImportArgs,
     },
     /// Inspect or manage migration bundles.
     Migrate {
@@ -199,7 +137,9 @@ enum Commands {
     /// opens it in the OS file manager, or tails the current log.
     Logs {
         /// Open the log directory in the OS file manager.
-        #[arg(long)]
+        /// Mutually exclusive with `--tail` (tail never returns,
+        /// so a combined invocation would silently drop the open).
+        #[arg(long, conflicts_with = "tail")]
         open: bool,
         /// Follow the current `claudepot.log` (tail -f equivalent).
         #[arg(long, short = 'f')]
@@ -308,9 +248,6 @@ enum CodexAction {
         /// `~/.claudepot/sessions.db`.
         #[arg(long)]
         db: Option<std::path::PathBuf>,
-        /// JSON-formatted output. Default is human-readable.
-        #[arg(long)]
-        json: bool,
     },
     /// Force a full rebuild of the transcript-derived tables
     /// (`sessions`, `session_turns`, `exchanges`, `tool_calls`,
@@ -337,18 +274,15 @@ enum CodexAction {
     /// memories/decisions/evidence will be empty until you
     /// re-create them.
     ///
-    /// Requires `--yes` to confirm — this is the only destructive
-    /// path in the codex subcommand tree.
+    /// Requires the global `--yes` to confirm — this is the only
+    /// destructive path in the codex subcommand tree. Without it
+    /// the command refuses and prints the row counts it would
+    /// have removed.
     Forget {
         /// Override the sessions.db path. Defaults to
         /// `~/.claudepot/sessions.db`.
         #[arg(long)]
         db: Option<std::path::PathBuf>,
-        /// Confirm the destructive action. Without this flag the
-        /// command refuses and prints the row counts it would
-        /// have removed.
-        #[arg(long = "yes")]
-        confirm: bool,
     },
 }
 
@@ -380,35 +314,8 @@ enum UpdateAction {
     /// Show or modify update settings. With no flags, prints the
     /// current configuration. Each flag triggers exactly one write.
     Config {
-        /// CC release channel — writes `autoUpdatesChannel` to
-        /// `~/.claude/settings.json` (CC's own settings file, not
-        /// Claudepot's). Single source of truth — see
-        /// `dev-docs/auto-updates.md` mechanism callout #2.
-        #[arg(long, value_parser = ["latest", "stable"])]
-        channel: Option<String>,
-        /// For `--channel stable` from `latest`: explicitly accept
-        /// the downgrade. Without this, the CLI pins
-        /// `minimumVersion` to the currently-installed version so
-        /// you stay on it (CC's "stay" default).
-        #[arg(long)]
-        allow_downgrade: bool,
-        /// Toggle CLI tray-badge update notifications.
-        #[arg(long)]
-        cli_notify: Option<bool>,
-        /// Toggle CLI OS notifications (toast / banner) when an
-        /// update is detected. Independent from the badge.
-        #[arg(long)]
-        cli_notify_os: Option<bool>,
-        /// Toggle Desktop tray-badge update notifications.
-        #[arg(long)]
-        desktop_notify: Option<bool>,
-        /// Toggle Desktop OS notifications.
-        #[arg(long)]
-        desktop_notify_os: Option<bool>,
-        /// Toggle "auto-install Desktop in background when not
-        /// running" — the asymmetry-fix toggle.
-        #[arg(long)]
-        desktop_auto: Option<bool>,
+        #[command(flatten)]
+        args: commands::update::config::ConfigArgs,
     },
 }
 
@@ -463,9 +370,6 @@ enum SessionAction {
         /// resolution Claude Code uses.
         #[arg(long)]
         claude_config: Option<std::path::PathBuf>,
-        /// JSON-formatted output. Default is human-readable.
-        #[arg(long)]
-        json: bool,
     },
     /// Inspect one transcript: classification, chunks, linked tool
     /// calls, subagents, phases, context attribution. Read-only.
@@ -480,36 +384,8 @@ enum SessionAction {
     },
     /// Export a session transcript. Redacts sk-ant-* tokens by default.
     Export {
-        /// Session UUID or absolute `.jsonl` path.
-        target: String,
-        /// Output format.
-        #[arg(long, default_value = "md", value_parser = ["md", "markdown", "markdown-slim", "json", "html"])]
-        format: String,
-        /// Destination. `file` requires --output; clipboard copies;
-        /// gist uploads via GITHUB_TOKEN env or keychain.
-        #[arg(long, default_value = "file", value_parser = ["file", "clipboard", "gist"])]
-        to: String,
-        /// Output file path (for --to file).
-        #[arg(long)]
-        output: Option<String>,
-        /// Make the gist public (for --to gist). Default is secret.
-        #[arg(long)]
-        public: bool,
-        /// Redact absolute paths: off | relative | hash.
-        #[arg(long, default_value = "off", value_parser = ["off", "relative", "hash"])]
-        redact_paths: String,
-        /// Mask email-like strings with <email-redacted>.
-        #[arg(long)]
-        redact_emails: bool,
-        /// Drop lines that look like FOO=bar env assignments.
-        #[arg(long)]
-        redact_env: bool,
-        /// Repeatable: extra literal substrings to redact.
-        #[arg(long)]
-        redact_regex: Vec<String>,
-        /// Strip the copy-buttons script from HTML output.
-        #[arg(long)]
-        html_no_js: bool,
+        #[command(flatten)]
+        args: commands::session::ExportArgs,
     },
     /// Cross-session text search. Scans first-user-prompts and
     /// assistant/user turns case-insensitively.
@@ -525,27 +401,8 @@ enum SessionAction {
     /// Bulk delete session transcripts into the reversible trash.
     /// Dry-run by default — pass `--execute` to actually move files.
     Prune {
-        /// Match sessions whose last activity is older than the given
-        /// duration. Accepts `7d`, `24h`, `90m`, `3600s`.
-        #[arg(long)]
-        older_than: Option<String>,
-        /// Match sessions whose size is at least the given value.
-        /// Accepts `10MB`, `500KB`, `1024`.
-        #[arg(long)]
-        larger_than: Option<String>,
-        /// Repeatable: narrow to sessions whose cwd equals one of these.
-        #[arg(long)]
-        project: Vec<String>,
-        /// Only include sessions that recorded an error.
-        #[arg(long)]
-        has_error: bool,
-        /// Only include sidechain (subagent) sessions.
-        #[arg(long)]
-        sidechain: bool,
-        /// Actually move files into the trash. Without this flag,
-        /// prune only prints the plan.
-        #[arg(long)]
-        execute: bool,
+        #[command(flatten)]
+        args: commands::session::PruneArgs,
     },
     /// Reversible trash for prune/slim operations.
     Trash {
@@ -556,43 +413,8 @@ enum SessionAction {
     /// and, optionally, base64 image/document payloads.
     /// Dry-run by default — pass `--execute` to rewrite in place.
     Slim {
-        /// Session UUID or absolute `.jsonl` path. Omit with `--all`.
-        #[arg(conflicts_with = "all")]
-        target: Option<String>,
-        /// Run against every session matching the filter flags below.
-        /// Mutually exclusive with `<target>`.
-        #[arg(long)]
-        all: bool,
-        /// Filter: only sessions whose last_ts is older than this (e.g. `7d`, `30d`).
-        /// Requires `--all`.
-        #[arg(long)]
-        older_than: Option<String>,
-        /// Filter: only sessions at least this size (`1MB`, `500KB`).
-        /// Requires `--all`.
-        #[arg(long)]
-        larger_than: Option<String>,
-        /// Filter: repeatable project path filter. Requires `--all`.
-        #[arg(long)]
-        project: Vec<String>,
-        /// Drop tool_result payloads larger than this. Accepts
-        /// `1MB`, `500KB`, `1024`. Default: 1MiB.
-        #[arg(long)]
-        drop_tool_results_over: Option<String>,
-        /// Repeatable: tool names whose results to preserve regardless.
-        #[arg(long)]
-        exclude_tool: Vec<String>,
-        /// Replace base64 image blocks with `[image]` text stubs.
-        /// Saves ~2000 tokens/image on `claude --resume` of this
-        /// session.
-        #[arg(long)]
-        strip_images: bool,
-        /// Replace document (PDF etc.) blocks with `[document]` text
-        /// stubs. Same ~2000-token-per-block accounting as images.
-        #[arg(long)]
-        strip_documents: bool,
-        /// Actually rewrite the file. Without this, slim only plans.
-        #[arg(long)]
-        execute: bool,
+        #[command(flatten)]
+        args: commands::session::SlimArgs,
     },
 }
 
@@ -600,27 +422,8 @@ enum SessionAction {
 enum ActivityAction {
     /// Show recent activity cards (anomalies + milestones), newest first.
     Recent {
-        /// Window: `30m`, `2h`, `7d`. Omit for all-time.
-        #[arg(long)]
-        since: Option<String>,
-        /// Filter by kind. Repeat for multiple kinds. Values:
-        /// hook, hook-slow, hook-info, agent, agent-stranded,
-        /// tool-error, command, milestone.
-        #[arg(long, value_name = "KIND")]
-        kind: Vec<String>,
-        /// Minimum severity: info, notice, warn, error.
-        #[arg(long)]
-        severity: Option<String>,
-        /// Filter to cards from this project (matches by cwd prefix).
-        #[arg(long)]
-        project: Option<String>,
-        /// Filter to cards attributed to this plugin (`<name>` or
-        /// `<name>@<owner>`).
-        #[arg(long)]
-        plugin: Option<String>,
-        /// Maximum rows to print. Defaults to 200, capped at 10000.
-        #[arg(long)]
-        limit: Option<usize>,
+        #[command(flatten)]
+        args: commands::activity::RecentArgs,
     },
     /// Walk every JSONL under `~/.claude/projects/` and rebuild the
     /// activity index. Idempotent — re-running adds zero rows when
@@ -861,28 +664,8 @@ enum ProjectAction {
     },
     /// Move/rename a project and migrate CC state
     Move {
-        /// Current project path
-        old_path: String,
-        /// New project path
-        new_path: String,
-        /// Only update CC state, don't move the actual directory
-        #[arg(long)]
-        no_move: bool,
-        /// Merge CC data if target already has sessions
-        #[arg(long, conflicts_with = "overwrite")]
-        merge: bool,
-        /// Overwrite CC data at target
-        #[arg(long, conflicts_with = "merge")]
-        overwrite: bool,
-        /// Proceed even if Claude is running in the directory
-        #[arg(long)]
-        force: bool,
-        /// Show what would happen without making changes
-        #[arg(long)]
-        dry_run: bool,
-        /// Proceed despite unresolved pending rename journals (last-resort)
-        #[arg(long)]
-        ignore_pending_journals: bool,
+        #[command(flatten)]
+        args: commands::project::MoveArgs,
     },
     /// Remove orphaned project directories
     Clean {
@@ -913,31 +696,8 @@ enum ProjectAction {
     },
     /// Repair or resolve pending / failed rename journals
     Repair {
-        /// Finish remaining phases for a journal (id optional, use --all to target every one)
-        #[arg(long)]
-        resume: bool,
-        /// Reverse completed phases and restore snapshots
-        #[arg(long, conflicts_with = "resume")]
-        rollback: bool,
-        /// Mark a journal as abandoned (keeps audit trail, suppresses nags)
-        #[arg(long, conflicts_with_all = ["resume", "rollback"])]
-        abandon: bool,
-        /// Force-release a lock file whose staleness detection refuses auto-break
-        #[arg(long)]
-        break_lock: Option<String>,
-        /// Clean up abandoned journals and expired snapshots
-        #[arg(long)]
-        gc: bool,
-        /// For --gc: how many days old before cleanup (default 90)
-        #[arg(long, requires = "gc")]
-        older_than: Option<u64>,
-        /// Target journal id (filename without extension). If absent,
-        /// --resume/--rollback/--abandon require --all.
-        #[arg(long)]
-        id: Option<String>,
-        /// Apply to all matching journals
-        #[arg(long)]
-        all: bool,
+        #[command(flatten)]
+        args: commands::project::RepairArgs,
     },
 }
 
@@ -1175,6 +935,10 @@ async fn main() -> Result<()> {
     // test flake. Surfaced by the v0.1.36 CI run (26006793979)
     // where `cargo test`'s parallel `mcp memory-server` + `codex
     // index` subprocesses raced on the runner's accounts.db.
+    // This early return is the ONLY dispatch site for Mcp/Codex —
+    // the arms in the post-ctx match below are `unreachable!`. Wire
+    // new Mcp/Codex verbs here. The global `--json` / `--yes` flags
+    // are already parsed, so they pass straight into the handlers.
     if matches!(cli.command, Commands::Mcp { .. } | Commands::Codex { .. }) {
         return match cli.command {
             Commands::Mcp { action } => match action {
@@ -1185,13 +949,11 @@ async fn main() -> Result<()> {
                 }
             },
             Commands::Codex { action } => match action {
-                CodexAction::Index {
-                    codex_home,
-                    db,
-                    json,
-                } => commands::codex::index(codex_home, db, json).await,
-                CodexAction::Rebuild { db } => commands::codex::rebuild(db).await,
-                CodexAction::Forget { db, confirm } => commands::codex::forget(db, confirm).await,
+                CodexAction::Index { codex_home, db } => {
+                    commands::codex::index(codex_home, db, cli.json).await
+                }
+                CodexAction::Rebuild { db } => commands::codex::rebuild(db, cli.json).await,
+                CodexAction::Forget { db } => commands::codex::forget(db, cli.yes).await,
             },
             _ => unreachable!("matches! guard ensures Mcp or Codex"),
         };
@@ -1257,26 +1019,7 @@ async fn main() -> Result<()> {
         Commands::Project { action } => match action {
             ProjectAction::List => commands::project::list(&ctx)?,
             ProjectAction::Show { path } => commands::project::show(&ctx, &path)?,
-            ProjectAction::Move {
-                old_path,
-                new_path,
-                no_move,
-                merge,
-                overwrite,
-                force,
-                dry_run,
-                ignore_pending_journals,
-            } => commands::project::move_project(
-                &ctx,
-                &old_path,
-                &new_path,
-                no_move,
-                merge,
-                overwrite,
-                force,
-                dry_run,
-                ignore_pending_journals,
-            )?,
+            ProjectAction::Move { args } => commands::project::move_project(&ctx, args)?,
             ProjectAction::Clean {
                 dry_run,
                 ignore_pending_journals,
@@ -1291,26 +1034,7 @@ async fn main() -> Result<()> {
                     commands::project::trash_empty(&ctx, older_than)?
                 }
             },
-            ProjectAction::Repair {
-                resume,
-                rollback,
-                abandon,
-                break_lock,
-                gc,
-                older_than,
-                id,
-                all,
-            } => commands::project::repair(
-                &ctx,
-                resume,
-                rollback,
-                abandon,
-                break_lock.as_deref(),
-                gc,
-                older_than,
-                id.as_deref(),
-                all,
-            )?,
+            ProjectAction::Repair { args } => commands::project::repair(&ctx, args)?,
         },
         Commands::Agent { action } => match *action {
             AgentAction::Draft {
@@ -1331,7 +1055,7 @@ async fn main() -> Result<()> {
                 attach_memory,
                 drafted_by,
             } => commands::agent::draft_cmd(
-                cli.json,
+                &ctx,
                 commands::agent::DraftArgs {
                     from_json,
                     name,
@@ -1351,8 +1075,8 @@ async fn main() -> Result<()> {
                     drafted_by,
                 },
             )?,
-            AgentAction::List => commands::agent::list_cmd(cli.json)?,
-            AgentAction::Show { id } => commands::agent::show_cmd(cli.json, &id)?,
+            AgentAction::List => commands::agent::list_cmd(&ctx)?,
+            AgentAction::Show { id } => commands::agent::show_cmd(&ctx, &id)?,
             AgentAction::RecordRun {
                 agent_id,
                 run_id,
@@ -1371,49 +1095,8 @@ async fn main() -> Result<()> {
                 run_dir.as_deref(),
             )?,
         },
-        Commands::Export {
-            project_prefixes,
-            out,
-            include_global,
-            include_worktree,
-            include_live,
-            include_claudepot_state,
-            no_file_history,
-            encrypt,
-            sign,
-        } => commands::project_migrate::export(
-            &ctx,
-            project_prefixes,
-            out,
-            include_global,
-            include_worktree,
-            include_live,
-            include_claudepot_state,
-            no_file_history,
-            encrypt,
-            sign,
-        )?,
-        Commands::Import {
-            bundle,
-            mode,
-            prefer,
-            accept_hooks,
-            accept_mcp,
-            remap,
-            no_file_history,
-            dry_run,
-        } => commands::project_migrate::import(
-            &ctx,
-            bundle,
-            mode,
-            prefer,
-            accept_hooks,
-            accept_mcp,
-            remap,
-            no_file_history,
-            dry_run,
-            cli.yes,
-        )?,
+        Commands::Export { args } => commands::project_migrate::export(&ctx, args)?,
+        Commands::Import { args } => commands::project_migrate::import(&ctx, args)?,
         Commands::Migrate { action } => match action {
             MigrateAction::Inspect {
                 bundle,
@@ -1422,7 +1105,7 @@ async fn main() -> Result<()> {
             MigrateAction::Undo => commands::project_migrate::undo(&ctx)?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
-        Commands::Logs { open, tail } => commands::logs::run(open, tail).await?,
+        Commands::Logs { open, tail } => commands::logs::run(&ctx, open, tail).await?,
         Commands::Status => commands::status::run(&ctx).await?,
         Commands::Usage { action } => match action {
             UsageAction::Report { window } => commands::usage::report(&ctx, &window).await?,
@@ -1431,61 +1114,18 @@ async fn main() -> Result<()> {
             UpdateAction::Check => commands::update::check::run(&ctx).await?,
             UpdateAction::Cli => commands::update::cli::run(&ctx).await?,
             UpdateAction::Desktop => commands::update::desktop::run(&ctx).await?,
-            UpdateAction::Config {
-                channel,
-                allow_downgrade,
-                cli_notify,
-                cli_notify_os,
-                desktop_notify,
-                desktop_notify_os,
-                desktop_auto,
-            } => {
-                commands::update::config::run(
-                    &ctx,
-                    channel,
-                    allow_downgrade,
-                    cli_notify,
-                    cli_notify_os,
-                    desktop_notify,
-                    desktop_notify_os,
-                    desktop_auto,
-                )
-                .await?
-            }
+            UpdateAction::Config { args } => commands::update::config::run(&ctx, args).await?,
         },
-        Commands::Mcp { action } => match action {
-            McpAction::MemoryServer { db } => commands::mcp::run(db).await?,
-            McpAction::PrintSnippet => commands::mcp::print_snippet()?,
-            McpAction::InstallSnippet { out, print_include } => {
-                commands::mcp::install_snippet(out, print_include)?
-            }
-        },
-        Commands::Codex { action } => match action {
-            CodexAction::Index {
-                codex_home,
-                db,
-                json,
-            } => commands::codex::index(codex_home, db, json).await?,
-            CodexAction::Rebuild { db } => commands::codex::rebuild(db).await?,
-            CodexAction::Forget { db, confirm } => commands::codex::forget(db, confirm).await?,
-        },
+        // Mcp/Codex never reach this match — they are dispatched (and
+        // returned from) before AccountStore::open so they don't
+        // serialize on accounts.db. Keeping the arms `unreachable!`
+        // instead of duplicating the dispatch means an edit to only
+        // one copy can't silently diverge.
+        Commands::Mcp { .. } | Commands::Codex { .. } => {
+            unreachable!("dispatched before AccountStore::open — see the early return above")
+        }
         Commands::Activity { action } => match action {
-            ActivityAction::Recent {
-                since,
-                kind,
-                severity,
-                project,
-                plugin,
-                limit,
-            } => commands::activity::recent(
-                &ctx,
-                since.as_deref(),
-                &kind,
-                severity.as_deref(),
-                project.as_deref(),
-                plugin.as_deref(),
-                limit,
-            )?,
+            ActivityAction::Recent { args } => commands::activity::recent(&ctx, args)?,
             ActivityAction::Reindex => commands::activity::reindex(&ctx)?,
         },
         Commands::Memory { action } => match action {
@@ -1567,84 +1207,19 @@ async fn main() -> Result<()> {
                 commands::session::adopt_orphan_cmd(&ctx, &slug, &target)?
             }
             SessionAction::RebuildIndex => commands::session::rebuild_index_cmd(&ctx)?,
-            SessionAction::BackfillExchanges {
-                claude_config,
-                json,
-            } => commands::session::backfill_exchanges_cmd(&ctx, claude_config, json).await?,
+            SessionAction::BackfillExchanges { claude_config } => {
+                commands::session::backfill_exchanges_cmd(&ctx, claude_config).await?
+            }
             SessionAction::View { target, show } => {
                 commands::session::view_cmd(&ctx, &target, &show)?
             }
-            SessionAction::Export {
-                target,
-                format,
-                to,
-                output,
-                public,
-                redact_paths,
-                redact_emails,
-                redact_env,
-                redact_regex,
-                html_no_js,
-            } => {
-                commands::session::export_cmd(
-                    &ctx,
-                    &target,
-                    &format,
-                    &to,
-                    output.as_deref(),
-                    public,
-                    &redact_paths,
-                    redact_emails,
-                    redact_env,
-                    redact_regex,
-                    html_no_js,
-                )
-                .await?
-            }
+            SessionAction::Export { args } => commands::session::export_cmd(&ctx, args).await?,
             SessionAction::Search { query, limit } => {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
             SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
-            SessionAction::Prune {
-                older_than,
-                larger_than,
-                project,
-                has_error,
-                sidechain,
-                execute,
-            } => commands::session::prune_cmd(
-                &ctx,
-                older_than.as_deref(),
-                larger_than.as_deref(),
-                project,
-                has_error,
-                sidechain,
-                execute,
-            )?,
-            SessionAction::Slim {
-                target,
-                all,
-                older_than,
-                larger_than,
-                project,
-                drop_tool_results_over,
-                exclude_tool,
-                strip_images,
-                strip_documents,
-                execute,
-            } => commands::session::slim_cmd(
-                &ctx,
-                target.as_deref(),
-                all,
-                older_than.as_deref(),
-                larger_than.as_deref(),
-                project,
-                drop_tool_results_over.as_deref(),
-                exclude_tool,
-                strip_images,
-                strip_documents,
-                execute,
-            )?,
+            SessionAction::Prune { args } => commands::session::prune_cmd(&ctx, args)?,
+            SessionAction::Slim { args } => commands::session::slim_cmd(&ctx, args)?,
             SessionAction::Trash { action } => match action {
                 TrashAction::List { older_than } => {
                     commands::session::trash_list_cmd(&ctx, older_than.as_deref())?
@@ -1660,4 +1235,125 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_parse_assert_no_arg_conflicts() {
+        use clap::CommandFactory;
+        // clap's self-check. Catches duplicate arg ids — e.g. a
+        // subcommand-local `--yes`/`--json` shadowing the global
+        // flag, which only asserts in debug builds at parse time.
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn test_codex_index_global_json_propagates_any_position() {
+        let before = Cli::try_parse_from(["claudepot", "--json", "codex", "index"]).unwrap();
+        assert!(before.json);
+        let after = Cli::try_parse_from(["claudepot", "codex", "index", "--json"]).unwrap();
+        assert!(after.json);
+        // The short form must work too — the old local flag broke it.
+        let short = Cli::try_parse_from(["claudepot", "codex", "index", "-j"]).unwrap();
+        assert!(short.json);
+    }
+
+    #[test]
+    fn test_codex_forget_global_yes_propagates_any_position() {
+        // The destructive-confirm flag must not be position-dependent:
+        // the old subcommand-local `--yes` shadowed the global one.
+        let before = Cli::try_parse_from(["claudepot", "-y", "codex", "forget"]).unwrap();
+        assert!(before.yes);
+        let after = Cli::try_parse_from(["claudepot", "codex", "forget", "--yes"]).unwrap();
+        assert!(after.yes);
+    }
+
+    #[test]
+    fn test_session_backfill_global_json_propagates() {
+        let cli =
+            Cli::try_parse_from(["claudepot", "--json", "session", "backfill-exchanges"]).unwrap();
+        assert!(cli.json);
+    }
+
+    #[test]
+    fn test_logs_open_rejects_tail_combination() {
+        // `--tail` never returns, so `--open` would be silently
+        // dropped; the pair is a clap-level conflict instead.
+        assert!(Cli::try_parse_from(["claudepot", "logs", "--open", "--tail"]).is_err());
+        assert!(Cli::try_parse_from(["claudepot", "logs", "--open"]).is_ok());
+        assert!(Cli::try_parse_from(["claudepot", "logs", "--tail"]).is_ok());
+    }
+
+    #[test]
+    fn test_session_slim_target_conflicts_with_all_after_flatten() {
+        // The flatten refactor must preserve the clap-level conflict.
+        assert!(Cli::try_parse_from(["claudepot", "session", "slim", "abc", "--all"]).is_err());
+        assert!(Cli::try_parse_from(["claudepot", "session", "slim", "--all"]).is_ok());
+    }
+
+    #[test]
+    fn test_project_move_merge_conflicts_with_overwrite_after_flatten() {
+        // The flatten refactor must preserve the clap-level conflict.
+        assert!(Cli::try_parse_from([
+            "claudepot",
+            "project",
+            "move",
+            "/a",
+            "/b",
+            "--merge",
+            "--overwrite"
+        ])
+        .is_err());
+        assert!(
+            Cli::try_parse_from(["claudepot", "project", "move", "/a", "/b", "--merge"]).is_ok()
+        );
+    }
+
+    #[test]
+    fn test_project_repair_flag_relationships_after_flatten() {
+        // --rollback conflicts with --resume; --older-than requires --gc.
+        assert!(
+            Cli::try_parse_from(["claudepot", "project", "repair", "--resume", "--rollback"])
+                .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["claudepot", "project", "repair", "--older-than", "30"]).is_err()
+        );
+        assert!(Cli::try_parse_from([
+            "claudepot",
+            "project",
+            "repair",
+            "--gc",
+            "--older-than",
+            "30"
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn test_export_flattened_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "claudepot",
+            "export",
+            "myproj",
+            "--include-global",
+            "--out",
+            "/tmp/x.claudepot.tar.zst",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Export { args } => {
+                assert_eq!(args.project_prefixes, vec!["myproj".to_string()]);
+                assert!(args.include_global);
+                assert_eq!(
+                    args.out,
+                    Some(std::path::PathBuf::from("/tmp/x.claudepot.tar.zst"))
+                );
+            }
+            _ => panic!("expected Commands::Export"),
+        }
+    }
 }

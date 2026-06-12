@@ -11,14 +11,15 @@ use claudepot_core::agent::AgentStore;
 use uuid::Uuid;
 
 use super::{agent_to_json, trigger_summary};
+use crate::AppContext;
 
 /// Run `agent list` — print every agent with id, name, lifecycle,
 /// and a one-line trigger summary.
-pub fn list_cmd(json: bool) -> Result<()> {
+pub fn list_cmd(ctx: &AppContext) -> Result<()> {
     let store = AgentStore::open().context("opening the agent store")?;
     let agents = store.list();
 
-    if json {
+    if ctx.json {
         let arr: Vec<serde_json::Value> = agents.iter().map(agent_to_json).collect();
         println!("{}", serde_json::to_string_pretty(&arr)?);
         return Ok(());
@@ -61,7 +62,7 @@ pub fn list_cmd(json: bool) -> Result<()> {
 
 /// Run `agent show <id>` — print one agent's full spec. `id` may be
 /// an agent UUID or a name (resolved via the store's name index).
-pub fn show_cmd(json: bool, id_or_name: &str) -> Result<()> {
+pub fn show_cmd(ctx: &AppContext, id_or_name: &str) -> Result<()> {
     let store = AgentStore::open().context("opening the agent store")?;
     let target = id_or_name.trim();
 
@@ -73,7 +74,7 @@ pub fn show_cmd(json: bool, id_or_name: &str) -> Result<()> {
     }
     .with_context(|| format!("no agent matching '{id_or_name}'"))?;
 
-    if json {
+    if ctx.json {
         println!("{}", serde_json::to_string_pretty(&agent_to_json(agent))?);
         return Ok(());
     }

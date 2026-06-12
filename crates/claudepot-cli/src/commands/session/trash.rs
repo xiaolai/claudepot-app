@@ -14,7 +14,7 @@ pub fn trash_list_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()> 
     let data_dir = paths::claudepot_data_dir();
     let listing = trash::list(&data_dir, filter).context("list trash")?;
     if ctx.json {
-        print_json(&listing);
+        print_json(&listing)?;
         return Ok(());
     }
     if listing.entries.is_empty() {
@@ -44,7 +44,7 @@ pub fn trash_restore_cmd(ctx: &AppContext, id: &str, to: Option<&str>) -> Result
     let cwd = to.map(Path::new);
     let restored = trash::restore(&data_dir, id, cwd).context("restore trash")?;
     if ctx.json {
-        print_json(&serde_json::json!({ "restored": restored }));
+        print_json(&serde_json::json!({ "restored": restored }))?;
     } else {
         println!("Restored to {}", restored.display());
     }
@@ -66,7 +66,7 @@ pub fn trash_empty_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()>
     let data_dir = paths::claudepot_data_dir();
     let freed = trash::empty(&data_dir, filter).context("empty trash")?;
     if ctx.json {
-        print_json(&serde_json::json!({ "freed_bytes": freed }));
+        print_json(&serde_json::json!({ "freed_bytes": freed }))?;
     } else {
         println!("Emptied. Freed {}.", format_size(freed));
     }

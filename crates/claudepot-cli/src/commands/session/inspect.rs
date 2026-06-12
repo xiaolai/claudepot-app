@@ -35,7 +35,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
                         })
                     })
                     .collect();
-                print_json(&payload);
+                print_json(&payload)?;
             } else {
                 println!("{:>5}  CATEGORY", "IDX");
                 for (cat, idx) in &cats {
@@ -46,7 +46,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
         "chunks" => {
             let chunks = claudepot_core::session_chunks::build_chunks(events);
             if ctx.json {
-                print_json(&chunks);
+                print_json(&chunks)?;
             } else {
                 print_chunks_human(&chunks);
             }
@@ -54,7 +54,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
         "tools" => {
             let linked = claudepot_core::session_tool_link::link_tools(events);
             if ctx.json {
-                print_json(&linked);
+                print_json(&linked)?;
             } else {
                 println!(
                     "{:<12}  {:<40}  {:>9}  STATUS",
@@ -86,7 +86,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
             .context("resolve subagents")?;
             claudepot_core::session_subagents::link_parent_tasks(events, &mut agents);
             if ctx.json {
-                print_json(&agents);
+                print_json(&agents)?;
             } else if agents.is_empty() {
                 println!("(no subagents)");
             } else {
@@ -109,7 +109,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
         "phases" => {
             let info = claudepot_core::session_phases::compute_phases(events);
             if ctx.json {
-                print_json(&info);
+                print_json(&info)?;
             } else {
                 println!(
                     "{:>5}  {:>8}  {:>8}  SUMMARY",
@@ -129,7 +129,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
         "context" => {
             let stats = claudepot_core::session_context::attribute_context(events);
             if ctx.json {
-                print_json(&stats);
+                print_json(&stats)?;
             } else {
                 let t = &stats.totals;
                 let total = t.total().max(1);
@@ -183,7 +183,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
                     "context": context,
                     "classification_counts": count_by_category(&cats),
                 });
-                print_json(&payload);
+                print_json(&payload)?;
             } else {
                 print_summary_human(&detail);
             }

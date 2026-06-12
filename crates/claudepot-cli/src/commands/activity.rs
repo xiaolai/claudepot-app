@@ -29,23 +29,49 @@ fn open_index() -> Result<ActivityIndex> {
     ActivityIndex::open(&db_path).with_context(|| format!("open {}", db_path.display()))
 }
 
+/// Flag bundle for `claudepot activity recent`, flattened into the
+/// `ActivityAction::Recent` variant in `main.rs`.
+#[derive(Debug, clap::Args)]
+pub struct RecentArgs {
+    /// Window: `30m`, `2h`, `7d`. Omit for all-time.
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Filter by kind. Repeat for multiple kinds. Values:
+    /// hook, hook-slow, hook-info, agent, agent-stranded,
+    /// tool-error, command, milestone.
+    #[arg(long, value_name = "KIND")]
+    pub kind: Vec<String>,
+    /// Minimum severity: info, notice, warn, error.
+    #[arg(long)]
+    pub severity: Option<String>,
+    /// Filter to cards from this project (matches by cwd prefix).
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Filter to cards attributed to this plugin (`<name>` or
+    /// `<name>@<owner>`).
+    #[arg(long)]
+    pub plugin: Option<String>,
+    /// Maximum rows to print. Defaults to 200, capped at 10000.
+    #[arg(long)]
+    pub limit: Option<usize>,
+}
+
 /// `claudepot activity recent` — print recent cards.
-#[allow(clippy::too_many_arguments)]
-pub fn recent(
-    ctx: &AppContext,
-    since: Option<&str>,
-    kinds: &[String],
-    severity: Option<&str>,
-    project: Option<&str>,
-    plugin: Option<&str>,
-    limit: Option<usize>,
-) -> Result<()> {
+pub fn recent(ctx: &AppContext, args: RecentArgs) -> Result<()> {
+    let RecentArgs {
+        since,
+        kind: kinds,
+        severity,
+        project,
+        plugin,
+        limit,
+    } = args;
     let idx = open_index()?;
     let mut q = RecentQuery {
         limit,
         ..Default::default()
     };
-    if let Some(s) = since {
+    if let Some(s) = since.as_deref() {
         q.since_ms = Some(parse_since(s)?);
     }
     if !kinds.is_empty() {
@@ -54,14 +80,14 @@ pub fn recent(
             .map(|s| parse_kind(s))
             .collect::<Result<Vec<_>>>()?;
     }
-    if let Some(s) = severity {
+    if let Some(s) = severity.as_deref() {
         q.min_severity = Some(parse_severity(s)?);
     }
-    if let Some(p) = project {
+    if let Some(p) = project.as_deref() {
         q.project_path_prefix = Some(PathBuf::from(p));
     }
     if let Some(p) = plugin {
-        q.plugin = Some(p.to_string());
+        q.plugin = Some(p);
     }
     let cards = idx.recent(&q).context("query recent activity cards")?;
 
