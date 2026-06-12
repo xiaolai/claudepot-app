@@ -41,10 +41,12 @@ mod dto_session_prune;
 mod dto_templates;
 mod dto_updates;
 mod dto_usage;
+mod events;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
 mod permission_orchestrator;
+mod poller;
 mod pr_orchestrator;
 mod preferences;
 mod rotation_orchestrator;
@@ -593,7 +595,23 @@ pub fn run() {
                 tracing::warn!("app menu install failed: {e}");
             }
 
+            // Seed the menu-glyph appearance flag and rebuild the tray
+            // when the system appearance flips, so dropdown icons swap
+            // to the readable stroke variant (see tray_icons.rs —
+            // muda never template-tints custom menu bitmaps).
+            tray_icons::install_menu_appearance_watcher(app.handle());
+
+            // macOS: pure-black Template asset, tinted by AppKit
+            // against the menubar in Light and Dark. Windows/Linux:
+            // no template tinting exists (`icon_as_template` is a
+            // macOS-only no-op), so the black bitmap would vanish on
+            // dark taskbars/panels — ship the mid-gray Mono variant
+            // instead. Mirrors the TRAY_IDLE/ALERT selection in
+            // `tray::apply_tray_icon`.
+            #[cfg(target_os = "macos")]
             let icon_bytes = include_bytes!("../icons/tray-iconTemplate@2x.png");
+            #[cfg(not(target_os = "macos"))]
+            let icon_bytes = include_bytes!("../icons/tray-iconMono@2x.png");
             let icon = Image::from_bytes(icon_bytes)?;
 
             TrayIconBuilder::with_id("main")
@@ -964,6 +982,7 @@ pub fn run() {
             commands::session_move::session_adopt_orphan,
             commands::session_move::session_discard_orphan,
             commands::session_index::session_list_all,
+            commands::session_index::session_list_by_slug,
             commands::session_index::session_read,
             commands::session_index::session_read_path,
             commands::session_index::session_index_rebuild,
@@ -1149,6 +1168,7 @@ pub fn run() {
             commands::release_update::release_channel_set,
             commands::release_update::release_update_check,
             commands::release_update::release_update_install,
+            commands::release_update::release_relaunch_busy_ops,
             commands::rotation::rotation_rules_get,
             commands::rotation::rotation_rules_set,
             commands::rotation::rotation_rule_validate,

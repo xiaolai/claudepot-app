@@ -38,6 +38,25 @@ pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String
     .map_err(join_blocking_err)?
 }
 
+/// Per-project variant of `session_list_all`: same refresh + DTO
+/// contract, but only the rows whose `slug` matches cross the IPC
+/// boundary. ProjectDetail's session pane calls this on every project
+/// selection — shipping the whole cross-project index (first prompts
+/// included) per click is the shape this command exists to avoid.
+///
+/// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
+#[tauri::command]
+pub async fn session_list_by_slug(slug: String) -> Result<Vec<crate::dto::SessionRowDto>, String> {
+    tokio::task::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let rows = claudepot_core::session::list_sessions_by_slug(&cfg, &slug)
+            .map_err(|e| format!("session list failed: {e}"))?;
+        Ok::<_, String>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
+    })
+    .await
+    .map_err(join_blocking_err)?
+}
+
 /// Full JSONL parse for a single session, keyed by its UUID. Returns
 /// the same row metadata as `session_list_all` plus the normalized
 /// event stream for transcript rendering.

@@ -658,65 +658,44 @@ pub async fn shared_memory_install_snippet(
     args: InstallSnippetArgs,
 ) -> Result<SnippetInstallResultDto, String> {
     tokio::task::spawn_blocking(move || {
-        let scope = args.scope.as_deref().unwrap_or("user");
-        if scope != "user" && scope != "project" {
-            return Err(format!(
-                "invalid scope: {scope:?} (expected \"user\" or \"project\")"
-            ));
-        }
+        use claudepot_core::mcp_snippet::{install, InstallScope};
 
-        // Resolve the snippet file path.
-        let (path, target_files, include_line): (std::path::PathBuf, Vec<String>, String) =
-            if let Some(out) = args.out.as_deref() {
-                let p = std::path::PathBuf::from(out);
-                let line = format!("@{}", p.display());
-                (p, Vec::new(), line)
-            } else if scope == "user" {
-                let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
-                let p = home.join(".claude").join("claudepot-mcp-instructions.md");
-                let line = format!("@{}", p.display());
-                let targets = vec![
-                    home.join(".claude").join("CLAUDE.md").display().to_string(),
-                    home.join(".codex").join("AGENTS.md").display().to_string(),
-                    home.join(".gemini").join("GEMINI.md").display().to_string(),
-                ];
-                (p, targets, line)
-            } else {
-                let project = args
-                    .project_path
-                    .as_deref()
-                    .ok_or_else(|| "project_path required for scope = \"project\"".to_string())?;
-                let project_root = std::path::PathBuf::from(project);
-                if !project_root.is_dir() {
-                    return Err(format!(
-                        "project_path is not an existing directory: {}",
-                        project_root.display()
-                    ));
-                }
-                let p = project_root
-                    .join(".claude")
-                    .join("claudepot-mcp-instructions.md");
-                // Relative-to-project include line. `/init-workspace`
-                // expects AGENTS.md at the project root, so a
-                // `.claude/claudepot-mcp-instructions.md` relative path
-                // resolves correctly when AGENTS.md imports it.
-                let include_line = "@.claude/claudepot-mcp-instructions.md".to_string();
-                let targets = vec![project_root.join("AGENTS.md").display().to_string()];
-                (p, targets, include_line)
-            };
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("create parent: {e}"))?;
+        let scope = match args.scope.as_deref().unwrap_or("user") {
+            "user" => InstallScope::User,
+            "project" => InstallScope::Project,
+            other => {
+                return Err(format!(
+                    "invalid scope: {other:?} (expected \"user\" or \"project\")"
+                ))
+            }
+        };
+        // Renderer-supplied paths must be absolute before they reach
+        // the shared installer (its `out` arm is the trusted
+        // CLI-flag escape hatch and does no validation itself).
+        let out = args.out.as_deref().map(std::path::Path::new);
+        if let Some(o) = out {
+            if !o.is_absolute() {
+                return Err(format!("out path must be absolute: {}", o.display()));
+            }
         }
-        let body = canonical_snippet();
-        std::fs::write(&path, &body).map_err(|e| format!("write: {e}"))?;
+        let project_root = args.project_path.as_deref().map(std::path::Path::new);
+
+        // Path policy, validation (absolute + existing dir for
+        // project scope), the write, and the @-import line all live
+        // in `claudepot_core::mcp_snippet::install` — shared with
+        // `claudepot mcp install-snippet` so the two can't drift.
+        let report = install(scope, project_root, out).map_err(|e| e.to_string())?;
 
         Ok::<_, String>(SnippetInstallResultDto {
-            scope: scope.to_string(),
-            path: path.display().to_string(),
-            bytes_written: body.len(),
-            include_line,
-            target_files,
+            scope: report.scope.as_str().to_string(),
+            path: report.path.display().to_string(),
+            bytes_written: report.bytes_written,
+            include_line: report.include_line,
+            target_files: report
+                .target_files
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect(),
         })
     })
     .await
@@ -741,199 +720,46 @@ pub struct McpHealthDto {
     pub error: Option<String>,
 }
 
-/// Resolve the `claudepot` CLI binary the user would configure as
-/// the MCP command. The GUI binary (`current_exe()`) doesn't have
-/// the `mcp memory-server` subcommand — that's only on the CLI
-/// crate. Probe order:
-///
-///   1. Explicit override.
-///   2. Sibling of `current_exe()`. In dev: `target/debug/claudepot`
-///      (the CLI's `[[bin]] name`). In a prod bundle:
-///      `Contents/MacOS/claudepot-cli` (the externalBin-resolved
-///      sidecar that `tauri-cli` copies in at bundle time).
-///   3. Sibling with the platform-triple suffix that `externalBin`
-///      uses pre-bundle (`claudepot-cli-aarch64-apple-darwin` etc.).
-fn resolve_cli_binary(override_path: Option<String>) -> Result<std::path::PathBuf, String> {
-    if let Some(p) = override_path {
-        return Ok(std::path::PathBuf::from(p));
-    }
-    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| "current_exe has no parent".to_string())?;
-    // In dev builds, prefer `claudepot` (the CLI crate's
-    // `[[bin]] name`). A stale `claudepot-cli` artifact from a
-    // pre-rename build may still sit next to it in `target/debug/`
-    // — probing that first would spawn the wrong binary.
-    // In release builds the sidecar is named `claudepot-cli`.
-    let mut candidates: Vec<std::path::PathBuf> = if cfg!(debug_assertions) {
-        vec![
-            dir.join("claudepot"),     // dev: target/debug/claudepot
-            dir.join("claudepot-cli"), // dev: stale rename fallback
-        ]
-    } else {
-        vec![
-            dir.join("claudepot-cli"), // prod bundle: Contents/MacOS/claudepot-cli
-            dir.join("claudepot"),     // fallback if installed manually
-        ]
-    };
-    // Pre-bundle externalBin candidates carry the host target triple.
-    #[cfg(target_os = "macos")]
-    {
-        candidates.push(dir.join("claudepot-cli-aarch64-apple-darwin"));
-        candidates.push(dir.join("claudepot-cli-x86_64-apple-darwin"));
-    }
-    #[cfg(target_os = "linux")]
-    {
-        candidates.push(dir.join("claudepot-cli-x86_64-unknown-linux-gnu"));
-        candidates.push(dir.join("claudepot-cli-aarch64-unknown-linux-gnu"));
-    }
-    #[cfg(target_os = "windows")]
-    {
-        candidates.push(dir.join("claudepot-cli-x86_64-pc-windows-msvc.exe"));
-    }
-    for c in &candidates {
-        if c.exists() {
-            return Ok(c.clone());
-        }
-    }
-    Err(format!(
-        "no claudepot CLI binary found next to {} (tried: {})",
-        exe.display(),
-        candidates
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    ))
-}
-
+/// The probe itself (JSON-RPC framing, read loop, failure
+/// classification) and the sibling-CLI resolution policy live in
+/// `claudepot_core::mcp_probe` — unit-tested there. This command
+/// only resolves the optional override, supplies `current_exe()`'s
+/// dir (the one thing core can't know), and maps to the DTO.
 #[tauri::command]
 pub async fn shared_memory_mcp_health(
     claudepot_binary: Option<String>,
 ) -> Result<McpHealthDto, String> {
-    use std::process::Stdio;
-    use std::time::Duration;
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-    use tokio::process::Command;
-    use tokio::time::timeout;
+    use claudepot_core::mcp_probe;
 
-    let bin = match resolve_cli_binary(claudepot_binary) {
-        Ok(p) => p,
-        Err(e) => {
-            return Ok(McpHealthDto {
-                tool_visible: false,
-                tool_count: 0,
-                error: Some(e),
-            });
-        }
-    };
-
-    let mut child = Command::new(&bin)
-        .args(["mcp", "memory-server"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env("RUST_LOG", "warn")
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("spawn {}: {e}", bin.display()))?;
-
-    let stdin_handle = child.stdin.take();
-    let stdout_handle = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
-    let stderr_handle = child.stderr.take();
-
-    if let Some(mut stdin) = stdin_handle {
-        let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"claudepot-health\",\"version\":\"0\"}}}\n\
-                      {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\
-                      {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n";
-        let _ = stdin.write_all(frames.as_bytes()).await;
-        // Drop stdin (EOF) so the server processes queued requests
-        // then exits cleanly on its own. Kept inside the spawned
-        // task so the await doesn't fight the read loop below.
-        drop(stdin);
-    }
-
-    // Hard wall-clock cap that survives a child that stays alive
-    // but emits no newline. Tokio's `timeout` aborts the whole
-    // read_line future, not just the deadline between reads — this
-    // is the exact bug the old `Instant::now() < deadline` shape
-    // had with blocking `BufReader::read_line`.
-    let read_fut = async {
-        let mut reader = BufReader::new(stdout_handle);
-        let mut tool_count: usize = 0;
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line).await {
-                Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let v: serde_json::Value = match serde_json::from_str(trimmed) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-                    if v.get("id").and_then(|i| i.as_u64()) == Some(2) {
-                        if let Some(tools) = v
-                            .get("result")
-                            .and_then(|r| r.get("tools"))
-                            .and_then(|t| t.as_array())
-                        {
-                            tool_count = tools.len();
-                            break;
-                        }
-                    }
+    let bin = match claudepot_binary {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+            let dir = exe
+                .parent()
+                .ok_or_else(|| "current_exe has no parent".to_string())?;
+            match mcp_probe::resolve_sibling_cli(dir, cfg!(debug_assertions)) {
+                Ok(p) => p,
+                Err(e) => {
+                    // "No binary found" is a renderable badge state,
+                    // not a hard IPC error — matches the old shape.
+                    return Ok(McpHealthDto {
+                        tool_visible: false,
+                        tool_count: 0,
+                        error: Some(e.to_string()),
+                    });
                 }
-                Err(_) => break,
             }
         }
-        tool_count
     };
 
-    let probe_timeout = Duration::from_secs(8);
-    let (tool_count, timed_out) = match timeout(probe_timeout, read_fut).await {
-        Ok(count) => (count, false),
-        Err(_) => (0, true),
-    };
-
-    // kill_on_drop = true would handle this when `child` falls out
-    // of scope, but be explicit to release the descriptor before
-    // we drain stderr.
-    let _ = child.start_kill();
-    let _ = child.wait().await;
-
-    let error = if tool_count == 0 {
-        let mut buf = String::new();
-        if let Some(mut s) = stderr_handle {
-            let mut take = (&mut s).take(1024);
-            let _ = take.read_to_string(&mut buf).await;
-        }
-        let trimmed = buf.trim();
-        Some(if !trimmed.is_empty() {
-            format!("stderr from {}: {trimmed}", bin.display())
-        } else if timed_out {
-            format!(
-                "spawned {} but no tools/list response within {}s",
-                bin.display(),
-                probe_timeout.as_secs()
-            )
-        } else {
-            format!(
-                "spawned {} but it exited before emitting a tools/list response",
-                bin.display()
-            )
-        })
-    } else {
-        None
-    };
-
+    let report = mcp_probe::probe_memory_server(&bin, std::time::Duration::from_secs(8))
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(McpHealthDto {
-        tool_visible: tool_count > 0,
-        tool_count,
-        error,
+        tool_visible: report.tool_visible,
+        tool_count: report.tool_count,
+        error: report.error,
     })
 }
 

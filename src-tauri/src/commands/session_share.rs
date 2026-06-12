@@ -9,7 +9,7 @@
 //! second — matching the CLI. The settings UI reads / writes only the
 //! keychain slot.
 
-use crate::ops::{emit_terminal, new_op_id, new_running_op, OpKind, RunningOps, TauriProgressSink};
+use crate::ops::{emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOps};
 use claudepot_core::paths;
 use tauri::{AppHandle, State};
 use zeroize::Zeroize;
@@ -135,80 +135,74 @@ pub async fn session_share_gist_start(
         None => target.clone(),
     };
     ops.insert(new_running_op(&op_id, OpKind::SessionShare, display, ""));
-    let app_c = app.clone();
-    let ops_c = ops.inner().clone();
-    let op_id_c = op_id.clone();
     let fmt = format_from_dto(format);
     let pol = policy_from_dto(policy);
     // Gist upload runs on its own thread because `deliver` is async
     // (HTTP calls). A current-thread runtime keeps `block_on` legal
     // outside of the global tauri runtime, since the IPC worker
-    // already returned the op id.
-    std::thread::spawn(move || {
-        // All sync prep (JSONL parse, redaction render, keychain
-        // read) now lives inside the worker so the IPC `await` above
-        // returned immediately with the op id.
-        let detail = match resolve_session_detail(&target) {
-            Ok(d) => d,
-            Err(e) => {
-                emit_terminal(&app_c, &ops_c, &op_id_c, Some(e));
-                return;
-            }
-        };
-        let body = claudepot_core::session_export::export_with(&detail, fmt.clone(), &pol);
-        let dest = claudepot_core::session_export_delivery::ExportDestination::Gist {
-            filename: claudepot_core::session_export_delivery::default_export_filename(
-                &detail.row.session_id,
-                claudepot_core::session_export_delivery::extension_for(&fmt),
-            ),
-            description: format!("Claudepot session export: {}", detail.row.session_id),
-            public,
-        };
-        let rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(r) => r,
-            Err(e) => {
-                emit_terminal(&app_c, &ops_c, &op_id_c, Some(e.to_string()));
-                return;
-            }
-        };
-        let sink = TauriProgressSink {
-            app: app_c.clone(),
-            op_id: op_id_c.clone(),
-            ops: ops_c.clone(),
-        };
-        // The GUI doesn't need a Rust-side clipboard writer for gist
-        // uploads. `deliver` only consults `clipboard` for the
-        // `Clipboard` arm, so `None` is correct here.
-        let res = rt.block_on(claudepot_core::session_export_delivery::deliver(
-            &body, dest, None, &sink,
-        ));
-        let err = res.err().map(|e| e.to_string());
-        emit_terminal(&app_c, &ops_c, &op_id_c, err);
-    });
+    // already returned the op id. `spawn_op_thread` (not a bare
+    // `std::thread::spawn`) so its catch_unwind guard translates a
+    // panic in the JSONL parse / redaction / upload into a terminal
+    // error event instead of leaving the op stuck Running forever
+    // (audit fix for commands/session_share.rs:147).
+    spawn_op_thread(
+        app.clone(),
+        ops.inner().clone(),
+        op_id.clone(),
+        move |sink, app, ops, op_id| {
+            // All sync prep (JSONL parse, redaction render, keychain
+            // read) lives inside the worker so the IPC `await` above
+            // returned immediately with the op id.
+            let detail = match resolve_session_detail(&target) {
+                Ok(d) => d,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(e));
+                    return;
+                }
+            };
+            let body = claudepot_core::session_export::export_with(&detail, fmt.clone(), &pol);
+            let dest = claudepot_core::session_export_delivery::ExportDestination::Gist {
+                filename: claudepot_core::session_export_delivery::default_export_filename(
+                    &detail.row.session_id,
+                    claudepot_core::session_export_delivery::extension_for(&fmt),
+                ),
+                description: format!("Claudepot session export: {}", detail.row.session_id),
+                public,
+            };
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(e.to_string()));
+                    return;
+                }
+            };
+            // The GUI doesn't need a Rust-side clipboard writer for
+            // gist uploads. `deliver` only consults `clipboard` for
+            // the `Clipboard` arm, so `None` is correct here.
+            let res = rt.block_on(claudepot_core::session_export_delivery::deliver(
+                &body, dest, None, &sink,
+            ));
+            let err = res.err().map(|e| e.to_string());
+            emit_terminal(&app, &ops, &op_id, err);
+        },
+    );
     Ok(op_id)
 }
-
-const GH_TOKEN_SERVICE: &str = "claudepot";
-const GH_TOKEN_ENTRY: &str = "github-token";
 
 // Token resolution for gist uploads (env var wins over keychain) lives
 // in `claudepot_core::session_export_delivery::github_token_resolve`.
 // The settings UI commands below operate only on the keychain slot —
 // Save/Clear must not be silent no-ops when the env var is also set,
-// so they bypass the resolver.
-
-/// Read only the keychain-backed token. Returns `None` when absent.
-fn github_token_keychain_read() -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
-        .map_err(|e| format!("keychain init: {e}"))?;
-    match entry.get_password() {
-        Ok(v) => Ok(Some(v)),
-        Err(_) => Ok(None),
-    }
-}
+// so they bypass the resolver. The slot itself is owned by core
+// (`github_token_keychain_{read,write,delete}`), which on macOS goes
+// through `/usr/bin/security` rather than the keyring crate — the
+// keyring crate silently writes to an ephemeral per-app keychain on
+// Developer ID-signed binaries, and its items are ACL-locked to the
+// creating binary, so the CLI couldn't read a GUI-written PAT. See
+// the module comment in `session_export_delivery.rs`.
 
 #[derive(serde::Serialize)]
 pub struct GithubTokenStatus {
@@ -279,12 +273,21 @@ pub async fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
     let env_override = std::env::var("GITHUB_TOKEN")
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
-    match github_token_keychain_read()? {
-        Some(t) => Ok(GithubTokenStatus {
-            present: true,
-            last4: last4_of(&t),
-            env_override,
-        }),
+    match claudepot_core::session_export_delivery::github_token_keychain_read()
+        .await
+        .map_err(|e| format!("keychain read: {e}"))?
+    {
+        Some(mut t) => {
+            // The plaintext PAT is only needed long enough to derive
+            // `last4` — scrub it before the DTO leaves (D-5/6/7).
+            let last4 = last4_of(&t);
+            t.zeroize();
+            Ok(GithubTokenStatus {
+                present: true,
+                last4,
+                env_override,
+            })
+        }
         None => Ok(GithubTokenStatus {
             present: false,
             last4: None,
@@ -306,21 +309,25 @@ pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenS
         return Err("token is empty".to_string());
     }
 
-    let result: Result<GithubTokenStatus, String> = (|| {
-        let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
-            .map_err(|e| format!("keychain init: {e}"))?;
-        entry
-            .set_password(&trimmed)
-            .map_err(|e| format!("keychain set: {e}"))?;
-        let env_override = std::env::var("GITHUB_TOKEN")
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false);
-        Ok(GithubTokenStatus {
-            present: true,
-            last4: last4_of(&trimmed),
-            env_override,
-        })
-    })();
+    // Core's write does a read-back verification, so a "saved" toast
+    // can no longer mask a write that silently failed to persist.
+    let result = match claudepot_core::session_export_delivery::github_token_keychain_write(
+        &trimmed,
+    )
+    .await
+    {
+        Ok(()) => {
+            let env_override = std::env::var("GITHUB_TOKEN")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+            Ok(GithubTokenStatus {
+                present: true,
+                last4: last4_of(&trimmed),
+                env_override,
+            })
+        }
+        Err(e) => Err(format!("keychain set: {e}")),
+    };
 
     trimmed.zeroize();
     result
@@ -328,11 +335,9 @@ pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenS
 
 #[tauri::command]
 pub async fn settings_github_token_clear() -> Result<(), String> {
-    let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
-        .map_err(|e| format!("keychain init: {e}"))?;
-    // Delete is a best-effort; not-found is fine.
-    let _ = entry.delete_credential();
-    Ok(())
+    claudepot_core::session_export_delivery::github_token_keychain_delete()
+        .await
+        .map_err(|e| format!("keychain clear: {e}"))
 }
 
 #[cfg(test)]

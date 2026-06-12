@@ -30,37 +30,13 @@ impl From<&claudepot_core::session_move::OrphanedProject> for OrphanedProjectDto
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MoveSessionReportDto {
-    pub session_id: Option<String>,
-    pub from_slug: String,
-    pub to_slug: String,
-    pub jsonl_lines_rewritten: usize,
-    pub subagent_files_moved: usize,
-    pub remote_agent_files_moved: usize,
-    pub history_entries_moved: usize,
-    pub history_entries_unmapped: usize,
-    pub claude_json_pointers_cleared: u8,
-    pub source_dir_removed: bool,
-}
-
-impl From<&claudepot_core::session_move::MoveSessionReport> for MoveSessionReportDto {
-    fn from(r: &claudepot_core::session_move::MoveSessionReport) -> Self {
-        Self {
-            session_id: r.session_id.map(|s| s.to_string()),
-            from_slug: r.from_slug.clone(),
-            to_slug: r.to_slug.clone(),
-            jsonl_lines_rewritten: r.jsonl_lines_rewritten,
-            subagent_files_moved: r.subagent_files_moved,
-            remote_agent_files_moved: r.remote_agent_files_moved,
-            history_entries_moved: r.history_entries_moved,
-            history_entries_unmapped: r.history_entries_unmapped,
-            claude_json_pointers_cleared: r.claude_json_pointers_cleared,
-            source_dir_removed: r.source_dir_removed,
-        }
-    }
-}
+// The move-report wire struct lives in `crate::ops` as
+// `MoveSessionReportSummary` (it rides on `RunningOpInfo` for the
+// op-progress pipeline) — same single-home pattern as
+// `ops::CleanResultSummary` / `dto_project`. Re-exported here under
+// the DTO name so the legacy `session_move` IPC keeps its import
+// path and both surfaces serialize the identical camelCase shape.
+pub use crate::ops::MoveSessionReportSummary as MoveSessionReportDto;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

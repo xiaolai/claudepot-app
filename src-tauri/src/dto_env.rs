@@ -16,7 +16,8 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct VaultSecretDto {
     pub name: String,
-    /// Non-reversible preview, e.g. `sk-a…cdef` or `••••`.
+    /// Non-reversible preview, e.g. `sk-a…cdef` (long secrets) or
+    /// `••••` (anything under 16 chars is fully masked).
     pub secret_preview: String,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,

@@ -71,14 +71,9 @@ impl From<&CheckCycleOutcome> for UpdatesCycleEvent {
 }
 
 pub fn spawn(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(FIRST_TICK_DELAY).await;
-
-        loop {
-            tick(&app).await;
-            let interval = read_interval(&app);
-            tokio::time::sleep(interval).await;
-        }
+    crate::poller::spawn_poller(app, "updates_watcher", FIRST_TICK_DELAY, |app| async move {
+        tick(&app).await;
+        read_interval(&app)
     });
 }
 
@@ -164,7 +159,10 @@ async fn tick(app: &AppHandle) {
     }
 
     // Emit so the panel refreshes without polling.
-    if let Err(e) = app.emit("updates::cycle-complete", UpdatesCycleEvent::from(&outcome)) {
+    if let Err(e) = app.emit(
+        crate::events::UPDATES_CYCLE_COMPLETE,
+        UpdatesCycleEvent::from(&outcome),
+    ) {
         tracing::warn!(error = %e, "updates_watcher: emit failed");
     }
 }

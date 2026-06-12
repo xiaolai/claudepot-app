@@ -31,11 +31,10 @@ pub async fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto
     .map_err(|e| format!("orphan join: {e}"))?
 }
 
-/// CC stores `.claude.json` at `$HOME/.claude.json` — a sibling of
-/// `~/.claude/`. Central accessor so the Tauri layer agrees with CLI.
-fn claude_json_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude.json"))
-}
+// The `.claude.json` location is owned by `claudepot_core::paths::
+// claude_json_path` — the one accessor the CLI and this Tauri layer
+// share, so the two surfaces can't drift.
+use claudepot_core::paths::claude_json_path;
 
 #[tauri::command]
 pub async fn session_move(
@@ -171,7 +170,7 @@ pub async fn session_move_start(
             );
             match result {
                 Ok(report) => {
-                    let summary = MoveSessionReportSummary::from_core(&report);
+                    let summary = MoveSessionReportSummary::from(&report);
                     ops.update(&op_id, |op| {
                         op.session_move_result = Some(summary);
                     });

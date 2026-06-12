@@ -52,7 +52,9 @@ pub fn override_application_icon() {
     // corrupt or abort silently. The early return is what makes the
     // `new_unchecked` below sound.
     if !claudepot_core::main_thread::is_main_thread() {
-        claudepot_core::main_thread::warn_if_off_main_thread("dock_icon::override_application_icon");
+        claudepot_core::main_thread::warn_if_off_main_thread(
+            "dock_icon::override_application_icon",
+        );
         return;
     }
     // SAFETY: established above that we are on the main thread; same

@@ -52,6 +52,19 @@ fn resolve_expires_at(
     }
 }
 
+/// Load the grants file under the explicit three-outcome contract
+/// ([`permission_store::load_outcome`]) — every store read in this
+/// module routes through here. A corruption recovery returns the
+/// recovered (empty) file; the user-visible "elevated projects may
+/// not auto-revert" notice is owned by
+/// `permission_orchestrator::tick`, which detects recoveries from
+/// any surface via `corrupt_grant_copies`.
+fn load_grants() -> Result<claudepot_core::permission::grants::GrantsFile, String> {
+    permission_store::load_outcome()
+        .map(|loaded| loaded.value)
+        .map_err(|e| format!("grants load failed: {e}"))
+}
+
 /// Resolve `project_path` to a `ProjectPermissionDto`, reading the
 /// current settings state and the active grant (if any) from disk.
 fn current_dto(project_path: &str) -> ProjectPermissionDto {
@@ -87,9 +100,14 @@ pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let cfg = claudepot_core::paths::claude_config_dir();
         let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
-        // `load` (not `load_or_default`) so a real I/O failure surfaces
-        // instead of silently rendering every project as un-granted.
-        let file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        // `load_outcome` (not `load_or_default`) so a real I/O failure
+        // surfaces instead of silently rendering every project as
+        // un-granted. A corruption recovery (file moved aside, empty
+        // grants returned) is user-surfaced by the permission
+        // orchestrator's corruption notice — `corrupt_grant_copies`
+        // makes the recovery visible to its scan — so here the
+        // recovered file is simply the best available truth.
+        let file = load_grants()?;
         let now = Utc::now();
         Ok(projects
             .iter()
@@ -111,9 +129,9 @@ pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
 #[tauri::command]
 pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        // `load` (not `load_or_default`) so a real I/O failure surfaces
-        // instead of silently rendering the project as un-granted.
-        let file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        // Three-outcome load — see `load_grants` for the recovery
+        // contract.
+        let file = load_grants()?;
         let state = resolve_default_mode(Path::new(&project_path));
         let active = eval::active_grant(&file, &project_path, Utc::now());
         let active = filter_stale(&state, active);
@@ -159,7 +177,12 @@ pub async fn permission_grant(
     tauri::async_runtime::spawn_blocking(move || {
         validate_project_path(&project_path)?;
         let root = Path::new(&project_path);
-        let mut file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        // Hold the grants-file lock across the whole load → mutate →
+        // save (and the settings write that must stay consistent with
+        // it) so an orchestrator tick can't save an older snapshot
+        // over this grant. See `permission_orchestrator::grants_file_guard`.
+        let _guard = crate::permission_orchestrator::grants_file_guard();
+        let mut file = load_grants()?;
 
         // Preserve the true original mode across a re-grant: if a
         // grant already exists, its `previous_mode` is the real
@@ -212,7 +235,10 @@ pub async fn permission_grant(
 #[tauri::command]
 pub async fn permission_revert(project_path: String) -> Result<ProjectPermissionDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        // Serialize against the orchestrator tick — see
+        // `permission_orchestrator::grants_file_guard`.
+        let _guard = crate::permission_orchestrator::grants_file_guard();
+        let mut file = load_grants()?;
         let grant = file
             .find(&project_path)
             .cloned()
@@ -242,7 +268,10 @@ pub async fn permission_extend(
     let now = Utc::now();
     let expires_at = resolve_expires_at(duration_secs, now)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let mut file = permission_store::load().map_err(|e| format!("grants load failed: {e}"))?;
+        // Serialize against the orchestrator tick — see
+        // `permission_orchestrator::grants_file_guard`.
+        let _guard = crate::permission_orchestrator::grants_file_guard();
+        let mut file = load_grants()?;
         let grant = file
             .grants
             .iter_mut()

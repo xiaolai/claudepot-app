@@ -267,30 +267,26 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         id.to_string()
     };
 
-    // Side-effects that don't require the webview:
+    // Side-effects that don't require the webview. Both route through
+    // tauri-plugin-opener (initialized in lib.rs), which carries
+    // maintained cross-platform escaping — the previous hand-rolled
+    // per-OS subprocess blocks mixed a PATH-resolved `open` with an
+    // absolute `/usr/bin/open` and used the `cmd /c start` injection-
+    // footgun shape on Windows.
     if id == "app-menu:help:reveal-data-dir" {
+        use tauri_plugin_opener::OpenerExt;
         let path = claudepot_core::paths::claudepot_data_dir();
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("/usr/bin/open")
-            .arg("-R")
-            .arg(&path)
-            .spawn();
-        #[cfg(target_os = "linux")]
-        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
-        #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("explorer").arg(&path).spawn();
+        if let Err(e) = app.opener().reveal_item_in_dir(&path) {
+            tracing::warn!("reveal data dir failed: {e}");
+        }
         return;
     }
     if id == "app-menu:help:github" {
+        use tauri_plugin_opener::OpenerExt;
         let url = "https://github.com/xiaolai/claudepot-app";
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(url).spawn();
-        #[cfg(target_os = "linux")]
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-        #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("cmd")
-            .args(["/c", "start", "", url])
-            .spawn();
+        if let Err(e) = app.opener().open_url(url, None::<&str>) {
+            tracing::warn!("open GitHub url failed: {e}");
+        }
         return;
     }
 
@@ -419,10 +415,11 @@ fn show_native_quit_dialog<R: Runtime>(app: &AppHandle<R>, in_flight: &[QuitGate
         });
 }
 
-/// One-line in-flight label for the quit modal. Mirrors the shape of
-/// `op_terminal_label` in `ops.rs` but uses gerunds ("Renaming", not
-/// "Renamed") since the op is still running.
-fn inflight_label(op: &crate::ops::RunningOpInfo) -> String {
+/// One-line in-flight label for the quit modal and the pre-relaunch
+/// quiesce probe (`commands::release_update::release_relaunch_busy_ops`).
+/// Mirrors the shape of `op_terminal_label` in `ops.rs` but uses
+/// gerunds ("Renaming", not "Renamed") since the op is still running.
+pub(crate) fn inflight_label(op: &crate::ops::RunningOpInfo) -> String {
     let from = basename(&op.old_path);
     let to = basename(&op.new_path);
     match op.kind {
