@@ -12,7 +12,7 @@ pub fn search_cmd(ctx: &AppContext, query: &str, limit: usize) -> Result<()> {
     let hits = claudepot_core::session_search::search_rows(&rows, query, limit)
         .context("search sessions")?;
     if ctx.json {
-        print_json(&hits);
+        print_json(&hits)?;
         return Ok(());
     }
     if hits.is_empty() {
@@ -42,7 +42,7 @@ pub fn worktrees_cmd(ctx: &AppContext) -> Result<()> {
         .context("list sessions for worktree grouping")?;
     let groups = claudepot_core::session_worktree::group_by_repo(rows);
     if ctx.json {
-        print_json(&groups);
+        print_json(&groups)?;
         return Ok(());
     }
     for g in &groups {

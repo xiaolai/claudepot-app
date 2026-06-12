@@ -1,6 +1,60 @@
+//! Shared output helpers for human vs `--json` formatting, per
+//! `.claude/rules/commands.md` rule 5. Generic helpers (JSON
+//! emission, byte sizes, timestamps, truncation) live here so the
+//! per-noun handler files don't grow drifting private copies;
+//! account-list formatting sits below because `account` is the only
+//! consumer.
+
 use claudepot_core::account::Account;
 use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Print any serializable value as a single pretty JSON document on
+/// stdout — the `--json` contract from `rules/commands.md`.
+pub fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+/// Human-readable byte size, 1024-based with the matching binary
+/// unit labels (KiB/MiB/GiB).
+pub fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GiB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MiB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KiB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Render an epoch-milliseconds timestamp as a `YYYY-MM-DD` date,
+/// `—` when out of range.
+pub fn format_ts_ms(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "—".to_string())
+}
+
+/// Truncate a string to `max` chars by keeping the tail (path-friendly,
+/// since the basename usually carries the load-bearing token) and
+/// prefixing the elision with `…`. Returns the input untouched when
+/// it's already short enough.
+pub fn truncate_start(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    // Keep the tail (more informative for paths). Prefix with "…".
+    let skip = s.chars().count() - (max - 1);
+    let kept: String = s.chars().skip(skip).collect();
+    format!("…{kept}")
+}
 
 #[derive(Default, Clone, Copy)]
 pub struct AccountUsageRow {
@@ -84,4 +138,33 @@ fn format_account_list_json(
         })
         .collect();
     serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_size_uses_binary_units_with_binary_labels() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(1023), "1023 B");
+        assert_eq!(format_size(1024), "1.0 KiB");
+        assert_eq!(format_size(1024 * 1024), "1.0 MiB");
+        assert_eq!(format_size(3 * 1024 * 1024 * 1024 / 2), "1.5 GiB");
+    }
+
+    #[test]
+    fn test_format_ts_ms_renders_date_or_dash() {
+        assert_eq!(format_ts_ms(0), "1970-01-01");
+        // Far out of chrono's representable range → dash.
+        assert_eq!(format_ts_ms(i64::MAX), "—");
+    }
+
+    #[test]
+    fn test_truncate_start_keeps_tail() {
+        assert_eq!(truncate_start("short", 10), "short");
+        let got = truncate_start("/Users/joker/projects/claudepot-app", 12);
+        assert_eq!(got, "…audepot-app");
+        assert_eq!(got.chars().count(), 12);
+    }
 }
