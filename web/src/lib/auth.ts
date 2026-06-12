@@ -33,6 +33,7 @@ import {
   sessions,
   verificationTokens,
 } from "@/db/schema";
+import { allowMagicLinkSend } from "@/lib/magic-link-rate-limit";
 import { assignUsername } from "@/lib/username-assign";
 
 const GITHUB_ID = process.env.AUTH_GITHUB_ID;
@@ -47,8 +48,11 @@ const providers: NextAuthConfig["providers"] = [];
 // Email-based linking: when a user signs in with a second provider
 // whose verified email matches an existing account, attach the new
 // provider to that account instead of refusing with OAuthAccountNotLinked.
-// Safe here because both GitHub and Google verify email server-side
-// before issuing the OAuth profile.
+// Linking is purely email-equality, so it is only safe if every OAuth
+// provider hands us a VERIFIED email — and that is NOT guaranteed by
+// the providers themselves (see githubEmailIsVerified below). The
+// `signIn` callback enforces it: Google must assert `email_verified`,
+// GitHub emails are re-checked against /user/emails. Fail closed.
 if (GITHUB_ID && GITHUB_SECRET) {
   providers.push(
     GitHub({
@@ -89,6 +93,48 @@ const adapterTables = {
 } as unknown as AdapterSchema;
 
 const baseAdapter = DrizzleAdapter(db, adapterTables);
+
+/**
+ * GitHub does NOT guarantee that the email it hands Auth.js is
+ * verified: when the public profile email is empty, the stock provider
+ * falls back to GET /user/emails and picks primary-or-first WITHOUT
+ * consulting the `verified` flag. Since allowDangerousEmailAccountLinking
+ * links purely on email equality, an unverified address would be an
+ * account-takeover vector (attacker adds victim@example.com to their
+ * GitHub account unverified, signs in here, gets linked to the
+ * victim's existing user). Re-fetch /user/emails with the OAuth access
+ * token (the provider's default `read:user user:email` scope covers
+ * it) and require the linking address to be present AND verified.
+ * Any API failure fails closed — never log the token.
+ */
+async function githubEmailIsVerified(
+  accessToken: string,
+  address: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch("https://api.github.com/user/emails", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "claudepot.com",
+      },
+    });
+    if (!res.ok) return false;
+    const rows = (await res.json()) as Array<{
+      email?: string;
+      verified?: boolean;
+    }>;
+    const target = address.toLowerCase();
+    return rows.some(
+      (r) =>
+        r.verified === true &&
+        typeof r.email === "string" &&
+        r.email.toLowerCase() === target,
+    );
+  } catch {
+    return false;
+  }
+}
 
 // Postgres unique-violation SQLSTATE — what the unique index on
 // users.username throws when a concurrent OAuth signup wins the race
@@ -169,6 +215,45 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     error: "/login/error",
   },
   callbacks: {
+    /**
+     * Gate sign-ins BEFORE the adapter links accounts or email is sent.
+     *
+     * 1. Magic-link send requests (`email.verificationRequest`) are
+     *    throttled per address + per IP (src/lib/magic-link-rate-limit.ts).
+     *    Throttled requests return the verify-request URL — not `false` —
+     *    so they are indistinguishable from successful sends and the
+     *    limiter can't be used as an account oracle. This hook covers
+     *    both the /login server action and the raw
+     *    /api/auth/signin/resend endpoint.
+     * 2. allowDangerousEmailAccountLinking (provider config above) is
+     *    only safe when the provider email is verified. Google asserts
+     *    it via the `email_verified` ID-token claim; GitHub is
+     *    re-checked against /user/emails. Both fail closed.
+     */
+    async signIn({ user, account, profile, email }) {
+      if (account?.provider === "resend") {
+        if (email?.verificationRequest) {
+          const address = user.email;
+          if (!address) return false;
+          if (!(await allowMagicLinkSend(address))) {
+            return "/login/verify-request";
+          }
+        }
+        // Token-consumption step (link click): the address was just
+        // proven reachable — allow.
+        return true;
+      }
+      if (account?.provider === "google") {
+        return profile?.email_verified === true;
+      }
+      if (account?.provider === "github") {
+        const address = user.email ?? profile?.email;
+        const accessToken = account.access_token;
+        if (!address || !accessToken) return false;
+        return githubEmailIsVerified(accessToken, address);
+      }
+      return true;
+    },
     // Database-strategy session callback: `user` is the DB row. Expose
     // `username` and `role` so server components can build profile URLs
     // and gate staff-only UI without a second DB hit. Type augmentation
