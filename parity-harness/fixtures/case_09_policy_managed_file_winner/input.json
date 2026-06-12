@@ -1,0 +1,16 @@
+{
+  "plugin_base": null,
+  "user": {
+    "theme": "user-theme",
+    "verbose": true
+  },
+  "project": null,
+  "local": null,
+  "flag": null,
+  "policy": [
+    {"origin": "remote",                 "value": null},
+    {"origin": "mdm_admin",              "value": null},
+    {"origin": "managed_file_composite", "value": {"theme": "managed-theme", "permissions": {"defaultMode": "plan"}}},
+    {"origin": "hkcu_user",              "value": {"theme": "hkcu-should-lose"}}
+  ]
+}

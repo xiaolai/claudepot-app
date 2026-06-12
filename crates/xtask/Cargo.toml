@@ -3,6 +3,7 @@ name = "xtask"
 description = "Workspace automation — CC-parity verifier and other one-shot tasks"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 publish = false
 

@@ -1,0 +1,26 @@
+{
+  "plugin_base": null,
+  "user": {
+    "hooks": {
+      "PreToolUse": [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo user"}]}
+      ]
+    }
+  },
+  "project": {
+    "hooks": {
+      "PreToolUse": [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo user"}]},
+        {"matcher": "Edit", "hooks": [{"type": "command", "command": "echo project"}]}
+      ]
+    }
+  },
+  "local": null,
+  "flag": null,
+  "policy": [
+    {"origin": "remote",                 "value": null},
+    {"origin": "mdm_admin",              "value": null},
+    {"origin": "managed_file_composite", "value": null},
+    {"origin": "hkcu_user",              "value": null}
+  ]
+}

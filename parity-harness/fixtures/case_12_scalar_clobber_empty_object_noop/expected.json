@@ -1,0 +1,4 @@
+{
+  "sandbox": "disabled",
+  "statusLine": {"type": "command", "command": "statusline.sh"}
+}

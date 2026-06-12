@@ -33,11 +33,6 @@ subcommands:
   verify-cc-parity [--only <name>]    diff Rust merge output against
                                       parity-harness/fixtures/*/expected.json.
                                       Fails loudly on mismatch.
-
-environment variables:
-  CLAUDE_SRC    when set, tells the verifier that a CC-side adapter is
-                available for regenerating expected.json. See
-                parity-harness/README.md §4 for the adapter contract.
 ";
 
 fn verify_cc_parity(args: &[String]) -> Result<()> {
@@ -56,7 +51,19 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
         }
     }
 
+    // A CC-side adapter that regenerates expected.json from a live CC
+    // tree does not exist yet (parity-harness/README.md §4). Say so
+    // instead of silently ignoring the variable.
+    if std::env::var_os("CLAUDE_SRC").is_some() {
+        eprintln!(
+            "warning: CLAUDE_SRC is set, but the CC-side adapter is not \
+             implemented — the variable is ignored and goldens stay \
+             hand-pinned. See parity-harness/README.md §4."
+        );
+    }
+
     let repo_root = workspace_root()?;
+    let pinned_cc_version = read_pinned_cc_version(&repo_root)?;
     let fixtures_dir = repo_root.join("parity-harness").join("fixtures");
     if !fixtures_dir.is_dir() {
         bail!(
@@ -97,7 +104,7 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
             }
         }
         matched += 1;
-        match run_fixture(fixture) {
+        match run_fixture(fixture, &pinned_cc_version) {
             Ok(()) => {
                 eprintln!("✓ {name}");
                 ok += 1;
@@ -125,13 +132,20 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
 }
 
 /// Run one fixture:
-/// 1. Read the `input.json` describing the source bundle.
-/// 2. Feed it to `effective_settings::compute`.
-/// 3. Diff the merged output against `expected.json`.
-/// 4. Return Ok if they match; detailed error otherwise.
-fn run_fixture(fixture: &Path) -> Result<()> {
+/// 1. Check `notes.md` exists and cites the pinned CC version —
+///    expected.json is hand-derived from CC source, so every fixture
+///    must carry its provenance (file + line refs + version).
+/// 2. Read the `input.json` describing the source bundle.
+/// 3. Feed it to `effective_settings::compute_raw`.
+/// 4. Fail if compute_raw reports an annotated/plain merge divergence —
+///    that's a claudepot-core bug the plain-merge backstop would
+///    otherwise hide from the harness.
+/// 5. Diff the merged output against `expected.json` by key-path.
+fn run_fixture(fixture: &Path, pinned_cc_version: &str) -> Result<()> {
     use claudepot_core::config_view::effective_settings;
     use claudepot_core::config_view::policy::PolicySource;
+
+    check_fixture_notes(fixture, pinned_cc_version)?;
 
     let input_path = fixture.join("input.json");
     let expected_path = fixture.join("expected.json");
@@ -164,18 +178,74 @@ fn run_fixture(fixture: &Path) -> Result<()> {
     };
     // Use compute_raw so parity goldens compare unmasked merge output —
     // CC's loader is upstream of any serialization-time redaction.
-    let actual = effective_settings::compute_raw(&input_struct).merged;
-
-    if !json_equal_order_insensitive(&actual, &expected) {
-        let diff = simple_diff(&actual, &expected);
+    let result = effective_settings::compute_raw(&input_struct);
+    if result.merge_divergence {
         bail!(
-            "mismatch:\n  actual   = {}\n  expected = {}\n{}",
-            actual,
-            expected,
-            diff
+            "compute_raw reported an annotated/plain merge divergence for \
+             this input — the provenance path and the CC-parity merge \
+             disagree. This is a claudepot-core bug (provenance::annotate_merge \
+             vs merge::merge_layers), not a fixture problem."
+        );
+    }
+    let actual = result.merged;
+
+    let diffs = json_tree_diff(&actual, &expected);
+    if !diffs.is_empty() {
+        let mut msg = format!("mismatch at {} key-path(s):", diffs.len());
+        for d in &diffs {
+            msg.push_str("\n  ");
+            msg.push_str(d);
+        }
+        bail!(msg);
+    }
+    Ok(())
+}
+
+/// Every fixture ships a `notes.md` that cites the CC source the
+/// expected.json was derived from, including the pinned version as
+/// `claude-code@<version>`. This makes a pin bump checkable: bumping
+/// `parity-harness/PINNED_CC_VERSION` without re-deriving the fixtures
+/// fails the harness instead of silently passing against stale goldens.
+fn check_fixture_notes(fixture: &Path, pinned_cc_version: &str) -> Result<()> {
+    let notes_path = fixture.join("notes.md");
+    let notes = std::fs::read_to_string(&notes_path).with_context(|| {
+        format!(
+            "read {} — every fixture must ship a notes.md citing the CC \
+             source (file + lines + version) its expected.json was derived \
+             from. See parity-harness/README.md §2.",
+            notes_path.display()
+        )
+    })?;
+    let want = format!("claude-code@{pinned_cc_version}");
+    if !notes.contains(&want) {
+        bail!(
+            "{} does not cite {want} (the version in \
+             parity-harness/PINNED_CC_VERSION). If the pin moved, re-derive \
+             expected.json against the new CC source and update notes.md.",
+            notes_path.display()
         );
     }
     Ok(())
+}
+
+/// Read `parity-harness/PINNED_CC_VERSION` — the single machine-readable
+/// record of which CC version the goldens were hand-derived from.
+fn read_pinned_cc_version(repo_root: &Path) -> Result<String> {
+    let p = repo_root.join("parity-harness").join("PINNED_CC_VERSION");
+    let s = std::fs::read_to_string(&p).with_context(|| {
+        format!(
+            "read {} — the harness requires a machine-readable CC version pin",
+            p.display()
+        )
+    })?;
+    let v = s.trim().to_string();
+    if v.is_empty() {
+        bail!(
+            "{} is empty — expected a CC version like 2.1.88",
+            p.display()
+        );
+    }
+    Ok(v)
 }
 
 fn read_json(p: &Path) -> Result<serde_json::Value> {
@@ -265,53 +335,57 @@ fn policy_origin_from_str(s: &str) -> Option<claudepot_core::config_view::model:
     })
 }
 
-fn json_equal_order_insensitive(a: &serde_json::Value, b: &serde_json::Value) -> bool {
-    use serde_json::Value;
-    match (a, b) {
-        (Value::Object(ao), Value::Object(bo)) => {
-            if ao.len() != bo.len() {
-                return false;
-            }
-            for (k, va) in ao {
-                match bo.get(k) {
-                    Some(vb) if json_equal_order_insensitive(va, vb) => continue,
-                    _ => return false,
-                }
-            }
-            true
-        }
-        (Value::Array(a), Value::Array(b)) => {
-            a.len() == b.len()
-                && a.iter()
-                    .zip(b.iter())
-                    .all(|(x, y)| json_equal_order_insensitive(x, y))
-        }
-        (x, y) => x == y,
-    }
+/// Structural JSON diff: walk both trees and report every diverging
+/// key-path with both values. Object key order is ignored; array order
+/// is significant (CC's merge preserves it). An empty result means the
+/// trees are equal. Path-anchored reporting replaces the old positional
+/// line diff, which misaligned every subsequent line after one
+/// insertion in the pretty-printed form.
+fn json_tree_diff(actual: &serde_json::Value, expected: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    json_tree_diff_walk("$", actual, expected, &mut out);
+    out
 }
 
-fn simple_diff(actual: &serde_json::Value, expected: &serde_json::Value) -> String {
-    // Line-level diff of the pretty-printed form — enough to pinpoint
-    // the divergence without pulling a diff crate.
-    let a = serde_json::to_string_pretty(actual).unwrap_or_default();
-    let b = serde_json::to_string_pretty(expected).unwrap_or_default();
-    let a_lines: Vec<&str> = a.lines().collect();
-    let b_lines: Vec<&str> = b.lines().collect();
-    let mut out = String::new();
-    let max = a_lines.len().max(b_lines.len());
-    for i in 0..max {
-        let al = a_lines.get(i).copied().unwrap_or("");
-        let bl = b_lines.get(i).copied().unwrap_or("");
-        if al == bl {
-            continue;
+fn json_tree_diff_walk(
+    path: &str,
+    actual: &serde_json::Value,
+    expected: &serde_json::Value,
+    out: &mut Vec<String>,
+) {
+    use serde_json::Value;
+    match (actual, expected) {
+        (Value::Object(ao), Value::Object(bo)) => {
+            for (k, av) in ao {
+                let p = format!("{path}.{k}");
+                match bo.get(k) {
+                    Some(bv) => json_tree_diff_walk(&p, av, bv, out),
+                    None => out.push(format!("{p}: actual = {av}, expected has no key")),
+                }
+            }
+            for (k, bv) in bo {
+                if !ao.contains_key(k) {
+                    out.push(format!("{path}.{k}: actual has no key, expected = {bv}"));
+                }
+            }
         }
-        out.push_str(&format!("  L{:03}  actual:   {al}\n", i + 1));
-        out.push_str(&format!("  L{:03}  expected: {bl}\n", i + 1));
-    }
-    if out.is_empty() {
-        "  (order-only difference in objects)".to_string()
-    } else {
-        out
+        (Value::Array(aa), Value::Array(ba)) => {
+            if aa.len() != ba.len() {
+                out.push(format!(
+                    "{path}: array length {} (actual) != {} (expected)",
+                    aa.len(),
+                    ba.len()
+                ));
+            }
+            for (i, (av, bv)) in aa.iter().zip(ba.iter()).enumerate() {
+                json_tree_diff_walk(&format!("{path}[{i}]"), av, bv, out);
+            }
+        }
+        (a, b) => {
+            if a != b {
+                out.push(format!("{path}: actual = {a}, expected = {b}"));
+            }
+        }
     }
 }
 
