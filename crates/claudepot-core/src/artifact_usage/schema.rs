@@ -11,10 +11,17 @@
 //!     7d/30d/all-time counters in the UI. ~100 bytes per (artifact,
 //!     day) row — even a power user accumulates < 10 MB/year.
 //!
-//! Cascade: when a `sessions` row is deleted by `refresh()`, its
-//! `usage_event` rows go with it (`ON DELETE CASCADE`). `usage_daily`
-//! is NOT cascade-deleted — those are aggregates that survive
-//! transcript deletion. A full `rebuild()` truncates both.
+//! Cleanup is MANUAL, not a cascade: `usage_event` declares no
+//! FOREIGN KEY, so deleting a `sessions` row removes nothing here —
+//! even though `PRAGMA foreign_keys=ON` is set on every sessions.db
+//! connection and real cascades exist elsewhere in the same DB
+//! (`exchanges` → `sessions`). `SessionIndex::refresh` calls
+//! `store::subtract_daily_for_file` then `store::delete_events_for_file`
+//! inside its write transaction for every re-scanned or vanished
+//! file; removing those calls would silently orphan events and
+//! corrupt the daily-rollup subtract/re-add invariant. `usage_daily`
+//! is never deleted per-file — those aggregates survive transcript
+//! deletion. A full `rebuild()` truncates both tables.
 
 /// Schema version stamped into `meta.schema_version`. Acts as the
 /// migration trigger across the whole `sessions.db` file (the

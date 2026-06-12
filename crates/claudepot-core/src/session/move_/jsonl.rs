@@ -1,4 +1,4 @@
-//! Surgical JSONL rewriters for `session_move`.
+//! Surgical JSONL rewriters for the `move_` boundary.
 //!
 //! Two streams, same philosophy:
 //!   - Session transcript (`<slug>/<S>.jsonl`) — rewrite every line's
@@ -11,7 +11,7 @@
 //! by `BTreeMap` here). Instead, parse to validate, then do a literal
 //! substring splice of the target field's key-value form.
 
-use crate::session_move_types::MoveSessionError;
+use super::types::MoveSessionError;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;

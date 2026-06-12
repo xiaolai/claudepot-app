@@ -1,181 +1,20 @@
-use thiserror::Error;
+//! Legacy path shim. Boundary error enums live next to their owning
+//! modules per rust-conventions ("one enum per module boundary"):
+//!
+//! - [`SwapError`] → `cli_backend::error`
+//! - [`DesktopSwapError`] → `desktop_backend::error`
+//! - [`OAuthError`] → `oauth::error`
+//! - [`ProjectError`] → `project`
+//! - [`LauncherError`] → `launcher`
+//! - [`OnboardError`] → `onboard`
+//!
+//! These re-exports keep historical `crate::error::X` /
+//! `claudepot_core::error::X` import paths compiling. New code should
+//! import from the owning module; do NOT add new enums here.
 
-#[derive(Error, Debug)]
-pub enum SwapError {
-    #[error("no stored credentials for account {0}")]
-    NoStoredCredentials(uuid::Uuid),
-
-    #[error("no default credentials found in CC storage")]
-    NoDefaultCredentials,
-
-    #[error("failed to write credentials: {0}")]
-    WriteFailed(String),
-
-    #[error("keychain operation failed: {0}")]
-    KeychainError(String),
-
-    #[error("file operation failed: {0}")]
-    FileError(#[from] std::io::Error),
-
-    #[error("corrupt credential blob: {0}")]
-    CorruptBlob(String),
-
-    #[error("token refresh failed: {0}")]
-    RefreshFailed(String),
-
-    #[error(
-        "identity mismatch: account {stored_email} holds credentials for {actual_email}. \
-         Run `claudepot account remove {stored_email}` and re-add to re-seed."
-    )]
-    IdentityMismatch {
-        stored_email: String,
-        actual_email: String,
-    },
-
-    /// Surface-agnostic message: callers append their own remediation
-    /// copy (CLI says "pass --force"; the GUI/tray surfaces an Override
-    /// affordance). Keep "Claude Code process is running" verbatim —
-    /// `useActions.useCli` substring-matches on it to route the in-app
-    /// switch path into the Override toast.
-    #[error("a Claude Code process is running — its next token refresh will overwrite this swap")]
-    LiveSessionConflict,
-
-    #[error("identity verification failed: {0}")]
-    IdentityVerificationFailed(String),
-}
-
-#[derive(Error, Debug)]
-pub enum DesktopSwapError {
-    #[error("Claude Desktop is still running after quit timeout")]
-    DesktopStillRunning,
-
-    #[error("no desktop profile stored for account {0}")]
-    NoStoredProfile(uuid::Uuid),
-
-    #[error("file copy failed: {0}")]
-    FileCopyFailed(String),
-
-    #[error("desktop not installed on this platform")]
-    NotInstalled,
-
-    /// Windows-only. Detected at pre-restore by
-    /// `desktop_service::check_profile_dpapi_valid`. Means the
-    /// stored profile's ciphertext was encrypted under a different
-    /// DPAPI master key than the one this Windows session currently
-    /// holds, so Chromium on next launch would reject the cookies /
-    /// tokens as corrupt. Surfaced to the user as "re-sign in to
-    /// Claude Desktop on this machine; Claudepot will re-bind the
-    /// fresh session." Never fires on macOS.
-    #[error(
-        "Desktop profile encrypted under different Windows credentials \
-         (different machine, different user, or password reset) — \
-         sign in to Claude Desktop fresh, then re-bind."
-    )]
-    DpapiInvalidated,
-
-    /// Failure to acquire or open the Desktop operation lock. Carries
-    /// the underlying [`crate::desktop_lock::DesktopLockError`] so
-    /// callers can distinguish "already held" (retry) from
-    /// "open failed" (I/O) without string-matching on the message.
-    #[error("desktop lock: {0}")]
-    Lock(#[from] crate::desktop_lock::DesktopLockError),
-
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
-}
-
-#[derive(Error, Debug)]
-pub enum OAuthError {
-    #[error("HTTP request failed: {0}")]
-    HttpError(#[from] reqwest::Error),
-
-    #[error("token expired and refresh failed: {0}")]
-    RefreshFailed(String),
-
-    #[error("rate limited — retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
-
-    #[error("authentication failed: {0}")]
-    AuthFailed(String),
-
-    /// Non-401, non-429 non-2xx response from an OAuth endpoint. Separate
-    /// from AuthFailed so callers (identity verification in particular)
-    /// can distinguish "token is genuinely bad" from "the server had a
-    /// bad minute" — the former is a `Rejected` outcome requiring
-    /// re-login; the latter is `NetworkError` and should NOT wipe the
-    /// verified_email history.
-    #[error("OAuth server error: {0}")]
-    ServerError(String),
-}
-
-#[derive(Error, Debug)]
-pub enum ProjectError {
-    #[error("project not found: {0}")]
-    NotFound(String),
-
-    #[error("old and new paths are the same")]
-    SamePath,
-
-    #[error("ambiguous: {0}")]
-    Ambiguous(String),
-
-    #[error("a claude process is running in {0} — use --force to proceed")]
-    ClaudeRunning(String),
-
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
-}
-
-#[derive(Error, Debug)]
-pub enum LauncherError {
-    #[error("no stored credentials for account {0}")]
-    NoStoredCredentials(uuid::Uuid),
-
-    #[error("corrupt credential blob: {0}")]
-    CorruptBlob(String),
-
-    #[error("token refresh failed: {0}")]
-    RefreshFailed(String),
-
-    #[error("failed to save refreshed credentials: {0}")]
-    SaveFailed(String),
-
-    #[error("no command specified")]
-    NoCommand,
-
-    #[error("spawn failed: {0}")]
-    SpawnFailed(String),
-}
-
-#[derive(Error, Debug)]
-pub enum OnboardError {
-    #[error("claude CLI not found at {0}")]
-    CliBinaryNotFound(String),
-
-    // Second tuple field is the captured stderr tail from the
-    // `claude auth login` subprocess (last N lines, redacted of
-    // `sk-ant-*` tokens). When present, it's appended to the rendered
-    // error so the GUI dialog shows the actual failure reason —
-    // network error, keychain perm denied, OAuth state mismatch, etc.
-    // — instead of just the exit code. Issue #16.
-    #[error("{}", match (*.0, .1.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty())) {
-        (-2, _) => "login timed out — close the Claudepot window and try again, or complete the browser flow faster".to_string(),
-        (code, Some(tail)) => format!(
-            "`claude auth login` exited with code {code}\n\nclaude stderr (last lines):\n{tail}"
-        ),
-        (code, None) => format!("`claude auth login` exited with code {code}"),
-    })]
-    AuthLoginFailed(i32, Option<String>),
-
-    #[error("login cancelled")]
-    AuthLoginCancelled,
-
-    #[error("import failed: no credentials at hashed service name for {0}")]
-    ImportFailed(String),
-
-    #[error("{0}")]
-    Swap(#[from] SwapError),
-
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
-}
+pub use crate::cli_backend::error::SwapError;
+pub use crate::desktop_backend::error::DesktopSwapError;
+pub use crate::launcher::LauncherError;
+pub use crate::oauth::error::OAuthError;
+pub use crate::onboard::OnboardError;
+pub use crate::project::ProjectError;

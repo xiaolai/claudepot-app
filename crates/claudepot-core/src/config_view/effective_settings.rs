@@ -7,9 +7,11 @@
 //!   PluginBase → User → Project → Local → Flag → Policy
 //! ```
 //!
-//! The CC-parity harness is deferred (plan §8.6); P4 ships hand-
-//! authored golden fixtures inside `merge::tests` and nested
-//! end-to-end cases here.
+//! The CC-parity harness (`cargo xtask verify-cc-parity`,
+//! `parity-harness/`) runs [`compute_raw`] against hand-derived CC
+//! goldens and fails on any [`EffectiveSettings::merge_divergence`];
+//! `merge::tests` and the nested end-to-end cases here cover the
+//! same semantics at the unit level.
 
 use crate::config_view::{
     mask::mask_json,
@@ -38,6 +40,14 @@ pub struct EffectiveSettings {
     pub merged: Value,
     pub provenance: Vec<ProvenanceEntry>,
     pub policy: PolicyResolved,
+    /// `true` when the provenance-annotated merge disagreed with the
+    /// plain CC-parity merge. `merged` always holds the plain (CC-
+    /// correct) result, but on divergence `provenance` was flattened
+    /// from the annotated tree and may attribute winners that don't
+    /// match the merged values. Consumers (the parity harness, the
+    /// Config UI) must treat a `true` here as a bug signal in
+    /// `provenance::annotate_merge`, not ignore it.
+    pub merge_divergence: bool,
 }
 
 pub fn compute(input: &EffectiveSettingsInput) -> EffectiveSettings {
@@ -131,14 +141,26 @@ pub fn compute_raw(input: &EffectiveSettingsInput) -> EffectiveSettings {
 
     // Sanity-check against the straightforward merge (§8.4). If they
     // diverge this is a bug in provenance or merge; we keep the merge-
-    // based view since it's what CC would produce.
+    // based view since it's what CC would produce — but we surface the
+    // divergence (fail-loud) instead of swapping silently: provenance
+    // was built from the annotated tree, so on divergence the winner
+    // attributions no longer match the merged values.
     let non_provenance_layers: Vec<Value> = layers
         .iter()
         .map(|(_, l)| l.clone())
         .chain(policy_layer.as_ref().map(|(_, l)| l.clone()))
         .collect();
     let plain = merge::merge_layers(&non_provenance_layers);
-    if !values_equal_ignoring_object_key_order(&merged, &plain) {
+    let merge_divergence = !values_equal_ignoring_object_key_order(&merged, &plain);
+    if merge_divergence {
+        tracing::warn!(
+            annotated = %merged,
+            plain = %plain,
+            "effective-settings merge divergence: annotated merge disagrees \
+             with plain CC-parity merge; keeping the plain result, but \
+             provenance attributions are unreliable for this input \
+             (bug in provenance::annotate_merge or merge::merge_layers)"
+        );
         merged = plain;
     }
 
@@ -148,6 +170,7 @@ pub fn compute_raw(input: &EffectiveSettingsInput) -> EffectiveSettings {
         merged,
         provenance,
         policy,
+        merge_divergence,
     }
 }
 
@@ -190,6 +213,45 @@ mod tests {
         assert_eq!(r.merged, json!({}));
         assert!(r.provenance.is_empty());
         assert!(r.policy.winner.is_none());
+        assert!(!r.merge_divergence);
+    }
+
+    /// Lock the divergence signal with a REAL annotated-vs-plain
+    /// divergence: `Annotated::from_value` keeps intra-layer duplicate
+    /// primitives in an array, while the plain merge (and CC's
+    /// `uniq([...a, ...b])`, settings.ts:529-531 @ claude-code@2.1.88)
+    /// dedupes them when the key collides across layers. So
+    /// user `{list:[1,1]}` + project `{list:[2]}` yields `[1,1,2]` on
+    /// the annotated path but `[1,2]` on the plain path. compute_raw
+    /// must (a) keep the plain (CC-correct) result and (b) report the
+    /// divergence instead of swapping silently.
+    #[test]
+    fn divergence_keeps_plain_merge_and_sets_flag() {
+        let input = EffectiveSettingsInput {
+            user: Some(json!({"list": [1, 1]})),
+            project: Some(json!({"list": [2]})),
+            ..Default::default()
+        };
+        let r = compute_raw(&input);
+        // CC-correct output (verified against lodash-es mergeWith +
+        // CC's settingsMergeCustomizer): duplicates deduped on merge.
+        assert_eq!(r.merged, json!({"list": [1, 2]}));
+        assert!(
+            r.merge_divergence,
+            "annotated/plain divergence must be surfaced, not silently swallowed"
+        );
+    }
+
+    #[test]
+    fn no_divergence_on_plain_precedence_input() {
+        let input = EffectiveSettingsInput {
+            user: Some(json!({"theme": "light", "list": ["a"]})),
+            project: Some(json!({"theme": "dark", "list": ["b"]})),
+            ..Default::default()
+        };
+        let r = compute_raw(&input);
+        assert_eq!(r.merged, json!({"theme": "dark", "list": ["a", "b"]}));
+        assert!(!r.merge_divergence);
     }
 
     #[test]

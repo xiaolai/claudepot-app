@@ -319,6 +319,48 @@ fn test_gc_leaves_recent_journals_alone() {
     assert!(journal_path.exists());
 }
 
+/// The GC exclusion that protects pending-rename rollback data: a
+/// snapshot referenced by a live (non-abandoned) journal must survive
+/// gc even past the age cutoff, while an unreferenced sibling of the
+/// same age is swept. On macOS the TempDir path is non-canonical
+/// (`/var/...` vs `/private/var/...`), so this test exercises the
+/// canonicalized membership comparison on both sides — the lock for
+/// routing those calls through `canonicalize_simplified`.
+#[test]
+fn test_gc_skips_snapshot_referenced_by_pending_journal() {
+    let tmp = TempDir::new().unwrap();
+    let journals = tmp.path().join("journals");
+    let snaps = tmp.path().join("snapshots");
+    fs::create_dir_all(&journals).unwrap();
+    fs::create_dir_all(&snaps).unwrap();
+
+    let referenced = snaps.join("ts-1-P7.json");
+    fs::write(&referenced, "rollback data").unwrap();
+    let unreferenced = snaps.join("ts-2-P7.json");
+    fs::write(&unreferenced, "sweep me").unwrap();
+    let live_journal =
+        write_journal_with_snapshots(&journals, "move-live", std::slice::from_ref(&referenced));
+
+    // Backdate both snapshots well past the 30-day cutoff.
+    let old_time = SystemTime::now()
+        .checked_sub(Duration::from_secs(100 * 86_400))
+        .unwrap();
+    filetime::set_file_mtime(&referenced, old_time.into()).ok();
+    filetime::set_file_mtime(&unreferenced, old_time.into()).ok();
+
+    let result = gc(&journals, &snaps, 30, /* dry_run */ false).unwrap();
+    assert!(
+        referenced.exists(),
+        "snapshot referenced by a pending journal must survive gc"
+    );
+    assert!(
+        !unreferenced.exists(),
+        "unreferenced old snapshot must be swept"
+    );
+    assert!(live_journal.exists(), "live journal itself must survive");
+    assert_eq!(result.removed_journals, 0);
+}
+
 #[test]
 fn test_resolve_lock_file_by_sanitized_path() {
     let tmp = TempDir::new().unwrap();

@@ -24,7 +24,7 @@ pub struct RewriteStats {
 
 /// Re-export for callers that used the old name. New code should
 /// import `ProgressSink` from `project_progress` directly.
-pub use crate::project_progress::{NoopSink, PhaseStatus, ProgressSink};
+pub use crate::project_progress::ProgressSink;
 
 /// Rewrite `cwd` fields inside all jsonl + `.meta.json` files under
 /// `project_dir` that reference `old_path` (exact-match or prefix with
@@ -353,6 +353,7 @@ fn rewrite_strings_in_value(v: &mut Value, old_path: &str, new_path: &str) -> us
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project_progress::{NoopSink, PhaseStatus};
 
     fn noop_progress() -> &'static dyn ProgressSink {
         &NoopSink

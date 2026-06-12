@@ -190,7 +190,16 @@ pub fn restore_at(
             action: "restore",
         });
     }
-    let manifest = entry.manifest.as_ref().expect("Healthy implies manifest");
+    // `read_one` guarantees Healthy ⇒ manifest present; if the entry
+    // ever arrives Healthy-but-manifestless, surface it as a state
+    // error (pointing at `recover`) rather than panicking in core.
+    let manifest = entry
+        .manifest
+        .as_ref()
+        .ok_or(LifecycleError::WrongTrashState {
+            state: "healthy-without-manifest",
+            action: "restore",
+        })?;
     if !manifest.scope_root.exists() {
         return Err(LifecycleError::ScopeRootMissing(
             manifest.scope_root.clone(),
@@ -497,7 +506,7 @@ fn validate_recover_target_in_roots(
     // may not exist yet (recover writes it). Walk up until we hit
     // an existing ancestor, canonicalize THAT, then compare.
     let probe = first_existing_ancestor(target).unwrap_or_else(|| target.to_path_buf());
-    let canon_target = match probe.canonicalize() {
+    let canon_target = match crate::path_utils::canonicalize_simplified(&probe) {
         Ok(p) => p,
         Err(_) => {
             // Couldn't resolve at all — refuse rather than risk
@@ -509,12 +518,12 @@ fn validate_recover_target_in_roots(
     };
     let mut allowed = Vec::new();
     if let Some(user) = roots.user_root.as_deref() {
-        if let Ok(c) = user.canonicalize() {
+        if let Ok(c) = crate::path_utils::canonicalize_simplified(user) {
             allowed.push(c);
         }
     }
     for project in &roots.project_roots {
-        if let Ok(c) = project.canonicalize() {
+        if let Ok(c) = crate::path_utils::canonicalize_simplified(project) {
             allowed.push(c);
         }
     }

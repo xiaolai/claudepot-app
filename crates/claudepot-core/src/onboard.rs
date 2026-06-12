@@ -3,11 +3,47 @@
 //! Uses a temp CLAUDE_CONFIG_DIR so the current active account isn't clobbered.
 //! After login, imports the credential from the hashed keychain item or file.
 
-use crate::error::OnboardError;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+/// Boundary error for onboarding. Historically lived in the
+/// crate-root `error.rs`; relocated next to its boundary per
+/// rust-conventions ("one enum per module boundary").
+/// `crate::error::OnboardError` remains a re-export.
+#[derive(thiserror::Error, Debug)]
+pub enum OnboardError {
+    #[error("claude CLI not found at {0}")]
+    CliBinaryNotFound(String),
+
+    // Second tuple field is the captured stderr tail from the
+    // `claude auth login` subprocess (last N lines, redacted of
+    // `sk-ant-*` tokens). When present, it's appended to the rendered
+    // error so the GUI dialog shows the actual failure reason —
+    // network error, keychain perm denied, OAuth state mismatch, etc.
+    // — instead of just the exit code. Issue #16.
+    #[error("{}", match (*.0, .1.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty())) {
+        (-2, _) => "login timed out — close the Claudepot window and try again, or complete the browser flow faster".to_string(),
+        (code, Some(tail)) => format!(
+            "`claude auth login` exited with code {code}\n\nclaude stderr (last lines):\n{tail}"
+        ),
+        (code, None) => format!("`claude auth login` exited with code {code}"),
+    })]
+    AuthLoginFailed(i32, Option<String>),
+
+    #[error("login cancelled")]
+    AuthLoginCancelled,
+
+    #[error("import failed: no credentials at hashed service name for {0}")]
+    ImportFailed(String),
+
+    #[error("{0}")]
+    Swap(#[from] crate::cli_backend::SwapError),
+
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
 
 /// Hard timeout for `claude auth login` — generous enough that slow
 /// readers completing OAuth in the browser finish in time, tight enough
@@ -190,14 +226,6 @@ async fn pipe_to_tracing<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
 
 /// Run `claude auth login` with a temporary config dir.
 /// Returns the path to the temp dir (caller is responsible for cleanup).
-///
-/// Non-cancellable — prefer `run_auth_login_cancellable` when a user
-/// might close the browser mid-flow.
-pub async fn run_auth_login() -> Result<PathBuf, OnboardError> {
-    run_auth_login_cancellable(None).await
-}
-
-/// Cancellable temp-dir variant of `run_auth_login`.
 ///
 /// Pass a shared `Notify`; when another task calls `notify.notify_one()`,
 /// the child `claude auth login` process is killed and this function

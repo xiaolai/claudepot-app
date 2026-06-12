@@ -208,8 +208,7 @@ async fn install_via_zip(
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(900))
         .user_agent(concat!("Claudepot/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .expect("reqwest client");
+        .build()?;
     let bytes = client
         .get(&release.download_url)
         .send()
@@ -217,13 +216,12 @@ async fn install_via_zip(
         .error_for_status()?
         .bytes()
         .await?;
-    std::fs::write(&zip_path, &bytes)?;
+    tokio::fs::write(&zip_path, &bytes).await?;
 
     if let Some(expected) = &release.sha256 {
         let actual = {
-            let body = std::fs::read(&zip_path)?;
             let mut hasher = Sha256::new();
-            hasher.update(&body);
+            hasher.update(&bytes);
             hex::encode(hasher.finalize())
         };
         if !actual.eq_ignore_ascii_case(expected) {
@@ -237,12 +235,10 @@ async fn install_via_zip(
     let extract_dir = tmp_dir.path().join("extracted");
     std::fs::create_dir_all(&extract_dir)?;
     let unzip = Command::new("unzip")
-        .args([
-            "-q",
-            zip_path.to_str().unwrap(),
-            "-d",
-            extract_dir.to_str().unwrap(),
-        ])
+        .arg("-q")
+        .arg(&zip_path)
+        .arg("-d")
+        .arg(&extract_dir)
         .output()
         .await
         .map_err(|e| {
@@ -269,7 +265,7 @@ async fn install_via_zip(
 
     // Verify the new app's code signature. This catches MITM, server
     // compromise, and malformed cask metadata.
-    verify_codesign(&new_app)?;
+    verify_codesign(&new_app).await?;
 
     // Re-check Desktop isn't running before we touch the install.
     if is_desktop_running() {
@@ -288,11 +284,9 @@ async fn install_via_zip(
         std::fs::rename(target, &backup)?;
     }
     let ditto = Command::new("ditto")
-        .args([
-            "--rsrc",
-            new_app.to_str().unwrap(),
-            target.to_str().unwrap(),
-        ])
+        .arg("--rsrc")
+        .arg(&new_app)
+        .arg(target)
         .output()
         .await
         .map_err(|e| {
@@ -321,7 +315,8 @@ async fn install_via_zip(
     // Gatekeeper. Best-effort — failure here doesn't block the
     // update, just means the user sees one extra dialog.
     let _ = Command::new("xattr")
-        .args(["-rd", "com.apple.quarantine", target.to_str().unwrap()])
+        .args(["-rd", "com.apple.quarantine"])
+        .arg(target)
         .output()
         .await;
 
@@ -403,7 +398,7 @@ pub fn recover_orphan_backup(target: &Path) -> OrphanRecovery {
 fn default_post_restore_verifier(target: &Path) -> std::result::Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        verify_codesign(target).map_err(|e| e.to_string())
+        verify_codesign_sync(target).map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -523,41 +518,38 @@ pub fn recover_orphan_backup_with_verifier(
     }
 }
 
+/// Leaf authority must be exactly "Developer ID Application:
+/// Anthropic, PBC". `-dv --verbose=4` writes the authority chain to
+/// stderr in the format `Authority=<name>` per line. A naive
+/// substring match for "Anthropic" anywhere in the output would
+/// pass for any cert whose subject happens to mention Anthropic in
+/// an unrelated field; pinning the full leaf-authority line is the
+/// tight check.
 #[cfg(target_os = "macos")]
-fn verify_codesign(app: &Path) -> Result<()> {
-    // Step 1: signature integrity (--verify --deep --strict).
-    let verify = std::process::Command::new("codesign")
-        .args(["--verify", "--deep", "--strict", app.to_str().unwrap()])
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                UpdateError::ToolMissing("codesign".into())
-            } else {
-                UpdateError::Io(e)
-            }
-        })?;
+const EXPECTED_LEAF_AUTHORITY: &str = "Authority=Developer ID Application: Anthropic, PBC";
+
+#[cfg(target_os = "macos")]
+fn codesign_spawn_err(e: std::io::Error) -> UpdateError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        UpdateError::ToolMissing("codesign".into())
+    } else {
+        UpdateError::Io(e)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn check_codesign_verify(verify: &std::process::Output) -> Result<()> {
     if !verify.status.success() {
         return Err(UpdateError::Signature(format!(
             "codesign --verify failed: {}",
             String::from_utf8_lossy(&verify.stderr)
         )));
     }
-    // Step 2: leaf authority must be exactly "Developer ID Application:
-    // Anthropic, PBC". `-dv --verbose=4` writes the authority chain to
-    // stderr in the format `Authority=<name>` per line. A naive
-    // substring match for "Anthropic" anywhere in the output would
-    // pass for any cert whose subject happens to mention Anthropic in
-    // an unrelated field; pinning the full leaf-authority line is the
-    // tight check.
-    const EXPECTED_LEAF_AUTHORITY: &str = "Authority=Developer ID Application: Anthropic, PBC";
-    let dv = std::process::Command::new("codesign")
-        .args(["-dv", "--verbose=4", app.to_str().unwrap()])
-        .output()?;
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&dv.stdout),
-        String::from_utf8_lossy(&dv.stderr)
-    );
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn check_leaf_authority(combined: &str) -> Result<()> {
     let has_leaf = combined
         .lines()
         .any(|l| l.trim() == EXPECTED_LEAF_AUTHORITY);
@@ -570,10 +562,54 @@ fn verify_codesign(app: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
-#[allow(dead_code)]
-fn verify_codesign(_app: &Path) -> Result<()> {
-    Err(UpdateError::UnsupportedPlatform)
+#[cfg(target_os = "macos")]
+fn combined_output(out: &std::process::Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// Async codesign verification for the install path — a deep verify
+/// of a multi-hundred-MB .app takes seconds, so it must not block a
+/// tokio worker thread.
+#[cfg(target_os = "macos")]
+async fn verify_codesign(app: &Path) -> Result<()> {
+    // Step 1: signature integrity (--verify --deep --strict).
+    let verify = Command::new("codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(app)
+        .output()
+        .await
+        .map_err(codesign_spawn_err)?;
+    check_codesign_verify(&verify)?;
+    // Step 2: leaf authority pinning (see `EXPECTED_LEAF_AUTHORITY`).
+    let dv = Command::new("codesign")
+        .args(["-dv", "--verbose=4"])
+        .arg(app)
+        .output()
+        .await?;
+    check_leaf_authority(&combined_output(&dv))
+}
+
+/// Sync twin of [`verify_codesign`] for the startup orphan-recovery
+/// sweep, which runs on a sync path before the UI loop (see
+/// [`recover_orphan_backups_at_startup`]). Same two codesign steps;
+/// the check logic is shared above so the two can't drift.
+#[cfg(target_os = "macos")]
+fn verify_codesign_sync(app: &Path) -> Result<()> {
+    let verify = std::process::Command::new("codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(app)
+        .output()
+        .map_err(codesign_spawn_err)?;
+    check_codesign_verify(&verify)?;
+    let dv = std::process::Command::new("codesign")
+        .args(["-dv", "--verbose=4"])
+        .arg(app)
+        .output()?;
+    check_leaf_authority(&combined_output(&dv))
 }
 
 /// Run [`recover_orphan_backup`] against every standard Claude.app
@@ -755,6 +791,55 @@ mod tests {
         // Target stayed missing; the garbage directory wasn't promoted.
         assert!(!target.exists());
         assert!(bogus.exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_codesign_leaf_check_accepts_pinned_authority() {
+        let combined = "Executable=/tmp/Claude.app/Contents/MacOS/Claude\n\
+                        Authority=Developer ID Application: Anthropic, PBC\n\
+                        Authority=Developer ID Certification Authority\n\
+                        Authority=Apple Root CA\n";
+        assert!(check_leaf_authority(combined).is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_codesign_leaf_check_rejects_missing_authority() {
+        let combined = "Executable=/tmp/Claude.app/Contents/MacOS/Claude\n\
+                        Authority=Developer ID Application: Someone Else, LLC\n\
+                        Authority=Apple Root CA\n";
+        let err = check_leaf_authority(combined).unwrap_err();
+        assert!(matches!(err, UpdateError::Signature(_)));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_codesign_leaf_check_rejects_superstring_line() {
+        // A line that merely contains the pinned authority as a
+        // substring must not pass — the match is whole-line.
+        let combined =
+            "Authority=Developer ID Application: Anthropic, PBC Holdings International\n";
+        assert!(check_leaf_authority(combined).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_codesign_verify_check_rejects_nonzero_status() {
+        use std::os::unix::process::ExitStatusExt;
+        let out = std::process::Output {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: Vec::new(),
+            stderr: b"invalid signature".to_vec(),
+        };
+        let err = check_codesign_verify(&out).unwrap_err();
+        assert!(matches!(err, UpdateError::Signature(_)));
+        let out_ok = std::process::Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        assert!(check_codesign_verify(&out_ok).is_ok());
     }
 
     /// Verifier rejects the restored bundle (simulating a planted

@@ -40,6 +40,11 @@ pub enum TemplateError {
         #[source]
         source: toml::de::Error,
     },
+
+    /// Reading/writing a run's `pending-changes.json` side-car failed.
+    /// The inner enum preserves the io-vs-parse distinction.
+    #[error("pending-changes side-car: {0}")]
+    Sidecar(#[from] crate::templates::apply::sidecar::SidecarError),
 }
 
 impl TemplateError {

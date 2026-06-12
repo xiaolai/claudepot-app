@@ -606,6 +606,76 @@ fn plugin_from_command_returns_none_for_bare_env_var() {
     assert_eq!(plugin_from_command_string(s), None);
 }
 
+// ── Windows path shapes (.claude/rules/paths.md golden tests) ───
+// CC preserves the host's native separator verbatim in hook
+// commands and stderr, so on a Windows host the plugin cache path
+// arrives with backslashes. Pure string ops — run on every host OS.
+
+#[test]
+fn test_plugin_command_extracts_windows_drive_cache_path() {
+    let s = r"cmd /c C:\Users\joker\.claude\plugins\cache\xiaolai\mermaid-preview\0.1.1\scripts\foo.bat";
+    assert_eq!(
+        plugin_from_command_string(s).as_deref(),
+        Some("mermaid-preview@xiaolai")
+    );
+}
+
+#[test]
+fn test_plugin_stderr_falls_back_to_windows_drive_cache_path() {
+    let s = r"Failed to run: Plugin directory does not exist: C:\Users\joker\.claude\plugins\cache\owner\name\0.1.0";
+    assert_eq!(extract_missing_plugin(s).as_deref(), Some("name@owner"));
+}
+
+#[test]
+fn test_plugin_stderr_falls_back_to_windows_unc_cache_path() {
+    let s = r"Failed to run: Plugin directory does not exist: \\server\share\.claude\plugins\cache\owner\name\0.1.0";
+    assert_eq!(extract_missing_plugin(s).as_deref(), Some("name@owner"));
+}
+
+// ── Tool-error path extraction (.claude/rules/paths.md shapes) ──
+// Verbatim `\\?\` is deliberately not covered: extract_path_from_body
+// consumes CC-written tool-error bodies, and no canonicalize output
+// reaches that text.
+
+#[test]
+fn test_tool_error_path_extracts_unix_shape() {
+    let body = "String to replace not found in /Users/joker/proj/src";
+    assert_eq!(
+        extract_path_from_body(body).as_deref(),
+        Some("/Users/joker/proj/src")
+    );
+}
+
+#[test]
+fn test_tool_error_path_extracts_tilde_shape() {
+    let body = "String to replace not found in ~/proj/src";
+    assert_eq!(extract_path_from_body(body).as_deref(), Some("~/proj/src"));
+}
+
+#[test]
+fn test_tool_error_path_extracts_windows_drive_shape() {
+    let body = r"String to replace not found in C:\Users\joker\proj\src";
+    assert_eq!(
+        extract_path_from_body(body).as_deref(),
+        Some(r"C:\Users\joker\proj\src")
+    );
+}
+
+#[test]
+fn test_tool_error_path_extracts_windows_unc_shape() {
+    let body = r"String to replace not found in \\server\share\proj\src";
+    assert_eq!(
+        extract_path_from_body(body).as_deref(),
+        Some(r"\\server\share\proj\src")
+    );
+}
+
+#[test]
+fn test_tool_error_path_rejects_relative_token() {
+    let body = "String to replace not found in file of unknown origin";
+    assert_eq!(extract_path_from_body(body), None);
+}
+
 #[test]
 fn plugin_from_namespaced_name_pulls_prefix() {
     assert_eq!(

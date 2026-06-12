@@ -35,23 +35,30 @@
 //!   `~/.claude/paste-cache/`, `~/.claude/shell-snapshots/`,
 //!   `~/.claude/todos/` (dead in current CC).
 
+// Intra-family submodules. These are private to the `move_` boundary:
+// the JSONL rewriters, slug/IO helpers, and shared types are
+// implementation detail. The public API (`AdoptReport`, … below) is
+// re-exported flat so `crate::session::move_::Foo` (and the
+// `session_move` lib.rs shim) resolve exactly as before the fold.
+mod helpers;
+mod jsonl;
+mod types;
+
 use crate::path_utils::canonicalize_simplified;
 use crate::project_progress::{NoopSink, PhaseStatus, ProgressSink};
 use crate::project_sanitize::sanitize_path;
-use crate::session_move_helpers::{
+use helpers::{
     clear_claude_json_session_pointers, extract_session_id_from_path, has_sync_conflict,
     is_recently_modified, list_sessions_in_slug, move_session_subdir_with_progress, read_first_cwd,
     remove_empty_subdirs, remove_if_empty, validate_slug,
 };
-use crate::session_move_jsonl::{
-    rewrite_history_jsonl_with_progress, stream_rewrite_jsonl_with_progress,
-};
-pub use crate::session_move_types::{
+use jsonl::{rewrite_history_jsonl_with_progress, stream_rewrite_jsonl_with_progress};
+use std::fs;
+use std::path::{Path, PathBuf};
+pub use types::{
     AdoptReport, DiscardReport, MoveSessionError, MoveSessionOpts, MoveSessionReport,
     OrphanedProject, INVALID_SLUG_MSG,
 };
-use std::fs;
-use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -531,5 +538,5 @@ where
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "session_move_tests.rs"]
+#[path = "tests.rs"]
 mod tests;

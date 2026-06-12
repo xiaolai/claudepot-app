@@ -1,7 +1,7 @@
-//! Types + shared constants for `session_move`.
+//! Types + shared constants for the `move_` boundary.
 //!
-//! Kept separate per loc-guardian rule 1 (types >30 LOC extract to
-//! `<module>_types.rs`).
+//! Kept in a separate submodule per loc-guardian rule 1 (types >30 LOC
+//! extract to their own module).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 /// `[A-Za-z0-9-]+`. Any slug outside that alphabet is untrusted input
 /// (most likely a path-traversal attempt); callers must be rejected at
 /// the library boundary regardless of whether the resulting path happens
-/// to be a real directory. See `session_move::validate_slug`.
+/// to be a real directory. See `super::helpers::validate_slug`.
 pub const INVALID_SLUG_MSG: &str = "slug must be a single non-empty directory name \
 containing only alphanumerics, hyphens, or underscores";
 

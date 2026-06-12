@@ -147,10 +147,13 @@ fn path_is_shell_safe(dir: &Path) -> bool {
 /// portable across machines. The caller must have already gated
 /// `dir` through [`path_is_shell_safe`].
 fn path_export_block(dir: &Path, home: &Path) -> String {
+    // `path_entry_forms` always ends with the absolute form, so the
+    // vec is never empty; if that invariant ever breaks, fall back to
+    // the same absolute form rather than panicking in core.
     let entry = path_entry_forms(dir, home)
         .into_iter()
         .next()
-        .expect("path_entry_forms is never empty");
+        .unwrap_or_else(|| dir.display().to_string());
     format!("\n{RC_MARKER}\nexport PATH=\"{entry}:$PATH\"\n")
 }
 

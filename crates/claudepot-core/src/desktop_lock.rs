@@ -12,7 +12,6 @@
 //! two commands inside the GUI also serialize without spinning on
 //! flock.
 
-use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -66,8 +65,9 @@ fn open_lockfile() -> Result<File, DesktopLockError> {
 /// fail-fast rather than queue — the tray, for instance.
 pub fn try_acquire() -> Result<DesktopLockGuard, DesktopLockError> {
     let file = open_lockfile()?;
-    file.try_lock_exclusive()
-        .map_err(|_| DesktopLockError::Held)?;
+    // std file_lock (1.89): Err is WouldBlock when held, or a real
+    // I/O error. Both map to Held, matching the old fs2 behavior.
+    file.try_lock().map_err(|_| DesktopLockError::Held)?;
     Ok(DesktopLockGuard {
         file,
         path: lock_path(),
@@ -113,8 +113,9 @@ mod tests {
         let _env = crate::testing::setup_test_data_dir();
         let _g = try_acquire().unwrap();
         // Second try from the SAME process still needs to respect
-        // the exclusive flock — fs2 enforces this correctly on
-        // macOS + Linux via flock(2).
+        // the exclusive lock — std's File::try_lock enforces this
+        // correctly on macOS + Linux via flock(2) (per open file
+        // description, not per process).
         let err = try_acquire().unwrap_err();
         assert!(matches!(err, DesktopLockError::Held));
     }

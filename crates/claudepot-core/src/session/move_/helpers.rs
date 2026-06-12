@@ -1,10 +1,10 @@
-//! Filesystem + config helpers for `session_move` (everything except
-//! the JSONL stream rewriters, which live in `session_move_jsonl`).
+//! Filesystem + config helpers for the `move_` boundary (everything
+//! except the JSONL stream rewriters, which live in [`super::jsonl`]).
 //!
-//! Crate-public so `session_move.rs` can call them; not part of the
-//! external API.
+//! Private to the `move_` module so the parent `mod.rs` can call them;
+//! not part of the external API.
 
-use crate::session_move_types::{MoveSessionError, INVALID_SLUG_MSG, LIVE_SESSION_MTIME_THRESHOLD};
+use super::types::{MoveSessionError, INVALID_SLUG_MSG, LIVE_SESSION_MTIME_THRESHOLD};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};

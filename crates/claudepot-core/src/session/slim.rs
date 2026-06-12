@@ -640,5 +640,5 @@ pub fn execute_slim_all(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "session_slim_tests.rs"]
+#[path = "slim_tests.rs"]
 mod tests;

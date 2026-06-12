@@ -1,6 +1,27 @@
-use crate::error::ProjectError;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Boundary error for the `project` noun. Historically lived in the
+/// crate-root `error.rs`; relocated next to its boundary per
+/// rust-conventions ("one enum per module boundary").
+/// `crate::error::ProjectError` remains a re-export.
+#[derive(thiserror::Error, Debug)]
+pub enum ProjectError {
+    #[error("project not found: {0}")]
+    NotFound(String),
+
+    #[error("old and new paths are the same")]
+    SamePath,
+
+    #[error("ambiguous: {0}")]
+    Ambiguous(String),
+
+    #[error("a claude process is running in {0} — use --force to proceed")]
+    ClaudeRunning(String),
+
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
 
 // Re-export public API from submodules
 pub use crate::project_display::format_size;
@@ -1465,5 +1486,5 @@ fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), Proje
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "project_tests.rs"]
+#[path = "core_tests.rs"]
 mod tests;

@@ -23,21 +23,12 @@ use std::path::Path;
 ///
 /// Idempotent — safe to call repeatedly. Returns Ok if `path` doesn't
 /// exist (a brand-new file may not have been persisted yet).
+///
+/// The platform mechanics live in [`crate::secure_perms`] so the
+/// secret SQLite stores (`keys.db`, `env-vault.db`) share the exact
+/// same implementation.
 pub fn harden_path(path: &Path) -> Result<(), SwapError> {
-    if !path.exists() {
-        return Ok(());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(SwapError::FileError)?;
-    }
-    #[cfg(windows)]
-    {
-        windows_impl::set_user_only_dacl(path)?;
-    }
-    Ok(())
+    crate::secure_perms::harden_user_only(path).map_err(SwapError::FileError)
 }
 
 /// Verify the file at `path` is locked down to the current user. If it
@@ -74,127 +65,9 @@ pub fn verify_path(path: &Path) -> Result<(), SwapError> {
         // structure is hard to compare directly. Re-apply the user-only
         // DACL unconditionally; this is idempotent and cheap relative
         // to the file read that follows.
-        windows_impl::set_user_only_dacl(path)?;
+        crate::secure_perms::harden_user_only(path).map_err(SwapError::FileError)?;
     }
     Ok(())
-}
-
-#[cfg(windows)]
-mod windows_impl {
-    use super::SwapError;
-    use std::os::windows::ffi::OsStrExt;
-    use std::path::Path;
-    use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HANDLE};
-    use windows_sys::Win32::Security::Authorization::SetEntriesInAclW;
-    use windows_sys::Win32::Security::Authorization::{
-        SetNamedSecurityInfoW, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
-    };
-    use windows_sys::Win32::Security::Authorization::{EXPLICIT_ACCESS_W, SET_ACCESS, TRUSTEE_W};
-    use windows_sys::Win32::Security::{
-        GetTokenInformation, TokenUser, ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE,
-        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
-    };
-    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-
-    /// `FILE_ALL_ACCESS` from Win32 — STANDARD_RIGHTS_REQUIRED |
-    /// SYNCHRONIZE | 0x1FF. Hardcoded so we don't pull the heavy
-    /// `Win32_Storage_FileSystem` feature surface for one constant.
-    const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
-
-    /// Replace `path`'s DACL with a single ACE granting the current
-    /// user FILE_ALL_ACCESS, with inheritance disabled and no other
-    /// ACEs (PROTECTED_DACL_SECURITY_INFORMATION blocks parent
-    /// inheritance from re-adding access).
-    pub fn set_user_only_dacl(path: &Path) -> Result<(), SwapError> {
-        unsafe {
-            // 1. Open the current process token to read the user SID.
-            let mut token: HANDLE = std::ptr::null_mut();
-            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
-                return Err(SwapError::WriteFailed(
-                    "OpenProcessToken failed".to_string(),
-                ));
-            }
-            // RAII-ish: ensure CloseHandle on early returns.
-            struct TokenGuard(HANDLE);
-            impl Drop for TokenGuard {
-                fn drop(&mut self) {
-                    unsafe {
-                        windows_sys::Win32::Foundation::CloseHandle(self.0);
-                    }
-                }
-            }
-            let _guard = TokenGuard(token);
-
-            // 2. Read TOKEN_USER (variable-length: SID lives past the struct).
-            let mut needed: u32 = 0;
-            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
-            if needed == 0 {
-                return Err(SwapError::WriteFailed(
-                    "GetTokenInformation size probe failed".to_string(),
-                ));
-            }
-            let mut buf = vec![0u8; needed as usize];
-            if GetTokenInformation(
-                token,
-                TokenUser,
-                buf.as_mut_ptr() as *mut _,
-                needed,
-                &mut needed,
-            ) == 0
-            {
-                return Err(SwapError::WriteFailed(
-                    "GetTokenInformation read failed".to_string(),
-                ));
-            }
-            let token_user_ptr = buf.as_ptr() as *const TOKEN_USER;
-            let user_sid = (*token_user_ptr).User.Sid;
-
-            // 3. Build a single EXPLICIT_ACCESS_W → ACL.
-            let mut ea: EXPLICIT_ACCESS_W = std::mem::zeroed();
-            ea.grfAccessPermissions = FILE_ALL_ACCESS;
-            ea.grfAccessMode = SET_ACCESS;
-            ea.grfInheritance = NO_INHERITANCE;
-            let trustee = TRUSTEE_W {
-                pMultipleTrustee: std::ptr::null_mut(),
-                MultipleTrusteeOperation: 0,
-                TrusteeForm: TRUSTEE_IS_SID,
-                TrusteeType: TRUSTEE_IS_USER,
-                ptstrName: user_sid as *mut _,
-            };
-            ea.Trustee = trustee;
-
-            let mut new_acl: *mut ACL = std::ptr::null_mut();
-            let rc = SetEntriesInAclW(1, &ea, std::ptr::null_mut(), &mut new_acl);
-            if rc != ERROR_SUCCESS {
-                return Err(SwapError::WriteFailed(format!(
-                    "SetEntriesInAclW failed: {rc}"
-                )));
-            }
-
-            // 4. Apply the protected DACL to the file by name.
-            let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-            wide.push(0);
-            let info_flags = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
-            let rc = SetNamedSecurityInfoW(
-                wide.as_ptr() as *mut _,
-                SE_FILE_OBJECT,
-                info_flags,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                new_acl,
-                std::ptr::null_mut(),
-            );
-            // SetEntriesInAclW allocated `new_acl` via LocalAlloc.
-            LocalFree(new_acl as _);
-
-            if rc != ERROR_SUCCESS {
-                return Err(SwapError::WriteFailed(format!(
-                    "SetNamedSecurityInfoW failed: {rc}"
-                )));
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

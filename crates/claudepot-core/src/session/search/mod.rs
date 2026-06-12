@@ -14,9 +14,13 @@
 //!
 //! The search is read-only; there's no mutation on disk.
 
+// Ranking heuristics live in a private sibling — the search module is
+// the sole consumer, so they are implementation detail of this boundary.
+mod ranking;
+
 use crate::session::{SessionError, SessionEvent, SessionRow};
 use crate::session_export::redact_secrets;
-use crate::session_search_ranking::{classify_match, rank_hits};
+use ranking::{classify_match, rank_hits};
 use serde::Serialize;
 use std::fs;
 use std::io::{BufRead, BufReader};

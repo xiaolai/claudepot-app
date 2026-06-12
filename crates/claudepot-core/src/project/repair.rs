@@ -473,7 +473,12 @@ pub fn gc(
                     if let Ok(body) = fs::read_to_string(e.path()) {
                         if let Ok(j) = serde_json::from_str::<Journal>(&body) {
                             for snap in j.snapshot_paths {
-                                if let Ok(canon) = snap.canonicalize() {
+                                // canonicalize_simplified: strips the
+                                // Windows verbatim prefix so set members
+                                // match GC candidates in one form. See
+                                // .claude/rules/paths.md.
+                                if let Ok(canon) = crate::path_utils::canonicalize_simplified(&snap)
+                                {
                                     set.insert(canon);
                                 } else {
                                     set.insert(snap);
@@ -543,7 +548,7 @@ pub fn gc(
             // Match against both the canonicalized path and the
             // raw entry path so the exclusion catches whichever
             // form the journal stored.
-            let canon = path.canonicalize().ok();
+            let canon = crate::path_utils::canonicalize_simplified(&path).ok();
             let referenced = referenced_by_pending.contains(&path)
                 || canon
                     .as_ref()
@@ -615,5 +620,5 @@ pub fn resolve_lock_file(locks_dir: &Path, project_hint: &str) -> Option<PathBuf
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "project_repair_tests.rs"]
+#[path = "repair_tests.rs"]
 mod tests;

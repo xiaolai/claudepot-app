@@ -202,6 +202,28 @@ pub fn linger_status() -> Result<bool, AgentError> {
     Ok(stdout.trim().eq_ignore_ascii_case("Linger=yes"))
 }
 
+/// Run `loginctl enable-linger $USER` so the systemd user instance
+/// (and the agent timers it owns) keeps running after logout.
+/// Sibling of [`linger_status`]. Fails loud when `USER` is unset —
+/// enabling linger for a guessed user would silently target the
+/// wrong account.
+pub fn linger_enable() -> Result<(), AgentError> {
+    let user =
+        std::env::var("USER").map_err(|e| io_err(format!("USER env var unavailable: {e}")))?;
+    let out = Command::new("loginctl")
+        .args(["enable-linger", &user])
+        .output()
+        .map_err(|e| io_err(e.to_string()))?;
+    if !out.status.success() {
+        return Err(io_err(format!(
+            "loginctl enable-linger exited {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
 /// Render `(timer, service)` unit-file contents for an agent.
 /// Pure: no OS calls. Outputs are byte-stable for goldens.
 pub fn render_units(agent: &Agent) -> Result<(String, String), AgentError> {

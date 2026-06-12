@@ -98,18 +98,224 @@ pub trait ClipboardWriter: Send + Sync {
 /// `("claudepot", "github-token")` is the fallback. Both the CLI and
 /// the GUI read from the same two sources; this is the one
 /// implementation.
-pub fn github_token_resolve() -> Result<String, DeliverError> {
+pub async fn github_token_resolve() -> Result<String, DeliverError> {
     if let Ok(v) = std::env::var("GITHUB_TOKEN") {
         if !v.trim().is_empty() {
             return Ok(v);
         }
     }
+    match github_token_keychain_read().await? {
+        Some(v) if !v.is_empty() => Ok(v),
+        _ => Err(DeliverError::NoToken),
+    }
+}
+
+// ── GitHub PAT keychain slot ────────────────────────────────────────
+//
+// On macOS the slot is accessed via `/usr/bin/security`, NOT the
+// `keyring` crate — the same decision `cli_backend/storage.rs` made
+// for credential blobs, for the same two reasons:
+//
+//   1. The keyring crate's SecItem-based write silently succeeds but
+//      lands in an ephemeral per-app keychain on Developer ID-signed
+//      binaries without a provisioning profile, so "Save" can report
+//      success while nothing persists.
+//   2. Items SecItemAdd creates are ACL-locked to the creating
+//      executable. The GUI `.app` and the `claudepot` CLI are
+//      differently signed binaries, so a GUI-written item would
+//      prompt or fail when the CLI reads it. Items written through
+//      `/usr/bin/security` grant the `security` tool itself access,
+//      which both binaries share.
+//
+// The attribute pair stays `("claudepot", "github-token")`, so a PAT
+// that an older keyring-crate build *did* manage to land in the real
+// login keychain remains findable (macOS may show a one-time consent
+// prompt for it; re-saving from Settings rewrites it cleanly).
+//
+// On Linux/Windows the keyring crate keeps the slot — Secret Service
+// and Credential Manager are per-user, not per-binary, and neither
+// failure mode above applies.
+
+/// Subprocess timeout for `/usr/bin/security` calls, matching
+/// `cli_backend::storage::KEYCHAIN_TIMEOUT` — a locked keychain or a
+/// TCC consent dialog the user never sees must not hang the caller.
+#[cfg(target_os = "macos")]
+const GH_KEYCHAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Read the keychain-backed GitHub PAT. `Ok(None)` = no item stored.
+#[cfg(target_os = "macos")]
+pub async fn github_token_keychain_read() -> Result<Option<String>, DeliverError> {
+    use tokio::process::Command;
+    let out = tokio::time::timeout(GH_KEYCHAIN_TIMEOUT, async {
+        Command::new("/usr/bin/security")
+            .args([
+                "find-generic-password",
+                "-a",
+                GH_TOKEN_ENTRY,
+                "-s",
+                GH_TOKEN_SERVICE,
+                "-w",
+            ])
+            .kill_on_drop(true)
+            .output()
+            .await
+    })
+    .await
+    .map_err(|_| DeliverError::Keychain("security find-generic-password timed out".into()))?
+    .map_err(|e| DeliverError::Keychain(format!("spawn /usr/bin/security: {e}")))?;
+    if out.status.success() {
+        let token = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+        if token.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(token));
+    }
+    // Exit 44 = errSecItemNotFound — a clean miss. Anything else
+    // (36 = locked keychain, TCC/ACL denial) is a real error; never
+    // report a present-but-unreadable token as "absent".
+    match out.status.code() {
+        Some(44) => Ok(None),
+        Some(36) => Err(DeliverError::Keychain(
+            "macOS login keychain is locked — unlock it in Keychain Access and retry".into(),
+        )),
+        code => Err(DeliverError::Keychain(format!(
+            "security find-generic-password failed (code {})",
+            code.unwrap_or(-1)
+        ))),
+    }
+}
+
+/// Write the GitHub PAT to the keychain slot, then read it back —
+/// `security -i` returns 0 even when the inner command silently
+/// fails, so only a verified round-trip counts as success. The token
+/// is passed hex-encoded over stdin (never argv, which is
+/// world-readable via `ps`) and the staging buffers zeroize on drop.
+#[cfg(target_os = "macos")]
+pub async fn github_token_keychain_write(token: &str) -> Result<(), DeliverError> {
+    use age::secrecy::{ExposeSecret, SecretString};
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt as _;
+    use tokio::process::Command;
+
+    let hex_value = SecretString::from(hex::encode(token.as_bytes()));
+    let command_line = SecretString::from(format!(
+        "add-generic-password -U -a \"{GH_TOKEN_ENTRY}\" -s \"{GH_TOKEN_SERVICE}\" -X \"{}\"\n",
+        hex_value.expose_secret()
+    ));
+
+    let result = tokio::time::timeout(GH_KEYCHAIN_TIMEOUT, async {
+        let mut child = Command::new("/usr/bin/security")
+            .args(["-i"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| DeliverError::Keychain(format!("spawn /usr/bin/security: {e}")))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(command_line.expose_secret().as_bytes())
+                .await
+                .map_err(|e| DeliverError::Keychain(format!("stdin write: {e}")))?;
+            drop(stdin);
+        }
+
+        child
+            .wait_with_output()
+            .await
+            .map_err(|e| DeliverError::Keychain(format!("wait: {e}")))
+    })
+    .await
+    .map_err(|_| DeliverError::Keychain("security add-generic-password timed out".into()))?;
+
+    let out = result?;
+    if !out.status.success() {
+        return Err(DeliverError::Keychain(format!(
+            "security add-generic-password failed (exit {})",
+            out.status.code().unwrap_or(-1)
+        )));
+    }
+
+    // Read-back verification — the storage.rs lesson: a 0 exit from
+    // `security -i` is not proof the item landed.
+    match github_token_keychain_read().await? {
+        Some(stored) => {
+            let stored = SecretString::from(stored);
+            if stored.expose_secret() == token {
+                Ok(())
+            } else {
+                Err(DeliverError::Keychain(
+                    "keychain write did not take effect (read-back mismatch)".into(),
+                ))
+            }
+        }
+        None => Err(DeliverError::Keychain(
+            "keychain write returned success but item is absent on read-back".into(),
+        )),
+    }
+}
+
+/// Delete the keychain-backed PAT. Missing item is a clean no-op.
+#[cfg(target_os = "macos")]
+pub async fn github_token_keychain_delete() -> Result<(), DeliverError> {
+    use tokio::process::Command;
+    let out = tokio::time::timeout(GH_KEYCHAIN_TIMEOUT, async {
+        Command::new("/usr/bin/security")
+            .args([
+                "delete-generic-password",
+                "-a",
+                GH_TOKEN_ENTRY,
+                "-s",
+                GH_TOKEN_SERVICE,
+            ])
+            .kill_on_drop(true)
+            .output()
+            .await
+    })
+    .await
+    .map_err(|_| DeliverError::Keychain("security delete-generic-password timed out".into()))?
+    .map_err(|e| DeliverError::Keychain(format!("spawn /usr/bin/security: {e}")))?;
+    // success or exit 44 (item not found) → idempotent ok.
+    if out.status.success() || out.status.code() == Some(44) {
+        Ok(())
+    } else {
+        Err(DeliverError::Keychain(format!(
+            "security delete-generic-password failed (code {})",
+            out.status.code().unwrap_or(-1)
+        )))
+    }
+}
+
+/// Read the keychain-backed GitHub PAT. `Ok(None)` = no item stored.
+#[cfg(not(target_os = "macos"))]
+pub async fn github_token_keychain_read() -> Result<Option<String>, DeliverError> {
     let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
         .map_err(|e| DeliverError::Keychain(e.to_string()))?;
     match entry.get_password() {
-        Ok(v) if !v.is_empty() => Ok(v),
-        _ => Err(DeliverError::NoToken),
+        Ok(v) if !v.is_empty() => Ok(Some(v)),
+        _ => Ok(None),
     }
+}
+
+/// Write the GitHub PAT to the keychain slot.
+#[cfg(not(target_os = "macos"))]
+pub async fn github_token_keychain_write(token: &str) -> Result<(), DeliverError> {
+    let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
+        .map_err(|e| DeliverError::Keychain(e.to_string()))?;
+    entry
+        .set_password(token)
+        .map_err(|e| DeliverError::Keychain(e.to_string()))
+}
+
+/// Delete the keychain-backed PAT. Missing item is a clean no-op.
+#[cfg(not(target_os = "macos"))]
+pub async fn github_token_keychain_delete() -> Result<(), DeliverError> {
+    let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
+        .map_err(|e| DeliverError::Keychain(e.to_string()))?;
+    // Best-effort; not-found is fine.
+    let _ = entry.delete_credential();
+    Ok(())
 }
 
 /// Default filename for a session export: `session-<short_hash>.<ext>`.
@@ -231,7 +437,7 @@ async fn deliver_gist(
     public: bool,
     progress: &dyn ProgressSink,
 ) -> Result<DeliveryReceipt, DeliverError> {
-    let token = github_token_resolve()?;
+    let token = github_token_resolve().await?;
     let result = share_gist(body, filename, description, public, &token, progress).await?;
     Ok(DeliveryReceipt::Gist {
         result,
@@ -369,15 +575,16 @@ mod tests {
         assert_eq!(extension_for(&ExportFormat::Html { no_js: true }), "html");
     }
 
-    #[test]
-    fn github_token_resolve_uses_env_var_when_set() {
+    #[tokio::test]
+    async fn github_token_resolve_uses_env_var_when_set() {
         // Use a unique token value so we don't conflict with the user's
-        // actual env. Set it, call, unset.
+        // actual env. Set it, call, unset. The env path returns before
+        // any keychain access, so this test never touches the OS store.
         let unique = "test-token-xyz123";
         // Intentionally overwrite for this test — saved & restored.
         let prior = std::env::var("GITHUB_TOKEN").ok();
         std::env::set_var("GITHUB_TOKEN", unique);
-        let got = github_token_resolve().unwrap();
+        let got = github_token_resolve().await.unwrap();
         assert_eq!(got, unique);
         match prior {
             Some(v) => std::env::set_var("GITHUB_TOKEN", v),

@@ -3,7 +3,7 @@
 use super::DesktopPlatform;
 use crate::error::DesktopSwapError;
 use crate::paths;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// Snapshot the current Desktop session items into the profile dir for `account_id`.
@@ -244,6 +244,48 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     crate::fs_utils::copy_dir_recursive(src, dst)
 }
 
+/// Run [`snapshot`] on the blocking pool. The profile copy spans the
+/// multi-MB `Local Storage` / `IndexedDB` trees, and running it inline
+/// in an async fn would pin a tokio worker thread for the duration
+/// (rust-conventions names Desktop profile snapshots as THE case for
+/// async file I/O). `snapshot` itself stays sync — it has sync callers
+/// and tests.
+async fn snapshot_off_runtime(
+    data_dir: PathBuf,
+    account_id: Uuid,
+    items: Vec<String>,
+) -> Result<(), DesktopSwapError> {
+    tokio::task::spawn_blocking(move || {
+        let refs: Vec<&str> = items.iter().map(String::as_str).collect();
+        snapshot(&data_dir, account_id, &refs)
+    })
+    .await
+    .map_err(|e| {
+        DesktopSwapError::Io(std::io::Error::other(format!(
+            "snapshot task join failed: {e}"
+        )))
+    })?
+}
+
+/// [`restore`] on the blocking pool — same rationale as
+/// [`snapshot_off_runtime`].
+async fn restore_off_runtime(
+    data_dir: PathBuf,
+    account_id: Uuid,
+    items: Vec<String>,
+) -> Result<(), DesktopSwapError> {
+    tokio::task::spawn_blocking(move || {
+        let refs: Vec<&str> = items.iter().map(String::as_str).collect();
+        restore(&data_dir, account_id, &refs)
+    })
+    .await
+    .map_err(|e| {
+        DesktopSwapError::Io(std::io::Error::other(format!(
+            "restore task join failed: {e}"
+        )))
+    })?
+}
+
 /// Full Desktop switch: quit -> snapshot outgoing -> restore target -> relaunch.
 /// Updates `has_desktop_profile` and `active_desktop` in the store.
 ///
@@ -277,7 +319,13 @@ pub async fn switch(
         return Err(DesktopSwapError::NotInstalled);
     }
 
-    let items = platform.session_items();
+    // Owned copy of the item list so the blocking-pool closures below
+    // can be `'static`.
+    let items: Vec<String> = platform
+        .session_items()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
     // Windows DPAPI precheck (Phase 6 + Tier 1): if the stored
     // profile's ciphertext was encrypted under a different DPAPI
@@ -303,7 +351,7 @@ pub async fn switch(
     // Snapshot outgoing
     if let Some(out_id) = outgoing_id {
         tracing::info!("saving profile for outgoing account...");
-        snapshot(&data_dir, out_id, items)?;
+        snapshot_off_runtime(data_dir.clone(), out_id, items.clone()).await?;
         store
             .update_desktop_profile_flag(out_id, true)
             .map_err(|e| {
@@ -313,7 +361,7 @@ pub async fn switch(
 
     // Restore target
     tracing::info!("restoring profile for target account...");
-    restore(&data_dir, target_id, items)?;
+    restore_off_runtime(data_dir.clone(), target_id, items.clone()).await?;
 
     // Update active pointer in store AFTER disk restore so metadata
     // matches on-disk reality. If the DB write fails here, disk is
@@ -328,7 +376,7 @@ pub async fn switch(
             "DB set_active_desktop failed after disk restore; attempting disk rollback: {db_err}"
         );
         if let Some(out_id) = outgoing_id {
-            match restore(&data_dir, out_id, items) {
+            match restore_off_runtime(data_dir.clone(), out_id, items.clone()).await {
                 Ok(()) => {
                     tracing::warn!(
                         "disk rolled back to outgoing account; state is consistent with DB"

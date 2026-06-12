@@ -13,6 +13,7 @@
 //!   cascade via the standard `merge_settings` deep-merge+concat-uniq
 //!   rules.
 
+use crate::config_view::error::ConfigViewError;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
@@ -89,22 +90,24 @@ pub fn build_plugin_base(plugins: &[Plugin]) -> Value {
 
 /// Read a plugin manifest from disk. Looks for `plugin.json` or
 /// `.claude-plugin/plugin.json`.
-pub fn load_plugin_manifest(root: &Path) -> Result<Value, String> {
+pub fn load_plugin_manifest(root: &Path) -> Result<Value, ConfigViewError> {
     let candidates = [
         root.join("plugin.json"),
         root.join(".claude-plugin").join("plugin.json"),
     ];
     for p in &candidates {
         if p.is_file() {
-            let bytes = std::fs::read(p).map_err(|e| format!("read {}: {}", p.display(), e))?;
-            return serde_json::from_slice(&bytes)
-                .map_err(|e| format!("parse {}: {}", p.display(), e));
+            let bytes = std::fs::read(p).map_err(|e| ConfigViewError::Io {
+                path: p.clone(),
+                source: e,
+            })?;
+            return serde_json::from_slice(&bytes).map_err(|e| ConfigViewError::Parse {
+                path: p.clone(),
+                source: e,
+            });
         }
     }
-    Err(format!(
-        "no plugin manifest in {} (looked for plugin.json / .claude-plugin/plugin.json)",
-        root.display()
-    ))
+    Err(ConfigViewError::ManifestNotFound(root.to_path_buf()))
 }
 
 /// Load a plugin's optional `settings.json`.

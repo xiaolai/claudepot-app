@@ -1,13 +1,13 @@
 //! Scoring + stable ranking primitives for session search.
 //!
-//! Kept in its own module so `session_search.rs` stays under the
-//! 350-line production budget and so the scoring rules are easy to
+//! Kept in its own submodule so the parent `search` module stays under
+//! the 350-line production budget and so the scoring rules are easy to
 //! find. These primitives are pure — no I/O, no Tauri, no `SessionRow`
 //! dependency — which also keeps tests trivial.
 
 use std::cmp::Ordering;
 
-use crate::session_search::SearchHit;
+use super::SearchHit;
 
 /// Exact phrase: match is bounded by non-alphanumeric chars on both
 /// sides of the haystack (start/end of string counts as a boundary).

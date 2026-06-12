@@ -115,6 +115,15 @@ pub(super) fn load_db_tuples(db: &Connection) -> Result<Vec<IndexTuple>, Session
 /// stamps all rows with the same wall-clock value — useful for
 /// diagnostics ("which pass wrote this row").
 ///
+/// `inode` is the WALK-time identity from `walk_fs` (threaded through
+/// the refresh pipeline rather than added to `SessionRow`, which is
+/// the public session API type). It must NOT be re-stat'd here: a
+/// fresh stat at upsert time would observe a file that was atomically
+/// replaced during the scan window and pair the OLD parse + size +
+/// mtime with the NEW inode — exactly the size+mtime-collision case
+/// the inode column exists to catch (see `diff.rs`). The pre-scan
+/// inode fails toward a spurious re-scan instead of a stale persist.
+///
 /// Redacts any `sk-ant-*` token that happens to appear in
 /// `first_user_prompt` before persisting. The on-disk JSONL already
 /// contains that data and redaction there is out of scope, but
@@ -123,18 +132,14 @@ pub(super) fn load_db_tuples(db: &Connection) -> Result<Vec<IndexTuple>, Session
 pub(super) fn upsert_row(
     db: &Connection,
     row: &SessionRow,
+    inode: u64,
     indexed_at_ms: i64,
 ) -> Result<(), SessionIndexError> {
     let file_path = row.file_path.to_string_lossy().into_owned();
     let mtime_ns = row.last_modified.map(mtime_ns_of_systemtime).unwrap_or(0);
-    // Inode is read from the file on disk at UPSERT time (cheap stat)
-    // so callers don't need to thread it through SessionRow, which is
-    // the public session API type. Missing → 0, which matches the
-    // non-Unix degraded-mode contract.
-    let inode: i64 = std::fs::metadata(&row.file_path)
-        .ok()
-        .map(|m| i64::try_from(inode_of(&m)).unwrap_or(0))
-        .unwrap_or(0);
+    // Missing / non-Unix identity is 0, matching the degraded-mode
+    // contract in `fs_utils::file_identity`.
+    let inode: i64 = i64::try_from(inode).unwrap_or(0);
     let models_json = serde_json::to_string(&row.models)?;
     let first_user_prompt = row.first_user_prompt.as_deref().map(redact_secrets);
 
@@ -235,6 +240,18 @@ pub(super) fn redact_secrets_for_turns(input: &str) -> String {
 pub(super) fn load_all_rows(db: &Connection) -> Result<Vec<SessionRow>, SessionIndexError> {
     let mut stmt = db.prepare(SQL_SELECT_ALL_SORTED)?;
     let rows = stmt.query_map([], row_from_sql)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Load the cached rows for one project slug, newest-first (same sort
+/// contract as `load_all_rows`). Served by `idx_sessions_slug`, so the
+/// query never scans rows outside the requested project.
+pub(super) fn load_rows_by_slug(
+    db: &Connection,
+    slug: &str,
+) -> Result<Vec<SessionRow>, SessionIndexError> {
+    let mut stmt = db.prepare(SQL_SELECT_BY_SLUG_SORTED)?;
+    let rows = stmt.query_map(params![slug], row_from_sql)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -381,6 +398,21 @@ SELECT
     git_branch, cc_version, display_slug, has_error, is_sidechain,
     indexed_at_ms
 FROM sessions
+ORDER BY
+    COALESCE(last_ts_ms, file_mtime_ns / 1000000) DESC
+"#;
+
+const SQL_SELECT_BY_SLUG_SORTED: &str = r#"
+SELECT
+    file_path, slug, session_id, file_size_bytes, file_mtime_ns,
+    project_path, project_from_transcript, first_ts_ms, last_ts_ms,
+    event_count, message_count, user_message_count, assistant_message_count,
+    first_user_prompt, models_json,
+    tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
+    git_branch, cc_version, display_slug, has_error, is_sidechain,
+    indexed_at_ms
+FROM sessions
+WHERE slug = ?1
 ORDER BY
     COALESCE(last_ts_ms, file_mtime_ns / 1000000) DESC
 "#;
