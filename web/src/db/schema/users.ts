@@ -133,3 +133,22 @@ export const verificationTokens = pgTable(
   },
   (t) => [primaryKey({ columns: [t.identifier, t.token] })],
 );
+
+// Magic-link send throttle buckets (migration 0040). One row per
+// (key, UTC hour bucket); key is "email:<normalized address>" or
+// "ip:<client ip>". Incremented atomically via INSERT … ON CONFLICT
+// DO UPDATE in src/lib/magic-link-rate-limit.ts (same pattern as
+// api_token_usage). Rows older than 24h are pruned opportunistically
+// on each send.
+export const magicLinkSends = pgTable(
+  "magic_link_sends",
+  {
+    key: text("key").notNull(),
+    bucketHour: timestamp("bucket_hour", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    count: integer("count").notNull().default(1),
+  },
+  (t) => [primaryKey({ columns: [t.key, t.bucketHour] })],
+);

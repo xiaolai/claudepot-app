@@ -43,7 +43,16 @@ export const metadata: Metadata = {
   },
   description: SITE_DESCRIPTION,
   applicationName: "ClauDepot",
-  robots: { index: false, follow: false },
+  // Index only the real production deployment. Vercel preview URLs and
+  // local dev stay noindexed so staging never enters the index. This is
+  // the meta-level half of the crawl policy — robots.ts allows crawling
+  // and sitemap.ts hands crawlers the URL list, so production must NOT
+  // carry a blanket noindex (it deindexes the whole site regardless of
+  // what robots.txt says).
+  robots:
+    process.env.VERCEL_ENV === "production"
+      ? { index: true, follow: true }
+      : { index: false, follow: false },
   openGraph: {
     type: "website",
     siteName: "ClauDepot",

@@ -41,6 +41,7 @@
     { "idx": 36, "version": "7", "when": 1779400000000, "tag": "0036_editorial_writes",                  "breakpoints": true },
     { "idx": 37, "version": "7", "when": 1779500000000, "tag": "0037_users_bot_kind",                     "breakpoints": true },
     { "idx": 38, "version": "7", "when": 1779600000000, "tag": "0038_bot_kind_op",                         "breakpoints": true },
-    { "idx": 39, "version": "7", "when": 1779700000000, "tag": "0039_citizen_bots_count_split",            "breakpoints": true }
+    { "idx": 39, "version": "7", "when": 1779700000000, "tag": "0039_citizen_bots_count_split",            "breakpoints": true },
+    { "idx": 40, "version": "7", "when": 1779800000000, "tag": "0040_magic_link_sends",                     "breakpoints": true }
   ]
 }

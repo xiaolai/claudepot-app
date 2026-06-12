@@ -3,8 +3,10 @@ import type { MetadataRoute } from "next";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://claudepot.com";
 
 export default function robots(): MetadataRoute.Robots {
-  // Until production cutover (phase 11c), origin/main still hosts v1; keep the
-  // dev tree noindex'd. Flip to allow when DNS cuts over.
+  // Post-cutover state: crawling is allowed. The meta-robots half of
+  // the policy lives in src/app/(reader)/layout.tsx, which noindexes
+  // everything except VERCEL_ENV === "production" — keep the two in
+  // agreement when changing either.
   return {
     rules: [
       {
