@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
 import type {
   AutoInstallOutcome,
@@ -773,18 +773,9 @@ export function UpdatesPanel() {
   // background poller did without the user having to click anything.
   // The emit happens once per cycle (default cadence: 4 h, but the
   // user can pin the toggle and click "Check now" to rerun on demand).
-  useEffect(() => {
-    let active = true;
-    const unlisten = listen("updates::cycle-complete", () => {
-      if (active) {
-        void refresh(false);
-      }
-    }).catch(() => null);
-    return () => {
-      active = false;
-      void unlisten.then((fn) => fn?.());
-    };
-  }, [refresh]);
+  useTauriEvent("updates::cycle-complete", () => {
+    void refresh(false);
+  });
 
   const onChannelSet = useCallback(
     async (channel: "latest" | "stable") => {

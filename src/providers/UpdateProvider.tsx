@@ -54,6 +54,13 @@ import {
   type ReleaseChannelName,
   type ReleaseDownloadProgress,
 } from "../api/releaseUpdate";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  UPDATE_AUTO_CHECK_KEY,
+  UPDATE_CHECK_FREQ_KEY,
+  UPDATE_LAST_CHECKED_KEY,
+  UPDATE_SKIP_VERSION_KEY,
+} from "../lib/storageKeys";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const ONE_WEEK_MS = 7 * ONE_DAY_MS;
@@ -117,6 +124,14 @@ interface UpdateContextValue {
   error: string | null;
   /** True iff the user pressed "Skip this version". Resets on next check. */
   isSkipped: boolean;
+  /**
+   * Non-null when the last check found the running build to be a
+   * prerelease *newer* than the Stable channel's current release
+   * (the Beta → Stable switch case). The status is "up-to-date" at
+   * the state-machine level, but the About pane must render a
+   * stranded explanation instead of "you're on the latest version".
+   */
+  stranded: { stableVersion: string | null } | null;
 
   // Settings.
   autoCheckEnabled: boolean;
@@ -148,10 +163,10 @@ interface UpdateContextValue {
 const UpdateContext = createContext<UpdateContextValue | null>(null);
 
 const LS = {
-  autoCheck: "claudepot.update.autoCheckEnabled",
-  freq: "claudepot.update.checkFrequency",
-  lastCheckedAt: "claudepot.update.lastCheckedAt",
-  skipVersion: "claudepot.update.skipVersion",
+  autoCheck: UPDATE_AUTO_CHECK_KEY,
+  freq: UPDATE_CHECK_FREQ_KEY,
+  lastCheckedAt: UPDATE_LAST_CHECKED_KEY,
+  skipVersion: UPDATE_SKIP_VERSION_KEY,
 } as const;
 
 function readLocalString(key: string, fallback: string): string {
@@ -222,6 +237,14 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [skipVersion, setSkipVersion] = useState<string | null>(() =>
     readLocalString(LS.skipVersion, "") || null,
   );
+  const [stranded, setStranded] = useState<{
+    stableVersion: string | null;
+  } | null>(null);
+  // Labels of in-flight background ops blocking a relaunch — non-null
+  // while the "restart anyway?" confirm dialog is up.
+  const [pendingRelaunchOps, setPendingRelaunchOps] = useState<
+    string[] | null
+  >(null);
 
   // Settings — initialized from localStorage so refresh restores prefs.
   const [autoCheckEnabled, setAutoCheckEnabledState] = useState<boolean>(
@@ -266,6 +289,15 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   // call — so no restart is needed.
   const setReleaseChannel = useCallback((v: ReleaseChannel) => {
     setReleaseChannelState(v);
+    // A channel switch invalidates any prior check result: the Rust
+    // side clears its stashed Update handle (`release_channel_set`),
+    // and the renderer must not keep offering the *other* channel's
+    // update. Reset to idle until the next check runs against the
+    // new channel.
+    setStatus("idle");
+    setUpdateInfo(null);
+    setDownloadProgress(null);
+    setStranded(null);
     void api
       .releaseChannelSet(v)
       .then((normalized) => setReleaseChannelState(normalized))
@@ -326,6 +358,15 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       // redundant — cancel it before it fires and yanks state back to
       // `checking`.
       cancelRetry();
+
+      // Stranded-on-prerelease: the running build is a prerelease
+      // newer than the Stable channel's current release. Carried
+      // alongside "up-to-date" so the badge can tell the truth.
+      setStranded(
+        result.strandedOnPrerelease
+          ? { stableVersion: result.stableVersion }
+          : null,
+      );
 
       if (!result.updateAvailable) {
         setUpdateInfo(null);
@@ -409,7 +450,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     }
   }, [cancelRetry]);
 
-  const applyUpdate = useCallback(async () => {
+  const doRelaunch = useCallback(async () => {
     try {
       await relaunch();
     } catch (e) {
@@ -418,6 +459,27 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       setStatus("error");
     }
   }, []);
+
+  const applyUpdate = useCallback(async () => {
+    // Quiesce probe before the restart: relaunch kills the process
+    // immediately, and a half-completed background op (credential
+    // swap, CC auto-install) is not crash-protected the way repair
+    // ops are. When anything is mid-flight, warn-confirm via the
+    // dialog rendered below — mirrors the quit gate
+    // (`app_menu::attempt_quit`). Zero overhead when idle.
+    let busy: string[] = [];
+    try {
+      busy = await api.relaunchBusyOps();
+    } catch {
+      // A failed probe must not strand the user behind a dead
+      // "Restart to update" button — proceed as before.
+    }
+    if (busy.length > 0) {
+      setPendingRelaunchOps(busy);
+      return;
+    }
+    await doRelaunch();
+  }, [doRelaunch]);
 
   // Probe platform support exactly once. The result drives both the
   // auto-check effect (skip on .deb) and the About pane (hide
@@ -524,6 +586,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       downloadProgress,
       error,
       isSkipped,
+      stranded,
       autoCheckEnabled,
       setAutoCheckEnabled,
       checkFrequency,
@@ -544,6 +607,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       downloadProgress,
       error,
       isSkipped,
+      stranded,
       autoCheckEnabled,
       setAutoCheckEnabled,
       checkFrequency,
@@ -560,7 +624,40 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <UpdateContext.Provider value={value}>{children}</UpdateContext.Provider>
+    <UpdateContext.Provider value={value}>
+      {children}
+      {/* Pre-relaunch quiesce confirm. Rendered by the provider (not a
+          section) because applyUpdate can be invoked from any surface
+          and the warning must never depend on which pane is mounted. */}
+      {pendingRelaunchOps && (
+        <ConfirmDialog
+          title="Operations still running"
+          body={
+            <>
+              <p style={{ margin: 0 }}>
+                Restarting now will abandon the work below. Repairable
+                operations leave a journal entry you can resume later;
+                one-shot operations will need to be restarted.
+              </p>
+              <ul style={{ margin: "var(--sp-8) 0 0", paddingLeft: "var(--sp-20)" }}>
+                {pendingRelaunchOps.map((label, i) => (
+                  // Index keys are fine: the list is a static snapshot
+                  // and two ops can legitimately share a label.
+                  <li key={i}>{label}</li>
+                ))}
+              </ul>
+            </>
+          }
+          confirmLabel="Restart anyway"
+          confirmDanger
+          onConfirm={() => {
+            setPendingRelaunchOps(null);
+            void doRelaunch();
+          }}
+          onCancel={() => setPendingRelaunchOps(null)}
+        />
+      )}
+    </UpdateContext.Provider>
   );
 }
 

@@ -20,7 +20,7 @@ import type {
  * surfaces (Sessions, Memory, Cleanup) regardless.
  */
 
-const SESSION_DISMISS_KEY = "claudepot.networkGate.dismissed";
+import { NETWORK_GATE_DISMISSED_KEY as SESSION_DISMISS_KEY } from "../lib/storageKeys";
 
 /** Time to wait after mount before firing the probe. Mirrors
  *  `service_status_watcher::FIRST_TICK_DELAY` philosophy: long enough

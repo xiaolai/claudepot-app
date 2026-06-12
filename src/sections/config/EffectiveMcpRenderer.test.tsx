@@ -74,4 +74,34 @@ describe("EffectiveMcpRenderer", () => {
     });
     expect(screen.getByText("pending")).toBeInTheDocument();
   });
+
+  it("server row expands via keyboard (Enter) and exposes aria-expanded", async () => {
+    configEffectiveMcpSpy.mockResolvedValue({
+      enterprise_lockout: false,
+      servers: [
+        {
+          name: "foo",
+          source_scope: "project",
+          contributors: ["project"],
+          approval: "pending",
+          approval_reason: null,
+          blocked_by: null,
+          masked: { command: "run-foo" },
+        },
+      ],
+    });
+    render(<EffectiveMcpRenderer cwd="/" />);
+    const row = await screen.findByRole("button", { expanded: false });
+    expect(row).toHaveAttribute("tabIndex", "0");
+
+    row.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    // The expanded detail row carries the masked JSON.
+    expect(screen.getByText(/"command": "run-foo"/)).toBeInTheDocument();
+
+    // Space toggles it closed again.
+    await userEvent.keyboard(" ");
+    expect(row).toHaveAttribute("aria-expanded", "false");
+  });
 });

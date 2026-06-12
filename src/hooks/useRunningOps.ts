@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { requestIdle, cancelIdle } from "../lib/idle";
 import type { RunningOpInfo } from "../types";
 
 const POLL_INTERVAL_MS = 3_000;
@@ -54,20 +55,10 @@ export function useRunningOps(): {
     // Defer the first tick past first paint. The running-op strip
     // only lights up when an op is in flight — we can wait one idle
     // slot for it on cold start.
-    const rIC: (cb: () => void) => number =
-      (window as typeof window & {
-        requestIdleCallback?: (cb: () => void) => number;
-      }).requestIdleCallback ??
-      ((cb) => window.setTimeout(cb, 250));
-    const cIC: (h: number) => void =
-      (window as typeof window & {
-        cancelIdleCallback?: (h: number) => void;
-      }).cancelIdleCallback ?? window.clearTimeout;
-
-    const idleHandle = rIC(() => refresh());
+    const idleHandle = requestIdle(() => refresh(), { fallbackDelayMs: 250 });
     const id = window.setInterval(refresh, POLL_INTERVAL_MS);
     return () => {
-      cIC(idleHandle);
+      cancelIdle(idleHandle);
       window.clearInterval(id);
     };
   }, [refresh]);

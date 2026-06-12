@@ -1,5 +1,5 @@
-import { useEffect, useId, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useId, useState } from "react";
+import { useTauriEvent } from "../hooks/useTauriEvent";
 import { Button } from "./primitives/Button";
 import { Glyph } from "./primitives/Glyph";
 import {
@@ -36,34 +36,19 @@ export function QuitConfirm() {
   const [ops, setOps] = useState<QuitGateOp[] | null>(null);
   const titleId = useId();
 
-  useEffect(() => {
-    let active = true;
-    let unlisten: (() => void) | null = null;
-    listen<QuitGateOp[]>("cp-quit-requested", (event) => {
-      // Empty payload would mean the backend's filter logic drifted —
-      // fall back to closing rather than showing an empty modal.
-      if (!event.payload || event.payload.length === 0) {
-        setOps(null);
-        return;
-      }
-      setOps(event.payload);
-    })
-      .then((fn) => {
-        if (!active) fn();
-        else unlisten = fn;
-      })
-      .catch((err: unknown) => {
-        // Subscription failure makes the quit gate undetectable from
-        // the renderer — log so the cause is diagnosable. Without
-        // this, ⌘Q would silently no-op while the backend keeps
-        // emitting `cp-quit-requested`.
-        console.error("QuitConfirm: listen(cp-quit-requested) failed:", err);
-      });
-    return () => {
-      active = false;
-      unlisten?.();
-    };
-  }, []);
+  // Subscription failure would make the quit gate undetectable from
+  // the renderer (⌘Q silently no-ops) — useTauriEvent's shared catch
+  // console.warns real listen() failures while staying silent in
+  // non-Tauri test environments.
+  useTauriEvent<QuitGateOp[]>("cp-quit-requested", (event) => {
+    // Empty payload would mean the backend's filter logic drifted —
+    // fall back to closing rather than showing an empty modal.
+    if (!event.payload || event.payload.length === 0) {
+      setOps(null);
+      return;
+    }
+    setOps(event.payload);
+  });
 
   if (!ops) return null;
 

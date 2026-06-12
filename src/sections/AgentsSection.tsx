@@ -299,12 +299,15 @@ export function AgentsSection() {
           pushToast("info", "Template installed.");
         }}
         onOpenThirdParties={() => {
-          // Best-effort deep-link: dispatch a custom event the
-          // sidebar/router listens to. If nothing handles it,
-          // close the gallery so the user can navigate manually.
-          window.dispatchEvent(new CustomEvent("claudepot:nav", {
-            detail: { section: "third-parties" },
-          }));
+          // Deep-link to the Providers section. The App shell listens
+          // for `claudepot:navigate-section` and reads `detail.id`
+          // against the registry ids (registry.tsx) — "third-party"
+          // is Providers' id (kept singular for localStorage compat).
+          window.dispatchEvent(
+            new CustomEvent("claudepot:navigate-section", {
+              detail: { id: "third-party" },
+            }),
+          );
           setShowGallery(false);
         }}
       />

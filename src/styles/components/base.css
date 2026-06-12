@@ -126,17 +126,9 @@ pre {
   font-size: var(--fs-xs);
 }
 
-/* ---------- reduced motion ---------- */
-
-@media (prefers-reduced-motion: reduce) {
-  .toast, .toast.exiting {
-    animation: none;
-  }
-  .skeleton {
-    animation: none;
-    opacity: 0.4;
-  }
-}
+/* Reduced-motion guards live in the shard that declares the animation
+   (e.g. modals.css for .toast/.skeleton) — a guard here loses the
+   cascade to later-imported shards' equal-specificity declarations. */
 
 /* ---------- responsive ---------- */
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
 import type {
   AutoMemoryStateDto,
@@ -75,24 +75,19 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
   // global events so a sibling project's edits don't trigger a
   // refresh here. Global CLAUDE.md events have project_slug=null and
   // SHOULD refresh because the pane shows the global file too.
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    void listen<{ project_slug?: string | null }>(
-      "memory:changed",
-      (event) => {
-        const eventSlug = event.payload?.project_slug ?? null;
-        const ourSlug = data?.anchor.slug ?? null;
-        if (eventSlug === null || (ourSlug !== null && eventSlug === ourSlug)) {
-          void refresh();
-        }
-      },
-    ).then((u) => {
-      unlisten = u;
-    });
-    return () => {
-      unlisten?.();
-    };
-  }, [refresh, data]);
+  // useTauriEvent holds the handler in a ref, so the closure always
+  // reads the latest `data`/`refresh` without re-subscribing (and
+  // the old unmount-before-listen-resolves leak is gone).
+  useTauriEvent<{ project_slug?: string | null }>(
+    "memory:changed",
+    (event) => {
+      const eventSlug = event.payload?.project_slug ?? null;
+      const ourSlug = data?.anchor.slug ?? null;
+      if (eventSlug === null || (ourSlug !== null && eventSlug === ourSlug)) {
+        void refresh();
+      }
+    },
+  );
 
   // Reload content + change log whenever the selection changes.
   useEffect(() => {

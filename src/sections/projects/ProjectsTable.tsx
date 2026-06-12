@@ -1,4 +1,4 @@
-import { type MouseEvent, useMemo, useState } from "react";
+import { memo, type MouseEvent, useMemo, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { BrandGithubMark } from "../../components/primitives/BrandGithubMark";
 import { Glyph } from "../../components/primitives/Glyph";
@@ -264,7 +264,19 @@ export function ProjectsTable({
   );
 }
 
-function ProjectRow({
+/**
+ * Memoized row: the parent re-renders on every `live-all` event
+ * (useSessionLive snapshot replacement), but only rows whose props
+ * changed should pay the render. `project` identities are stable
+ * across live updates (the `shown` memo doesn't depend on the live
+ * list) and `live` is `undefined` for rows without a matching live
+ * session, so the shallow compare skips every non-live row; rows
+ * WITH live sessions get a fresh `live` array per event and re-render
+ * — exactly the ones whose dots can change. Callers must pass
+ * referentially stable `onSelect` / `onContextMenu` or the memo is
+ * defeated.
+ */
+const ProjectRow = memo(function ProjectRow({
   project: p,
   active,
   live,
@@ -477,7 +489,7 @@ function ProjectRow({
       </span>
     </li>
   );
-}
+});
 
 /**
  * Render up to 5 live-status dots for a project row, followed by

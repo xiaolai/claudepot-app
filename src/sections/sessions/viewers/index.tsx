@@ -7,7 +7,7 @@ import { BashToolViewer } from "./BashToolViewer";
 import { EditToolViewer } from "./EditToolViewer";
 import { ReadToolViewer } from "./ReadToolViewer";
 import { WriteToolViewer } from "./WriteToolViewer";
-import { redactSecrets } from "./redact";
+import { redactSecrets } from "../../../lib/redactSecrets";
 
 const GENERIC_CLAMP = 4000;
 

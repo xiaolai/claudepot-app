@@ -8,7 +8,7 @@
 // `verify_all_accounts`, `accounts_reconcile`, `fetch_all_usage` —
 // the worst-case latency is `5s × N`. Without a JS-side ceiling the
 // renderer's Promise sits unresolved for the full window, and any
-// caller that awaits unconditionally (`useAccounts`, `useRefresh`,
+// caller that awaits unconditionally (`useRefresh`,
 // `runVerifyAll`) makes the Accounts pane appear frozen while every
 // other surface keeps moving.
 //

@@ -100,6 +100,14 @@ export const sessionApi = {
    */
   sessionListAll: () => invoke<SessionRow[]>("session_list_all"),
   /**
+   * Per-project variant of `sessionListAll`: same refresh + row shape,
+   * but only the rows whose `slug` matches cross the IPC boundary.
+   * Use this from per-project surfaces (ProjectDetail) — the full
+   * index (first prompts included) is for global consumers only.
+   */
+  sessionListBySlug: (slug: string) =>
+    invoke<SessionRow[]>("session_list_by_slug", { slug }),
+  /**
    * Truncate the session-index cache and force the next `sessionListAll`
    * to re-parse every transcript from cold. Escape hatch for cases the
    * `(size, mtime)` guard can't see. Safe to call — no data loss; only

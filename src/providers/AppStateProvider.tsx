@@ -20,6 +20,7 @@ import { useActions } from "../hooks/useActions";
 import { useOperations } from "../hooks/useOperations";
 import { buildEmit, type EmitFn } from "../lib/notifications/dispatch";
 import { hydrateCategoryPrefs } from "../lib/notifications/prefs";
+import { useTauriEvent } from "../hooks/useTauriEvent";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
 interface AppStateValue {
@@ -217,32 +218,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // emit() reading stale category state.
   //
   // Fire-and-forget — emit() falls back to sensible defaults until
-  // the cache lands. Module-level dynamic import on @tauri-apps so
-  // non-Tauri test environments don't blow up.
+  // the cache lands. useTauriEvent swallows the listen() rejection
+  // that non-Tauri test environments raise.
+  useTauriEvent("cp-prefs-changed", () => {
+    void hydrateCategoryPrefs();
+  });
   useEffect(() => {
     void hydrateCategoryPrefs();
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    void import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen("cp-prefs-changed", () => {
-          void hydrateCategoryPrefs();
-        }),
-      )
-      .then((fn) => {
-        if (cancelled) {
-          if (typeof fn === "function") fn();
-        } else {
-          unlisten = fn;
-        }
-      })
-      .catch(() => {
-        /* non-tauri env */
-      });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
   }, []);
 
   const [splitBrainPending, setSplitBrainPending] =

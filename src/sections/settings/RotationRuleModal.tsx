@@ -330,7 +330,7 @@ export function RotationRuleModal({
                       },
                     }))
                   }
-                  style={{ ...inputStyle(), width: "var(--input-narrow)" }}
+                  style={{ ...inputStyle(), width: "var(--sp-64)" }}
                 />
               </Field>
               <Field
@@ -350,7 +350,7 @@ export function RotationRuleModal({
                       },
                     }))
                   }
-                  style={{ ...inputStyle(), width: "var(--input-narrow)" }}
+                  style={{ ...inputStyle(), width: "var(--sp-64)" }}
                 />
               </Field>
               <label

@@ -240,7 +240,7 @@ function GalleryGrid({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(tokens.config.menu.min.width, 1fr))",
+              gridTemplateColumns: "repeat(auto-fill, minmax(var(--config-menu-min-width), 1fr))",
               gap: "var(--sp-12)",
             }}
           >

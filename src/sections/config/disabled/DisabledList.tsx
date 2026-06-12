@@ -5,6 +5,7 @@
 import { useCallback, useState } from "react";
 import { api } from "../../../api";
 import { Button } from "../../../components/primitives/Button";
+import { IconButton } from "../../../components/primitives/IconButton";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { NF } from "../../../icons";
 import type { DisabledRecordDto, LifecycleKind } from "../../../types";
@@ -134,7 +135,11 @@ function KindBlock({
         <span style={{ flex: 1 }}>{group.label}</span>
         <span>{total}</span>
       </header>
-      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      <ul
+        role="listbox"
+        aria-label={`Disabled ${group.label.toLowerCase()}`}
+        style={{ listStyle: "none", margin: 0, padding: 0 }}
+      >
         {Array.from(group.byRoot.entries()).map(([root, list]) => (
           <RootSubgroup
             key={root}
@@ -176,6 +181,9 @@ function RootSubgroup({
     <>
       {showRootLabel && (
         <li
+          // Non-interactive subgroup label inside the listbox — keep it
+          // out of the option list for assistive tech.
+          role="presentation"
           style={{
             padding: "var(--sp-6) var(--sp-12)",
             fontSize: "var(--fs-2xs)",
@@ -268,7 +276,21 @@ function Row({
   return (
     <>
       <li
+        // Listbox option pattern (design.md a11y floor) — same shape
+        // as ProjectsList rows: keyboard-activatable, aria-selected,
+        // and a left accent bar so selection isn't conveyed by
+        // background color alone.
+        role="option"
+        aria-selected={selected}
+        tabIndex={0}
+        className="pm-focus"
         onClick={onSelect}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect();
+          }
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -276,6 +298,9 @@ function Row({
           padding: "var(--sp-6) var(--sp-12)",
           background: selected ? "var(--bg-active)" : "transparent",
           color: selected ? "var(--accent-ink)" : "var(--fg)",
+          borderLeft: selected
+            ? "2px solid var(--accent-border)"
+            : "2px solid transparent",
           borderBottom: "var(--bw-hair) solid var(--line)",
           cursor: "pointer",
           fontSize: "var(--fs-sm)",
@@ -298,22 +323,19 @@ function Row({
           onClick={(e) => e.stopPropagation()}
           style={{ display: "inline-flex", gap: "var(--sp-4)" }}
         >
-          <Button
-            variant="ghost"
-            glyph={NF.refresh}
-            onClick={onEnable}
-            disabled={busy}
-            size="sm"
-            title="Re-enable"
-          />
-          <Button
-            variant="ghost"
-            danger
+          {/* Tier 3 (icon-buttons.md): "Disable / Enable" verbs have no
+              universal glyph — the label IS the affordance. */}
+          <Button variant="ghost" onClick={onEnable} disabled={busy} size="sm">
+            Re-enable
+          </Button>
+          {/* Tier 1: trash in a dense list row is a universal verb. */}
+          <IconButton
             glyph={NF.trash}
             onClick={() => setConfirmTrash(true)}
             disabled={busy}
             size="sm"
             title="Move to trash"
+            aria-label="Move to trash"
           />
         </span>
       </li>

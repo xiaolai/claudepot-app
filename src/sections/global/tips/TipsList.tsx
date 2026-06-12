@@ -55,7 +55,7 @@ export function TipsList({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter tips by prose, id, or trigger…"
           style={{
-            flex: "1 1 tokens.config.cmd.col.max",
+            flex: "1 1 var(--config-cmd-col-max)",
             minWidth: 240,
             padding: "var(--sp-4) var(--sp-8)",
             fontFamily: "var(--font-mono)",
