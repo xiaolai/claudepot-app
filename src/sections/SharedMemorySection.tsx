@@ -28,8 +28,28 @@ import { ScreenHeader } from "../shell/ScreenHeader";
 
 type Tab = "search" | "memories" | "decisions";
 
+const TABS: { id: Tab; label: string }[] = [
+  { id: "search", label: "Search" },
+  { id: "memories", label: "Memories" },
+  { id: "decisions", label: "Decisions" },
+];
+
 export function SharedMemorySection() {
   const [tab, setTab] = useState<Tab>("search");
+
+  // WAI-ARIA tabs pattern: Left/Right move selection with wrap-around
+  // and focus follows. Required companion to TabButton's roving
+  // tabIndex — without it, inactive tabs (tabIndex={-1}) would be
+  // keyboard-unreachable.
+  const onTablistKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const delta = e.key === "ArrowRight" ? 1 : -1;
+    const i = TABS.findIndex((t) => t.id === tab);
+    const next = TABS[(i + delta + TABS.length) % TABS.length].id;
+    setTab(next);
+    document.getElementById(`shared-memory-tab-${next}`)?.focus();
+  };
 
   return (
     <div
@@ -47,35 +67,35 @@ export function SharedMemorySection() {
       <nav
         role="tablist"
         aria-label="Shared memory tabs"
+        onKeyDown={onTablistKeyDown}
         style={{
           display: "flex",
-          gap: 16,
+          gap: "var(--sp-16)",
           padding: "0 var(--sp-24)",
           borderBottom: "var(--sp-px) solid var(--line)",
         }}
       >
-        <TabButton active={tab === "search"} onClick={() => setTab("search")}>
-          Search
-        </TabButton>
-        <TabButton
-          active={tab === "memories"}
-          onClick={() => setTab("memories")}
-        >
-          Memories
-        </TabButton>
-        <TabButton
-          active={tab === "decisions"}
-          onClick={() => setTab("decisions")}
-        >
-          Decisions
-        </TabButton>
+        {TABS.map((t) => (
+          <TabButton
+            key={t.id}
+            id={`shared-memory-tab-${t.id}`}
+            panelId={`shared-memory-panel-${t.id}`}
+            active={tab === t.id}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </TabButton>
+        ))}
       </nav>
       <div
+        role="tabpanel"
+        id={`shared-memory-panel-${tab}`}
+        aria-labelledby={`shared-memory-tab-${tab}`}
         style={{
           flex: 1,
           minHeight: 0,
           overflow: "auto",
-          padding: 24,
+          padding: "var(--sp-24)",
         }}
       >
         {tab === "search" && <SearchTab />}
@@ -86,24 +106,38 @@ export function SharedMemorySection() {
   );
 }
 
+// Mirrors the canonical SectionTab ARIA contract
+// (src/sections/sessions/components/SectionTab.tsx): id +
+// aria-controls wired to the tabpanel, roving tabIndex (the tablist
+// above supplies the arrow-key navigation that keeps inactive tabs
+// reachable), and the design system's `pm-focus` ring. Only the
+// visuals stay on this section's underline style.
 function TabButton({
+  id,
+  panelId,
   active,
   onClick,
   children,
 }: {
+  id: string;
+  panelId: string;
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
     <button
+      id={id}
       type="button"
       role="tab"
       aria-selected={active}
+      aria-controls={panelId}
+      tabIndex={active ? 0 : -1}
+      className="pm-focus"
       onClick={onClick}
       style={{
         padding: "var(--sp-12) 0",
-        marginBottom: -1,
+        marginBottom: "calc(-1 * var(--sp-px))",
         borderBottom: active
           ? "var(--sp-2) solid var(--accent)"
           : "var(--sp-2) solid transparent",
@@ -177,13 +211,13 @@ function SearchTab() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-16)" }}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void runSearch();
         }}
-        style={{ display: "flex", gap: 8 }}
+        style={{ display: "flex", gap: "var(--sp-8)" }}
       >
         <Input
           value={query}
@@ -203,7 +237,7 @@ function SearchTab() {
             background: "var(--bg-raised)",
             color: "var(--fg)",
             border: "var(--sp-px) solid var(--line)",
-            borderRadius: 6,
+            borderRadius: "var(--r-2)",
             font: "inherit",
           }}
         >
@@ -231,25 +265,25 @@ function SearchTab() {
         </SectionLabel>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
         {hits.map((hit) => (
           <article
             key={hit.exchange_id}
             style={{
               border: "var(--sp-px) solid var(--line)",
-              borderRadius: 8,
-              padding: 12,
+              borderRadius: "var(--r-3)",
+              padding: "var(--sp-12)",
               background: "var(--bg-raised)",
             }}
           >
             <header
               style={{
                 display: "flex",
-                gap: 8,
+                gap: "var(--sp-8)",
                 alignItems: "center",
                 fontSize: "var(--fs-2xs)",
                 color: "var(--fg-muted)",
-                marginBottom: 6,
+                marginBottom: "var(--sp-6)",
               }}
             >
               <Tag>{hit.source_kind === "codex" ? "Codex" : "Claude"}</Tag>
@@ -269,7 +303,7 @@ function SearchTab() {
             >
               {hit.snippet}
             </p>
-            <footer style={{ marginTop: 8, display: "flex", gap: 8 }}>
+            <footer style={{ marginTop: "var(--sp-8)", display: "flex", gap: "var(--sp-8)" }}>
               <Button
                 variant="ghost"
                 glyph={expanded === hit.exchange_id ? NF.chevronU : NF.chevronD}
@@ -281,11 +315,11 @@ function SearchTab() {
             {expanded === hit.exchange_id && (
               <pre
                 style={{
-                  marginTop: 8,
-                  padding: 12,
+                  marginTop: "var(--sp-8)",
+                  padding: "var(--sp-12)",
                   background: "var(--bg-sunken)",
-                  borderRadius: 6,
-                  maxHeight: 320,
+                  borderRadius: "var(--r-2)",
+                  maxHeight: "var(--list-max-height-md)",
                   overflow: "auto",
                   whiteSpace: "pre-wrap",
                   fontSize: "var(--fs-2xs)",
@@ -351,8 +385,8 @@ function MemoriesTab() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-16)" }}>
+      <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center" }}>
         <select
           value={scopeFilter}
           onChange={(e) => setScopeFilter(e.currentTarget.value as typeof scopeFilter)}
@@ -376,7 +410,7 @@ function MemoriesTab() {
           <option value="constraint">Constraint</option>
           <option value="summary">Summary</option>
         </select>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-sm)" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", fontSize: "var(--fs-sm)" }}>
           <input
             type="checkbox"
             checked={includeArchived}
@@ -385,8 +419,10 @@ function MemoriesTab() {
           include archived
         </label>
         <div style={{ flex: 1 }} />
+        {/* Demoted to ghost while the create form is open so its
+            "Save" stays the view's single solid primary action. */}
         <Button
-          variant="solid"
+          variant={showCreate ? "ghost" : "solid"}
           glyph={NF.plus}
           onClick={() => setShowCreate((v) => !v)}
         >
@@ -409,19 +445,19 @@ function MemoriesTab() {
         <SectionLabel>No memories yet.</SectionLabel>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
         {rows.map((m) => (
           <article
             key={m.id}
             style={{
               border: "var(--sp-px) solid var(--line)",
-              borderRadius: 8,
-              padding: 12,
+              borderRadius: "var(--r-3)",
+              padding: "var(--sp-12)",
               background: "var(--bg-raised)",
               opacity: m.archived_at_ms ? 0.55 : 1,
             }}
           >
-            <header style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
+            <header style={{ display: "flex", gap: "var(--sp-8)", marginBottom: "var(--sp-6)", alignItems: "center" }}>
               <Tag>{m.kind}</Tag>
               <Tag>{m.scope}</Tag>
               {m.project_path && (
@@ -438,7 +474,7 @@ function MemoriesTab() {
               {m.content}
             </p>
             {!m.archived_at_ms && (
-              <footer style={{ marginTop: 8 }}>
+              <footer style={{ marginTop: "var(--sp-8)" }}>
                 <Button variant="ghost" glyph={NF.archive} onClick={() => void archive(m.id)}>
                   Archive
                 </Button>
@@ -495,15 +531,15 @@ function CreateMemoryForm({
     <div
       style={{
         border: "var(--sp-px) solid var(--line)",
-        borderRadius: 8,
-        padding: 16,
+        borderRadius: "var(--r-3)",
+        padding: "var(--sp-16)",
         background: "var(--bg-raised)",
         display: "flex",
         flexDirection: "column",
-        gap: 10,
+        gap: "var(--sp-10)",
       }}
     >
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: "var(--sp-8)" }}>
         <select
           value={scope}
           onChange={(e) => setScope(e.currentTarget.value as MemoryScope)}
@@ -538,16 +574,16 @@ function CreateMemoryForm({
         placeholder="What should we remember?"
         rows={3}
         style={{
-          padding: 8,
+          padding: "var(--sp-8)",
           background: "var(--bg-sunken)",
           color: "var(--fg)",
           border: "var(--sp-px) solid var(--line)",
-          borderRadius: 6,
+          borderRadius: "var(--r-2)",
           font: "inherit",
           resize: "vertical",
         }}
       />
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: "var(--sp-8)" }}>
         <Input
           value={createdBy}
           onChange={(e) => setCreatedBy(e.currentTarget.value)}
@@ -618,8 +654,8 @@ function DecisionsTab() {
   }, [rows]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-16)" }}>
+      <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center" }}>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.currentTarget.value as typeof statusFilter)}
@@ -642,19 +678,19 @@ function DecisionsTab() {
       {byProject.map(([proj, items]) => (
         <section key={proj}>
           <SectionLabel>{proj}</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)", marginTop: "var(--sp-6)" }}>
             {items.map((d) => (
               <article
                 key={d.id}
                 style={{
                   border: "var(--sp-px) solid var(--line)",
-                  borderRadius: 8,
-                  padding: 12,
+                  borderRadius: "var(--r-3)",
+                  padding: "var(--sp-12)",
                   background: "var(--bg-raised)",
                   opacity: d.status === "active" ? 1 : 0.6,
                 }}
               >
-                <header style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
+                <header style={{ display: "flex", gap: "var(--sp-8)", marginBottom: "var(--sp-6)", alignItems: "center" }}>
                   <Tag>{d.status}</Tag>
                   {d.topic && <Tag>{d.topic}</Tag>}
                   <div style={{ flex: 1 }} />
@@ -671,7 +707,7 @@ function DecisionsTab() {
                   </p>
                 )}
                 {d.status === "active" && (
-                  <footer style={{ marginTop: 8 }}>
+                  <footer style={{ marginTop: "var(--sp-8)" }}>
                     <Button variant="ghost" glyph={NF.archive} onClick={() => void archive(d.id)}>
                       Archive
                     </Button>
@@ -691,11 +727,11 @@ function DecisionsTab() {
 function selectStyle(): React.CSSProperties {
   return {
     padding: "0 var(--sp-8)",
-    height: 32,
+    height: "var(--input-height)",
     background: "var(--bg-raised)",
     color: "var(--fg)",
     border: "var(--sp-px) solid var(--line)",
-    borderRadius: 6,
+    borderRadius: "var(--r-2)",
     font: "inherit",
   };
 }

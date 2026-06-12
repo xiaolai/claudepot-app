@@ -8,7 +8,9 @@
  * virtual sub-route for Effective Settings.
  */
 
-export const CONFIG_ANCHOR_STORAGE_KEY = "claudepot.config.anchor";
+import { CONFIG_ANCHOR_KEY } from "../../lib/storageKeys";
+
+export const CONFIG_ANCHOR_STORAGE_KEY = CONFIG_ANCHOR_KEY;
 
 export const EFFECTIVE_SETTINGS_ROUTE = "virtual:effective-settings";
 export const EFFECTIVE_MCP_ROUTE = "virtual:effective-mcp";

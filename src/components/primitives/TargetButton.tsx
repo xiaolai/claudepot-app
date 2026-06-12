@@ -190,7 +190,7 @@ export function TargetButton({
             fontSize: "var(--fs-2xs)",
             color: "var(--fg-faint)",
             textAlign: "center",
-            letterSpacing: "0.02em",
+            letterSpacing: "var(--ls-caption)",
             lineHeight: "var(--lh-tight)",
           }}
         >

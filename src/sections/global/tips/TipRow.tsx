@@ -99,7 +99,7 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
         <div
           style={{
             marginTop: "var(--sp-8)",
-            paddingLeft: "calc(var(--sp-10) + tokens.sp[16])",
+            paddingLeft: "calc(var(--sp-10) + var(--sp-16))",
             display: "flex",
             flexDirection: "column",
             gap: "var(--sp-8)",

@@ -1,6 +1,5 @@
-import { useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEmit } from "../providers/AppStateProvider";
+import { useTauriEvent } from "./useTauriEvent";
 
 /**
  * `useUsageThresholdNotifications` — listens for the
@@ -49,48 +48,33 @@ interface CrossingPayload {
 export function useUsageThresholdNotifications(): void {
   const emit = useEmit();
 
-  useEffect(() => {
-    let active = true;
-    let unlisten: UnlistenFn | null = null;
-
-    void listen<CrossingPayload>("usage-threshold-crossed", (ev) => {
-      if (!active || !ev.payload) return;
-      const p = ev.payload;
-      const title = `${p.accountEmail ?? "Account"} — ${p.windowLabel} at ${p.thresholdPct}%`;
-      const body = formatBody(p.utilizationPct, p.resetsAtIso);
-      void emit({
-        category: "usageThreshold",
-        title,
-        body,
-        // dedupeKey grain: account × window × threshold guarantees
-        // two distinct legitimate crossings (e.g. 80% then 90% in
-        // the same cycle) don't compete for the same bucket and
-        // suppress each other.
-        dedupeKey: `usage:${p.accountUuid}:${p.window}:${p.thresholdPct}`,
-        target: p.accountEmail
-          ? {
-              kind: "app",
-              route: { section: "accounts", email: p.accountEmail },
-            }
-          : { kind: "info" },
-        // Forward the Rust-side log id when the watcher already
-        // persisted the entry — boot-race fix for audit #4.
-        preexistingLogId: p.logId ?? undefined,
-      });
-    })
-      .then((fn) => {
-        if (!active) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {
-        /* non-tauri env */
-      });
-
-    return () => {
-      active = false;
-      if (unlisten) unlisten();
-    };
-  }, [emit]);
+  // Lifetime subscription via the shared primitive — the handler is
+  // held in a ref, so it always sees the latest emit().
+  useTauriEvent<CrossingPayload>("usage-threshold-crossed", (ev) => {
+    if (!ev.payload) return;
+    const p = ev.payload;
+    const title = `${p.accountEmail ?? "Account"} — ${p.windowLabel} at ${p.thresholdPct}%`;
+    const body = formatBody(p.utilizationPct, p.resetsAtIso);
+    void emit({
+      category: "usageThreshold",
+      title,
+      body,
+      // dedupeKey grain: account × window × threshold guarantees
+      // two distinct legitimate crossings (e.g. 80% then 90% in
+      // the same cycle) don't compete for the same bucket and
+      // suppress each other.
+      dedupeKey: `usage:${p.accountUuid}:${p.window}:${p.thresholdPct}`,
+      target: p.accountEmail
+        ? {
+            kind: "app",
+            route: { section: "accounts", email: p.accountEmail },
+          }
+        : { kind: "info" },
+      // Forward the Rust-side log id when the watcher already
+      // persisted the entry — boot-race fix for audit #4.
+      preexistingLogId: p.logId ?? undefined,
+    });
+  });
 }
 
 function formatBody(utilizationPct: number, resetsAtIso: string | null): string {

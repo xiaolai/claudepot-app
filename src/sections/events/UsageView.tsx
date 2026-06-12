@@ -4,8 +4,10 @@
 // — the inverse of the Cards stream which answers "what broke?"
 //
 // Data source: `api.artifactUsageTop(null, 500)` on mount and on
-// every `live-all` tick, plus a 5s polling fallback so newly-fired
-// events surface without a manual refresh.
+// `live-all` events (coalesced behind a trailing 2 s debounce —
+// the backend only publishes on real state changes, but a busy
+// session can still emit several per second), plus a 5s polling
+// fallback so newly-fired events surface without a manual refresh.
 //
 // Filters:
 //   Kind chips      — All / Skill / Hook / Agent / Command
@@ -18,7 +20,7 @@
 // about what the UI actually consumes.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
 import type { ArtifactUsageRowDto } from "../../types";
 import { UsageTable, type SortKey } from "./UsageTable";
@@ -27,6 +29,10 @@ type KindFilter = "all" | "skill" | "hook" | "agent" | "command";
 type ViewMode = "hot" | "noisy" | "all";
 
 const POLL_MS = 5000;
+// Min interval between live-driven refetches — coalesces a burst of
+// `live-all` events into one 500-row fetch. Matches the debounce in
+// EventsSection so the two surfaces share one freshness contract.
+const LIVE_REFRESH_DEBOUNCE_MS = 2000;
 
 interface UsageViewProps {
   /**
@@ -64,22 +70,28 @@ export function UsageView({ registerRefresh }: UsageViewProps = {}) {
     }
   }, []);
 
+  // Trailing debounce: the first event of a burst schedules one
+  // refetch; events inside the window are absorbed. The handle lives
+  // in a ref shared with the poll effect's cleanup below, which
+  // clears any pending debounce on unmount or refresh-identity
+  // rotation (exactly what the old single-effect teardown did).
+  const liveDebounceRef = useRef<number | null>(null);
+  useTauriEvent("live-all", () => {
+    if (liveDebounceRef.current !== null) return;
+    liveDebounceRef.current = window.setTimeout(() => {
+      liveDebounceRef.current = null;
+      void refresh();
+    }, LIVE_REFRESH_DEBOUNCE_MS);
+  });
   useEffect(() => {
     void refresh();
     const interval = window.setInterval(() => void refresh(), POLL_MS);
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    void listen("live-all", () => void refresh()).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlisten = u;
-      }
-    }).catch(() => {});
     return () => {
-      cancelled = true;
       window.clearInterval(interval);
-      unlisten?.();
+      if (liveDebounceRef.current !== null) {
+        window.clearTimeout(liveDebounceRef.current);
+        liveDebounceRef.current = null;
+      }
     };
   }, [refresh]);
 

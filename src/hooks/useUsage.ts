@@ -1,6 +1,7 @@
-import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { useTauriEvent } from "./useTauriEvent";
 import type { UsageMap } from "../types";
 
 /** Fetch usage for all accounts. Refreshes on window focus (debounced 5s)
@@ -48,6 +49,14 @@ export function useUsage() {
     }
   }, []);
 
+  // When the user clicks "Refresh" in the tray's Usage submenu,
+  // the backend re-fetches and emits tray-usage-refreshed. Pull the
+  // fresh cache into the webview so the card values match the tray.
+  // (useTauriEvent owns the audit-T4-6 late-resolve race internally.)
+  useTauriEvent("tray-usage-refreshed", () => {
+    void refreshUsage();
+  });
+
   useEffect(() => {
     refreshUsage();
     const onFocus = () => {
@@ -56,33 +65,8 @@ export function useUsage() {
       }
     };
     window.addEventListener("focus", onFocus);
-
-    // When the user clicks "Refresh" in the tray's Usage submenu,
-    // the backend re-fetches and emits tray-usage-refreshed. Pull the
-    // fresh cache into the webview so the card values match the tray.
-    //
-    // Audit T4-6: see useTrashCount for the matching late-resolve
-    // race. If `listen()` resolves after unmount, fire the returned
-    // unlisten immediately so the subscription doesn't outlive the
-    // hook.
-    let unlisten: UnlistenFn | undefined;
-    let cancelled = false;
-    listen("tray-usage-refreshed", () => {
-      refreshUsage();
-    })
-      .then((fn) => {
-        if (cancelled) {
-          fn();
-        } else {
-          unlisten = fn;
-        }
-      })
-      .catch(() => {});
-
     return () => {
-      cancelled = true;
       window.removeEventListener("focus", onFocus);
-      unlisten?.();
     };
   }, [refreshUsage]);
 

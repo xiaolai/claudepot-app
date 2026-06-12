@@ -4,12 +4,13 @@ import type {
   SessionChunk,
   SessionEvent,
 } from "../../types";
+import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import { useActivityPrefs } from "../../hooks/useActivityPrefs";
 import { Body, Bubble, Divider } from "./components/transcriptAtoms";
 import { ToolExecutionView } from "./viewers";
-import { redactSecrets } from "./viewers/redact";
+import { redactSecrets } from "../../lib/redactSecrets";
 import { formatTokens, modelBadge } from "./format";
 import { stripLocalCommandStdout } from "./localCommandStdout";
 import { CopyButton } from "../../components/CopyButton";
@@ -237,7 +238,7 @@ function EventInlineView({
             color: "var(--fg-muted)",
           }}
         >
-          🔧 {redactSecrets(event.tool_name)} <span className="mono">{event.tool_use_id.slice(0, 8)}</span> · (no result)
+          <Glyph g={NF.wrench} /> {redactSecrets(event.tool_name)} <span className="mono">{event.tool_use_id.slice(0, 8)}</span> · (no result)
         </div>
       );
     case "userToolResult":
@@ -274,7 +275,7 @@ function EventInlineView({
             borderRadius: "var(--r-2)",
           }}
         >
-          📎 Attachment {event.name ? redactSecrets(event.name) : "(unnamed)"}
+          <Glyph g={NF.paperclip} /> Attachment {event.name ? redactSecrets(event.name) : "(unnamed)"}
           {event.mime ? ` · ${redactSecrets(event.mime)}` : ""}
         </div>
       );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
 import {
   GRANT_DURATION_PRESETS,
@@ -95,19 +95,11 @@ export function PermissionPanel({
   // 5-min tick and emits `permission-reverted`. Refetch when that
   // fires for THIS project so the countdown doesn't linger on a
   // stale "expired".
-  useEffect(() => {
-    const unlisten = listen<PermissionRevertedEvent>(
-      "permission-reverted",
-      (e) => {
-        if (e.payload.projectPath === projectPath) {
-          setReloadTick((n) => n + 1);
-        }
-      },
-    );
-    return () => {
-      void unlisten.then((fn) => fn());
-    };
-  }, [projectPath]);
+  useTauriEvent<PermissionRevertedEvent>("permission-reverted", (e) => {
+    if (e.payload.projectPath === projectPath) {
+      setReloadTick((n) => n + 1);
+    }
+  });
 
   // The orchestrator quarantines a grant whose auto-revert keeps
   // failing — its consecutive-failure circuit breaker trips and
@@ -115,23 +107,18 @@ export function PermissionPanel({
   // project so the user knows the grant is stuck (not silently
   // reverting) and may need a manual revert. Refetch too — the
   // breaker counter is part of the grant state.
-  useEffect(() => {
-    const unlisten = listen<PermissionBreakerTrippedEvent>(
-      "permission-breaker-tripped",
-      (e) => {
-        if (e.payload.projectPath === projectPath) {
-          pushToast(
-            "error",
-            `Auto-revert for this project was paused after ${e.payload.consecutiveFailures} consecutive failures. The bypass grant is still active — revert it manually, then check the project's settings file.`,
-          );
-          setReloadTick((n) => n + 1);
-        }
-      },
-    );
-    return () => {
-      void unlisten.then((fn) => fn());
-    };
-  }, [projectPath, pushToast]);
+  useTauriEvent<PermissionBreakerTrippedEvent>(
+    "permission-breaker-tripped",
+    (e) => {
+      if (e.payload.projectPath === projectPath) {
+        pushToast(
+          "error",
+          `Auto-revert for this project was paused after ${e.payload.consecutiveFailures} consecutive failures. The bypass grant is still active — revert it manually, then check the project's settings file.`,
+        );
+        setReloadTick((n) => n + 1);
+      }
+    },
+  );
 
   // Tick once a minute while a TIME-BOXED grant is active so the
   // countdown re-renders. Sticky grants have no countdown — no

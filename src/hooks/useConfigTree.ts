@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useState } from "react";
+import { useTauriEvent } from "./useTauriEvent";
 import type {
   ConfigFileNodeDto,
   ConfigScopeNodeDto,
@@ -64,47 +64,32 @@ export function useConfigTree(initial: ConfigTreeDto | null): UseConfigTreeResul
   // scan's setTree lands.
   const [orphanPatchSignal, setOrphanPatchSignal] = useState(0);
 
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    void listen<ConfigTreePatchEvent>("config-tree-patch", (ev) => {
-      if (cancelled) return;
-      const payload = ev.payload;
-      setDirty(payload.dirty_during_emit);
-      if (payload.full_snapshot) {
-        setTree({
-          scopes: payload.full_snapshot.scopes,
-          cwd: payload.full_snapshot.cwd,
-          project_root: payload.full_snapshot.project_root,
-          config_home_dir: payload.full_snapshot.config_home_dir,
-          memory_slug: payload.full_snapshot.memory_slug,
-          memory_slug_lossy: payload.full_snapshot.memory_slug_lossy,
-        });
-        return;
-      }
-      // Functional setState: each patch sees the latest tree even when
-      // multiple patches arrive before a render lands. Orphan patches
-      // (no baseline yet) bump `orphanPatchSignal` so the consumer can
-      // trigger a recovery scan.
-      setTree((prev) => {
-        if (!prev) {
-          setOrphanPatchSignal((n) => n + 1);
-          return prev;
-        }
-        return applyPatch(prev, payload);
+  useTauriEvent<ConfigTreePatchEvent>("config-tree-patch", (ev) => {
+    const payload = ev.payload;
+    setDirty(payload.dirty_during_emit);
+    if (payload.full_snapshot) {
+      setTree({
+        scopes: payload.full_snapshot.scopes,
+        cwd: payload.full_snapshot.cwd,
+        project_root: payload.full_snapshot.project_root,
+        config_home_dir: payload.full_snapshot.config_home_dir,
+        memory_slug: payload.full_snapshot.memory_slug,
+        memory_slug_lossy: payload.full_snapshot.memory_slug_lossy,
       });
-    }).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlisten = u;
+      return;
+    }
+    // Functional setState: each patch sees the latest tree even when
+    // multiple patches arrive before a render lands. Orphan patches
+    // (no baseline yet) bump `orphanPatchSignal` so the consumer can
+    // trigger a recovery scan.
+    setTree((prev) => {
+      if (!prev) {
+        setOrphanPatchSignal((n) => n + 1);
+        return prev;
       }
+      return applyPatch(prev, payload);
     });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
+  });
 
   return { tree, dirty, setTree, orphanPatchSignal };
 }

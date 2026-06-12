@@ -6,9 +6,12 @@ import {
   useState,
 } from "react";
 
-const STORAGE_KEY = "claudepot.activeSection";
-const START_KEY = "claudepot.startSection";
-const SUBROUTE_KEY_PREFIX = "claudepot.subRoute.";
+import {
+  SECTION_ACTIVE_KEY as STORAGE_KEY,
+  SECTION_START_KEY as START_KEY,
+  SECTION_SUBROUTE_KEY_PREFIX as SUBROUTE_KEY_PREFIX,
+} from "../lib/storageKeys";
+import { requestIdle, cancelIdle } from "../lib/idle";
 
 function safeGet(key: string): string | null {
   try {
@@ -80,16 +83,7 @@ export function useSection<Id extends string>(
           : null;
     if (!target || target === defaultId) return;
 
-    const rIC: (cb: () => void) => number =
-      (window as typeof window & {
-        requestIdleCallback?: (cb: () => void) => number;
-      }).requestIdleCallback ?? ((cb) => window.setTimeout(cb, 0));
-    const cIC: (h: number) => void =
-      (window as typeof window & {
-        cancelIdleCallback?: (h: number) => void;
-      }).cancelIdleCallback ?? window.clearTimeout;
-
-    const handle = rIC(() => {
+    const handle = requestIdle(() => {
       // Wrap in startTransition so the still-mounted default-section
       // tree stays on screen while the saved-section's lazy chunk
       // resolves — eliminates the blank Suspense fallback flash.
@@ -98,7 +92,7 @@ export function useSection<Id extends string>(
         setSubRouteState(safeGet(SUBROUTE_KEY_PREFIX + target));
       });
     });
-    return () => cIC(handle);
+    return () => cancelIdle(handle);
     // Only resolves once per mount — saved prefs are static for this
     // session, and `defaultId` / `ids` don't change at runtime.
     // eslint-disable-next-line react-hooks/exhaustive-deps

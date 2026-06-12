@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
  */
 export type ThemeMode = "light" | "dark" | null;
 
-const CP_THEME_KEY = "cp-theme";
+import { THEME_KEY as CP_THEME_KEY } from "../lib/storageKeys";
 
 function readTheme(): ThemeMode {
   try {

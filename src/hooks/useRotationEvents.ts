@@ -1,9 +1,10 @@
 import { useCallback, useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { Event as TauriEvent } from "@tauri-apps/api/event";
 
 import { api } from "../api";
 import type { PendingSwap } from "../api/rotation";
 import { useEmit } from "../providers/AppStateProvider";
+import { useTauriEvents } from "./useTauriEvent";
 
 /**
  * Listen for rotation orchestrator events. Three channels:
@@ -143,31 +144,26 @@ export function useRotationEvents(): void {
     [emit],
   );
 
+  // Lifetime subscriptions via the shared multi-channel primitive —
+  // handlers are held in a ref, so the unstable useCallback
+  // identities above never re-wire the channels.
+  useTauriEvents({
+    "rotation-suggested": (ev: TauriEvent<SuggestedPayload>) => {
+      if (ev.payload) handleSuggested(ev.payload);
+    },
+    "rotation-applied": (ev: TauriEvent<AppliedPayload>) => {
+      if (ev.payload) handleApplied(ev.payload);
+    },
+    "rotation-failed": (ev: TauriEvent<FailedPayload>) => {
+      if (ev.payload) handleFailed(ev.payload);
+    },
+    "rotation-breaker-tripped": (ev: TauriEvent<BreakerTrippedPayload>) => {
+      if (ev.payload) handleBreakerTripped(ev.payload);
+    },
+  });
+
   useEffect(() => {
     let active = true;
-    const unlisteners: UnlistenFn[] = [];
-
-    const wire = <T>(channel: string, handler: (p: T) => void) => {
-      void listen<T>(channel, (ev) => {
-        if (!active || !ev.payload) return;
-        handler(ev.payload);
-      })
-        .then((fn) => {
-          if (!active) fn();
-          else unlisteners.push(fn);
-        })
-        .catch(() => {
-          /* non-tauri env */
-        });
-    };
-
-    wire<SuggestedPayload>("rotation-suggested", handleSuggested);
-    wire<AppliedPayload>("rotation-applied", handleApplied);
-    wire<FailedPayload>("rotation-failed", handleFailed);
-    wire<BreakerTrippedPayload>(
-      "rotation-breaker-tripped",
-      handleBreakerTripped,
-    );
 
     // Hydrate any pending swaps the orchestrator queued while the
     // renderer was disconnected (between reloads, before mount,
@@ -203,7 +199,6 @@ export function useRotationEvents(): void {
 
     return () => {
       active = false;
-      unlisteners.forEach((fn) => fn());
     };
-  }, [handleSuggested, handleApplied, handleFailed, handleBreakerTripped]);
+  }, [handleSuggested]);
 }

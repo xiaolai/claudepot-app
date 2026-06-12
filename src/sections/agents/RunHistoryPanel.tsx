@@ -233,12 +233,16 @@ function StructuredResultPanel({ result }: { result: RunResultDto }) {
               style={{ display: "contents" }}
             >
               <dt style={{ color: "var(--fg-3)", fontWeight: 500 }}>{k}</dt>
+              {/* `.selectable` (base.css), not inline `userSelect:
+                  "text"` — React omits the -webkit- prefix WKWebView
+                  reads first, so the inline form never wins over the
+                  body opt-out. Same for the error list below. */}
               <dd
+                className="selectable"
                 style={{
                   margin: 0,
                   color: "var(--fg-2)",
                   wordBreak: "break-all",
-                  userSelect: "text",
                 }}
               >
                 {v}
@@ -251,11 +255,11 @@ function StructuredResultPanel({ result }: { result: RunResultDto }) {
         <div>
           <div style={{ color: "var(--danger)", fontWeight: 500 }}>errors</div>
           <ul
+            className="selectable"
             style={{
               margin: "var(--sp-4) 0 0",
               paddingLeft: "var(--sp-16)",
               color: "var(--danger)",
-              userSelect: "text",
             }}
           >
             {result.errors.map((e, i) => (

@@ -30,6 +30,16 @@ export interface ReleaseUpdateCheck {
   pubDate: string | null;
   /** The channel this check ran against. */
   channel: ReleaseChannelName;
+  /**
+   * True when the check ran on the Stable channel from a running
+   * prerelease build and the stable manifest's newest version is
+   * older than the running version (the Beta → Stable switch case).
+   * Not an update, but not "you're on the latest version" either —
+   * the UI renders a dedicated explanation.
+   */
+  strandedOnPrerelease: boolean;
+  /** The stable manifest's version when stranded; `null` otherwise. */
+  stableVersion: string | null;
 }
 
 /**
@@ -72,4 +82,12 @@ export const releaseUpdateApi = {
    * `@tauri-apps/plugin-process`.
    */
   releaseUpdateInstall: () => invoke<void>("release_update_install"),
+
+  /**
+   * Pre-relaunch quiesce probe — labels of background ops still
+   * running (same busy definition as the quit gate). Call before
+   * relaunching so restart-to-update can warn-confirm instead of
+   * killing in-flight work.
+   */
+  relaunchBusyOps: () => invoke<string[]>("release_relaunch_busy_ops"),
 };
