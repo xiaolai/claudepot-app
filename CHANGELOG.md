@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.1.46 — beta (unreleased)
+## 0.1.46 — beta (released 2026-06-08)
 
 Diagnostic-logging patch. Self-quits used to leave no forensic
 trail — the existing `tracing_subscriber::fmt()` wrote to stderr
@@ -76,7 +76,7 @@ visible on macOS.
   same off-main-thread hazard in the traffic-light IPC command was
   closed as well.
 
-## 0.1.45 — beta (unreleased)
+## 0.1.45 — beta (released 2026-06-05)
 
 Windows reliability patch. Four fixes from external contributor
 @austen-wqm covering credential storage, console-window suppression,
@@ -129,7 +129,7 @@ desktop swap reliability, and visual flicker reduction.
   EBUSY on cargo's in-progress `.o` writes (making `pnpm tauri dev`
   usable on Windows). (#19)
 
-## 0.1.44 — beta (unreleased)
+## 0.1.44 — beta (released 2026-05-26)
 
 Rotation-audit display patch. Settings → Rotation's "Recent
 activity" table was showing every row as "20578d ago" — a
@@ -147,7 +147,7 @@ current wall-clock time in days since the epoch.
   match every other `formatRelative` call site in the codebase
   (NetworkPane, ArtifactTrashList, UsageBadge, ServiceStatusDot).
 
-## 0.1.43 — beta (unreleased)
+## 0.1.43 — beta (released 2026-05-25)
 
 The auto-mode patch. Surfaces background CC sessions in the UI so
 the ten-detached-agents-burning-tokens case stops being invisible,
@@ -196,7 +196,7 @@ run continuously in auto mode.
   with a transient parse failure, so the Sidebar bg-worker chip
   doesn't flicker off when one scrape returns degraded.
 
-## 0.1.42 — beta (unreleased)
+## 0.1.42 — beta (released 2026-05-24)
 
 The WAL-housekeeping patch. Stops every SQLite store from leaking
 WAL files between restarts — the 2026-05-24 incident showed
@@ -222,7 +222,7 @@ only 114 MB.
   longer grows unbounded between restarts. Existing oversized WAL
   files are truncated on first launch after the upgrade.
 
-## 0.1.41 — beta (unreleased)
+## 0.1.41 — beta (released 2026-05-23)
 
 The Agents release. Reframes the old "Automations" tab as
 **Agents** — schedule-and-event-triggered tasks that fire `claude
@@ -266,7 +266,7 @@ ecosystem (LiteLLM, OpenRouter, Aider, Cline).
 - `agents_update` re-validates Custom MCP servers against the prior
   record (the F3 hardening previously only applied to drafts).
 
-## 0.1.40 — beta (unreleased)
+## 0.1.40 — beta (released 2026-05-21)
 
 A feature release: opt-in beta updates, a safety net for the
 background automations, and a fix for command-line tools silently
@@ -306,7 +306,7 @@ failing to resolve when Claudepot is launched from the Dock.
   now augments `PATH` with the standard install locations — appended
   after the trusted system directories — for every tool it spawns.
 
-## 0.1.39 — beta (unreleased)
+## 0.1.39 — beta (released 2026-05-20)
 
 Reliability hardening release. Two rounds of crash/freeze auditing
 plus an audit-fix verification pass surfaced ten distinct hazards
@@ -442,7 +442,7 @@ panic", and the "Dock-blur shake on cold launch" symptom classes.
   confusing Activities-vs-Trends gap), and pins the value to
   `memory_log::MAX_ROW_AGE_NS`'s 90-day budget.
 
-## 0.1.38 — beta (unreleased)
+## 0.1.38 — beta (released 2026-05-18)
 
 Four findings from a Codex 5-dimension audit of the v0.1.37 surface
 (audit thread `019e3893-5f90-72b2-a4f9-2a5e55fb310b`). No new
@@ -504,7 +504,7 @@ in the v0.1.35–v0.1.37 work.
   runner. Single helper in `fs_utils`, all three call sites
   delegate.
 
-## 0.1.37 — beta (unreleased)
+## 0.1.37 — beta (released 2026-05-18)
 
 Recovery release. v0.1.36's release.yml failed silently on
 `windows-latest` (nightly-only `file_index()` from the v0.1.35
@@ -586,7 +586,7 @@ section in Projects detail, and two web/post styling touch-ups.
   copy. Scoped via `:not(pre) > code` so fenced blocks inside
   `.proto-code` are unaffected.
 
-## 0.1.36 — beta (unreleased)
+## 0.1.36 — beta (released 2026-05-15)
 
 Post-0.1.35 audit-fix round plus the user/project scope toggle for the
 MCP installer pane. Surfaced by driving the running dev app through

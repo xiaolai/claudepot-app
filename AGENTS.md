@@ -8,9 +8,11 @@ integrations, agents, memory (CLAUDE.md files), usage/cost
 tracking, updates, service status, and notifications — all under one
 Tauri shell with tray + menubar integration.
 
-The four-noun domain model (account, cli, desktop, project) still
-holds in `claudepot-core` — new surfaces are presentation layers over
-those nouns and over CC's filesystem, not new domain types. See
+The domain model in `claudepot-core` is five nouns: account, cli,
+desktop, project, plus **agent** (scheduled headless `claude -p`
+runs — the one noun added since the seed; see
+`claudepot-core::agent`). Other surfaces are presentation layers
+over those nouns and over CC's filesystem, not new domain types. See
 `.claude/rules/architecture.md` for the noun-vs-surface distinction.
 Scope discipline applies to the *domain model* (don't add nouns
 casually); it does not cap what the UI can usefully expose.
@@ -29,18 +31,31 @@ pnpm tauri build --no-bundle         # GUI release binary (no .dmg)
 
 ```bash
 cargo test --workspace               # Rust
+cargo xtask verify-cc-parity         # CC settings-merge parity goldens (see parity-harness/README.md)
 pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
 ```
 
+CI runs the core + cli tests on a Linux/macOS/Windows matrix and the
+`claudepot-tauri` crate's tests on macOS + Windows (Linux needs
+webkit2gtk; release.yml's Linux build job is that crate's Linux
+compile gate). The lint job fmt/clippy-gates `xtask` itself and runs
+`cargo xtask verify-cc-parity`. Release builds preflight a five-site
+version lock-step check (tag vs `Cargo.toml`, `package.json`,
+`tauri.conf.json`, README status banner, web install-page banner).
+
 ## GUI (Tauri)
 
-- `src-tauri/src/commands.rs` — async Tauri commands wrapping `claudepot-core`. NO business logic.
+- `src-tauri/src/commands/` — async Tauri commands wrapping `claudepot-core`,
+  sliced by domain (`mod.rs` + one file per surface). NO business logic.
 - `src-tauri/src/dto.rs` — serde DTOs crossing to JS. Credentials never cross.
 - `src/App.tsx` + `src/api/` (sliced by domain — `account`, `project`,
-  `notification`, `activity`, etc., merged in `index.ts`) + `src/types.ts` — React UI, plain CSS.
+  `notification`, `activity`, etc., merged in `index.ts`) + `src/types/`
+  (sliced by domain, merged in `index.ts`) — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
-- Three SQLite files live in `~/.claudepot/` (override with `CLAUDEPOT_DATA_DIR`):
+- Six SQLite files live in `~/.claudepot/` (override with
+  `CLAUDEPOT_DATA_DIR`; the authoritative list is whatever joins onto
+  `claudepot_core::paths::claudepot_data_dir()`):
   - `accounts.db` — authoritative account + verification state, linked to Keychain.
   - `sessions.db` — persistent cache for the Sessions tab. One row per
     `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
@@ -50,14 +65,26 @@ pnpm test:coverage                   # React with coverage report
     table, secret in a 0600 column). Owned by
     `claudepot-core::env_vault::store`. Mirrors `keys.db`'s at-rest
     pattern — no OS Keychain. See "## Env secret vault" below.
-- Five JSON files also live in `~/.claudepot/`:
+  - `keys.db` — the Keys tab's API-key inventory. Owned by
+    `claudepot-core::keys::store`.
+  - `memory_changes.db` — append-only log of detected CLAUDE.md /
+    memory-file writes. Owned by `claudepot-core::memory_log`.
+  - `activity_metrics.db` — one row per session per tick for the
+    Activity Trends view. Owned by
+    `claudepot-core::session_live::metrics_store`.
+- A dozen-plus JSON state files also live in `~/.claudepot/`
+  (`agents.json`, `routes.json`, `routing-rules.json`, `updates.json`,
+  `preferences.json`, `usage-snapshot.json`, `usage_alert_state.json`,
+  `agent-events.json`, … — again, the data-dir joins in source are
+  authoritative). Stores backed by `claudepot-core::json_store` (the
+  five below plus `agent-events.json`) move a corrupt file aside to a
+  timestamped `<name>.corrupt.<unix-ts>` and start empty — never
+  fatal at boot. Five carry behavior worth documenting here:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
     `src/hooks/useToasts.ts` and `dispatchOsNotification` in
-    `src/lib/notify.ts`. Corrupt files are moved aside to
-    `notifications.json.corrupt` and the log starts empty — never
-    fatal at boot.
+    `src/lib/notify.ts`.
   - `rotation-rules.json` — user-authored auto-rotation rules.
     Hand-edit-friendly JSON with `{schema_version, rules: [...]}`.
     Owned by `claudepot-core::rotation::store`. Settings → Rotation
@@ -189,16 +216,19 @@ clippy commits in v0.0.18 prompted this setup:
 Real host names and the network they sit on live in `CLAUDE.local.md`
 (gitignored).
 
-A `pre-push` hook at `.git/hooks/pre-push` (per-clone, not committed
-because git refuses to track `.git/`) auto-runs both validators
-against the pushed SHA when — and only when — the push contains a
-`refs/tags/v*` release tag. Branch pushes skip validation. Failure
-aborts the push and prints the recovery recipe (delete tag, fix
-locally, re-tag, re-push).
+The hook source is committed at `scripts/pre-push`. Install it
+per clone with `scripts/install-hooks.sh` (which runs
+`ln -sf ../../scripts/pre-push .git/hooks/pre-push`). The hook
+auto-runs both validators against the pushed SHA when — and only
+when — the push contains a `refs/tags/v*` release tag. Branch pushes
+skip validation. Failure aborts the push and prints the recovery
+recipe (delete tag, fix locally, re-tag, re-push).
 
-The hook source lives in this repo's history at any commit that
-touched `dev-docs/release-validation.md` if it ever gets written
-down; otherwise it's reconstructable from this CLAUDE.md section.
+Validator hosts are never committed: the hook reads them from the
+gitignored `.validator-hosts` file at the repo root (shape documented
+in the `scripts/pre-push` header) or from
+`CLAUDEPOT_VALIDATOR_LINUX_SSH` / `CLAUDEPOT_VALIDATOR_WINDOWS_SSH`
+in the environment. Real host names live in `CLAUDE.local.md`.
 Bypass with `git push --no-verify` if a host is unreachable, but
 note CI is unforgiving about red main.
 
@@ -206,11 +236,15 @@ note CI is unforgiving about red main.
 
 See `dev-docs/implementation-plan.md` for the full plan.
 
-- Four nouns: **account**, **cli**, **desktop**, **project**
+- Five nouns: **account**, **cli**, **desktop**, **project**, **agent**
+  (see `.claude/rules/architecture.md` for each noun's scope)
 - `claudepot-core` = pure Rust library, no Tauri dependency
 - `claudepot-cli` = thin clap wrapper over core
 - `src-tauri` = Tauri app consuming same core
-- Two separate keychain surfaces on macOS (see rules/architecture.md)
+- `crates/xtask` = workspace automation, currently the CC-parity
+  verifier (`cargo xtask verify-cc-parity` over `parity-harness/`)
+- Separate keychain surfaces on macOS — CC's item vs Claudepot's own
+  slots, `keyring` vs `/usr/bin/security` (see rules/architecture.md)
 - Account identity = email, resolved by prefix matching
 - GUI is paper-mono shell: custom 38px `WindowChrome` at top
   (breadcrumb + ⌘K palette hint + bell + theme toggle), 240px `Sidebar`
@@ -222,9 +256,11 @@ See `dev-docs/implementation-plan.md` for the full plan.
   Accounts, Activities (id `events` for localStorage compatibility,
   label "Activities" — live + today/month dashboard + cards stream),
   Projects (hosts per-project sessions in ProjectDetail's
-  master-detail pane), Keys, Providers, Agents, Global,
-  Settings. Eight top-level tabs total. The Agents section id is
-  still `automations` in the registry (localStorage compatibility).
+  master-detail pane), Memory (id `shared-memory` — cross-harness
+  search over indexed Claude + Codex transcripts, memories,
+  decisions), Keys, Providers (id `third-party`, localStorage
+  compatibility), Agents (id `automations`, ditto), Global,
+  Settings. Nine top-level tabs total.
   Cleanup (session prune + trash) lives at Settings → Cleanup.
 - Long-running ops (project rename, repair resume/rollback) flow
   through a single op-progress pipeline:
@@ -242,9 +278,9 @@ root Tauri app. Two surfaces in one app:
 
 - `/` — **reader**: resource aggregator for one-man companies
   building with AI.
-- `/app/*` — **product docs**: 14 routes (landing + why + install
-  + 8 features + features index + changelog + download), MDX
-  inside the `(docs)` route group.
+- `/app/*` — **product docs**: 15 routes (landing + why + install
+  + 9 features + features index + changelog + download), MDX
+  under `web/src/app/(reader)/app/`.
 
 Stack: Next.js 15 + Drizzle/Neon + Auth.js v5 (GitHub + Google +
 Resend magic-link) + Resend + boring-avatars. `editorial/` carries
@@ -254,14 +290,17 @@ private repo).
 Deploy: Vercel project `<vercel-org>/claudepot-com`, Root Directory
 `web/`. CF DNS for the `claudepot.com` zone is unproxied A
 records to `76.76.21.21`. Phase-1 plan and full migration log in
-`dev-docs/domain-realignment.md`.
+`dev-docs/archive/domain-realignment.md`.
 
 CI: `.github/workflows/ci-web.yml` runs typecheck + tests on
 `web/**` changes (no build — Vercel handles the build per push).
 
-The `web/.tokenize/` config is currently `disabled: true`; re-enable
-with `/ui-tokenize:fix` after the residual hardcoded values in the
-imported codebase are absorbed.
+The `web/.tokenize/` config currently runs the hook in
+`{"mode": "maintainer", "strictness": "advisory"}` — it flags
+hardcoded values but does not block. Promote to strict only after
+the residual hardcoded values in the imported codebase are absorbed,
+and diff-scan TS/TSX after any `/ui-tokenize:fix` run (the hook has
+corrupted non-CSS files before).
 
 ## Reference
 
