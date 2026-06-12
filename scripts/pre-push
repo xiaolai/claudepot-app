@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Pre-push hook — release-tag validation across Linux + Windows.
+#
+# Install (per clone):
+#   ln -sf ../../scripts/pre-push .git/hooks/pre-push
+# or run scripts/install-hooks.sh.
+#
+# Triggers ONLY when the push contains a tag matching `refs/tags/v*`
+# (release tags), not on regular branch pushes. Mirrors CI's gates so
+# a green local validation predicts a green CI run:
+#
+#   - Linux validator:
+#       cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings
+#     Matches ci.yml's `Format / Clippy (Linux)` job. `--all-targets`
+#     is load-bearing: without it, test-only lints accumulate
+#     silently between Rust releases (the 2026-05-13 7-lint backlog).
+#
+#   - Windows validator:
+#       cargo test -p claudepot-core -p claudepot-cli --no-run
+#     Matches the core+cli compile step of CI's `Tests
+#     (windows-latest)` job. Compile only (--no-run): CI re-runs the
+#     tests on a fresh matrix anyway, so paying SSH-runtime for a
+#     redundant run isn't worth the wall-clock cost. CI's
+#     tauri-crate test step is NOT mirrored here — it needs the CLI
+#     staged as a Tauri externalBin, which the validator clones
+#     don't carry.
+#
+# Validator hosts are machine-local (internal hostnames — never
+# committed). They are read from the gitignored `.validator-hosts`
+# file at the repo root, or from the environment:
+#
+#   CLAUDEPOT_VALIDATOR_LINUX_SSH    e.g. user@linux-host
+#   CLAUDEPOT_VALIDATOR_WINDOWS_SSH  e.g. user@windows-host
+#
+# `.validator-hosts` shape (shell syntax, sourced):
+#   CLAUDEPOT_VALIDATOR_LINUX_SSH="user@linux-host"
+#   CLAUDEPOT_VALIDATOR_WINDOWS_SSH="user@windows-host"
+#
+# Real host names live in CLAUDE.local.md. Each validator holds a
+# clone of this repo at ~/claudepot-app (Linux) / claudepot-app
+# (Windows home) with the origin remote reachable.
+#
+# Exits non-zero on validation failure; the push is aborted and the
+# recovery recipe printed. Bypass with `git push --no-verify` if a
+# validator host is unreachable — but note CI is unforgiving about
+# red main.
+#
+# History: added 2026-05-01 after a four-round CI cascade where each
+# fix on macOS-only commits surfaced the next layer of platform-
+# conditional bugs.
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+if [ -f "$repo_root/.validator-hosts" ]; then
+  # shellcheck source=/dev/null
+  . "$repo_root/.validator-hosts"
+fi
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/tags/v*) ;;          # tag push — validate
+    *) continue ;;            # any other ref — skip
+  esac
+
+  tag_name="${remote_ref#refs/tags/}"
+
+  if [ -z "${CLAUDEPOT_VALIDATOR_LINUX_SSH:-}" ] || [ -z "${CLAUDEPOT_VALIDATOR_WINDOWS_SSH:-}" ]; then
+    echo "✗ Release tag push ($tag_name) but validator hosts are not configured."
+    echo
+    echo "  Create .validator-hosts at the repo root (gitignored):"
+    echo "    CLAUDEPOT_VALIDATOR_LINUX_SSH=\"user@linux-host\""
+    echo "    CLAUDEPOT_VALIDATOR_WINDOWS_SSH=\"user@windows-host\""
+    echo
+    echo "  Real host names live in CLAUDE.local.md. Bypass with"
+    echo "  'git push --no-verify' if the validators are unreachable."
+    exit 1
+  fi
+
+  echo "Release tag push detected ($remote_ref → $local_sha)"
+  echo "──────────────────────────────────────────────────────"
+
+  # Linux validation — mirrors CI's `Format / Clippy (Linux)` job.
+  echo "▶ Linux clippy on $CLAUDEPOT_VALIDATOR_LINUX_SSH ..."
+  if ! ssh "$CLAUDEPOT_VALIDATOR_LINUX_SSH" "cd ~/claudepot-app && \
+      git fetch --quiet && \
+      git checkout --quiet $local_sha && \
+      cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings"; then
+    echo
+    echo "✗ Linux clippy failed on $local_sha. Release aborted."
+    echo
+    echo "Recovery:"
+    echo "  1. Fix the lint locally"
+    echo "  2. git tag -d $tag_name"
+    echo "  3. Re-tag the new commit"
+    echo "  4. Re-push"
+    exit 1
+  fi
+  echo "✓ Linux clippy clean"
+  echo
+
+  # Windows validation (MSVC toolchain — matches the CI runner).
+  echo "▶ Windows test compile on $CLAUDEPOT_VALIDATOR_WINDOWS_SSH ..."
+  if ! ssh "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH" "cd claudepot-app && \
+      git fetch --quiet && \
+      git checkout --quiet $local_sha && \
+      cargo test -p claudepot-core -p claudepot-cli --no-run"; then
+    echo
+    echo "✗ Windows test compile failed on $local_sha. Release aborted."
+    echo
+    echo "Recovery:"
+    echo "  1. Fix the build error locally (likely a missing cfg gate)"
+    echo "  2. git tag -d $tag_name"
+    echo "  3. Re-tag the new commit"
+    echo "  4. Re-push"
+    exit 1
+  fi
+  echo "✓ Windows test compile clean"
+  echo
+
+  echo "──────────────────────────────────────────────────────"
+  echo "✓ Release validation passed across Linux + Windows."
+done
+
+exit 0

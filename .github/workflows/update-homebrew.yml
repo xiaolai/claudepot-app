@@ -28,6 +28,20 @@ jobs:
       VERSION: ${{ github.event.inputs.version }}
       REPO: xiaolai/claudepot-app
     steps:
+      # Homebrew serves the stable channel only. release.yml gates
+      # its dispatch on non-beta tags; this guard catches a manual
+      # dispatch with a prerelease version — shipping a `-beta.N` to
+      # the tap would hand it to every stable `brew upgrade` user.
+      - name: Validate version shape (stable only)
+        run: |
+          set -eu
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version '$VERSION' is not a bare X.Y.Z stable version."
+            echo "::error::Prerelease versions must never reach the Homebrew tap."
+            exit 1
+          fi
+          echo "OK: $VERSION is a stable version"
+
       - name: Wait for release assets to be available
         run: |
           set -eu
@@ -167,6 +181,13 @@ jobs:
             name "Claudepot"
             desc "Multi-account Claude Code / Claude Desktop switcher"
             homepage "https://claudepot.com/app/"
+
+            # The app self-updates in place (Settings → About), so the
+            # Caskroom version goes stale by design. auto_updates makes
+            # plain 'brew upgrade' skip the cask (only --greedy
+            # reinstalls), so brew can't downgrade a self-updated app
+            # when the tap lags a release.
+            auto_updates true
 
             livecheck do
               url "https://github.com/${REPO}"
