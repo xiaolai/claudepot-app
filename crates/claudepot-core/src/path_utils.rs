@@ -81,14 +81,19 @@ pub fn is_windows_absolute(path: &str) -> bool {
     false
 }
 
-/// Combined absolute-path predicate: host's `Path::is_absolute()` OR
-/// any Windows-shape signature. Use this in code that processes paths
-/// that may have crossed an OS boundary.
+/// Combined absolute-path predicate: any Windows-shape signature OR a
+/// Unix-rooted (`/…`) shape. Host-independent by string shape — use
+/// this in code that processes path text that may have crossed an OS
+/// boundary (e.g. daemon output parsed on a different host).
 pub fn is_absolute_path_str(path: &str) -> bool {
     if is_windows_absolute(path) {
         return true;
     }
-    std::path::Path::new(path).is_absolute()
+    // Unix-absolute by string shape, NOT `Path::is_absolute()` — the
+    // latter is host-dependent (a leading `/` is not absolute on a
+    // Windows host), which would make a `/`-rooted token unrecognized
+    // when this classifier runs on Windows.
+    path.starts_with('/')
 }
 
 /// `std::fs::canonicalize` paired with [`simplify_windows_path`] so the
@@ -271,12 +276,12 @@ mod tests {
 
     #[test]
     fn is_absolute_path_str_accepts_unix_absolute() {
-        // Host-native check still covers Unix on every OS.
-        // On Windows, `Path::is_absolute("/Users/...")` is false, but
-        // `is_windows_absolute` rejects it too, so this test only
-        // documents Unix-host behavior.
-        #[cfg(unix)]
+        // String-shape classifier: a `/`-rooted path reads as absolute
+        // on EVERY host (incl. Windows), since daemon/session text is
+        // parsed cross-platform. Regression guard for the cc_daemon
+        // sock-recovery tests that assert unix hints on windows-latest.
         assert!(is_absolute_path_str("/Users/joker/project"));
+        assert!(is_absolute_path_str("/tmp/cc-daemon-501/abc/control.sock"));
     }
 
     #[test]
