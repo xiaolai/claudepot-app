@@ -13,16 +13,25 @@ use crate::dto_cc_tips::{TipsRefreshDto, TipsRenderDto};
 use claudepot_core::cc_tips::catalog::{ensure_catalog, record_view, render_tips};
 use claudepot_core::cc_tips::triggers::known_id_count;
 
+/// On a cache miss `render_tips` reads the whole CC binary
+/// (~150 MB) synchronously, so it runs on a blocking thread.
 #[tauri::command]
 pub async fn cc_tips_list() -> Result<TipsRenderDto, String> {
-    render_tips(false)
+    tokio::task::spawn_blocking(|| render_tips(false))
+        .await
+        .map_err(|e| format!("cc_tips_list blocking-task join: {e}"))?
         .map(TipsRenderDto::from)
         .map_err(|e| format!("cc_tips_list: {e}"))
 }
 
+/// Forced refresh always re-reads the whole CC binary, so it runs
+/// on a blocking thread.
 #[tauri::command]
 pub async fn cc_tips_refresh() -> Result<TipsRefreshDto, String> {
-    let snap = ensure_catalog(true).map_err(|e| format!("cc_tips_refresh: {e}"))?;
+    let snap = tokio::task::spawn_blocking(|| ensure_catalog(true))
+        .await
+        .map_err(|e| format!("cc_tips_refresh blocking-task join: {e}"))?
+        .map_err(|e| format!("cc_tips_refresh: {e}"))?;
     let extracted = snap.tips.len();
     let known = known_id_count();
     let partial = extracted * 100 / known.max(1) < 80;

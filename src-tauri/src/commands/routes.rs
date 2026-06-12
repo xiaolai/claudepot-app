@@ -9,12 +9,12 @@
 //! `api_key_preview` is sent back.
 
 use claudepot_core::routes::{
-    activate_desktop, add_wrapper_dir_to_path, clear_desktop_active, delete_helpers,
+    activate_desktop, add_route, add_wrapper_dir_to_path, clear_desktop_active, delete_helpers,
     delete_keychain_for_route, delete_library_profile, delete_wrapper, derive_wrapper_slug,
-    normalize_gateway_base_url, sanitize_wrapper_name, store_keychain_secret, validate_base_url,
-    wrapper_dir_path_status, write_helper, write_library_profile, write_wrapper, AuthScheme,
-    BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route, RouteError, RouteId,
-    RouteProvider, RouteStore, SecretField, VertexConfig,
+    edit_route, normalize_gateway_base_url, sanitize_wrapper_name, validate_base_url,
+    wrapper_dir_path_status, write_wrapper, zeroize_provider_secrets, AuthScheme, BedrockConfig,
+    FoundryConfig, GatewayConfig, OsRouteEffects, ProviderKind, Route, RouteError, RouteProvider,
+    RouteStore, SaveRouteError, VertexConfig,
 };
 use uuid::Uuid;
 use zeroize::Zeroize;
@@ -195,140 +195,11 @@ fn empty_to_none(s: String) -> Option<String> {
     }
 }
 
-/// Side-effect function that resolves how each provider's secret
-/// should be stored, given the new (post-form) and the previous
-/// (already-on-disk) provider configs:
-///
-///   - **Plaintext mode (`use_keychain == false`)**: blank secret on
-///     edit means "keep prev value"; non-empty replaces.
-///   - **Keychain mode (`use_keychain == true`)**: any non-empty
-///     incoming secret is written to the OS keychain and the helper
-///     script is (re)materialized; the inline field is then blanked
-///     so it never reaches the routes.json on disk.
-///
-/// Run before `RouteStore::add` / `update` so the persisted route
-/// reflects the post-effect state.
-fn commit_secrets(
-    new_provider: &mut RouteProvider,
-    route_id: RouteId,
-    prev: Option<&RouteProvider>,
-) -> Result<(), String> {
-    match new_provider {
-        RouteProvider::Gateway(cfg) => {
-            if cfg.use_keychain {
-                if !cfg.api_key.is_empty() {
-                    store_keychain_secret(route_id, SecretField::GatewayApiKey, &cfg.api_key)
-                        .map_err(map_err)?;
-                    write_helper(route_id, SecretField::GatewayApiKey).map_err(map_err)?;
-                }
-                // Zeroize before truncate — `String::clear` only sets
-                // len = 0, leaving the secret bytes in the buffer until
-                // the allocator hands them out for reuse.
-                cfg.api_key.zeroize();
-            } else if cfg.api_key.is_empty() {
-                if let Some(RouteProvider::Gateway(p)) = prev {
-                    cfg.api_key = p.api_key.clone();
-                }
-            }
-        }
-        RouteProvider::Bedrock(cfg) => {
-            if cfg.use_keychain {
-                if let Some(mut t) = cfg.bearer_token.take() {
-                    if !t.is_empty() {
-                        store_keychain_secret(route_id, SecretField::BedrockBearerToken, &t)
-                            .map_err(map_err)?;
-                        write_helper(route_id, SecretField::BedrockBearerToken).map_err(map_err)?;
-                    }
-                    t.zeroize();
-                }
-                cfg.bearer_token = None;
-            } else {
-                let need_inherit = cfg.bearer_token.as_ref().is_some_and(|t| t.is_empty());
-                if need_inherit {
-                    if let Some(RouteProvider::Bedrock(p)) = prev {
-                        cfg.bearer_token = p.bearer_token.clone();
-                    } else {
-                        cfg.bearer_token = None;
-                    }
-                }
-            }
-        }
-        RouteProvider::Foundry(cfg) => {
-            if cfg.use_keychain {
-                if let Some(mut k) = cfg.api_key.take() {
-                    if !k.is_empty() {
-                        store_keychain_secret(route_id, SecretField::FoundryApiKey, &k)
-                            .map_err(map_err)?;
-                        write_helper(route_id, SecretField::FoundryApiKey).map_err(map_err)?;
-                    }
-                    k.zeroize();
-                }
-                cfg.api_key = None;
-            } else {
-                let need_inherit = cfg.api_key.as_ref().is_some_and(|k| k.is_empty());
-                if need_inherit {
-                    if let Some(RouteProvider::Foundry(p)) = prev {
-                        cfg.api_key = p.api_key.clone();
-                    } else {
-                        cfg.api_key = None;
-                    }
-                }
-            }
-        }
-        RouteProvider::Vertex(_) => {}
-    }
-    Ok(())
-}
-
-/// Snapshot every inline secret on a provider config into owned
-/// Strings. Caller is expected to zeroize them on every exit path
-/// (used by `routes_edit` to scrub shadow copies even when the
-/// store-update path drops the original `candidate` without
-/// scrubbing).
-fn collect_inline_secrets(p: &RouteProvider) -> Vec<String> {
-    match p {
-        RouteProvider::Gateway(c) if !c.api_key.is_empty() => {
-            vec![c.api_key.clone()]
-        }
-        RouteProvider::Bedrock(c) => c
-            .bearer_token
-            .as_ref()
-            .filter(|t| !t.is_empty())
-            .cloned()
-            .map(|t| vec![t])
-            .unwrap_or_default(),
-        RouteProvider::Foundry(c) => c
-            .api_key
-            .as_ref()
-            .filter(|k| !k.is_empty())
-            .cloned()
-            .map(|k| vec![k])
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    }
-}
-
-/// Scrub every inline secret on a provider config. Used by error
-/// paths so a half-built route doesn't leave the user-typed key
-/// resident in process memory until the allocator overwrites it.
-fn zeroize_provider_secrets(p: &mut RouteProvider) {
-    match p {
-        RouteProvider::Gateway(c) => c.api_key.zeroize(),
-        RouteProvider::Bedrock(c) => {
-            if let Some(t) = c.bearer_token.as_mut() {
-                t.zeroize();
-            }
-            c.bearer_token = None;
-        }
-        RouteProvider::Foundry(c) => {
-            if let Some(k) = c.api_key.as_mut() {
-                k.zeroize();
-            }
-            c.api_key = None;
-        }
-        RouteProvider::Vertex(_) => {}
-    }
-}
+// The secret-commit policy (`commit_secrets`), the shadow-copy
+// scrubbing, and the add/edit save transactions live in
+// `claudepot_core::routes::lifecycle` — unit-tested there with fake
+// effects. This file keeps DTO parsing, inbound-secret zeroize, and
+// error stringification only.
 
 fn project_summary(r: &Route) -> RouteSummaryDto {
     let s = r.summary();
@@ -512,19 +383,10 @@ pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, St
         }
     };
 
-    let route_id = Uuid::new_v4();
-    if let Err(e) = commit_secrets(&mut provider, route_id, None) {
-        // commit_secrets may have written to keychain / dropped a helper
-        // before failing — best-effort tear-down so we don't leak state
-        // for a route that was never persisted.
-        let _ = delete_keychain_for_route(route_id);
-        let _ = delete_helpers(route_id, None);
-        zeroize_provider_secrets(&mut provider);
-        return Err(e);
-    }
-
     let new_route = Route {
-        id: route_id,
+        // Nil id — core's `add_route` assigns the UUID shared by the
+        // keychain entries and the persisted record.
+        id: Uuid::nil(),
         name: route.name.trim().to_string(),
         provider,
         model: route.model.trim().to_string(),
@@ -546,24 +408,10 @@ pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, St
         capabilities_override: None,
     };
 
+    // The commit → persist ordering and the keychain/helper rollback
+    // on either failure live in core (`routes::lifecycle::add_route`).
     let mut store = open_store()?;
-    let saved = match store.add(new_route) {
-        Ok(s) => s,
-        Err(mut e) => {
-            // Roll back any keychain / helper writes commit_secrets did,
-            // since the store call rejected the route.
-            let _ = delete_keychain_for_route(route_id);
-            let _ = delete_helpers(route_id, None);
-            // We can't reach the moved provider anymore; the in-flight
-            // copy was scrubbed by commit_secrets if it took the
-            // keychain path. The error itself is a String — make sure
-            // it doesn't carry the secret (it doesn't, by error-type
-            // construction, but be defensive).
-            let s = e.to_string();
-            e = RouteError::Io(std::io::Error::other(s.clone()));
-            return Err(e.to_string());
-        }
-    };
+    let saved = add_route(&mut store, new_route, &OsRouteEffects).map_err(map_err)?;
     Ok(project_summary(&saved))
 }
 
@@ -571,24 +419,6 @@ pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, St
 pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, String> {
     let id = parse_route_id(&route.id)?;
     let provider_kind = parse_provider(&route.provider_kind)?;
-
-    // Capture the prior provider so commit_secrets can decide
-    // "blank = keep existing" for plaintext mode, and capture the
-    // prior wrapper name to detect renames for stale-file cleanup.
-    let (prev_provider, prev_wrapper_name) = {
-        let store = open_store()?;
-        let prev = store
-            .get(id)
-            .ok_or_else(|| RouteError::NotFound(id.to_string()).to_string())?;
-        (
-            prev.provider.clone(),
-            if prev.installed_on_cli {
-                Some(prev.wrapper_name.clone())
-            } else {
-                None
-            },
-        )
-    };
 
     let mut provider = build_provider(
         provider_kind,
@@ -598,14 +428,9 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
         route.foundry.take(),
     )?;
     // Audit fix for commands_routes.rs:562 — validate everything we
-    // can BEFORE rotating any keychain secrets. The previous order
-    // committed secrets first and then did wrapper-name validation;
-    // a wrapper-name failure left the keychain rotated but no route
-    // update applied, so the old route stopped working without a
-    // visible Save success. Rotating keychain entries is still not
-    // transactional (we can't atomically swap an old value with a
-    // new one and roll back on a later failure), but moving the
-    // pure-data validation up shrinks the window where that matters.
+    // can BEFORE rotating any keychain secrets (the rotation itself
+    // happens inside core's `edit_route`). A wrapper-name failure
+    // here costs nothing: no keychain entry has been touched yet.
     let wrapper = match pick_wrapper_name(&route.wrapper_name, &route.model) {
         Ok(w) => w,
         Err(e) => {
@@ -613,10 +438,6 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
             return Err(e);
         }
     };
-    if let Err(e) = commit_secrets(&mut provider, id, Some(&prev_provider)) {
-        zeroize_provider_secrets(&mut provider);
-        return Err(e);
-    }
 
     let candidate = Route {
         id,
@@ -642,79 +463,33 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
         capabilities_override: None,
     };
 
+    // Core's `edit_route` owns the prev-capture → commit_secrets →
+    // store.update → side-effects ordering, the shadow-secret
+    // scrubbing, and the "never delete helpers on a failed update"
+    // invariant (audit fix for commands_routes.rs:613). This command
+    // only stringifies the outcomes.
     let mut store = open_store()?;
-    // Snapshot any inline secrets in the candidate into local Strings
-    // BEFORE we move it into `store.update`. The local strings are
-    // explicitly zeroized at every exit point of this function so
-    // even if `store.update` fails (and drops `candidate` without
-    // scrubbing), we still scrub our shadow copies.
-    let mut shadow_secrets = collect_inline_secrets(&candidate.provider);
-    let updated = match store.update(candidate) {
-        Ok(u) => u,
-        Err(e) => {
-            for s in shadow_secrets.iter_mut() {
-                s.zeroize();
-            }
-            // Audit fix for commands_routes.rs:613 — DO NOT delete
-            // helpers here. The previous shape ran
-            // `delete_helpers(id, None)` on store.update failure,
-            // which removed helper scripts the still-existing
-            // (un-updated) route depends on. The route's persisted
-            // state is unchanged by a failed update, so its
-            // helpers must stay too. The keychain entry
-            // commit_secrets just wrote may now hold the new
-            // secret while the route still references the old
-            // shape — surface that explicitly so the user knows
-            // to re-save (which will rewrite the keychain).
+    let saved = match edit_route(&mut store, candidate, &OsRouteEffects) {
+        Ok(s) => s,
+        Err(SaveRouteError::Store(e)) => {
+            // The persisted route is unchanged; the keychain may
+            // already hold the new secret while the route still
+            // references the old shape — tell the user to re-save.
             return Err(format!(
                 "{e}; the previously-saved route remains active. \
                  If the route stops working after retry, re-enter the secret and save again."
             ));
         }
+        Err(e) => return Err(e.to_string()),
     };
-    for s in shadow_secrets.iter_mut() {
-        s.zeroize();
-    }
 
-    // Post-store side effects: surface any failure so the user sees
-    // when wrapper / Desktop state diverges from the persisted route
-    // (instead of silently leaving stale files behind).
-    let mut warnings: Vec<String> = Vec::new();
-    if updated.installed_on_cli {
-        if let Some(prev_name) = &prev_wrapper_name {
-            if prev_name != &updated.wrapper_name {
-                if let Err(e) = delete_wrapper(prev_name) {
-                    warnings.push(format!(
-                        "old wrapper '{prev_name}' could not be removed: {e}"
-                    ));
-                }
-            }
-        }
-        if let Err(e) = write_wrapper(&updated) {
-            warnings.push(format!("wrapper rewrite failed: {e}"));
-        }
-    }
-    // Always rewrite the library profile (regardless of active state),
-    // so a defined-but-inactive 3P profile in `configLibrary/` reflects
-    // the latest fields and any pre-existing plaintext secret on disk
-    // is replaced.
-    if let Err(e) = write_library_profile(&updated) {
-        warnings.push(format!("Desktop library profile write failed: {e}"));
-    }
-    if updated.active_on_desktop {
-        let disable = store.disable_chooser();
-        if let Err(e) = activate_desktop(&updated, disable) {
-            warnings.push(format!("Desktop activation re-mirror failed: {e}"));
-        }
-    }
-
-    if !warnings.is_empty() {
+    if !saved.warnings.is_empty() {
         return Err(format!(
             "route saved, but follow-up writes had warnings — {}",
-            warnings.join("; ")
+            saved.warnings.join("; ")
         ));
     }
-    Ok(project_summary(&updated))
+    Ok(project_summary(&saved.route))
 }
 
 #[tauri::command]

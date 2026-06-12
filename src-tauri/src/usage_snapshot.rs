@@ -44,12 +44,9 @@ const POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const FIRST_TICK_DELAY: Duration = Duration::from_secs(10);
 
 pub fn spawn(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(FIRST_TICK_DELAY).await;
-        loop {
-            run_tick(&app).await;
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
+    crate::poller::spawn_poller(app, "usage_snapshot", FIRST_TICK_DELAY, |app| async move {
+        run_tick(&app).await;
+        POLL_INTERVAL
     });
 }
 

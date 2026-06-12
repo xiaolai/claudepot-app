@@ -232,10 +232,12 @@ pub struct VerifyAccountEvent {
     pub detail: Option<String>,
 }
 
-/// Mirror of `claudepot_core::session_move::MoveSessionReport` for
-/// JSON emission. Same shape (camelCase) as
-/// [`crate::dto_session_move::MoveSessionReportDto`] so the frontend
-/// can reuse `MoveSessionReport` regardless of which surface fed it.
+/// The single wire struct for `claudepot_core::session_move::MoveSessionReport`
+/// (camelCase JSON). Re-exported as `MoveSessionReportDto` from
+/// `crate::dto_session_move` — same single-home pattern as
+/// [`CleanResultSummary`] / `dto_project` — so the legacy
+/// `session_move` IPC and the op-progress pipeline serialize the
+/// identical shape and a new core field only needs adding once.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MoveSessionReportSummary {
@@ -251,8 +253,8 @@ pub struct MoveSessionReportSummary {
     pub source_dir_removed: bool,
 }
 
-impl MoveSessionReportSummary {
-    pub fn from_core(r: &claudepot_core::session_move::MoveSessionReport) -> Self {
+impl From<&claudepot_core::session_move::MoveSessionReport> for MoveSessionReportSummary {
+    fn from(r: &claudepot_core::session_move::MoveSessionReport) -> Self {
         Self {
             session_id: r.session_id.map(|s| s.to_string()),
             from_slug: r.from_slug.clone(),
@@ -361,12 +363,15 @@ impl RunningOps {
     /// runtime (plain sync `#[tauri::command]` handlers dispatched on
     /// Tauri's own thread pool).
     pub fn remove_after_grace(&self, op_id: String) {
-        let map = self.inner.clone();
+        let this = self.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(5));
-            if let Ok(mut guard) = map.lock() {
-                guard.remove(&op_id);
-            }
+            // `guard()` (not a bare `lock()`) so a mutex poisoned by an
+            // earlier panic doesn't silently disable grace-removal for
+            // the rest of the app lifetime — terminal entries would
+            // otherwise accumulate and the polling backstop would
+            // report long-dead ops forever.
+            this.guard().remove(&op_id);
         });
     }
 }
@@ -382,7 +387,7 @@ pub struct TauriProgressSink {
 
 impl TauriProgressSink {
     fn channel(&self) -> String {
-        format!("op-progress::{}", self.op_id)
+        crate::events::op_progress_channel(&self.op_id)
     }
 }
 
@@ -518,7 +523,7 @@ pub fn emit_terminal(app: &AppHandle, ops: &RunningOps, op_id: &str, error: Opti
         total: None,
         detail: error.clone(),
     };
-    let channel = format!("op-progress::{op_id}");
+    let channel = crate::events::op_progress_channel(op_id);
     let _ = app.emit(&channel, payload);
     ops.update(op_id, |op| {
         op.status = if error.is_some() {
@@ -544,7 +549,7 @@ pub fn emit_terminal(app: &AppHandle, ops: &RunningOps, op_id: &str, error: Opti
             label,
             error,
         };
-        let _ = app.emit("cp-op-terminal", global);
+        let _ = app.emit(crate::events::OP_TERMINAL, global);
     }
     ops.remove_after_grace(op_id.to_string());
 }
@@ -611,7 +616,7 @@ pub struct TauriLoginProgressSink {
 
 impl TauriLoginProgressSink {
     fn channel(&self) -> String {
-        format!("op-progress::{}", self.op_id)
+        crate::events::op_progress_channel(&self.op_id)
     }
 }
 
@@ -669,7 +674,7 @@ pub struct TauriVerifyProgressSink {
 
 impl TauriVerifyProgressSink {
     fn channel(&self) -> String {
-        format!("op-progress::{}", self.op_id)
+        crate::events::op_progress_channel(&self.op_id)
     }
 }
 
@@ -836,4 +841,223 @@ where
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Audit fix (ops.rs:367): `remove_after_grace`'s worker thread
+    /// must recover from a poisoned map — the old `if let Ok(guard) =
+    /// map.lock()` silently no-op'd after any panic-while-holding,
+    /// leaking every completed op for the app lifetime. This test
+    /// poisons the mutex and runs the exact removal the grace thread
+    /// performs (`guard().remove`, minus the 5 s sleep).
+    #[test]
+    fn test_running_ops_remove_recovers_from_poisoned_mutex() {
+        let ops = RunningOps::new();
+        ops.insert(new_running_op("op-x", OpKind::SessionShare, "a", "b"));
+
+        // Poison the inner mutex via a panicking holder thread.
+        let inner = ops.inner.clone();
+        let join = std::thread::spawn(move || {
+            let _g = inner.lock().unwrap();
+            panic!("intentional poison");
+        });
+        let _ = join.join();
+        assert!(
+            ops.inner.is_poisoned(),
+            "test setup: mutex must be poisoned"
+        );
+
+        // The grace-thread body: clone + guard() + remove.
+        let this = ops.clone();
+        this.guard().remove("op-x");
+
+        assert!(
+            ops.get("op-x").is_none(),
+            "entry must be removed even after the mutex was poisoned"
+        );
+    }
+
+    // ── RunningOps map semantics — the polling backstop ────────────
+
+    #[test]
+    fn test_running_ops_insert_get_round_trips() {
+        let ops = RunningOps::new();
+        assert!(ops.get("op-a").is_none(), "empty map yields None");
+        ops.insert(new_running_op(
+            "op-a",
+            OpKind::MoveProject,
+            "/p/old",
+            "/p/new",
+        ));
+        let got = ops.get("op-a").expect("inserted op must be retrievable");
+        assert_eq!(got.op_id, "op-a");
+        assert_eq!(got.old_path, "/p/old");
+        assert_eq!(got.new_path, "/p/new");
+        assert_eq!(got.status, OpStatus::Running);
+        assert!(got.current_phase.is_none());
+        assert!(got.last_error.is_none());
+    }
+
+    #[test]
+    fn test_running_ops_update_then_get_sees_mutation() {
+        let ops = RunningOps::new();
+        ops.insert(new_running_op("op-b", OpKind::SessionPrune, "", ""));
+        ops.update("op-b", |op| {
+            op.status = OpStatus::Error;
+            op.last_error = Some("boom".to_string());
+            op.current_phase = Some("p3".to_string());
+            op.sub_progress = Some((2, 5));
+        });
+        let got = ops.get("op-b").unwrap();
+        assert_eq!(got.status, OpStatus::Error);
+        assert_eq!(got.last_error.as_deref(), Some("boom"));
+        assert_eq!(got.current_phase.as_deref(), Some("p3"));
+        assert_eq!(got.sub_progress, Some((2, 5)));
+    }
+
+    #[test]
+    fn test_running_ops_update_missing_id_is_noop() {
+        let ops = RunningOps::new();
+        // Must not panic or insert a phantom entry.
+        ops.update("nope", |op| op.status = OpStatus::Complete);
+        assert!(ops.list().is_empty());
+    }
+
+    #[test]
+    fn test_running_ops_list_returns_every_entry() {
+        let ops = RunningOps::new();
+        ops.insert(new_running_op("op-1", OpKind::CleanProjects, "", ""));
+        ops.insert(new_running_op("op-2", OpKind::VerifyAll, "", ""));
+        let mut ids: Vec<String> = ops.list().into_iter().map(|o| o.op_id).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["op-1", "op-2"]);
+    }
+
+    // ── basename — pure path-tail helper ───────────────────────────
+    // Windows-aware per `.claude/rules/paths.md`: both separators,
+    // trailing-separator trim, drive-letter shapes.
+
+    #[test]
+    fn test_basename_empty_stays_empty() {
+        assert_eq!(basename(""), "");
+    }
+
+    #[test]
+    fn test_basename_unix_absolute() {
+        assert_eq!(basename("/Users/joker/project"), "project");
+    }
+
+    #[test]
+    fn test_basename_unix_trailing_slash_trimmed() {
+        assert_eq!(basename("/Users/joker/project/"), "project");
+    }
+
+    #[test]
+    fn test_basename_windows_drive_letter() {
+        assert_eq!(basename("C:\\Users\\joker\\project"), "project");
+    }
+
+    #[test]
+    fn test_basename_windows_trailing_backslash_trimmed() {
+        assert_eq!(basename("C:\\Users\\joker\\project\\"), "project");
+    }
+
+    #[test]
+    fn test_basename_unc_path() {
+        assert_eq!(basename("\\\\server\\share\\dir"), "dir");
+    }
+
+    #[test]
+    fn test_basename_bare_name_passes_through() {
+        assert_eq!(basename("just-a-name"), "just-a-name");
+    }
+
+    // ── op_terminal_label — notification body per op kind ──────────
+
+    fn op(kind: OpKind, old: &str, new: &str) -> RunningOpInfo {
+        new_running_op("op-t", kind, old, new)
+    }
+
+    #[test]
+    fn test_op_terminal_label_fixed_kinds() {
+        assert_eq!(
+            op_terminal_label(&op(OpKind::CleanProjects, "", "")),
+            "Cleaned projects"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::SessionPrune, "", "")),
+            "Pruned sessions"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::SessionShare, "", "")),
+            "Shared session"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::AccountLogin, "", "")),
+            "Account login"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::AccountRegister, "", "")),
+            "Added account"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::AgentRun, "", "")),
+            "Agent run"
+        );
+    }
+
+    #[test]
+    fn test_op_terminal_label_path_pair_kinds_use_basenames() {
+        assert_eq!(
+            op_terminal_label(&op(OpKind::MoveProject, "/p/old-proj", "/p/new-proj")),
+            "Renamed old-proj → new-proj"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::SessionMove, "/p/a", "/p/b")),
+            "Moved session a → b"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::RepairResume, "/p/a", "/p/b")),
+            "Resumed a → b"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::RepairRollback, "/p/a", "/p/b")),
+            "Rolled back a → b"
+        );
+    }
+
+    #[test]
+    fn test_op_terminal_label_session_slim_falls_back_when_path_empty() {
+        assert_eq!(
+            op_terminal_label(&op(OpKind::SessionSlim, "", "")),
+            "Slimmed session"
+        );
+        assert_eq!(
+            op_terminal_label(&op(OpKind::SessionSlim, "/p/sess.jsonl", "")),
+            "Slimmed sess.jsonl"
+        );
+    }
+
+    #[test]
+    fn test_op_terminal_label_verify_all_pluralizes_from_results() {
+        let mut one = op(OpKind::VerifyAll, "", "");
+        one.verify_results = Some(VerifyResultSummary {
+            total: 1,
+            ..Default::default()
+        });
+        assert_eq!(op_terminal_label(&one), "Verified 1 account");
+
+        let mut many = op(OpKind::VerifyAll, "", "");
+        many.verify_results = Some(VerifyResultSummary {
+            total: 4,
+            ..Default::default()
+        });
+        assert_eq!(op_terminal_label(&many), "Verified 4 accounts");
+
+        let none = op(OpKind::VerifyAll, "", "");
+        assert_eq!(op_terminal_label(&none), "Verified accounts");
+    }
 }

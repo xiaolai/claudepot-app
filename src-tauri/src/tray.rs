@@ -34,50 +34,91 @@ use tauri::{AppHandle, Emitter, Manager};
 /// path. `@2x` is the canonical asset on macOS — AppKit downsamples
 /// to 1x when needed; bundling the higher-res file by default keeps
 /// the menubar crisp on retina displays.
+///
+/// macOS gets the pure-black `Template` asset (AppKit re-tints it
+/// against the menubar foreground in Light and Dark). Windows/Linux
+/// have no template tinting — `icon_as_template` is a no-op there —
+/// so the black bitmap would be invisible on a dark taskbar/panel.
+/// They get a mid-gray `Mono` variant instead, derived from the same
+/// glyph: `magick tray-iconTemplate@2x.png -fill '#808080'
+/// -colorize 100 tray-iconMono@2x.png` (alpha preserved; #808080
+/// reads on both light and dark panels).
+#[cfg(target_os = "macos")]
 const TRAY_IDLE_BYTES: &[u8] = include_bytes!("../icons/tray-iconTemplate@2x.png");
+#[cfg(not(target_os = "macos"))]
+const TRAY_IDLE_BYTES: &[u8] = include_bytes!("../icons/tray-iconMono@2x.png");
 
-/// Alerting variant — same teapot glyph plus a small black dot in
-/// the top-right corner. Filename keeps the `Template` suffix so
-/// AppKit re-tints both bytes-blobs identically and the alert dot
-/// inherits the menubar's foreground colour in light + dark modes.
+/// Alerting variant — same teapot glyph plus a small dot in the
+/// top-right corner. On macOS the filename keeps the `Template`
+/// suffix so AppKit re-tints both bytes-blobs identically and the
+/// alert dot inherits the menubar's foreground colour in light +
+/// dark modes. Windows/Linux get the mid-gray `Mono` derivation
+/// (same rationale as `TRAY_IDLE_BYTES`).
+#[cfg(target_os = "macos")]
 const TRAY_ALERT_BYTES: &[u8] = include_bytes!("../icons/tray-iconAlertTemplate@2x.png");
+#[cfg(not(target_os = "macos"))]
+const TRAY_ALERT_BYTES: &[u8] = include_bytes!("../icons/tray-iconAlertMono@2x.png");
+
+/// Decode caches for the two tray states. The bytes are compile-time
+/// constants, so the decoded RGBA never changes — decoding once per
+/// process instead of once per alert flip keeps `apply_tray_icon`
+/// cheap on the per-toast hot path.
+static TRAY_IDLE_IMG: std::sync::OnceLock<Image<'static>> = std::sync::OnceLock::new();
+static TRAY_ALERT_IMG: std::sync::OnceLock<Image<'static>> = std::sync::OnceLock::new();
+
+/// Last alert count actually applied to the NSStatusItem (by either
+/// `rebuild` or `refresh_alert_chrome`). `u32::MAX` = nothing applied
+/// yet, so the first refresh always lands. Lets the per-toast
+/// `refresh_alert_chrome` hot path return before doing any SQLite or
+/// AppKit work when the visible state wouldn't change.
+static LAST_APPLIED_ALERT_COUNT: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
 
 /// Swap the tray icon to match the current alert state. Logged-only
 /// on failure — a stale icon is far less bad than a failed rebuild.
 ///
-/// On macOS, `set_icon` alone is *not* enough: `tray-icon`'s impl
+/// On macOS, plain `set_icon` is *not* enough: `tray-icon`'s impl
 /// hard-codes `setTemplate(false)` on the new NSImage, clobbering the
 /// template flag we set at startup in `lib.rs`. Once that flag is
 /// gone, AppKit renders the raw bitmap instead of tinting against the
 /// menubar foreground, and a pure-black silhouette disappears against
-/// a dark menubar. The fix is to re-apply the template flag after
-/// every swap. See tauri-apps/tray-icon
-/// `platform_impl/macos/mod.rs` — `set_icon` (~line 118, hard-codes
-/// `false`) vs. `set_icon_as_template` (~line 206, applies it back).
+/// a dark menubar. The old two-step fix (`set_icon` then
+/// `set_icon_as_template(true)`) rendered the icon twice — one
+/// untinted frame per call — and could strand a non-template icon if
+/// the second call failed. tauri 2.11's `set_icon_with_as_template`
+/// sets both atomically (and falls back to plain `set_icon` on
+/// non-macOS, where our bytes are already non-template).
 fn apply_tray_icon(tray: &tauri::tray::TrayIcon, alert_count: u32) {
     // set_icon mutates the live NSStatusItem — main-thread-only on
     // macOS. Both current callers route through run_on_main_thread;
     // this guards against a future direct caller that forgets to.
+    // (tauri's TrayIcon methods self-route via run_item_main_thread,
+    // so warn-only is sufficient here — unlike raw-AppKit callers
+    // such as `traffic_light::emit`, which must guard-and-return.)
     claudepot_core::main_thread::warn_if_off_main_thread("tray::apply_tray_icon");
-    let bytes = if alert_count == 0 {
-        TRAY_IDLE_BYTES
+    let (bytes, cache) = if alert_count == 0 {
+        (TRAY_IDLE_BYTES, &TRAY_IDLE_IMG)
     } else {
-        TRAY_ALERT_BYTES
+        (TRAY_ALERT_BYTES, &TRAY_ALERT_IMG)
     };
-    match Image::from_bytes(bytes) {
-        Ok(img) => {
-            if let Err(e) = tray.set_icon(Some(img)) {
-                tracing::warn!("tray::apply_tray_icon: set_icon failed: {e}");
+    let img = match cache.get() {
+        Some(img) => img.clone(),
+        None => match Image::from_bytes(bytes) {
+            Ok(img) => {
+                let _ = cache.set(img.clone());
+                img
+            }
+            Err(e) => {
+                tracing::warn!("tray::apply_tray_icon: decode failed: {e}");
                 return;
             }
-            if let Err(e) = tray.set_icon_as_template(true) {
-                tracing::warn!("tray::apply_tray_icon: set_icon_as_template failed: {e}");
-            }
-        }
-        Err(e) => {
-            tracing::warn!("tray::apply_tray_icon: decode failed: {e}");
-        }
+        },
+    };
+    if let Err(e) = tray.set_icon_with_as_template(Some(img), true) {
+        tracing::warn!("tray::apply_tray_icon: set_icon_with_as_template failed: {e}");
+        return;
     }
+    LAST_APPLIED_ALERT_COUNT.store(alert_count, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Build and set the tray menu from the current account state.
@@ -157,44 +198,45 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     //     hidden (render-if-nonzero on the menu level).
     let live_submenu = build_live_submenu(app)?;
 
-    // 4. Standalone items. macOS gets IconMenuItem + a pre-rendered
-    // Nerd Font PNG so the whole tray carries the same paper-mono
-    // register as the webview. Windows/Linux fall back to plain
-    // MenuItem (IconMenuItemBuilder exists cross-platform but the
-    // visual result isn't worth the weight without template-tinting).
+    // 4. Standalone items. Every platform gets IconMenuItem + a
+    // pre-rendered Lucide PNG so the whole tray carries the same
+    // paper-mono register as the webview. The glyphs ship paired
+    // dark/light stroke variants selected per system appearance in
+    // `tray_icons::MenuGlyph` — no template tinting exists for menu
+    // bitmaps on any platform (muda never calls setTemplate:YES).
     let sep1 = PredefinedMenuItem::separator(app).map_err(|e| format!("sep1: {e}"))?;
 
-    let add_item = icon_item(app, ID_ADD, "Add account from browser…", ICON_USER_PLUS)?;
-    let sync_item = icon_item(app, ID_SYNC, "Sync from current CC", ICON_REFRESH)?;
+    let add_item = icon_item(app, ID_ADD, "Add account from browser…", &ICON_USER_PLUS)?;
+    let sync_item = icon_item(app, ID_SYNC, "Sync from current CC", &ICON_REFRESH)?;
     // `Verify all` is the natural quick-maintenance action after the
     // user comes back from a break — credential health goes stale on
     // its own schedule. The handler reuses the existing `app-menu:
     // account:verify-all` listener in App.tsx (no new IPC needed).
-    let verify_item = icon_item(app, ID_VERIFY_ALL, "Verify all", ICON_BADGE_CHECK)?;
+    let verify_item = icon_item(app, ID_VERIFY_ALL, "Verify all", &ICON_BADGE_CHECK)?;
 
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| format!("sep2: {e}"))?;
 
-    let show_item = icon_item(app, ID_SHOW, "Show Claudepot", ICON_HOME)?;
+    let show_item = icon_item(app, ID_SHOW, "Show Claudepot", &ICON_HOME)?;
     // `Open Activities` is the only stable Activities entry-point
     // from the tray. The pre-existing "Active: N ▸" submenu is
     // conditional (renders only when a session is live) and only
     // covers the live time-scale; the Activities section itself is
     // the today/month dashboard. Reuses the existing
     // `app-menu:nav:events` listener in App.tsx.
-    let activities_item = icon_item(app, ID_ACTIVITIES, "Open Activities", ICON_LAYERS)?;
+    let activities_item = icon_item(app, ID_ACTIVITIES, "Open Activities", &ICON_LAYERS)?;
     // Health row — reflects the last cc_doctor scrape. Label
     // depends on TrayHealthState so closed-window users still get
     // a glanceable verdict. Unknown reads as "checking…" — never
     // "healthy" until we've actually confirmed.
     let health_label = compose_health_label(app);
-    let health_item = icon_item(app, ID_HEALTH, &health_label, ICON_SHIELD)?;
-    let settings_item = icon_item(app, ID_SETTINGS, "Settings…", ICON_SLIDERS)?;
+    let health_item = icon_item(app, ID_HEALTH, &health_label, &ICON_SHIELD)?;
+    let settings_item = icon_item(app, ID_SETTINGS, "Settings…", &ICON_SLIDERS)?;
 
     // Quit carries a power glyph for column consistency with the
     // rest of the stack. macOS convention leaves system Quit items
     // bare, but here every other row is iconized and a lone
     // text-only Quit row misaligned the whole menu.
-    let quit_icon = Image::from_bytes(ICON_POWER).map_err(|e| format!("power icon: {e}"))?;
+    let quit_icon = ICON_POWER.image().map_err(|e| format!("power icon: {e}"))?;
     let quit_item = IconMenuItemBuilder::with_id(ID_QUIT, "Quit Claudepot")
         .icon(quit_icon)
         .accelerator("CmdOrCtrl+Q")
@@ -252,17 +294,12 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
 
     // Pull the live alert count so the tooltip + macOS title text
     // survive a full rebuild (account-list change shouldn't reset
-    // the alert badge to 0). State may be unmanaged in test
-    // harness builds — fall through with 0. These are plain managed-
-    // state reads; safe to do off the main thread.
-    let alert_count = app
-        .try_state::<crate::state::TrayAlertState>()
-        .map(|s| s.get())
-        .unwrap_or(0)
-        + app
-            .try_state::<crate::state::UpdatesAlertState>()
-            .map(|s| s.get())
-            .unwrap_or(0);
+    // the alert badge to 0). Uses the same three-source sum as
+    // `refresh_alert_chrome` — summing only two here used to let a
+    // rebuild clear a bell-unread-driven alert dot. State may be
+    // unmanaged in test harness builds — fall through with 0. These
+    // are plain managed-state reads; safe to do off the main thread.
+    let alert_count = current_alert_count(app);
     let tooltip = compose_tooltip(cli_active, desktop_active, alert_count);
 
     // Every NSStatusItem mutation below (set_menu / set_tooltip /
@@ -313,19 +350,135 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
 /// the usage cache + builds every submenu; that's too expensive for
 /// every transition into / out of an errored or stuck session.
 ///
-/// Updates state, then patches title (macOS) and tooltip (everywhere)
-/// without touching the menu. Errors out silently if the tray isn't
-/// registered yet — the next full rebuild will pick up the new count
-/// from `TrayAlertState`.
+/// Patches icon, title (macOS), and tooltip without touching the menu
+/// — but only when the summed alert count actually changed since the
+/// last application (see `LAST_APPLIED_ALERT_COUNT`); the unchanged
+/// case returns immediately, which keeps the per-toast call sites
+/// nearly free. The tooltip's SQLite lookup runs on the blocking
+/// pool, never on the async executor. Errors out silently if the
+/// tray isn't registered yet — the next full rebuild will pick up
+/// the new count from `TrayAlertState`.
 pub fn refresh_alert_chrome(app: &AppHandle) {
-    // Sum both alert sources so the badge survives whichever channel
-    // last wrote. See `state::UpdatesAlertState` doc-comment.
+    let alert_count = current_alert_count(app);
+
+    // Dirty check: this path fires on EVERY toast and OS banner (see
+    // `notification_log_append`), but the chrome only changes when the
+    // summed count moves. When it hasn't, skip the store lookup and
+    // the NSStatusItem redraw entirely — a tooltip that went stale for
+    // other reasons (account switch) is refreshed by the full rebuild
+    // those events already trigger. Relaxed is fine: a lost race means
+    // one redundant redraw — never a missed one, because the apply
+    // step below re-reads the live count at apply time, and every
+    // count change triggers another call through this gate.
+    if LAST_APPLIED_ALERT_COUNT.load(std::sync::atomic::Ordering::Relaxed) == alert_count {
+        return;
+    }
+
+    // Recompute the tooltip with the same identity inputs the menu
+    // build uses — but skip the per-account list lookup; this path
+    // runs frequently and a stale tooltip is fine until the next
+    // rebuild lands.
     //
-    // Phase 5: include unread P0/P1/P2 entries from the notification
-    // log too. A window-closed user with a 90% usage alert in the
-    // log now sees the tray badge; P3 ambient writes (memory/config
-    // patches) are excluded so the badge doesn't flicker on every
-    // CC write to CLAUDE.md.
+    // The store lookup is sync SQLite I/O. Our own callers
+    // (`commands/notification.rs`, the updates watcher) carefully
+    // route their JSON-log I/O through `spawn_blocking`; blocking the
+    // async executor here would undo that discipline, so the lookup
+    // runs on the blocking pool and hands the finished String to the
+    // main-thread closure.
+    //
+    // The tooltip only needs `uuid` and `email` from each summary
+    // (see `tray_menu::build_tooltip`), so we build a minimal stub
+    // and skip the per-account keychain reads that
+    // `summary_for_account` would do. The full summary lands on the
+    // next `rebuild` (async) call.
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Identity-only base tooltip; the alert suffix is appended on
+        // the main thread with the live count (see below).
+        let base_tooltip: Option<String> = if let Ok(store) = crate::commands::open_store() {
+            if let Ok(accounts) = store.list() {
+                let summaries: Vec<crate::dto::AccountSummary> = accounts
+                    .iter()
+                    .map(|a| crate::dto::AccountSummary {
+                        uuid: a.uuid.to_string(),
+                        email: a.email.clone(),
+                        org_name: a.org_name.clone(),
+                        subscription_type: a.subscription_type.clone(),
+                        is_cli_active: a.is_cli_active,
+                        is_desktop_active: a.is_desktop_active,
+                        has_cli_credentials: a.has_cli_credentials,
+                        has_desktop_profile: a.has_desktop_profile,
+                        last_cli_switch: a.last_cli_switch,
+                        last_desktop_switch: a.last_desktop_switch,
+                        token_status: String::new(),
+                        token_remaining_mins: None,
+                        credentials_healthy: false,
+                        verify_status: a.verify_status.clone(),
+                        verified_email: a.verified_email.clone(),
+                        verified_at: a.verified_at,
+                        drift: a.verify_status == "drift",
+                        desktop_profile_on_disk: false,
+                    })
+                    .collect();
+                let cli = summaries.iter().find(|a| a.is_cli_active);
+                let desktop = summaries.iter().find(|a| a.is_desktop_active);
+                Some(build_tooltip(cli, desktop))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // The dot now lives in the icon glyph (see `apply_tray_icon`), so we
+        // explicitly clear any prior title text to keep the previous "• N"
+        // remnant from sticking. set_title / set_icon / set_tooltip all
+        // mutate the NSStatusItem and assert the main thread on macOS;
+        // this closure runs on the blocking pool, so route the apply step
+        // through the main thread exactly like `rebuild`. Re-fetching the
+        // tray inside the closure keeps its Drop on the main thread too.
+        //
+        // The count is RE-READ here instead of captured: blocking-pool
+        // tasks from rapid back-to-back calls can land out of order,
+        // and a captured count could clobber a newer state (0→1→0
+        // flip where the "0" call deduped against the not-yet-applied
+        // "1"). Applying the live count makes every apply converge on
+        // current state regardless of interleaving.
+        let app_for_main = app.clone();
+        if let Err(e) = app.run_on_main_thread(move || {
+            claudepot_core::main_thread::warn_if_off_main_thread("tray::refresh_alert_chrome");
+            let Some(tray) = app_for_main.tray_by_id("main") else {
+                return;
+            };
+            let live_count = current_alert_count(&app_for_main);
+            if let Err(e) = tray.set_title(None::<&str>) {
+                tracing::warn!("tray::refresh_alert_chrome: set_title failed: {e}");
+            }
+            apply_tray_icon(&tray, live_count);
+            if let Some(base) = base_tooltip {
+                let tip = append_alert_suffix(base, live_count);
+                if let Err(e) = tray.set_tooltip(Some(&tip)) {
+                    tracing::warn!("tray::refresh_alert_chrome: set_tooltip failed: {e}");
+                }
+            }
+        }) {
+            tracing::warn!("tray::refresh_alert_chrome: dispatch to main thread failed: {e}");
+        }
+    });
+}
+
+/// Sum the three alert sources that feed the tray badge, so the badge
+/// survives whichever channel last wrote (see the
+/// `state::UpdatesAlertState` doc-comment). Phase 5 added unread
+/// P0/P1/P2 entries from the notification log: a window-closed user
+/// with a 90% usage alert in the log now sees the tray badge; P3
+/// ambient writes (memory/config patches) are excluded so the badge
+/// doesn't flicker on every CC write to CLAUDE.md.
+///
+/// Plain managed-state reads (std mutexes + an in-memory unread
+/// counter) — cheap and safe from any thread. Unmanaged state (test
+/// harness) contributes 0.
+fn current_alert_count(app: &AppHandle) -> u32 {
     let bell_unread = app
         .try_state::<crate::commands::notification::NotificationLogState>()
         .map(|s| {
@@ -333,88 +486,14 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
                 .unread_count_at_or_above(claudepot_core::notifications::Priority::P2Acknowledge)
         })
         .unwrap_or(0);
-    let alert_count = app
-        .try_state::<crate::state::TrayAlertState>()
+    app.try_state::<crate::state::TrayAlertState>()
         .map(|s| s.get())
         .unwrap_or(0)
         + app
             .try_state::<crate::state::UpdatesAlertState>()
             .map(|s| s.get())
             .unwrap_or(0)
-        + bell_unread;
-    // Recompute the tooltip with the same identity inputs the menu
-    // build uses — but skip the per-account list lookup; this path
-    // runs frequently and a stale tooltip is fine until the next
-    // rebuild lands. The store lookup + summary stub is plain sync
-    // I/O, so build the tooltip here (off the main thread) and hand the
-    // finished String to the main-thread closure below.
-    //
-    // refresh_alert_chrome is sync. The tooltip only needs `uuid` and
-    // `email` from each summary (see `tray_menu::build_tooltip`), so we
-    // build a minimal stub and skip the per-account keychain reads that
-    // `summary_for_account` would do. The full summary lands on the
-    // next `rebuild` (async) call.
-    let tooltip: Option<String> = if let Ok(store) = crate::commands::open_store() {
-        if let Ok(accounts) = store.list() {
-            let summaries: Vec<crate::dto::AccountSummary> = accounts
-                .iter()
-                .map(|a| crate::dto::AccountSummary {
-                    uuid: a.uuid.to_string(),
-                    email: a.email.clone(),
-                    org_name: a.org_name.clone(),
-                    subscription_type: a.subscription_type.clone(),
-                    is_cli_active: a.is_cli_active,
-                    is_desktop_active: a.is_desktop_active,
-                    has_cli_credentials: a.has_cli_credentials,
-                    has_desktop_profile: a.has_desktop_profile,
-                    last_cli_switch: a.last_cli_switch,
-                    last_desktop_switch: a.last_desktop_switch,
-                    token_status: String::new(),
-                    token_remaining_mins: None,
-                    credentials_healthy: false,
-                    verify_status: a.verify_status.clone(),
-                    verified_email: a.verified_email.clone(),
-                    verified_at: a.verified_at,
-                    drift: a.verify_status == "drift",
-                    desktop_profile_on_disk: false,
-                })
-                .collect();
-            let cli = summaries.iter().find(|a| a.is_cli_active);
-            let desktop = summaries.iter().find(|a| a.is_desktop_active);
-            Some(compose_tooltip(cli, desktop, alert_count))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // The dot now lives in the icon glyph (see `apply_tray_icon`), so we
-    // explicitly clear any prior title text to keep the previous "• N"
-    // remnant from sticking. set_title / set_icon / set_tooltip all
-    // mutate the NSStatusItem and assert the main thread on macOS;
-    // refresh_alert_chrome is called from watchers and Tauri commands
-    // (tokio workers), so route the apply step through the main thread
-    // exactly like `rebuild`. Re-fetching the tray inside the closure
-    // keeps its Drop on the main thread too.
-    let app_for_main = app.clone();
-    if let Err(e) = app.run_on_main_thread(move || {
-        claudepot_core::main_thread::warn_if_off_main_thread("tray::refresh_alert_chrome");
-        let Some(tray) = app_for_main.tray_by_id("main") else {
-            return;
-        };
-        if let Err(e) = tray.set_title(None::<&str>) {
-            tracing::warn!("tray::refresh_alert_chrome: set_title failed: {e}");
-        }
-        apply_tray_icon(&tray, alert_count);
-        if let Some(ref tip) = tooltip {
-            if let Err(e) = tray.set_tooltip(Some(tip)) {
-                tracing::warn!("tray::refresh_alert_chrome: set_tooltip failed: {e}");
-            }
-        }
-    }) {
-        tracing::warn!("tray::refresh_alert_chrome: dispatch to main thread failed: {e}");
-    }
+        + bell_unread
 }
 
 // The alert dot is now part of the tray icon image itself (see the
@@ -431,7 +510,14 @@ fn compose_tooltip(
     desktop_active: Option<&AccountSummary>,
     alert_count: u32,
 ) -> String {
-    let base = build_tooltip(cli_active, desktop_active);
+    append_alert_suffix(build_tooltip(cli_active, desktop_active), alert_count)
+}
+
+/// Append the "⚠ N alerting session(s)" line to an identity tooltip.
+/// Split out of `compose_tooltip` so `refresh_alert_chrome` can build
+/// the identity base off-thread and attach the live count at apply
+/// time on the main thread.
+fn append_alert_suffix(base: String, alert_count: u32) -> String {
     if alert_count == 0 {
         base
     } else {
@@ -448,12 +534,21 @@ fn compose_tooltip(
 /// [`crate::state::TrayHealthState`] which the cc_doctor command +
 /// background poller keep current. State may be unmanaged in test
 /// builds; fall through to `"Health"` (no suffix) in that case.
+///
+/// Thin AppHandle reader over the pure [`health_label`] formatter —
+/// same split as `compose_tooltip` / `build_tooltip`, so the string
+/// shapes are unit-testable without a Tauri runtime.
 fn compose_health_label(app: &AppHandle) -> String {
-    use crate::state::HealthRecordKind;
     let Some(state) = app.try_state::<crate::state::TrayHealthState>() else {
         return "Health".to_string();
     };
-    let rec = state.get();
+    health_label(state.get())
+}
+
+/// Pure formatter for the Health row label. Unknown reads as
+/// "checking…" — never "healthy" until a scrape has confirmed.
+fn health_label(rec: crate::state::HealthRecord) -> String {
+    use crate::state::HealthRecordKind;
     match rec.kind {
         HealthRecordKind::Unknown => "Health: checking…".to_string(),
         HealthRecordKind::Healthy => "Health: ok".to_string(),
@@ -604,7 +699,9 @@ fn handle_desktop_reconcile(app: &AppHandle) {
         match claudepot_core::services::desktop_service::reconcile_flags(&store) {
             Ok(outcome) => {
                 if !outcome.flag_flips.is_empty() || outcome.orphan_pointer_cleared {
-                    let _ = rebuild(&app).await;
+                    if let Err(e) = rebuild(&app).await {
+                        tracing::warn!("tray rebuild after desktop reconcile failed: {e}");
+                    }
                 }
                 let _ = app.emit("desktop-reconciled", outcome.flag_flips.len());
             }
@@ -809,5 +906,72 @@ mod tests {
         let composed = compose_tooltip(None, None, 1);
         assert!(composed.contains("1 alerting session"));
         assert!(!composed.contains("sessions"));
+    }
+
+    // ---- health_label ---------------------------------------------
+
+    use crate::state::{HealthRecord, HealthRecordKind};
+
+    fn rec(kind: HealthRecordKind, flagged_sections: u32) -> HealthRecord {
+        HealthRecord {
+            kind,
+            flagged_sections,
+        }
+    }
+
+    #[test]
+    fn test_health_label_unknown_reads_checking() {
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Unknown, 0)),
+            "Health: checking…"
+        );
+    }
+
+    #[test]
+    fn test_health_label_healthy() {
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Healthy, 0)),
+            "Health: ok"
+        );
+    }
+
+    #[test]
+    fn test_health_label_warning_zero_flagged_is_generic() {
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Warning, 0)),
+            "Health: warnings"
+        );
+    }
+
+    #[test]
+    fn test_health_label_warning_singular_plural() {
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Warning, 1)),
+            "Health: 1 warning"
+        );
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Warning, 4)),
+            "Health: 4 warnings"
+        );
+    }
+
+    #[test]
+    fn test_health_label_error_zero_flagged_is_generic() {
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Error, 0)),
+            "Health: errors"
+        );
+    }
+
+    #[test]
+    fn test_health_label_error_singular_plural() {
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Error, 1)),
+            "Health: 1 issue"
+        );
+        assert_eq!(
+            health_label(rec(HealthRecordKind::Error, 3)),
+            "Health: 3 issues"
+        );
     }
 }

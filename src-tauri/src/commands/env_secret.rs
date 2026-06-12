@@ -13,6 +13,14 @@
 //! bridge *only* by being written to the OS clipboard Rust-side, with
 //! the renderer receiving a `KeyCopyReceiptDto` — never the value.
 //! Every handler is `async fn` and runs its I/O via `spawn_blocking`.
+//!
+//! Scrub boundary: every buffer *this module owns* that holds `.env`
+//! plaintext — whole-file read buffers (`Zeroizing<String>`), parsed
+//! [`EnvLine`] vectors ([`zeroize_lines`]), and single moved values —
+//! is scrubbed before drop. Transient allocations inside
+//! `claudepot_core::env_vault::env_file`'s line editor (split/join
+//! intermediates) are accepted residue; scrubbing them would mean
+//! rebuilding the parser around owned-secret types.
 
 use std::path::{Path, PathBuf};
 
@@ -22,7 +30,7 @@ use claudepot_core::env_vault::vault_db_path;
 use claudepot_core::fs_utils::atomic_write;
 use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::validate_project_path;
 use crate::commands::keys::{
@@ -34,17 +42,47 @@ fn open_vault() -> Result<VaultStore, String> {
     VaultStore::open(&vault_db_path()).map_err(|e| format!("env vault open failed: {e}"))
 }
 
+/// Scrub the owned key/value `String`s inside parsed `.env` lines.
+/// A parse result holds *every* secret in the file, not just the one
+/// being moved — dropping it unscrubbed would leave more plaintext
+/// heap residue than the single value the callers zeroize.
+fn zeroize_lines(lines: &mut [env_file::EnvLine]) {
+    for line in lines {
+        match line {
+            env_file::EnvLine::Active { key, value }
+            | env_file::EnvLine::Commented { key, value } => {
+                key.zeroize();
+                value.zeroize();
+            }
+            env_file::EnvLine::Other(raw) => raw.zeroize(),
+        }
+    }
+}
+
 fn edit_err(e: EnvEditError) -> String {
     e.to_string()
 }
 
 // ─────────────────────────── path safety ───────────────────────────
 
+/// Is `name` a dotenv filename — exactly `.env` or a `.env.<suffix>`
+/// variant (`.env.local`, `.env.production`, …)?
+///
+/// Deliberately rejects other `.env`-prefixed names. `.envrc` in
+/// particular is NOT a dotenv file — it is executable direnv shell
+/// code, and routing the vault's set/inject writes into it would put
+/// secret-bearing lines (or attacker-shaped keys) into a file the
+/// shell *runs*. Same for `.environment` and friends: this surface
+/// is a dotenv movement layer, nothing else.
+fn is_dotenv_file_name(name: &str) -> bool {
+    name == ".env" || name.starts_with(".env.")
+}
+
 /// Validate a `.env*` file name received from the renderer. The
 /// renderer must only ever pass a *bare filename* that one of the
 /// `env_file_list` results carried; this rejects anything that could
 /// escape the project root (separators, `..`, NUL) or that isn't a
-/// dotenv file at all.
+/// dotenv file at all (see [`is_dotenv_file_name`]).
 fn safe_env_file_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("empty .env file name".to_string());
@@ -52,7 +90,7 @@ fn safe_env_file_name(name: &str) -> Result<(), String> {
     if name.contains('/') || name.contains('\\') || name.contains('\0') || name.contains("..") {
         return Err(format!("unsafe .env file name: {name:?}"));
     }
-    if !name.starts_with(".env") {
+    if !is_dotenv_file_name(name) {
         return Err(format!("not a .env file: {name:?}"));
     }
     Ok(())
@@ -89,16 +127,27 @@ fn scan_env_files(project_path: &str) -> Result<Vec<EnvFileDto>, String> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.starts_with(".env") {
+        // Same predicate as the write-path validator — listing a file
+        // the mutation commands would reject (e.g. `.envrc`) would
+        // offer the user actions that can only fail.
+        if !is_dotenv_file_name(&name) {
             continue;
         }
         let path = entry.path();
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("read {} failed: {e}", path.display()))?;
+        // The read buffer and the parsed lines hold every secret in
+        // the file; only previews leave this scope. `Zeroizing`
+        // scrubs the buffer on drop, `zeroize_lines` the parse.
+        let content = Zeroizing::new(
+            std::fs::read_to_string(&path)
+                .map_err(|e| format!("read {} failed: {e}", path.display()))?,
+        );
+        let mut lines = env_file::parse(&content);
+        let entries = entries_from_lines(&lines);
+        zeroize_lines(&mut lines);
         files.push(EnvFileDto {
             file_name: name,
             path: path.to_string_lossy().into_owned(),
-            entries: entries_from_lines(&env_file::parse(&content)),
+            entries,
         });
     }
     // Stable order so the UI doesn't reshuffle between refreshes.
@@ -122,11 +171,13 @@ fn mutate_env_file(
     edit: impl FnOnce(&str) -> Result<String, String>,
 ) -> Result<ProjectEnvDto, String> {
     let path = env_file_path(&project_path, &file_name)?;
-    let content = match std::fs::read_to_string(&path) {
+    // The pre-edit buffer holds every secret already in the file —
+    // scrub it on drop, same as the freshly-written copy below.
+    let content = Zeroizing::new(match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(format!("read {} failed: {e}", path.display())),
-    };
+    });
     let mut new_content = edit(&content)?;
     let write_result = atomic_write(&path, new_content.as_bytes())
         .map_err(|e| format!("write {} failed: {e}", path.display()));
@@ -350,9 +401,15 @@ pub async fn env_file_copy_value(
         let key = key.clone();
         tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
             let path = env_file_path(&project_path, &file_name)?;
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("read {} failed: {e}", path.display()))?;
-            let lines = env_file::parse(&content);
+            // The read buffer and the parse hold every secret in the
+            // file, not just the one being copied — scrub both before
+            // this closure returns (`Zeroizing` on drop for the
+            // buffer, `zeroize_lines` for the parse).
+            let content = Zeroizing::new(
+                std::fs::read_to_string(&path)
+                    .map_err(|e| format!("read {} failed: {e}", path.display()))?,
+            );
+            let mut lines = env_file::parse(&content);
             // Active first, then commented — copy-out works for either.
             let value = lines
                 .iter()
@@ -367,8 +424,9 @@ pub async fn env_file_copy_value(
                         }
                         _ => None,
                     })
-                })
-                .ok_or_else(|| format!("no `{key}` in {file_name}"))?;
+                });
+            zeroize_lines(&mut lines);
+            let value = value.ok_or_else(|| format!("no `{key}` in {file_name}"))?;
             let preview = secret_preview(&value);
             Ok((value, preview))
         })
@@ -414,4 +472,103 @@ pub async fn env_file_inject(
     })
     .await
     .map_err(|e| format!("env_file_inject join: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── safe_env_file_name — renderer trust-boundary validator ─────
+    // Table tests in the style of core's `validate_slug` traversal
+    // tests: every rejection class and every accepted dotenv shape.
+
+    #[test]
+    fn test_safe_env_file_name_accepts_dotenv_shapes() {
+        for ok in [
+            ".env",
+            ".env.local",
+            ".env.production",
+            ".env.test",
+            ".env.development.local",
+            // Unicode in the suffix is harmless — no separators, so
+            // `Path::join` cannot escape the project root.
+            ".env.ünïcode",
+        ] {
+            assert!(safe_env_file_name(ok).is_ok(), "should accept {ok:?}");
+        }
+    }
+
+    #[test]
+    fn test_safe_env_file_name_rejects_empty() {
+        assert!(safe_env_file_name("").is_err());
+    }
+
+    #[test]
+    fn test_safe_env_file_name_rejects_separators_and_traversal() {
+        for bad in [
+            "a/b",
+            "a\\b",
+            "..",
+            "../.env",
+            "..\\.env",
+            "sub/.env",
+            "sub\\.env",
+            ".env/..",
+            ".env/../../x",
+            // `..` embedded in an otherwise dotenv-shaped name —
+            // the traversal check fires before the shape check.
+            ".env..",
+            // Unicode fraction-slash is NOT a path separator, but the
+            // embedded `..` still rejects it.
+            ".env\u{2044}..\u{2044}x",
+        ] {
+            assert!(safe_env_file_name(bad).is_err(), "should reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn test_safe_env_file_name_rejects_nul() {
+        assert!(safe_env_file_name(".env\0").is_err());
+        assert!(safe_env_file_name(".env.\0local").is_err());
+    }
+
+    #[test]
+    fn test_safe_env_file_name_rejects_non_dotenv_shapes() {
+        for bad in ["env", "env.local", "x.env", ".environ", ".env2"] {
+            assert!(safe_env_file_name(bad).is_err(), "should reject {bad:?}");
+        }
+    }
+
+    /// `.envrc` is direnv shell code that gets *executed* — admitting
+    /// it would let the vault inject secret-bearing lines into a file
+    /// the shell runs. Explicit decision test, not just a shape case.
+    #[test]
+    fn test_safe_env_file_name_rejects_envrc() {
+        assert!(safe_env_file_name(".envrc").is_err());
+    }
+
+    #[test]
+    fn test_is_dotenv_file_name_matches_validator_shape() {
+        assert!(is_dotenv_file_name(".env"));
+        assert!(is_dotenv_file_name(".env.local"));
+        assert!(!is_dotenv_file_name(".envrc"));
+        assert!(!is_dotenv_file_name(".environment"));
+        assert!(!is_dotenv_file_name("env"));
+    }
+
+    // ── scan filter parity ──────────────────────────────────────────
+    // The directory listing and the write-path validator must agree:
+    // a file the list shows must be mutable, and `.envrc` must never
+    // surface in the UI at all.
+    #[test]
+    fn test_scan_env_files_skips_envrc_and_lists_dotenv() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".env"), "A=1\n").unwrap();
+        std::fs::write(tmp.path().join(".env.local"), "B=2\n").unwrap();
+        std::fs::write(tmp.path().join(".envrc"), "export C=3\n").unwrap();
+
+        let files = scan_env_files(tmp.path().to_str().unwrap()).unwrap();
+        let names: Vec<&str> = files.iter().map(|f| f.file_name.as_str()).collect();
+        assert_eq!(names, vec![".env", ".env.local"]);
+    }
 }

@@ -309,7 +309,7 @@ async fn handle_one(
     // Notify the renderer. Cheap — payload is just enough to drive
     // a refresh; the renderer fetches the actual rows via IPC.
     let _ = app.emit(
-        "memory:changed",
+        crate::events::MEMORY_CHANGED,
         serde_json::json!({
             "abs_path": path.to_string_lossy(),
             "role": role,

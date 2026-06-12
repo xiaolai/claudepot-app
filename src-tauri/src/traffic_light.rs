@@ -144,10 +144,17 @@ pub fn traffic_light_metrics<R: Runtime>(window: WebviewWindow<R>) -> Option<Tra
 /// `WebviewWindow::run_on_main_thread`.
 pub fn emit<R: Runtime>(window: &WebviewWindow<R>) {
     // `compute` calls into AppKit (NSWindow.standardWindowButton, …),
-    // which asserts the main thread. Surface any off-thread caller in
-    // the log before AppKit aborts the process. See
-    // `claudepot_core::main_thread`.
-    claudepot_core::main_thread::warn_if_off_main_thread("traffic_light::emit");
+    // which asserts the main thread and aborts the process when called
+    // from anywhere else. Guard-and-return — same policy as
+    // `dock_icon::override_application_icon` — rather than warn-and-
+    // proceed: a skipped metrics emit is re-sent on the next window
+    // event, whereas proceeding off-thread is the SIGTRAP self-quit
+    // class the v0.1.4x arc was about. Off-main callers should use
+    // [`emit_on_main_thread`]. See `claudepot_core::main_thread`.
+    if !claudepot_core::main_thread::is_main_thread() {
+        claudepot_core::main_thread::warn_if_off_main_thread("traffic_light::emit");
+        return;
+    }
     if let Some(m) = compute(window) {
         let _ = window.emit("traffic-light-metrics", m);
     }
