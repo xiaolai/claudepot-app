@@ -106,7 +106,10 @@ fn sample_draft(name: &str) -> Agent {
         enabled: true,
         binary: AgentBinary::FirstParty,
         model: Some("sonnet".into()),
-        cwd: "/tmp".into(),
+        // Host-absolute temp dir (NOT a hardcoded "/tmp" — that fails
+        // `validate_cwd`'s host-native is_absolute() check on Windows,
+        // where the new src-tauri CI test step runs).
+        cwd: std::env::temp_dir().to_string_lossy().into_owned(),
         prompt: "say hi".into(),
         system_prompt: None,
         append_system_prompt: None,
