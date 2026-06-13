@@ -29,9 +29,12 @@
  *       only reveals a handful of keys per run.
  *
  * Until one of these lands, `expected.json` files are HAND-AUTHORED
- * from a close reading of `utils/settings/settings.ts:645-790`. The
- * Rust `effective_settings::compute` is tested against those goldens
- * by `cargo xtask verify-cc-parity`.
+ * from a close reading of CC's `utils/settings/settings.ts` at the
+ * version recorded in `parity-harness/PINNED_CC_VERSION`. Each
+ * fixture's `notes.md` carries the exact function + line refs and
+ * must cite `claude-code@<that version>` — `cargo xtask
+ * verify-cc-parity` enforces this, so a pin bump without re-deriving
+ * the goldens fails the harness.
  *
  * When an adapter becomes available, this file becomes:
  *
@@ -56,5 +59,7 @@ console.error(`[dump.ts] stub — cannot regenerate ${fixture}/expected.json.`);
 console.error("[dump.ts] The CC-side adapter is not installed. See");
 console.error("[dump.ts] parity-harness/README.md §4 for the contract.");
 console.error("[dump.ts] In the interim, expected.json is hand-authored");
-console.error("[dump.ts] against CC source (utils/settings/settings.ts:645-790).");
+console.error("[dump.ts] against CC source (utils/settings/settings.ts) at the");
+console.error("[dump.ts] version pinned in parity-harness/PINNED_CC_VERSION,");
+console.error("[dump.ts] with per-fixture derivation notes in notes.md.");
 process.exit(1);

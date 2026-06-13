@@ -1,0 +1,5 @@
+{
+  "theme": "managed-theme",
+  "verbose": true,
+  "permissions": {"defaultMode": "plan"}
+}

@@ -59,6 +59,7 @@ pub struct ForgetReport {
 /// `claudepot codex index` to drive the rescan deliberately.
 pub fn mark_pending_rescan(db_path: &Path) -> Result<(), rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
+    crate::db_pragmas::apply_standard_pragmas(&conn)?;
     conn.execute(
         "INSERT OR REPLACE INTO meta (k, v) VALUES ('_pending_rescan', '1')",
         [],
@@ -71,6 +72,7 @@ pub fn mark_pending_rescan(db_path: &Path) -> Result<(), rusqlite::Error> {
 /// dry-run summary before the destructive path.
 pub fn count_shared_memory_rows(db_path: &Path) -> Result<ForgetReport, rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
+    crate::db_pragmas::apply_standard_pragmas(&conn)?;
     let count = |t: &str| -> Result<i64, rusqlite::Error> {
         conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
     };
@@ -101,6 +103,7 @@ pub fn count_shared_memory_rows(db_path: &Path) -> Result<ForgetReport, rusqlite
 /// caller's connection has FKs off.
 pub fn forget_shared_memory(db_path: &Path) -> Result<ForgetReport, rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
+    crate::db_pragmas::apply_standard_pragmas(&conn)?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
     let counts = count_shared_memory_rows_impl(&conn)?;
@@ -1252,5 +1255,44 @@ mod tests {
         let stats = backfill_codex(&idx, &codex_root).expect("ok");
         assert_eq!(stats.discovered, 0);
         assert_eq!(stats.indexed, 0);
+    }
+
+    #[test]
+    fn test_indexer_utility_conns_wait_for_concurrent_writer() {
+        // The path-based utility functions open their own raw
+        // connections. Without the standard pragmas (busy_timeout)
+        // they returned SQLITE_BUSY immediately whenever another
+        // connection — e.g. the GUI's long-lived SessionIndex handle
+        // — held the writer lock. With `apply_standard_pragmas` they
+        // wait out the writer like every other store.
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("sessions.db");
+        drop(open_idx(&tmp));
+
+        let writer_path = db_path.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+        let writer = std::thread::spawn(move || {
+            let conn = Connection::open(&writer_path).unwrap();
+            crate::db_pragmas::apply_standard_pragmas(&conn).unwrap();
+            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (k, v) VALUES ('_writer_probe', '1')",
+                [],
+            )
+            .unwrap();
+            started_tx.send(()).unwrap();
+            // Hold the write lock long enough that the utility write
+            // below is reliably contending, then release — well
+            // within the 5 s busy_timeout.
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            conn.execute_batch("COMMIT").unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        // Pre-fix: immediate SQLITE_BUSY. Post-fix: waits for COMMIT.
+        mark_pending_rescan(&db_path)
+            .expect("mark_pending_rescan must wait out the writer, not fail with SQLITE_BUSY");
+        writer.join().unwrap();
+        count_shared_memory_rows(&db_path).expect("count must succeed once the writer is idle");
     }
 }

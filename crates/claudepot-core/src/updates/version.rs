@@ -63,12 +63,11 @@ pub struct DesktopRelease {
     pub sha256: Option<String>,
 }
 
-fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+fn http_client() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
         .timeout(HTTP_TIMEOUT)
         .user_agent(concat!("Claudepot/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .expect("reqwest client builder")
+        .build()?)
 }
 
 /// Fetch the latest CC CLI version for the chosen channel.
@@ -78,7 +77,7 @@ fn http_client() -> reqwest::Client {
 /// otherwise be silently parsed as a "version".
 pub async fn fetch_cli_latest(channel: Channel) -> Result<String> {
     let url = format!("{CC_RELEASES_BASE}/{}", channel.as_str());
-    let body = http_client()
+    let body = http_client()?
         .get(&url)
         .send()
         .await?
@@ -108,7 +107,7 @@ pub async fn fetch_desktop_latest() -> Result<DesktopRelease> {
         url: String,
         sha256: Option<String>,
     }
-    let body: CaskJson = http_client()
+    let body: CaskJson = http_client()?
         .get(DESKTOP_FORMULAE_API)
         .send()
         .await?
@@ -203,6 +202,11 @@ mod tests {
         assert!(!looks_like_version("<html>"));
         assert!(!looks_like_version("Cloudflare error 403"));
         assert!(!looks_like_version("not.a.version!"));
+    }
+
+    #[test]
+    fn test_http_client_build_succeeds() {
+        assert!(http_client().is_ok());
     }
 
     #[test]

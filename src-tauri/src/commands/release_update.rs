@@ -25,7 +25,13 @@
 //! - [`release_channel_get`] / [`release_channel_set`] read and write
 //!   the `release_channel` preference. A channel switch takes effect
 //!   on the *next* check — `release_update_check` reads the pref each
-//!   call — so no app restart is needed.
+//!   call — so no app restart is needed. A switch also invalidates
+//!   any stashed `Update`: the handle is bound to the endpoints it
+//!   was checked against, and installing it after a switch would
+//!   ship the *other* channel's build.
+//! - [`release_relaunch_busy_ops`] is the pre-relaunch quiesce probe
+//!   — the renderer calls it before `relaunch()` so a restart-to-
+//!   update can warn-confirm instead of killing in-flight work.
 //!
 //! Per `.claude/rules/architecture.md` no business logic lives here:
 //! the channel → endpoint mapping is pure logic in
@@ -34,7 +40,7 @@
 
 use claudepot_core::release_channel::ReleaseChannel;
 use serde::Serialize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -51,7 +57,8 @@ pub const DOWNLOAD_EVENT: &str = "release-update://download";
 /// `Update` is bound to the channel endpoints it was checked against,
 /// and there is no way to reconstruct it from a DTO. A fresh check
 /// overwrites the slot; `release_update_install` clears it on a
-/// successful install so a stale handle can't be re-used.
+/// successful install and `release_channel_set` clears it on a
+/// channel switch, so a stale handle can't be re-used.
 #[derive(Default)]
 pub struct ReleaseUpdateState(pub Mutex<Option<Update>>);
 
@@ -85,6 +92,17 @@ pub struct ReleaseUpdateCheckDto {
     /// The channel this check ran against — echoed back so the
     /// renderer can confirm which manifest it is looking at.
     pub channel: String,
+    /// True when the check ran on the Stable channel from a running
+    /// *prerelease* build and the stable manifest's newest version is
+    /// older than the running version (the Beta → Stable switch
+    /// case). The user is "stranded": not on the latest stable, but
+    /// the stable channel has nothing newer to offer until it passes
+    /// the running prerelease. The UI must not render "you're on the
+    /// latest version" in this state.
+    pub stranded_on_prerelease: bool,
+    /// The stable manifest's current version when stranded (no
+    /// leading `v`). `None` otherwise.
+    pub stable_version: Option<String>,
 }
 
 /// One download-progress tick emitted on [`DOWNLOAD_EVENT`].
@@ -148,12 +166,18 @@ pub async fn release_channel_get(
 /// [`release_update_check`] — no restart needed, because the check
 /// command reads the preference each call.
 ///
+/// An actual channel *change* also clears the [`ReleaseUpdateState`]
+/// stash: the stashed `Update` is bound to the endpoints it was
+/// checked against, so installing it after a switch would ship the
+/// other channel's build.
+///
 /// Returns the normalized channel string so the renderer mirrors the
 /// canonical value rather than whatever casing the user's `<select>`
 /// emitted.
 #[tauri::command]
 pub async fn release_channel_set(
     prefs: tauri::State<'_, PreferencesState>,
+    state: tauri::State<'_, ReleaseUpdateState>,
     channel: String,
 ) -> Result<String, String> {
     let parsed: ReleaseChannel = channel.parse()?;
@@ -161,14 +185,25 @@ pub async fn release_channel_set(
     // the guard, then persist on a blocking task — the mutex must not
     // be held across the disk write (every other preferences reader
     // contends for it). Same discipline as `preferences_set_*`.
-    let snapshot = {
+    let (snapshot, changed) = {
         let mut p = prefs
             .0
             .lock()
             .map_err(|e| format!("preferences lock: {e}"))?;
+        let changed = p.release_channel != parsed;
         p.release_channel = parsed;
-        p.clone()
+        (p.clone(), changed)
     };
+    if changed {
+        // Invalidate before persisting: even if the disk write below
+        // fails, the in-memory preference (which every check reads)
+        // already carries the new channel, so the old stash is stale
+        // either way.
+        *state
+            .0
+            .lock()
+            .map_err(|e| format!("update state lock: {e}"))? = None;
+    }
     tokio::task::spawn_blocking(move || snapshot.save())
         .await
         .map_err(|e| format!("blocking task failed: {e}"))??;
@@ -195,14 +230,39 @@ pub async fn release_update_check(
     let channel = channel_from_prefs(&prefs)?;
     let endpoints = channel_endpoints(channel)?;
 
+    // Stranded-on-prerelease probe (the Beta → Stable switch case).
+    // The plugin's default comparator is strictly-greater, so a user
+    // running 0.2.0-beta.1 who checks the Stable channel (currently
+    // at, say, 0.1.46) gets `None` — indistinguishable from genuinely
+    // being up to date. When the running build is a prerelease and
+    // the channel is Stable, override the comparator to also surface
+    // a *lower* manifest version, record whether the remote was
+    // actually newer, and classify below via `is_stranded`.
+    let stranded_probe =
+        channel == ReleaseChannel::Stable && !app.package_info().version.pre.is_empty();
+    let remote_newer: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
+
     // `updater_builder()` seeds endpoints + pubkey from
     // tauri.conf.json; `.endpoints(...)` overrides only the endpoint
     // list, leaving the pubkey (and thus signature verification)
     // intact.
-    let updater = app
+    let mut builder = app
         .updater_builder()
         .endpoints(endpoints)
-        .map_err(|e| format!("updater endpoint config failed: {e}"))?
+        .map_err(|e| format!("updater endpoint config failed: {e}"))?;
+    if stranded_probe {
+        let flag = Arc::clone(&remote_newer);
+        builder = builder.version_comparator(move |current, release| {
+            if let Ok(mut g) = flag.lock() {
+                *g = Some(release.version > current);
+            }
+            // Surface any *differing* release so the stranded case
+            // still yields the manifest's version; an equal version
+            // keeps the plain up-to-date path.
+            release.version != current
+        });
+    }
+    let updater = builder
         .build()
         .map_err(|e| format!("updater build failed: {e}"))?;
 
@@ -227,6 +287,28 @@ pub async fn release_update_check(
                 notes: None,
                 pub_date: None,
                 channel: channel.as_str().to_string(),
+                stranded_on_prerelease: false,
+                stable_version: None,
+            })
+        }
+        Some(update) if is_stranded(stranded_probe, remote_newer.lock().ok().and_then(|g| *g)) => {
+            // The stable manifest's newest version is *older* than
+            // this running prerelease — the user is stranded, not up
+            // to date. Don't stash the handle: installing it would
+            // sidegrade to an older build the user never asked for.
+            *state
+                .0
+                .lock()
+                .map_err(|e| format!("update state lock: {e}"))? = None;
+            Ok(ReleaseUpdateCheckDto {
+                update_available: false,
+                version: None,
+                current_version: update.current_version.clone(),
+                notes: None,
+                pub_date: None,
+                channel: channel.as_str().to_string(),
+                stranded_on_prerelease: true,
+                stable_version: Some(update.version.clone()),
             })
         }
         Some(update) => {
@@ -242,6 +324,8 @@ pub async fn release_update_check(
                 notes: update.body.clone(),
                 pub_date,
                 channel: channel.as_str().to_string(),
+                stranded_on_prerelease: false,
+                stable_version: None,
             };
             *state
                 .0
@@ -250,6 +334,43 @@ pub async fn release_update_check(
             Ok(dto)
         }
     }
+}
+
+/// Classify a check that surfaced a remote release.
+///
+/// `stranded_probe` — the check ran on the Stable channel from a
+/// running prerelease build (the only configuration where the
+/// strictly-greater default comparator can mask a real difference).
+/// `remote_newer` — whether the manifest version was strictly greater
+/// than the running version; `None` when the probe comparator never
+/// ran (probe inactive, in which case the plugin's own
+/// strictly-greater comparator already vouched for "newer").
+///
+/// Stranded means: probe active AND the surfaced release is *not*
+/// newer — i.e. the stable channel's newest version is older than the
+/// running prerelease.
+fn is_stranded(stranded_probe: bool, remote_newer: Option<bool>) -> bool {
+    stranded_probe && !remote_newer.unwrap_or(true)
+}
+
+/// Pre-relaunch quiesce probe: labels of background ops still in
+/// `Running` status. The renderer calls this before `relaunch()` so a
+/// restart-to-update can warn-confirm instead of killing in-flight
+/// work — a half-completed credential swap or CC auto-install is not
+/// journal-protected the way repair ops are. "Busy" is defined
+/// exactly as the quit gate defines it (`app_menu::attempt_quit`):
+/// any [`crate::ops::RunningOps`] entry still `Running`. Zero
+/// overhead in the common idle case — a single map scan.
+#[tauri::command]
+pub async fn release_relaunch_busy_ops(
+    ops: tauri::State<'_, crate::ops::RunningOps>,
+) -> Result<Vec<String>, String> {
+    Ok(ops
+        .list()
+        .into_iter()
+        .filter(|op| op.status == crate::ops::OpStatus::Running)
+        .map(|op| crate::app_menu::inflight_label(&op))
+        .collect())
 }
 
 /// Download + install the update stashed by [`release_update_check`].
@@ -393,11 +514,79 @@ mod tests {
             notes: Some("notes".to_string()),
             pub_date: Some("2026-05-21".to_string()),
             channel: "beta".to_string(),
+            stranded_on_prerelease: false,
+            stable_version: None,
         };
         let v = serde_json::to_value(&dto).unwrap();
         assert_eq!(v["updateAvailable"], true);
         assert_eq!(v["currentVersion"], "0.1.39");
         assert_eq!(v["pubDate"], "2026-05-21");
         assert_eq!(v["channel"], "beta");
+        assert_eq!(v["strandedOnPrerelease"], false);
+        assert_eq!(v["stableVersion"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_check_dto_stranded_serializes_stable_version() {
+        // The stranded shape the renderer keys on: no update offered,
+        // but the stable channel's version is carried for the badge.
+        let dto = ReleaseUpdateCheckDto {
+            update_available: false,
+            version: None,
+            current_version: "0.2.0-beta.1".to_string(),
+            notes: None,
+            pub_date: None,
+            channel: "stable".to_string(),
+            stranded_on_prerelease: true,
+            stable_version: Some("0.1.46".to_string()),
+        };
+        let v = serde_json::to_value(&dto).unwrap();
+        assert_eq!(v["updateAvailable"], false);
+        assert_eq!(v["strandedOnPrerelease"], true);
+        assert_eq!(v["stableVersion"], "0.1.46");
+    }
+
+    #[test]
+    fn test_is_stranded_only_when_probe_active_and_remote_not_newer() {
+        // Probe inactive (stable build, or Beta channel): never
+        // stranded, regardless of what a comparator recorded.
+        assert!(!is_stranded(false, None));
+        assert!(!is_stranded(false, Some(false)));
+        assert!(!is_stranded(false, Some(true)));
+        // Probe active, remote strictly newer (stable finally passed
+        // the running prerelease): a genuine update, not stranded.
+        assert!(!is_stranded(true, Some(true)));
+        // Probe active, remote older: the stranded case.
+        assert!(is_stranded(true, Some(false)));
+        // Probe active but the comparator never recorded (defensive
+        // degenerate): treat as a genuine update rather than falsely
+        // claiming stranded.
+        assert!(!is_stranded(true, None));
+    }
+
+    #[test]
+    fn test_tauri_conf_updater_endpoints_lock_step_with_stable_endpoint() {
+        // `release_channel.rs` documents STABLE_ENDPOINT as
+        // byte-identical to `tauri.conf.json`'s
+        // `plugins.updater.endpoints`. At runtime the constant always
+        // wins — every check overrides via `.endpoints()` and the
+        // renderer never calls the JS plugin — so an edit to
+        // conf.json alone silently does nothing while looking
+        // authoritative. This test forces the two files to move in
+        // lock-step.
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json"))
+            .expect("tauri.conf.json parses as JSON");
+        let endpoints: Vec<&str> = conf["plugins"]["updater"]["endpoints"]
+            .as_array()
+            .expect("plugins.updater.endpoints is an array")
+            .iter()
+            .map(|v| v.as_str().expect("endpoint is a string"))
+            .collect();
+        assert_eq!(
+            endpoints,
+            vec![claudepot_core::release_channel::STABLE_ENDPOINT],
+            "tauri.conf.json plugins.updater.endpoints must stay \
+             byte-identical to release_channel::STABLE_ENDPOINT"
+        );
     }
 }

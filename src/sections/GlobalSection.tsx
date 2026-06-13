@@ -27,7 +27,7 @@ import { Button } from "../components/primitives/Button";
  */
 
 type GlobalTab = "config" | "updates" | "memory" | "tips";
-const TAB_STORAGE_KEY = "claudepot.global.tab";
+import { GLOBAL_TAB_KEY as TAB_STORAGE_KEY } from "../lib/storageKeys";
 
 function loadTab(): GlobalTab {
   try {

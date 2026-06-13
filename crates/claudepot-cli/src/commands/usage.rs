@@ -12,6 +12,7 @@
 //! `--json` switches the output to a single object that scripting
 //! pipes can parse directly.
 
+use crate::output::print_json;
 use crate::AppContext;
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
@@ -63,11 +64,6 @@ pub async fn report(ctx: &AppContext, window: &str) -> Result<()> {
     } else {
         print_human(&report);
     }
-    Ok(())
-}
-
-fn print_json(r: &LocalUsageReport) -> Result<()> {
-    println!("{}", serde_json::to_string_pretty(r)?);
     Ok(())
 }
 

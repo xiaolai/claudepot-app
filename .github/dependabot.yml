@@ -1,0 +1,36 @@
+# Dependency vulnerability coverage for all three lockfiles
+# (Cargo.lock, pnpm-lock.yaml, web/pnpm-lock.yaml) plus the GitHub
+# Actions pins.
+#
+# Routine version-update PRs are deliberately disabled
+# (open-pull-requests-limit: 0) — this file exists so Dependabot
+# watches every ecosystem. Security-update PRs are driven by
+# Dependabot alerts (repo Settings → Advanced Security →
+# "Dependabot security updates" must be enabled) and are NOT capped
+# by the limits below. Raise a limit to opt into routine
+# version-bump PRs for that ecosystem.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0

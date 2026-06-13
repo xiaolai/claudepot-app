@@ -75,6 +75,35 @@ describe("redactSecrets", () => {
   });
 });
 
+/**
+ * Golden vectors copied verbatim from the Rust redactor's unit tests
+ * (`crates/claudepot-core/src/session_export_tests.rs`,
+ * `redact_secrets_masks_sk_ant_tokens` / `redact_preserves_non_secret_text`
+ * / `redact_leaves_short_prefix_truncated`). This module is the single
+ * TS mirror of `claudepot_core::session_export::redact_secrets`; if the
+ * Rust rules change, update these vectors in the same commit.
+ */
+describe("redactSecrets — Rust parity golden vectors", () => {
+  it("masks sk-ant tokens (rust: redact_secrets_masks_sk_ant_tokens)", () => {
+    const out = redactSecrets(
+      "key sk-ant-oat01-Abcdefghijkl1234 and another sk-ant-api03-XYZwxyz9876",
+    );
+    expect(out).not.toContain("sk-ant-oat01-Abcdefghijkl");
+    expect(out).not.toContain("sk-ant-api03-XYZwxyz");
+    expect(out).toContain("sk-ant-***1234");
+    expect(out).toContain("sk-ant-***9876");
+  });
+
+  it("preserves non-secret text (rust: redact_preserves_non_secret_text)", () => {
+    const t = "no secrets here, just some code";
+    expect(redactSecrets(t)).toBe(t);
+  });
+
+  it("fully masks short prefixes (rust: redact_leaves_short_prefix_truncated)", () => {
+    expect(redactSecrets("sk-ant-ab")).toBe("sk-ant-***");
+  });
+});
+
 describe("maybeRedact", () => {
   it("passes null through", () => {
     expect(maybeRedact(null)).toBeNull();

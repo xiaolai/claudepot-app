@@ -7,7 +7,8 @@ import { useEffect, useState } from "react";
  * `cp-dev-mode`; changes fire a window event so every mounted
  * `<DevBadge>` updates live.
  */
-const CP_DEV_MODE_KEY = "cp-dev-mode";
+import { DEV_MODE_KEY as CP_DEV_MODE_KEY } from "../lib/storageKeys";
+
 const CP_DEV_MODE_EVENT = "cp-dev-mode-change";
 
 export function readDevMode(): boolean {

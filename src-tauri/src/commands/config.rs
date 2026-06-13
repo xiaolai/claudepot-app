@@ -332,14 +332,14 @@ pub async fn config_search_start(
                 skipped_large: s.skipped_large,
                 cancelled: s.cancelled,
             },
-            Err(msg) => SearchSummaryDto {
+            Err(e) => SearchSummaryDto {
                 search_id: search_id_for_task.clone(),
                 total_hits: 0,
                 capped: false,
                 skipped_large: 0,
                 cancelled: true,
             }
-            .with_error(&msg),
+            .with_error(&e.to_string()),
         };
         let _ = app_for_task.emit(&format!("config-search-done::{search_id_for_task}"), &dto);
     });
@@ -398,6 +398,7 @@ pub async fn config_effective_settings(
                     message: e.message,
                 })
                 .collect(),
+            merge_divergence: r.merge_divergence,
         }
     })
     .await

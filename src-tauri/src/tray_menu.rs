@@ -7,14 +7,13 @@
 
 use crate::dto::AccountSummary;
 use crate::tray_icons::{
-    ICON_BAR_CHART, ICON_BOLT, ICON_CHECK, ICON_CIRCLE_DOT, ICON_CIRCLE_PAUSE, ICON_CIRCLE_PLAY,
-    ICON_CIRCLE_USER, ICON_DESKTOP, ICON_REFRESH, ICON_TERMINAL, ID_ACTIVE_DISPLAY,
-    ID_ACTIVE_DISPLAY_CLI, ID_ACTIVE_DISPLAY_DESKTOP, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR,
-    ID_DESKTOP_LAUNCH, ID_DESKTOP_RECONCILE, ID_USAGE_REFRESH, PREFIX_CLI, PREFIX_DESKTOP,
-    PREFIX_LIVE,
+    MenuGlyph, ICON_BAR_CHART, ICON_BOLT, ICON_CHECK, ICON_CIRCLE_DOT, ICON_CIRCLE_PAUSE,
+    ICON_CIRCLE_PLAY, ICON_CIRCLE_USER, ICON_DESKTOP, ICON_REFRESH, ICON_TERMINAL,
+    ID_ACTIVE_DISPLAY, ID_ACTIVE_DISPLAY_CLI, ID_ACTIVE_DISPLAY_DESKTOP, ID_DESKTOP_BIND,
+    ID_DESKTOP_CLEAR, ID_DESKTOP_LAUNCH, ID_DESKTOP_RECONCILE, ID_USAGE_REFRESH, PREFIX_CLI,
+    PREFIX_DESKTOP, PREFIX_LIVE,
 };
 use claudepot_core::oauth::usage::UsageResponse;
-use tauri::image::Image;
 use tauri::menu::{
     IconMenuItem, IconMenuItemBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
@@ -106,7 +105,7 @@ fn active_label(a: &AccountSummary, surface: Option<&str>) -> String {
 }
 
 fn make_active_item(app: &AppHandle, id: &str, label: &str) -> Result<IconMenuItem<Wry>, String> {
-    let img = Image::from_bytes(ICON_CHECK).map_err(|e| format!("check icon: {e}"))?;
+    let img = ICON_CHECK.image().map_err(|e| format!("check icon: {e}"))?;
     IconMenuItemBuilder::with_id(id, label)
         .icon(img)
         .enabled(false)
@@ -119,7 +118,7 @@ pub fn build_cli_submenu(
     summaries: &[AccountSummary],
 ) -> Result<Submenu<Wry>, String> {
     let mut builder = SubmenuBuilder::new(app, "Switch CLI");
-    if let Ok(img) = Image::from_bytes(ICON_TERMINAL) {
+    if let Ok(img) = ICON_TERMINAL.image() {
         builder = builder.submenu_icon(img);
     }
     let mut any = false;
@@ -154,7 +153,7 @@ pub fn build_desktop_submenu(
     summaries: &[AccountSummary],
 ) -> Result<Submenu<Wry>, String> {
     let mut builder = SubmenuBuilder::new(app, "Set Desktop");
-    if let Ok(img) = Image::from_bytes(ICON_DESKTOP) {
+    if let Ok(img) = ICON_DESKTOP.image() {
         builder = builder.submenu_icon(img);
     }
 
@@ -243,19 +242,17 @@ pub fn build_usage_submenu(
     snapshots: &[(AccountSummary, Option<UsageResponse>)],
 ) -> Result<Submenu<Wry>, String> {
     let mut builder = SubmenuBuilder::new(app, "Usage");
-    if let Ok(img) = Image::from_bytes(ICON_BAR_CHART) {
+    if let Ok(img) = ICON_BAR_CHART.image() {
         builder = builder.submenu_icon(img);
     }
 
-    // Decode the per-row glyph once; the bytes are static, so the
-    // result is identical across iterations. The previous version
-    // re-parsed the PNG for every account row inside the loop.
+    // Fetch the per-row glyph once (cached decode in `MenuGlyph`).
     // Icon is best-effort — a broken asset must not take down the
     // whole submenu. Fall back to a plain text row when decoding
     // fails. IconMenuItem and MenuItem are distinct concrete types,
     // so each branch builds its own item kind; the builder's
     // `item(&dyn IsMenuItem<_>)` signature is polymorphic.
-    let row_icon = Image::from_bytes(ICON_CIRCLE_USER).ok();
+    let row_icon = ICON_CIRCLE_USER.image().ok();
 
     let mut any = false;
     for (s, snap) in snapshots {
@@ -296,8 +293,9 @@ pub fn build_usage_submenu(
     } else {
         let sep = PredefinedMenuItem::separator(app).map_err(|e| format!("usage sep: {e}"))?;
         builder = builder.item(&sep);
-        let refresh_img =
-            Image::from_bytes(ICON_REFRESH).map_err(|e| format!("usage refresh icon: {e}"))?;
+        let refresh_img = ICON_REFRESH
+            .image()
+            .map_err(|e| format!("usage refresh icon: {e}"))?;
         let refresh_item = IconMenuItemBuilder::with_id(ID_USAGE_REFRESH, "Refresh")
             .icon(refresh_img)
             .build(app)
@@ -324,7 +322,7 @@ pub fn build_live_submenu(app: &AppHandle) -> Result<Option<Submenu<Wry>>, Strin
     }
     let label = format!("Active: {}", list.len());
     let mut builder = SubmenuBuilder::new(app, &label);
-    if let Ok(img) = Image::from_bytes(ICON_BOLT) {
+    if let Ok(img) = ICON_BOLT.image() {
         builder = builder.submenu_icon(img);
     }
     for s in list.iter() {
@@ -345,12 +343,12 @@ pub fn build_live_submenu(app: &AppHandle) -> Result<Option<Submenu<Wry>>, Strin
         // Status-varied per-row glyph so the tray conveys
         // "what's happening" without requiring the user to parse
         // the text after each label.
-        let icon_bytes: &[u8] = match s.status {
-            Status::Busy => ICON_CIRCLE_PLAY,
-            Status::Waiting => ICON_CIRCLE_PAUSE,
-            Status::Idle => ICON_CIRCLE_DOT,
+        let glyph: &'static MenuGlyph = match s.status {
+            Status::Busy => &ICON_CIRCLE_PLAY,
+            Status::Waiting => &ICON_CIRCLE_PAUSE,
+            Status::Idle => &ICON_CIRCLE_DOT,
         };
-        match Image::from_bytes(icon_bytes) {
+        match glyph.image() {
             Ok(img) => {
                 let item = IconMenuItemBuilder::with_id(&id, line)
                     .icon(img)
@@ -375,7 +373,14 @@ pub fn build_live_submenu(app: &AppHandle) -> Result<Option<Submenu<Wry>>, Strin
 /// plain `&str` — no rich formatting available — so we pack
 /// `project · model · action · elapsed` into a compact one-liner.
 fn format_live_row(cwd: &str, model: Option<&str>, action: &str, idle_ms: i64) -> String {
-    let project = cwd.rsplit('/').find(|s| !s.is_empty()).unwrap_or(cwd);
+    // The cwd comes verbatim from CC's session JSONL, so it carries
+    // the native separator — `\` for Windows cwds (`C:\Users\…`).
+    // Split on both so the row shows the basename, not the full
+    // Windows path (paths.md: never hardcode '/').
+    let project = cwd
+        .rsplit(['/', '\\'])
+        .find(|s| !s.is_empty())
+        .unwrap_or(cwd);
     let family = match model {
         Some(m) if m.contains("opus") => "OPUS",
         Some(m) if m.contains("sonnet") => "SON",
@@ -485,6 +490,7 @@ pub fn build_tooltip(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claudepot_core::oauth::usage::{ExtraUsage, UsageWindow};
 
     #[test]
     fn usage_fragment_below_threshold_omits_marker() {
@@ -505,5 +511,279 @@ mod tests {
     #[test]
     fn usage_fragment_zero_is_clean() {
         assert_eq!(usage_fragment("7d", 0), "7d 0%");
+    }
+
+    // ---- fixtures -------------------------------------------------
+
+    fn summary(uuid: &str, email: &str) -> AccountSummary {
+        AccountSummary {
+            uuid: uuid.to_string(),
+            email: email.to_string(),
+            org_name: None,
+            subscription_type: None,
+            is_cli_active: false,
+            is_desktop_active: false,
+            has_cli_credentials: true,
+            has_desktop_profile: false,
+            last_cli_switch: None,
+            last_desktop_switch: None,
+            token_status: "valid".to_string(),
+            token_remaining_mins: None,
+            credentials_healthy: true,
+            verify_status: "ok".to_string(),
+            verified_email: None,
+            verified_at: None,
+            drift: false,
+            desktop_profile_on_disk: false,
+        }
+    }
+
+    fn window(utilization: f64) -> UsageWindow {
+        UsageWindow {
+            utilization,
+            resets_at: None,
+        }
+    }
+
+    fn usage(
+        five_hour: Option<UsageWindow>,
+        seven_day: Option<UsageWindow>,
+        extra_usage: Option<ExtraUsage>,
+    ) -> UsageResponse {
+        UsageResponse {
+            five_hour,
+            seven_day,
+            seven_day_oauth_apps: None,
+            seven_day_opus: None,
+            seven_day_sonnet: None,
+            seven_day_cowork: None,
+            iguana_necktie: None,
+            extra_usage,
+            unknown: Default::default(),
+        }
+    }
+
+    // ---- format_usage_line ----------------------------------------
+
+    #[test]
+    fn test_format_usage_line_none_snapshot_sentinel() {
+        assert_eq!(
+            format_usage_line("a@x.com", None),
+            "a@x.com — (no data — click Refresh)"
+        );
+    }
+
+    #[test]
+    fn test_format_usage_line_no_windows_sentinel() {
+        let u = usage(None, None, None);
+        assert_eq!(
+            format_usage_line("a@x.com", Some(&u)),
+            "a@x.com — (no windows reported)"
+        );
+    }
+
+    #[test]
+    fn test_format_usage_line_both_windows() {
+        let u = usage(Some(window(77.4)), Some(window(92.0)), None);
+        assert_eq!(
+            format_usage_line("a@x.com", Some(&u)),
+            "a@x.com — 5h 77% · 7d 92% (tight)"
+        );
+    }
+
+    #[test]
+    fn test_format_usage_line_extra_utilization_direct() {
+        let extra = ExtraUsage {
+            is_enabled: true,
+            monthly_limit: None,
+            used_credits: None,
+            utilization: Some(41.6),
+            currency: None,
+        };
+        let u = usage(Some(window(10.0)), None, Some(extra));
+        assert_eq!(
+            format_usage_line("a@x.com", Some(&u)),
+            "a@x.com — 5h 10% · Extra 42%"
+        );
+    }
+
+    #[test]
+    fn test_format_usage_line_extra_percent_inferred_from_credits() {
+        // No direct utilization — (used / limit) * 100 fallback.
+        let extra = ExtraUsage {
+            is_enabled: true,
+            monthly_limit: Some(15000.0),
+            used_credits: Some(7500.0),
+            utilization: None,
+            currency: None,
+        };
+        let u = usage(None, None, Some(extra));
+        assert_eq!(
+            format_usage_line("a@x.com", Some(&u)),
+            "a@x.com — Extra 50%"
+        );
+    }
+
+    #[test]
+    fn test_format_usage_line_extra_zero_limit_renders_on() {
+        // limit == 0 must not divide; falls through to "Extra on".
+        let extra = ExtraUsage {
+            is_enabled: true,
+            monthly_limit: Some(0.0),
+            used_credits: Some(100.0),
+            utilization: None,
+            currency: None,
+        };
+        let u = usage(None, None, Some(extra));
+        assert_eq!(format_usage_line("a@x.com", Some(&u)), "a@x.com — Extra on");
+    }
+
+    #[test]
+    fn test_format_usage_line_extra_disabled_renders_off() {
+        let extra = ExtraUsage {
+            is_enabled: false,
+            monthly_limit: Some(15000.0),
+            used_credits: Some(100.0),
+            utilization: Some(1.0),
+            currency: None,
+        };
+        let u = usage(None, None, Some(extra));
+        assert_eq!(
+            format_usage_line("a@x.com", Some(&u)),
+            "a@x.com — Extra off"
+        );
+    }
+
+    // ---- format_live_row ------------------------------------------
+
+    #[test]
+    fn test_format_live_row_basic_unix_cwd() {
+        assert_eq!(
+            format_live_row("/Users/x/proj", Some("claude-opus-4"), "thinking", 5_000),
+            "proj · OPUS · thinking · 5s"
+        );
+    }
+
+    #[test]
+    fn test_format_live_row_windows_drive_cwd_shows_basename() {
+        // Windows cwds carry backslashes verbatim from the session
+        // JSONL — the row must show the basename, not the full path.
+        assert_eq!(
+            format_live_row(r"C:\Users\x\proj", Some("claude-sonnet-4"), "idle", 0),
+            "proj · SON · idle · —"
+        );
+    }
+
+    #[test]
+    fn test_format_live_row_windows_unc_cwd_shows_basename() {
+        assert_eq!(
+            format_live_row(r"\\server\share\proj", None, "idle", 0),
+            "proj · ? · idle · —"
+        );
+    }
+
+    #[test]
+    fn test_format_live_row_trailing_separator_skipped() {
+        assert_eq!(
+            format_live_row("/Users/x/proj/", Some("claude-haiku-3"), "idle", 0),
+            "proj · HAI · idle · —"
+        );
+    }
+
+    #[test]
+    fn test_format_live_row_unknown_model_family() {
+        assert_eq!(
+            format_live_row("/p/a", Some("claude-next-9"), "idle", 0),
+            "a · ? · idle · —"
+        );
+    }
+
+    #[test]
+    fn test_format_live_row_clips_action_at_32_chars() {
+        let action = "x".repeat(40);
+        let row = format_live_row("/p/a", None, &action, 0);
+        // 31 chars + ellipsis.
+        let expected_action = format!("{}…", "x".repeat(31));
+        assert_eq!(row, format!("a · ? · {expected_action} · —"));
+    }
+
+    #[test]
+    fn test_format_live_row_action_exactly_32_chars_not_clipped() {
+        let action = "y".repeat(32);
+        let row = format_live_row("/p/a", None, &action, 0);
+        assert_eq!(row, format!("a · ? · {action} · —"));
+    }
+
+    // ---- format_elapsed_short -------------------------------------
+
+    #[test]
+    fn test_format_elapsed_short_boundaries() {
+        assert_eq!(format_elapsed_short(0), "—");
+        assert_eq!(format_elapsed_short(999), "—");
+        assert_eq!(format_elapsed_short(1_000), "1s");
+        assert_eq!(format_elapsed_short(59_000), "59s");
+        assert_eq!(format_elapsed_short(60_000), "1:00");
+        assert_eq!(format_elapsed_short(61_000), "1:01");
+        assert_eq!(format_elapsed_short(3_599_000), "59:59");
+        assert_eq!(format_elapsed_short(3_600_000), "1h0m");
+        assert_eq!(format_elapsed_short(3_660_000), "1h1m");
+    }
+
+    // ---- build_tooltip (Some-arms) --------------------------------
+
+    #[test]
+    fn test_build_tooltip_same_uuid_collapses_to_one_line() {
+        let a = summary("u1", "a@x.com");
+        let b = summary("u1", "a@x.com");
+        assert_eq!(build_tooltip(Some(&a), Some(&b)), "Claudepot — a@x.com");
+    }
+
+    #[test]
+    fn test_build_tooltip_split_surfaces_two_lines() {
+        let c = summary("u1", "cli@x.com");
+        let d = summary("u2", "desk@x.com");
+        assert_eq!(
+            build_tooltip(Some(&c), Some(&d)),
+            "Claudepot\nCLI: cli@x.com\nDesktop: desk@x.com"
+        );
+    }
+
+    #[test]
+    fn test_build_tooltip_cli_only() {
+        let c = summary("u1", "cli@x.com");
+        assert_eq!(build_tooltip(Some(&c), None), "Claudepot — cli@x.com");
+    }
+
+    #[test]
+    fn test_build_tooltip_desktop_only() {
+        let d = summary("u2", "desk@x.com");
+        assert_eq!(
+            build_tooltip(None, Some(&d)),
+            "Claudepot — Desktop: desk@x.com"
+        );
+    }
+
+    // ---- active_label ---------------------------------------------
+
+    #[test]
+    fn test_active_label_plain_email() {
+        let a = summary("u1", "a@x.com");
+        assert_eq!(active_label(&a, None), "a@x.com");
+    }
+
+    #[test]
+    fn test_active_label_with_surface_prefix() {
+        let a = summary("u1", "a@x.com");
+        assert_eq!(active_label(&a, Some("CLI")), "CLI: a@x.com");
+    }
+
+    #[test]
+    fn test_active_label_reauth_suffix() {
+        let mut a = summary("u1", "a@x.com");
+        a.credentials_healthy = false;
+        assert_eq!(
+            active_label(&a, Some("Desktop")),
+            "Desktop: a@x.com — re-auth needed"
+        );
     }
 }

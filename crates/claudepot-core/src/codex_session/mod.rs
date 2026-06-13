@@ -52,8 +52,8 @@ pub mod types;
 #[cfg(test)]
 mod tests;
 
-pub use error::CodexError;
-pub use parser::{iter_events, parse_codex_rollout_jsonl, parse_head, EventIter};
-pub use types::{
-    CodexConversation, CodexEvent, CodexExchange, CodexHead, CodexToolCall, EnvironmentTextKind,
-};
+// Only the names the crate actually consumes are re-exported here
+// (shared_memory::indexer). Everything else stays reachable via the
+// `error` / `parser` / `types` submodules.
+pub use parser::parse_codex_rollout_jsonl;
+pub use types::CodexConversation;

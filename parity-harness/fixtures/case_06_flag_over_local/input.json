@@ -1,0 +1,20 @@
+{
+  "plugin_base": null,
+  "user": null,
+  "project": {
+    "theme": "project-theme"
+  },
+  "local": {
+    "theme": "local-theme",
+    "verbose": true
+  },
+  "flag": {
+    "theme": "flag-theme"
+  },
+  "policy": [
+    {"origin": "remote",                 "value": null},
+    {"origin": "mdm_admin",              "value": null},
+    {"origin": "managed_file_composite", "value": null},
+    {"origin": "hkcu_user",              "value": null}
+  ]
+}

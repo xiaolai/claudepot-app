@@ -46,6 +46,58 @@ pub fn build_file_appender(log_dir: &Path) -> Result<RollingFileAppender, InitEr
         .build(log_dir)
 }
 
+/// Name of the symlink [`build_file_appender`] maintains pointing at
+/// today's dated file. The single owner of this contract — consumers
+/// (`claudepot logs --tail`, the GUI's "Reveal logs") resolve through
+/// [`resolve_active_log`] instead of hardcoding the name.
+const ACTIVE_LOG_SYMLINK: &str = "claudepot.log";
+
+/// Resolve [`crate::paths::log_dir`] and create it if missing, so
+/// consumers (e.g. `claudepot logs --open`) land on a real directory
+/// even before the GUI has ever booted. Deliberately does NOT
+/// pre-create the log file or symlink — that would shadow the GUI's
+/// later symlink creation if a CLI consumer ran first.
+pub fn ensure_log_dir() -> std::io::Result<std::path::PathBuf> {
+    let dir = crate::paths::log_dir();
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Find the active log file to follow. Preferred path: the
+/// `claudepot.log` symlink the appender maintains. Fallback: if the
+/// symlink hasn't been created yet (older GUI build, manual
+/// deletion), pick the lexically-latest `claudepot.log.YYYY-MM-DD`
+/// file in the directory. `None` means nothing exists to tail.
+///
+/// Lives here — next to [`build_file_appender`] — so the rotation
+/// naming and the symlink contract have exactly one owner.
+pub fn resolve_active_log(dir: &Path) -> Option<std::path::PathBuf> {
+    let symlink = dir.join(ACTIVE_LOG_SYMLINK);
+    // `exists()` follows symlinks, so this returns true when the
+    // symlink points to a real file. We accept either a real file
+    // or a working symlink.
+    if symlink.exists() {
+        return Some(symlink);
+    }
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut candidates: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            // The rolled files are `claudepot.log.YYYY-MM-DD`.
+            // Lexical sort on this prefix is also chronological,
+            // so the lexically-latest entry is today's active file.
+            if name.starts_with("claudepot.log.") {
+                Some(e.path())
+            } else {
+                None
+            }
+        })
+        .collect();
+    candidates.sort();
+    candidates.pop()
+}
+
 /// Write one panic record to `<log_dir>/panic.log`. Appends; the
 /// active file grows across runs and is bounded by your OS, not by
 /// this module — panics should be rare enough that the trade-off
@@ -611,6 +663,47 @@ mod tests {
             !IN_HOOK.with(|f| f.get()),
             "the guard must be released after the outer call returns"
         );
+    }
+
+    #[test]
+    fn test_resolve_active_log_empty_dir_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(resolve_active_log(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn test_resolve_active_log_picks_lexically_latest_dated_file_when_no_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::File::create(tmp.path().join("claudepot.log.2026-06-03")).unwrap();
+        std::fs::File::create(tmp.path().join("claudepot.log.2026-06-05")).unwrap();
+        std::fs::File::create(tmp.path().join("claudepot.log.2026-06-04")).unwrap();
+        std::fs::File::create(tmp.path().join("unrelated.txt")).unwrap();
+        let active = resolve_active_log(tmp.path()).expect("should find a dated file");
+        assert_eq!(active.file_name().unwrap(), "claudepot.log.2026-06-05");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_resolve_active_log_prefers_symlink_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::File::create(tmp.path().join("claudepot.log.2026-06-04")).unwrap();
+        let dated = tmp.path().join("claudepot.log.2026-06-05");
+        std::fs::File::create(&dated).unwrap();
+        let symlink = tmp.path().join("claudepot.log");
+        std::os::unix::fs::symlink(&dated, &symlink).unwrap();
+        let active = resolve_active_log(tmp.path()).expect("symlink should be picked");
+        assert_eq!(active.file_name().unwrap(), "claudepot.log");
+    }
+
+    #[test]
+    fn test_resolve_active_log_finds_appender_output() {
+        // End-to-end coherence: whatever build_file_appender writes,
+        // resolve_active_log must find — they own the same contract.
+        let tmp = tempfile::tempdir().unwrap();
+        let _appender = build_file_appender(tmp.path()).expect("builder should succeed");
+        let active =
+            resolve_active_log(tmp.path()).expect("resolver must find the appender's symlink/file");
+        assert!(active.exists());
     }
 
     #[test]

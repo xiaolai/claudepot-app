@@ -14,6 +14,7 @@
 use crate::config_view::diff::{diff, ConfigTreePatch};
 use crate::config_view::model::ConfigTree;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
 use std::sync::Mutex;
 
 pub const MAX_CONVERGE_ATTEMPTS: u32 = 5;
@@ -121,11 +122,16 @@ pub fn ingest_event(gen: &DirtyGen, ev: &FsEvent) -> bool {
 
 // ---------- Fake event source for tests -------------------------------
 
+/// Test-only event source. `#[cfg(test)]`-gated so the fake (and its
+/// `.lock().unwrap()` panic path, fine in tests per rust-conventions)
+/// never ships in the production library.
+#[cfg(test)]
 #[derive(Default)]
 pub struct FakeEventSource {
     events: Mutex<Vec<FsEvent>>,
 }
 
+#[cfg(test)]
 impl FakeEventSource {
     pub fn new() -> Self {
         Self::default()

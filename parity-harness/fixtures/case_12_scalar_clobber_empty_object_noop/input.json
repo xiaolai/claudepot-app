@@ -1,0 +1,19 @@
+{
+  "plugin_base": null,
+  "user": {
+    "sandbox": {"enabled": true, "network": {"allowAll": false}},
+    "statusLine": {"type": "command", "command": "statusline.sh"}
+  },
+  "project": {
+    "sandbox": "disabled",
+    "statusLine": {}
+  },
+  "local": null,
+  "flag": null,
+  "policy": [
+    {"origin": "remote",                 "value": null},
+    {"origin": "mdm_admin",              "value": null},
+    {"origin": "managed_file_composite", "value": null},
+    {"origin": "hkcu_user",              "value": null}
+  ]
+}

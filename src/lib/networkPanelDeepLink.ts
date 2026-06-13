@@ -18,12 +18,19 @@
  * rename fails loudly with a TypeScript error, not silently.
  */
 
-// sessionStorage keys — cold-mount path.
-export const STORAGE_KEY_OPEN_ADD_ROUTE =
-  "claudepot.deepLink.openAddRoute";
+// sessionStorage keys — cold-mount path. Declared centrally in
+// lib/storageKeys.ts; re-exported here so call sites keep their
+// established import path.
+import {
+  DEEPLINK_OPEN_ADD_ROUTE_KEY,
+  DEEPLINK_FROM_NETWORK_PANEL_KEY,
+  DEEPLINK_SETTINGS_TAB_KEY,
+} from "./storageKeys";
+
+export const STORAGE_KEY_OPEN_ADD_ROUTE = DEEPLINK_OPEN_ADD_ROUTE_KEY;
 export const STORAGE_KEY_FROM_NETWORK_PANEL =
-  "claudepot.deepLink.fromNetworkPanel";
-export const STORAGE_KEY_SETTINGS_TAB = "claudepot.deepLink.settingsTab";
+  DEEPLINK_FROM_NETWORK_PANEL_KEY;
+export const STORAGE_KEY_SETTINGS_TAB = DEEPLINK_SETTINGS_TAB_KEY;
 
 // Window CustomEvent names — hot-mount path.
 export const EVENT_OPEN_ADD_ROUTE = "claudepot:openAddRoute";

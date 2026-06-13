@@ -13,14 +13,14 @@ export function LiveSessionsStrip() {
 
   if (sessions.length === 0) {
     return (
-      <section style={{ marginBottom: 24 }}>
+      <section style={{ marginBottom: "var(--sp-24)" }}>
         <SectionLabel>Live sessions</SectionLabel>
         <div
           style={{
-            marginTop: 8,
-            padding: 16,
+            marginTop: "var(--sp-8)",
+            padding: "var(--sp-16)",
             border: "var(--sp-px) dashed var(--line)",
-            borderRadius: 8,
+            borderRadius: "var(--r-3)",
             color: "var(--fg-muted)",
             fontSize: "var(--fs-sm)",
             textAlign: "center",
@@ -33,16 +33,16 @@ export function LiveSessionsStrip() {
   }
 
   return (
-    <section style={{ marginBottom: 24 }}>
+    <section style={{ marginBottom: "var(--sp-24)" }}>
       <SectionLabel>
         Live sessions ({sessions.length})
       </SectionLabel>
       <div
         style={{
-          marginTop: 8,
+          marginTop: "var(--sp-8)",
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(var(--sidebar-width), 1fr))",
-          gap: 12,
+          gap: "var(--sp-12)",
         }}
       >
         {sessions.map((s) => (

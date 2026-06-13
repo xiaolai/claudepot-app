@@ -21,8 +21,12 @@ For ANY production schema change:
 
 1. **Add a numbered migration file** under
    `web/src/db/migrations/<NNNN>_<slug>.sql` with the exact DDL.
-2. **Apply it via `psql` or via the Neon dashboard SQL editor**
-   pointed at the prod connection string. Never push against prod.
+2. **Apply it via the project's migration runner** — from `web/`:
+   `pnpm exec tsx --env-file=.env.local scripts/apply-migration.ts
+   <path/to/file.sql>` (Neon HTTP driver; splits on
+   `--> statement-breakpoint`). The Neon dashboard SQL editor is the
+   fallback. `psql` against prod is harness-blocked in this
+   environment — don't reach for it. Never push against prod.
 3. **Update `_journal.json`** so the migration is recorded.
 4. **Mirror the change** in the relevant `web/src/db/schema/*.ts`
    file so type inference works. Use `customType` for DB features
@@ -34,8 +38,11 @@ For ANY production schema change:
 
 Migrate uses transactions, which require websockets. The
 `@neondatabase/serverless` HTTP driver doesn't support them, so
-`migrate` hangs indefinitely under the default config. Switching the
-driver for migrations alone is more work than just using `psql`.
+`migrate` hangs indefinitely under the default config. (This
+limitation applies to drizzle-kit's migrate tooling, not to the
+runtime app — `web/src/db/client.ts` now uses the WebSocket-backed
+`Pool` via `drizzle-orm/neon-serverless` precisely to get
+transactions at runtime.)
 
 If a future contributor needs migrate to work, the path is:
 
@@ -44,7 +51,8 @@ If a future contributor needs migrate to work, the path is:
   `neonConfig.webSocketConstructor = ws` set.
 - Use the `migrate()` helper from `drizzle-orm/neon-serverless/migrator`.
 
-But for one-off prod migrations, `psql` is faster and more auditable.
+But for one-off prod migrations, `scripts/apply-migration.ts` is
+faster and more auditable.
 
 ## Existing things push will want to drop
 

@@ -7,7 +7,7 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const DEFAULT_SCOPES: &str =
     "user:file_upload user:inference user:mcp_servers user:profile user:sessions:claude_code";
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct TokenResponse {
     pub access_token: String,
     pub refresh_token: String,
@@ -16,6 +16,29 @@ pub struct TokenResponse {
     pub scope: Option<String>,
     #[serde(default)]
     pub token_type: Option<String>,
+}
+
+/// Manual `Debug` so a `tracing::debug!(?resp)`, error-context
+/// capture, or test-failure dump can never print the raw
+/// `sk-ant-oat01-`/`sk-ant-ort01-` bodies. Same redaction shape as
+/// `blob::OAuthCredentials` (`<redacted len=N>`), per
+/// `.claude/rules/rust-conventions.md`.
+impl std::fmt::Debug for TokenResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct Redacted(usize);
+        impl std::fmt::Debug for Redacted {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "<redacted len={}>", self.0)
+            }
+        }
+        f.debug_struct("TokenResponse")
+            .field("access_token", &Redacted(self.access_token.len()))
+            .field("refresh_token", &Redacted(self.refresh_token.len()))
+            .field("expires_in", &self.expires_in)
+            .field("scope", &self.scope)
+            .field("token_type", &self.token_type)
+            .finish()
+    }
 }
 
 /// Exchange a refresh token for a new access token + rotated refresh token.
@@ -156,6 +179,36 @@ mod tests {
             Some("")
         );
         assert_eq!(result.claude_ai_oauth.rate_limit_tier.as_deref(), Some(""));
+    }
+
+    /// Mirrors `blob.rs`'s `test_blob_debug_redacts_tokens` — the
+    /// Debug impl is what `tracing` and panic messages interpolate.
+    #[test]
+    fn test_token_response_debug_redacts_tokens() {
+        let resp = TokenResponse {
+            access_token: "sk-ant-oat01-SECRETLEAKVALUE".into(),
+            refresh_token: "sk-ant-ort01-OTHERLEAK".into(),
+            expires_in: 3600,
+            scope: Some("user:inference".into()),
+            token_type: Some("Bearer".into()),
+        };
+        let dbg = format!("{resp:?}");
+        assert!(
+            !dbg.contains("SECRETLEAK"),
+            "Debug must not include the raw access token; got: {dbg}"
+        );
+        assert!(
+            !dbg.contains("OTHERLEAK"),
+            "Debug must not include the raw refresh token; got: {dbg}"
+        );
+        // Length is preserved for diagnosing truncated responses.
+        assert!(dbg.contains("len=28"), "got: {dbg}");
+        assert!(dbg.contains("len=22"), "got: {dbg}");
+        // Non-secret fields stay visible.
+        assert!(dbg.contains("expires_in"));
+        // Pretty formatter routes through the same impl.
+        let pretty = format!("{resp:#?}");
+        assert!(!pretty.contains("SECRETLEAK"));
     }
 
     #[test]

@@ -196,7 +196,7 @@ pub async fn desktop_adopt(
     .await
     .map_err(|e| format!("desktop adopt failed: {e}"))?;
 
-    let _ = app.emit("desktop-adopted", &outcome.account_email);
+    let _ = app.emit(crate::events::DESKTOP_ADOPTED, &outcome.account_email);
     Ok(dto::DesktopAdoptOutcome {
         account_email: outcome.account_email,
         captured_items: outcome.captured_items,
@@ -225,7 +225,7 @@ pub async fn desktop_clear(
         .await
         .map_err(|e| format!("desktop clear failed: {e}"))?;
 
-    let _ = app.emit("desktop-cleared", &outcome.email);
+    let _ = app.emit(crate::events::DESKTOP_CLEARED, &outcome.email);
     Ok(dto::DesktopClearOutcome {
         email: outcome.email,
         snapshot_kept: outcome.snapshot_kept,
@@ -282,6 +282,6 @@ pub async fn desktop_launch(
         .launch()
         .await
         .map_err(|e| format!("launch failed: {e}"))?;
-    let _ = app.emit("desktop-running-changed", true);
+    let _ = app.emit(crate::events::DESKTOP_RUNNING_CHANGED, true);
     Ok(())
 }

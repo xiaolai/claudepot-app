@@ -48,6 +48,8 @@ pub enum DecryptError {
     Base64(String),
     #[error("AES decrypt failed (corrupt ciphertext or wrong key)")]
     Aes,
+    #[error("key derivation failed: {0}")]
+    Kdf(String),
 }
 
 /// Strip and validate the Chromium `v10`/`v11` version prefix.
@@ -97,12 +99,14 @@ pub mod macos {
     ///
     /// Pulled out so tests can drive known-password/known-ciphertext
     /// fixtures through the exact same derivation the production path
-    /// uses.
-    pub fn derive_key(password: &[u8]) -> [u8; KEY_LEN] {
+    /// uses. The output length is hard-coded so the pbkdf2 call can't
+    /// actually fail — but core propagates rather than panics
+    /// (rust-conventions: no expect in core).
+    pub fn derive_key(password: &[u8]) -> Result<[u8; KEY_LEN], DecryptError> {
         let mut key = [0u8; KEY_LEN];
         pbkdf2::pbkdf2::<Hmac<Sha1>>(password, SALT, ITERATIONS, &mut key)
-            .expect("PBKDF2 output length is hard-coded");
-        key
+            .map_err(|e| DecryptError::Kdf(e.to_string()))?;
+        Ok(key)
     }
 
     /// Decrypt a base64 `v10…` ciphertext using the Chromium OSCrypt
@@ -111,7 +115,7 @@ pub mod macos {
     pub fn decrypt(cipher_b64: &str, secret: &[u8]) -> Result<Vec<u8>, DecryptError> {
         let raw = b64_decode(cipher_b64)?;
         let ct = strip_version_prefix(&raw)?;
-        let key = derive_key(secret);
+        let key = derive_key(secret)?;
         Aes128CbcDec::new_from_slices(&key, &IV)
             .map_err(|_| DecryptError::Aes)?
             .decrypt_padded_vec_mut::<Pkcs7>(ct)
@@ -217,7 +221,7 @@ mod tests {
         type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
 
         fn encrypt_like_chromium(plaintext: &[u8], secret: &[u8]) -> String {
-            let key = super::super::macos::derive_key(secret);
+            let key = super::super::macos::derive_key(secret).expect("kdf");
             let iv = [b' '; 16];
             let ct = Aes128CbcEnc::new_from_slices(&key, &iv)
                 .unwrap()
@@ -274,9 +278,9 @@ mod tests {
 
         #[test]
         fn test_derive_key_deterministic() {
-            let k1 = macos::derive_key(b"same");
-            let k2 = macos::derive_key(b"same");
-            let k3 = macos::derive_key(b"other");
+            let k1 = macos::derive_key(b"same").expect("kdf");
+            let k2 = macos::derive_key(b"same").expect("kdf");
+            let k3 = macos::derive_key(b"other").expect("kdf");
             assert_eq!(k1, k2);
             assert_ne!(k1, k3);
         }

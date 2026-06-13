@@ -19,6 +19,7 @@ use claudepot_core::agent::draft::{build_draft, CliOverrides, DraftInput};
 use claudepot_core::agent::{AgentStore, PermissionMode, Trigger};
 
 use super::{agent_to_json, emit, trigger_summary};
+use crate::AppContext;
 
 /// Where the JSON spec comes from. `--from-json <file>` reads a
 /// file; `--from-json -` reads stdin; omitting the flag means a
@@ -124,7 +125,7 @@ pub struct DraftArgs {
 /// normalizes it (Claudepot-native or `AgentDefinition`-shaped JSON
 /// both accepted — PRD D2), builds a `lifecycle = Draft` agent, and
 /// persists it. Prints the new draft's id.
-pub fn draft_cmd(json: bool, args: DraftArgs) -> Result<()> {
+pub fn draft_cmd(ctx: &AppContext, args: DraftArgs) -> Result<()> {
     // Resolve flag-derived overrides up front so a bad value fails
     // before we touch the store.
     let permission_mode = match args.permission_mode.as_deref() {
@@ -211,7 +212,7 @@ pub fn draft_cmd(json: bool, args: DraftArgs) -> Result<()> {
         trigger_summary(&agent),
         args.drafted_by,
     );
-    emit(json, agent_to_json(&agent), &human)
+    emit(ctx.json, agent_to_json(&agent), &human)
 }
 
 #[cfg(test)]

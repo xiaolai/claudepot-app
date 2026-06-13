@@ -15,6 +15,7 @@
 // here automatically when the runtime is extended (WI-L1/L2).
 
 import type { LiveSessionSummary } from "../../types";
+import { NF } from "../../icons";
 import { Tag } from "../primitives/Tag";
 
 interface Props {
@@ -38,8 +39,8 @@ export function LiveSessionCard({ summary, onClick }: Props) {
         textAlign: "left",
         background: "var(--bg-raised)",
         border: "var(--sp-px) solid var(--line)",
-        borderRadius: 8,
-        padding: 12,
+        borderRadius: "var(--r-3)",
+        padding: "var(--sp-12)",
         font: "inherit",
         cursor: onClick ? "pointer" : "default",
         display: "flex",
@@ -54,9 +55,9 @@ export function LiveSessionCard({ summary, onClick }: Props) {
           aria-hidden="true"
           className={busy ? "live-dot-busy" : "live-dot-idle"}
           style={{
-            width: 8,
-            height: 8,
-            borderRadius: 8,
+            width: "var(--sp-8)",
+            height: "var(--sp-8)",
+            borderRadius: "var(--r-3)",
             background: busy ? "var(--accent)" : "var(--fg-muted)",
             flex: "0 0 var(--sp-8)",
           }}
@@ -64,8 +65,12 @@ export function LiveSessionCard({ summary, onClick }: Props) {
         <Tag>{sourceLabel}</Tag>
         <Tag>{summary.status}</Tag>
         <div style={{ flex: 1 }} />
-        {summary.errored && <Tag>⚠ error</Tag>}
-        {summary.stuck && <Tag>⏳ stuck</Tag>}
+        {/* Lucide glyphs, not emoji — design.md bans emoji icons
+            (⚠/⏳ render as color emoji in WebKit, breaking the
+            monochrome register). Glyph + text keeps the "color
+            never alone" rule satisfied. */}
+        {summary.errored && <Tag glyph={NF.warn}>error</Tag>}
+        {summary.stuck && <Tag glyph={NF.hourglass}>stuck</Tag>}
       </header>
       <div
         style={{

@@ -10,12 +10,30 @@ members = [
 [workspace.package]
 version = "0.1.46"
 edition = "2021"
+# Floor set by std file_lock (File::{lock,try_lock,unlock}, 1.89) —
+# the cross-process advisory locks in claudepot-core depend on it.
+rust-version = "1.89"
 authors = ["xiaolai"]
 license = "ISC"
 
 [workspace.dependencies]
-# Async
-tokio = { version = "1", features = ["full"] }
+# Async. Enumerated features instead of the `full` umbrella (matching
+# the minimal-surface discipline used for futures-util/reqwest below):
+# rt-multi-thread + macros (runtimes, #[tokio::main/test], select!),
+# sync/time/process/fs for the orchestrators and subprocess calls,
+# io-util for the Async{Read,Write,BufRead}Ext adapters, net for the
+# loopback TcpListener test fixtures. `full` would also compile
+# signal, io-std, and the UDP/UDS net surfaces nothing here uses.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "process",
+    "fs",
+    "io-util",
+    "net",
+] }
 # `FutureExt::catch_unwind` — used by `usage_snapshot::run_tick` to
 # isolate panics from each sub-orchestrator so one panicking tick can
 # never silently kill all the other orchestrators for the GUI's
@@ -24,7 +42,18 @@ tokio = { version = "1", features = ["full"] }
 # subcrates we don't use.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
-# HTTP
+# HTTP. Deliberately on 0.12 even though tauri-plugin-updater pulls
+# reqwest 0.13 into the GUI binary (two reqwest layers; hyper/rustls
+# are shared). 0.13 removed the `rustls-tls` (ring + webpki-roots)
+# feature: the replacements are `rustls` (compiles aws-lc-rs — NASM
+# toolchain requirement on the Windows MSVC gate, and a second
+# CryptoProvider beside lettre's ring, which panics rustls' provider
+# auto-detection) or `rustls-no-provider` (reqwest panics "No
+# provider set" at Client build unless a process-level provider is
+# installed first — core builds clients in 14 modules and in unit
+# tests, so there is no single startup choke point to install it).
+# Converge only with a dedicated change that routes every client
+# through one constructor installing `rustls::crypto::ring`.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
 
 # Serialization
@@ -32,7 +61,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # TOML — bundled template blueprints. Author-friendly multi-line
 # strings for prompts and descriptions; round-trips via serde.
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+# Pinned to the 1.x line so cargo unifies this copy with the one
+# tauri-utils already compiles into every src-tauri build (0.8 was
+# a second full parser). Parse-only: `serde` moved behind an
+# explicit feature in 1.x; no `display` (we never serialize TOML).
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 # Glob matching for templates' apply.scope.allowed_paths. Used in
 # place of a hand-rolled matcher because globset handles
 # cross-platform separators (`/` and `\`) and case-insensitive
@@ -177,8 +210,12 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 # Cross-process advisory locking for Desktop mutators (CLI + GUI run as
-# separate processes; the Tauri-side async Mutex is insufficient alone).
-fs2 = "0.4"
+# separate processes; the Tauri-side async Mutex is insufficient alone)
+# uses std::fs::File's inherent lock/try_lock/unlock (`file_lock`,
+# stable since Rust 1.89 — flock(2) on Unix, LockFileEx on Windows,
+# the same syscalls the retired `fs2` crate wrapped). No crate dep:
+# on ≥1.89 toolchains an fs2/fs4 trait import would be shadowed by
+# the inherent methods anyway (inherent-over-trait method resolution).
 
 # OS-native Trash so orphan discard is reversible (NSFileManager on macOS,
 # IFileOperation on Windows, XDG trash on Linux). Chosen over manual

@@ -167,7 +167,7 @@ export function NetworkPane({ pushToast }: Props) {
               void setField({ pollIntervalMinutes: v });
             }}
             style={{
-              width: "var(--input-narrow, tokens.sp[64])",
+              width: "var(--sp-64)",
               padding: "var(--sp-3) var(--sp-6)",
               border: "var(--bw-hair) solid var(--line)",
               borderRadius: "var(--r-1)",
@@ -287,7 +287,7 @@ export function NetworkPane({ pushToast }: Props) {
               style={{
                 marginTop: "var(--sp-10)",
                 width: "100%",
-                maxWidth: "tokens.project.detail.width",
+                maxWidth: "var(--project-detail-width)",
                 borderCollapse: "collapse",
                 fontSize: "var(--fs-sm)",
               }}

@@ -22,6 +22,7 @@ describe("EffectiveRenderer", () => {
       ],
       policy_winner: "managed_file_composite",
       policy_errors: [],
+      merge_divergence: false,
     });
     render(<EffectiveRenderer cwd="/" />);
     await waitFor(() =>
@@ -30,6 +31,30 @@ describe("EffectiveRenderer", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByText("managed_file_composite")).toBeInTheDocument();
+    expect(screen.queryByText(/Attribution may be unreliable/i)).toBeNull();
+  });
+
+  it("warns when the merge engine reports divergence", async () => {
+    configEffectiveSettingsSpy.mockResolvedValue({
+      merged: { theme: "dark" },
+      provenance: [
+        {
+          path: "theme",
+          winner: "user",
+          contributors: ["user"],
+          suppressed: false,
+        },
+      ],
+      policy_winner: null,
+      policy_errors: [],
+      merge_divergence: true,
+    });
+    render(<EffectiveRenderer cwd="/" />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Attribution may be unreliable/i),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("badges each primitive leaf with its winning scope", async () => {
@@ -51,6 +76,7 @@ describe("EffectiveRenderer", () => {
       ],
       policy_winner: null,
       policy_errors: [],
+      merge_divergence: false,
     });
     render(<EffectiveRenderer cwd="/" />);
     await waitFor(() =>

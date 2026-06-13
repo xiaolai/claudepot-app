@@ -123,23 +123,23 @@ export function McpInstallerPane({
   }, [installing, scope, projectPath]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 760 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)", maxWidth: "var(--content-cap-md)" }}>
       {/* ─── Server health ─────────────────────────────────── */}
       <section>
         <SectionLabel>Server health</SectionLabel>
         <div
           style={{
-            marginTop: 8,
-            padding: 16,
+            marginTop: "var(--sp-8)",
+            padding: "var(--sp-16)",
             border: "var(--sp-px) solid var(--line)",
-            borderRadius: 8,
+            borderRadius: "var(--r-3)",
             background: "var(--bg-raised)",
             display: "flex",
             flexDirection: "column",
-            gap: 12,
+            gap: "var(--sp-12)",
           }}
         >
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "var(--sp-12)", alignItems: "center" }}>
             <Tag>
               {health
                 ? health.tool_visible
@@ -159,9 +159,9 @@ export function McpInstallerPane({
             <pre
               style={{
                 margin: 0,
-                padding: 10,
+                padding: "var(--sp-10)",
                 background: "var(--bg-sunken)",
-                borderRadius: 6,
+                borderRadius: "var(--r-2)",
                 fontSize: "var(--fs-2xs)",
                 color: "var(--danger)",
                 whiteSpace: "pre-wrap",
@@ -176,7 +176,7 @@ export function McpInstallerPane({
       {/* ─── Agent-instruction snippet installer ──────────── */}
       <section>
         <SectionLabel>Agent instructions</SectionLabel>
-        <p style={{ marginTop: 6, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
+        <p style={{ marginTop: "var(--sp-6)", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
           Configuring an MCP entry alone isn't enough — agents have to
           be told <em>when</em> to call the tools. This snippet does
           that. Pick a scope, install it once, then paste the{" "}
@@ -186,14 +186,14 @@ export function McpInstallerPane({
         </p>
         <div
           style={{
-            marginTop: 8,
-            padding: 16,
+            marginTop: "var(--sp-8)",
+            padding: "var(--sp-16)",
             border: "var(--sp-px) solid var(--line)",
-            borderRadius: 8,
+            borderRadius: "var(--r-3)",
             background: "var(--bg-raised)",
             display: "flex",
             flexDirection: "column",
-            gap: 12,
+            gap: "var(--sp-12)",
           }}
         >
           {/* Scope picker */}
@@ -204,13 +204,13 @@ export function McpInstallerPane({
               margin: 0,
               display: "flex",
               flexDirection: "column",
-              gap: 6,
+              gap: "var(--sp-6)",
             }}
           >
             <legend style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)", padding: 0 }}>
               Scope
             </legend>
-            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+            <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start", cursor: "pointer" }}>
               <input
                 type="radio"
                 name="snippet-scope"
@@ -228,7 +228,7 @@ export function McpInstallerPane({
                 </span>
               </span>
             </label>
-            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+            <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start", cursor: "pointer" }}>
               <input
                 type="radio"
                 name="snippet-scope"
@@ -253,11 +253,11 @@ export function McpInstallerPane({
               onChange={(e) => setProjectPath(e.currentTarget.value)}
               aria-label="Project"
               style={{
-                padding: 8,
+                padding: "var(--sp-8)",
                 border: "var(--sp-px) solid var(--line)",
-                borderRadius: 6,
+                borderRadius: "var(--r-2)",
                 background: "var(--bg-base)",
-                fontFamily: "monospace",
+                fontFamily: "var(--font-mono)",
                 fontSize: "var(--fs-sm)",
               }}
             >
@@ -269,7 +269,7 @@ export function McpInstallerPane({
               ))}
             </select>
           )}
-          <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ display: "flex", gap: "var(--sp-12)" }}>
             <Button
               variant="solid"
               glyph={NF.download}
@@ -285,22 +285,25 @@ export function McpInstallerPane({
             )}
           </div>
           {install && (
+            // `.selectable` (base.css), not inline `userSelect: "text"` —
+            // React omits the -webkit- prefix WKWebView reads first, so
+            // the inline form never wins over the body opt-out.
             <div
+              className="selectable"
               style={{
-                padding: 10,
+                padding: "var(--sp-10)",
                 background: "var(--bg-sunken)",
-                borderRadius: 6,
+                borderRadius: "var(--r-2)",
                 fontSize: "var(--fs-2xs)",
-                fontFamily: "monospace",
-                userSelect: "text",
+                fontFamily: "var(--font-mono)",
               }}
             >
               <div>
                 Wrote ({install.scope}): {install.path}
               </div>
-              <div style={{ marginTop: 4, fontWeight: 600 }}>{install.include_line}</div>
+              <div style={{ marginTop: "var(--sp-4)", fontWeight: 600 }}>{install.include_line}</div>
               {install.target_files.length > 0 && (
-                <div style={{ marginTop: 6, color: "var(--fg-muted)" }}>
+                <div style={{ marginTop: "var(--sp-6)", color: "var(--fg-muted)" }}>
                   Paste the line above into:
                   <ul style={{ margin: "var(--sp-4) 0 0 var(--sp-16)", padding: 0 }}>
                     {install.target_files.map((f) => (
@@ -311,21 +314,22 @@ export function McpInstallerPane({
               )}
             </div>
           )}
-          <details style={{ marginTop: 4 }}>
+          <details style={{ marginTop: "var(--sp-4)" }}>
             <summary style={{ cursor: "pointer", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
               Preview snippet content
             </summary>
+            {/* <pre> is already select-opted-in by base.css; the old
+                inline userSelect was redundant (and non-functional). */}
             <pre
               style={{
-                marginTop: 8,
-                padding: 12,
+                marginTop: "var(--sp-8)",
+                padding: "var(--sp-12)",
                 background: "var(--bg-sunken)",
-                borderRadius: 6,
-                maxHeight: 360,
+                borderRadius: "var(--r-2)",
+                maxHeight: "var(--viewer-max-height)",
                 overflow: "auto",
                 fontSize: "var(--fs-2xs)",
                 whiteSpace: "pre-wrap",
-                userSelect: "text",
               }}
             >
               {snippet}

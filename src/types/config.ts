@@ -125,6 +125,9 @@ export interface ConfigEffectiveSettingsDto {
   provenance: ConfigProvenanceLeafDto[];
   policy_winner: string | null;
   policy_errors: ConfigPolicyErrorDto[];
+  /** True when the annotated merge diverged from the CC-parity merge:
+   * `merged` is correct but `provenance` winners may be unreliable. */
+  merge_divergence: boolean;
 }
 
 export type McpSimulationMode =

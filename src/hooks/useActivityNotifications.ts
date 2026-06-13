@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { useEmit } from "../providers/AppStateProvider";
-import { useSessionLive } from "./useSessionLive";
+import { useSessionLive, useSessionLiveSelector } from "./useSessionLive";
+import { useTauriEvent } from "./useTauriEvent";
 import type { LiveSessionSummary, Preferences } from "../types";
 import type { Category } from "../lib/notifications/types";
 
@@ -56,10 +56,13 @@ interface SessionMemo {
   lastWaitingReason: string | null;
 }
 
-/** Returns the count of sessions currently in an alerting state
- *  (errored or stuck). Used by AppShell to drive the Activity nav
- *  badge without a second useSessionLive subscription at shell level. */
-export function useActivityNotifications(): number {
+/**
+ * Transition-diffing effect only — mount via
+ * `ActivityNotificationsBridge` (a null-rendering leaf) so its raw
+ * `useSessionLive` subscription re-renders just that leaf, never the
+ * shell. The nav-badge / tray count lives in `useActivityAlertCount`.
+ */
+export function useActivityNotifications(): void {
   const sessions = useSessionLive();
   const memoRef = useRef(new Map<string, SessionMemo>());
   const prefsRef = useRef<Preferences | null>(null);
@@ -81,36 +84,29 @@ export function useActivityNotifications(): number {
   // `cp-prefs-changed` event whose payload IS the new Preferences
   // snapshot — no second preferencesGet() and no ordering race
   // between back-to-back setters.
+  const applyPrefs = (p: Preferences) => {
+    prefsRef.current = p;
+    setPrefsVersion((v) => v + 1);
+  };
+  useTauriEvent<Preferences>("cp-prefs-changed", (ev) => {
+    if (ev.payload) applyPrefs(ev.payload);
+  });
   useEffect(() => {
     let cancelled = false;
-    let unlisten: UnlistenFn | null = null;
-
-    const applyPrefs = (p: Preferences) => {
-      if (cancelled) return;
-      prefsRef.current = p;
-      setPrefsVersion((v) => v + 1);
-    };
-
     api
       .preferencesGet()
-      .then(applyPrefs)
-      .catch(() => {
-        /* no-tauri env */
-      });
-    listen<Preferences>("cp-prefs-changed", (ev) => {
-      if (ev.payload) applyPrefs(ev.payload);
-    })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
+      .then((p) => {
+        if (!cancelled) applyPrefs(p);
       })
       .catch(() => {
         /* no-tauri env */
       });
     return () => {
       cancelled = true;
-      unlisten?.();
     };
+    // applyPrefs only touches a ref + a monotonic counter — safe to
+    // omit from deps (runs once on mount).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -291,17 +287,38 @@ export function useActivityNotifications(): number {
     }
   }, [sessions, prefsVersion]);
 
-  // Tray-badge count includes every attention-worthy state — error
-  // bursts, stuck tool calls, AND sessions waiting on the user
-  // (permission, plan-mode approval, clarifying answer). Waiting was
-  // added with WI-A; it's the case the product exists for, so the
-  // tray dot must light up for it. The badge IS the dot — only
-  // count > 0 vs == 0 changes anything in the tray (compose_title
-  // drops the numeric value), but downstream consumers (sidebar
-  // badge etc.) still want the count for their own reasons.
+}
+
+/** Null-rendering leaf that hosts the transition-diffing effect.
+ *  AppShell mounts this (via NotificationBridges) instead of calling
+ *  the hook directly, so the raw live-session subscription inside
+ *  re-renders only this leaf — not the whole shell tree — on every
+ *  `live-all` publish. */
+export function ActivityNotificationsBridge(): null {
+  useActivityNotifications();
+  return null;
+}
+
+/** Count of sessions in an attention-worthy state — error bursts,
+ *  stuck tool calls, AND sessions waiting on the user (permission,
+ *  plan-mode approval, clarifying answer). Waiting was added with
+ *  WI-A; it's the case the product exists for, so the tray dot must
+ *  light up for it. The badge IS the dot — only count > 0 vs == 0
+ *  changes anything in the tray (compose_title drops the numeric
+ *  value), but downstream consumers (sidebar badge etc.) still want
+ *  the count for their own reasons. Pure — exported for tests. */
+export function activityAlertCount(sessions: LiveSessionSummary[]): number {
   return sessions.filter(
     (s) => s.errored || s.stuck || s.status === "waiting",
   ).length;
+}
+
+/** Alerting-session count for the Activity nav badge + tray mirror.
+ *  Subscribes through the primitive-snapshot selector, so the caller
+ *  (AppShell) re-renders only when the COUNT changes — not on every
+ *  live-list publish. */
+export function useActivityAlertCount(): number {
+  return useSessionLiveSelector(activityAlertCount);
 }
 
 function nextMemo(

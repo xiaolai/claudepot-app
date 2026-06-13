@@ -195,10 +195,9 @@ fn acquire_swap_lock() -> Result<fs::File, SwapError> {
         // Use a real cross-process exclusive lock. Plain
         // `OpenOptions::write` does NOT exclude other processes — a
         // concurrent process can still open + write the file. Use
-        // LockFileEx via the `fs2` shim, which is already used for the
-        // Desktop swap lock in `desktop_lock.rs`.
-        use fs2::FileExt;
-        file.lock_exclusive().map_err(SwapError::FileError)?;
+        // LockFileEx via std's `File::lock` (file_lock, 1.89), the
+        // same primitive `desktop_lock.rs` uses.
+        file.lock().map_err(SwapError::FileError)?;
     }
 
     Ok(file)

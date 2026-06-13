@@ -45,6 +45,7 @@ import {
   Globe,
   Grip,
   Home,
+  Hourglass,
   Inbox,
   Info,
   Key,
@@ -60,6 +61,7 @@ import {
   Package,
   PanelLeft,
   PanelLeftClose,
+  Paperclip,
   Pin,
   Play,
   Plus,
@@ -170,6 +172,8 @@ export const NF = {
   bolt:       Zap,
   ban:        Ban,
   clock:      Clock,
+  /** Waiting / stalled state — distinct from `clock` (a timestamp). */
+  hourglass:  Hourglass,
   calendar:   Calendar,
   xCircle:    XCircle,
 
@@ -198,6 +202,7 @@ export const NF = {
   tag:        Tag,
   tags:       Tags,
   link:       Link,
+  paperclip:  Paperclip,
   grip:       Grip,
   layers:     Layers,
   zap:        Zap,

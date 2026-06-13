@@ -1,9 +1,11 @@
 pub mod beta_header;
+pub mod error;
 pub mod profile;
 pub mod refresh;
 pub mod usage;
 
-use crate::error::OAuthError;
+pub use error::OAuthError;
+
 use parking_lot::Mutex;
 use std::sync::Arc;
 

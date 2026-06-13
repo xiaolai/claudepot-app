@@ -91,6 +91,16 @@ CREATE TABLE IF NOT EXISTS session_turns (
     PRIMARY KEY (file_path, turn_index)
 );
 
-CREATE INDEX IF NOT EXISTS idx_turns_file_path ON session_turns(file_path);
+-- idx_turns_file_path (dropped): the composite PRIMARY KEY
+-- (file_path, turn_index) is backed by an automatic unique index
+-- whose leftmost column already serves every `WHERE file_path = ?`
+-- query — and gives the ORDER BY turn_index reads a free sort. The
+-- standalone index only added write amplification on the hot
+-- replace-all path inside every refresh transaction. The DROP runs
+-- on every open (idempotent, no-op once gone) so existing installs
+-- shed it without a schema-version bump — an index drop changes no
+-- data and needs no re-scan.
+DROP INDEX IF EXISTS idx_turns_file_path;
+
 CREATE INDEX IF NOT EXISTS idx_turns_ts        ON session_turns(ts_ms DESC);
 "#;

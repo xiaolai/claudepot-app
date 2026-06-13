@@ -91,11 +91,9 @@ pub async fn templates_pending_changes(path: String) -> Result<PendingChanges, S
     use std::path::PathBuf;
     let claudepot_root = claudepot_data_dir();
     let target = PathBuf::from(&path);
-    let canonical_target = target
-        .canonicalize()
+    let canonical_target = claudepot_core::path_utils::canonicalize_simplified(&target)
         .map_err(|e| format!("cannot resolve {path}: {e}"))?;
-    let canonical_root = claudepot_root
-        .canonicalize()
+    let canonical_root = claudepot_core::path_utils::canonicalize_simplified(&claudepot_root)
         .unwrap_or(claudepot_root.clone());
     if !canonical_target.starts_with(&canonical_root) {
         return Err(format!(
@@ -104,7 +102,7 @@ pub async fn templates_pending_changes(path: String) -> Result<PendingChanges, S
             canonical_target.display()
         ));
     }
-    sidecar::read(&canonical_target)
+    sidecar::read(&canonical_target).map_err(|e| e.to_string())
 }
 
 /// Apply selected items from a `pending-changes.json` side-car.
@@ -232,11 +230,9 @@ pub async fn templates_read_report(path: String) -> Result<String, String> {
     use std::path::PathBuf;
     let claudepot_root = claudepot_data_dir();
     let target = PathBuf::from(&path);
-    let canonical_target = target
-        .canonicalize()
+    let canonical_target = claudepot_core::path_utils::canonicalize_simplified(&target)
         .map_err(|e| format!("cannot resolve {path}: {e}"))?;
-    let canonical_root = claudepot_root
-        .canonicalize()
+    let canonical_root = claudepot_core::path_utils::canonicalize_simplified(&claudepot_root)
         .unwrap_or(claudepot_root.clone());
     if !canonical_target.starts_with(&canonical_root) {
         return Err(format!(

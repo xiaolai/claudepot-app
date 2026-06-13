@@ -1,6 +1,5 @@
-import { useEffect, useRef } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEmit } from "../providers/AppStateProvider";
+import { useTauriEvent } from "./useTauriEvent";
 import type { EmitFn } from "../lib/notifications/dispatch";
 import { redactSecrets } from "../lib/redactSecrets";
 
@@ -87,34 +86,17 @@ function dispatchPayload(emit: EmitFn, payload: OpTerminalWire): void {
 
 export function useOpDoneNotifications(): void {
   const emit = useEmit();
+
   // emit() reads CategoryPrefs synchronously from the renderer
   // cache (hydrated on AppStateProvider mount). No more buffering
   // for pref-load — emit() handles unloaded-cache by treating
   // categories as enabled, which matches the audit-validated
   // intent ("don't drop the user's first event after launch").
-  const emitRef = useRef(emit);
-  emitRef.current = emit;
-
-  useEffect(() => {
-    let active = true;
-    let unlisten: UnlistenFn | null = null;
-
-    listen<OpTerminalWire>("cp-op-terminal", (ev) => {
-      const payload = ev.payload;
-      if (!payload) return;
-      dispatchPayload(emitRef.current, payload);
-    })
-      .then((fn) => {
-        if (!active) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {
-        /* no-tauri env */
-      });
-
-    return () => {
-      active = false;
-      unlisten?.();
-    };
-  }, []);
+  // useTauriEvent holds the handler in a ref, so the per-render
+  // closure always sees the latest emit without re-subscribing.
+  useTauriEvent<OpTerminalWire>("cp-op-terminal", (ev) => {
+    const payload = ev.payload;
+    if (!payload) return;
+    dispatchPayload(emit, payload);
+  });
 }

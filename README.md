@@ -79,7 +79,7 @@ Your data lives at `~/.claudepot/` (override with `CLAUDEPOT_DATA_DIR`).
 
 ### First run
 
-Open the app. The left sidebar is your map of the whole product — **eight tabs, each one a feature**. Start by adding your accounts under **Accounts**. Three ways:
+Open the app. The left sidebar is your map of the whole product — **nine tabs, each one a feature**. Start by adding your accounts under **Accounts**. Three ways:
 
 - Browser OAuth — a one-time browser sign-in, no token handling on your part.
 - Import the account Claude Code is currently signed into.
@@ -101,13 +101,15 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 ![Projects tab](assets/screenshots/projects.png)
 
+**Memory** — Cross-harness search over everything your agents have done: indexed Claude Code *and* Codex transcripts, durable memories, and design decisions, in three tabs (Search / Memories / Decisions). The same data is exposed to agents through `claudepot mcp memory-server`; this tab is the human-facing view.
+
 **Keys** — All your API keys and OAuth tokens, in one inventory. Stored in the OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Copy with self-clearing clipboard — the value wipes itself after 30 seconds.
 
 ![Keys tab](assets/screenshots/keys.png)
 
-**Third-parties** — Run non-Anthropic models (Bedrock, Vertex, Foundry, OpenRouter, Ollama, vLLM, llama.cpp, …) through the same `claude` interface. Each route installs as a wrapper binary on `PATH` (`~/.claudepot/bin/<name>`) and a separate Desktop profile (`~/Library/Application Support/Claude-3p/`), so first-party Claude is never touched. Routes are siblings on disk — no swap, no default.
+**Providers** — Run non-Anthropic models (Bedrock, Vertex, Foundry, OpenRouter, Ollama, vLLM, llama.cpp, …) through the same `claude` interface. Each route installs as a wrapper binary on `PATH` (`~/.claudepot/bin/<name>`) and a separate Desktop profile (`~/Library/Application Support/Claude-3p/`), so first-party Claude is never touched. Routes are siblings on disk — no swap, no default.
 
-![Third-parties tab](assets/screenshots/third-parties.png)
+![Providers tab](assets/screenshots/third-parties.png)
 
 **Agents** — Schedule a `claude -p` prompt to run on a cron expression (every weekday at 8am, every Monday morning, anything cron can express) or on demand. Each run lands in a history pane with stdout, stderr, and exit code. macOS uses launchd, Windows uses Task Scheduler, Linux uses systemd-user timers — set up for you, not by hand.
 
@@ -117,7 +119,7 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 ![Global tab](assets/screenshots/global.png)
 
-**Settings** — Eleven sub-panes: General, Appearance (light / dark / system, paper-mono density), Notifications, Network (status-bar dot + status-page polling), **Rotation** (rule-driven auto-swap of the active CLI account when a usage window crosses a threshold — confirm or auto, with a 500-entry audit log), Cleanup (**Prune** orphaned sessions · **Slim** strips bulky tool-output payloads · **Trash** 7-day undo), Protected paths, GitHub PAT, Locks (SQLite-lock recovery), Diagnostics (`doctor`), and About.
+**Settings** — Thirteen sub-panes: General, Appearance (light / dark / system, paper-mono density), Notifications, Network (status-bar dot + status-page polling), **Rotation** (rule-driven auto-swap of the active CLI account when a usage window crosses a threshold — confirm or auto, with a 500-entry audit log), Health (Claude Code's own self-diagnostic, scraped from `claude doctor`), MCP (memory-server health + agent-instruction snippet installer), Cleanup (**Prune** orphaned sessions · **Slim** strips bulky tool-output payloads · **Trash** 7-day undo), Protected paths, GitHub PAT, Locks (SQLite-lock recovery), Diagnostics (Claudepot's own self-check), and About.
 
 ![Settings tab](assets/screenshots/settings.png)
 
@@ -138,14 +140,28 @@ The CLI handler is the reference implementation; the GUI wraps the same function
 ```text
 claudepot account   list | add | remove | inspect | verify
 claudepot cli       status | use <email> | clear | run <email> -- <cmd>
-claudepot desktop   status | use <email>
-claudepot project   list | show | move | clean | repair
+claudepot desktop   status | use <email> | identity | reconcile | adopt
+                    clear | launch | quit
+claudepot project   list | show | move | clean | remove | trash | repair
 claudepot session   list-orphans | move | adopt-orphan | rebuild-index
-                    view | export | search | worktrees
+                    backfill-exchanges | view | export | search | worktrees
                     prune | slim | trash {list|restore|empty}
-claudepot doctor
-claudepot status
+claudepot agent     draft | list | show            (alias: automation)
+claudepot memory    list | view | log               # CLAUDE.md + memory files
+claudepot activity  recent | reindex                # anomaly + milestone cards
+claudepot usage     report                          # local token/cost rollup
+claudepot update    check | cli | desktop | config  # CC + Desktop updates
+claudepot settings  auto-memory {status|enable|disable|clear}
+claudepot mcp       memory-server | print-snippet | install-snippet
+claudepot codex     index | rebuild | forget        # Codex transcript indexing
+claudepot export / import                           # *.claudepot.tar.zst bundles
+claudepot migrate   inspect | undo
+claudepot doctor                                    # health check
+claudepot status                                    # ground-truth auth status
+claudepot logs      [--open | --tail]
 ```
+
+Run `claudepot --help` (or `claudepot <command> --help`) for the authoritative, always-current surface.
 
 Every command supports `--json` with a stable shape (scriptable), `--quiet`, `--verbose`, `--yes`. Exit codes: `0` ok · `1` general · `2` ambiguous / drift · `3` auth failure · `4` Desktop quit failed · `5` network.
 
@@ -163,13 +179,13 @@ pnpm tauri dev                        # GUI hot reload (Vite :11220, HMR :11221)
 
 Path-handling code (sanitize, unsanitize, canonicalize, tilde expansion) is the highest-risk surface; it's golden-tested on Linux / macOS / Windows in CI. See [`.claude/rules/paths.md`](.claude/rules/paths.md).
 
-Full design lives in [`dev-docs/implementation-plan.md`](dev-docs/implementation-plan.md). The 3400-line CC/Desktop internals reference is at [`dev-docs/kannon/reference.md`](dev-docs/kannon/reference.md).
+The full design docs (`dev-docs/implementation-plan.md` and a 3400-line CC/Desktop internals reference) are internal working documents — `dev-docs/` is local-only and not shipped in this repository.
 
 ### Security posture
 
 - Tokens never logged, toasted, or sent to the webview. Truncated in any human output (`sk-ant-oat01-Abc…xyz`).
 - Per-account secrets in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service).
-- Two distinct keychain surfaces on macOS: the `keyring` crate for Claudepot's own secrets, the `/usr/bin/security` subprocess for Claude Code's `Claude Code-credentials` keychain item. They are not interchangeable.
+- Distinct keychain surfaces on macOS: Claude Code's `Claude Code-credentials` item and Claudepot's cross-binary secrets (account credentials, GitHub PAT) go through the `/usr/bin/security` subprocess with verified writes; the `keyring` crate is reserved for slots only one binary reads. They are not interchangeable.
 - Redaction (`sk-ant-*`, OAuth bearers, JWTs, `Authorization` headers, URL params, cookies) runs before any session event reaches the UI or the SQLite index.
 - SQLite WAL/SHM sidecars are forced to `chmod 0600`.
 - Tauri `opener` scope is narrowed to `https://console.anthropic.com/settings/keys`.

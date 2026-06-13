@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-const KEY = "claudepot.dismissedIssues";
+import { DISMISSED_ISSUES_KEY as KEY } from "../lib/storageKeys";
 const SNOOZE_MS = 24 * 60 * 60 * 1000;
 /** Interval for the periodic expiry sweep. Audit issue #8 fix:
  *  pre-fix the store was purged only on mount; a long-lived

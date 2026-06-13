@@ -113,7 +113,7 @@
   color: var(--fg);
   max-width: 100%;
   pointer-events: auto;
-  animation: toast-in 0.15s ease;
+  animation: toast-in var(--dur-base) var(--ease-out);
 }
 
 .toast-text {
@@ -188,7 +188,7 @@
 }
 
 .toast.exiting {
-  animation: toast-out 0.15s ease forwards;
+  animation: toast-out var(--dur-base) var(--ease-in) forwards;
 }
 
 @keyframes toast-out {
@@ -246,7 +246,7 @@
 .skeleton {
   background: var(--border);
   border-radius: var(--r-2);
-  animation: skeleton-pulse 1.2s ease-in-out infinite;
+  animation: skeleton-pulse var(--dur-pulse) var(--ease-in-out) infinite;
 }
 
 .skeleton-header {
@@ -264,5 +264,20 @@
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 0.6; }
+}
+
+/* ---------- reduced motion ----------
+   Must live in THIS shard: App.css imports base.css before modals.css,
+   so an equal-specificity guard in base.css loses the cascade to the
+   `animation:` declarations above and silently does nothing. */
+
+@media (prefers-reduced-motion: reduce) {
+  .toast, .toast.exiting {
+    animation: none;
+  }
+  .skeleton {
+    animation: none;
+    opacity: 0.4;
+  }
 }
 
