@@ -171,6 +171,12 @@ pub struct EffectiveSettingsDto {
     /// Winning policy origin ("remote" | "mdm_admin" | …) or None.
     pub policy_winner: Option<String>,
     pub policy_errors: Vec<PolicyErrorDto>,
+    /// `true` when the annotated merge disagreed with the CC-parity
+    /// merge: `merged` is correct but `provenance` attributions may be
+    /// unreliable. The UI surfaces this as a warning rather than
+    /// silently showing wrong winners. See
+    /// `effective_settings::EffectiveSettings::merge_divergence`.
+    pub merge_divergence: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

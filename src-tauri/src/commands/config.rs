@@ -398,6 +398,7 @@ pub async fn config_effective_settings(
                     message: e.message,
                 })
                 .collect(),
+            merge_divergence: r.merge_divergence,
         }
     })
     .await
