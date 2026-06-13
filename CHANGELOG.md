@@ -6,6 +6,58 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.47 — beta (unreleased)
+
+Hardening + maintainability release. A multi-agent audit swept the
+codebase across 16 dimensions; 176 adversarially-verified findings
+were fixed, then re-audited independently. No user-facing feature
+changes — the surface is the same, the internals are safer and
+leaner.
+
+### Added
+
+- **Windows ACL + atomic 0600 pre-create** for the secret SQLite
+  stores (`keys.db`, `env-vault.db`, `accounts.db`), matching the
+  hardening `sessions.db` already had.
+- **Dependabot** security + version-update config; CI now runs a
+  five-site version lock-step preflight, compiles/tests the
+  `src-tauri` crate on macOS + Windows, runs the CC-parity verifier,
+  and exercises the production frontend build.
+- **Config UI divergence warning** — the effective-settings view now
+  flags when per-key attribution may be unreliable instead of showing
+  it as fact.
+
+### Changed
+
+- **Secret handling tightened**: `TokenResponse` no longer derives a
+  token-leaking `Debug`; the GitHub PAT moved off the `keyring` crate
+  to the verified-write Keychain pattern on macOS; secret-bearing
+  command paths zeroize on every exit; `secret_preview` no longer
+  near-fully discloses short secrets.
+- **Dedup**: a shared `json_store` helper now backs the rotation /
+  permission / breaker / agent-event / notification stores (one
+  corrupt-file policy, not five); MCP-snippet install, the MCP probe,
+  and route/agent lifecycle logic moved out of the Tauri layer into
+  `claudepot-core`.
+- **`session_*` / `project_*` modules** folded into `session/` and
+  `project/` directory modules; the App shell was decomposed
+  (1533 → 473 lines) and the live-session subscription narrowed.
+- Dependency hygiene: `tokio` features trimmed, unmaintained `fs2`
+  replaced with std file locks, dead deps dropped.
+
+### Fixed
+
+- **Cross-platform correctness** surfaced by the new Windows CI:
+  Windows-only path classification, a `cfg(windows)` decrypt match,
+  and Unix-shaped paths in activity/daemon parsing.
+- The `CLAUDEPOT_DATA_DIR` override is now honored by `mcp` / `codex`
+  verbs (previously a split-brain `~/.claudepot/sessions.db`).
+- sessions.db migrations run in an IMMEDIATE transaction;
+  corrupt-grants and other JSON stores fail loud instead of silently
+  dropping state.
+- Production website is no longer meta-noindexed; magic-link sends
+  are rate-limited; GitHub/Google sign-in enforces verified email.
+
 ## 0.1.46 — beta (released 2026-06-08)
 
 Diagnostic-logging patch. Self-quits used to leave no forensic
