@@ -62,30 +62,29 @@ pub struct KeyStore {
 impl KeyStore {
     pub fn open(path: &Path) -> Result<Self, KeyError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| KeyError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))?;
+            std::fs::create_dir_all(parent)?;
         }
+        // Pre-create the DB file with user-only perms BEFORE rusqlite
+        // opens it — `Connection::open` creates files at the process
+        // umask (typically 0644), leaving a create→harden window where
+        // another local user can open the file and keep the fd. Same
+        // M9 fix as `session_index::SessionIndex::open`; SQLite's
+        // WAL/SHM sidecars inherit the main file's mode, so closing
+        // the main-file window is what matters.
+        crate::secure_perms::precreate_user_only(path);
+
         let db = Connection::open(path)?;
         apply_standard_pragmas(&db)?;
         db.execute_batch(SCHEMA)?;
         migrate_add_secret_and_purge(&db, "api_keys")?;
         migrate_add_secret_and_purge(&db, "oauth_tokens")?;
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let secure = |p: &Path| -> Result<(), KeyError> {
-                if p.exists() {
-                    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600)).map_err(
-                        |e| KeyError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
-                    )?;
-                }
-                Ok(())
-            };
-            secure(path)?;
-            secure(&path.with_extension("db-wal"))?;
-            secure(&path.with_extension("db-shm"))?;
-        }
+        // 0600 on Unix, user-only DACL on Windows — for the db file
+        // and any sidecars from a previous open. Backstop for the
+        // pre-existing-file case the pre-create doesn't touch.
+        crate::secure_perms::harden_user_only(path)?;
+        crate::secure_perms::harden_user_only(&path.with_extension("db-wal"))?;
+        crate::secure_perms::harden_user_only(&path.with_extension("db-shm"))?;
 
         Ok(Self { db: Mutex::new(db) })
     }
@@ -380,6 +379,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = KeyStore::open(&dir.path().join("keys.db")).unwrap();
         (store, dir)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_keystore_open_creates_db_at_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keys.db");
+        let _store = KeyStore::open(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

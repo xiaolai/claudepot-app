@@ -63,9 +63,10 @@ only users who picked the Beta channel in Settings → About.
 Read `Cargo.toml` line `version = "..."` under `[workspace.package]`.
 That's the authoritative current version. Parse as `CURRENT = X.Y.Z`.
 
-Confirm all three files agree. If they don't, STOP and report the
-drift — bumping from a drifted state would silently adopt one file's
-opinion as canonical.
+Confirm all five locations agree (the three manifests plus both
+status banners). If they don't, STOP and report the drift — bumping
+from a drifted state would silently adopt one file's opinion as
+canonical.
 
 ### Step 2 — Compute the next version
 
@@ -205,7 +206,7 @@ Show the final diff:
 
 ```bash
 git diff --stat
-git diff Cargo.toml package.json src-tauri/tauri.conf.json CHANGELOG.md README.md
+git diff Cargo.toml package.json src-tauri/tauri.conf.json CHANGELOG.md README.md 'web/src/app/(reader)/app/install/page.mdx'
 ```
 
 ### Step 6 — Do NOT commit
@@ -217,7 +218,7 @@ maybe `dev-docs/`. The user drives that final edit pass.
 End with a one-line summary:
 
 ```
-Bumped CURRENT → NEXT. 5 files changed. Review + commit when ready.
+Bumped CURRENT → NEXT. 6 files changed. Review + commit when ready.
 ```
 
 ## Rules
@@ -233,12 +234,13 @@ Bumped CURRENT → NEXT. 5 files changed. Review + commit when ready.
   must exceed `CURRENT` (whether `CURRENT` is a plain release or an
   earlier `-beta`). If the user really wants a backwards bump, they
   can edit the files directly.
-- Refuse if the working tree is dirty in any of the five touched
+- Refuse if the working tree is dirty in any of the six touched
   files (Cargo.toml, package.json, src-tauri/tauri.conf.json,
-  CHANGELOG.md, README.md) — let the user commit or stash first so
-  the bump diff is isolated.
+  CHANGELOG.md, README.md,
+  web/src/app/(reader)/app/install/page.mdx) — let the user commit
+  or stash first so the bump diff is isolated.
 - Do not touch any other file, and do not touch other parts of the
-  five files. Specifically: in README.md only the status banner
+  six files. Specifically: in README.md only the status banner
   line is in scope; do not retouch install snippets, version
   strings in code blocks, or anything else. Version strings in doc
   examples (e.g. `dev-docs/*.md`) are intentionally pinned and must

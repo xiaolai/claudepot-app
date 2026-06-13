@@ -81,19 +81,19 @@ pub fn token_preview(token: &str) -> String {
     format!("{prefix}{head}…{tail}")
 }
 
+/// Length-scaled disclosure for values without a recognized prefix
+/// (malformed pastes). Mirrors `env_vault::store::secret_preview` —
+/// change both together: fully mask under 16 chars (the old 4+4 rule
+/// left a 9-char value with a single masked char), then reveal at
+/// most `min(4, len / 8)` chars per side so at least 12 stay masked.
 fn safe_generic_preview(token: &str) -> String {
-    if token.len() <= 8 {
+    let char_count = token.chars().count();
+    if char_count < 16 {
         return "…".to_string();
     }
-    let head: String = token.chars().take(4).collect();
-    let tail: String = token
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
+    let per_side = 4.min(char_count / 8);
+    let head: String = token.chars().take(per_side).collect();
+    let tail: String = token.chars().skip(char_count - per_side).collect();
     format!("{head}…{tail}")
 }
 
@@ -154,5 +154,22 @@ mod tests {
         let preview = token_preview("sk-not-a-real-prefix-abcdefg");
         assert!(preview.contains('…'));
         assert!(!preview.contains("abcdefg"));
+    }
+
+    #[test]
+    fn preview_short_unknown_value_is_fully_masked() {
+        // The old generic rule revealed 4+4 of anything over 8 chars —
+        // a 9-char malformed paste kept only 1 char masked. Anything
+        // under 16 chars is now fully masked.
+        assert_eq!(token_preview("123456789"), "…");
+        assert_eq!(token_preview("123456789012345"), "…");
+    }
+
+    #[test]
+    fn preview_unknown_value_scales_disclosure_with_length() {
+        // 16–23 chars → 2 per side; 24–31 → 3; 32+ → 4.
+        assert_eq!(token_preview("1234567890123456"), "12…56");
+        let preview = token_preview("a-32-char-malformed-paste-value!");
+        assert_eq!(preview, "a-32…lue!");
     }
 }

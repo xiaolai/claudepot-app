@@ -39,14 +39,12 @@ const FIRST_TICK_DELAY: Duration = Duration::from_secs(8);
 const FALLBACK_INTERVAL: Duration = Duration::from_secs(60 * 5);
 
 pub fn spawn(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(FIRST_TICK_DELAY).await;
-
-        loop {
-            let interval = tick(&app).await;
-            tokio::time::sleep(interval).await;
-        }
-    });
+    crate::poller::spawn_poller(
+        app,
+        "service_status_watcher",
+        FIRST_TICK_DELAY,
+        |app| async move { tick(&app).await },
+    );
 }
 
 /// Run one cycle. Returns the duration to sleep before the next cycle.
@@ -78,7 +76,7 @@ async fn tick(app: &AppHandle) -> Duration {
                 }
             }
 
-            if let Err(e) = app.emit("service-status::updated", ()) {
+            if let Err(e) = app.emit(crate::events::SERVICE_STATUS_UPDATED, ()) {
                 tracing::warn!(error = %e, "service_status_watcher: emit failed");
             }
         }
@@ -95,7 +93,7 @@ async fn tick(app: &AppHandle) -> Duration {
             // state via `service_status_summary_get`; the event is
             // just a refresh ping, which is why we use the same
             // channel as success.
-            if let Err(e) = app.emit("service-status::updated", ()) {
+            if let Err(e) = app.emit(crate::events::SERVICE_STATUS_UPDATED, ()) {
                 tracing::warn!(error = %e, "service_status_watcher: emit (failure path) failed");
             }
         }
@@ -270,5 +268,103 @@ fn tier_human(t: core::StatusTier) -> &'static str {
         core::StatusTier::Degraded => "degraded",
         core::StatusTier::Down => "down",
         core::StatusTier::Unknown => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(description: &str, components: Vec<core::Component>) -> core::StatusSummary {
+        core::StatusSummary {
+            page: core::PageInfo {
+                id: "pg".to_string(),
+                name: "Claude".to_string(),
+                url: "https://status.claude.com".to_string(),
+                updated_at: None,
+            },
+            status: core::StatusIndicator {
+                indicator: "none".to_string(),
+                description: description.to_string(),
+            },
+            components,
+            incidents: Vec::new(),
+            scheduled_maintenances: Vec::new(),
+        }
+    }
+
+    fn component(name: &str, status: &str) -> core::Component {
+        core::Component {
+            id: format!("c-{name}"),
+            name: name.to_string(),
+            status: status.to_string(),
+            description: None,
+        }
+    }
+
+    #[test]
+    fn test_transition_message_recovery_names_previous_tier() {
+        let s = summary("All Systems Operational", vec![]);
+        let (title, body) =
+            transition_message(core::StatusTier::Degraded, core::StatusTier::Ok, &s);
+        assert_eq!(title, "Claude services back to normal");
+        assert_eq!(
+            body,
+            "Recovered from degraded. Status: All Systems Operational."
+        );
+    }
+
+    #[test]
+    fn test_transition_message_degraded_lists_affected_components() {
+        let s = summary(
+            "Partial outage",
+            vec![
+                component("API", "partial_outage"),
+                component("Console", "operational"),
+                component("claude.ai", "degraded_performance"),
+            ],
+        );
+        let (title, body) =
+            transition_message(core::StatusTier::Ok, core::StatusTier::Degraded, &s);
+        assert_eq!(title, "Claude services degraded");
+        // Only the non-Ok components appear, in summary order.
+        assert_eq!(body, "Affected: API, claude.ai. Partial outage");
+    }
+
+    #[test]
+    fn test_transition_message_truncates_affected_to_three() {
+        let s = summary(
+            "Major outage",
+            vec![
+                component("A", "major_outage"),
+                component("B", "major_outage"),
+                component("C", "major_outage"),
+                component("D", "major_outage"),
+                component("E", "major_outage"),
+            ],
+        );
+        let (title, body) = transition_message(core::StatusTier::Ok, core::StatusTier::Down, &s);
+        assert_eq!(title, "Claude services down");
+        // take(3) truncation — D and E are dropped.
+        assert_eq!(body, "Affected: A, B, C. Major outage");
+    }
+
+    #[test]
+    fn test_transition_message_empty_components_falls_back_to_description() {
+        let s = summary("Investigating elevated errors", vec![]);
+        let (_, body) = transition_message(core::StatusTier::Ok, core::StatusTier::Degraded, &s);
+        assert_eq!(body, "Investigating elevated errors");
+    }
+
+    #[test]
+    fn test_transition_message_all_ok_components_falls_back_to_description() {
+        // Components exist but none are degraded (page-level indicator
+        // drove the tier) — same fallback as the empty list.
+        let s = summary(
+            "Elevated error rates",
+            vec![component("API", "operational")],
+        );
+        let (_, body) = transition_message(core::StatusTier::Ok, core::StatusTier::Degraded, &s);
+        assert_eq!(body, "Elevated error rates");
     }
 }

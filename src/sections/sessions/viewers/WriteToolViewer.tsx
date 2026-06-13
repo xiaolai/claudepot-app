@@ -2,7 +2,7 @@ import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
 import { CopyButton } from "../../../components/CopyButton";
-import { redactSecrets } from "./redact";
+import { redactSecrets } from "../../../lib/redactSecrets";
 import { parseToolInput, type WriteInput } from "./toolInput";
 
 const CONTENT_CLAMP = 4000;

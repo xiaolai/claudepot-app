@@ -1,7 +1,8 @@
 //! SQLite-backed registry for named env secrets — the local vault.
 //!
 //! File: `~/.claudepot/env-vault.db` (overridable via
-//! `CLAUDEPOT_DATA_DIR`), 0600 on Unix. The secret lives in the
+//! `CLAUDEPOT_DATA_DIR`), 0600 on Unix and user-only DACL on Windows
+//! (via `crate::secure_perms`). The secret lives in the
 //! `secret` column, mirroring `keys::store` — that module migrated
 //! *away* from the OS Keychain to an at-rest 0600 SQLite column, so
 //! the env vault follows the same de-facto pattern rather than the
@@ -40,20 +41,67 @@ pub struct VaultSecret {
 }
 
 /// A short, non-reversible preview of a secret for display:
-/// `abcd…wxyz`. Secrets of 8 chars or fewer are fully masked so a
-/// short secret can't be reconstructed from the preview.
+/// `abcd…wxyz`. The preview persists in the DB, crosses IPC, and
+/// renders in the UI, so disclosure scales with length:
+///
+/// * under 16 chars — fully masked (`••••`). The old 4+4 rule left a
+///   9-char secret with a single masked character; short passwords
+///   and PIN-like values must never be near-fully disclosed.
+/// * 16+ chars — head + tail of `min(4, len / 8)` chars per side, so
+///   at most 25% of the secret is revealed and at least 12 chars stay
+///   masked. Real API keys (40+ chars) keep the familiar 4+4 shape.
+///
+/// Mirrors `keys::format::safe_generic_preview` — change both
+/// together.
 ///
 /// Never collects the whole secret into an owned buffer — only the
-/// 4-char head and 4-char tail are ever materialized, so the
-/// plaintext doesn't get a second heap copy that outlives the call.
+/// short head and tail are ever materialized, so the plaintext
+/// doesn't get a second heap copy that outlives the call.
 pub fn secret_preview(secret: &str) -> String {
     let char_count = secret.chars().count();
-    if char_count <= 8 {
+    if char_count < 16 {
         return "••••".to_string();
     }
-    let head: String = secret.chars().take(4).collect();
-    let tail: String = secret.chars().skip(char_count - 4).collect();
+    let per_side = 4.min(char_count / 8);
+    let head: String = secret.chars().take(per_side).collect();
+    let tail: String = secret.chars().skip(char_count - per_side).collect();
     format!("{head}…{tail}")
+}
+
+/// Recompute every stored `secret_preview` that no longer matches the
+/// current preview policy. The preview column persists across
+/// releases, so rows written under the old over-revealing 4+4 rule
+/// (a 9-char secret kept only 1 char masked) would otherwise keep
+/// disclosing short secrets in the UI until the next `update`.
+/// Idempotent; the vault is small, so a full pass per open is cheap.
+fn normalize_previews(db: &Connection) -> Result<(), VaultError> {
+    let mut stale: Vec<(String, String)> = Vec::new();
+    {
+        let mut stmt = db.prepare("SELECT name, secret, secret_preview FROM env_secrets")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (name, secret, stored) = row?;
+            let want = secret_preview(&secret);
+            if want != stored {
+                stale.push((name, want));
+            }
+            // `secret` drops here — this module is the value's
+            // at-rest home; no copy leaves the function.
+        }
+    }
+    for (name, preview) in stale {
+        db.execute(
+            "UPDATE env_secrets SET secret_preview = ?1 WHERE name = ?2",
+            params![preview, name],
+        )?;
+    }
+    Ok(())
 }
 
 pub struct VaultStore {
@@ -65,23 +113,23 @@ impl VaultStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        // Pre-create the DB file with user-only perms BEFORE rusqlite
+        // opens it at umask defaults — same M9 fix as
+        // `session_index::SessionIndex::open`. The WAL/SHM sidecars
+        // inherit the main file's mode, so this closes the window
+        // that matters.
+        crate::secure_perms::precreate_user_only(path);
+
         let db = Connection::open(path)?;
         apply_standard_pragmas(&db)?;
         db.execute_batch(SCHEMA)?;
+        normalize_previews(&db)?;
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let secure = |p: &Path| -> Result<(), VaultError> {
-                if p.exists() {
-                    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600))?;
-                }
-                Ok(())
-            };
-            secure(path)?;
-            secure(&path.with_extension("db-wal"))?;
-            secure(&path.with_extension("db-shm"))?;
-        }
+        // 0600 on Unix, user-only DACL on Windows — backstop for the
+        // pre-existing-file case the pre-create doesn't touch.
+        crate::secure_perms::harden_user_only(path)?;
+        crate::secure_perms::harden_user_only(&path.with_extension("db-wal"))?;
+        crate::secure_perms::harden_user_only(&path.with_extension("db-shm"))?;
 
         Ok(Self { db: Mutex::new(db) })
     }
@@ -238,7 +286,44 @@ mod tests {
     fn secret_preview_masks_short_and_truncates_long() {
         assert_eq!(secret_preview(""), "••••");
         assert_eq!(secret_preview("12345678"), "••••");
-        assert_eq!(secret_preview("sk-ant-api03-abcdef"), "sk-a…cdef");
+        // The audit case: the old 4+4 rule rendered a 9-char secret
+        // as `1234…6789` — 8 of 9 chars disclosed. Anything under 16
+        // chars is now fully masked.
+        assert_eq!(secret_preview("123456789"), "••••");
+        assert_eq!(secret_preview("123456789012345"), "••••");
+        // 16–23 chars → 2+2; 24–31 → 3+3; 32+ → 4+4.
+        assert_eq!(secret_preview("1234567890123456"), "12…56");
+        assert_eq!(secret_preview("sk-ant-api03-abcdef"), "sk…ef");
+        assert_eq!(secret_preview("abcdefghijklmnopqrstuvwx"), "abc…vwx");
+        assert_eq!(
+            secret_preview("abcdefghijklmnopqrstuvwxyz012345"),
+            "abcd…2345"
+        );
+    }
+
+    #[test]
+    fn secret_preview_never_reveals_more_than_a_quarter() {
+        // Behavioral lock for the disclosure budget: at every length,
+        // the preview reveals at most len/4 chars and leaves at least
+        // 12 masked — or is fully masked below 16.
+        for len in 1..=64usize {
+            let secret: String = "abcdefgh".chars().cycle().take(len).collect();
+            let preview = secret_preview(&secret);
+            if len < 16 {
+                assert_eq!(preview, "••••", "len {len} must be fully masked");
+                continue;
+            }
+            let revealed = preview.chars().filter(|c| *c != '…').count();
+            assert!(
+                revealed * 4 <= len,
+                "len {len}: revealed {revealed} chars exceeds 25%"
+            );
+            assert!(
+                len - revealed >= 12,
+                "len {len}: only {} chars masked",
+                len - revealed
+            );
+        }
     }
 
     #[test]
@@ -248,7 +333,8 @@ mod tests {
             .insert("OPENAI_API_KEY", "sk-proj-secret-value")
             .unwrap();
         assert_eq!(rec.name, "OPENAI_API_KEY");
-        assert_eq!(rec.secret_preview, "sk-p…alue");
+        // 20 chars → 2+2 under the length-scaled disclosure rule.
+        assert_eq!(rec.secret_preview, "sk…ue");
         let list = store.list().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "OPENAI_API_KEY");
@@ -286,7 +372,8 @@ mod tests {
         let (store, _d) = tmp_store();
         store.insert("KEY", "old-secret-value").unwrap();
         let updated = store.update("KEY", "brand-new-secret").unwrap();
-        assert_eq!(updated.secret_preview, "bran…cret");
+        // 16 chars → 2+2 under the length-scaled disclosure rule.
+        assert_eq!(updated.secret_preview, "br…et");
         assert_eq!(store.reveal("KEY").unwrap(), "brand-new-secret");
         assert!(updated.updated_at >= updated.created_at);
     }
@@ -331,6 +418,33 @@ mod tests {
         let list = store.list().unwrap();
         assert_eq!(list[0].name, "FIRST");
         assert_eq!(list[1].name, "SECOND");
+    }
+
+    /// Rows persisted under the old 4+4 preview rule must be
+    /// re-masked on open — the stored preview is what the UI shows,
+    /// so a short secret written by an older build would otherwise
+    /// keep leaking 8 of its chars forever.
+    #[test]
+    fn open_normalizes_stale_previews_from_older_builds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("env-vault.db");
+        {
+            let store = VaultStore::open(&path).unwrap();
+            store.insert("SHORT_PIN", "123456789").unwrap();
+            // Simulate the old build's over-revealing stored preview.
+            store
+                .db()
+                .execute(
+                    "UPDATE env_secrets SET secret_preview = '1234…6789' \
+                     WHERE name = 'SHORT_PIN'",
+                    [],
+                )
+                .unwrap();
+        }
+        let store = VaultStore::open(&path).unwrap();
+        assert_eq!(store.get("SHORT_PIN").unwrap().secret_preview, "••••");
+        // And the secret itself is untouched.
+        assert_eq!(store.reveal("SHORT_PIN").unwrap(), "123456789");
     }
 
     #[cfg(unix)]

@@ -11,7 +11,13 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import {
+  renderHook,
+  act,
+  waitFor,
+  screen,
+  fireEvent,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import { shouldCheckNow, UpdateProvider, useUpdater } from "./UpdateProvider";
@@ -20,12 +26,14 @@ const releaseUpdateCheckMock = vi.fn();
 const releaseUpdateInstallMock = vi.fn();
 const releaseChannelGetMock = vi.fn();
 const releaseChannelSetMock = vi.fn();
+const relaunchBusyOpsMock = vi.fn();
 const updaterSupportedMock = vi.fn().mockResolvedValue(true);
 const listenMock = vi.fn();
 const unlistenSpy = vi.fn();
+const relaunchMock = vi.fn();
 
 vi.mock("@tauri-apps/plugin-process", () => ({
-  relaunch: vi.fn().mockResolvedValue(undefined),
+  relaunch: (...args: unknown[]) => relaunchMock(...args),
 }));
 
 // `listen` is the download-progress channel. Most tests never drive
@@ -45,12 +53,55 @@ vi.mock("../api", () => ({
     releaseUpdateInstall: () => releaseUpdateInstallMock(),
     releaseChannelGet: () => releaseChannelGetMock(),
     releaseChannelSet: (...args: unknown[]) => releaseChannelSetMock(...args),
+    relaunchBusyOps: () => relaunchBusyOpsMock(),
   },
 }));
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <UpdateProvider>{children}</UpdateProvider>
 );
+
+/** A no-update check result — the common backdrop for scheduler tests. */
+const UP_TO_DATE_DTO = {
+  updateAvailable: false,
+  version: null,
+  currentVersion: "0.1.39",
+  notes: null,
+  pubDate: null,
+  channel: "stable",
+  strandedOnPrerelease: false,
+  stableVersion: null,
+};
+
+/**
+ * Reset every mock to its baseline. Shared by the per-describe
+ * `beforeEach` hooks so the fake-timer describes don't drift from
+ * the lifecycle describe's setup.
+ */
+function resetUpdateMocks() {
+  releaseUpdateCheckMock.mockReset();
+  releaseUpdateInstallMock.mockReset();
+  releaseChannelGetMock.mockReset();
+  releaseChannelSetMock.mockReset();
+  relaunchBusyOpsMock.mockReset();
+  updaterSupportedMock.mockReset();
+  listenMock.mockReset();
+  unlistenSpy.mockReset();
+  relaunchMock.mockReset();
+  listenMock.mockResolvedValue(unlistenSpy);
+  updaterSupportedMock.mockResolvedValue(true);
+  releaseChannelGetMock.mockResolvedValue("stable");
+  releaseChannelSetMock.mockImplementation((channel: string) =>
+    Promise.resolve(channel),
+  );
+  relaunchBusyOpsMock.mockResolvedValue([]);
+  relaunchMock.mockResolvedValue(undefined);
+  try {
+    localStorage.clear();
+  } catch {
+    // jsdom storage may not be present in some envs.
+  }
+}
 
 describe("shouldCheckNow", () => {
   it("returns false when auto-check is disabled", () => {
@@ -90,24 +141,7 @@ describe("shouldCheckNow", () => {
 
 describe("UpdateProvider — checkNow lifecycle", () => {
   beforeEach(() => {
-    releaseUpdateCheckMock.mockReset();
-    releaseUpdateInstallMock.mockReset();
-    releaseChannelGetMock.mockReset();
-    releaseChannelSetMock.mockReset();
-    updaterSupportedMock.mockReset();
-    listenMock.mockReset();
-    unlistenSpy.mockReset();
-    listenMock.mockResolvedValue(unlistenSpy);
-    updaterSupportedMock.mockResolvedValue(true);
-    releaseChannelGetMock.mockResolvedValue("stable");
-    releaseChannelSetMock.mockImplementation((channel: string) =>
-      Promise.resolve(channel),
-    );
-    try {
-      localStorage.clear();
-    } catch {
-      // jsdom storage may not be present in some envs.
-    }
+    resetUpdateMocks();
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -327,5 +361,264 @@ describe("UpdateProvider — checkNow lifecycle", () => {
     expect(result.current.error).toBe("install failed");
     // The listener is torn down on the failure path too (`finally`).
     expect(unlistenSpy).toHaveBeenCalled();
+  });
+
+  it("setReleaseChannel resets a prior check result back to idle", async () => {
+    releaseUpdateCheckMock.mockResolvedValue({
+      updateAvailable: true,
+      version: "0.2.0-beta.1",
+      currentVersion: "0.1.46",
+      notes: "",
+      pubDate: null,
+      channel: "beta",
+      strandedOnPrerelease: false,
+      stableVersion: null,
+    });
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(result.current.status).toBe("available");
+    expect(result.current.updateInfo).not.toBeNull();
+
+    // Switching channels must not leave the *other* channel's
+    // "Update available" card (and its stale Rust-side handle)
+    // standing — the renderer resets until a fresh check runs.
+    await act(async () => {
+      result.current.setReleaseChannel("stable");
+    });
+    expect(result.current.status).toBe("idle");
+    expect(result.current.updateInfo).toBeNull();
+    expect(result.current.downloadProgress).toBeNull();
+  });
+
+  it("exposes stranded info when the check reports stranded-on-prerelease", async () => {
+    releaseUpdateCheckMock.mockResolvedValue({
+      updateAvailable: false,
+      version: null,
+      currentVersion: "0.2.0-beta.1",
+      notes: null,
+      pubDate: null,
+      channel: "stable",
+      strandedOnPrerelease: true,
+      stableVersion: "0.1.46",
+    });
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    // Status is up-to-date at the machine level, but the stranded
+    // marker lets the badge avoid the false "latest version" claim.
+    expect(result.current.status).toBe("up-to-date");
+    expect(result.current.stranded).toEqual({ stableVersion: "0.1.46" });
+
+    // A later non-stranded check clears the marker.
+    releaseUpdateCheckMock.mockResolvedValue(UP_TO_DATE_DTO);
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(result.current.stranded).toBeNull();
+  });
+
+  it("applyUpdate relaunches directly when no background ops are running", async () => {
+    relaunchBusyOpsMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await result.current.applyUpdate();
+    });
+    expect(relaunchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("applyUpdate warn-confirms instead of relaunching while ops are in flight", async () => {
+    relaunchBusyOpsMock.mockResolvedValue(["Renaming proj-a → proj-b"]);
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await result.current.applyUpdate();
+    });
+    // No relaunch yet — the provider renders the confirm dialog.
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Renaming proj-a → proj-b")).toBeInTheDocument();
+
+    // Cancel keeps the app alive and closes the dialog.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Re-trigger and confirm — only then does the relaunch fire.
+    await act(async () => {
+      await result.current.applyUpdate();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
+    });
+    expect(relaunchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("applyUpdate still relaunches when the busy probe itself fails", async () => {
+    // A broken probe must not strand the user behind a dead
+    // "Restart to update" button.
+    relaunchBusyOpsMock.mockRejectedValue(new Error("ipc down"));
+    const { result } = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await result.current.applyUpdate();
+    });
+    expect(relaunchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Timing-sensitive paths: the startup auto-check (2 s hydration
+ * delay, fires at most once per launch) and scheduleRetry's
+ * 5 s → 10 s → 20 s exponential backoff with RETRY_MAX give-up.
+ * Everything here runs under fake timers; `advanceTimersByTimeAsync`
+ * also flushes the microtasks the mocked api promises resolve on.
+ */
+describe("UpdateProvider — startup auto-check and retry backoff", () => {
+  beforeEach(() => {
+    resetUpdateMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Mount the hook and let the support probe + channel load settle. */
+  async function mountSettled() {
+    const rendered = renderHook(() => useUpdater(), { wrapper });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(rendered.result.current.supported).toBe(true);
+    return rendered;
+  }
+
+  it("fires the startup auto-check exactly once, after the 2 s delay", async () => {
+    releaseUpdateCheckMock.mockResolvedValue(UP_TO_DATE_DTO);
+    const { result } = await mountSettled();
+    expect(releaseUpdateCheckMock).not.toHaveBeenCalled();
+
+    // Not a millisecond early…
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_999);
+    });
+    expect(releaseUpdateCheckMock).not.toHaveBeenCalled();
+
+    // …fires at exactly STARTUP_DELAY_MS…
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(1);
+    expect(result.current.status).toBe("up-to-date");
+
+    // …and never again this launch.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not auto-check at all when frequency is 'manual'", async () => {
+    localStorage.setItem("claudepot.update.checkFrequency", "manual");
+    releaseUpdateCheckMock.mockResolvedValue(UP_TO_DATE_DTO);
+    await mountSettled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+    });
+    expect(releaseUpdateCheckMock).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed background check at 5 s / 10 s / 20 s, then gives up", async () => {
+    releaseUpdateCheckMock.mockRejectedValue(new Error("offline"));
+    const { result } = await mountSettled();
+
+    // Startup check fails → first retry armed at +5 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_999);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(2);
+
+    // Second retry at +10 s, third at +20 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(4);
+
+    // RETRY_MAX reached — the backoff never hammers GitHub again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(4);
+    expect(result.current.status).toBe("error");
+  });
+
+  it("a successful check cancels the pending retry and resets the backoff", async () => {
+    releaseUpdateCheckMock.mockRejectedValueOnce(new Error("offline"));
+    releaseUpdateCheckMock.mockResolvedValue(UP_TO_DATE_DTO);
+    const { result } = await mountSettled();
+
+    // Startup check fails → retry pending at +5 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(1);
+
+    // The retry fires and succeeds — the success path cancels the
+    // backoff state, so nothing further is ever queued.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("up-to-date");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a manual checkNow cancels the pending retry and does not re-arm it", async () => {
+    releaseUpdateCheckMock.mockRejectedValue(new Error("offline"));
+    const { result } = await mountSettled();
+
+    // Startup check fails → retry pending at +5 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(1);
+
+    // Manual check 1 s later supersedes the queued retry. It also
+    // fails — but manual failures never auto-retry.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(2);
+
+    // Neither the original +5 s slot nor any backoff window fires.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    });
+    expect(releaseUpdateCheckMock).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("error");
   });
 });

@@ -28,7 +28,17 @@ globs: "crates/claudepot-cli/**/*.rs"
    Submodules access the entry file's private helpers via
    `use super::*;` — Rust's privacy is outward-not-upward, so
    children reach the parent's private items without `pub(super)`.
-2. Takes parsed clap args + shared `AppContext` (store, http client, platform)
+2. Takes parsed clap args + shared `AppContext` (store, usage cache,
+   and the global `json` / `quiet` / `yes` flags). Handlers read the
+   global flags from `ctx`, never from their own duplicate clap args.
+   Exceptions: the `mcp` / `codex` verbs are dispatched before
+   `AccountStore::open` (no ctx exists yet — `main.rs` passes the
+   already-parsed global flags straight in), and pure plumbing verbs
+   with no output policy (`agent _record-run`) take neither.
+   For verbs with many flags, group them in a `#[derive(clap::Args)]`
+   struct next to the handler and `#[command(flatten)]` it into the
+   enum variant (see `DraftArgs` / `ExportArgs`) instead of
+   `#[allow(clippy::too_many_arguments)]`.
 3. Returns `anyhow::Result<()>`
 4. Calls ONLY `claudepot-core` functions — no direct I/O
 5. Uses `output.rs` helpers for human vs `--json` formatting

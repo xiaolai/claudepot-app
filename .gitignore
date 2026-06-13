@@ -46,7 +46,13 @@ typescript
 /scripts/*
 !/scripts/generate-menu-icons.sh
 !/scripts/regen-icons.sh
+!/scripts/pre-push
+!/scripts/install-hooks.sh
 dev-docs/
+
+# Per-clone validator hosts for scripts/pre-push (internal hostnames —
+# never committed; real values documented in CLAUDE.local.md).
+.validator-hosts
 
 # Claude Code local override files (read alongside CLAUDE.md / AGENTS.md
 # but kept out of version control). The general pattern catches any

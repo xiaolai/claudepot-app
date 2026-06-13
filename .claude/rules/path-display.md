@@ -86,11 +86,14 @@ breadcrumb segment that's the only place the path appears.
 - `.mono.selectable` — span class that combines monospace font and
   `user-select: text`. Pair with `direction` flip if you need
   middle-truncation.
-- `formatPathDisplay(path, maxChars)` — when a string-level truncation
-  is needed (e.g. inside a toast template), use the helper rather
-  than CSS-only ellipsis so the result is accessible to screen
-  readers as the truncated form (plus `aria-label` carrying the
-  full path).
+- String-level truncation (e.g. inside a toast template): no shared
+  helper exists yet. If you need one, add it to `src/lib/` as
+  `formatPathDisplay(path, maxChars)` — middle-truncate preserving
+  the basename (per the left-truncation guidance above) — rather
+  than writing an ad-hoc truncator at the call site. Whatever
+  produces the truncated string, make it accessible: the visible
+  text is the truncated form, with `aria-label` (or `title`)
+  carrying the full path.
 
 ## Surfaces already correct
 

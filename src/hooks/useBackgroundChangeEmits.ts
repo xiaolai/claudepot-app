@@ -11,10 +11,10 @@
 // bell-icon popover surfaces them without spraying toasts or OS
 // banners for routine writes.
 
-import { useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { Event as TauriEvent } from "@tauri-apps/api/event";
 
 import { useEmit } from "../providers/AppStateProvider";
+import { useTauriEvents } from "./useTauriEvent";
 
 /** Mirrors the Rust event payload at `memory_watch.rs::emit_memory_changed`. */
 interface MemoryChangedPayload {
@@ -49,25 +49,13 @@ interface ConfigTreePatchPayload {
 export function useBackgroundChangeEmits(): void {
   const emit = useEmit();
 
-  useEffect(() => {
-    let active = true;
-    const unlisteners: UnlistenFn[] = [];
-
-    const wire = <T>(channel: string, handler: (p: T) => void) => {
-      void listen<T>(channel, (ev) => {
-        if (!active || !ev.payload) return;
-        handler(ev.payload);
-      })
-        .then((fn) => {
-          if (!active) fn();
-          else unlisteners.push(fn);
-        })
-        .catch(() => {
-          /* non-tauri env */
-        });
-    };
-
-    wire<MemoryChangedPayload>("memory:changed", (p) => {
+  // Lifetime subscriptions via the shared multi-channel primitive —
+  // handlers are held in a ref, so the per-render closures below
+  // never re-wire the channels and always see the latest emit().
+  useTauriEvents({
+    "memory:changed": (ev: TauriEvent<MemoryChangedPayload>) => {
+      if (!ev.payload) return;
+      const p = ev.payload;
       // Filter ChangeType::Deleted's "no path" emits — CC sometimes
       // emits transient deletions during atomic writes that
       // immediately re-create. Keep the bell entry for true
@@ -88,9 +76,10 @@ export function useBackgroundChangeEmits(): void {
         body: p.abs_path,
         dedupeKey: `memory:${p.abs_path}:${p.change_type}`,
       });
-    });
-
-    wire<ConfigTreePatchPayload>("config-tree-patch", (p) => {
+    },
+    "config-tree-patch": (ev: TauriEvent<ConfigTreePatchPayload>) => {
+      if (!ev.payload) return;
+      const p = ev.payload;
       // Skip full_snapshot patches — those are the initial hydrate,
       // not a user-visible change. We only log incremental diffs.
       if (p.full_snapshot) return;
@@ -113,11 +102,6 @@ export function useBackgroundChangeEmits(): void {
         // collapse into one bell row inside the rate window.
         dedupeKey: `config:${firstPath || "any"}`,
       });
-    });
-
-    return () => {
-      active = false;
-      unlisteners.forEach((fn) => fn());
-    };
-  }, [emit]);
+    },
+  });
 }

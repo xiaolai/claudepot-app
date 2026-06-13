@@ -5,28 +5,73 @@
 
 use super::*;
 
-#[allow(clippy::too_many_arguments)]
-pub fn slim_cmd(
-    ctx: &AppContext,
-    target: Option<&str>,
-    all: bool,
-    older_than: Option<&str>,
-    larger_than: Option<&str>,
-    project: Vec<String>,
-    drop_over: Option<&str>,
-    exclude_tool: Vec<String>,
-    strip_images: bool,
-    strip_documents: bool,
-    execute: bool,
-) -> Result<()> {
+/// Flag bundle for `claudepot session slim`, flattened into the
+/// `SessionAction::Slim` variant in `main.rs`.
+#[derive(Debug, clap::Args)]
+pub struct SlimArgs {
+    /// Session UUID or absolute `.jsonl` path. Omit with `--all`.
+    #[arg(conflicts_with = "all")]
+    pub target: Option<String>,
+    /// Run against every session matching the filter flags below.
+    /// Mutually exclusive with `<target>`.
+    #[arg(long)]
+    pub all: bool,
+    /// Filter: only sessions whose last_ts is older than this (e.g. `7d`, `30d`).
+    /// Requires `--all`.
+    #[arg(long)]
+    pub older_than: Option<String>,
+    /// Filter: only sessions at least this size (`1MB`, `500KB`).
+    /// Requires `--all`.
+    #[arg(long)]
+    pub larger_than: Option<String>,
+    /// Filter: repeatable project path filter. Requires `--all`.
+    #[arg(long)]
+    pub project: Vec<String>,
+    /// Drop tool_result payloads larger than this. Accepts
+    /// `1MB`, `500KB`, `1024`. Default: 1MiB.
+    #[arg(long)]
+    pub drop_tool_results_over: Option<String>,
+    /// Repeatable: tool names whose results to preserve regardless.
+    #[arg(long)]
+    pub exclude_tool: Vec<String>,
+    /// Replace base64 image blocks with `[image]` text stubs.
+    /// Saves ~2000 tokens/image on `claude --resume` of this
+    /// session.
+    #[arg(long)]
+    pub strip_images: bool,
+    /// Replace document (PDF etc.) blocks with `[document]` text
+    /// stubs. Same ~2000-token-per-block accounting as images.
+    #[arg(long)]
+    pub strip_documents: bool,
+    /// Actually rewrite the file. Without this, slim only plans.
+    #[arg(long)]
+    pub execute: bool,
+}
+
+pub fn slim_cmd(ctx: &AppContext, args: SlimArgs) -> Result<()> {
     use claudepot_core::session_slim::SlimOpts;
+    let SlimArgs {
+        target,
+        all,
+        older_than,
+        larger_than,
+        project,
+        drop_tool_results_over: drop_over,
+        exclude_tool,
+        strip_images,
+        strip_documents,
+        execute,
+    } = args;
+    let target = target.as_deref();
+    let older_than = older_than.as_deref();
+    let larger_than = larger_than.as_deref();
     let mut opts = SlimOpts {
         exclude_tools: exclude_tool,
         strip_images,
         strip_documents,
         ..SlimOpts::default()
     };
-    if let Some(s) = drop_over {
+    if let Some(s) = drop_over.as_deref() {
         opts.drop_tool_results_over_bytes = parse_size(s)?;
     }
     if all {
@@ -67,7 +112,7 @@ fn slim_single_cmd(
     let plan = plan_slim(&path, opts).context("plan slim")?;
     if !execute {
         if ctx.json {
-            print_json(&plan);
+            print_json(&plan)?;
             return Ok(());
         }
         println!(
@@ -93,7 +138,7 @@ fn slim_single_cmd(
     let sink = claudepot_core::project_progress::NoopSink;
     let report = execute_slim(&data_dir, &path, opts, &sink).context("execute slim")?;
     if ctx.json {
-        print_json(&report);
+        print_json(&report)?;
         return Ok(());
     }
     println!(
@@ -135,7 +180,7 @@ fn slim_all_cmd(
 
     if !execute {
         if ctx.json {
-            print_json(&plan);
+            print_json(&plan)?;
             return Ok(());
         }
         println!("Plan (dry-run): {} session(s)", plan.entries.len());
@@ -183,7 +228,7 @@ fn slim_all_cmd(
     let sink = claudepot_core::project_progress::NoopSink;
     let report = execute_slim_all(&data_dir, &plan, opts, &sink);
     if ctx.json {
-        print_json(&report);
+        print_json(&report)?;
         return Ok(());
     }
     println!(

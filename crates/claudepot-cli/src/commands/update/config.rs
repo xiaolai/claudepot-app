@@ -4,21 +4,53 @@ use claudepot_core::updates::detect::detect_cli_installs;
 use claudepot_core::updates::settings_bridge;
 use claudepot_core::updates::state::UpdateState;
 
-// One arg per toggle is the right shape here — the CLI parser
-// hands them through individually because each maps to a distinct
-// `--cli-notify` / `--desktop-auto` / etc. flag, and bundling them
-// into a config struct would just hide the trivial pass-through.
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    ctx: &AppContext,
-    channel: Option<String>,
-    allow_downgrade: bool,
-    cli_notify: Option<bool>,
-    cli_notify_os: Option<bool>,
-    desktop_notify: Option<bool>,
-    desktop_notify_os: Option<bool>,
-    desktop_auto: Option<bool>,
-) -> Result<()> {
+/// Flag bundle for `claudepot update config`, flattened into the
+/// `UpdateAction::Config` variant in `main.rs`. Each field maps 1:1
+/// to a distinct toggle flag; the struct keeps the dispatch a
+/// single pass-through instead of a 7-way positional destructure.
+#[derive(Debug, clap::Args)]
+pub struct ConfigArgs {
+    /// CC release channel — writes `autoUpdatesChannel` to
+    /// `~/.claude/settings.json` (CC's own settings file, not
+    /// Claudepot's). Single source of truth — see
+    /// `dev-docs/auto-updates.md` mechanism callout #2.
+    #[arg(long, value_parser = ["latest", "stable"])]
+    pub channel: Option<String>,
+    /// For `--channel stable` from `latest`: explicitly accept
+    /// the downgrade. Without this, the CLI pins
+    /// `minimumVersion` to the currently-installed version so
+    /// you stay on it (CC's "stay" default).
+    #[arg(long)]
+    pub allow_downgrade: bool,
+    /// Toggle CLI tray-badge update notifications.
+    #[arg(long)]
+    pub cli_notify: Option<bool>,
+    /// Toggle CLI OS notifications (toast / banner) when an
+    /// update is detected. Independent from the badge.
+    #[arg(long)]
+    pub cli_notify_os: Option<bool>,
+    /// Toggle Desktop tray-badge update notifications.
+    #[arg(long)]
+    pub desktop_notify: Option<bool>,
+    /// Toggle Desktop OS notifications.
+    #[arg(long)]
+    pub desktop_notify_os: Option<bool>,
+    /// Toggle "auto-install Desktop in background when not
+    /// running" — the asymmetry-fix toggle.
+    #[arg(long)]
+    pub desktop_auto: Option<bool>,
+}
+
+pub async fn run(ctx: &AppContext, args: ConfigArgs) -> Result<()> {
+    let ConfigArgs {
+        channel,
+        allow_downgrade,
+        cli_notify,
+        cli_notify_os,
+        desktop_notify,
+        desktop_notify_os,
+        desktop_auto,
+    } = args;
     let mut wrote = false;
 
     if let Some(c) = channel.as_deref() {

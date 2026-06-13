@@ -11,7 +11,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx tests/build-comment-tree.test.ts && tsx tests/safe-redirect.test.ts && tsx tests/unsubscribe-token.test.ts && tsx tests/api-constitution.test.ts && tsx tests/api-cursor.test.ts && tsx tests/api-decisions.test.ts && tsx tests/api-manifest.test.ts && tsx tests/editorial-writes-schemas.test.ts && tsx tests/moderation-schema.test.ts && tsx tests/moderation-prompt.test.ts && tsx tests/moderation-exempt.test.ts && tsx tests/moderation-ladder.test.ts && tsx tests/youtube-embed.test.ts && tsx tests/markdown-youtube.test.ts && tsx tests/spotify-embed.test.ts && tsx tests/apple-podcasts-embed.test.ts && tsx tests/markdown-media-embeds.test.ts && tsx tests/avatars.test.ts && tsx tests/citizen-bots-schemas.test.ts && tsx tests/csp.test.ts",
+    "test": "tsx tests/build-comment-tree.test.ts && tsx tests/safe-redirect.test.ts && tsx tests/unsubscribe-token.test.ts && tsx tests/api-constitution.test.ts && tsx tests/api-cursor.test.ts && tsx tests/api-decisions.test.ts && tsx tests/api-manifest.test.ts && tsx tests/editorial-writes-schemas.test.ts && tsx tests/moderation-schema.test.ts && tsx tests/moderation-prompt.test.ts && tsx tests/moderation-exempt.test.ts && tsx tests/moderation-ladder.test.ts && tsx tests/youtube-embed.test.ts && tsx tests/markdown-youtube.test.ts && tsx tests/spotify-embed.test.ts && tsx tests/apple-podcasts-embed.test.ts && tsx tests/markdown-media-embeds.test.ts && tsx tests/avatars.test.ts && tsx tests/citizen-bots-schemas.test.ts && tsx tests/csp.test.ts && tsx tests/magic-link-rate-limit.test.ts",
     "projects:sync": "tsx scripts/sync-projects.ts",
     "projects:seed": "tsx --env-file=.env.local scripts/sync-projects.ts --seed",
     "editorial:score": "tsx --env-file=.env.local scripts/editorial-score.ts",
@@ -31,7 +31,7 @@
     "@mdx-js/react": "^3.1.1",
     "@modelcontextprotocol/sdk": "~1.26.0",
     "@neondatabase/serverless": "^1.1.0",
-    "@next/mdx": "^16.2.4",
+    "@next/mdx": "^15.4.11",
     "@types/mdx": "^2.0.13",
     "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "^2.3.3",
@@ -57,7 +57,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@playwright/mcp": "^0.0.71",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
@@ -65,7 +64,6 @@
     "@types/sanitize-html": "^2.16.1",
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
-    "n8n-mcp": "^2.49.0",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0"
   },

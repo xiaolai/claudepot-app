@@ -153,10 +153,12 @@ export function ProjectDetail({
     };
   }, [path, refreshSignal]);
 
-  // Pull the session index once per (project, refresh). Filtering by
-  // slug here keeps the join exact even when an old transcript's
-  // `cwd` differs slightly from the canonicalized `original_path`
-  // (case-folded on macOS, trailing-slash differences, etc.).
+  // Pull this project's slice of the session index once per
+  // (project, refresh). Joining on slug keeps the match exact even
+  // when an old transcript's `cwd` differs slightly from the
+  // canonicalized `original_path` (case-folded on macOS,
+  // trailing-slash differences, etc.); the slug filter runs in SQL on
+  // the backend so only this project's rows cross the IPC boundary.
   //
   // Clear `sessionRows` synchronously before each fetch so the heading
   // total + per-row costs never render against a previous project's
@@ -169,10 +171,10 @@ export function ProjectDetail({
     setSessionRows(null);
     let cancelled = false;
     api
-      .sessionListAll()
+      .sessionListBySlug(sanitizedName)
       .then((rows) => {
         if (cancelled) return;
-        setSessionRows(rows.filter((r) => r.slug === sanitizedName));
+        setSessionRows(rows);
       })
       .catch(() => {
         if (cancelled) return;

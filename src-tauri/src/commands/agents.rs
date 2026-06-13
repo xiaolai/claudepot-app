@@ -7,8 +7,8 @@
 use chrono::Utc;
 use claudepot_core::agent::{
     active_scheduler, apply_lifecycle_change, current_claudepot_cli, install_shim,
-    read_run as core_read_run, resolve_binary, scheduler::cron_next_runs, store::agent_runs_dir,
-    Agent, AgentBinary, AgentId, AgentPatch, AgentStore, CreatedVia, PlatformOptions, Trigger,
+    read_run as core_read_run, resolve_binary, scheduler::cron_next_runs, Agent, AgentBinary,
+    AgentId, AgentPatch, AgentStore, CreatedVia, PlatformOptions, Trigger,
 };
 use claudepot_core::routes::RouteStore;
 use uuid::Uuid;
@@ -741,30 +741,17 @@ pub async fn agents_runs_list(
 ) -> Result<Vec<AgentRunDto>, String> {
     let aid = parse_id(&id)?;
     let cap = limit.unwrap_or(50);
-    let runs_dir = agent_runs_dir(&aid);
-    if !runs_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut names: Vec<String> = std::fs::read_dir(&runs_dir)
-        .map_err(err)?
-        .flatten()
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
-        .filter(|n| !n.starts_with('.'))
-        .collect();
-    names.sort();
-    names.reverse();
-
-    let mut out = Vec::with_capacity(cap.min(names.len()));
-    for name in names.into_iter().take(cap) {
-        let result_path = runs_dir.join(&name).join("result.json");
-        if let Ok(raw) = std::fs::read(&result_path) {
-            if let Ok(run) = serde_json::from_slice::<claudepot_core::agent::AgentRun>(&raw) {
-                out.push(AgentRunDto::from(run));
-            }
-        }
-    }
-    Ok(out)
+    // Core owns the listing policy (`.latest`-symlink skip, newest-
+    // first sort) and `read_run` is the validated single-run reader.
+    // `.ok()` keeps the historical silent-skip on a missing or
+    // half-written result.json — one bad run must not 500 the list.
+    let names = claudepot_core::agent::list_run_ids(&aid).map_err(err)?;
+    Ok(names
+        .into_iter()
+        .take(cap)
+        .filter_map(|name| core_read_run(&aid, &name).ok())
+        .map(AgentRunDto::from)
+        .collect())
 }
 
 #[tauri::command]
@@ -900,15 +887,7 @@ pub async fn agents_linger_status() -> Result<bool, String> {
 pub async fn agents_linger_enable() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let user = std::env::var("USER").map_err(|e| e.to_string())?;
-        let status = std::process::Command::new("loginctl")
-            .args(["enable-linger", &user])
-            .status()
-            .map_err(|e| e.to_string())?;
-        if !status.success() {
-            return Err(format!("loginctl enable-linger exited {status}"));
-        }
-        Ok(())
+        claudepot_core::agent::scheduler::systemd::linger_enable().map_err(err)
     }
     #[cfg(not(target_os = "linux"))]
     {

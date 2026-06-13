@@ -12,6 +12,13 @@
 //! their `@include`'d copy disagrees with a future installer's
 //! output — a regen overwrites in place, and they `@include` from
 //! a fixed path.
+//!
+//! The *install* operation (path policy, validation, write) also
+//! lives here — see [`install`]. It was previously implemented
+//! twice (CLI verb + Tauri command) and had already drifted the
+//! same way the body once did.
+
+use std::path::{Path, PathBuf};
 
 /// Bump this when the snippet body changes meaningfully. The
 /// version stamp is the first comment line of the body.
@@ -136,9 +143,222 @@ inline.
     )
 }
 
+// ─── install ──────────────────────────────────────────────────
+
+/// File name of the installed snippet — identical in user and
+/// project scope so the `@`-import line is predictable.
+pub const SNIPPET_FILE_NAME: &str = "claudepot-mcp-instructions.md";
+
+/// Where [`install`] writes the snippet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallScope {
+    /// `<claude_config_dir>/claudepot-mcp-instructions.md`.
+    /// Honors `$CLAUDE_CONFIG_DIR`; defaults to `~/.claude/`, next
+    /// to the user's CLAUDE.md so the `@`-import resolves where CC
+    /// actually loads memory from.
+    User,
+    /// `<project_root>/.claude/claudepot-mcp-instructions.md`.
+    Project,
+}
+
+impl InstallScope {
+    /// Wire string used by the CLI output and the Tauri DTO.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InstallScope::User => "user",
+            InstallScope::Project => "project",
+        }
+    }
+}
+
+/// Result of a successful [`install`].
+#[derive(Debug, Clone)]
+pub struct InstallReport {
+    pub scope: InstallScope,
+    /// Where the snippet was written.
+    pub path: PathBuf,
+    pub bytes_written: usize,
+    /// The CC `@`-import line to paste into the target files.
+    /// Absolute for user scope and `out`; project-relative
+    /// (`@.claude/…`) for project scope.
+    pub include_line: String,
+    /// Files the user is expected to paste `include_line` into.
+    /// User scope: the three agent home configs that auto-load
+    /// every session. Project scope: only `AGENTS.md` (CLAUDE.md /
+    /// GEMINI.md are `@AGENTS.md` re-exports and shouldn't be
+    /// hand-edited). Empty for `out` — we can't know the layout
+    /// around an arbitrary path.
+    pub target_files: Vec<PathBuf>,
+}
+
+/// Failures from [`install`].
+#[derive(Debug, thiserror::Error)]
+pub enum InstallError {
+    #[error("could not resolve home directory")]
+    NoHomeDir,
+    #[error("project_path required for scope = \"project\"")]
+    MissingProjectPath,
+    #[error("project path must be absolute: {}", .0.display())]
+    ProjectPathNotAbsolute(PathBuf),
+    #[error("project path is not an existing directory: {}", .0.display())]
+    ProjectPathNotDir(PathBuf),
+    #[error("create parent of {}: {source}", .path.display())]
+    CreateParent {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("write {}: {source}", .path.display())]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Write the canonical snippet and report where it landed plus the
+/// `@`-import line and paste targets. The single install policy for
+/// both the CLI's `claudepot mcp install-snippet` verb and the
+/// Tauri Settings → MCP installer — the two previously implemented
+/// this independently and drifted (project scope, target hints,
+/// include-line format, `CLAUDE_CONFIG_DIR` handling).
+///
+/// * `out` is the power-user escape hatch: write to exactly this
+///   path, bypassing `scope` / `project_root`. No validation —
+///   trusted callers (a typed CLI flag) only. The Tauri command
+///   layer additionally requires renderer-supplied paths to be
+///   absolute before delegating here.
+/// * Project scope validates `project_root` at the codebase's
+///   defense-in-depth level for write paths: absolute AND an
+///   existing directory (`<root>/.claude/` is created if missing,
+///   the root itself never is).
+///
+/// Idempotent — re-running overwrites with the current canonical
+/// content.
+pub fn install(
+    scope: InstallScope,
+    project_root: Option<&Path>,
+    out: Option<&Path>,
+) -> Result<InstallReport, InstallError> {
+    let (path, target_files, include_line) = if let Some(out) = out {
+        (out.to_path_buf(), Vec::new(), format!("@{}", out.display()))
+    } else {
+        match scope {
+            InstallScope::User => {
+                // The codex/gemini paste targets live under the
+                // home dir; without a resolvable home there is
+                // nowhere sane to install. Fail loud.
+                let home = dirs::home_dir().ok_or(InstallError::NoHomeDir)?;
+                let config_dir = crate::paths::claude_config_dir();
+                let path = config_dir.join(SNIPPET_FILE_NAME);
+                let include_line = format!("@{}", path.display());
+                let target_files = vec![
+                    config_dir.join("CLAUDE.md"),
+                    home.join(".codex").join("AGENTS.md"),
+                    home.join(".gemini").join("GEMINI.md"),
+                ];
+                (path, target_files, include_line)
+            }
+            InstallScope::Project => {
+                let root = project_root.ok_or(InstallError::MissingProjectPath)?;
+                if !root.is_absolute() {
+                    return Err(InstallError::ProjectPathNotAbsolute(root.to_path_buf()));
+                }
+                if !root.is_dir() {
+                    return Err(InstallError::ProjectPathNotDir(root.to_path_buf()));
+                }
+                let path = root.join(".claude").join(SNIPPET_FILE_NAME);
+                // CC's @-import syntax inside a markdown file, not
+                // a filesystem operation — the forward slash is
+                // correct on every host OS. AGENTS.md sits at the
+                // project root, so the relative form resolves.
+                let include_line = format!("@.claude/{SNIPPET_FILE_NAME}");
+                let target_files = vec![root.join("AGENTS.md")];
+                (path, target_files, include_line)
+            }
+        }
+    };
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| InstallError::CreateParent {
+            path: path.clone(),
+            source,
+        })?;
+    }
+    let body = snippet_body();
+    std::fs::write(&path, &body).map_err(|source| InstallError::Write {
+        path: path.clone(),
+        source,
+    })?;
+
+    Ok(InstallReport {
+        scope,
+        path,
+        bytes_written: body.len(),
+        include_line,
+        target_files,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_install_out_writes_snippet_and_reports_import_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("custom.md");
+        let report = install(InstallScope::User, None, Some(&out)).unwrap();
+        assert_eq!(report.path, out);
+        assert_eq!(report.bytes_written, snippet_body().len());
+        assert_eq!(report.include_line, format!("@{}", out.display()));
+        assert!(report.target_files.is_empty(), "out scope has no targets");
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), snippet_body());
+        // Idempotent — second run overwrites cleanly.
+        install(InstallScope::User, None, Some(&out)).unwrap();
+    }
+
+    #[test]
+    fn test_install_project_scope_writes_under_dot_claude() {
+        let tmp = tempfile::tempdir().unwrap();
+        let report = install(InstallScope::Project, Some(tmp.path()), None).unwrap();
+        assert_eq!(
+            report.path,
+            tmp.path().join(".claude").join(SNIPPET_FILE_NAME)
+        );
+        assert!(report.path.is_file());
+        assert_eq!(
+            report.include_line,
+            format!("@.claude/{SNIPPET_FILE_NAME}"),
+            "project import line is project-relative"
+        );
+        assert_eq!(report.target_files, vec![tmp.path().join("AGENTS.md")]);
+    }
+
+    #[test]
+    fn test_install_project_scope_rejects_relative_root() {
+        let err = install(
+            InstallScope::Project,
+            Some(std::path::Path::new("relative/dir")),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, InstallError::ProjectPathNotAbsolute(_)));
+    }
+
+    #[test]
+    fn test_install_project_scope_rejects_missing_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gone = tmp.path().join("nope");
+        let err = install(InstallScope::Project, Some(&gone), None).unwrap_err();
+        assert!(matches!(err, InstallError::ProjectPathNotDir(_)));
+    }
+
+    #[test]
+    fn test_install_project_scope_requires_root() {
+        let err = install(InstallScope::Project, None, None).unwrap_err();
+        assert!(matches!(err, InstallError::MissingProjectPath));
+    }
 
     #[test]
     fn snippet_body_contains_version_stamp() {

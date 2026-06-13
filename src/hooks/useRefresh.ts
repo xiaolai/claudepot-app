@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { requestIdle, cancelIdle } from "../lib/idle";
 import { runVerifyAll } from "../sections/accounts/runVerifyAll";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
@@ -207,23 +208,15 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
         // result, so paying for it on the boot critical path just
         // delays ambient network for the same staleness gate that fires
         // on the next focus event.
-        const rIC: (cb: () => void) => number =
-          (window as typeof window & {
-            requestIdleCallback?: (cb: () => void) => number;
-          }).requestIdleCallback ?? ((cb) => window.setTimeout(cb, 0));
-        const cIC: (h: number) => void =
-          (window as typeof window & {
-            cancelIdleCallback?: (h: number) => void;
-          }).cancelIdleCallback ?? window.clearTimeout;
         // Cancel any prior pending verify-rIC: a refresh that fires
         // while one is still queued would otherwise run two verifies
         // back-to-back (the queued one against stale data, the new
         // one against fresh).
         if (verifyIdleRef.current !== null) {
-          cIC(verifyIdleRef.current);
+          cancelIdle(verifyIdleRef.current);
           verifyIdleRef.current = null;
         }
-        verifyIdleRef.current = rIC(() => {
+        verifyIdleRef.current = requestIdle(() => {
           verifyIdleRef.current = null;
           setVerifyingCount((n) => n + 1);
           runVerifyAll({
@@ -284,11 +277,7 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       // Drop any still-queued deferred verify so it can't fire after
       // teardown and call setVerifyingCount on a dead component.
       if (verifyIdleRef.current !== null) {
-        const cIC: (h: number) => void =
-          (window as typeof window & {
-            cancelIdleCallback?: (h: number) => void;
-          }).cancelIdleCallback ?? window.clearTimeout;
-        cIC(verifyIdleRef.current);
+        cancelIdle(verifyIdleRef.current);
         verifyIdleRef.current = null;
       }
     };

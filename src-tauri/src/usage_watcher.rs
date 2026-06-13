@@ -112,30 +112,39 @@ pub struct UsageThresholdCrossedPayload {
 /// at the `manage()` site (and thereby breaking every existing
 /// `State<'_, UsageCache>` consumer).
 pub fn spawn(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        // Load alert state from disk once. The task owns the only
-        // mutable handle for its lifetime — no other writer touches
-        // `usage_alert_state.json`, so an in-task mutex is unnecessary.
-        let mut state = match tauri::async_runtime::spawn_blocking(UsageAlertState::load).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(error = %e, "usage_watcher: state load join failed; starting fresh");
-                UsageAlertState::new()
-            }
-        };
-
-        // Wait for the renderer's listener to come up before the
-        // first tick (see FIRST_TICK_DELAY for why). After that, run
-        // ticks continuously: the user wants toggle effects visible
-        // within minutes of flipping a switch, not after a full poll
-        // window.
-        tokio::time::sleep(FIRST_TICK_DELAY).await;
-
-        loop {
+    // Alert state is loaded from disk once — lazily, on the first
+    // tick (after FIRST_TICK_DELAY; see that const for why we wait
+    // for the renderer's listener) — and then threaded through the
+    // loop functionally: the poller harness passes the state one
+    // tick returns into the next. The loop owns the only mutable
+    // handle for its lifetime — no other writer touches
+    // `usage_alert_state.json`, so an in-task mutex is unnecessary.
+    crate::poller::spawn_poller_with_state(
+        app,
+        "usage_watcher",
+        FIRST_TICK_DELAY,
+        None::<UsageAlertState>,
+        |app, state| async move {
+            let mut state = match state {
+                Some(s) => s,
+                None => load_initial_state().await,
+            };
             run_tick(&app, &mut state).await;
-            tokio::time::sleep(POLL_INTERVAL).await;
+            (Some(state), POLL_INTERVAL)
+        },
+    );
+}
+
+/// One-time disk load for the fired-set state. A join failure starts
+/// fresh rather than killing the watcher.
+async fn load_initial_state() -> UsageAlertState {
+    match tauri::async_runtime::spawn_blocking(UsageAlertState::load).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "usage_watcher: state load join failed; starting fresh");
+            UsageAlertState::new()
         }
-    });
+    }
 }
 
 /// Single poll cycle. Broken out so a future test can drive the
@@ -333,7 +342,7 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
         });
         let mut payload = make_payload(&c, account_email.as_deref());
         payload.log_id = log_id;
-        if let Err(e) = app.emit("usage-threshold-crossed", payload) {
+        if let Err(e) = app.emit(crate::events::USAGE_THRESHOLD_CROSSED, payload) {
             tracing::warn!(error = %e, "usage_watcher: emit failed");
         }
     }

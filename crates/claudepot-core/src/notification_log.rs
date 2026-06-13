@@ -16,7 +16,7 @@
 //! - **JSON not SQLite.** Max payload is ~100 KB (500 × ~200 B). A new
 //!   SQLite file would be infrastructure tax for a fixed schema with no
 //!   query complexity. JSON is also easier to inspect / delete by hand.
-//! - **Single mutex around the entire `Inner`.** Append rate is
+//! - **Single mutex around the entire state.** Append rate is
 //!   user-paced (one notification per UX event), so the lock is never
 //!   contended. Read-after-write needs the same lock anyway because
 //!   the renderer might list immediately after appending.
@@ -30,15 +30,19 @@
 //! - **Corrupt file → empty log.** If the JSON fails to parse on
 //!   open, we treat the on-disk store as wiped and start fresh.
 //!   Better than wedging the bell forever; the file gets overwritten
-//!   on the next append. The previous content is moved aside to
-//!   `notifications.json.corrupt` for forensics.
+//!   on the next append. The previous content is moved aside to a
+//!   timestamped `notifications.json.corrupt.<unix-ts>` for
+//!   forensics.
+//!
+//! The mutex/ring/write-through/corrupt-rename engine itself is
+//! [`crate::json_store::CappedJsonLog`], shared with
+//! `rotation::audit`; this module keeps the entry schema, the
+//! redaction boundary, and the bell-specific queries.
 
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
-use crate::fs_utils::atomic_write;
+use crate::json_store::{CappedJsonLog, HasId, LogConfig};
 use crate::notifications::{Category, Priority, Surface};
 use crate::session_export::redact_secrets;
 
@@ -182,114 +186,76 @@ pub enum SortOrder {
     OldestFirst,
 }
 
+impl HasId for NotificationEntry {
+    fn id(&self) -> u64 {
+        self.id
+    }
+    fn set_id(&mut self, id: u64) {
+        self.id = id;
+    }
+}
+
+/// Extra persisted state beyond the ring buffer. Flattened by the
+/// engine into the top level of the on-disk doc, so the historical
+/// `{"last_seen_id": N, "entries": [...]}` shape round-trips
+/// unchanged.
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct PersistedDoc {
+struct NotifMeta {
     /// Highest id seen by any reader. Entries with `id > last_seen_id`
     /// are unread; the bell badge renders that count.
     #[serde(default)]
     last_seen_id: u64,
-    #[serde(default)]
-    entries: Vec<NotificationEntry>,
 }
 
-struct Inner {
-    path: PathBuf,
-    /// Front = oldest, back = newest. VecDeque so eviction is O(1).
-    entries: VecDeque<NotificationEntry>,
-    next_id: u64,
-    last_seen_id: u64,
-    /// When true, `persist_locked` returns Ok without touching disk.
-    /// Set by `in_memory_only()` for the boot-fallback path so a
-    /// degraded log doesn't spam attempted writes against a path
-    /// that's already known to be unreachable.
-    volatile: bool,
-}
-
-/// Thin shim over [`crate::sync::recover_lock`] so the rest of this
-/// file keeps calling `lock_inner(&self.inner)` without changing.
-/// The shared helper is the project-wide poisoning policy — see its
-/// docstring for the rationale (this module was the original site).
-fn lock_inner(m: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
-    crate::sync::recover_lock(m, "notification_log")
-}
+/// Engine config: the name lands in log messages and poison-recovery
+/// warns; pretty output matches the historical on-disk format.
+const LOG_CFG: LogConfig = LogConfig {
+    name: "notification_log",
+    cap: MAX_ENTRIES,
+    pretty: true,
+};
 
 /// Persistent ring-buffer log of dispatched notifications. Cheap to
 /// construct (one file read, one parse). Concurrent callers go
 /// through a single mutex — appends are user-paced so contention is
 /// never a real concern.
 pub struct NotificationLog {
-    inner: Mutex<Inner>,
+    log: CappedJsonLog<NotificationEntry, NotifMeta>,
 }
 
 impl NotificationLog {
     /// Build a volatile in-memory-only log — appends and reads work,
-    /// but persistence is skipped entirely (the `volatile` flag
-    /// short-circuits `persist_locked`). Used as the last-resort
+    /// but persistence is skipped entirely. Used as the last-resort
     /// boot fallback when both the real and temp-dir file paths
     /// refused to open. The bell still works for the current
     /// process; nothing survives a restart.
-    ///
-    /// The `path` field is kept (set to a unique per-process value)
-    /// so the Inner shape is uniform across both code paths, but
-    /// nothing ever writes to it.
     pub fn in_memory_only() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("claudepot-notif-volatile-{}", std::process::id()));
         Self {
-            inner: Mutex::new(Inner {
-                path,
-                entries: VecDeque::new(),
-                next_id: 1,
-                last_seen_id: 0,
-                volatile: true,
-            }),
+            log: CappedJsonLog::in_memory_only(LOG_CFG),
         }
     }
 
     /// Open the log at `path`, creating the parent directory if
     /// necessary. A missing file is treated as an empty log; a
-    /// corrupt file is moved aside to `<path>.corrupt` and the log
-    /// starts empty. Both cases are non-fatal — better than wedging
-    /// the bell on a parse glitch.
+    /// corrupt file is moved aside (timestamped, see
+    /// [`crate::json_store::move_aside`]) and the log starts empty.
+    /// Both cases are non-fatal — better than wedging the bell on a
+    /// parse glitch.
     pub fn open(path: PathBuf) -> std::io::Result<Self> {
-        let doc = match std::fs::read(&path) {
-            Ok(bytes) => match serde_json::from_slice::<PersistedDoc>(&bytes) {
-                Ok(d) => d,
-                Err(_) => {
-                    // Move the corrupt file aside for forensics.
-                    // `rename` is best-effort; a failure here only
-                    // means the next mutation overwrites it cleanly.
-                    let corrupt = path.with_extension("json.corrupt");
-                    let _ = std::fs::rename(&path, &corrupt);
-                    PersistedDoc::default()
-                }
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => PersistedDoc::default(),
-            Err(e) => return Err(e),
-        };
-
-        let mut entries: VecDeque<NotificationEntry> = doc.entries.into();
-        // Defense against a hand-edited file that exceeds the cap —
-        // truncate from the front so we keep the newest tail.
-        while entries.len() > MAX_ENTRIES {
-            entries.pop_front();
-        }
-        let next_id = entries.iter().map(|e| e.id).max().unwrap_or(0) + 1;
+        let log: CappedJsonLog<NotificationEntry, NotifMeta> = CappedJsonLog::open(path, LOG_CFG)?;
         // Clamp `last_seen_id` to a sane range. A persisted value
         // higher than the current max can happen if the on-disk tail
         // got truncated by a corrupt-file fallback; clamp prevents the
-        // bell from going permanently silent.
-        let last_seen_id = doc.last_seen_id.min(next_id.saturating_sub(1));
-
-        Ok(Self {
-            inner: Mutex::new(Inner {
-                path,
-                entries,
-                next_id,
-                last_seen_id,
-                volatile: false,
-            }),
-        })
+        // bell from going permanently silent. In-memory only — no
+        // persist needed until the next real mutation.
+        log.with_mut(|s| {
+            let max = s.entries.iter().map(|e| e.id).max().unwrap_or(0);
+            if s.meta.last_seen_id > max {
+                s.meta.last_seen_id = max;
+            }
+            ((), false)
+        })?;
+        Ok(Self { log })
     }
 
     /// Append a new entry via the legacy single-surface API. Assigns
@@ -321,13 +287,9 @@ impl NotificationLog {
         // usage_watcher). `.claude/rules/design.md` non-negotiable.
         let title = redact_secrets(&title);
         let body = redact_secrets(&body);
-        let mut g = lock_inner(&self.inner);
-        let id = g.next_id;
-        g.next_id = g.next_id.saturating_add(1);
-        let ts_ms = chrono::Utc::now().timestamp_millis();
-        g.entries.push_back(NotificationEntry {
-            id,
-            ts_ms,
+        self.log.append(NotificationEntry {
+            id: 0, // assigned by the engine
+            ts_ms: chrono::Utc::now().timestamp_millis(),
             source: Some(source),
             kind,
             title,
@@ -337,12 +299,7 @@ impl NotificationLog {
             priority: None,
             surfaces_requested: Vec::new(),
             surfaces_delivered: Vec::new(),
-        });
-        while g.entries.len() > MAX_ENTRIES {
-            g.entries.pop_front();
-        }
-        Self::persist_locked(&g)?;
-        Ok(id)
+        })
     }
 
     /// Append a new entry recording full routing metadata. The
@@ -381,13 +338,9 @@ impl NotificationLog {
             .into_iter()
             .filter(|s| surfaces_requested.contains(s))
             .collect();
-        let mut g = lock_inner(&self.inner);
-        let id = g.next_id;
-        g.next_id = g.next_id.saturating_add(1);
-        let ts_ms = chrono::Utc::now().timestamp_millis();
-        g.entries.push_back(NotificationEntry {
-            id,
-            ts_ms,
+        self.log.append(NotificationEntry {
+            id: 0, // assigned by the engine
+            ts_ms: chrono::Utc::now().timestamp_millis(),
             source: None,
             kind,
             title,
@@ -397,12 +350,7 @@ impl NotificationLog {
             priority: Some(priority),
             surfaces_requested,
             surfaces_delivered,
-        });
-        while g.entries.len() > MAX_ENTRIES {
-            g.entries.pop_front();
-        }
-        Self::persist_locked(&g)?;
-        Ok(id)
+        })
     }
 
     /// Mark a previously-appended entry as delivered on `surface`.
@@ -412,27 +360,26 @@ impl NotificationLog {
     /// caller doesn't care — the dispatch already happened. Returns
     /// `Ok(true)` when the entry was updated.
     pub fn mark_delivered(&self, id: u64, surface: Surface) -> std::io::Result<bool> {
-        let mut g = lock_inner(&self.inner);
-        let entry = g.entries.iter_mut().find(|e| e.id == id);
-        let Some(entry) = entry else {
-            return Ok(false);
-        };
-        // Reject delivery marks for surfaces that weren't in
-        // `surfaces_requested` — a renderer bug or malicious IPC
-        // shouldn't be able to claim "we delivered on this surface"
-        // when routing never asked for it. Caller treats `false` as
-        // "entry not updated"; the dispatcher already swallows that
-        // outcome (best-effort post-confirmation).
-        if !entry.surfaces_requested.contains(&surface) {
-            return Ok(false);
-        }
-        if entry.surfaces_delivered.contains(&surface) {
-            // Idempotent; no persist needed.
-            return Ok(true);
-        }
-        entry.surfaces_delivered.push(surface);
-        Self::persist_locked(&g)?;
-        Ok(true)
+        self.log.with_mut(|s| {
+            let Some(entry) = s.entries.iter_mut().find(|e| e.id == id) else {
+                return (false, false);
+            };
+            // Reject delivery marks for surfaces that weren't in
+            // `surfaces_requested` — a renderer bug or malicious IPC
+            // shouldn't be able to claim "we delivered on this
+            // surface" when routing never asked for it. Caller treats
+            // `false` as "entry not updated"; the dispatcher already
+            // swallows that outcome (best-effort post-confirmation).
+            if !entry.surfaces_requested.contains(&surface) {
+                return (false, false);
+            }
+            if entry.surfaces_delivered.contains(&surface) {
+                // Idempotent; no persist needed.
+                return (true, false);
+            }
+            entry.surfaces_delivered.push(surface);
+            (true, true)
+        })
     }
 
     /// Return entries matching `filter`, in `order`. Cap the result
@@ -445,7 +392,6 @@ impl NotificationLog {
         order: SortOrder,
         limit: Option<usize>,
     ) -> Vec<NotificationEntry> {
-        let g = lock_inner(&self.inner);
         let q_lower = filter
             .query
             .as_deref()
@@ -495,46 +441,53 @@ impl NotificationLog {
             true
         };
 
-        let take = |it: Box<dyn Iterator<Item = &NotificationEntry> + '_>| {
-            it.filter(|e| matches(e)).take(cap).cloned().collect()
-        };
-
-        match order {
-            SortOrder::NewestFirst => take(Box::new(g.entries.iter().rev())),
-            SortOrder::OldestFirst => take(Box::new(g.entries.iter())),
-        }
+        self.log.with(|s| {
+            let take = |it: Box<dyn Iterator<Item = &NotificationEntry> + '_>| {
+                it.filter(|e| matches(e)).take(cap).cloned().collect()
+            };
+            match order {
+                SortOrder::NewestFirst => take(Box::new(s.entries.iter().rev())),
+                SortOrder::OldestFirst => take(Box::new(s.entries.iter())),
+            }
+        })
     }
 
     /// Mark every current entry as seen. The next [`unread_count`]
     /// returns 0 until a fresh entry lands.
     pub fn mark_all_read(&self) -> std::io::Result<()> {
-        let mut g = lock_inner(&self.inner);
-        let highest = g.entries.iter().map(|e| e.id).max().unwrap_or(0);
-        if g.last_seen_id == highest {
-            return Ok(());
-        }
-        g.last_seen_id = highest;
-        Self::persist_locked(&g)
+        self.log.with_mut(|s| {
+            let highest = s.entries.iter().map(|e| e.id).max().unwrap_or(0);
+            if s.meta.last_seen_id == highest {
+                return ((), false);
+            }
+            s.meta.last_seen_id = highest;
+            ((), true)
+        })
     }
 
     /// Wipe every entry and reset the id counter to 1. The file is
     /// rewritten as an empty doc rather than deleted so subsequent
     /// reads don't hit the not-found branch in `open`.
     pub fn clear(&self) -> std::io::Result<()> {
-        let mut g = lock_inner(&self.inner);
-        g.entries.clear();
-        g.next_id = 1;
-        g.last_seen_id = 0;
-        Self::persist_locked(&g)
+        self.log.with_mut(|s| {
+            s.entries.clear();
+            s.next_id = 1;
+            s.meta.last_seen_id = 0;
+            ((), true)
+        })
     }
 
     /// Number of entries with `id > last_seen_id`. Drives the bell
     /// badge.
     pub fn unread_count(&self) -> u32 {
-        let g = lock_inner(&self.inner);
         // u32 is wide enough — MAX_ENTRIES is 500 and the badge
         // would render "99+" past two digits anyway.
-        g.entries.iter().filter(|e| e.id > g.last_seen_id).count() as u32
+        self.log.with(|s| {
+            s.entries
+                .iter()
+                .filter(|e| e.id > s.meta.last_seen_id)
+                .count() as u32
+        })
     }
 
     /// Phase 5: count of unread entries at-or-above the given
@@ -548,51 +501,27 @@ impl NotificationLog {
     /// user" tier) so the badge doesn't go silent for installs
     /// that haven't yet generated any routed entries.
     pub fn unread_count_at_or_above(&self, min: Priority) -> u32 {
-        let g = lock_inner(&self.inner);
         let rank = priority_rank;
         let threshold = rank(min);
-        g.entries
-            .iter()
-            .filter(|e| e.id > g.last_seen_id)
-            .filter(|e| {
-                let p = e.priority.unwrap_or(Priority::P2Acknowledge);
-                rank(p) <= threshold
-            })
-            .count() as u32
+        self.log.with(|s| {
+            s.entries
+                .iter()
+                .filter(|e| e.id > s.meta.last_seen_id)
+                .filter(|e| {
+                    let p = e.priority.unwrap_or(Priority::P2Acknowledge);
+                    rank(p) <= threshold
+                })
+                .count() as u32
+        })
     }
 
     /// Total entry count.
     pub fn len(&self) -> usize {
-        let g = lock_inner(&self.inner);
-        g.entries.len()
+        self.log.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Persist the current state to disk. Caller must hold the inner
-    /// lock; we re-read from `g` so the on-disk file always matches
-    /// the in-memory state at the lock-release point.
-    ///
-    /// No-op when `g.volatile` is set (the boot-fallback degraded
-    /// log) — see [`NotificationLog::in_memory_only`] for the
-    /// rationale.
-    fn persist_locked(g: &Inner) -> std::io::Result<()> {
-        if g.volatile {
-            return Ok(());
-        }
-        let doc = PersistedDoc {
-            last_seen_id: g.last_seen_id,
-            entries: g.entries.iter().cloned().collect(),
-        };
-        let bytes = serde_json::to_vec_pretty(&doc).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("notification_log serialize: {e}"),
-            )
-        })?;
-        atomic_write(&g.path, &bytes)
+        self.log.is_empty()
     }
 }
 
@@ -706,9 +635,9 @@ mod tests {
         std::fs::write(&path, b"{not valid json").unwrap();
         let log = NotificationLog::open(path.clone()).unwrap();
         assert_eq!(log.len(), 0);
-        // The corrupt file should have been moved aside so we can
-        // inspect it later.
-        assert!(path.with_extension("json.corrupt").exists());
+        // The corrupt file should have been moved aside (timestamped,
+        // X23) so we can inspect it later.
+        assert_eq!(crate::json_store::corrupt_siblings(&path).len(), 1);
     }
 
     #[test]

@@ -142,6 +142,28 @@ export function useSessionLive(): LiveSessionSummary[] {
   );
 }
 
+/**
+ * Subscribe to a PRIMITIVE projection of the live session list.
+ *
+ * The selector must return a primitive (number / string / boolean /
+ * null) — useSyncExternalStore compares snapshots with `Object.is`,
+ * so a primitive result means the caller only re-renders when the
+ * projected VALUE changes, not on every `live-all` publish. This is
+ * how AppShell consumes the alert count without reconciling the
+ * whole shell tree per live tick. Selectors returning objects or
+ * arrays would defeat that (fresh identity per call → render loop);
+ * use `useSessionLive` + your own memo for those.
+ */
+export function useSessionLiveSelector<
+  T extends number | string | boolean | null,
+>(selector: (sessions: LiveSessionSummary[]) => T): T {
+  return useSyncExternalStore(
+    subscribe,
+    () => selector(snapshot),
+    () => selector(EMPTY),
+  );
+}
+
 const EMPTY: LiveSessionSummary[] = [];
 const EMPTY_SERVER_SNAPSHOT = (): LiveSessionSummary[] => EMPTY;
 

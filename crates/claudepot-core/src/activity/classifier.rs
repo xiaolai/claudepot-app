@@ -729,7 +729,13 @@ fn extract_path_from_body(body: &str) -> Option<String> {
         let rest = &body[idx + 4..];
         let end = rest.find(['\n', '.', ')', ',']).unwrap_or(rest.len());
         let candidate = rest[..end].trim();
-        if candidate.starts_with('/') || candidate.starts_with('~') {
+        // Accept Unix absolute, tilde, and Windows absolute shapes —
+        // CC writes the host's native form verbatim into tool-error
+        // bodies (see .claude/rules/paths.md).
+        if candidate.starts_with('/')
+            || candidate.starts_with('~')
+            || crate::path_utils::is_windows_absolute(candidate)
+        {
             return Some(candidate.to_string());
         }
     }
@@ -867,14 +873,28 @@ fn plugin_from_hook(attachment: &Value) -> Option<String> {
 /// 2. `bash /Users/<user>/.claude/plugins/cache/<owner>/<name>/<ver>/scripts/foo.sh`
 ///    — the path encodes owner + name. Returns `<name>@<owner>`.
 fn plugin_from_command_string(command: &str) -> Option<String> {
-    if let Some(idx) = command.find("/plugins/cache/") {
-        let rest = &command[idx + "/plugins/cache/".len()..];
-        let mut parts = rest.split('/');
-        let owner = parts.next()?;
-        let name = parts.next()?;
-        if !owner.is_empty() && !name.is_empty() {
-            return Some(format!("{name}@{owner}"));
-        }
+    plugin_slug_from_cache_path(command)
+}
+
+/// Pull `<name>@<owner>` from any string carrying a plugin cache path
+/// (`…/plugins/cache/<owner>/<name>/…`). CC writes the host's native
+/// separator verbatim — forward slashes on Unix, backslashes on
+/// Windows — so both shapes must match (.claude/rules/paths.md).
+fn plugin_slug_from_cache_path(s: &str) -> Option<String> {
+    const UNIX_NEEDLE: &str = "/plugins/cache/";
+    const WIN_NEEDLE: &str = r"\plugins\cache\";
+    let rest = if let Some(idx) = s.find(UNIX_NEEDLE) {
+        &s[idx + UNIX_NEEDLE.len()..]
+    } else if let Some(idx) = s.find(WIN_NEEDLE) {
+        &s[idx + WIN_NEEDLE.len()..]
+    } else {
+        return None;
+    };
+    let mut parts = rest.split(['/', '\\']);
+    let owner = parts.next()?;
+    let name = parts.next()?;
+    if !owner.is_empty() && !name.is_empty() {
+        return Some(format!("{name}@{owner}"));
     }
     None
 }
@@ -1129,17 +1149,9 @@ fn extract_missing_plugin(stderr: &str) -> Option<String> {
         }
     }
     // Fallback: derive from the cache path
-    // (`/.../plugins/cache/<owner>/<name>/<version>`).
-    if let Some(idx) = stderr.find("/plugins/cache/") {
-        let rest = &stderr[idx + "/plugins/cache/".len()..];
-        let mut parts = rest.split('/');
-        let owner = parts.next()?;
-        let name = parts.next()?;
-        if !owner.is_empty() && !name.is_empty() {
-            return Some(format!("{name}@{owner}"));
-        }
-    }
-    None
+    // (`/.../plugins/cache/<owner>/<name>/<version>`, either
+    // separator shape).
+    plugin_slug_from_cache_path(stderr)
 }
 
 fn parse_ts(line: &Value) -> Option<DateTime<Utc>> {

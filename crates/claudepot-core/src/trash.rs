@@ -47,6 +47,11 @@ pub enum TrashError {
         #[source]
         source: serde_json::Error,
     },
+    /// `TrashEntry` → JSON serialization failed. Unreachable with the
+    /// current plain-data struct, but propagated rather than panicked
+    /// per rust-conventions ("no expect in core").
+    #[error("manifest serialize error: {0}")]
+    ManifestSerialize(#[source] serde_json::Error),
     #[error("restore target already exists: {0}")]
     RestoreCollision(PathBuf),
 }
@@ -215,7 +220,7 @@ pub fn write(data_dir: &Path, put: TrashPut<'_>) -> Result<TrashEntry, TrashErro
         reason: put.reason,
     };
     let manifest_path = batch_dir.join("manifest.json");
-    let json = serde_json::to_vec_pretty(&entry).expect("TrashEntry serializes");
+    let json = serde_json::to_vec_pretty(&entry).map_err(TrashError::ManifestSerialize)?;
 
     // Stage 1: write manifest atomically (tmp + rename). After this
     // returns Ok, list() will see the batch — but only the moved
@@ -467,7 +472,10 @@ pub fn empty(data_dir: &Path, filter: TrashFilter) -> Result<u64, TrashError> {
         // is paranoia given the validator, but the cost is one
         // canonicalize call per batch and the failure mode it
         // protects against is `remove_dir_all` outside the trash.
-        if let (Ok(canon_root), Ok(canon_batch)) = (root.canonicalize(), batch_dir.canonicalize()) {
+        if let (Ok(canon_root), Ok(canon_batch)) = (
+            crate::path_utils::canonicalize_simplified(&root),
+            crate::path_utils::canonicalize_simplified(&batch_dir),
+        ) {
             if !canon_batch.starts_with(&canon_root) {
                 tracing::warn!(
                     "trash batch {:?} resolves outside trash root — refusing to remove",

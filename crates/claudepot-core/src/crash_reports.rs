@@ -83,7 +83,9 @@ pub fn parse_ips(file_name: &str, contents: &str) -> CrashSummary {
     };
 
     summary.exc_type = body.get("exception").and_then(|e| string_field(e, "type"));
-    summary.signal = body.get("exception").and_then(|e| string_field(e, "signal"));
+    summary.signal = body
+        .get("exception")
+        .and_then(|e| string_field(e, "signal"));
 
     if let Some(ft_idx) = body.get("faultingThread").and_then(Value::as_u64) {
         if let Some(thread) = body
@@ -442,7 +444,10 @@ mod tests {
         let second = harvest(&reports, "claudepot-tauri", &crashes_log, &state).unwrap();
         assert!(second.is_empty());
         assert_eq!(
-            std::fs::read_to_string(&crashes_log).unwrap().lines().count(),
+            std::fs::read_to_string(&crashes_log)
+                .unwrap()
+                .lines()
+                .count(),
             2
         );
 

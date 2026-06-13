@@ -21,6 +21,7 @@ mod desktop;
 mod error;
 mod helper;
 mod keychain;
+mod lifecycle;
 mod path_setup;
 mod slug;
 mod store;
@@ -38,6 +39,10 @@ pub use helper::{delete_helpers, helper_path, helpers_dir, write_helper};
 pub use keychain::{
     delete_all_for_route as delete_keychain_for_route, delete_secret as delete_keychain_secret,
     read_secret as read_keychain_secret, store_secret as store_keychain_secret, SecretField,
+};
+pub use lifecycle::{
+    add_route, commit_secrets, edit_route, zeroize_provider_secrets, OsRouteEffects, RouteEffects,
+    SaveRouteError, SavedRoute,
 };
 pub use path_setup::{add_wrapper_dir_to_path, wrapper_dir_path_status, PathStatus};
 pub use slug::{derive_wrapper_slug, sanitize_wrapper_name, WrapperNameError};

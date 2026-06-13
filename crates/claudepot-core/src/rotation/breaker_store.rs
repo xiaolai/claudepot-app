@@ -11,12 +11,13 @@
 //! a busy account could evict the failure history before the breaker
 //! reads it. The breaker state must be authoritative.
 //!
-//! Mirrors `rotation::store` exactly: missing file → empty;
-//! corrupt/invalid file → renamed aside to `<path>.corrupt`, return
-//! empty, log a warn; a *real* I/O failure (permission denied, disk
-//! gone) propagates as `Err` so the orchestrator skips the tick
-//! instead of clobbering the user's real breaker state on the next
-//! save.
+//! Persistence is a thin wrapper over [`crate::json_store`] — see
+//! that module for the three-outcome load contract and the
+//! corruption-recovery policy (timestamped rename-aside, warn on
+//! rename failure, atomic write). A *real* I/O failure (permission
+//! denied, disk gone) propagates as `Err` so the orchestrator skips
+//! the tick instead of clobbering the user's real breaker state on
+//! the next save.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +26,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::breaker::FailureLedger;
-use crate::fs_utils::atomic_write;
+use crate::json_store::{self, SaveError};
 
 /// Bumped on schema-breaking changes. A file with an unrecognized
 /// version is treated as corrupt (moved aside, empty returned).
@@ -143,62 +144,36 @@ pub enum RotationBreakerError {
     UnsupportedSchemaVersion { found: u32, expected: u32 },
 }
 
-/// Load breaker state from the canonical path. See
-/// `rotation::store::load` for the three-outcome contract — `Ok`
-/// covers success, missing file, and recovered-from-corruption;
-/// `Err` is a real I/O failure.
+/// Store name used in log messages.
+const STORE: &str = "rotation_breaker_store";
+
+impl json_store::Validate for BreakerFile {
+    type Error = RotationBreakerError;
+    fn validate(&self) -> Result<(), RotationBreakerError> {
+        // Delegates to the inherent method (inherent methods win
+        // resolution over trait methods, so this is not recursion).
+        BreakerFile::validate(self)
+    }
+}
+
+/// Load breaker state from the canonical path under the
+/// three-outcome contract (see [`crate::json_store`]) — `Ok` covers
+/// success, missing file, and recovered-from-corruption; `Err` is a
+/// real I/O failure.
 pub fn load() -> std::io::Result<BreakerFile> {
     load_from(&breaker_path())
 }
 
 /// Test-friendly load that takes the path directly. See [`load`].
 pub fn load_from(path: &Path) -> std::io::Result<BreakerFile> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(BreakerFile::default());
-        }
-        Err(e) => return Err(e),
-    };
-    match serde_json::from_slice::<BreakerFile>(&bytes) {
-        Ok(file) => match file.validate() {
-            Ok(()) => Ok(file),
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "rotation_breaker_store: parsed but invalid; moving aside and starting empty"
-                );
-                move_aside(path);
-                Ok(BreakerFile::default())
-            }
-        },
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "rotation_breaker_store: parse failed; moving aside and starting empty"
-            );
-            move_aside(path);
-            Ok(BreakerFile::default())
-        }
-    }
-}
-
-fn move_aside(path: &Path) {
-    let corrupt = path.with_extension("json.corrupt");
-    let _ = std::fs::rename(path, corrupt);
+    json_store::load(path, STORE)
 }
 
 /// Log + swallow real I/O errors, always returning a usable file.
 /// Use only where errors cannot be propagated; new code prefers
 /// [`load`].
 pub fn load_or_default() -> BreakerFile {
-    match load() {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!(error = %e, "rotation_breaker_store: read failed; defaulting to empty");
-            BreakerFile::default()
-        }
-    }
+    json_store::load_or_default(&breaker_path(), STORE)
 }
 
 /// Persist `file` to the canonical path. Validates before writing —
@@ -209,10 +184,11 @@ pub fn save(file: &BreakerFile) -> Result<(), RotationBreakerError> {
 
 /// Test-friendly save that takes the path directly.
 pub fn save_to(path: &Path, file: &BreakerFile) -> Result<(), RotationBreakerError> {
-    file.validate()?;
-    let json = serde_json::to_vec_pretty(file)?;
-    atomic_write(path, &json)?;
-    Ok(())
+    json_store::save(path, file).map_err(|e| match e {
+        SaveError::Validation(v) => v,
+        SaveError::Serde(s) => s.into(),
+        SaveError::Io(io) => io.into(),
+    })
 }
 
 #[cfg(test)]
@@ -231,14 +207,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_breaker_store_load_missing_file_yields_default() {
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("nope.json");
-        let f = load_from(&p).unwrap();
-        assert_eq!(f.schema_version, SCHEMA_VERSION);
-        assert!(f.ledgers.is_empty());
-    }
+    // Generic store behaviors (missing-file default, corrupt-rename-
+    // aside, permission-denied propagation, 0600 writes) are covered
+    // once in `crate::json_store::tests`; the tests here exercise the
+    // breaker-specific schema + ledger logic and the store wiring.
 
     #[test]
     fn test_breaker_store_save_then_load_round_trips() {
@@ -284,19 +256,6 @@ mod tests {
     }
 
     #[test]
-    fn test_breaker_store_corrupt_file_is_moved_aside() {
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("breaker.json");
-        std::fs::write(&p, b"this is not json").unwrap();
-        let f = load_from(&p).unwrap();
-        assert!(f.ledgers.is_empty());
-        assert!(
-            p.with_extension("json.corrupt").exists(),
-            "corrupt file should be moved aside"
-        );
-    }
-
-    #[test]
     fn test_breaker_store_unsupported_schema_version_is_moved_aside() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("breaker.json");
@@ -304,7 +263,7 @@ mod tests {
         std::fs::write(&p, br#"{"schema_version":99,"ledgers":{}}"#).unwrap();
         let f = load_from(&p).unwrap();
         assert!(f.ledgers.is_empty());
-        assert!(p.with_extension("json.corrupt").exists());
+        assert_eq!(crate::json_store::corrupt_siblings(&p).len(), 1);
     }
 
     #[test]
@@ -330,29 +289,5 @@ mod tests {
             Err(RotationBreakerError::UnsupportedSchemaVersion { .. })
         ));
         assert!(!p.exists(), "rejected file must never be written");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_breaker_store_permission_denied_returns_err() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("breaker.json");
-        std::fs::write(&p, br#"{"schema_version":1,"ledgers":{}}"#).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let result = load_from(&p);
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(result.is_err(), "permission denied must surface as Err");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_breaker_store_save_writes_mode_0600() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("breaker.json");
-        save_to(&p, &BreakerFile::default()).unwrap();
-        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
     }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useTauriEvent } from "../hooks/useTauriEvent";
 import { api } from "../api";
 import type {
   ActivityCard,
@@ -25,7 +25,7 @@ import { CostTab } from "./events/CostTab";
 
 type EventsTab = "stream" | "usage" | "cost";
 
-const TAB_STORAGE_KEY = "claudepot.events.tab";
+import { EVENTS_TAB_KEY as TAB_STORAGE_KEY } from "../lib/storageKeys";
 
 function loadTab(): EventsTab {
   try {
@@ -71,10 +71,13 @@ function saveTab(t: EventsTab) {
  *
  * Live updates: the classifier persists cards into
  * `~/.claudepot/sessions.db`; live tail emits `CardEmitted` deltas.
- * This component refetches on every delta from `live-all` plus a
- * 5-second polling fallback for cross-session visibility. The
- * aggregate strip refetches on the same cadence (cheap — same
- * `cards_recent` command, just with a higher limit and no filters).
+ * This component refetches on `live-all` events (coalesced behind a
+ * trailing 2 s debounce — the backend only publishes on real state
+ * changes, but a busy session can still emit several per second)
+ * plus a 5-second polling fallback for cross-session visibility,
+ * both gated on the Stream tab being active. The aggregate strip
+ * refetches on the same cadence (same `cards_recent` command, just
+ * with a higher limit and no filters).
  *
  * Suppression rules and severity meanings live in
  * `dev-docs/activity-cards-design.md` §2 / §6 — when in doubt,
@@ -111,6 +114,12 @@ const DEFAULT_LIMIT = 200;
 // grows past 50k and aggregation becomes noticeable.
 const AGG_LIMIT = 10_000;
 const AGG_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+// Min interval between live-driven refetches. The backend dedups
+// `live-all` to real state changes, but a busy session still emits
+// several events per second (status flips, new cards, idle-bucket
+// crossings); the trailing debounce coalesces a burst into one
+// refetch so the 10k-row aggregate query can't be hammered.
+const LIVE_REFRESH_DEBOUNCE_MS = 2_000;
 
 export function EventsSection() {
   const [cards, setCards] = useState<ActivityCard[]>([]);
@@ -176,8 +185,8 @@ export function EventsSection() {
   // Aggregate fetch — separate from `refresh` because it doesn't
   // depend on `filters`, and re-running on every filter change would
   // be wasted work (the metrics strip is intentionally global). It
-  // refreshes on mount, on the `live-all` tick (cards landed
-  // anywhere), and on Reindex completion (handled by handleReindex
+  // refreshes on mount, on the debounced `live-all` event (cards
+  // landed anywhere), and on Reindex completion (handled by handleReindex
   // which calls refreshAgg explicitly). Same monotonic-seq guard
   // as `refresh` so a slow aggregate fetch can't clobber a fresher
   // one.
@@ -209,26 +218,49 @@ export function EventsSection() {
 
   // Live updates — subscribe to the `live::*` channel pattern. Tauri
   // doesn't support channel wildcards, so we listen on the public
-  // `live-all` channel for session lifecycle and refresh on tick;
+  // `live-all` channel for session lifecycle and refresh on event;
   // per-session CardEmitted deltas land on `live::<sid>` channels
   // which the per-session detail viewer subscribes to directly.
   // For cross-session card visibility, a 5-second poll is the
   // simplest correct approach; live deltas for the *selected*
   // session arrive via the subscriber inside SessionDetail.
+  //
+  // Two guards keep this from hammering the index (the refetch
+  // includes the 10k-row aggregate query):
+  //   * gated on `tab === "stream"` — the subscription channel goes
+  //     null and the refetch loop stops while the user sits on Usage
+  //     or Cost; switching back re-wires both, which refetches
+  //     within one poll interval.
+  //   * `live-all` bursts coalesce behind a trailing debounce — at
+  //     most one live-driven refetch per LIVE_REFRESH_DEBOUNCE_MS.
+  //     The handle lives in a ref shared with the poll effect's
+  //     cleanup below, which clears any pending debounce when the
+  //     tab changes or refresh identities rotate (exactly what the
+  //     old single-effect teardown did).
+  const liveDebounceRef = useRef<number | null>(null);
+  useTauriEvent(tab === "stream" ? "live-all" : null, () => {
+    if (liveDebounceRef.current !== null) return;
+    liveDebounceRef.current = window.setTimeout(() => {
+      liveDebounceRef.current = null;
+      void refresh();
+      void refreshAgg();
+    }, LIVE_REFRESH_DEBOUNCE_MS);
+  });
   useEffect(() => {
-    const unsubP = listen("live-all", () => {
+    if (tab !== "stream") return;
+    const refreshBoth = () => {
       void refresh();
       void refreshAgg();
-    });
-    const t = setInterval(() => {
-      void refresh();
-      void refreshAgg();
-    }, 5_000);
-    return () => {
-      void unsubP.then((u) => u());
-      clearInterval(t);
     };
-  }, [refresh, refreshAgg]);
+    const t = setInterval(refreshBoth, 5_000);
+    return () => {
+      clearInterval(t);
+      if (liveDebounceRef.current !== null) {
+        window.clearTimeout(liveDebounceRef.current);
+        liveDebounceRef.current = null;
+      }
+    };
+  }, [tab, refresh, refreshAgg]);
 
   const handleReindex = useCallback(async () => {
     setReindexing(true);

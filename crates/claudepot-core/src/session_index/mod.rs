@@ -226,14 +226,25 @@ impl SessionIndex {
         // captured with their path + message so the caller can log /
         // surface them; the file will also be retried on the next
         // refresh because its tuple stays absent or different.
-        type ScanOk = (SessionRow, Vec<UsageEvent>, Vec<TurnRecord>);
+        //
+        // Each scan carries the WALK-time inode forward so the upsert
+        // stores the identity of the file the parse came from. A
+        // fresh stat at upsert time would void the inode guard: a
+        // transcript atomically replaced during the (possibly
+        // multi-second) rayon scan would pair the OLD parse + size +
+        // mtime with the NEW inode, letting a same-size replacement
+        // match the full triple on the next walk and persist stale.
+        // The walk inode fails safe in the other direction — a
+        // replacement between walk and parse stores a stale inode,
+        // which mismatches on the next walk and forces a re-scan.
+        type ScanOk = (SessionRow, Vec<UsageEvent>, Vec<TurnRecord>, u64);
         let scan_results: Vec<Result<ScanOk, (std::path::PathBuf, String)>> = plan
             .to_upsert
             .par_iter()
             .filter_map(|path_key| {
                 by_path.get(path_key.as_str()).map(|entry| {
                     scan_session(&entry.slug, &entry.path)
-                        .map(|s| (s.row, s.usage, s.turns))
+                        .map(|s| (s.row, s.usage, s.turns, entry.tuple.inode))
                         .map_err(|e| (entry.path.clone(), e.to_string()))
                 })
             })
@@ -263,8 +274,8 @@ impl SessionIndex {
         {
             let mut db = self.db();
             let tx = db.transaction()?;
-            for (row, events, turns) in &scanned {
-                codec::upsert_row(&tx, row, indexed_at_ms)?;
+            for (row, events, turns, inode) in &scanned {
+                codec::upsert_row(&tx, row, *inode, indexed_at_ms)?;
                 let file_path = row.file_path.to_string_lossy();
                 // Per-turn rows: replace-all in the same transaction so
                 // the cache is internally consistent. A re-scan that
@@ -355,6 +366,21 @@ impl SessionIndex {
         codec::load_all_rows(&db)
     }
 
+    /// Refresh the cache against `config_dir` and return only the rows
+    /// whose `slug` matches, newest-first. Same freshness contract as
+    /// `list_all`, but the read is a single indexed `WHERE slug = ?`
+    /// query — per-project consumers (ProjectDetail's session pane)
+    /// avoid deserializing the whole cross-project index.
+    pub fn list_by_slug(
+        &self,
+        config_dir: &Path,
+        slug: &str,
+    ) -> Result<Vec<SessionRow>, SessionIndexError> {
+        self.refresh(config_dir)?;
+        let db = self.db();
+        codec::load_rows_by_slug(&db, slug)
+    }
+
     // -----------------------------------------------------------------
     // artifact_usage public API — wraps the queries in
     // `claudepot_core::artifact_usage` so callers don't need raw access
@@ -416,12 +442,25 @@ impl SessionIndex {
     /// `list_all` / `refresh` to repopulate.
     ///
     /// Does not drop the DB file or touch the schema — just the rows.
-    /// Also truncates `usage_event` and `usage_daily` so the next
-    /// `refresh()` rebuilds the rollups from disk truth.
+    /// Also clears `session_turns` (no SQLite FK to `sessions`; the
+    /// cascade is by convention — see `schema.rs`) and truncates
+    /// `usage_event` + `usage_daily` so the next `refresh()` rebuilds
+    /// the rollups from disk truth. Without the explicit turn delete,
+    /// files removed from disk before a rebuild would leave their
+    /// per-turn rows orphaned forever: the post-rebuild refresh sees
+    /// an empty `sessions` side, so those paths never enter
+    /// `to_delete` and `codec::delete_row`'s cascade never fires.
+    ///
+    /// All deletes run in one transaction, matching the all-or-nothing
+    /// discipline of `refresh()` and the `apply_schema` invalidation
+    /// path — a crash mid-rebuild can't leave a half-truncated cache.
     pub fn rebuild(&self) -> Result<(), SessionIndexError> {
-        let db = self.db();
-        db.execute("DELETE FROM sessions", [])?;
-        usage_store::truncate_all(&db)?;
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        tx.execute("DELETE FROM sessions", [])?;
+        tx.execute("DELETE FROM session_turns", [])?;
+        usage_store::truncate_all(&tx)?;
+        tx.commit()?;
         Ok(())
     }
 }
@@ -505,7 +544,15 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     // BEGIN IMMEDIATE acquires a RESERVED lock immediately so two
     // processes can't race on the migration. Everything inside the
     // transaction is either fully applied or fully rolled back.
-    let tx = db.unchecked_transaction()?;
+    //
+    // NOT `unchecked_transaction()` — that begins DEFERRED, letting
+    // two processes (GUI + CLI both open sessions.db) each take a
+    // read snapshot, read `prior_version`, and then race on the first
+    // write; in WAL mode the loser fails with SQLITE_BUSY_SNAPSHOT,
+    // which `busy_timeout` cannot rescue (a stale snapshot never
+    // becomes writable by waiting). Immediate serializes at BEGIN,
+    // where the 5 s busy_timeout applies and the loser simply waits.
+    let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
 
     // Read prior version while holding the write lock so a
     // concurrent process can't change it under us.
@@ -723,11 +770,22 @@ fn is_corrupt_error(err: &rusqlite::Error) -> bool {
     }
 }
 
+/// How many quarantined `*.corrupt-<epoch_ms>` copies to retain,
+/// newest first. The newest copy is the forensic artifact for the
+/// incident that just happened; one older sibling covers "it
+/// happened twice before anyone looked". Beyond that, a flaky-disk
+/// machine would accumulate a full-size sessions.db copy (with the
+/// v4 FTS tables, potentially hundreds of MB) per incident with no
+/// surfacing in Settings → Cleanup — so older copies are pruned.
+const MAX_CORRUPT_QUARANTINES: usize = 2;
+
 /// Move a corrupt DB (plus any WAL/SHM sidecars) aside so `open()`
 /// can create fresh files without risking data loss — the index is
 /// a cache, so "recovered" just means "rebuild from disk on next
 /// refresh". The quarantined file is preserved (not deleted) so the
-/// user can hand it to support if they care.
+/// user can hand it to support if they care; only the newest
+/// [`MAX_CORRUPT_QUARANTINES`] copies are kept, older ones are
+/// garbage-collected best-effort.
 fn quarantine_corrupt_db(path: &Path) -> Result<(), SessionIndexError> {
     let stamp = chrono::Utc::now().timestamp_millis();
     let corrupt_path = path.with_extension(format!("db.corrupt-{stamp}"));
@@ -743,7 +801,50 @@ fn quarantine_corrupt_db(path: &Path) -> Result<(), SessionIndexError> {
             let _ = std::fs::remove_file(side);
         }
     }
+    prune_corrupt_quarantines(path);
     Ok(())
+}
+
+/// Best-effort GC of older quarantine copies next to `path`. Keeps
+/// the [`MAX_CORRUPT_QUARANTINES`] newest `<file>.corrupt-<epoch_ms>`
+/// siblings (by their numeric stamp) and removes the rest. Never
+/// fails the caller — losing an old forensic copy is strictly less
+/// bad than failing the recovery path that's trying to get the user
+/// a working cache back.
+fn prune_corrupt_quarantines(path: &Path) {
+    let Some(parent) = path.parent() else { return };
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let prefix = format!("{file_name}.corrupt-");
+    let Ok(read) = std::fs::read_dir(parent) else {
+        return;
+    };
+    let mut stamped: Vec<(i64, std::path::PathBuf)> = read
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name();
+            let stamp: i64 = name.to_str()?.strip_prefix(&prefix)?.parse().ok()?;
+            Some((stamp, e.path()))
+        })
+        .collect();
+    if stamped.len() <= MAX_CORRUPT_QUARANTINES {
+        return;
+    }
+    stamped.sort_by_key(|(stamp, _)| std::cmp::Reverse(*stamp));
+    for (_, old) in stamped.drain(MAX_CORRUPT_QUARANTINES..) {
+        match std::fs::remove_file(&old) {
+            Ok(()) => tracing::info!(
+                path = %old.display(),
+                "session_index: pruned old corrupt-DB quarantine"
+            ),
+            Err(e) => tracing::warn!(
+                path = %old.display(),
+                error = %e,
+                "session_index: failed to prune old corrupt-DB quarantine"
+            ),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1151,6 +1252,28 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].session_id, "S2");
         assert_eq!(rows[1].session_id, "S1");
+    }
+
+    #[test]
+    fn list_by_slug_filters_and_sorts_newest_first() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        // Two sessions in slug `-a` (older first on disk), one in `-b`.
+        let a_old = r#"{"type":"user","message":{"role":"user","content":"old"},"timestamp":"2026-04-01T00:00:00Z","cwd":"/a","sessionId":"A1"}"#.to_string();
+        let a_new = r#"{"type":"user","message":{"role":"user","content":"new"},"timestamp":"2026-04-20T00:00:00Z","cwd":"/a","sessionId":"A2"}"#.to_string();
+        let b_only = r#"{"type":"user","message":{"role":"user","content":"other"},"timestamp":"2026-04-10T00:00:00Z","cwd":"/b","sessionId":"B1"}"#.to_string();
+        write_session(cfg.path(), "-a", "A1", &[a_old]);
+        write_session(cfg.path(), "-a", "A2", &[a_new]);
+        write_session(cfg.path(), "-b", "B1", &[b_only]);
+
+        let rows = idx.list_by_slug(cfg.path(), "-a").unwrap();
+        assert_eq!(rows.len(), 2, "only -a rows should be returned");
+        assert_eq!(rows[0].session_id, "A2", "newest-first within the slug");
+        assert_eq!(rows[1].session_id, "A1");
+        assert!(rows.iter().all(|r| r.slug == "-a"));
+
+        // Unknown slug → empty, not an error.
+        assert!(idx.list_by_slug(cfg.path(), "-missing").unwrap().is_empty());
     }
 
     #[test]
@@ -1681,5 +1804,266 @@ mod tests {
             0,
             "usage rows follow session deletion"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // audit-fix regression tests: migration locking, rebuild atomicity,
+    // inode-guard integrity, quarantine GC, redundant-index drop.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_session_index_open_waits_for_concurrent_writer() {
+        // Regression for the DEFERRED-migration bug: `apply_schema`
+        // used `unchecked_transaction()` (BEGIN DEFERRED), so an open
+        // racing a concurrent writer would take a read snapshot, then
+        // die with SQLITE_BUSY_SNAPSHOT on the version-bump UPSERT
+        // once the writer committed — busy_timeout never retries a
+        // stale snapshot. With BEGIN IMMEDIATE the open serializes at
+        // BEGIN, where the 5 s busy_timeout applies, and simply waits.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+        // Create + migrate once so the concurrent open below runs the
+        // idempotent re-apply path, whose only unconditional write is
+        // the version-bump UPSERT — the exact statement that failed
+        // under DEFERRED.
+        drop(SessionIndex::open(&path).unwrap());
+
+        let writer_path = path.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+        let writer = std::thread::spawn(move || {
+            let conn = Connection::open(&writer_path).unwrap();
+            crate::db_pragmas::apply_standard_pragmas(&conn).unwrap();
+            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (k, v) VALUES ('_writer_probe', '1')",
+                [],
+            )
+            .unwrap();
+            started_tx.send(()).unwrap();
+            // Hold the write lock long enough that the main thread's
+            // open is reliably waiting on it, then commit — well
+            // within the 5 s busy_timeout.
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            conn.execute_batch("COMMIT").unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        let opened = SessionIndex::open(&path);
+        writer.join().unwrap();
+        let idx = opened.expect(
+            "open must wait for the concurrent writer (BEGIN IMMEDIATE + busy_timeout), \
+             not fail with BUSY_SNAPSHOT from a stale DEFERRED snapshot",
+        );
+        assert_eq!(
+            idx.schema_version().unwrap().as_deref(),
+            Some(crate::artifact_usage::schema::SCHEMA_VERSION)
+        );
+    }
+
+    #[test]
+    fn test_rebuild_clears_orphan_session_turns() {
+        // A transcript deleted from disk BEFORE a rebuild never enters
+        // a later refresh's to_delete (the DB side is empty after the
+        // rebuild), so codec::delete_row's by-convention cascade never
+        // fires for it. rebuild() itself must clear session_turns or
+        // those rows are orphaned forever.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 1);
+
+        // File vanishes, then the user hits Rebuild without an
+        // intervening refresh.
+        std::fs::remove_file(&path).unwrap();
+        idx.rebuild().unwrap();
+
+        let count_turns = |idx: &SessionIndex| -> i64 {
+            idx.db()
+                .query_row("SELECT COUNT(*) FROM session_turns", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            count_turns(&idx),
+            0,
+            "rebuild must clear session_turns — orphans would persist forever"
+        );
+
+        // The follow-up refresh stays clean — nothing resurrects.
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(count_turns(&idx), 0);
+    }
+
+    #[test]
+    fn test_upsert_row_persists_caller_inode_without_restat() {
+        // upsert_row must store the inode the refresh walk observed,
+        // not re-stat the path at write time — a re-stat would pair an
+        // old parse with the identity of a file that replaced the
+        // original during the scan window, voiding the inode guard in
+        // exactly its target scenario.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
+        let scan = scan_session("-p", &path).unwrap();
+        let disk_inode = crate::fs_utils::file_identity(&std::fs::metadata(&path).unwrap());
+        // A sentinel identity that can't match the file on disk: if
+        // upsert_row re-stats, it stores disk_inode instead.
+        let walk_inode = disk_inode.wrapping_add(1);
+
+        let db = idx.db();
+        codec::upsert_row(&db, &scan.row, walk_inode, 42).unwrap();
+        let file_path = path.to_string_lossy().into_owned();
+        let stored: i64 = db
+            .query_row(
+                "SELECT file_inode FROM sessions WHERE file_path = ?1",
+                [file_path.as_str()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            i64::try_from(walk_inode).unwrap(),
+            "stored inode must be the walk-time value, not a fresh stat"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_refresh_rescans_replaced_file_with_matching_size_and_mtime() {
+        // The target scenario for the inode column (diff.rs): an
+        // atomic create-temp-and-rename replacement that preserves
+        // both byte size and mtime must still trigger a re-scan via
+        // the inode mismatch. Unix-only: on Windows `file_identity`
+        // is creation_time, and NTFS name tunneling preserves it
+        // across same-name replacement — the guard degrades there by
+        // design (see fs_utils::file_identity).
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+
+        let mtime =
+            filetime::FileTime::from_last_modification_time(&std::fs::metadata(&path).unwrap());
+        // Same byte count, different content: swap the user prompt
+        // "hi" for "yo", write to a temp file, rename over the
+        // original (new inode), and pin the mtime back.
+        let original = std::fs::read_to_string(&path).unwrap();
+        let replaced = original.replacen("\"hi\"", "\"yo\"", 1);
+        assert_eq!(
+            original.len(),
+            replaced.len(),
+            "fixture must keep size identical"
+        );
+        assert_ne!(original, replaced);
+        let tmp_path = path.with_extension("jsonl.swap");
+        std::fs::write(&tmp_path, &replaced).unwrap();
+        std::fs::rename(&tmp_path, &path).unwrap();
+        filetime::set_file_mtime(&path, mtime).unwrap();
+
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(
+            stats.scanned, 1,
+            "inode change alone must force a re-scan when size + mtime match"
+        );
+        let db = idx.db();
+        let row = codec::get_row_by_path(&db, &path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.first_user_prompt.as_deref(),
+            Some("yo"),
+            "re-scan must pick up the replacement content"
+        );
+    }
+
+    #[test]
+    fn test_quarantine_prune_keeps_newest_corrupt_copies() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+        // Three pre-existing quarantines from older incidents, plus a
+        // non-stamped sibling that must survive untouched.
+        for stamp in [100, 200, 300] {
+            std::fs::write(
+                tmp.path().join(format!("sessions.db.corrupt-{stamp}")),
+                b"old",
+            )
+            .unwrap();
+        }
+        std::fs::write(tmp.path().join("sessions.db.corrupt-notastamp"), b"keep").unwrap();
+
+        // Plant a corrupt DB; open() quarantines it (newest stamp) and
+        // prunes everything beyond MAX_CORRUPT_QUARANTINES.
+        std::fs::write(&path, b"this is not a sqlite database").unwrap();
+        let _idx = SessionIndex::open(&path).expect("open should recover");
+
+        let mut stamps: Vec<i64> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                e.file_name()
+                    .to_str()?
+                    .strip_prefix("sessions.db.corrupt-")?
+                    .parse::<i64>()
+                    .ok()
+            })
+            .collect();
+        stamps.sort_unstable();
+        assert_eq!(
+            stamps.len(),
+            MAX_CORRUPT_QUARANTINES,
+            "older quarantines must be pruned; saw {stamps:?}"
+        );
+        // The survivors are the newest old copy (300) and the fresh one.
+        assert_eq!(stamps[0], 300);
+        assert!(
+            stamps[1] > 300,
+            "the fresh quarantine carries an epoch-ms stamp"
+        );
+        // Non-stamped sibling untouched.
+        assert!(tmp.path().join("sessions.db.corrupt-notastamp").exists());
+    }
+
+    #[test]
+    fn test_schema_open_drops_redundant_turns_file_path_index() {
+        fn has_index(db: &Connection, name: &str) -> bool {
+            db.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [name],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        }
+
+        // Fresh DB: the redundant index is never created; the ts
+        // index still is.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+        let idx = SessionIndex::open(&path).unwrap();
+        {
+            let db = idx.db();
+            assert!(
+                !has_index(&db, "idx_turns_file_path"),
+                "redundant index must not be created on fresh DBs"
+            );
+            assert!(has_index(&db, "idx_turns_ts"), "the ts index must survive");
+        }
+        drop(idx);
+
+        // Existing install: the index is present from an older binary;
+        // re-opening must shed it via the idempotent DROP — without a
+        // schema-version bump or cache invalidation.
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch("CREATE INDEX idx_turns_file_path ON session_turns(file_path);")
+                .unwrap();
+        }
+        let idx = SessionIndex::open(&path).unwrap();
+        let db = idx.db();
+        assert!(
+            !has_index(&db, "idx_turns_file_path"),
+            "existing installs must shed the redundant index on open"
+        );
+        assert!(has_index(&db, "idx_turns_ts"));
     }
 }

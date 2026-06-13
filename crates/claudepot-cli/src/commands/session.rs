@@ -18,9 +18,11 @@
 //! around `claudepot_core` — no business logic here, per
 //! `.claude/rules/architecture.md`.
 
+use crate::output::{format_size, format_ts_ms, print_json, truncate_start};
 use crate::AppContext;
 use anyhow::{bail, Context, Result};
 use claudepot_core::paths;
+use claudepot_core::paths::claude_json_path;
 use claudepot_core::session::{read_session_detail, read_session_detail_at_path, SessionDetail};
 use claudepot_core::session_move::{
     adopt_orphan_project, detect_orphaned_projects, move_session, AdoptReport, MoveSessionOpts,
@@ -28,74 +30,6 @@ use claudepot_core::session_move::{
 };
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
-
-/// CC stores `.claude.json` at `$HOME/.claude.json` — a sibling of
-/// `~/.claude/`, not inside. Central accessor so CLI and Tauri agree.
-fn claude_json_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude.json"))
-}
-
-/// Truncate a string to `max` chars by keeping the tail (path-friendly,
-/// since the basename usually carries the load-bearing token) and
-/// prefixing the elision with `…`. Returns the input untouched when
-/// it's already short enough.
-fn truncate_start(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    // Keep the tail (more informative for paths). Prefix with "…".
-    let skip = s.chars().count() - (max - 1);
-    let kept: String = s.chars().skip(skip).collect();
-    format!("…{kept}")
-}
-
-fn format_bytes(n: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-    if n >= GB {
-        format!("{:.2} GB", n as f64 / GB as f64)
-    } else if n >= MB {
-        format!("{:.2} MB", n as f64 / MB as f64)
-    } else if n >= KB {
-        format!("{:.2} KB", n as f64 / KB as f64)
-    } else {
-        format!("{n} B")
-    }
-}
-
-fn print_json<T: serde::Serialize>(value: &T) {
-    match serde_json::to_string_pretty(value) {
-        Ok(s) => println!("{s}"),
-        Err(e) => eprintln!("json serialization failed: {e}"),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Prune + trash
-// ---------------------------------------------------------------------------
-
-fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.1} GiB", b / GB)
-    } else if b >= MB {
-        format!("{:.1} MiB", b / MB)
-    } else if b >= KB {
-        format!("{:.1} KiB", b / KB)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-fn format_ts_ms(ms: i64) -> String {
-    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
-        .map(|dt| dt.format("%Y-%m-%d").to_string())
-        .unwrap_or_else(|| "—".to_string())
-}
 
 fn parse_duration(s: &str) -> Result<std::time::Duration> {
     let t = s.trim();
@@ -151,12 +85,12 @@ mod slim;
 mod trash;
 
 // Re-exports — main.rs's match block dispatches on these names.
-pub use export::export_cmd;
+pub use export::{export_cmd, ExportArgs};
 pub use inspect::view_cmd;
 pub use orphan::{
     adopt_orphan_cmd, backfill_exchanges_cmd, list_orphans, move_cmd, rebuild_index_cmd,
 };
-pub use prune::prune_cmd;
+pub use prune::{prune_cmd, PruneArgs};
 pub use search::{search_cmd, worktrees_cmd};
-pub use slim::slim_cmd;
+pub use slim::{slim_cmd, SlimArgs};
 pub use trash::{trash_empty_cmd, trash_list_cmd, trash_restore_cmd};

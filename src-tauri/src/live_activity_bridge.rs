@@ -36,7 +36,7 @@ impl SessionEventListener for TauriSessionEventListener {
             .cloned()
             .map(LiveSessionSummaryDto::from)
             .collect();
-        let _ = self.app.emit("live-all", dtos);
+        let _ = self.app.emit(crate::events::LIVE_ALL, dtos);
     }
 
     fn on_membership_changed(&self, _sessions: Arc<Vec<LiveSessionSummary>>) {
@@ -54,6 +54,6 @@ impl SessionEventListener for TauriSessionEventListener {
 
     fn on_detail(&self, session_id: &str, delta: LiveDelta) {
         let dto = LiveDeltaDto::from(delta);
-        let _ = self.app.emit(&format!("live::{session_id}"), dto);
+        let _ = self.app.emit(&crate::events::live_channel(session_id), dto);
     }
 }

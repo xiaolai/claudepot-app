@@ -211,14 +211,28 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
   const [open, setOpen] = useState(false);
   const cmd =
     (server.masked as { command?: string } | null)?.command ?? "";
+  // Keyboard activation for the disclosure row — same pattern as
+  // NotificationLogEntry: role="button" + tabIndex + Enter/Space +
+  // `pm-focus`, satisfying design.md's "every interactive element is
+  // keyboard-reachable" floor. `aria-expanded` carries the open state.
   return (
     <>
       <tr
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        className="pm-focus"
         style={{
           borderBottom: "var(--bw-hair) solid var(--line)",
           cursor: "pointer",
         }}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
       >
         <td
           style={{

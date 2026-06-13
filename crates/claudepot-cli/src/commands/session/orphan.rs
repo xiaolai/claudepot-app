@@ -96,8 +96,9 @@ pub fn rebuild_index_cmd(ctx: &AppContext) -> Result<()> {
             db_path.display().to_string()
         );
     } else {
-        eprintln!("Session index cleared at {}", db_path.display());
-        eprintln!("Next `session` list will re-parse every transcript.");
+        // Result, not progress — stdout per `rules/commands.md`.
+        println!("Session index cleared at {}", db_path.display());
+        println!("Next `session` list will re-parse every transcript.");
     }
     Ok(())
 }
@@ -116,13 +117,11 @@ pub fn rebuild_index_cmd(ctx: &AppContext) -> Result<()> {
 pub async fn backfill_exchanges_cmd(
     ctx: &AppContext,
     claude_config: Option<std::path::PathBuf>,
-    json: bool,
 ) -> Result<()> {
     use claudepot_core::shared_memory::claude_exchanges::backfill_claude_exchanges;
 
-    let _ = ctx; // The ctx.json flag is per-subcommand; we use our own --json.
     let db_path = paths::claudepot_data_dir().join("sessions.db");
-    let claude_config = claude_config.unwrap_or_else(default_claude_config);
+    let claude_config = claude_config.unwrap_or_else(paths::claude_config_dir);
 
     // 1. Make sure session_index has fresh rows.
     let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
@@ -140,7 +139,7 @@ pub async fn backfill_exchanges_cmd(
     .context("join backfill task")?
     .context("backfill_claude_exchanges")?;
 
-    if json {
+    if ctx.json {
         let report = serde_json::json!({
             "discovered": stats.discovered,
             "indexed": stats.indexed,
@@ -176,17 +175,6 @@ pub async fn backfill_exchanges_cmd(
     Ok(())
 }
 
-/// Resolve Claude's config directory the same way Claude Code does:
-/// `$CLAUDE_CONFIG_DIR` if set, else `~/.claude`.
-fn default_claude_config() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
-        return std::path::PathBuf::from(dir);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".claude")
-}
-
 fn print_orphans_human(orphans: &[OrphanedProject]) {
     println!(
         "{:<48}  {:>8}  {:>12}  Slug",
@@ -204,7 +192,7 @@ fn print_orphans_human(orphans: &[OrphanedProject]) {
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "(unparseable)".to_string());
-        let size = format_bytes(o.total_size_bytes);
+        let size = format_size(o.total_size_bytes);
         let cwd_short = truncate_start(&cwd, 48);
         println!(
             "{:<48}  {:>8}  {:>12}  {}",

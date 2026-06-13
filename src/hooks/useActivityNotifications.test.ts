@@ -1,5 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { projectBasename, projectLabels } from "./useActivityNotifications";
+import {
+  activityAlertCount,
+  projectBasename,
+  projectLabels,
+} from "./useActivityNotifications";
+import type { LiveSessionSummary } from "../types";
+
+function session(
+  overrides: Partial<LiveSessionSummary>,
+): LiveSessionSummary {
+  return {
+    session_id: "s",
+    pid: 1,
+    cwd: "/proj",
+    transcript_path: null,
+    status: "idle",
+    current_action: null,
+    model: null,
+    waiting_for: null,
+    errored: false,
+    stuck: false,
+    idle_ms: 0,
+    seq: 0,
+    ...overrides,
+  } as LiveSessionSummary;
+}
+
+describe("activityAlertCount", () => {
+  it("counts errored, stuck, and waiting sessions", () => {
+    expect(
+      activityAlertCount([
+        session({ session_id: "a", errored: true }),
+        session({ session_id: "b", stuck: true }),
+        session({ session_id: "c", status: "waiting" }),
+        session({ session_id: "d" }), // healthy idle — not counted
+        session({ session_id: "e", status: "busy" }), // busy — not counted
+      ]),
+    ).toBe(3);
+  });
+
+  it("returns 0 for an empty list", () => {
+    expect(activityAlertCount([])).toBe(0);
+  });
+
+  it("counts a session once even when several flags overlap", () => {
+    expect(
+      activityAlertCount([
+        session({ session_id: "a", errored: true, stuck: true }),
+      ]),
+    ).toBe(1);
+  });
+});
 
 describe("projectBasename", () => {
   it("returns last POSIX path segment", () => {

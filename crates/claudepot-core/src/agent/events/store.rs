@@ -7,13 +7,14 @@
 //! `log_retention_runs` long before the session leaves the index —
 //! so the fired set needs its own authoritative home.
 //!
-//! Mirrors `rotation::breaker_store` exactly: missing file → empty;
-//! corrupt/invalid file → renamed aside to
-//! `<path>.corrupt.<unix-ts>` (grill X23: timestamped so repeated
-//! corruption events do not overwrite the forensic copy), return
-//! empty, log a warn; a *real* I/O failure (permission denied, disk
-//! gone) propagates as `Err` so the orchestrator skips the tick
-//! instead of clobbering the user's real ledger on the next save.
+//! Persistence is a thin wrapper over [`crate::json_store`] — see
+//! that module for the three-outcome load contract and the
+//! corruption-recovery policy (grill X23: timestamped rename-aside
+//! so repeated corruption events do not overwrite the forensic copy,
+//! warn on rename failure, atomic write). A *real* I/O failure
+//! (permission denied, disk gone) propagates as `Err` so the
+//! orchestrator skips the tick instead of clobbering the user's real
+//! ledger on the next save.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::fs_utils::atomic_write;
+use crate::json_store::{self, SaveError};
 
 /// Bumped on schema-breaking changes. A file with an unrecognized
 /// version is treated as corrupt (moved aside, empty returned).
@@ -194,8 +195,20 @@ pub enum AgentEventsError {
     UnsupportedSchemaVersion { found: u32, expected: u32 },
 }
 
-/// Load the ledger from the canonical path. Three-outcome contract,
-/// matching `rotation::breaker_store::load`: `Ok` covers success,
+/// Store name used in log messages.
+const STORE: &str = "agent_events_store";
+
+impl json_store::Validate for EventsFile {
+    type Error = AgentEventsError;
+    fn validate(&self) -> Result<(), AgentEventsError> {
+        // Delegates to the inherent method (inherent methods win
+        // resolution over trait methods, so this is not recursion).
+        EventsFile::validate(self)
+    }
+}
+
+/// Load the ledger from the canonical path under the three-outcome
+/// contract (see [`crate::json_store`]): `Ok` covers success,
 /// missing file, and recovered-from-corruption; `Err` is a real I/O
 /// failure.
 pub fn load() -> std::io::Result<EventsFile> {
@@ -204,87 +217,14 @@ pub fn load() -> std::io::Result<EventsFile> {
 
 /// Test-friendly load that takes the path directly. See [`load`].
 pub fn load_from(path: &Path) -> std::io::Result<EventsFile> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(EventsFile::default());
-        }
-        Err(e) => return Err(e),
-    };
-    match serde_json::from_slice::<EventsFile>(&bytes) {
-        Ok(file) => match file.validate() {
-            Ok(()) => Ok(file),
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "agent_events_store: parsed but invalid; moving aside and starting empty"
-                );
-                move_aside(path);
-                Ok(EventsFile::default())
-            }
-        },
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "agent_events_store: parse failed; moving aside and starting empty"
-            );
-            move_aside(path);
-            Ok(EventsFile::default())
-        }
-    }
-}
-
-/// Rename a corrupt ledger out of the way so the next `load`
-/// starts empty. grill X23: previously the corrupt filename was a
-/// fixed `.json.corrupt` and the rename's failure was silently
-/// dropped — repeated corruption events would overwrite the forensic
-/// copy, and a permission/EXDEV/disk-full rename failure looked
-/// identical to a successful move-aside from the caller's side.
-///
-/// Two changes:
-///
-/// 1. The corrupt filename carries a unix-second suffix
-///    (`<path>.corrupt.<unix-ts>`) so two corruption events seconds
-///    apart land on different files and neither overwrites the
-///    other. The seconds-resolution timestamp matches the rest of
-///    Claudepot's filesystem breadcrumbs (run dirs,
-///    `dispatch-failed-<ts>-<session>`) and keeps the filename
-///    sortable.
-/// 2. A rename failure is logged at `warn!` with the original path,
-///    the corrupt target, and the OS error so a recurring corruption
-///    (e.g. read-only home, parent dir missing) is visible. The
-///    caller still recovers by returning the default ledger — losing
-///    a single forensic copy is preferable to refusing to load.
-fn move_aside(path: &Path) {
-    let suffix = chrono::Utc::now().timestamp();
-    let mut corrupt = path.to_path_buf();
-    let filename = path
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "agent-events".to_string());
-    corrupt.set_file_name(format!("{filename}.corrupt.{suffix}"));
-    if let Err(e) = std::fs::rename(path, &corrupt) {
-        tracing::warn!(
-            from = %path.display(),
-            to = %corrupt.display(),
-            error = %e,
-            "agent_events_store: failed to move corrupt ledger aside; \
-             the next load will retry but the forensic copy was lost"
-        );
-    }
+    json_store::load(path, STORE)
 }
 
 /// Log + swallow real I/O errors, always returning a usable file.
 /// Use only where errors cannot be propagated; new code prefers
 /// [`load`].
 pub fn load_or_default() -> EventsFile {
-    match load() {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!(error = %e, "agent_events_store: read failed; defaulting to empty");
-            EventsFile::default()
-        }
-    }
+    json_store::load_or_default(&events_path(), STORE)
 }
 
 /// Persist `file` to the canonical path. Validates before writing —
@@ -295,10 +235,11 @@ pub fn save(file: &EventsFile) -> Result<(), AgentEventsError> {
 
 /// Test-friendly save that takes the path directly.
 pub fn save_to(path: &Path, file: &EventsFile) -> Result<(), AgentEventsError> {
-    file.validate()?;
-    let json = serde_json::to_vec_pretty(file)?;
-    atomic_write(path, &json)?;
-    Ok(())
+    json_store::save(path, file).map_err(|e| match e {
+        SaveError::Validation(v) => v,
+        SaveError::Serde(s) => s.into(),
+        SaveError::Io(io) => io.into(),
+    })
 }
 
 #[cfg(test)]
@@ -355,45 +296,11 @@ mod tests {
         assert!(f.has_fired("live-agent", "live-sess"));
     }
 
-    /// Find every sibling whose filename matches
-    /// `<orig>.corrupt.<digits>` — the X23 timestamped corrupt-copy
-    /// shape. Returns an empty vec when no copy exists.
-    fn corrupt_copies(orig: &Path) -> Vec<PathBuf> {
-        let dir = orig.parent().expect("test path has a parent");
-        let base = orig
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .expect("test path has a basename");
-        let prefix = format!("{base}.corrupt.");
-        std::fs::read_dir(dir)
-            .map(|it| {
-                it.flatten()
-                    .map(|e| e.path())
-                    .filter(|p| {
-                        p.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
-                            n.starts_with(&prefix)
-                                && n[prefix.len()..].chars().all(|c| c.is_ascii_digit())
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    }
-
-    #[test]
-    fn test_events_store_corrupt_file_is_moved_aside() {
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("agent-events.json");
-        std::fs::write(&p, b"this is not json").unwrap();
-        let f = load_from(&p).unwrap();
-        assert!(f.fired.is_empty());
-        let copies = corrupt_copies(&p);
-        assert_eq!(
-            copies.len(),
-            1,
-            "corrupt file should be moved aside under a timestamped name"
-        );
-    }
+    // Generic store behaviors (corrupt-rename-aside under a
+    // timestamped name, the X23 repeated-corruption forensics,
+    // permission-denied propagation, 0600 writes) are covered once
+    // in `crate::json_store::tests`; the tests here exercise the
+    // ledger-specific schema + dedupe logic and the store wiring.
 
     #[test]
     fn test_events_store_unsupported_schema_version_is_moved_aside() {
@@ -402,47 +309,8 @@ mod tests {
         std::fs::write(&p, br#"{"schema_version":99,"fired":[]}"#).unwrap();
         let f = load_from(&p).unwrap();
         assert!(f.fired.is_empty());
-        let copies = corrupt_copies(&p);
+        let copies = crate::json_store::corrupt_siblings(&p);
         assert_eq!(copies.len(), 1);
-    }
-
-    #[test]
-    fn test_events_store_repeated_corruption_does_not_overwrite_forensic_copy() {
-        // grill X23: previously every corrupt-load wrote to a fixed
-        // `<path>.json.corrupt` and the second corruption clobbered
-        // the first forensic copy. With the timestamp suffix, each
-        // corruption that surfaces in a different second lands on a
-        // different file and accumulates.
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("agent-events.json");
-
-        std::fs::write(&p, b"first corruption").unwrap();
-        let _ = load_from(&p).unwrap();
-        let copies1 = corrupt_copies(&p);
-        assert_eq!(copies1.len(), 1);
-
-        // Sleep just past the 1-second timestamp resolution before
-        // the second corruption — otherwise the second rename would
-        // try to land on the same name and would be a noop overwrite
-        // (or a clobber of the first copy on platforms where rename
-        // is destructive). The assertion below is intentionally
-        // permissive in the same-second case: the bug fixed is
-        // "every corruption silently overwrites the prior copy", not
-        // "every corruption N milliseconds apart gets its own copy".
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        std::fs::write(&p, b"second corruption").unwrap();
-        let _ = load_from(&p).unwrap();
-        let copies2 = corrupt_copies(&p);
-        assert!(
-            !copies2.is_empty(),
-            "at least one forensic copy must always exist"
-        );
-        // The first copy is still on disk — repeated failures no
-        // longer destroy earlier evidence.
-        assert!(
-            copies2.iter().any(|c| c == &copies1[0]),
-            "the first forensic copy is not clobbered by a later corruption"
-        );
     }
 
     #[test]
@@ -468,17 +336,6 @@ mod tests {
             Err(AgentEventsError::UnsupportedSchemaVersion { .. })
         ));
         assert!(!p.exists(), "rejected file must never be written");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_events_store_save_writes_mode_0600() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("agent-events.json");
-        save_to(&p, &EventsFile::default()).unwrap();
-        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
     }
 
     #[test]

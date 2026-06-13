@@ -5,6 +5,16 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege for GITHUB_TOKEN; mirror ci-web.yml.
+permissions:
+  contents: read
+
+# Stacked pushes to the same ref cancel the superseded run instead
+# of burning the full 3-OS matrix to completion; mirror ci-web.yml.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   # Opt every JavaScript-based action (`actions/checkout@v6`,
@@ -27,27 +37,31 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      # Swatinem/rust-cache keys on job id + toolchain + lockfile and
+      # prunes stale artifacts, unlike a raw actions/cache of target/
+      # keyed only on Cargo.lock (which froze at the first
+      # post-lockfile-change run and re-uploaded multi-GB archives).
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
-        run: cargo fmt --check -p claudepot-core -p claudepot-cli
+        run: cargo fmt --check -p claudepot-core -p claudepot-cli -p xtask
 
-      - name: Clippy (core + cli, all targets)
+      - name: Clippy (core + cli + xtask, all targets)
         # `--all-targets` lints test code too. Without it, test-only
         # lints accumulate silently between Rust releases and surface
         # as a wall of errors at the next local clippy run (see the
         # 2026-05-13 cleanup commit for the 7-lint backlog this gate
         # would have caught at the source).
-        run: cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings
+        run: cargo clippy --all-targets -p claudepot-core -p claudepot-cli -p xtask -- -D warnings
+
+      # CC-parity fixtures (parity-harness/README.md): verifies
+      # claudepot-core's settings-merge semantics against golden
+      # fixtures generated from CC's own implementation. The xtask
+      # crate shares the cargo cache above, so the marginal cost is
+      # one small crate compile plus a millisecond fixture run.
+      - name: CC-parity fixtures (cargo xtask verify-cc-parity)
+        run: cargo xtask verify-cc-parity
 
       # ─── Architectural invariants ─────────────────────────────
       # Three grep-based tripwires. Each protects an invariant
@@ -140,19 +154,38 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      # See the lint job for why rust-cache replaces actions/cache.
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Tests (core + cli)
         run: cargo test -p claudepot-core -p claudepot-cli
+
+      # The tauri crate carries real unit tests (orchestrators, DTOs,
+      # preferences) plus an install smoke test that no other gate
+      # runs. It builds without extra system packages on macOS and
+      # Windows; on Linux it needs webkit2gtk + friends (see
+      # release.yml's build-linux-x86_64 apt list), which aren't
+      # worth installing on every CI run — release.yml's Linux build
+      # job is the Linux compile gate for this crate.
+      #
+      # tauri-build validates the `bundle.externalBin` entry at
+      # build-script time, so the CLI binary must be staged under
+      # src-tauri/binaries/ first (a fresh checkout doesn't have it).
+      # The frontend `dist/` is NOT needed: dev-profile codegen
+      # doesn't embed assets.
+      - name: Tests (tauri crate)
+        if: matrix.os != 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -eu
+          cargo build -p claudepot-cli
+          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+          EXT=""
+          case "$TRIPLE" in *windows*) EXT=".exe" ;; esac
+          mkdir -p src-tauri/binaries
+          cp "target/debug/claudepot$EXT" "src-tauri/binaries/claudepot-cli-$TRIPLE$EXT"
+          cargo test -p claudepot-tauri
 
   # grill X26: `--ignored` integration tests are normally locked out
   # of the default suite — they touch the real OS scheduler, hit
@@ -175,16 +208,9 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      # See the lint job for why rust-cache replaces actions/cache.
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
 
       # Scheduler-touching E2E. On Linux the active scheduler is
       # systemd-user; tests that require it self-skip when systemd
@@ -223,6 +249,16 @@ jobs:
 
       - name: Typecheck
         run: pnpm tsc --noEmit
+
+      # The production vite build catches failure classes tsc and
+      # vitest don't (asset resolution, CSS shard syntax errors,
+      # rollup-only module issues). Without this step the first
+      # `pnpm build` is tauri.conf.json's beforeBuildCommand at
+      # release-tag time — the most expensive place to find out.
+      # Unlike web/'s skipped build (see ci-web.yml), this is a
+      # plain client-side vite bundle that builds offline.
+      - name: Production build (vite)
+        run: pnpm build
 
       - name: Run tests
         run: pnpm test

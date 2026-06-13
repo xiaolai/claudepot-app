@@ -16,14 +16,14 @@ const revealSpy = vi.fn();
 // matter when asserting absence (e.g. "no cost trailer rendered").
 const pricingImpl = { fn: vi.fn(() => Promise.resolve(null as unknown)) };
 const sessionListImpl = {
-  fn: vi.fn(() => Promise.resolve([] as unknown[])),
+  fn: vi.fn((..._args: unknown[]) => Promise.resolve([] as unknown[])),
 };
 vi.mock("../../api", () => ({
   api: {
     projectShow: (...args: unknown[]) => showSpy(...args),
     revealInFinder: (...args: unknown[]) => revealSpy(...args),
     pricingGet: () => pricingImpl.fn(),
-    sessionListAll: () => sessionListImpl.fn(),
+    sessionListBySlug: (...args: unknown[]) => sessionListImpl.fn(...args),
     // ProjectDetail now mounts PermissionPanel + ProjectEnvPanel for
     // reachable projects; both fire reads on mount. Default to empty
     // so the existing list/move/reveal/cost tests don't have to
@@ -567,7 +567,10 @@ describe("ProjectDetail", () => {
     // been invoked so the test can't pass before the cost effect ran.
     // Otherwise an early `queryByText(/\$/)` would tautologically pass
     // even if suppression were broken.
-    await waitFor(() => expect(sessionListImpl.fn).toHaveBeenCalled());
+    // The per-project listing must request only this project's slug —
+    // shipping the whole cross-project index per click is the shape
+    // `session_list_by_slug` exists to avoid.
+    await waitFor(() => expect(sessionListImpl.fn).toHaveBeenCalledWith("-p"));
     await waitFor(() => expect(pricingImpl.fn).toHaveBeenCalled());
     // Flush one more microtask cycle so the useMemo + setState that
     // would emit a trailer (if one were going to) has a chance to run.

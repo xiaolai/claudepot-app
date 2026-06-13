@@ -12,6 +12,8 @@ use crate::cc_tips::error::{TipsError, TipsResult};
 use crate::cc_tips::extract::{extract_from_binary, resolve_cc_binary, RawTip};
 use crate::cc_tips::history::{read_tips_history, LastSeen, SnapshotLog};
 use crate::cc_tips::triggers::{default_shortcut, known_id_count, trigger_for};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -303,17 +305,33 @@ pub fn record_view() -> TipsResult<bool> {
     log.record_if_due(now_ms(), snap)
 }
 
+/// Shortcut helpers `Mf("key","scope","default")`. Matches generic
+/// single-letter helper IDs that Bun produces.
+static SHORTCUT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"\$\{[A-Za-z_$][A-Za-z0-9_$]*\("([a-z]+:[A-Za-z]+)","[^"]*","([^"]*)"\)\}"#)
+        .expect("static regex")
+});
+
+/// Color helpers. Recognized shapes:
+///   `${IDENT("text")}`
+///   `${IDENT(`text`)}`
+///   `${IDENT('text')}`
+///   `${IDENT(arg, arg)("text")}`        — curried color call
+///   `${IDENT(arg, arg)(`text`)}`        — curried color call w/ template
+///   `${IDENT(IDENT2(args))}`            — wrapped call (e.g. `${_(WJH(q))}`)
+static COLOR_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r#"\$\{[A-Za-z_$][A-Za-z0-9_$]*(?:\([^()]*\))?\((?:"([^"]*)"|`([^`]*)`|'([^']*)')\)\}"#,
+    )
+    .expect("static regex")
+});
+
 /// Replace `${Mf("chat:cycleMode","Chat","shift+tab")}` with the
 /// user's actual binding (or default), and unwrap `${HELPER("text")}`
 /// or `${HELPER('text')}` color helpers down to `text`.
 fn interpolate_prose(s: &str) -> String {
-    // Phase 1: shortcut helpers `Mf("key","scope","default")`. Match
-    // generic single-letter helper IDs that Bun produces.
-    let shortcut_re = regex::Regex::new(
-        r#"\$\{[A-Za-z_$][A-Za-z0-9_$]*\("([a-z]+:[A-Za-z]+)","[^"]*","([^"]*)"\)\}"#,
-    )
-    .expect("static");
-    let phase1 = shortcut_re.replace_all(s, |caps: &regex::Captures| {
+    // Phase 1: shortcut helpers.
+    let phase1 = SHORTCUT_RE.replace_all(s, |caps: &regex::Captures| {
         let key = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let dflt = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let resolved = default_shortcut(key);
@@ -324,21 +342,11 @@ fn interpolate_prose(s: &str) -> String {
         }
     });
 
-    // Phase 2: color helpers. Recognized shapes:
-    //   ${IDENT("text")}
-    //   ${IDENT(`text`)}
-    //   ${IDENT('text')}
-    //   ${IDENT(arg, arg)("text")}        // curried color call
-    //   ${IDENT(arg, arg)(`text`)}        // curried color call w/ template
-    //   ${IDENT(IDENT2(args))}            // wrapped call (e.g. `${_(WJH(q))}`)
-    // For each, return the inner display string. The user-facing
-    // payload is always the single quoted/templated argument that
-    // comes last; theme args, indices, and helper wrappers are noise.
-    let color_re = regex::Regex::new(
-        r#"\$\{[A-Za-z_$][A-Za-z0-9_$]*(?:\([^()]*\))?\((?:"([^"]*)"|`([^`]*)`|'([^']*)')\)\}"#,
-    )
-    .expect("static");
-    let phase2 = color_re.replace_all(&phase1, |caps: &regex::Captures| {
+    // Phase 2: color helpers. For each, return the inner display
+    // string. The user-facing payload is always the single
+    // quoted/templated argument that comes last; theme args, indices,
+    // and helper wrappers are noise.
+    let phase2 = COLOR_RE.replace_all(&phase1, |caps: &regex::Captures| {
         caps.get(1)
             .or_else(|| caps.get(2))
             .or_else(|| caps.get(3))
@@ -387,6 +395,13 @@ mod tests {
         let s = r#"Visit ${Kq("/passes")} for rewards"#;
         let out = interpolate_prose(s);
         assert_eq!(out, "Visit /passes for rewards");
+    }
+
+    #[test]
+    fn test_prose_interpolate_shortcut_and_color_combined() {
+        let s = r#"Press ${Mf("chat:cycleMode","Chat","shift+tab")} then run ${Kq("suggestion",H.theme)("/effort high")}"#;
+        let out = interpolate_prose(s);
+        assert_eq!(out, "Press Shift+Tab then run /effort high");
     }
 
     #[test]

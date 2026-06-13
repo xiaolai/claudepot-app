@@ -331,7 +331,7 @@ fn emit_patch(
     }
 
     let payload = encode_patch(core_patch, generation);
-    let _ = app.emit("config-tree-patch", payload);
+    let _ = app.emit(crate::events::CONFIG_TREE_PATCH, payload);
 }
 
 fn encode_patch(p: CorePatch, generation: u64) -> ConfigTreePatchEvent {

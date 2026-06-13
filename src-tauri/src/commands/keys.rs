@@ -1,7 +1,8 @@
 //! Tauri commands for the Keys section.
 //!
 //! Metadata and secrets both live in `~/.claudepot/keys.db` (0o600 on
-//! Unix). The OS Keychain is NOT used for this feature — CC's shared
+//! Unix, user-only DACL on Windows). The OS Keychain is NOT used for
+//! this feature — CC's shared
 //! `Claude Code-credentials` slot is the only Keychain surface touched
 //! by the app (via `cli_backend::keychain`). The plaintext token
 //! crosses the Tauri bridge ONLY on deliberate `*_copy` / `*_add` —
@@ -152,7 +153,9 @@ pub async fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, String> {
 /// we need to model.
 ///
 /// `async fn` — the body opens two SQLite stores and writes the
-/// encrypted secret into `keys.db`. Keeping it off the main thread is
+/// plaintext secret into `keys.db`'s 0600 `secret` column (no
+/// encryption layer — the at-rest pattern documented in the file
+/// header and AGENTS.md). Keeping it off the main thread is
 /// consistent with the rest of the `key_*` family; see `key_api_list`.
 ///
 /// Secret handling (D-5/6/7): the `token` `String` arrives via the
@@ -254,7 +257,8 @@ async fn key_oauth_add_inner(
     outcome
 }
 
-/// `async fn` — SQLite delete + encrypted-blob wipe. See `key_api_list`.
+/// `async fn` — SQLite row delete (the plaintext secret column goes
+/// with the row; there is no separate encrypted blob). See `key_api_list`.
 #[tauri::command]
 pub async fn key_api_remove(uuid: String) -> Result<(), String> {
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
@@ -370,10 +374,10 @@ pub(crate) fn schedule_self_clear(app: AppHandle, mut payload: String) {
 }
 
 /// Shared body of the three `key_*_copy*` commands. Loads the secret
-/// inside `spawn_blocking` (SQLite read + decrypt), formats the
-/// payload, writes it to the OS clipboard, schedules the 30s
-/// self-clear, and returns a `KeyCopyReceiptDto` — the secret bytes
-/// never reach the renderer.
+/// inside `spawn_blocking` (SQLite read of the plaintext secret
+/// column), formats the payload, writes it to the OS clipboard,
+/// schedules the 30s self-clear, and returns a `KeyCopyReceiptDto` —
+/// the secret bytes never reach the renderer.
 async fn key_copy_inner(
     uuid: String,
     kind: CopyKind,
@@ -467,13 +471,24 @@ pub async fn key_oauth_copy_shell(
 /// Probe an API key against `GET /v1/models`. `Ok(())` = key accepted,
 /// `Err(reason)` = rejected / rate-limited / transport. No DB write —
 /// the result is ephemeral so a stale cached status can never lie.
+///
+/// Secret handling (D-5/6/7): the plaintext key is fetched inside
+/// `spawn_blocking` (SQLite open off the IPC worker, same as
+/// `key_copy_inner`) and **zeroized** after the probe on every exit
+/// path — the error mapping below never interpolates it.
 #[tauri::command]
 pub async fn key_api_probe(uuid: String) -> Result<(), String> {
     use claudepot_core::error::OAuthError;
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
-    let keys = open_keys_store()?;
-    let secret = keys.find_api_secret(id).map_err(|e| format!("{e}"))?;
-    match claudepot_core::keys::probe_api_key(&secret).await {
+    let mut secret = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let keys = open_keys_store()?;
+        keys.find_api_secret(id).map_err(|e| format!("{e}"))
+    })
+    .await
+    .map_err(|e| format!("blocking task failed: {e}"))??;
+    let probe = claudepot_core::keys::probe_api_key(&secret).await;
+    secret.zeroize();
+    match probe {
         Ok(()) => Ok(()),
         Err(OAuthError::AuthFailed(_)) => Err("rejected (invalid key)".into()),
         Err(OAuthError::RateLimited { retry_after_secs }) => {

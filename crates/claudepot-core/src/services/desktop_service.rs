@@ -753,6 +753,13 @@ pub async fn check_profile_dpapi_valid(
             Err(DecryptError::UnknownVersion(tag)) => Err(DesktopKeyError::LocalState(format!(
                 "snapshot token uses unsupported envelope tag: {tag:?}"
             ))),
+            // KDF failure is an internal error deriving the key from the
+            // secret — not the "live key can't decrypt" (Aes) signal and
+            // not snapshot corruption. Surface it rather than reporting a
+            // false key-rotation (Ok(false)).
+            Err(DecryptError::Kdf(msg)) => Err(DesktopKeyError::LocalState(format!(
+                "snapshot key derivation failed: {msg}"
+            ))),
         }
     }
 }

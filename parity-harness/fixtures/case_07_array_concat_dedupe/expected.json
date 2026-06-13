@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["Bash(git *)", "Read", "Bash(npm *)"],
+    "deny": ["WebFetch"]
+  }
+}

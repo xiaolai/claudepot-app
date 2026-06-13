@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { listen, type Event as TauriEvent } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { useServiceStatus } from "../hooks/useServiceStatus";
+import { useTauriEvent } from "../hooks/useTauriEvent";
 import { tierColor, tierLabel } from "../api/service-status";
 import type { Preferences } from "../types";
 import { formatRelative } from "../lib/formatRelative";
@@ -30,6 +30,9 @@ export function ServiceStatusDot() {
   // `broadcastPrefsChanged`). The event payload IS the new
   // Preferences snapshot, so we don't have to round-trip a second
   // `preferencesGet`.
+  useTauriEvent<Preferences>("cp-prefs-changed", (ev) => {
+    setPrefs(ev.payload);
+  });
   useEffect(() => {
     let cancelled = false;
     api
@@ -38,20 +41,8 @@ export function ServiceStatusDot() {
         if (!cancelled) setPrefs(p);
       })
       .catch(() => {});
-
-    let unlisten: (() => void) | undefined;
-    listen<Preferences>("cp-prefs-changed", (ev: TauriEvent<Preferences>) => {
-      if (!cancelled) setPrefs(ev.payload);
-    })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {});
-
     return () => {
       cancelled = true;
-      if (unlisten) unlisten();
     };
   }, []);
 

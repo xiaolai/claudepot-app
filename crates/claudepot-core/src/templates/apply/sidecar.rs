@@ -3,9 +3,43 @@
 
 use std::path::{Path, PathBuf};
 
+use thiserror::Error;
+
 use crate::fs_utils;
 
 use super::ops::PendingChanges;
+
+/// Side-car read/write failures. Folded into
+/// [`crate::templates::TemplateError`] via `#[from]` so callers at the
+/// templates boundary can propagate with `?`; kept as its own enum so
+/// the io-vs-parse distinction survives (per rust-conventions, no
+/// stringly `Result<_, String>` at public core boundaries).
+#[derive(Debug, Error)]
+pub enum SidecarError {
+    #[error("read {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("parse {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("serialize: {0}")]
+    Serialize(#[source] serde_json::Error),
+
+    #[error("write {path}: {source}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
 
 /// Resolve the `pending-changes.json` path for a run, given the
 /// blueprint's `pending_changes_path` template (e.g.
@@ -21,17 +55,29 @@ pub fn pending_path_for(pending_changes_path_template: &str, output_path: &Path)
     PathBuf::from(resolved)
 }
 
-pub fn read(path: &Path) -> Result<PendingChanges, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))
+pub fn read(path: &Path) -> Result<PendingChanges, SidecarError> {
+    let bytes = std::fs::read(path).map_err(|e| SidecarError::Read {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    serde_json::from_slice(&bytes).map_err(|e| SidecarError::Parse {
+        path: path.to_path_buf(),
+        source: e,
+    })
 }
 
-pub fn write(path: &Path, value: &PendingChanges) -> Result<(), String> {
-    let bytes = serde_json::to_vec_pretty(value).map_err(|e| format!("serialize: {e}"))?;
+pub fn write(path: &Path, value: &PendingChanges) -> Result<(), SidecarError> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(SidecarError::Serialize)?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| SidecarError::Write {
+            path: parent.to_path_buf(),
+            source: e,
+        })?;
     }
-    fs_utils::atomic_write(path, &bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
+    fs_utils::atomic_write(path, &bytes).map_err(|e| SidecarError::Write {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     Ok(())
 }
 
@@ -82,6 +128,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("nope.json");
         let err = read(&p).unwrap_err();
-        assert!(err.contains("read"));
+        assert!(matches!(err, SidecarError::Read { .. }));
+        assert!(err.to_string().contains("read"));
+    }
+
+    #[test]
+    fn read_malformed_json_is_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("bad.json");
+        std::fs::write(&p, b"{not json").unwrap();
+        let err = read(&p).unwrap_err();
+        assert!(matches!(err, SidecarError::Parse { .. }));
     }
 }

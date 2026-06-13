@@ -1,7 +1,8 @@
-import { useCallback, useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useCallback } from "react";
+import type { Event as TauriEvent } from "@tauri-apps/api/event";
 
 import { useEmit } from "../providers/AppStateProvider";
+import { useTauriEvents } from "./useTauriEvent";
 
 /**
  * Listen for `agent_event_orchestrator` events. Two subscribed
@@ -88,62 +89,17 @@ export function useAgentEventToasts(): void {
     [emit],
   );
 
-  useEffect(() => {
-    let active = true;
-    const unlisteners: UnlistenFn[] = [];
-
-    const wire = <T>(channel: string, handler: (p: T) => void) => {
-      void listen<T>(channel, (ev) => {
-        if (!active || !ev.payload) return;
-        handler(ev.payload);
-      })
-        .then((fn) => {
-          if (!active) fn();
-          else unlisteners.push(fn);
-        })
-        .catch((err: unknown) => {
-          // grill X18: previously this `.catch` swallowed every
-          // failure mode. A non-Tauri renderer (vitest under jsdom,
-          // a future preview build) raises a ReferenceError-shaped
-          // failure on the `__TAURI_IPC__` global; that is the
-          // expected silent-skip case. A *real* `listen()` failure
-          // (renderer reload race mid-mount, a renamed channel on
-          // a future addition, an unexpected throw inside the
-          // plugin's invoke layer) looks identical here and used
-          // to be invisible — debugging a missing toast meant
-          // staring at the bell-icon log with no upstream signal.
-          //
-          // Discriminate: a non-Tauri renderer (vitest under jsdom,
-          // a future preview build) raises a failure whose message
-          // mentions `__TAURI_*` or a missing tauri binding. That
-          // is the expected silent-skip case. Everything else gets
-          // a `console.warn` so a real channel-typo or runtime
-          // failure is debuggable. We deliberately avoid touching
-          // `process` here — the renderer is browser-context and
-          // doesn't carry `@types/node`; the message-shape filter
-          // is sufficient for the test surface (vitest's mock
-          // never throws this catch path).
-          const msg =
-            err instanceof Error ? err.message : String(err);
-          const isNonTauri =
-            /__TAURI/i.test(msg) ||
-            (/tauri/i.test(msg) && /undefined|not (a )?function/i.test(msg));
-          if (!isNonTauri) {
-            // eslint-disable-next-line no-console
-            console.warn(
-              `useAgentEventToasts: listen(${channel}) failed:`,
-              err,
-            );
-          }
-        });
-    };
-
-    wire<FailedPayload>("agent-event-failed", handleFailed);
-    wire<BurstCappedPayload>("agent-event-burst-capped", handleBurstCapped);
-
-    return () => {
-      active = false;
-      unlisteners.forEach((fn) => fn());
-    };
-  }, [handleFailed, handleBurstCapped]);
+  // Lifetime subscriptions via the shared multi-channel primitive.
+  // The grill-X18 failure discrimination (silent skip for non-Tauri
+  // renderers, console.warn for real listen() failures like channel
+  // typos) now lives inside useTauriEvents — one home, not a copy
+  // per hook.
+  useTauriEvents({
+    "agent-event-failed": (ev: TauriEvent<FailedPayload>) => {
+      if (ev.payload) handleFailed(ev.payload);
+    },
+    "agent-event-burst-capped": (ev: TauriEvent<BurstCappedPayload>) => {
+      if (ev.payload) handleBurstCapped(ev.payload);
+    },
+  });
 }

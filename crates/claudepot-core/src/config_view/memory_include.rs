@@ -279,8 +279,16 @@ fn mask_non_scannable(body: &str) -> String {
     mask_html(&mut buf);
     debug_assert_eq!(buf.len(), len);
     // Safe: every byte we blanked was overwritten with a space; all
-    // other bytes are unchanged from the original `&str`.
-    String::from_utf8(buf).expect("masker preserves UTF-8")
+    // other bytes are unchanged from the original `&str`, so the Err
+    // arm is unreachable by construction. Degrade to a lossy decode
+    // rather than panicking in core (rust-conventions: no expect).
+    match String::from_utf8(buf) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("memory-include masker produced non-UTF-8 — lossy decode");
+            String::from_utf8_lossy(e.as_bytes()).into_owned()
+        }
+    }
 }
 
 fn mask_fenced_blocks(bytes: &mut [u8]) {

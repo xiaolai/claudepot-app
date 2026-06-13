@@ -131,7 +131,7 @@
   border-radius: var(--r-1);
   font-size: var(--fs-xs);
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--ls-caption);
   white-space: nowrap;
   border: var(--bw-subhair) solid transparent;
 }

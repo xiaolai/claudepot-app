@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from "react";
  *
  * Pattern mirrors `useTheme` so the keys and lifecycle are familiar.
  */
-const KEY = "cp-sidebar-collapsed";
+import { SIDEBAR_COLLAPSED_KEY as KEY } from "../lib/storageKeys";
 
 function read(): boolean {
   try {

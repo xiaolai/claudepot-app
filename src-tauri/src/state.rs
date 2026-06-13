@@ -1,9 +1,28 @@
 //! App-wide state held across Tauri command invocations.
 //!
-//! Today there is one piece of shared state: the Notify handle for an
-//! in-flight `claude auth login` subprocess, so a Cancel button click can
-//! reach back and kill it. Kept in a std Mutex because accesses are
-//! non-async and very brief.
+//! What lives here (all managed via `app.manage(...)` in lib.rs):
+//!
+//! - [`DesktopOpState`] — async mutex serializing Desktop-mutating
+//!   commands (adopt, clear, use, launch, quit, sync).
+//! - [`CliOpState`] — async mutex serializing tray-initiated CLI
+//!   switches so rapid clicks see each other's results.
+//! - [`LoginState`] / [`LoginStateHandle`] — the Notify handle for an
+//!   in-flight `claude auth login` subprocess, so a Cancel click can
+//!   reach back and kill it.
+//! - [`DryRunState`] — last-call-wins arbiter for concurrent
+//!   `project_move_dry_run` calls.
+//! - [`LiveSessionState`] — the LiveActivityService (runtime,
+//!   listener fan-out, membership debounce).
+//! - [`TrayAlertState`] / [`UpdatesAlertState`] — alert counters
+//!   summed into the tray badge.
+//! - [`TrayHealthState`] — last cc_doctor verdict for the tray's
+//!   Health row.
+//!
+//! Sync (std) mutexes here are held only long enough to copy small
+//! values; async mutexes are held across awaits by design. Poisoned
+//! sync locks recover via `claudepot_core::sync::recover_lock` — UI
+//! counters and login slots must survive an earlier panic, and the
+//! helper logs the recovery so it's diagnosable.
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as AsyncMutex, Notify};
@@ -76,30 +95,18 @@ impl LoginStateHandle {
     /// Drop the active login slot. Idempotent — safe to call multiple
     /// times even if no login was running.
     ///
-    /// Mirrors the poison-recovery policy used by the SQLite stores
-    /// (`account.rs`, `env_vault/store.rs`, `keys/store.rs`,
-    /// `session_live/metrics_store.rs`) and `notification_log`: if the
+    /// Uses the project-wide `recover_lock` poison policy: if the
     /// mutex is poisoned by an earlier worker-thread panic, recover via
-    /// `into_inner()` and clear the slot anyway. The previous
-    /// `if let Ok(mut g) = self.slot.lock()` shape silently no-oped on
-    /// poison, leaving the in-process login lock held forever — every
-    /// subsequent `account_login_start` would then reject with "login
-    /// already in progress" for the process lifetime. The whole point
-    /// of `clear()` existing is to make sure that lock gets released
-    /// even when something blows up upstream, so the policy is to
-    /// recover and clear.
+    /// `into_inner()` and clear the slot anyway (the helper logs the
+    /// recovery). The pre-helper `if let Ok(mut g) = self.slot.lock()`
+    /// shape silently no-oped on poison, leaving the in-process login
+    /// lock held forever — every subsequent `account_login_start` would
+    /// then reject with "login already in progress" for the process
+    /// lifetime. The whole point of `clear()` existing is to make sure
+    /// that lock gets released even when something blows up upstream,
+    /// so the policy is to recover and clear.
     pub fn clear(&self) {
-        let mut g = match self.slot.lock() {
-            Ok(g) => g,
-            Err(poisoned) => {
-                tracing::warn!(
-                    "LoginStateHandle::clear: slot mutex was poisoned by an earlier panic; \
-                     clearing anyway so the login slot doesn't stay held forever"
-                );
-                poisoned.into_inner()
-            }
-        };
-        g.take();
+        claudepot_core::sync::recover_lock(&self.slot, "LoginStateHandle::slot").take();
     }
 }
 
@@ -245,17 +252,11 @@ impl TrayAlertState {
     pub fn get(&self) -> u32 {
         // Recover from poison rather than panic — a poisoned alert
         // counter is a UI-only concern and must not propagate.
-        match self.0.lock() {
-            Ok(g) => *g,
-            Err(p) => *p.into_inner(),
-        }
+        *claudepot_core::sync::recover_lock(&self.0, "TrayAlertState")
     }
 
     pub fn set(&self, count: u32) {
-        match self.0.lock() {
-            Ok(mut g) => *g = count,
-            Err(p) => *p.into_inner() = count,
-        }
+        *claudepot_core::sync::recover_lock(&self.0, "TrayAlertState") = count;
     }
 }
 
@@ -272,17 +273,11 @@ pub struct UpdatesAlertState(pub Mutex<u32>);
 
 impl UpdatesAlertState {
     pub fn get(&self) -> u32 {
-        match self.0.lock() {
-            Ok(g) => *g,
-            Err(p) => *p.into_inner(),
-        }
+        *claudepot_core::sync::recover_lock(&self.0, "UpdatesAlertState")
     }
 
     pub fn set(&self, count: u32) {
-        match self.0.lock() {
-            Ok(mut g) => *g = count,
-            Err(p) => *p.into_inner() = count,
-        }
+        *claudepot_core::sync::recover_lock(&self.0, "UpdatesAlertState") = count;
     }
 }
 
@@ -328,10 +323,7 @@ impl Default for TrayHealthState {
 
 impl TrayHealthState {
     pub fn get(&self) -> HealthRecord {
-        match self.0.lock() {
-            Ok(g) => *g,
-            Err(p) => *p.into_inner(),
-        }
+        *claudepot_core::sync::recover_lock(&self.0, "TrayHealthState")
     }
 
     pub fn set(&self, kind: HealthRecordKind, flagged_sections: u32) {
@@ -339,9 +331,6 @@ impl TrayHealthState {
             kind,
             flagged_sections,
         };
-        match self.0.lock() {
-            Ok(mut g) => *g = rec,
-            Err(p) => *p.into_inner() = rec,
-        }
+        *claudepot_core::sync::recover_lock(&self.0, "TrayHealthState") = rec;
     }
 }

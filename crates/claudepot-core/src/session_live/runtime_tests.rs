@@ -812,6 +812,209 @@ async fn activity_classifier_runs_on_live_tail() {
     );
 }
 
+// ── Aggregate publish dedup ────────────────────────────────────────
+//
+// `tick` must publish the aggregate only when the list actually
+// changed (idle_ms bucketed). The watch channel notifies receivers
+// unconditionally per send, and the Tauri bridge re-emits `live-all`
+// per notification — so an unconditional publish meant a 2 Hz render
+// storm in the webview even with zero live sessions.
+
+fn summary_fixture(sid: &str) -> LiveSessionSummary {
+    LiveSessionSummary {
+        source_kind: Default::default(),
+        session_id: sid.to_string(),
+        pid: 1,
+        cwd: "/tmp/p".into(),
+        transcript_path: None,
+        status: Status::Idle,
+        current_action: None,
+        model: None,
+        waiting_for: None,
+        errored: false,
+        stuck: false,
+        idle_ms: 0,
+        seq: 0,
+    }
+}
+
+#[test]
+fn test_publish_equivalent_same_idle_bucket_is_equal() {
+    let a = LiveSessionSummary {
+        idle_ms: 1_000,
+        ..summary_fixture("s")
+    };
+    let b = LiveSessionSummary {
+        idle_ms: 4_999,
+        ..summary_fixture("s")
+    };
+    assert!(
+        super::publish_equivalent(&a, &b),
+        "idle_ms drift within one bucket must not count as a change"
+    );
+}
+
+#[test]
+fn test_publish_equivalent_idle_bucket_crossing_differs() {
+    let a = LiveSessionSummary {
+        idle_ms: 4_999,
+        ..summary_fixture("s")
+    };
+    let b = LiveSessionSummary {
+        idle_ms: 5_000,
+        ..summary_fixture("s")
+    };
+    assert!(
+        !super::publish_equivalent(&a, &b),
+        "crossing an idle bucket boundary must publish (keeps the UI's idle counter fresh)"
+    );
+}
+
+#[test]
+fn test_publish_equivalent_field_change_differs() {
+    let a = summary_fixture("s");
+    let busy = LiveSessionSummary {
+        status: Status::Busy,
+        ..summary_fixture("s")
+    };
+    let stuck = LiveSessionSummary {
+        stuck: true,
+        ..summary_fixture("s")
+    };
+    let seq = LiveSessionSummary {
+        seq: 7,
+        ..summary_fixture("s")
+    };
+    assert!(!super::publish_equivalent(&a, &busy));
+    assert!(!super::publish_equivalent(&a, &stuck));
+    assert!(!super::publish_equivalent(&a, &seq));
+}
+
+#[test]
+fn test_aggregate_publish_equivalent_length_mismatch_differs() {
+    let one = vec![summary_fixture("s1")];
+    let two = vec![summary_fixture("s1"), summary_fixture("s2")];
+    assert!(!super::aggregate_publish_equivalent(&one, &two));
+    assert!(!super::aggregate_publish_equivalent(&two, &one));
+    assert!(super::aggregate_publish_equivalent(&one, &one));
+    assert!(super::aggregate_publish_equivalent(&[], &[]));
+}
+
+/// PID-file body with `startedAt` = now, so the session's `idle_ms`
+/// sits in bucket 0 for a full 5 s — long enough for back-to-back
+/// test ticks to land in the same bucket deterministically.
+fn pid_body_started_now(pid: u32, sid: &str, cwd: &str) -> String {
+    let now = chrono::Utc::now().timestamp_millis();
+    format!(r#"{{"pid":{pid},"sessionId":"{sid}","cwd":"{cwd}","startedAt":{now}}}"#)
+}
+
+#[tokio::test]
+async fn tick_suppresses_publish_when_nothing_changed() {
+    let f = fixture();
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        &pid_body_started_now(12345, "sess-a", "/tmp/proj"),
+    );
+    write_transcript(&f.projects_dir, "/tmp/proj", "sess-a", "");
+    f.check.set_alive(&[12345]);
+    // First tick attaches and publishes (list went empty → one).
+    f.runtime.tick().await.unwrap();
+
+    // A fresh subscriber marks the current value as seen.
+    let rx = f.runtime.subscribe_aggregate();
+    assert!(!rx.has_changed().unwrap());
+
+    // Nothing changed on disk — repeated ticks must NOT re-publish.
+    f.runtime.tick().await.unwrap();
+    f.runtime.tick().await.unwrap();
+    assert!(
+        !rx.has_changed().unwrap(),
+        "no-change ticks must not notify aggregate subscribers"
+    );
+}
+
+#[tokio::test]
+async fn tick_publishes_again_on_real_transition() {
+    let f = fixture();
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        &pid_body_started_now(12345, "sess-a", "/tmp/proj"),
+    );
+    write_transcript(&f.projects_dir, "/tmp/proj", "sess-a", "");
+    f.check.set_alive(&[12345]);
+    f.runtime.tick().await.unwrap();
+
+    let mut rx = f.runtime.subscribe_aggregate();
+    // Quiet tick first — proves the next assertion isn't passing
+    // because every tick publishes.
+    f.runtime.tick().await.unwrap();
+    assert!(!rx.has_changed().unwrap());
+
+    // CC appends a user turn → status flips Idle → Busy.
+    append_transcript(
+        &f.projects_dir,
+        "/tmp/proj",
+        "sess-a",
+        concat!(
+            r#"{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/tmp/p","sessionId":"sess-a","version":"2.1","timestamp":"2026-04-21T10:00:00.000Z","uuid":"u1","type":"user","message":{"role":"user","content":"go"}}"#,
+            "\n",
+        ),
+    );
+    f.runtime.tick().await.unwrap();
+    assert!(
+        rx.has_changed().unwrap(),
+        "a real status transition must publish"
+    );
+    assert_eq!(rx.borrow_and_update()[0].status, Status::Busy);
+}
+
+#[tokio::test]
+async fn tick_publishes_empty_exactly_once_on_transition_to_empty() {
+    let f = fixture();
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        &pid_body_started_now(12345, "sess-a", "/tmp/proj"),
+    );
+    write_transcript(&f.projects_dir, "/tmp/proj", "sess-a", "");
+    f.check.set_alive(&[12345]);
+    f.runtime.tick().await.unwrap();
+
+    let mut rx = f.runtime.subscribe_aggregate();
+
+    // Session dies → the empty list publishes once…
+    f.check.set_alive(&[]);
+    f.runtime.tick().await.unwrap();
+    assert!(
+        rx.has_changed().unwrap(),
+        "transition to empty must publish"
+    );
+    assert!(rx.borrow_and_update().is_empty());
+
+    // …and stays silent on every subsequent tick.
+    f.runtime.tick().await.unwrap();
+    f.runtime.tick().await.unwrap();
+    assert!(
+        !rx.has_changed().unwrap(),
+        "empty list must not re-publish while nothing is live"
+    );
+}
+
+#[tokio::test]
+async fn tick_never_publishes_when_no_sessions_exist() {
+    let f = fixture();
+    let rx = f.runtime.subscribe_aggregate();
+    f.runtime.tick().await.unwrap();
+    f.runtime.tick().await.unwrap();
+    assert!(
+        !rx.has_changed().unwrap(),
+        "an always-empty registry must produce zero aggregate publishes"
+    );
+    assert!(f.runtime.snapshot().is_empty());
+}
+
 /// Phase 3 finalize hook: when a session disappears from the PID
 /// registry, any open Agent episodes drain into AgentStranded
 /// cards before the session is removed from the runtime's state map.
