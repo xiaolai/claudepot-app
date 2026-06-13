@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.46"
+version = "0.1.47"
 edition = "2021"
 # Floor set by std file_lock (File::{lock,try_lock,unlock}, 1.89) —
 # the cross-process advisory locks in claudepot-core depend on it.
