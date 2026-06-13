@@ -6,6 +6,28 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.48 — beta (unreleased)
+
+Emergency fix for a v0.1.47 startup regression.
+
+### Fixed
+
+- **App no longer freezes on the boot splash.** v0.1.47's production
+  bundle had a circular Rollup *chunk* (`section-config` ↔
+  `section-projects` ↔ `section-sessions`), introduced when the
+  `manualChunks` source-path grouping met new cross-section imports.
+  Circular chunks throw "Cannot access X before initialization" at
+  load, so React never mounted. `manualChunks` is now vendor-only and
+  sections are auto-split by their lazy loaders (acyclic). Dev, type-
+  check, and the test suite never saw it — only the minified, code-
+  split build was affected.
+
+### Changed
+
+- The Vite build now treats a circular-chunk warning as **fatal**
+  (`rollupOptions.onwarn`), so `pnpm build` — and therefore CI and the
+  release pipeline — fails loudly instead of shipping a white screen.
+
 ## 0.1.47 — beta (unreleased)
 
 Hardening + maintainability release. A multi-agent audit swept the
