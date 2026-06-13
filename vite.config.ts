@@ -58,28 +58,50 @@ export default defineConfig(() => ({
     cssMinify: true,
     sourcemap: false,
     rollupOptions: {
+      // A circular *chunk* cycle ships a prod bundle that throws
+      // "Cannot access X before initialization" at module-eval — React
+      // never mounts and the app white-screens on the boot splash
+      // (this shipped as v0.1.47). It only manifests in the minified,
+      // code-split production bundle, so dev / tsc / vitest all pass.
+      // Treat the warning as FATAL so `pnpm build` (and thus CI + the
+      // release pipeline) fails here instead of in users' webviews.
+      onwarn(warning, defaultHandler) {
+        if (
+          warning.code === "CYCLIC_CROSS_CHUNK_REEXPORT" ||
+          (warning.message && warning.message.includes("Circular chunk"))
+        ) {
+          throw new Error(`Fatal build warning (circular chunk): ${warning.message}`);
+        }
+        defaultHandler(warning);
+      },
       output: {
-        // Split React + the per-section trees into their own chunks
-        // so the shell can paint before Projects / Sessions / Settings
-        // parse. Without this, everything ends up in a single 384 KB
-        // main bundle that the webview has to parse before React
-        // mounts.
+        // VENDOR chunks only. App section code is split automatically
+        // by the `React.lazy(() => import(...))` loaders in the section
+        // registry — those produce acyclic async chunks per section.
+        //
+        // We deliberately do NOT manual-group section *source* by path
+        // anymore: doing so forced eagerly-imported helpers (e.g.
+        // App.tsx's static import of `sections/projects/sessionMoveProgress`)
+        // into a named `section-*` chunk, and once sections began
+        // cross-importing (config↔projects↔sessions) those named chunks
+        // became mutually circular. Rollup emitted a `Circular chunk`
+        // warning and the circular init order threw "Cannot access X
+        // before initialization" at module-eval — so the production
+        // bundle white-screened on the boot splash while dev (unbundled)
+        // and the test suite (no chunking) were fine. Vendor-only manual
+        // chunks + lazy() auto-splitting keep the shell-paints-first
+        // perf win without the cycle.
         manualChunks(id: string) {
           // Config preview pulls react-markdown + remark-gfm +
           // rehype-highlight + highlight.js grammars (~150 KB
-          // gzipped). Keep them isolated so the rest of the app
-          // doesn't pay the parse cost until the user opens
-          // Config. Match these BEFORE the react chunk rule so
-          // `react-markdown` isn't swept into `react` by the
-          // `node_modules/react` substring match. The pattern
-          // covers the full unified-ecosystem family (unified,
-          // vfile, hast/mdast utilities, micromark grammars, link
-          // attribute helpers, devlop) so transitive deps land in
-          // the same lazy chunk instead of leaking into the main
-          // bundle.
-          if (id.includes("/sections/config/") ||
-              id.includes("/sections/ConfigSection") ||
-              id.includes("node_modules/react-markdown") ||
+          // gzipped). Isolate the vendor family in its own chunk so it
+          // loads lazily with the (auto-split) Config section instead
+          // of leaking into the main bundle. Match BEFORE the react
+          // rule so `react-markdown` isn't swept into `react` by the
+          // `node_modules/react` substring. Covers the full unified
+          // ecosystem (unified, vfile, hast/mdast, micromark, link
+          // attribute helpers, devlop) so transitive deps stay grouped.
+          if (id.includes("node_modules/react-markdown") ||
               id.includes("node_modules/remark-") ||
               id.includes("node_modules/rehype-") ||
               id.includes("node_modules/micromark") ||
@@ -107,24 +129,12 @@ export default defineConfig(() => ({
               id.includes("node_modules/lowlight") ||
               id.includes("node_modules/fault") ||
               id.includes("node_modules/highlight.js")) {
-            return "section-config";
+            return "markdown-vendor";
           }
           if (id.includes("node_modules/react/") ||
               id.includes("node_modules/react-dom/") ||
               id.includes("node_modules/scheduler/")) {
             return "react";
-          }
-          if (id.includes("/sections/projects/") ||
-              id.includes("/sections/ProjectsSection")) {
-            return "section-projects";
-          }
-          if (id.includes("/sections/sessions/") ||
-              id.includes("/sections/SessionsSection")) {
-            return "section-sessions";
-          }
-          if (id.includes("/sections/settings/") ||
-              id.includes("/sections/SettingsSection")) {
-            return "section-settings";
           }
           return undefined;
         },
