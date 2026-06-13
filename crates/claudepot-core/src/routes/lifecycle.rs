@@ -319,7 +319,13 @@ pub fn edit_route(
                 None
             },
         ),
-        None => return Err(SaveRouteError::NotFound(id.to_string())),
+        None => {
+            // Scrub the typed secret before bailing — `candidate` is
+            // dropped here without store.update ever taking it, so
+            // this stale-id path must zeroize like the others below.
+            zeroize_provider_secrets(&mut candidate.provider);
+            return Err(SaveRouteError::NotFound(id.to_string()));
+        }
     };
 
     if let Err(e) = commit_secrets(&mut candidate.provider, id, Some(&prev_provider), fx) {

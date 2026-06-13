@@ -83,6 +83,7 @@ export function EffectiveRenderer({ cwd }: { cwd: string | null }) {
         winner={data.policy_winner}
         errors={data.policy_errors}
       />
+      {data.merge_divergence && <DivergenceBanner />}
       <div
         style={{
           flex: 1,
@@ -95,6 +96,30 @@ export function EffectiveRenderer({ cwd }: { cwd: string | null }) {
       >
         <TreeView value={data.merged} prov={provByPath} />
       </div>
+    </div>
+  );
+}
+
+// Shown when the core merge engine reports `merge_divergence`: the
+// merged values are still CC-correct, but the per-leaf attribution
+// (winner/contributors) was flattened from a divergent annotated tree
+// and may be wrong. Warn rather than present unreliable provenance as
+// fact. See effective_settings::EffectiveSettings::merge_divergence.
+function DivergenceBanner() {
+  return (
+    <div
+      role="status"
+      style={{
+        padding: "var(--sp-8) var(--sp-16)",
+        borderBottom: "var(--bw-hair) solid var(--accent)",
+        background: "var(--bg-sunken)",
+        fontSize: "var(--fs-xs)",
+        color: "var(--accent)",
+      }}
+    >
+      <strong>Attribution may be unreliable:</strong> the merge engine
+      diverged from the reference merge for this project. Merged values
+      are correct, but the per-key source labels below may be wrong.
     </div>
   );
 }
