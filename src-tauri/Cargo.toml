@@ -51,6 +51,12 @@ tracing-appender.workspace = true
 # duplicate tree in the lockfile (the plugin still targets the old
 # objc2 generation as of 0.11.2).
 tauri-plugin-mcp-bridge = "0.11"
+# Single-instance guard: a second launch (dev build, `open -n`, or a
+# direct binary run that bypasses LaunchServices' one-per-bundle rule)
+# hands its argv to the running instance and exits; we raise the
+# existing window instead of spawning a duplicate Claudepot. Registered
+# FIRST in lib.rs, as the plugin requires.
+tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
