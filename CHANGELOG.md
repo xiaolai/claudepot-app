@@ -6,6 +6,17 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.49 — beta (unreleased)
+
+### Added
+
+- **Single-instance guard.** Launching Claudepot a second time now
+  focuses the existing window instead of starting a duplicate. Claudepot
+  previously had no application-level guard, so a launch that bypassed
+  macOS's one-per-bundle rule (a dev build, `open -n`, or a direct
+  binary run) could leave two `com.claudepot.app` processes running at
+  once. Registered via `tauri-plugin-single-instance`; cross-platform.
+
 ## 0.1.48 — beta (unreleased)
 
 Emergency fix for a v0.1.47 startup regression.
