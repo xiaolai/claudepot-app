@@ -418,6 +418,21 @@ pub fn run() {
     // release builds don't touch it. Silence the release warning here.
     #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut builder = tauri::Builder::default()
+        // MUST be the first plugin. On a second launch the new process
+        // forwards its argv to the already-running instance and exits;
+        // the callback raises the existing main window instead of
+        // spawning a duplicate. Without this, a dev build, `open -n`,
+        // or a direct binary run (which bypass LaunchServices'
+        // one-launch-per-bundle rule) could run a second
+        // com.claudepot.app alongside the installed one.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            use tauri::Manager;
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
