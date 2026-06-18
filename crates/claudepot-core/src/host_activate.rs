@@ -208,13 +208,18 @@ pub fn activate_bundle_id(bundle_id: &str) -> std::io::Result<()> {
         // `-g` would deactivate-self; we omit it so the host app
         // takes focus immediately. Stdin/stdout/stderr discarded —
         // we never read them and don't want to block.
+        // `.status()` (not `.spawn()` + drop): `open -b` returns
+        // immediately once LaunchServices has the request, and we must
+        // reap it — a dropped Child is never waited on and would leak a
+        // zombie per activation. This runs inside `spawn_blocking`, so
+        // the ~instant block is fine.
         Command::new("/usr/bin/open")
             .args(["-b", bundle_id])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .map(|_child| ())
+            .status()
+            .map(|_| ())
     }
     #[cfg(not(target_os = "macos"))]
     {

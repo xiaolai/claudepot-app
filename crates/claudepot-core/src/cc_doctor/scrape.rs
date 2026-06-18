@@ -368,15 +368,25 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<CaptureResult> {
         }
     }
 
-    // Best-effort kill if the child is still running past our cap.
+    // Close the pty first so the child sees EOF (controlling terminal
+    // gone) and the reader thread's `read()` returns EOF and exits.
+    drop(pair.master);
+    drop(pair.slave);
+    // Reap the child. `kill()` only SIGNALS — it does NOT collect the
+    // exit status. A killed (or exited-but-uncollected) `claude doctor`
+    // left without a `wait()` becomes a zombie, and the watcher
+    // rescrapes every 5 min — so one unreaped child per timed-out
+    // scrape steadily saturates the per-user process table, after which
+    // `fork()` fails machine-wide (observed: 4600+ zombies owning every
+    // free PID slot). Closing the pty above makes the child exit
+    // promptly, so `wait()` is bounded. The trailing unconditional
+    // `wait()` reaps on every exit path (kill, clean exit, or a child
+    // already collected by `try_wait` — that last case just errors,
+    // harmlessly).
     if let Ok(None) = child.try_wait() {
         let _ = child.kill();
     }
-    // Drop the master end so the reader's `read()` returns EOF and
-    // the spawned thread exits. Without this drop, the reader can
-    // sit on a blocking read for the lifetime of the pty pair.
-    drop(pair.master);
-    drop(pair.slave);
+    let _ = child.wait();
     // Join the reader thread so its handle doesn't leak. Best-effort
     // (a panicked reader thread shouldn't tank the scrape).
     let _ = reader_handle.join();
