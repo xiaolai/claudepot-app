@@ -6,6 +6,22 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.50 — beta (unreleased)
+
+### Fixed
+
+- **Zombie-process leak that could freeze the whole machine.** The
+  cc-doctor diagnostics scrape spawned a `claude doctor` child and, on
+  the common timeout path, killed it without reaping it (`kill()`
+  without a following `wait()`). The watcher rescrapes every 5 minutes,
+  so a zombie leaked per scrape; over days these saturate the per-user
+  process table (`kern.maxprocperuid`), after which `fork()` fails
+  machine-wide — new terminals/apps die with "Resource temporarily
+  unavailable." Now the child is always reaped. Pre-existing since the
+  cc-doctor feature shipped, not a recent regression. A smaller sibling
+  leak in the notification "focus host" path (`open -b` spawned without
+  reaping) is fixed too.
+
 ## 0.1.49 — beta (unreleased)
 
 ### Added
