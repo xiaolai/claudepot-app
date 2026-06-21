@@ -30,6 +30,16 @@ export interface RunVerifyAllOptions {
   patchAccount: (uuid: string, patch: Partial<AccountSummary>) => void;
   /** Replace the full list once the op terminates, after re-fetching. */
   setAccounts: (rows: AccountSummary[]) => void;
+  /** Fires once per account as its verification resolves, carrying the
+   *  running tally. Drives the in-progress indicator (button label
+   *  "Verifying… done/total" + per-card "verifying…" pulse) without the
+   *  caller having to re-derive counts from the row patches. */
+  onProgress?: (p: {
+    uuid: string;
+    outcome: VerifyOutcomeKind;
+    done: number;
+    total: number;
+  }) => void;
 }
 
 export interface VerifyAllOutcome {
@@ -100,6 +110,12 @@ export async function runVerifyAll(
         const row = ev as VerifyAccountEvent;
         counts.total = row.total;
         counts[row.outcome as VerifyOutcomeKind] += 1;
+        opts.onProgress?.({
+          uuid: row.uuid,
+          outcome: row.outcome as VerifyOutcomeKind,
+          done: counts.ok + counts.drift + counts.rejected + counts.network_error,
+          total: row.total,
+        });
         opts.patchAccount(row.uuid, {
           verify_status: row.outcome,
           // Surface the actual_email when drift is reported. The DB row

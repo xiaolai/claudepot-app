@@ -239,3 +239,33 @@
   font-style: italic;
 }
 
+/* Per-card "verifying…" pulse in the HealthFooter verify cell during a
+   "Verify all" run. Mirrors .statusbar-chip-pulse's shape + cadence,
+   but the fill is passed inline (var(--fg-muted)) so it doesn't claim
+   the accent — verification-in-progress is neutral, not a CTA. The
+   reduced-motion guard leaves a static dot (still a valid "in progress"
+   marker, paired with the word "verifying…"). */
+.cp-pulse-dot {
+  width: var(--sp-6);
+  height: var(--sp-6);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: cp-pulse-dot var(--dur-pulse) var(--ease-in-out) infinite;
+}
+
+@keyframes cp-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-pulse-dot {
+    animation: none;
+  }
+}
+

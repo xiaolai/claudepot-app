@@ -2,9 +2,14 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
 import { relTime } from "./format";
+import type { VerifyLive } from "./useAccountHandlers";
 
 interface HealthFooterProps {
   account: AccountSummary;
+  /** Live state during a "Verify all" run: `"verifying"` shows the
+   *  pulse; an outcome flips the verify cell to that result before the
+   *  terminal refresh persists it; undefined → use `verify_status`. */
+  verifyLive?: VerifyLive;
 }
 
 /**
@@ -12,14 +17,24 @@ interface HealthFooterProps {
  * last CLI switch, last Desktop switch. All values are tabular-nums
  * so cards align.
  */
-export function HealthFooter({ account: a }: HealthFooterProps) {
+export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
+  // A run is actively checking THIS account — show a neutral pulse
+  // instead of the stale prior result so the user sees work happening.
+  const isVerifying = verifyLive === "verifying";
+  // Once an outcome streams in (verifyLive is an outcome, not
+  // "verifying"), flip to it immediately; otherwise the persisted
+  // status. `effectiveStatus` is only read when !isVerifying.
+  const effectiveStatus =
+    verifyLive && verifyLive !== "verifying" ? verifyLive : a.verify_status;
+
   // Accent (--accent-ink / terracotta) is reserved for the primary CTA
   // and selected state per design.md. A green check plus --ok tone
   // reads as "healthy" without over-claiming brand attention.
-  const verifyTone =
-    a.verify_status === "ok"
+  const verifyTone = isVerifying
+    ? "var(--fg-muted)"
+    : effectiveStatus === "ok"
       ? "var(--ok)"
-      : a.verify_status === "drift" || a.verify_status === "rejected"
+      : effectiveStatus === "drift" || effectiveStatus === "rejected"
         ? "var(--warn)"
         : "var(--fg-faint)";
 
@@ -29,14 +44,15 @@ export function HealthFooter({ account: a }: HealthFooterProps) {
   // freshness suffix so a 3-day-old "verified" doesn't read as
   // reassurance.
   const verifiedAgo = a.verified_at ? ` · ${relTime(a.verified_at)}` : "";
-  const verifyLabel =
-    a.verify_status === "ok"
+  const verifyLabel = isVerifying
+    ? "verifying…"
+    : effectiveStatus === "ok"
       ? `verified${verifiedAgo}`
-      : a.verify_status === "drift"
+      : effectiveStatus === "drift"
         ? `drift → ${a.verified_email ?? "?"}`
-        : a.verify_status === "rejected"
+        : effectiveStatus === "rejected"
           ? "token rejected"
-          : a.verify_status === "network_error"
+          : effectiveStatus === "network_error"
             ? "profile unreachable"
             : "not yet verified";
 
@@ -56,12 +72,25 @@ export function HealthFooter({ account: a }: HealthFooterProps) {
       }}
     >
       <Cell tone={verifyTone} weight={500}>
-        <Glyph
-          g={a.verify_status === "ok" ? NF.check : NF.warn}
-          color={verifyTone}
-          style={{ fontSize: "var(--fs-2xs)" }}
-        />
+        {isVerifying ? (
+          // Pulsing dot, not a glyph — a steady spinner-substitute that
+          // reads as "in progress" without color carrying the meaning
+          // alone (the word "verifying…" sits beside it).
+          // `.cp-pulse-dot` honors prefers-reduced-motion (static dot).
+          <span
+            className="cp-pulse-dot"
+            aria-hidden="true"
+            style={{ background: "var(--fg-muted)" }}
+          />
+        ) : (
+          <Glyph
+            g={effectiveStatus === "ok" ? NF.check : NF.warn}
+            color={verifyTone}
+            style={{ fontSize: "var(--fs-2xs)" }}
+          />
+        )}
         <span
+          aria-live={isVerifying ? "polite" : undefined}
           style={{
             whiteSpace: "nowrap",
             overflow: "hidden",
