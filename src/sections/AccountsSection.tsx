@@ -15,7 +15,10 @@ import { AccountsGrid } from "./accounts/AccountsGrid";
 import { AddAccountModal } from "./accounts/AddAccountModal";
 import { HealthChips } from "./accounts/HealthChips";
 import { CtxMenuForAccount } from "./accounts/useAccountContextMenu";
-import { useAccountHandlers } from "./accounts/useAccountHandlers";
+import {
+  useAccountHandlers,
+  verifyLiveFor,
+} from "./accounts/useAccountHandlers";
 import type {
   CliTargetHandlers,
   DesktopTargetHandlers,
@@ -112,12 +115,16 @@ export function AccountsSection({
     | null
   >(null);
 
-  const { runVerifyAccount, runVerifyAll, handleDesktopSwitch } =
+  const { runVerifyAccount, runVerifyAll, handleDesktopSwitch, verify } =
     useAccountHandlers({
       pushToast,
       refresh,
       useDesktop: actions.useDesktop,
     });
+  // Denominator for the "Verifying… n/total" label: prefer the count
+  // streamed with the first outcome, fall back to the visible account
+  // count for the frame before the first event lands.
+  const verifyTotal = verify.total || accounts.length;
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, a: AccountSummary) => {
@@ -337,8 +344,17 @@ export function AccountsSection({
                 <IconButton
                   glyph={NF.shield}
                   onClick={runVerifyAll}
-                  title="Verify all — check every account against /profile"
-                  aria-label="Verify all accounts"
+                  disabled={verify.active}
+                  title={
+                    verify.active
+                      ? `Verifying… ${verify.done}/${verifyTotal}`
+                      : "Verify all — check every account against /profile"
+                  }
+                  aria-label={
+                    verify.active
+                      ? `Verifying accounts, ${verify.done} of ${verifyTotal}`
+                      : "Verify all accounts"
+                  }
                 />
                 <IconButton
                   glyph={NF.refresh}
@@ -357,9 +373,16 @@ export function AccountsSection({
                   glyph={NF.shield}
                   glyphColor="var(--fg-muted)"
                   onClick={runVerifyAll}
-                  title="Verify every account against /profile"
+                  disabled={verify.active}
+                  title={
+                    verify.active
+                      ? "Checking every account against /profile…"
+                      : "Verify every account against /profile"
+                  }
                 >
-                  Verify all
+                  {verify.active
+                    ? `Verifying… ${verify.done}/${verifyTotal}`
+                    : "Verify all"}
                 </Button>
                 {usageAgeLabel && (
                   <span
@@ -430,6 +453,7 @@ export function AccountsSection({
             pushToast("error", `Couldn't adopt current session: ${msg}`);
           }
         }}
+        verifyLiveFor={(uuid) => verifyLiveFor(verify, uuid)}
       />
 
       <AddAccountModal

@@ -5,6 +5,7 @@ import { Input } from "../../components/primitives/Input";
 import { NF } from "../../icons";
 import type { AccountSummary, AppStatus, CcIdentity, UsageMap } from "../../types";
 import { AccountCard } from "./AccountCard";
+import type { VerifyLive } from "./useAccountHandlers";
 import type {
   CliTargetHandlers,
   DesktopTargetHandlers,
@@ -40,6 +41,10 @@ interface Props {
   /** Opens the AddAccountModal. Used by the empty state when no CC
    *  session is available to adopt. */
   onAdd: () => void;
+  /** Per-card live verification state during a "Verify all" run:
+   *  `"verifying"` (pending pulse), the streamed outcome, or undefined
+   *  (no run active → card uses its persisted `verify_status`). */
+  verifyLiveFor?: (uuid: string) => VerifyLive | undefined;
 }
 
 /**
@@ -64,6 +69,7 @@ export function AccountsGrid({
   onAdd,
   tokenCounts,
   onOpenTokens,
+  verifyLiveFor,
 }: Props) {
   // Pre-fill adoption when CC is already signed in. `error` null +
   // non-empty email covers the 0- or 1-account case where Claudepot
@@ -149,6 +155,7 @@ export function AccountsGrid({
             desktopHandlers={desktopHandlers}
             tokenCount={tokenCounts?.[a.uuid]}
             onOpenTokens={onOpenTokens}
+            verifyLive={verifyLiveFor?.(a.uuid)}
           />
         ))}
         {shown.length === 0 && accounts.length > 0 && (

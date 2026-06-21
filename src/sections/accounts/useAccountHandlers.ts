@@ -1,7 +1,40 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { api } from "../../api";
 import { runVerifyAll } from "./runVerifyAll";
-import type { AccountSummary } from "../../types";
+import type { AccountSummary, VerifyOutcomeKind } from "../../types";
+
+/** Live state of a "Verify all" run, for the in-progress indicator.
+ *  `active` gates the whole indicator; `done`/`total` drive the button
+ *  label; `outcomes` records the per-account result the instant it
+ *  streams in, so a card flips from "verifying…" straight to its real
+ *  status without waiting for the terminal refresh. */
+export interface VerifyAllState {
+  active: boolean;
+  done: number;
+  total: number;
+  outcomes: Record<string, VerifyOutcomeKind>;
+}
+
+const IDLE_VERIFY: VerifyAllState = {
+  active: false,
+  done: 0,
+  total: 0,
+  outcomes: {},
+};
+
+/** Per-card verification state for the live indicator: `"verifying"`
+ *  while a run is active and this account hasn't resolved yet, the
+ *  streamed outcome the moment it does, or `undefined` when no run is
+ *  active (the card falls back to its persisted `verify_status`). */
+export type VerifyLive = "verifying" | VerifyOutcomeKind;
+
+export function verifyLiveFor(
+  v: VerifyAllState,
+  uuid: string,
+): VerifyLive | undefined {
+  if (!v.active) return undefined;
+  return v.outcomes[uuid] ?? "verifying";
+}
 
 type Push = (
   kind: "info" | "error",
@@ -65,17 +98,27 @@ export function useAccountHandlers({
     [pushToast, refresh],
   );
 
+  const [verify, setVerify] = useState<VerifyAllState>(IDLE_VERIFY);
+
   const runVerifyAllHandler = useCallback(async () => {
+    // Mark active up-front so the button disables + flips to
+    // "Verifying…" and every card shows the pending pulse on the same
+    // frame the user clicks — before the first row resolves.
+    setVerify({ ...IDLE_VERIFY, active: true });
     try {
-      // The streaming start API returns when the terminal `op` event
-      // lands. `runVerifyAll` patches rows in place via `patchAccount`,
-      // but at this entry point we only need the aggregate summary —
-      // useRefresh's parallel verify pass owns the row-level surface.
-      // Pass no-op patchers here; the caller's `refresh()` below picks
-      // up the persisted state.
+      // Row persistence still rides `refresh()` below (useRefresh owns
+      // the canonical row surface). `onProgress` only feeds the live
+      // indicator: per-account outcome + running tally as each streams.
       const summary = await runVerifyAll({
         patchAccount: () => {},
         setAccounts: () => {},
+        onProgress: ({ uuid, outcome, done, total }) =>
+          setVerify((s) => ({
+            active: true,
+            done,
+            total,
+            outcomes: { ...s.outcomes, [uuid]: outcome },
+          })),
       });
       if (summary.drift + summary.rejected === 0) {
         pushToast("info", `All ${summary.total} accounts verified.`);
@@ -88,6 +131,11 @@ export function useAccountHandlers({
       await refresh();
     } catch (e) {
       pushToast("error", `Verify-all failed: ${e}`);
+    } finally {
+      // Clear only after `refresh()` has landed the persisted statuses,
+      // so cards read `account.verify_status` (now current) the instant
+      // the live override drops — no stale flash.
+      setVerify(IDLE_VERIFY);
     }
   }, [pushToast, refresh]);
 
@@ -102,5 +150,10 @@ export function useAccountHandlers({
     [pushToast, useDesktop],
   );
 
-  return { runVerifyAccount, runVerifyAll: runVerifyAllHandler, handleDesktopSwitch };
+  return {
+    runVerifyAccount,
+    runVerifyAll: runVerifyAllHandler,
+    handleDesktopSwitch,
+    verify,
+  };
 }

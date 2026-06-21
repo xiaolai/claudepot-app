@@ -6,6 +6,7 @@ import { NF } from "../../icons";
 import type { AccountSummary, AppStatus, UsageEntry } from "../../types";
 import { AnomalyBanner, isAnomaly } from "./AnomalyBanner";
 import { HealthFooter } from "./HealthFooter";
+import type { VerifyLive } from "./useAccountHandlers";
 import { UsageBlock } from "./UsageBlock";
 import {
   cliTargetProps,
@@ -30,6 +31,10 @@ interface AccountCardProps {
   /** Opens Keys pre-filtered to this account. Optional so callers
    *  that don't wire navigation still compile cleanly. */
   onOpenTokens?: (accountEmail: string) => void;
+  /** Live verification state during a "Verify all" run — drives the
+   *  HealthFooter "verifying…" pulse / live outcome flip. Undefined
+   *  outside a run (footer shows persisted `verify_status`). */
+  verifyLive?: VerifyLive;
 }
 
 /**
@@ -54,6 +59,7 @@ export function AccountCard({
   desktopHandlers,
   tokenCount,
   onOpenTokens,
+  verifyLive,
 }: AccountCardProps) {
   const bound = a.is_cli_active || a.is_desktop_active;
   const severe = isAnomaly(a);
@@ -260,7 +266,7 @@ export function AccountCard({
       )}
 
       <UsageBlock entry={usageEntry} anomalyShown={severe} />
-      <HealthFooter account={a} />
+      <HealthFooter account={a} verifyLive={verifyLive} />
     </article>
   );
 }
