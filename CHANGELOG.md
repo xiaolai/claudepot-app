@@ -6,6 +6,17 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.51 — beta (unreleased)
+
+### Added
+
+- **Verification-in-progress indicator on the Accounts page.** "Verify
+  all" now shows live feedback instead of staying idle until a terminal
+  toast: the button disables and reads "Verifying… n/total", and each
+  account card shows a pulsing "verifying…" dot that flips to its result
+  (verified / drift / token rejected / profile unreachable) the moment
+  that account resolves. Honors `prefers-reduced-motion`.
+
 ## 0.1.50 — beta (unreleased)
 
 ### Fixed
