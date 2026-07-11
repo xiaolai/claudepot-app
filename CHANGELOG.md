@@ -6,6 +6,22 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.52 — beta (released 2026-07-12)
+
+### Added
+
+- **Remove projects that have no session directory.** `claudepot
+  project remove` and Projects → Remove now handle "config-only"
+  projects — entries that linger in `~/.claude.json` and history with
+  no `~/.claude/projects/<slug>/` directory (the state Claude Code
+  leaves when a session opens but takes no turn, or after a prior
+  cleanup). These previously errored "project not found" and were
+  impossible to clean up; now the stale entries are stripped and a
+  recovery snapshot is kept. Slug resolution reverse-maps project
+  paths that contain a literal `-` (which a plain slug can't represent)
+  and refuses an ambiguous slug rather than removing the wrong project.
+  The CLI and GUI disclosures are honest about the no-trash case.
+
 ## 0.1.51 — beta (unreleased)
 
 ### Added
