@@ -151,16 +151,30 @@ export function RemoveProjectModal({
         ) : (
           <>
             <Block label="Removing">
-              <code
-                className="selectable"
-                style={{
-                  fontSize: "var(--fs-sm)",
-                  color: "var(--fg)",
-                  wordBreak: "break-all",
-                }}
-              >
-                {`~/.claude/projects/${basic.slug}/`}
-              </code>
+              {basic.artifact_dir_present ? (
+                <code
+                  className="selectable"
+                  style={{
+                    fontSize: "var(--fs-sm)",
+                    color: "var(--fg)",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {`~/.claude/projects/${basic.slug}/`}
+                </code>
+              ) : (
+                // Config-only project: naming a directory that isn't
+                // there would misrepresent what gets removed.
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--fs-sm)",
+                    color: "var(--fg)",
+                  }}
+                >
+                  No session directory — config entries only.
+                </p>
+              )}
               <Meta items={metaItems(basic, extras)} />
             </Block>
 
@@ -186,18 +200,37 @@ export function RemoveProjectModal({
               </p>
             </Block>
 
-            <Block label={`Recoverable until ${recoverableUntil}`}>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "var(--fs-xs)",
-                  color: "var(--fg-faint)",
-                }}
-              >
-                Lives in <code>~/.claudepot/trash/projects/</code> for 30 days.
-                Restore via <code>claudepot project trash restore &lt;id&gt;</code>.
-              </p>
-            </Block>
+            {basic.artifact_dir_present ? (
+              <Block label={`Recoverable until ${recoverableUntil}`}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--fs-xs)",
+                    color: "var(--fg-faint)",
+                  }}
+                >
+                  Lives in <code>~/.claudepot/trash/projects/</code> for 30 days.
+                  Restore via <code>claudepot project trash restore &lt;id&gt;</code>.
+                </p>
+              </Block>
+            ) : (
+              // No artifact dir means no trash entry — promising a
+              // restore id here would be a lie.
+              <Block label="Nothing to trash">
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--fs-xs)",
+                    color: "var(--fg-faint)",
+                  }}
+                >
+                  No session directory exists, so nothing moves to the trash. A
+                  snapshot of the stripped entries is kept in{" "}
+                  <code>~/.claudepot/repair/snapshots/</code> (under{" "}
+                  <code>$CLAUDEPOT_DATA_DIR</code> if set).
+                </p>
+              </Block>
+            )}
 
             <div
               style={{

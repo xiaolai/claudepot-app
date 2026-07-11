@@ -114,6 +114,11 @@ export interface CleanResult {
 export interface RemoveProjectPreviewBasic {
   slug: string;
   original_path: string | null;
+  /** False for a config-only project: no `<config_dir>/projects/<slug>/`
+   *  exists, so nothing is trashed and no restore id comes back. The
+   *  modal branches on this rather than inferring it from `bytes === 0`
+   *  (a real project can legitimately be empty). */
+  artifact_dir_present: boolean;
   bytes: number;
   session_count: number;
   last_modified_ms: number | null;
@@ -142,6 +147,11 @@ export interface RemoveProjectPreview {
   /** Best-effort recovered cwd. Null when the dir is empty AND no
    *  `.claude.json` key matches the unsanitized slug. */
   original_path: string | null;
+  /** False for a config-only project: no `<config_dir>/projects/<slug>/`
+   *  exists, so nothing is trashed and no restore id comes back. The
+   *  modal branches on this rather than inferring it from `bytes === 0`
+   *  (a real project can legitimately be empty). */
+  artifact_dir_present: boolean;
   bytes: number;
   session_count: number;
   last_modified_ms: number | null;
@@ -156,9 +166,15 @@ export interface RemoveProjectResult {
   original_path: string | null;
   bytes: number;
   session_count: number;
-  trash_id: string;
+  /** Null for a config-only removal — nothing was trashed, so there is
+   *  no trash entry to restore from. */
+  trash_id: string | null;
   claude_json_entry_removed: boolean;
   history_lines_removed: number;
+  /** Recovery snapshot files written during the strip. For a
+   *  config-only removal (`trash_id === null`) these are the only
+   *  precise recovery surface. */
+  snapshot_paths: string[];
 }
 
 /** One row in the project Trash drawer. */

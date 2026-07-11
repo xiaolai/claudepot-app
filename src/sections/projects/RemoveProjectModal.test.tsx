@@ -26,11 +26,25 @@ function okBasic(
   return {
     slug: "-Users-joker-myproject",
     original_path: "/Users/joker/myproject",
+    artifact_dir_present: true,
     bytes: 4_200_000,
     session_count: 12,
     last_modified_ms: Date.now() - 3 * 24 * 3600 * 1000,
     ...overrides,
   };
+}
+
+/**
+ * A config-only project: `.claude.json` / `history.jsonl` still name
+ * it, but no `~/.claude/projects/<slug>/` exists. Nothing to trash.
+ */
+function configOnlyBasic(): RemoveProjectPreviewBasic {
+  return okBasic({
+    artifact_dir_present: false,
+    bytes: 0,
+    session_count: 0,
+    last_modified_ms: null,
+  });
 }
 
 function okExtras(
@@ -74,6 +88,35 @@ describe("RemoveProjectModal", () => {
     expect(screen.getByText(/Untouched/)).toBeInTheDocument();
     // Recoverable block.
     expect(screen.getByText(/Recoverable until/)).toBeInTheDocument();
+  });
+
+  it("does not promise a trash restore for a config-only project", async () => {
+    basicSpy.mockResolvedValue(configOnlyBasic());
+    extrasSpy.mockResolvedValue(okExtras({ history_lines_count: 1 }));
+    render(
+      <RemoveProjectModal
+        target="/Users/joker/myproject"
+        onClose={() => {}}
+        onCompleted={() => {}}
+        onError={() => {}}
+      />,
+    );
+
+    // No artifact dir: the modal must not name a directory that isn't
+    // there, and must not promise a 30-day restorable trash entry.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No session directory — config entries only/),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Nothing to trash/)).toBeInTheDocument();
+    expect(screen.queryByText(/Recoverable until/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("~/.claude/projects/-Users-joker-myproject/"),
+    ).not.toBeInTheDocument();
+
+    // The cwd is still shown as untouched — the user's actual fear.
+    expect(screen.getByText("/Users/joker/myproject")).toBeInTheDocument();
   });
 
   it("disables Remove until the slug is typed exactly", async () => {
@@ -139,6 +182,7 @@ describe("RemoveProjectModal", () => {
       trash_id: "20260426T120000Z-deadbeef",
       claude_json_entry_removed: true,
       history_lines_removed: 7,
+      snapshot_paths: [],
     });
     const onCompleted = vi.fn();
     const user = userEvent.setup();

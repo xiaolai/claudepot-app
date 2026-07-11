@@ -41,12 +41,14 @@ fn print_remove_disclosure(
 ) {
     println!();
     println!("Removing:");
-    let cc_dir = config_dir.join("projects").join(&preview.slug);
-    println!("  {}", cc_dir.display());
-    let last = preview
-        .last_modified
-        .map(format_relative_time)
-        .unwrap_or_else(|| "unknown".to_string());
+    if preview.artifact_dir_present {
+        let cc_dir = config_dir.join("projects").join(&preview.slug);
+        println!("  {}", cc_dir.display());
+    } else {
+        // Config-only project: no artifact dir to name. Say so, or the
+        // disclosure points at a path that isn't there.
+        println!("  (no session directory — config entries only)");
+    }
     let mut details = Vec::new();
     if preview.session_count > 0 {
         details.push(format!(
@@ -58,7 +60,11 @@ fn print_remove_disclosure(
     if preview.bytes > 0 {
         details.push(format_size(preview.bytes));
     }
-    details.push(format!("last touched {}", last));
+    // Render-if-nonzero: a config-only project has no mtime, and
+    // "last touched unknown" is noise.
+    if let Some(last) = preview.last_modified.map(format_relative_time) {
+        details.push(format!("last touched {last}"));
+    }
     if preview.claude_json_entry_present {
         details.push("with .claude.json entry".to_string());
     }
@@ -84,11 +90,19 @@ fn print_remove_disclosure(
     }
 
     println!();
-    let cutoff = chrono::Utc::now() + chrono::Duration::days(30);
-    println!(
-        "Recoverable until: {} (30 days), via `claudepot project trash restore <id>`",
-        cutoff.format("%Y-%m-%d")
-    );
+    if preview.artifact_dir_present {
+        let cutoff = chrono::Utc::now() + chrono::Duration::days(30);
+        println!(
+            "Recoverable until: {} (30 days), via `claudepot project trash restore <id>`",
+            cutoff.format("%Y-%m-%d")
+        );
+    } else {
+        // No artifact dir means no trash entry — promising a
+        // `trash restore <id>` here would be a lie. The batch
+        // helpers' snapshot is the only way back.
+        println!("Nothing to trash — a snapshot of the stripped entries is written to");
+        println!("  {}", snapshots_dir().display());
+    }
 }
 
 pub fn remove(ctx: &AppContext, target: &str, dry_run: bool) -> Result<()> {
@@ -141,7 +155,15 @@ pub fn remove(ctx: &AppContext, target: &str, dry_run: bool) -> Result<()> {
         print_remove_disclosure(&preview, &config_dir);
         if !dry_run {
             println!();
-            println!("Re-run with -y to confirm. (The project moves to recoverable trash.)");
+            if preview.artifact_dir_present {
+                println!("Re-run with -y to confirm. (The project moves to recoverable trash.)");
+            } else {
+                // Config-only: nothing is trashed, so don't promise a
+                // recoverable-trash entry that won't exist.
+                println!(
+                    "Re-run with -y to confirm. (Config entries are stripped; a snapshot is kept.)"
+                );
+            }
         }
         return Ok(());
     }
@@ -153,12 +175,20 @@ pub fn remove(ctx: &AppContext, target: &str, dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "\u{2713} Trashed {} ({}). Restore with `claudepot project trash restore {}`.",
-        result.slug,
-        format_size(result.bytes),
-        result.trash_id
-    );
+    match result.trash_id.as_deref() {
+        Some(id) => println!(
+            "\u{2713} Trashed {} ({}). Restore with `claudepot project trash restore {}`.",
+            result.slug,
+            format_size(result.bytes),
+            id
+        ),
+        // Config-only removal: nothing was trashed, so there is no
+        // restore id to hand back.
+        None => println!(
+            "\u{2713} Removed config entries for {} (no session directory existed).",
+            result.slug
+        ),
+    }
     if result.claude_json_entry_removed {
         println!("  · pruned ~/.claude.json entry");
     }
