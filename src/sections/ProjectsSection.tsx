@@ -667,7 +667,9 @@ export function ProjectsSection({
             );
             pushToast(
               "info",
-              `Removed ${result.slug}. Restore via project trash if needed.`,
+              result.trash_id
+                ? `Removed ${result.slug}. Restore via project trash if needed.`
+                : `Removed config entries for ${result.slug} (no session directory existed).`,
             );
             refresh();
           }}

@@ -226,6 +226,7 @@ pub struct MoveArgsDto {
 pub struct RemoveProjectPreviewDto {
     pub slug: String,
     pub original_path: Option<String>,
+    pub artifact_dir_present: bool,
     pub bytes: u64,
     pub session_count: usize,
     pub last_modified_ms: Option<i64>,
@@ -239,6 +240,7 @@ impl From<&claudepot_core::project_remove::RemovePreview> for RemoveProjectPrevi
         Self {
             slug: p.slug.clone(),
             original_path: p.original_path.clone(),
+            artifact_dir_present: p.artifact_dir_present,
             bytes: p.bytes,
             session_count: p.session_count,
             last_modified_ms: system_time_to_ms(p.last_modified),
@@ -256,6 +258,7 @@ impl From<&claudepot_core::project_remove::RemovePreview> for RemoveProjectPrevi
 pub struct RemoveProjectPreviewBasicDto {
     pub slug: String,
     pub original_path: Option<String>,
+    pub artifact_dir_present: bool,
     pub bytes: u64,
     pub session_count: usize,
     pub last_modified_ms: Option<i64>,
@@ -266,6 +269,7 @@ impl From<&claudepot_core::project_remove::RemovePreviewBasic> for RemoveProject
         Self {
             slug: p.slug.clone(),
             original_path: p.original_path.clone(),
+            artifact_dir_present: p.artifact_dir_present,
             bytes: p.bytes,
             session_count: p.session_count,
             last_modified_ms: system_time_to_ms(p.last_modified),
@@ -302,9 +306,13 @@ pub struct RemoveProjectResultDto {
     pub original_path: Option<String>,
     pub bytes: u64,
     pub session_count: usize,
-    pub trash_id: String,
+    pub trash_id: Option<String>,
     pub claude_json_entry_removed: bool,
     pub history_lines_removed: usize,
+    /// Recovery snapshot files written during the strip. For a
+    /// config-only removal (`trash_id: None`) these are the *only*
+    /// precise recovery surface, so the GUI must be able to name them.
+    pub snapshot_paths: Vec<String>,
 }
 
 impl From<&claudepot_core::project_remove::RemoveResult> for RemoveProjectResultDto {
@@ -317,6 +325,11 @@ impl From<&claudepot_core::project_remove::RemoveResult> for RemoveProjectResult
             trash_id: r.trash_id.clone(),
             claude_json_entry_removed: r.claude_json_entry_removed,
             history_lines_removed: r.history_lines_removed,
+            snapshot_paths: r
+                .snapshot_paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect(),
         }
     }
 }
