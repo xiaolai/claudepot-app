@@ -209,6 +209,42 @@ export function ProjectDetail({
     };
   }, [sessionRows, priceTable]);
 
+  /**
+   * Per-session label + search haystack, keyed by session_id.
+   *
+   * `project_show` only hands the pane `(session_id, file_size,
+   * last_modified)`, so a row could show nothing but 8 hex characters
+   * of a UUID — nothing to scan, and the filter could only ever match
+   * an id prefix. The index rows we already fetch for the cost overlay
+   * carry `first_user_prompt` / `models` / `git_branch`, which is what
+   * a human actually remembers a conversation by. Reuse them: no extra
+   * IPC, and the list becomes both readable and searchable.
+   *
+   * Missing entry (index still cold, or fetch in flight) = row falls
+   * back to the short id and stays id-searchable, as before.
+   */
+  const sessionMeta = useMemo(() => {
+    const m = new Map<string, SessionSearchMeta>();
+    if (!sessionRows) return m;
+    for (const r of sessionRows) {
+      const prompt = r.first_user_prompt?.trim() ?? "";
+      m.set(r.session_id, {
+        prompt,
+        // Everything the filter matches against, pre-lowercased once
+        // per fetch rather than once per keystroke per row.
+        haystack: [
+          prompt,
+          r.session_id,
+          r.git_branch ?? "",
+          ...(r.models ?? []),
+        ]
+          .join(" ")
+          .toLowerCase(),
+      });
+    }
+    return m;
+  }, [sessionRows]);
+
   if (loading && !detail) {
     return (
       <main className="content">
@@ -409,6 +445,7 @@ export function ProjectDetail({
         <SessionListPane
           sessions={sessions}
           costBySessionId={costBySessionId}
+          sessionMeta={sessionMeta}
           totalCost={sessionTotal}
           onOpen={
             onOpenSession
@@ -509,14 +546,29 @@ export function ProjectDetail({
 
 const PAGE_SIZE = 20;
 
+/** Row label + pre-lowercased search haystack for one session. */
+export type SessionSearchMeta = {
+  /** First user prompt — what the conversation was about. May be "". */
+  prompt: string;
+  /** prompt + id + branch + models, lowercased, ready to substring-match. */
+  haystack: string;
+};
+
 /**
- * Session list with id-prefix search and incremental pagination.
+ * Session list with search and incremental pagination.
  *
  * The previous implementation hard-capped at 20 rows with no recourse —
  * so sessions 21+ were unreachable from the GUI. This version renders
- * the first PAGE_SIZE by default, offers a "Show more" button that
- * grows the window, and lets the user filter by session-id prefix to
- * drill straight to a specific transcript.
+ * the first PAGE_SIZE by default and offers a "Show more" button that
+ * grows the window.
+ *
+ * Search used to match `session_id` only — an opaque UUID — while the
+ * row rendered nothing but that id's first 8 characters. There was
+ * therefore nothing to scan and nothing findable: you had to already
+ * know the id of the transcript you were looking for. Rows now lead
+ * with the session's first user prompt and the filter matches prompt /
+ * id / branch / model, so the list is searchable by the thing a human
+ * actually remembers.
  *
  * Rows are keyboard-reachable (role=option + tabIndex + Enter/Space
  * opens the actions menu) so this satisfies the design-rules
@@ -525,6 +577,7 @@ const PAGE_SIZE = 20;
 function SessionListPane({
   sessions,
   costBySessionId,
+  sessionMeta,
   totalCost,
   onOpen,
   onContextMenu,
@@ -539,6 +592,13 @@ function SessionListPane({
    * rather than $0.00.
    */
   costBySessionId?: Map<string, number | null>;
+  /**
+   * Prompt + search haystack per session, from the index rows. Missing
+   * key = index hasn't reached this transcript (or the fetch is still
+   * in flight) → the row falls back to its short id and stays
+   * id-searchable.
+   */
+  sessionMeta?: Map<string, SessionSearchMeta>;
   /** Sum of all priceable sessions in this project. `null` when no
    *  session was priceable; render nothing rather than $0.00. */
   totalCost?: number | null;
@@ -563,11 +623,21 @@ function SessionListPane({
     return m;
   }, [liveAll]);
 
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? sessions.filter((s) => s.session_id.toLowerCase().includes(q))
-    : sessions;
-  const visible = filtered.slice(0, limit);
+  // Memoized: this used to run in the render body, so every keystroke
+  // AND every `useSessionLive()` tick re-filtered the whole list.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) => {
+      const meta = sessionMeta?.get(s.session_id);
+      // Fall back to the id when the index hasn't reached this
+      // transcript yet, so search never goes fully dark.
+      if (!meta) return s.session_id.toLowerCase().includes(q);
+      return meta.haystack.includes(q);
+    });
+  }, [sessions, sessionMeta, query]);
+
+  const visible = useMemo(() => filtered.slice(0, limit), [filtered, limit]);
   const hiddenCount = Math.max(0, filtered.length - visible.length);
 
   const handleKeyDown = (e: React.KeyboardEvent, sid: string) => {
@@ -602,13 +672,13 @@ function SessionListPane({
         <input
           type="search"
           className="session-filter mono"
-          placeholder="Filter by id prefix"
+          placeholder="Search prompt, id, branch, model"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             setLimit(PAGE_SIZE);
           }}
-          aria-label="Filter sessions by id prefix"
+          aria-label="Search sessions by prompt, id, branch, or model"
         />
       </div>
       {filtered.length === 0 ? (
@@ -618,6 +688,8 @@ function SessionListPane({
           {visible.map((s) => {
             const cost = costBySessionId?.get(s.session_id);
             const live = liveBySessionId.get(s.session_id);
+            const prompt = sessionMeta?.get(s.session_id)?.prompt ?? "";
+            const shortId = s.session_id.slice(0, 8);
             return (
             <li
               key={s.session_id}
@@ -631,13 +703,21 @@ function SessionListPane({
               style={onOpen ? { cursor: "pointer" } : undefined}
             >
               <div className="session-row-text">
+                {/* Lead with the opening prompt — that's what a human
+                    recognizes a conversation by. The id is still shown
+                    (demoted to the meta line) because it's the handle
+                    used by move/adopt and the CLI. When the index
+                    hasn't reached this transcript yet there's no prompt
+                    to show, so the id takes the label slot as before. */}
                 <span
-                  className="session-row-name mono"
+                  className={prompt ? "session-row-name" : "session-row-name mono"}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "var(--sp-6)",
+                    minWidth: 0,
                   }}
+                  title={prompt || s.session_id}
                 >
                   {live &&
                     (() => {
@@ -651,9 +731,23 @@ function SessionListPane({
                         />
                       );
                     })()}
-                  {s.session_id.slice(0, 8)}
+                  <span
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {prompt || shortId}
+                  </span>
                 </span>
                 <span className="session-row-meta">
+                  {prompt && (
+                    <>
+                      <span className="mono">{shortId}</span>
+                      {" · "}
+                    </>
+                  )}
                   {formatSize(s.file_size)}
                   {s.last_modified_ms != null && (
                     <>{" · "}{formatRelativeTime(s.last_modified_ms)}</>

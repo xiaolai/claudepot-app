@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
 import { useReachTop } from "../../hooks/useReachTop";
@@ -122,6 +129,15 @@ export function SessionDetail({
 
   const events = detail?.events ?? [];
 
+  // The transcript filter (`filtered` / `chunksFiltered` below) scans
+  // every event on each query change. On a multi-thousand-event
+  // session that scan is heavy enough to drop keystrokes, so defer the
+  // query: the input stays bound to `search` (immediate feedback) while
+  // the expensive filtering tracks a value React can compute without
+  // blocking typing. `useDeferredValue` is React's built-in debounce —
+  // no timer, and it self-tunes to how fast the render actually is.
+  const deferredSearch = useDeferredValue(search);
+
   /**
    * One canonical form of the user's query, shared by every predicate
    * that narrows the view. Derived through `normalizeDetailQuery` —
@@ -131,8 +147,8 @@ export function SessionDetail({
    * didn't.
    */
   const normalizedQuery = useMemo(
-    () => normalizeDetailQuery(search),
-    [search],
+    () => normalizeDetailQuery(deferredSearch),
+    [deferredSearch],
   );
 
   /**
