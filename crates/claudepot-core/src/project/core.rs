@@ -60,6 +60,23 @@ use crate::project_sanitize::{djb2_hash, format_radix};
 // ---------------------------------------------------------------------------
 
 pub fn list_projects(config_dir: &Path) -> Result<Vec<ProjectInfo>, ProjectError> {
+    list_projects_with_cwds(config_dir, None)
+}
+
+/// `list_projects` with the per-slug transcript `cwd` supplied by the
+/// caller — see `SessionIndex::project_cwds`.
+///
+/// Without the map, every project dir pays a `recover_cwd_from_sessions`
+/// call: open the first `.jsonl`, JSON-parse up to 64 lines, find `cwd`.
+/// The session index already holds that value (`sessions.project_path`),
+/// so a caller holding the index can pass it in and skip the file opens
+/// entirely. A slug missing from the map falls back to reading it off
+/// disk, so a cold/partial index degrades to the old behavior rather
+/// than to a wrong path.
+pub fn list_projects_with_cwds(
+    config_dir: &Path,
+    cwds: Option<&std::collections::HashMap<String, String>>,
+) -> Result<Vec<ProjectInfo>, ProjectError> {
     let projects_dir = config_dir.join("projects");
     if !projects_dir.exists() {
         return Ok(vec![]);
@@ -73,7 +90,14 @@ pub fn list_projects(config_dir: &Path) -> Result<Vec<ProjectInfo>, ProjectError
             continue;
         }
         let sanitized_name = entry.file_name().to_string_lossy().to_string();
-        projects.push(compute_project_info(&entry.path(), &sanitized_name)?);
+        let cwd = cwds
+            .and_then(|m| m.get(&sanitized_name))
+            .map(|s| s.as_str());
+        projects.push(compute_project_info_with_cwd(
+            &entry.path(),
+            &sanitized_name,
+            cwd,
+        )?);
     }
 
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));

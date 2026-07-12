@@ -6,7 +6,9 @@
 //! dispatches them off the main thread — a sync handler that scans
 //! thousands of JSONL files would freeze the webview for seconds.
 
+use crate::commands::shared_memory::SharedMemoryIndex;
 use claudepot_core::paths;
+use tauri::State;
 
 fn join_blocking_err(e: tokio::task::JoinError) -> String {
     format!("blocking task failed: {e}")
@@ -317,23 +319,36 @@ fn session_export_to_file_sync(
     Ok(body.len())
 }
 
-/// Cross-session text search. Returns up to `limit` hits.
+/// Cross-session text search. Returns up to `limit` hits, at most one
+/// per session.
 ///
-/// Wrapped in `spawn_blocking` — the body opens every `.jsonl` that
-/// doesn't match via the row-level fast path and scans line by line.
-/// For a multi-thousand-session corpus this is many seconds of pure
-/// blocking I/O, which would otherwise pin a Tauri IPC worker.
+/// The routing — FTS index, plus a scan of whatever the index doesn't
+/// cover yet, plus a `tool_calls` pass when the cheap sources come up
+/// short — lives in `claudepot_core::session_search::search_cross_session`.
+/// This command only supplies the index handle and the config dir, per
+/// the "no business logic in commands" rule.
+///
+/// Wrapped in `spawn_blocking`: the fast path is a SQLite read, but the
+/// degraded paths (cold index, or an index that failed to open) still
+/// scan `.jsonl` files and would otherwise pin a Tauri IPC worker.
 #[tauri::command]
 pub async fn session_search(
     query: String,
     limit: Option<usize>,
+    state: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<crate::dto::SearchHitDto>, String> {
+    // Clone the `Option<Arc<SessionIndex>>` out of Tauri state so the
+    // blocking closure can own it across the await point.
+    let idx = state.0.clone();
     tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let rows = claudepot_core::session::list_all_sessions(&cfg)
-            .map_err(|e| format!("list sessions: {e}"))?;
-        let hits = claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
-            .map_err(|e| format!("search sessions: {e}"))?;
+        let hits = claudepot_core::session_search::search_cross_session(
+            idx.as_deref(),
+            &cfg,
+            &query,
+            limit.unwrap_or(25),
+        )
+        .map_err(|e| format!("search sessions: {e}"))?;
         Ok::<_, String>(hits.iter().map(crate::dto::SearchHitDto::from).collect())
     })
     .await

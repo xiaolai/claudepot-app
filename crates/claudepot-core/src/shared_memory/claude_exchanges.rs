@@ -20,15 +20,20 @@
 //!   until the next `UserText`. `summary` / `system` / `attachment`
 //!   events are ignored (they're not turn content).
 //!
-//! * Stable exchange id: `<session_id>:<turn_index>` where
-//!   `session_id` is the file stem (matches the existing
-//!   `sessions.session_id` derivation) and `turn_index` is the
-//!   0-based ordinal of the user prompt in the file.
+//! * Stable exchange id: `claude_code:<slug>/<stem>:<turn_index>`, where
+//!   `<slug>/<stem>` identifies the FILE and `turn_index` is the 0-based
+//!   ordinal of the user prompt within it. The slug is load-bearing: a
+//!   session id is only unique within a project, and CC leaves the same
+//!   transcript uuid in two project dirs after a move/adopt. Keying on
+//!   the stem alone collided on the `exchanges.id` primary key and
+//!   silently dropped the second copy from the index.
 //!
-//! * Stable tool-call id: `<exchange_id>\u{001f}<tool_use_id>`,
-//!   matching the L3 unit-separator convention used by the Codex
-//!   indexer (so a `tool_use_id` containing `:` doesn't collide
-//!   with the exchange-id separator).
+//! * Stable tool-call id: `<exchange_id>\u{001f}<ordinal>\u{001f}<tool_use_id>`,
+//!   using the L3 unit-separator convention from the Codex indexer (so a
+//!   `tool_use_id` containing `:` doesn't collide with the exchange-id
+//!   separator). The ordinal is required: `tool_use_id` is not reliably
+//!   unique within one exchange, and without it a repeated id collided on
+//!   the `tool_calls.id` primary key and rolled the whole file back.
 //!
 //! * Source kind: `'claude_code'`.
 
@@ -52,21 +57,22 @@ pub struct ClaudeExchangeStats {
 }
 
 /// Walk `<claude_config_dir>/projects/**/*.jsonl` and populate
-/// `exchanges` + `tool_calls` for any Claude `sessions` row whose
-/// `(file_size_bytes, file_mtime_ns, file_inode)` triple has moved
-/// since the last exchange-write, OR has zero `exchanges` rows.
+/// `exchanges` + `tool_calls` for every Claude `sessions` row whose
+/// `(size, mtime_ns, inode)` differs from the tuple recorded in
+/// `exchange_state` — i.e. never indexed, or changed since it was.
 ///
 /// `claude_config_dir` is typically `~/.claude` (or the
 /// `CLAUDE_CONFIG_DIR` override). The function appends `projects/`
 /// itself so callers can pass the literal config dir.
 ///
-/// Doesn't touch the `sessions` row staleness tuple — that's owned
-/// by `session_index::refresh`. Instead, this module tracks its
-/// own "last exchanged" state per `file_path` via the existing
-/// row's tuple. If the tuple in `sessions` has moved since the
-/// exchanges were written, we re-write. The signal "exchanges
-/// already populated for this file" is: a non-zero count in
-/// `exchanges WHERE file_path = ?`.
+/// Staleness is tracked in this module's own `exchange_state` table, NOT
+/// against the `sessions` tuple. `session_index::refresh` owns that tuple
+/// and keeps it equal to disk, so a backfill running after a refresh —
+/// which is exactly the startup order — compared disk against an
+/// already-current tuple, concluded "unchanged", and skipped the file.
+/// Appended turns were therefore never indexed: a transcript could grow
+/// all session long while its new content never reached `exchanges` or
+/// the FTS index.
 pub fn backfill_claude_exchanges(
     idx: &SessionIndex,
     claude_config_dir: &Path,
@@ -85,12 +91,18 @@ pub fn backfill_claude_exchanges(
     let db = idx.db();
     let tx = db.unchecked_transaction()?;
 
-    // 2. Load the existing exchange-tuple state for every Claude
-    //    row in the cache: (file_path, size, mtime, inode,
-    //    exchanges_row_count).
+    // 2a. Which transcripts does `sessions` know about? `exchanges` has a
+    //     FK onto `sessions.file_path`, so a file the index hasn't seen
+    //     yet cannot be written — it waits for the next refresh.
+    let known = load_known_claude_sessions(&tx)?;
+    // 2b. What did THIS module last index, and at which file tuple?
     let existing = load_claude_exchange_state(&tx)?;
 
     for entry in &discovered {
+        if !known.contains(&entry.file_path) {
+            stats.skipped_unchanged += 1;
+            continue;
+        }
         match upsert_claude_exchanges_in_savepoint(&tx, entry, existing.get(&entry.file_path)) {
             Ok(Outcome::Indexed) => stats.indexed += 1,
             Ok(Outcome::Skipped) => stats.skipped_unchanged += 1,
@@ -107,6 +119,20 @@ pub fn backfill_claude_exchanges(
 
     tx.commit()?;
     Ok(stats)
+}
+
+/// `file_path` of every Claude transcript the session index knows about.
+fn load_known_claude_sessions(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<std::collections::HashSet<String>, rusqlite::Error> {
+    let mut stmt =
+        tx.prepare("SELECT file_path FROM sessions WHERE source_kind = 'claude_code'")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let mut out = std::collections::HashSet::new();
+    for r in rows {
+        out.insert(r?);
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone)]
@@ -178,22 +204,28 @@ fn inode_of(meta: &fs::Metadata) -> i64 {
     crate::fs_utils::file_identity(meta) as i64
 }
 
-/// Per-file state we use to decide skip-vs-reindex. The triple is
-/// the same one the `sessions` row already stores; we treat it as
-/// authoritative. If a previously-indexed Claude file has zero
-/// `exchanges` rows AND a matching tuple, we re-index regardless
-/// (catches the first-ever run of this module against a populated
-/// v4 DB).
+/// Per-file skip-vs-reindex state: the `(size, mtime_ns, inode)` of each
+/// transcript as of the last time THIS module wrote its exchanges. A file
+/// with no entry has never been indexed and will be.
 fn load_claude_exchange_state(
     tx: &rusqlite::Transaction<'_>,
 ) -> Result<std::collections::HashMap<String, (i64, i64, i64, i64)>, rusqlite::Error> {
+    // Read the marker THIS module wrote (`exchange_state`), not the
+    // `sessions` tuple — `session_index::refresh` owns that one and keeps
+    // it equal to disk, so comparing against it made every changed file
+    // look unchanged and skipped its re-index. A file `sessions` knows
+    // about but that has never been through here has no marker, so it is
+    // absent from this map and gets indexed.
+    //
+    // The trailing `1` keeps the tuple shape stable for callers; the
+    // exchange count is no longer part of the decision (a transcript with
+    // no user turns legitimately yields zero exchanges, and re-indexing
+    // it on every pass just to rediscover that was wasted work).
     let mut stmt = tx.prepare(
-        "SELECT s.file_path, s.file_size_bytes, s.file_mtime_ns, s.file_inode, \
-                COUNT(e.id) \
-         FROM sessions s \
-         LEFT JOIN exchanges e ON e.file_path = s.file_path \
-         WHERE s.source_kind = 'claude_code' \
-         GROUP BY s.file_path",
+        "SELECT es.file_path, es.size, es.mtime_ns, es.inode \
+         FROM exchange_state es \
+         JOIN sessions s ON s.file_path = es.file_path \
+         WHERE s.source_kind = 'claude_code'",
     )?;
     let mut rows = stmt.query([])?;
     let mut out = std::collections::HashMap::new();
@@ -202,8 +234,7 @@ fn load_claude_exchange_state(
         let s: i64 = row.get(1)?;
         let m: i64 = row.get(2)?;
         let i: i64 = row.get(3)?;
-        let c: i64 = row.get(4)?;
-        out.insert(path, (s, m, i, c));
+        out.insert(path, (s, m, i, 1));
     }
     Ok(out)
 }
@@ -239,23 +270,16 @@ fn upsert_claude_exchanges(
     entry: &ClaudeFile,
     existing: Option<&(i64, i64, i64, i64)>,
 ) -> Result<Outcome, String> {
-    if let Some((size, mtime, inode, ex_count)) = existing {
-        // Skip when (a) the staleness tuple matches AND (b) the
-        // exchanges table already has rows for this file. The
-        // second condition catches the first-ever run of this
-        // module against an existing v4 DB where `sessions` was
-        // populated but `exchanges` wasn't.
-        if *size == entry.size && *mtime == entry.mtime_ns && *inode == entry.inode && *ex_count > 0
-        {
+    // The caller has already established the file is in `sessions`. The
+    // only question here is whether THIS module has indexed it at its
+    // current on-disk tuple. No marker (never indexed) or a moved tuple
+    // (the transcript grew) means re-index. Comparing against the
+    // `sessions` tuple instead — as this used to — always said "unchanged"
+    // once a refresh had run, so appended turns never got indexed.
+    if let Some((size, mtime, inode, _)) = existing {
+        if *size == entry.size && *mtime == entry.mtime_ns && *inode == entry.inode {
             return Ok(Outcome::Skipped);
         }
-    } else {
-        // File isn't in `sessions` yet — `session_index::refresh`
-        // hasn't seen it. Skip for this run; the user should run
-        // their normal refresh first. We avoid the failure path
-        // because this isn't a Claude exchange bug, it's a setup
-        // ordering issue.
-        return Ok(Outcome::Skipped);
     }
 
     let events =
@@ -270,8 +294,28 @@ fn upsert_claude_exchanges(
         .unwrap_or("claude-session")
         .to_string();
 
+    // The exchange id must be unique per FILE, not per session id.
+    //
+    // A session id is only unique within a project: CC leaves the same
+    // transcript uuid in two project dirs after a move/adopt (the codebase
+    // already knows this — `session_read_path` exists precisely because
+    // "two rows can legitimately share a session_id"). Keying the exchange
+    // id on the file stem alone therefore collided on `exchanges.id`, the
+    // insert rolled the whole file back, and that transcript silently
+    // never reached the index. Three transcripts on a real corpus were in
+    // exactly this state, invisible because the backfill's `stats.failed`
+    // was not surfaced.
+    //
+    // The slug (the project dir) discriminates them: `sessions.file_path`
+    // is `projects/<slug>/<stem>.jsonl`, so `(slug, stem)` is unique.
+    let slug = Path::new(&entry.file_path)
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown-project");
+
     // Pair events into exchanges.
-    let exchanges = pair_events_into_exchanges(&session_id, &events);
+    let exchanges = pair_events_into_exchanges(&format!("{slug}/{session_id}"), &events);
 
     // Wipe + reinsert the per-file exchanges. FK cascade + FTS
     // trigger keep tool_calls and exchange_fts in sync.
@@ -305,8 +349,20 @@ fn upsert_claude_exchanges(
         )
         .map_err(|e| format!("insert exchange: {e}"))?;
 
-        for tc in &ex.tool_calls {
-            let tc_id = format!("{}\u{001f}{}", ex.id, tc.tool_use_id);
+        for (ordinal, tc) in ex.tool_calls.iter().enumerate() {
+            // `<exchange_id>\u{1f}<ordinal>\u{1f}<tool_use_id>`.
+            //
+            // The ordinal is load-bearing. `tool_use_id` is NOT reliably
+            // unique within one exchange: a resumed or rescued transcript
+            // can replay the same `tool_use` id twice in a turn, and the
+            // id used to be `<exchange_id>\u{1f}<tool_use_id>` — which
+            // then collided on the `tool_calls.id` primary key. The whole
+            // file's savepoint rolled back with
+            // "UNIQUE constraint failed: tool_calls.id", so that
+            // transcript stayed permanently absent from the exchange
+            // index. Observed on a real corpus, where it also kept
+            // search's un-indexed-remainder probe permanently non-empty.
+            let tc_id = format!("{}\u{001f}{}\u{001f}{}", ex.id, ordinal, tc.tool_use_id);
             tx.execute(
                 "INSERT INTO tool_calls (
                     id, exchange_id, tool_name, tool_input_json,
@@ -325,6 +381,20 @@ fn upsert_claude_exchanges(
             .map_err(|e| format!("insert tool_call: {e}"))?;
         }
     }
+
+    // Record the tuple we just indexed AT. Inside the same savepoint as
+    // the writes above, so a file that fails partway leaves no marker and
+    // is retried next pass rather than being mistaken for done.
+    tx.execute(
+        "INSERT INTO exchange_state (file_path, size, mtime_ns, inode) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(file_path) DO UPDATE SET \
+            size = excluded.size, \
+            mtime_ns = excluded.mtime_ns, \
+            inode = excluded.inode",
+        params![entry.file_path, entry.size, entry.mtime_ns, entry.inode],
+    )
+    .map_err(|e| format!("upsert exchange_state: {e}"))?;
 
     Ok(Outcome::Indexed)
 }
@@ -562,6 +632,90 @@ mod tests {
             .query_row("SELECT count(*) FROM exchange_fts", [], |r| r.get(0))
             .unwrap();
         assert_eq!(fts_count, 1);
+    }
+
+    #[test]
+    fn the_same_session_id_in_two_projects_both_index() {
+        // CC leaves the same transcript uuid in two project dirs after a
+        // move/adopt — the codebase already knows this (`session_read_path`
+        // exists because "two rows can legitimately share a session_id").
+        // The exchange id used to be keyed on the file stem alone, so the
+        // second file collided on `exchanges.id`, its insert rolled back,
+        // and that transcript was silently absent from search. Three
+        // transcripts on a real corpus were in exactly this state.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let claude_config = tmp.path().join("claude");
+        stage_claude_session(&claude_config, "-proj-a", "dupe");
+        stage_claude_session(&claude_config, "-proj-b", "dupe");
+        refresh_sessions(&idx, &claude_config);
+
+        let stats = backfill_claude_exchanges(&idx, &claude_config).unwrap();
+        assert_eq!(stats.indexed, 2, "both copies must index");
+        assert!(
+            stats.failed.is_empty(),
+            "no PK collision expected, got {:?}",
+            stats.failed
+        );
+
+        let db = open_raw(&tmp.path().join("sessions.db"));
+        let files: i64 = db
+            .query_row("SELECT COUNT(DISTINCT file_path) FROM exchanges", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(files, 2, "both transcripts must reach the exchange index");
+    }
+
+    #[test]
+    fn appended_turns_are_reindexed_even_after_a_refresh() {
+        // The bug this guards: the backfill used to compare the file on
+        // disk against the `sessions` tuple — which `session_index::refresh`
+        // owns and keeps equal to disk. Refresh-then-backfill (the startup
+        // order) therefore always concluded "unchanged" and skipped the
+        // file, so a transcript that grew during a session never got its
+        // new turns into `exchanges` or the FTS index. The content the
+        // user most wants to find — what they just said — was the content
+        // search could never see.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let claude_config = tmp.path().join("claude");
+        let path = stage_claude_session(&claude_config, "-proj", "sid");
+        refresh_sessions(&idx, &claude_config);
+        assert_eq!(
+            backfill_claude_exchanges(&idx, &claude_config)
+                .unwrap()
+                .indexed,
+            1
+        );
+
+        // The session continues: a new turn is appended.
+        let mut body = fs::read_to_string(&path).unwrap();
+        body.push_str(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"and now the zebrafish question"}]},"timestamp":"2026-05-15T11:31:00.000Z","sessionId":"sid","cwd":"/proj"}
+"#,
+        );
+        // mtime granularity: make sure the tuple genuinely moves.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&path, body).unwrap();
+
+        // Refresh first — this is what makes the old guard blind.
+        refresh_sessions(&idx, &claude_config);
+        let stats = backfill_claude_exchanges(&idx, &claude_config).unwrap();
+        assert_eq!(
+            stats.indexed, 1,
+            "a grown transcript must be re-indexed, not skipped"
+        );
+
+        let db = open_raw(&tmp.path().join("sessions.db"));
+        let n: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM exchanges WHERE user_text LIKE '%zebrafish%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "the appended turn must reach the exchange index");
     }
 
     #[test]

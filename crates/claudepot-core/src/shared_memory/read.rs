@@ -651,10 +651,16 @@ mod tests {
         assert_eq!(stats.indexed, 1, "indexer should populate exchanges");
 
         // Ask for the FIRST exchange by id.
+        //
+        // The id carries the project slug as well as the session stem
+        // (`claude_code:<slug>/<stem>:<turn>`): a session id is only
+        // unique within a project, and CC leaves the same transcript uuid
+        // in two project dirs after a move/adopt, which used to collide on
+        // the `exchanges.id` primary key.
         let file_path = file_path_buf.to_string_lossy().into_owned();
         let loc = ConversationLocator {
             file_path: file_path.clone(),
-            exchange_id: Some("claude_code:sid:0".to_string()),
+            exchange_id: Some("claude_code:-proj/sid:0".to_string()),
             line_start: None,
             line_end: None,
         };

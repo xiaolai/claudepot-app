@@ -352,6 +352,11 @@ pub fn run() {
             }
         };
 
+    // Clone the shared index handle for the startup search-index
+    // backfill spawned inside `.setup` below; the original stays
+    // available for `.manage()` further down.
+    let search_index_for_backfill = shared_memory_index.clone();
+
     // (Live state is built inside the `.manage` chain below — the
     // service-refactor pattern owns the runtime, so we hand the
     // cards index into the service's `enable_activity` accessor at
@@ -818,6 +823,86 @@ pub fn run() {
             // the tray Health row stays current when the window is
             // closed. See `cc_doctor_watcher.rs` for cadence rationale.
             cc_doctor_watcher::spawn(app.handle().clone());
+
+            // Keep the exchange FTS index — which backs cross-session (⌘K
+            // palette) search — converged with disk.
+            //
+            // `session_index::refresh` writes the `sessions` staleness
+            // tuples; `backfill_claude_exchanges` then fills `exchanges` +
+            // `exchange_fts`. Nothing else runs this, so without it a
+            // GUI-only user's palette search falls back to the slow
+            // full-JSONL scan on every query.
+            //
+            // It LOOPS rather than running once at boot. A transcript grows
+            // for as long as its session lasts, and a one-shot backfill
+            // would leave everything said after launch out of the index
+            // until the next restart — i.e. exactly the content the user is
+            // most likely to search for. Re-running converges it instead.
+            // `search_cross_session` never pays for this: a pass whose files
+            // are all unchanged is a stat-walk plus a skip, and the
+            // `exchange_state` guard means only genuinely-changed
+            // transcripts are re-parsed.
+            //
+            // Detached blocking task; a failed index open (`None`) is a
+            // no-op.
+            if let Some(idx) = search_index_for_backfill {
+                tauri::async_runtime::spawn_blocking(move || {
+                    /// Long enough that an idle app is doing nothing
+                    /// measurable; short enough that "find what I said a few
+                    /// minutes ago" works without a restart.
+                    const BACKFILL_EVERY: std::time::Duration =
+                        std::time::Duration::from_secs(120);
+
+                    loop {
+                        let cfg = claudepot_core::paths::claude_config_dir();
+                        if let Err(e) = idx.refresh(&cfg) {
+                            tracing::warn!(
+                                target = "claudepot_tauri",
+                                error = %e,
+                                "search index: session refresh failed; palette search uses JSONL scan"
+                            );
+                        } else {
+                            match claudepot_core::shared_memory::claude_exchanges::backfill_claude_exchanges(
+                                &idx, &cfg,
+                            ) {
+                                // Per-file failures leave those transcripts
+                                // out of the FTS index. NOT fatal — search
+                                // still finds them, because
+                                // `search_cross_session` scans every session
+                                // the index doesn't cover — but it silently
+                                // costs speed, so say so out loud rather than
+                                // reporting a clean "complete".
+                                Ok(stats) if !stats.failed.is_empty() => tracing::warn!(
+                                    target = "claudepot_tauri",
+                                    discovered = stats.discovered,
+                                    indexed = stats.indexed,
+                                    skipped = stats.skipped_unchanged,
+                                    failed = stats.failed.len(),
+                                    first_error = %stats.failed[0].1,
+                                    first_path = %stats.failed[0].0.display(),
+                                    "search index: exchange backfill finished WITH FAILURES — \
+                                     those transcripts fall back to the slow scan path"
+                                ),
+                                Ok(stats) if stats.indexed > 0 => tracing::info!(
+                                    target = "claudepot_tauri",
+                                    discovered = stats.discovered,
+                                    indexed = stats.indexed,
+                                    skipped = stats.skipped_unchanged,
+                                    "search index: exchange backfill complete"
+                                ),
+                                // Steady state: nothing changed. Don't narrate.
+                                Ok(_) => {}
+                                Err(e) => tracing::warn!(
+                                    target = "claudepot_tauri",
+                                    error = %e,
+                                    "search index: exchange backfill failed"
+                                ),
+                            }
+                        }
+                        std::thread::sleep(BACKFILL_EVERY);
+                    }
+                });
+            }
 
             Ok(())
         })

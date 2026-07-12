@@ -109,6 +109,28 @@ BEGIN
     VALUES (new.rowid, new.user_text, new.assistant_text, new.snippet_text);
 END;
 
+-- ─── exchange_state ───────────────────────────────────────────
+-- The exchange backfill's OWN staleness marker: the (size, mtime, inode)
+-- of each transcript as of the last time its `exchanges` were written.
+--
+-- It cannot reuse the `sessions` tuple for this. `session_index::refresh`
+-- owns that tuple and updates it to match disk; a backfill running after
+-- a refresh (which is exactly the startup order) then compares disk
+-- against an already-current tuple, concludes nothing changed, and skips
+-- the file. Appended turns were therefore never indexed — a transcript
+-- grew all session long and its new content never reached `exchanges`
+-- or the FTS index.
+--
+-- Cascades with the session, so a pruned transcript takes its marker
+-- with it and a re-added one re-indexes from scratch.
+CREATE TABLE IF NOT EXISTS exchange_state (
+    file_path  TEXT    PRIMARY KEY,
+    size       INTEGER NOT NULL,
+    mtime_ns   INTEGER NOT NULL,
+    inode      INTEGER NOT NULL,
+    FOREIGN KEY (file_path) REFERENCES sessions(file_path) ON DELETE CASCADE
+);
+
 -- ─── tool_calls ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tool_calls (
     id              TEXT    PRIMARY KEY,
@@ -212,6 +234,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_links_file     ON memory_links(file_path);
 pub const V4_TABLE_NAMES: &[&str] = &[
     "exchanges",
     "exchange_fts",
+    "exchange_state",
     "tool_calls",
     "memories",
     "decisions",

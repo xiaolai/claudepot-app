@@ -126,21 +126,48 @@ pub(crate) fn compute_project_info(
     dir: &Path,
     sanitized_name: &str,
 ) -> Result<ProjectInfo, ProjectError> {
-    // Prefer the authoritative `cwd` field from any session.jsonl. Fall back to
-    // the lossy unsanitize_path only when no session metadata is available.
-    let recovered = recover_cwd_from_sessions(dir);
+    compute_project_info_with_cwd(dir, sanitized_name, None)
+}
+
+/// `compute_project_info` with the transcript `cwd` supplied by the
+/// caller instead of recovered from disk.
+///
+/// `recover_cwd_from_sessions` opens the first `.jsonl` in the project
+/// dir and JSON-parses up to 64 lines to find the `cwd` field. Across a
+/// full `list_projects` that is one file open + a burst of `serde_json`
+/// work per project — a large slice of the command's wall time on a
+/// real corpus. The session index (`sessions.db`) already stores that
+/// same `cwd` as `sessions.project_path`, parsed once and cached, so
+/// callers holding the index can hand it in and skip the disk work
+/// entirely.
+///
+/// `cwd` must be an *authoritative* transcript-derived path (that is
+/// what `sessions.project_path` is). It is treated exactly like a
+/// successful `recover_cwd_from_sessions` result, including for the
+/// orphan classification below, which trusts a recovered cwd over the
+/// lossy `unsanitize_path` round-trip. Pass `None` to fall back to
+/// reading it off disk.
+pub(crate) fn compute_project_info_with_cwd(
+    dir: &Path,
+    sanitized_name: &str,
+    cwd: Option<&str>,
+) -> Result<ProjectInfo, ProjectError> {
+    // Prefer the authoritative `cwd` field from any session.jsonl — from
+    // the caller's index when supplied, else read off disk. Fall back to
+    // the lossy unsanitize_path only when no session metadata exists.
+    let recovered = match cwd {
+        Some(c) => Some(c.to_string()),
+        None => recover_cwd_from_sessions(dir),
+    };
     let original_path = recovered
         .clone()
         .unwrap_or_else(|| unsanitize_path(sanitized_name));
-    let session_count = count_files_with_ext(dir, "jsonl");
-    let memory_dir = dir.join("memory");
-    let memory_file_count = if memory_dir.exists() {
-        count_files_with_ext(&memory_dir, "md")
-    } else {
-        0
-    };
-    let total_size_bytes = dir_size(dir);
-    let last_modified = most_recent_mtime(dir);
+    // One traversal for session_count + memory_file_count + size + mtime.
+    let scan = scan_project_dir(dir);
+    let session_count = scan.session_count;
+    let memory_file_count = scan.memory_file_count;
+    let total_size_bytes = scan.total_size_bytes;
+    let last_modified = scan.last_modified;
 
     // Empty-dir heuristic: no sessions, no memory, and below one
     // filesystem block (directory entries themselves take space, but
@@ -398,6 +425,77 @@ pub(crate) fn count_files_with_ext(dir: &Path, ext: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// Everything `compute_project_info` needs from one traversal of a
+/// project directory.
+#[derive(Debug, Default)]
+pub(crate) struct DirScan {
+    /// `.jsonl` files at the top level (NOT recursive) — matches the
+    /// old `count_files_with_ext(dir, "jsonl")`.
+    pub session_count: usize,
+    /// `.md` files directly inside `<dir>/memory/`.
+    pub memory_file_count: usize,
+    /// Recursive sum of every file's length — matches `dir_size`.
+    pub total_size_bytes: u64,
+    /// Recursive max mtime over every entry, files AND directories —
+    /// matches `most_recent_mtime`.
+    pub last_modified: Option<SystemTime>,
+}
+
+/// Single-pass replacement for the `count_files_with_ext` + `dir_size`
+/// + `most_recent_mtime` trio that `compute_project_info` used to run
+/// back-to-back.
+///
+/// Each of those made its own `read_dir` and its own `metadata()` call
+/// per entry, so a project dir was fully stat-walked twice (plus two
+/// shallow `read_dir`s) on every list. On a 7.9k-transcript corpus that
+/// was ~16k redundant stats per `project list`. This walks once and
+/// derives all four fields, preserving each one's exact semantics —
+/// note `session_count` stays top-level-only while size and mtime stay
+/// recursive.
+pub(crate) fn scan_project_dir(dir: &Path) -> DirScan {
+    let mut scan = DirScan::default();
+    walk_project_dir(dir, &mut scan, true);
+    // `memory/*.md` is a shallow count inside the memory subdir. The
+    // recursive pass above already folded those bytes into
+    // `total_size_bytes`; this only needs the count.
+    let memory_dir = dir.join("memory");
+    if memory_dir.is_dir() {
+        scan.memory_file_count = count_files_with_ext(&memory_dir, "md");
+    }
+    scan
+}
+
+fn walk_project_dir(dir: &Path, scan: &mut DirScan, top_level: bool) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let mtime = meta.modified().ok();
+        if meta.is_file() {
+            scan.total_size_bytes += meta.len();
+            if top_level
+                && entry
+                    .path()
+                    .extension()
+                    .map(|x| x == "jsonl")
+                    .unwrap_or(false)
+            {
+                scan.session_count += 1;
+            }
+        } else if meta.is_dir() {
+            walk_project_dir(&entry.path(), scan, false);
+        }
+        // `most_recent_mtime` compared the mtime of every entry it saw,
+        // directories included — keep that.
+        if mtime > scan.last_modified {
+            scan.last_modified = mtime;
+        }
+    }
+}
+
 pub(crate) fn dir_size(dir: &Path) -> u64 {
     let mut total = 0;
     if let Ok(entries) = fs::read_dir(dir) {
@@ -416,28 +514,12 @@ pub(crate) fn dir_size(dir: &Path) -> u64 {
     total
 }
 
-pub(crate) fn most_recent_mtime(dir: &Path) -> Option<SystemTime> {
-    let mut latest: Option<SystemTime> = None;
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let meta = match entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let mtime = meta.modified().ok();
-            if meta.is_dir() {
-                let sub = most_recent_mtime(&entry.path());
-                if sub > latest {
-                    latest = sub;
-                }
-            }
-            if mtime > latest {
-                latest = mtime;
-            }
-        }
-    }
-    latest
-}
+// `most_recent_mtime` was folded into `scan_project_dir` above — its
+// recursive max-mtime semantics (every entry, directories included) are
+// preserved there and locked down by `scan_project_dir_*` tests. It had
+// no other caller, and a `pub(crate)` fn reachable only from `#[cfg(test)]`
+// code still trips `dead_code` in a release build (which CI gates with
+// `clippy -D warnings`), so it is gone rather than left behind.
 
 pub(crate) fn is_claude_running_in(dir: &str) -> bool {
     use sysinfo::System;

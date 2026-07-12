@@ -19,7 +19,9 @@ use crate::artifact_usage::extract as usage_extract;
 use crate::artifact_usage::model::{Outcome, UsageEvent};
 use crate::path_utils::canonicalize_simplified;
 use chrono::{DateTime, Utc};
-#[cfg(test)]
+// Not `#[cfg(test)]`: `scan_all_sessions_uncached` parallelises its walk
+// with `par_iter` and is now production code (the no-index search path),
+// not just a test helper.
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -268,11 +270,19 @@ pub fn list_sessions_by_slug(
         .map_err(|e| SessionError::Index(e.to_string()))
 }
 
-/// Direct (uncached) scan — used by tests that want to verify the
-/// JSONL-folding logic without pulling SQLite and the global data-dir
-/// lock into every unit test. Production callers go through
-/// `list_all_sessions`, which wraps the persistent index.
-#[cfg(test)]
+/// Direct (uncached) scan — no SQLite, no global data-dir lock.
+///
+/// Two callers:
+///
+/// * Tests that want to verify the JSONL-folding logic without pulling
+///   SQLite and the global data-dir lock into every unit test.
+/// * `search::search_cross_session`'s no-index path. When the shared
+///   `SessionIndex` failed to open, re-entering `list_all_sessions`
+///   would just try to open that same broken database again; scanning
+///   the filesystem directly is the degraded path that actually works.
+///
+/// Everything else goes through `list_all_sessions`, which wraps the
+/// persistent index.
 pub(crate) fn scan_all_sessions_uncached(
     config_dir: &Path,
 ) -> Result<Vec<SessionRow>, SessionError> {

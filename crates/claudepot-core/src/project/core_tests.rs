@@ -2653,25 +2653,73 @@ fn test_dir_size_sums_correctly() {
     assert_eq!(size, 13);
 }
 
-// -- most_recent_mtime --
+// -- scan_project_dir --
+//
+// Replaces the old `most_recent_mtime` tests: that function was folded
+// into `scan_project_dir`, which now derives session_count, memory
+// count, recursive size, and recursive max-mtime from ONE walk. These
+// tests pin each field's semantics, which differ per field — the count
+// is top-level-only while size and mtime are recursive.
 
 #[test]
-fn test_most_recent_mtime_returns_latest() {
+fn scan_project_dir_reports_latest_mtime_recursively() {
     let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("old"), "old").unwrap();
+    fs::write(tmp.path().join("old.jsonl"), "old").unwrap();
     std::thread::sleep(std::time::Duration::from_millis(50));
-    fs::write(tmp.path().join("new"), "new").unwrap();
+    let nested = tmp.path().join("memory");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("new.md"), "new").unwrap();
 
-    let mtime = most_recent_mtime(tmp.path());
-    assert!(mtime.is_some());
+    let scan = scan_project_dir(tmp.path());
+    // The newest file lives in a SUBDIRECTORY — the max-mtime scan must
+    // recurse to see it, matching the old `most_recent_mtime`.
+    let newest = fs::metadata(nested.join("new.md"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(scan.last_modified, Some(newest));
 }
 
 #[test]
-fn test_most_recent_mtime_empty_dir() {
+fn scan_project_dir_empty_dir_yields_zeroes() {
     let tmp = tempfile::tempdir().unwrap();
-    let mtime = most_recent_mtime(tmp.path());
-    // Empty dir still has its own mtime
-    assert!(mtime.is_none() || mtime.is_some());
+    let scan = scan_project_dir(tmp.path());
+    assert_eq!(scan.session_count, 0);
+    assert_eq!(scan.memory_file_count, 0);
+    assert_eq!(scan.total_size_bytes, 0);
+    assert_eq!(scan.last_modified, None);
+}
+
+#[test]
+fn scan_project_dir_counts_only_top_level_jsonl() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("a.jsonl"), "aa").unwrap();
+    fs::write(tmp.path().join("b.jsonl"), "bb").unwrap();
+    fs::write(tmp.path().join("notes.txt"), "x").unwrap();
+    // A .jsonl nested in a subdir must NOT be counted as a session —
+    // `count_files_with_ext(dir, "jsonl")` was non-recursive.
+    let sub = tmp.path().join("nested");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("c.jsonl"), "ccc").unwrap();
+
+    let scan = scan_project_dir(tmp.path());
+    assert_eq!(scan.session_count, 2, "only top-level .jsonl counts");
+    // ...but its bytes DO count: size was always recursive.
+    assert_eq!(scan.total_size_bytes, 2 + 2 + 1 + 3);
+}
+
+#[test]
+fn scan_project_dir_counts_memory_markdown() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mem = tmp.path().join("memory");
+    fs::create_dir_all(&mem).unwrap();
+    fs::write(mem.join("one.md"), "1").unwrap();
+    fs::write(mem.join("two.md"), "2").unwrap();
+    fs::write(mem.join("skip.txt"), "3").unwrap();
+
+    let scan = scan_project_dir(tmp.path());
+    assert_eq!(scan.memory_file_count, 2, "only .md under memory/ counts");
+    assert_eq!(scan.total_size_bytes, 3, "every file's bytes still count");
 }
 
 // ---------------------------------------------------------------------
