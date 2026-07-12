@@ -10,6 +10,7 @@ use claudepot_core::agent::{
     read_run as core_read_run, resolve_binary, scheduler::cron_next_runs, Agent, AgentBinary,
     AgentId, AgentPatch, AgentStore, CreatedVia, PlatformOptions, Trigger,
 };
+use claudepot_core::proc_utils::NoWindowExt;
 use claudepot_core::routes::RouteStore;
 use uuid::Uuid;
 
@@ -860,6 +861,7 @@ pub async fn agents_open_artifact_dir() -> Result<(), String> {
     } else if cfg!(target_os = "windows") {
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &dir])
+            .no_window()
             .status()
     } else {
         std::process::Command::new("xdg-open").arg(&dir).status()

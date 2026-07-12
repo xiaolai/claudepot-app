@@ -6,7 +6,6 @@
 //! to as `is_active`. Updates target the active install.
 
 use crate::path_utils::canonicalize_simplified;
-#[cfg(target_os = "windows")]
 use crate::proc_utils::NoWindowExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -285,7 +284,15 @@ fn query_binary_version(bin: &Path) -> Option<String> {
     // version ("contains a dot AND a digit"). 5s timeout via std (we
     // can't easily timeout a sync std::process::Command; if the binary
     // hangs we lose the call but startup continues).
-    let output = Command::new(bin).arg("--version").output().ok()?;
+    // `.no_window()`: the CC-health poll runs this once per detected
+    // install every 60s (and on window focus). On Windows the `claude`
+    // shim is console-attached, so without CREATE_NO_WINDOW each probe
+    // flashes a console window — the "nonstop popups" of issue #28.
+    let output = Command::new(bin)
+        .arg("--version")
+        .no_window()
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -305,6 +312,7 @@ fn npm_global_bin() -> Option<PathBuf> {
     let output = Command::new("npm")
         .args(["root", "-g"])
         .env("PATH", crate::path_env::enriched_path())
+        .no_window()
         .output()
         .ok()?;
     if !output.status.success() {
@@ -322,6 +330,7 @@ fn brew_cask_installed(cask: &str) -> bool {
     Command::new("brew")
         .args(["list", "--cask", cask])
         .env("PATH", crate::path_env::enriched_path())
+        .no_window()
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)

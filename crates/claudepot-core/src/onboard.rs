@@ -3,6 +3,7 @@
 //! Uses a temp CLAUDE_CONFIG_DIR so the current active account isn't clobbered.
 //! After login, imports the credential from the hashed keychain item or file.
 
+use crate::proc_utils::NoWindowExt;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -116,6 +117,7 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .no_window()
         .spawn()
         .map_err(OnboardError::Io)?;
 
@@ -270,6 +272,7 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .no_window()
         .spawn()
         .map_err(OnboardError::Io)?;
 

@@ -1,5 +1,6 @@
 //! Shared filesystem utilities.
 
+use crate::proc_utils::NoWindowExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -186,6 +187,7 @@ pub fn find_claude_binary() -> Option<PathBuf> {
     if let Ok(output) = std::process::Command::new(which_cmd)
         .arg(claude_name)
         .env("PATH", crate::path_env::enriched_path())
+        .no_window()
         .output()
     {
         if output.status.success() {
@@ -208,6 +210,7 @@ pub fn find_claude_binary() -> Option<PathBuf> {
 pub fn claude_version(path: &Path) -> Option<String> {
     std::process::Command::new(path)
         .arg("--version")
+        .no_window()
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())

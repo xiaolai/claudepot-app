@@ -16,6 +16,7 @@
 //! fire-and-forget. Spawn errors are returned; callers surface as a toast.
 
 use crate::config_view::model::{DetectSource, EditorCandidate, EditorDefaults, Kind, LaunchKind};
+use crate::proc_utils::NoWindowExt;
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -239,6 +240,7 @@ impl ProbeBackend for RealProbe {
         let out = Command::new(cmd)
             .arg(name)
             .env("PATH", crate::path_env::enriched_path())
+            .no_window()
             .output()
             .ok()?;
         if !out.status.success() {
@@ -468,6 +470,7 @@ pub fn invoke(editor: &EditorCandidate, path: &Path) -> Result<(), LaunchError> 
                     .ok_or_else(|| LaunchError::Spawn("path is not valid UTF-8".to_string()))?;
                 std::process::Command::new("cmd")
                     .args(["/C", "start", "", p])
+                    .no_window()
                     .spawn()
                     .map_err(|e| LaunchError::Spawn(e.to_string()))?;
             }
