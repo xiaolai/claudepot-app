@@ -1,0 +1,8 @@
+# pnpm 10+ blocks dependency build scripts by default. The frontend's
+# vite toolchain pulls in esbuild, whose postinstall must run for the
+# bundle build (`pnpm build`, `pnpm tauri build`) to succeed. Without
+# this, a fresh `pnpm install` aborts with ERR_PNPM_IGNORED_BUILDS.
+# This file also makes the repo root a pnpm workspace root; web/ carries
+# its own pnpm-workspace.yaml so it stays an independent install.
+allowBuilds:
+  esbuild: true
