@@ -17,7 +17,7 @@ fn extracts_from_real_cc_binary() {
         eprintln!(
             "  {}: {}",
             t.id,
-            &t.prose.chars().take(60).collect::<String>()
+            t.prose.chars().take(60).collect::<String>()
         );
         if let Some(b) = &t.prose_b {
             eprintln!("    [variant_b] {}", b.chars().take(60).collect::<String>());

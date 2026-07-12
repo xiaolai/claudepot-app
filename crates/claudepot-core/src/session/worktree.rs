@@ -150,10 +150,7 @@ fn read_gitdir_pointer(git_file: &Path) -> Option<PathBuf> {
     let abs = if p.is_absolute() {
         p.to_path_buf()
     } else {
-        match git_file.parent() {
-            Some(base) => base.join(p),
-            None => return None,
-        }
+        git_file.parent()?.join(p)
     };
 
     // Expected shape: `/.../.git/worktrees/<name>` → parent is `worktrees`,
