@@ -1,4 +1,7 @@
 import React, { type CSSProperties, useState } from "react";
+import { IconButton } from "../../../components/primitives/IconButton";
+import { NF } from "../../../icons";
+import { DETAIL_QUERY_MIN_LEN } from "../sessionDetail.search";
 
 /**
  * Visual primitives shared by the two transcript renderers
@@ -160,6 +163,177 @@ export function Body({
         </button>
       )}
     </>
+  );
+}
+
+/**
+ * Turn-level fold threshold, in characters.
+ *
+ * Distinct from `Body`'s `clamp`, which trims *within* one text block.
+ * This one folds an entire turn — header stays, body collapses to a
+ * one-line preview — so a transcript full of long answers stays
+ * scannable instead of being a wall you scroll past.
+ */
+export const TURN_FOLD_CHARS = 1200;
+
+/**
+ * First *meaningful* line of `text`, ellipsised for the folded preview.
+ *
+ * Skips bare section markers. `SessionChunkView` builds an AI turn's
+ * text by prefixing each thinking block with a `[thinking]` line, so a
+ * turn that opens by thinking would otherwise preview as the literal
+ * string "[thinking]" — a fold hint that tells the reader nothing. Skip
+ * those and show the first real line of prose instead.
+ */
+function previewLine(text: string): string {
+  const first =
+    text
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0 && !/^\[[a-z][a-z ._-]*\]$/i.test(l)) ?? "";
+  return first.length > 140 ? `${first.slice(0, 140)}…` : first;
+}
+
+const FOLD_PREVIEW_BUTTON: CSSProperties = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  background: "transparent",
+  border: "none",
+  padding: "var(--sp-4) 0 0",
+  cursor: "pointer",
+  font: "inherit",
+};
+
+const FOLD_PREVIEW_LINE: CSSProperties = {
+  color: "var(--fg-muted)",
+  fontSize: "var(--fs-sm)",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const FOLD_PREVIEW_HINT: CSSProperties = {
+  marginTop: "var(--sp-2)",
+  color: "var(--fg-faint)",
+  fontSize: "var(--fs-xs)",
+  letterSpacing: "var(--ls-wide)",
+  textTransform: "uppercase",
+};
+
+/** What a folded turn shows in place of its body: opening line + size. */
+function FoldPreview({
+  text,
+  onExpand,
+}: {
+  text: string;
+  onExpand: () => void;
+}) {
+  return (
+    <button type="button" onClick={onExpand} style={FOLD_PREVIEW_BUTTON}>
+      <div style={FOLD_PREVIEW_LINE}>{previewLine(text)}</div>
+      <div style={FOLD_PREVIEW_HINT}>
+        {text.split("\n").length} lines · {text.length.toLocaleString()} chars
+      </div>
+    </button>
+  );
+}
+
+/**
+ * A `Bubble` whose body folds when the turn is long.
+ *
+ * Fold rules:
+ *  - A turn under `TURN_FOLD_CHARS` is never foldable — no chevron, no
+ *    behavior change. Short turns render exactly as before.
+ *  - A turn over the threshold starts **folded**, showing only its
+ *    header plus a one-line preview and a size hint.
+ *  - A turn that matches the live search is **never** folded. The chunk
+ *    list is already filtered to matches, so folding one would hide the
+ *    very hit the user searched for. This overrides both the default
+ *    and an explicit user fold — search visibility wins.
+ *  - An explicit toggle by the user otherwise sticks, and survives
+ *    "Show older" paging because chunks keep stable React keys.
+ */
+export function FoldableBubble({
+  side,
+  tone,
+  mono,
+  header,
+  foldText,
+  searchTerm,
+  children,
+}: {
+  side: "left" | "right";
+  tone: BubbleTone;
+  mono?: boolean;
+  /** Title row (label, timestamp, actions). Always visible, folded or not. */
+  header: React.ReactNode;
+  /**
+   * Plain text of the turn. Drives the fold decision, the preview line,
+   * and the size hint. It need not cover everything `children` renders
+   * — an AI turn's tool cards are deliberately excluded, since the
+   * header already reports the tool count.
+   */
+  foldText: string;
+  searchTerm: string;
+  children: React.ReactNode;
+}) {
+  const foldable = foldText.length > TURN_FOLD_CHARS;
+  // `null` = follow the default; a boolean = the user has decided.
+  const [userFolded, setUserFolded] = useState<boolean | null>(null);
+
+  // While a search is active, NOTHING folds.
+  //
+  // The transcript already filters chunks to those matching the query
+  // (`chunkMatchesSearch`), so every turn still on screen contains a hit
+  // — and that hit is not necessarily in `foldText`. `chunkMatchesSearch`
+  // also matches tool inputs and tool results, which render inside
+  // `children` and never appear in `foldText` (an AI turn's foldText is
+  // its prose only). An earlier version folded unless `foldText` itself
+  // contained the term; driving the real app showed 10 of 48 matching
+  // turns staying folded on a tool-result hit — search hiding its own
+  // result, the precise failure the fold must never cause.
+  // Same floor `normalizeDetailQuery` applies, imported rather than
+  // re-typed: if the two drift, the fold and the chunk filter disagree
+  // about whether a search is running.
+  const searchActive = searchTerm.trim().length >= DETAIL_QUERY_MIN_LEN;
+
+  const folded = foldable && !searchActive && (userFolded ?? true);
+
+  if (!foldable) {
+    return (
+      <Bubble side={side} tone={tone} mono={mono}>
+        {header}
+        {children}
+      </Bubble>
+    );
+  }
+
+  return (
+    <Bubble side={side} tone={tone} mono={mono}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-6)",
+        }}
+      >
+        <IconButton
+          glyph={folded ? NF.chevronR : NF.chevronD}
+          size="sm"
+          onClick={() => setUserFolded(!folded)}
+          title={folded ? "Expand turn" : "Collapse turn"}
+          aria-label={folded ? "Expand turn" : "Collapse turn"}
+          aria-expanded={!folded}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>{header}</div>
+      </div>
+      {folded ? (
+        <FoldPreview text={foldText} onExpand={() => setUserFolded(false)} />
+      ) : (
+        children
+      )}
+    </Bubble>
   );
 }
 

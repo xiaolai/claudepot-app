@@ -308,7 +308,10 @@ describe("ProjectDetail", () => {
       />,
     );
     const list = await screen.findByRole("listbox", { name: /sessions/i });
-    await user.type(screen.getByLabelText(/filter sessions/i), "bbbb");
+    // The filter's label widened from "filter by id prefix" to
+    // "search by prompt, id, branch, or model" — id-prefix matching,
+    // which this test guards, still works.
+    await user.type(screen.getByLabelText(/search sessions/i), "bbbb");
     const filtered = await within(list).findAllByRole("option");
     expect(filtered).toHaveLength(1);
   });
@@ -581,5 +584,154 @@ describe("ProjectDetail", () => {
       screen.getByRole("heading", { name: /^Sessions · 1$/ }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+  });
+
+  // ─── session search ────────────────────────────────────────────
+  //
+  // The list used to render 8 hex characters of a UUID per row and
+  // filter on `session_id` only — nothing to scan, and findable only
+  // if you already knew the id. Rows now lead with the first user
+  // prompt and the filter matches prompt / id / branch / model.
+
+  /** A SessionRow as `sessionListBySlug` returns it. */
+  function mkRow(
+    id: string,
+    prompt: string | null,
+    branch: string | null = null,
+  ) {
+    return {
+      session_id: id,
+      slug: "-p",
+      file_path: `/tmp/claudepot-test/.claude/projects/-p/${id}.jsonl`,
+      file_size_bytes: 100,
+      last_modified_ms: null,
+      project_path: "/p",
+      project_from_transcript: true,
+      first_ts: null,
+      last_ts: null,
+      event_count: 0,
+      message_count: 0,
+      user_message_count: 0,
+      assistant_message_count: 0,
+      first_user_prompt: prompt,
+      models: ["claude-sonnet-4-6"],
+      tokens: {
+        input: 0,
+        output: 0,
+        cache_creation: 0,
+        cache_read: 0,
+        total: 0,
+      },
+      git_branch: branch,
+      cc_version: null,
+      display_slug: null,
+      has_error: false,
+      is_sidechain: false,
+    };
+  }
+
+  const ID_A = "aaaa0000-0000-0000-0000-000000000000";
+  const ID_B = "bbbb0000-0000-0000-0000-000000000000";
+
+  async function renderWithRows(rows: unknown[]) {
+    showSpy.mockResolvedValue(
+      mkDetail([
+        { id: ID_A, size: 100 },
+        { id: ID_B, size: 200 },
+      ]),
+    );
+    sessionListImpl.fn = vi.fn(() => Promise.resolve(rows));
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: /^Sessions · 2$/ }),
+      ).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(sessionListImpl.fn).toHaveBeenCalled());
+  }
+
+  const searchBox = () =>
+    screen.getByRole("searchbox", { name: /search sessions/i });
+
+  it("labels session rows with the first user prompt, not the bare uuid", async () => {
+    await renderWithRows([
+      mkRow(ID_A, "investigate the deadlock in the mutex"),
+      mkRow(ID_B, "write the release notes"),
+    ]);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/investigate the deadlock in the mutex/),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/write the release notes/)).toBeInTheDocument();
+    // The id is still reachable — demoted to the meta line, not dropped.
+    expect(screen.getByText(ID_A.slice(0, 8))).toBeInTheDocument();
+  });
+
+  it("filters sessions by prompt text", async () => {
+    await renderWithRows([
+      mkRow(ID_A, "investigate the deadlock in the mutex"),
+      mkRow(ID_B, "write the release notes"),
+    ]);
+    await waitFor(() =>
+      expect(screen.getByText(/investigate the deadlock/)).toBeInTheDocument(),
+    );
+
+    await userEvent.type(searchBox(), "deadlock");
+
+    expect(screen.getByText(/investigate the deadlock/)).toBeInTheDocument();
+    expect(screen.queryByText(/write the release notes/)).toBeNull();
+  });
+
+  it("filters sessions by git branch", async () => {
+    await renderWithRows([
+      mkRow(ID_A, "first task", "feat/rotation"),
+      mkRow(ID_B, "second task", "main"),
+    ]);
+    await waitFor(() =>
+      expect(screen.getByText(/first task/)).toBeInTheDocument(),
+    );
+
+    await userEvent.type(searchBox(), "rotation");
+
+    expect(screen.getByText(/first task/)).toBeInTheDocument();
+    expect(screen.queryByText(/second task/)).toBeNull();
+  });
+
+  it("still filters by session-id prefix", async () => {
+    await renderWithRows([
+      mkRow(ID_A, "investigate the deadlock"),
+      mkRow(ID_B, "write the release notes"),
+    ]);
+    await waitFor(() =>
+      expect(screen.getByText(/investigate the deadlock/)).toBeInTheDocument(),
+    );
+
+    await userEvent.type(searchBox(), "bbbb");
+
+    expect(screen.getByText(/write the release notes/)).toBeInTheDocument();
+    expect(screen.queryByText(/investigate the deadlock/)).toBeNull();
+  });
+
+  it("falls back to id label and id search when the index has no rows", async () => {
+    // Cold index (or fetch in flight): no prompts available. The row
+    // must still render and still be findable by id — search never
+    // goes fully dark.
+    await renderWithRows([]);
+
+    expect(screen.getByText(ID_A.slice(0, 8))).toBeInTheDocument();
+
+    await userEvent.type(searchBox(), "bbbb");
+
+    expect(screen.getByText(ID_B.slice(0, 8))).toBeInTheDocument();
+    expect(screen.queryByText(ID_A.slice(0, 8))).toBeNull();
   });
 });

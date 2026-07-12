@@ -8,7 +8,7 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import { useActivityPrefs } from "../../hooks/useActivityPrefs";
-import { Body, Bubble, Divider } from "./components/transcriptAtoms";
+import { Body, Divider, FoldableBubble } from "./components/transcriptAtoms";
 import { ToolExecutionView } from "./viewers";
 import { redactSecrets } from "../../lib/redactSecrets";
 import { formatTokens, modelBadge } from "./format";
@@ -42,18 +42,23 @@ export function SessionChunkView({
       const ts = ev && "ts" in ev ? ev.ts : null;
       const copyText = redactSecrets(text);
       return (
-        <Bubble side="left" tone="sunken">
-          {renderHeader(
+        <FoldableBubble
+          side="left"
+          tone="sunken"
+          foldText={copyText}
+          searchTerm={searchTerm}
+          header={renderHeader(
             "You",
             ts,
             <CopyButton text={copyText} ariaLabel="Copy your message" />,
           )}
+        >
           <Body
             text={copyText}
             searchTerm={searchTerm}
             clamp={TEXT_CLAMP}
           />
-        </Bubble>
+        </FoldableBubble>
       );
     }
     case "system": {
@@ -62,12 +67,18 @@ export function SessionChunkView({
       const text = redactSecrets(stripLocalCommandStdout(raw));
       const ts = ev && "ts" in ev ? ev.ts : null;
       return (
-        <Bubble side="left" tone="faint" mono>
-          {renderHeader(
+        <FoldableBubble
+          side="left"
+          tone="faint"
+          mono
+          foldText={text}
+          searchTerm={searchTerm}
+          header={renderHeader(
             "System output",
             ts,
             <CopyButton text={text} ariaLabel="Copy system output" />,
           )}
+        >
           <Body
             text={text}
             searchTerm={searchTerm}
@@ -75,7 +86,7 @@ export function SessionChunkView({
             mono
             tone="ghost"
           />
-        </Bubble>
+        </FoldableBubble>
       );
     }
     case "compact": {
@@ -158,8 +169,16 @@ function AiChunkView({
     .join("\n\n");
 
   return (
-    <Bubble side="right" tone="accent">
-      {renderHeader(
+    // `foldText` is the turn's prose (assistant text + thinking), not its
+    // tool cards — a tool-only turn stays unfolded because the header
+    // already reports the tool count and the cards carry their own
+    // disclosure. This is the surface the "long answers" fold targets.
+    <FoldableBubble
+      side="right"
+      tone="accent"
+      foldText={copyText}
+      searchTerm={searchTerm}
+      header={renderHeader(
         "Claude",
         chunk.start_ts,
         <>
@@ -173,6 +192,7 @@ function AiChunkView({
           )}
         </>,
       )}
+    >
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
         {chunk.event_indices.map((idx) => {
           if (absorbed.has(idx)) return null;
@@ -187,7 +207,7 @@ function AiChunkView({
           );
         })}
       </div>
-    </Bubble>
+    </FoldableBubble>
   );
 }
 
@@ -311,6 +331,11 @@ function renderHeader(
       style={{
         display: "flex",
         alignItems: "center",
+        // Wrap as whole items. Without this the label and timestamp are
+        // shrinkable flex items and a tight bubble breaks them
+        // mid-word ("CLAUD / E") — visible once the fold chevron takes
+        // its ~28px out of the header row.
+        flexWrap: "wrap",
         gap: "var(--sp-8)",
         marginBottom: "var(--sp-6)",
         fontSize: "var(--fs-xs)",
@@ -319,8 +344,12 @@ function renderHeader(
         textTransform: "uppercase",
       }}
     >
-      <span>{label}</span>
-      {ts && <span title={ts}>{new Date(ts).toLocaleString()}</span>}
+      <span style={{ whiteSpace: "nowrap" }}>{label}</span>
+      {ts && (
+        <span title={ts} style={{ whiteSpace: "nowrap" }}>
+          {new Date(ts).toLocaleString()}
+        </span>
+      )}
       {extra && (
         <span
           style={{
