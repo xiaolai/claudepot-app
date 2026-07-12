@@ -66,6 +66,13 @@ cd claudepot-app
 cargo build -p claudepot-cli --release
 # Built binary: ./target/release/claudepot
 
+# Stage the CLI as the GUI's bundled sidecar (Tauri `externalBin`).
+# Required before any GUI build or `tauri dev` run — Tauri validates
+# this slot at compile time.
+mkdir -p src-tauri/binaries
+cp target/release/claudepot \
+   "src-tauri/binaries/claudepot-cli-$(rustc -Vv | sed -n 's/host: //p')"
+
 # Desktop app
 pnpm install
 pnpm tauri build --no-bundle      # builds a binary, no installer
