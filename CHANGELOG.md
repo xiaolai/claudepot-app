@@ -6,6 +6,42 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.53 — beta (released 2026-07-12)
+
+### Added
+
+- **Collapse long turns in the session transcript.** A long
+  conversation folds to one-line previews you can expand with a click,
+  so it stays scannable instead of being a wall you scroll past. Long
+  answers start folded; a turn that matches your in-transcript search is
+  never folded.
+- **Search the session list by what you remember.** Session rows now
+  lead with the first prompt instead of an opaque id, and the filter
+  matches the prompt, git branch, and model — not just the session id.
+
+### Changed
+
+- **Cross-session search (⌘K) is near-instant.** It now answers from the
+  full-text index instead of opening and scanning every transcript on
+  each keystroke — seconds down to milliseconds on a large history. When
+  the fast path finds nothing it falls back to an exhaustive scan, so
+  "no results" still means no results.
+- **The Projects list paints faster** — a single directory pass per
+  project instead of several, with the project path read from the
+  session index.
+
+### Fixed
+
+- Cross-session search now finds sessions written or grown since the
+  last index refresh, matches text that appears only inside a tool's
+  command or output, and returns at most one result per session.
+- The session index no longer drops indexed Codex history during a
+  Claude-side refresh, and two transcripts that share a session id
+  across projects (after a move) now both index correctly instead of one
+  silently going missing.
+- In-transcript search stays responsive while typing on very large
+  sessions.
+
 ## 0.1.52 — beta (released 2026-07-12)
 
 ### Added
