@@ -1,9 +1,0 @@
-# Anchors web/ as its own pnpm workspace root. The repo-root
-# pnpm-workspace.yaml (which approves esbuild's build script for the
-# Tauri app's frontend) would otherwise capture web/ as a non-member of
-# that workspace — pnpm run from here would install the ROOT package
-# instead of this app, breaking the Vercel deploy (Root Directory =
-# web/, full repo checked out). Keeping a pnpm-workspace.yaml here stops
-# pnpm's upward search so web/ resolves to itself. web/ keeps its own
-# pnpm-lock.yaml and pinned packageManager (pnpm 10.30.3); it is NOT a
-# member of the root Tauri workspace. See AGENTS.md "## Web".
