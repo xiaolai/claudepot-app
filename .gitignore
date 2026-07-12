@@ -48,6 +48,10 @@ typescript
 !/scripts/regen-icons.sh
 !/scripts/pre-push
 !/scripts/install-hooks.sh
+# Local CI gate + its shared invariant checks. repo-invariants.sh is
+# invoked by .github/workflows/ci.yml, so it MUST be committed.
+!/scripts/preflight.sh
+!/scripts/repo-invariants.sh
 dev-docs/
 
 # Per-clone validator hosts for scripts/pre-push (internal hostnames —
