@@ -238,7 +238,7 @@ pub fn backfill_codex(
     // since v4 → enforces).
     let on_disk: std::collections::HashSet<&str> =
         discovered.iter().map(|e| e.file_path.as_str()).collect();
-    for (path, _) in existing.iter() {
+    for path in existing.keys() {
         if !on_disk.contains(path.as_str()) {
             tx.execute(
                 "DELETE FROM sessions WHERE file_path = ?1 AND source_kind = 'codex'",

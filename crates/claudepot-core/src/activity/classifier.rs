@@ -885,10 +885,9 @@ fn plugin_slug_from_cache_path(s: &str) -> Option<String> {
     const WIN_NEEDLE: &str = r"\plugins\cache\";
     let rest = if let Some(idx) = s.find(UNIX_NEEDLE) {
         &s[idx + UNIX_NEEDLE.len()..]
-    } else if let Some(idx) = s.find(WIN_NEEDLE) {
-        &s[idx + WIN_NEEDLE.len()..]
     } else {
-        return None;
+        let idx = s.find(WIN_NEEDLE)?;
+        &s[idx + WIN_NEEDLE.len()..]
     };
     let mut parts = rest.split(['/', '\\']);
     let owner = parts.next()?;
