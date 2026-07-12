@@ -176,10 +176,13 @@ export function AgentsSection() {
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: "var(--sp-12)",
-        padding: "var(--sp-16)",
+        height: "100%",
+        minHeight: 0,
       }}
     >
+      {/* Fixed header — stays put so Add agent / Refresh are always
+          reachable while the list below scrolls (issue #23). */}
+      <div style={{ padding: "var(--sp-16) var(--sp-16) var(--sp-12)" }}>
       <ScreenHeader
         title="Agents"
         subtitle={`Scheduled and manual claude -p runs · ${
@@ -222,7 +225,23 @@ export function AgentsSection() {
           </>
         }
       />
+      </div>
 
+      {/* Scroll body — the list that was previously clipped with no
+          scrollbar when a third+ agent overflowed the window (issue
+          #23). `minHeight: 0` lets the flex child actually shrink so
+          `overflow: auto` engages. */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--sp-12)",
+          padding: "0 var(--sp-16) var(--sp-16)",
+        }}
+      >
       {loadError && (
         <div
           role="alert"
@@ -265,6 +284,7 @@ export function AgentsSection() {
           ))}
         </div>
       )}
+      </div>
 
       <AddAgentModal
         open={showAdd}
