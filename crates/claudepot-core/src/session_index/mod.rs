@@ -189,6 +189,66 @@ impl SessionIndex {
         Ok(n)
     }
 
+    /// Map each project slug to its authoritative transcript `cwd`.
+    ///
+    /// `project::list_projects` otherwise recovers this by opening the
+    /// first `.jsonl` in every project dir and JSON-parsing up to 64
+    /// lines of it (`recover_cwd_from_sessions`) — one file open plus a
+    /// burst of `serde_json` per project, every single listing. The
+    /// index already parsed that `cwd` once and stored it as
+    /// `sessions.project_path`, so one grouped read replaces the whole
+    /// pass.
+    ///
+    /// Slugs with an empty `project_path` are omitted: the caller must
+    /// treat a miss as "no transcript metadata" and fall back to the
+    /// on-disk recovery, exactly as before.
+    ///
+    /// A slug can hold several sessions, and a bare `GROUP BY slug` lets
+    /// SQLite pick the `project_path` from an arbitrary one — a
+    /// nondeterministic answer to "where does this project live", which
+    /// bites when a project has moved and older transcripts still carry
+    /// the previous cwd.
+    ///
+    /// Resolved in Rust rather than leaning on SQLite's bare-column rule:
+    /// that rule only pins the row when the `MAX()` is unique, and two
+    /// transcripts can share an `file_mtime_ns`. Folding on the tuple
+    /// `(mtime, project_path)` is a total order, so the winner is defined
+    /// even on a tie — newest transcript wins, ties broken by path.
+    pub fn project_cwds(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, SessionIndexError> {
+        let db = self.db();
+        // `source_kind` filter: this map answers "where does this CC
+        // project slug live", and only Claude rows carry a CC slug. A
+        // Codex row sharing a slug would otherwise be able to win the
+        // fold and hand `list_projects` a cwd from the wrong tool.
+        let mut stmt = db.prepare(
+            "SELECT slug, project_path, file_mtime_ns FROM sessions \
+             WHERE project_path != '' AND source_kind = 'claude_code'",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })?;
+        // slug -> (mtime, project_path) of the best candidate so far.
+        let mut best: std::collections::HashMap<String, (i64, String)> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let (slug, path, mtime) = row?;
+            let candidate = (mtime, path);
+            match best.get(&slug) {
+                Some(current) if *current >= candidate => {}
+                _ => {
+                    best.insert(slug, candidate);
+                }
+            }
+        }
+        Ok(best.into_iter().map(|(k, (_, p))| (k, p)).collect())
+    }
+
     /// Converge the cache with `<config_dir>/projects/`. Walks the
     /// filesystem, diffs against the cache, re-scans only the files
     /// whose `(size, mtime_ns)` moved, and applies the result in a
@@ -364,6 +424,27 @@ impl SessionIndex {
         self.refresh(config_dir)?;
         let db = self.db();
         codec::load_all_rows(&db)
+    }
+
+    /// Read cached rows for a specific set of transcripts.
+    ///
+    /// Pure SQL: **no `refresh`**, so no stat-walk of the corpus and no
+    /// re-parse of whatever a live session just appended. `list_all` is
+    /// the wrong tool when the caller already knows which handful of
+    /// files it wants — search's un-indexed-remainder probe needs a few
+    /// rows and was paying for a full refresh to get them.
+    ///
+    /// Paths with no cached row are skipped silently: a caller asking
+    /// about a file the index has never seen gets nothing, not an error.
+    pub fn rows_by_paths(&self, paths: &[&str]) -> Result<Vec<SessionRow>, SessionIndexError> {
+        let db = self.db();
+        let mut out = Vec::with_capacity(paths.len());
+        for path in paths {
+            if let Some(row) = codec::get_row_by_path(&db, path)? {
+                out.push(row);
+            }
+        }
+        Ok(out)
     }
 
     /// Refresh the cache against `config_dir` and return only the rows
@@ -1134,6 +1215,59 @@ mod tests {
             .unwrap()
             .expect("row b should be cached");
         assert_eq!(row.session_id, "S2");
+    }
+
+    #[test]
+    fn refresh_does_not_delete_codex_rows() {
+        // `refresh` walks `<claude_config>/projects` and deletes every
+        // cached row it did not see. Codex transcripts live under
+        // `~/.codex/sessions`, so they are never in that walk — and the
+        // delete plan was built from ALL `sessions` rows, source_kind
+        // included. A single Claude-side refresh therefore wiped the
+        // Codex half of the Shared Memory index, and `exchanges`
+        // cascade-deleted with it.
+        //
+        // This bites hard now that the GUI runs a `refresh` at every
+        // startup to populate the search index.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+
+        // Stand in for a row `claudepot codex index` would have written:
+        // a session that does NOT live under the Claude config dir.
+        {
+            let db = idx.db();
+            db.execute(
+                "INSERT INTO sessions (
+                    file_path, slug, session_id, file_size_bytes, file_mtime_ns,
+                    file_inode, project_path, project_from_transcript,
+                    event_count, message_count, user_message_count,
+                    assistant_message_count, models_json, tokens_input,
+                    tokens_output, tokens_cache_creation, tokens_cache_read,
+                    has_error, is_sidechain, indexed_at_ms, source_kind
+                 ) VALUES (
+                    '/home/u/.codex/sessions/c1.jsonl', '-codex', 'c1', 10, 1,
+                    1, '/proj', 1, 0, 0, 0, 0, '[]', 0, 0, 0, 0, 0, 0, 0, 'codex'
+                 )",
+                [],
+            )
+            .unwrap();
+        }
+
+        idx.refresh(cfg.path()).unwrap();
+
+        let db = idx.db();
+        let codex: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE source_kind = 'codex'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            codex, 1,
+            "a Claude-side refresh must not delete Codex rows it never walks"
+        );
     }
 
     #[test]

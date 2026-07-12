@@ -94,12 +94,22 @@ pub(super) struct FsEntry {
     pub tuple: IndexTuple,
 }
 
-/// Read every `(file_path, size, mtime_ns, inode)` tuple from the
-/// cache. Ordering is not meaningful here — the diff fn rebuilds
-/// hashmaps.
+/// Read the `(file_path, size, mtime_ns, inode)` tuple of every **Claude**
+/// row in the cache. Ordering is not meaningful here — the diff fn
+/// rebuilds hashmaps.
+///
+/// The `source_kind` filter is load-bearing, not a micro-optimisation.
+/// `refresh` walks `<claude_config>/projects` and deletes every cached
+/// tuple that walk did not produce. Codex transcripts live outside that
+/// tree (`~/.codex/sessions`), so including them here put every Codex row
+/// on the delete list of any Claude-side refresh — silently wiping the
+/// Codex half of the Shared Memory index, with its `exchanges` cascading
+/// away behind it. `refresh` may only prune the corpus it actually walks.
 pub(super) fn load_db_tuples(db: &Connection) -> Result<Vec<IndexTuple>, SessionIndexError> {
-    let mut stmt =
-        db.prepare("SELECT file_path, file_size_bytes, file_mtime_ns, file_inode FROM sessions")?;
+    let mut stmt = db.prepare(
+        "SELECT file_path, file_size_bytes, file_mtime_ns, file_inode \
+         FROM sessions WHERE source_kind = 'claude_code'",
+    )?;
     let rows = stmt.query_map([], |r| {
         Ok(IndexTuple {
             file_path: r.get::<_, String>(0)?,
@@ -257,7 +267,10 @@ pub(super) fn load_rows_by_slug(
 
 /// Look up a single cached row by path. Handy for diagnostics and
 /// tests that want to verify an UPSERT landed.
-#[cfg(test)]
+///
+/// Not `#[cfg(test)]`: `SessionIndex::rows_by_paths` builds on it to read
+/// a handful of specific transcripts without triggering `list_all`'s
+/// refresh (a full stat-walk of every transcript on disk).
 pub(super) fn get_row_by_path(
     db: &Connection,
     file_path: &str,
@@ -375,7 +388,8 @@ ON CONFLICT(file_path) DO UPDATE SET
     indexed_at_ms            = excluded.indexed_at_ms
 "#;
 
-#[cfg(test)]
+// Not `#[cfg(test)]`: `get_row_by_path` is production code now (it backs
+// `SessionIndex::rows_by_paths`, search's no-refresh row lookup).
 const SQL_SELECT_ALL: &str = r#"
 SELECT
     file_path, slug, session_id, file_size_bytes, file_mtime_ns,

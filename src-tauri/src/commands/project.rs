@@ -36,17 +36,27 @@ pub(crate) fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, 
 #[tauri::command]
 pub async fn project_list(
     pr_orch: tauri::State<'_, std::sync::Arc<crate::pr_orchestrator::PrOrchestrator>>,
+    index: tauri::State<'_, crate::commands::shared_memory::SharedMemoryIndex>,
 ) -> Result<Vec<ProjectInfoDto>, String> {
-    // `list_projects` fans out over every project slug, running
-    // `dir_size` (recursive), `recover_cwd_from_sessions` (JSONL I/O),
-    // `classify_reachability` (stat + optional slow-mount checks), and
-    // `canonicalize` on each. Multi-hundred-ms in the tail; keep it
-    // off the Tokio IPC worker so other commands don't queue behind it.
+    // `list_projects` fans out over every project slug, running a
+    // recursive size+mtime walk, `classify_reachability` (stat +
+    // optional slow-mount checks), and `canonicalize` on each.
+    // Multi-hundred-ms in the tail; keep it off the Tokio IPC worker so
+    // other commands don't queue behind it.
+    //
+    // The one piece of per-project JSONL I/O — `recover_cwd_from_sessions`,
+    // which opens the first transcript and JSON-parses up to 64 lines to
+    // find `cwd` — is served instead from the session index, which
+    // already stores that value as `sessions.project_path`. A cold index
+    // yields an empty map and the core falls back to reading from disk.
     let pr_orch: std::sync::Arc<crate::pr_orchestrator::PrOrchestrator> =
         std::sync::Arc::clone(&pr_orch);
+    let index = index.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
+        let cwds = index.as_ref().and_then(|idx| idx.project_cwds().ok());
+        let projects = project::list_projects_with_cwds(&cfg, cwds.as_ref())
+            .map_err(|e| format!("list failed: {e}"))?;
         let mut out: Vec<ProjectInfoDto> = projects.iter().map(ProjectInfoDto::from).collect();
         // Synchronous cache-only enrichment — never blocks on
         // subprocesses. Misses (nothing cached, expired, or no PR
