@@ -184,6 +184,7 @@ pub async fn probe_memory_server(
     bin: &Path,
     probe_timeout: Duration,
 ) -> Result<ProbeReport, McpProbeError> {
+    use crate::proc_utils::NoWindowExt;
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
     use tokio::process::Command;
@@ -196,6 +197,7 @@ pub async fn probe_memory_server(
         .stderr(Stdio::piped())
         .env("RUST_LOG", "warn")
         .kill_on_drop(true)
+        .no_window()
         .spawn()
         .map_err(|e| McpProbeError::Spawn {
             bin: bin.display().to_string(),

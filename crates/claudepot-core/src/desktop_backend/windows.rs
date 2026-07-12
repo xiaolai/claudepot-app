@@ -340,6 +340,7 @@ impl super::DesktopPlatform for WindowsDesktop {
         tracing::warn!("graceful taskkill didn't land in 8s; escalating to /F");
         let _ = tokio::process::Command::new("taskkill")
             .args(["/IM", "Claude.exe", "/T", "/F"])
+            .no_window()
             .output()
             .await
             .map_err(DesktopSwapError::Io)?;
