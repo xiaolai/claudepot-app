@@ -108,21 +108,28 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     // rename. On Unix the temp file is opened with mode 0o600 from the
     // start, so secrets are never world-readable, even briefly between
     // the create() and a follow-up chmod.
-    {
+    let write_result = (|| -> std::io::Result<()> {
         #[cfg(unix)]
         let mut f = {
             use std::os::unix::fs::OpenOptionsExt;
             std::fs::OpenOptions::new()
                 .write(true)
-                .create(true)
-                .truncate(true)
+                .create_new(true)
                 .mode(0o600)
                 .open(&tmp)?
         };
         #[cfg(not(unix))]
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         f.write_all(contents)?;
         f.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
 
     // rename is atomic within a filesystem. If it fails, clean up the
@@ -131,6 +138,12 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
+    // A durable file fsync does not make the directory entry durable. Sync
+    // the parent after rename so a crash cannot acknowledge a successful
+    // write while losing the replacement name from the directory journal.
+    #[cfg(unix)]
+    std::fs::File::open(parent)?.sync_all()?;
+
     Ok(())
 }
 

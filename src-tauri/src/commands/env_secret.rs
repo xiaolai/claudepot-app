@@ -22,6 +22,8 @@
 //! intermediates) are accepted residue; scrubbing them would mean
 //! rebuilding the parser around owned-secret types.
 
+use std::fs::{File, OpenOptions};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use claudepot_core::env_vault::env_file::{self, EnvEditError};
@@ -37,6 +39,8 @@ use crate::commands::keys::{
     now_unix_ms, schedule_self_clear, KeyCopyReceiptDto, CLIPBOARD_CLEAR_MS,
 };
 use crate::dto_env::{entries_from_lines, EnvFileDto, ProjectEnvDto, VaultSecretDto};
+
+const MAX_ENV_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 fn open_vault() -> Result<VaultStore, String> {
     VaultStore::open(&vault_db_path()).map_err(|e| format!("env vault open failed: {e}"))
@@ -61,6 +65,45 @@ fn zeroize_lines(lines: &mut [env_file::EnvLine]) {
 
 fn edit_err(e: EnvEditError) -> String {
     e.to_string()
+}
+
+fn read_env_content(path: &Path) -> Result<Zeroizing<String>, String> {
+    let file = File::open(path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
+    let mut bytes = Zeroizing::new(Vec::new());
+    file.take(MAX_ENV_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("read {} failed: {e}", path.display()))?;
+    if bytes.len() as u64 > MAX_ENV_FILE_BYTES {
+        return Err(format!(
+            "{} is too large for the environment-file editor (maximum {MAX_ENV_FILE_BYTES} bytes)",
+            path.display()
+        ));
+    }
+    let content = String::from_utf8(bytes.to_vec())
+        .map_err(|_| format!("{} is not valid UTF-8", path.display()))?;
+    Ok(Zeroizing::new(content))
+}
+
+/// Serialize read-modify-write operations for one dotenv file across both
+/// Tauri commands and cooperating Claudepot processes. The sidecar is not a
+/// security boundary; it prevents our own concurrent editors from silently
+/// losing one another's changes.
+fn lock_env_file(path: &Path) -> Result<File, String> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("invalid dotenv path: {}", path.display()))?;
+    let lock_path = path.with_file_name(format!(".{name}.claudepot.lock"));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| format!("open dotenv lock {} failed: {e}", lock_path.display()))?;
+    file.lock()
+        .map_err(|e| format!("lock dotenv file {} failed: {e}", path.display()))?;
+    Ok(file)
 }
 
 // ─────────────────────────── path safety ───────────────────────────
@@ -137,10 +180,7 @@ fn scan_env_files(project_path: &str) -> Result<Vec<EnvFileDto>, String> {
         // The read buffer and the parsed lines hold every secret in
         // the file; only previews leave this scope. `Zeroizing`
         // scrubs the buffer on drop, `zeroize_lines` the parse.
-        let content = Zeroizing::new(
-            std::fs::read_to_string(&path)
-                .map_err(|e| format!("read {} failed: {e}", path.display()))?,
-        );
+        let content = read_env_content(&path)?;
         let mut lines = env_file::parse(&content);
         let entries = entries_from_lines(&lines);
         zeroize_lines(&mut lines);
@@ -171,13 +211,14 @@ fn mutate_env_file(
     edit: impl FnOnce(&str) -> Result<String, String>,
 ) -> Result<ProjectEnvDto, String> {
     let path = env_file_path(&project_path, &file_name)?;
+    let _lock = lock_env_file(&path)?;
     // The pre-edit buffer holds every secret already in the file —
     // scrub it on drop, same as the freshly-written copy below.
-    let content = Zeroizing::new(match std::fs::read_to_string(&path) {
+    let content = match read_env_content(&path) {
         Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("read {} failed: {e}", path.display())),
-    });
+        Err(_e) if !path.exists() => Zeroizing::new(String::new()),
+        Err(e) => return Err(e),
+    };
     let mut new_content = edit(&content)?;
     let write_result = atomic_write(&path, new_content.as_bytes())
         .map_err(|e| format!("write {} failed: {e}", path.display()));
@@ -570,5 +611,15 @@ mod tests {
         let files = scan_env_files(tmp.path().to_str().unwrap()).unwrap();
         let names: Vec<&str> = files.iter().map(|f| f.file_name.as_str()).collect();
         assert_eq!(names, vec![".env", ".env.local"]);
+    }
+
+    #[test]
+    fn test_read_env_content_rejects_oversized_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".env");
+        std::fs::write(&path, vec![b'x'; (MAX_ENV_FILE_BYTES + 1) as usize]).unwrap();
+
+        let error = read_env_content(&path).unwrap_err();
+        assert!(error.contains("too large"));
     }
 }

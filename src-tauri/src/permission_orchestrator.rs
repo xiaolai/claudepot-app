@@ -99,6 +99,7 @@ fn user_changed_layer(current: Option<&PermissionMode>, granted: &PermissionMode
 /// grant was created, so the on-disk record is no longer managing
 /// anything. [`tick`] injects `resolve_default_mode`; tests inject a
 /// closure over a fixture map.
+#[cfg(test)]
 fn stale_grant_paths<F>(grants: &[Grant], local_value: F) -> Vec<String>
 where
     F: Fn(&str) -> Option<PermissionMode>,
@@ -178,9 +179,23 @@ pub async fn tick(app: &AppHandle) {
     // otherwise linger on disk indefinitely. Drop them here so disk
     // state matches what `current_dto::filter_stale` already hides
     // from the UI.
-    let stale_paths: Vec<String> = stale_grant_paths(&file.grants, |path| {
-        resolve_default_mode(std::path::Path::new(path)).local_project_value
-    });
+    let mut stale_paths = Vec::new();
+    for grant in &file.grants {
+        let state = match resolve_default_mode(std::path::Path::new(&grant.project_path)) {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::warn!(
+                    project_path = %grant.project_path,
+                    error = %e,
+                    "permission_orchestrator: settings unreadable; skipping tick"
+                );
+                return;
+            }
+        };
+        if state.local_project_value.as_ref() != Some(&grant.granted_mode) {
+            stale_paths.push(grant.project_path.clone());
+        }
+    }
     let mut changed = false;
     for path in &stale_paths {
         if file.remove(path).is_some() {
@@ -366,13 +381,17 @@ fn elevated_unmanaged_projects(file: &GrantsFile) -> Vec<String> {
             return Vec::new();
         }
     };
-    let modes: Vec<(String, Option<PermissionMode>)> = projects
-        .into_iter()
-        .map(|p| {
-            let mode = resolve_default_mode(Path::new(&p.original_path)).local_project_value;
-            (p.original_path, mode)
-        })
-        .collect();
+    let mut modes = Vec::with_capacity(projects.len());
+    for p in projects {
+        match resolve_default_mode(Path::new(&p.original_path)) {
+            Ok(state) => modes.push((p.original_path, state.local_project_value)),
+            Err(e) => tracing::warn!(
+                project_path = %p.original_path,
+                error = %e,
+                "permission_orchestrator: skipping unreadable project settings"
+            ),
+        }
+    }
     filter_elevated_unmanaged(modes, file)
 }
 

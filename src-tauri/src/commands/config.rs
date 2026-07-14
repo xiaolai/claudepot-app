@@ -1,7 +1,7 @@
 //! Config section Tauri commands — P0.
 //!
 //! P0 ships:
-//! - `config_scan` — empty tree stub (discovery lands in P1).
+//! - `config_scan` — discovers the effective CC configuration tree.
 //! - `config_list_editors` — detected editors, cached 5 min.
 //! - `config_open_in_editor` — fire-and-forget launch.
 //! - `config_open_in_editor_path` — raw-path variant; used when the

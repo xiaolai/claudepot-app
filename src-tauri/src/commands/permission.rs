@@ -67,12 +67,17 @@ fn load_grants() -> Result<claudepot_core::permission::grants::GrantsFile, Strin
 
 /// Resolve `project_path` to a `ProjectPermissionDto`, reading the
 /// current settings state and the active grant (if any) from disk.
-fn current_dto(project_path: &str) -> ProjectPermissionDto {
-    let state = resolve_default_mode(Path::new(project_path));
+fn current_dto(project_path: &str) -> Result<ProjectPermissionDto, String> {
+    let state = resolve_default_mode(Path::new(project_path))
+        .map_err(|e| format!("read permission settings: {e}"))?;
     let file = permission_store::load_or_default();
     let active = eval::active_grant(&file, project_path, Utc::now());
     let active = filter_stale(&state, active);
-    project_permission_dto(project_path.to_string(), &state, active)
+    Ok(project_permission_dto(
+        project_path.to_string(),
+        &state,
+        active,
+    ))
 }
 
 /// Drop the grant from the DTO when the LocalProject layer's value
@@ -109,15 +114,21 @@ pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
         // recovered file is simply the best available truth.
         let file = load_grants()?;
         let now = Utc::now();
-        Ok(projects
+        projects
             .iter()
-            .map(|p| {
-                let state = resolve_default_mode(Path::new(&p.original_path));
+            .map(|p| -> Result<_, String> {
+                let state = resolve_default_mode(Path::new(&p.original_path)).map_err(|e| {
+                    format!("read permission settings for {}: {e}", p.original_path)
+                })?;
                 let active = eval::active_grant(&file, &p.original_path, now);
                 let active = filter_stale(&state, active);
-                project_permission_dto(p.original_path.clone(), &state, active)
+                Ok(project_permission_dto(
+                    p.original_path.clone(),
+                    &state,
+                    active,
+                ))
             })
-            .collect())
+            .collect::<Result<Vec<_>, _>>()
     })
     .await
     .map_err(|e| format!("permission_list join: {e}"))?
@@ -132,7 +143,8 @@ pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto
         // Three-outcome load — see `load_grants` for the recovery
         // contract.
         let file = load_grants()?;
-        let state = resolve_default_mode(Path::new(&project_path));
+        let state = resolve_default_mode(Path::new(&project_path))
+            .map_err(|e| format!("read permission settings: {e}"))?;
         let active = eval::active_grant(&file, &project_path, Utc::now());
         let active = filter_stale(&state, active);
         Ok(project_permission_dto(project_path.clone(), &state, active))
@@ -190,7 +202,11 @@ pub async fn permission_grant(
         // now would just record the prior grant's mode.
         let previous_mode = match file.find(&project_path) {
             Some(existing) => existing.previous_mode.clone(),
-            None => resolve_default_mode(root).local_project_value,
+            None => {
+                resolve_default_mode(root)
+                    .map_err(|e| format!("read permission settings: {e}"))?
+                    .local_project_value
+            }
         };
 
         let grant = Grant {
@@ -222,7 +238,7 @@ pub async fn permission_grant(
             return Err(format!("settings write failed: {e}"));
         }
 
-        Ok(current_dto(&project_path))
+        current_dto(&project_path)
     })
     .await
     .map_err(|e| format!("permission_grant join: {e}"))?
@@ -248,7 +264,7 @@ pub async fn permission_revert(project_path: String) -> Result<ProjectPermission
         file.remove(&project_path);
         permission_store::save(&file).map_err(|e| format!("grants save failed: {e}"))?;
 
-        Ok(current_dto(&project_path))
+        current_dto(&project_path)
     })
     .await
     .map_err(|e| format!("permission_revert join: {e}"))?
@@ -280,7 +296,7 @@ pub async fn permission_extend(
         grant.expires_at = expires_at;
         permission_store::save(&file).map_err(|e| format!("grants save failed: {e}"))?;
 
-        Ok(current_dto(&project_path))
+        current_dto(&project_path)
     })
     .await
     .map_err(|e| format!("permission_extend join: {e}"))?
