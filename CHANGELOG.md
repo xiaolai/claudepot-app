@@ -6,6 +6,25 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.54 — beta (released 2026-07-14)
+
+### Added
+
+- **Spot orphaned plugin installs.** `claudepot project plugin-bindings`
+  lists plugins still bound to a project directory that no longer exists
+  — the tell-tale of a project moved or renamed outside Claudepot. Each
+  entry points at the fix (`project move <old> <new>`).
+
+### Fixed
+
+- **Renaming a project now moves its plugins too.** Claude Code binds
+  project-scoped plugins to the project's absolute path in a global file
+  that lives outside the project directory, so a move used to leave them
+  pointing at a path that no longer exists and the plugins silently
+  stopped working. Project rename now repoints those bindings, and an
+  external move (Finder / `mv` / `git`) can be reconciled with
+  `project move`.
+
 ## 0.1.53 — beta (released 2026-07-12)
 
 ### Added
