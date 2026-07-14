@@ -59,8 +59,14 @@ jobs:
           NODE_ENV: test
         run: pnpm test
 
-      # The DB client uses a non-connecting build-time stub when no
-      # database secret is present, so this catches route/import,
-      # MDX, asset, and standalone-tracing regressions before Vercel.
-      - name: Production build
-        run: pnpm build
+      # `pnpm build` is intentionally NOT run here. The DB client's
+      # build-time stub only lets Drizzle's brand check pass during
+      # module introspection — it does NOT make build-time queries
+      # succeed (Pool opens no connection until the first query). Several
+      # routes DO query at build: `/c/[slug]`'s generateStaticParams and
+      # `/sitemap.xml` both hit Neon, so a secret-free build fails on the
+      # first prerendered query. Vercel already runs the full build per
+      # push with the real database, which is the authoritative build
+      # gate. CI's job here is typecheck + tests. To validate the build
+      # in CI, wire a Neon preview-branch URL into the build step env via
+      # `${{ secrets.NEON_DATABASE_URL_CI }}` and re-add it.
