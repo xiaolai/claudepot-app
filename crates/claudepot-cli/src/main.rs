@@ -205,11 +205,29 @@ enum Commands {
 enum McpAction {
     /// Run the Claudepot memory MCP server over stdio. Stdout is
     /// reserved for JSON-RPC frames; logs go to stderr.
+    ///
+    /// `sessions.db` indexes EVERY project you have ever opened. The
+    /// server is therefore confined to one project by default — the
+    /// current directory — so an agent working in project A cannot
+    /// read project B's transcripts. Widening that is a decision only
+    /// you can make, and it is recorded in your MCP config where you
+    /// can audit it, not in a prompt the agent could talk its way
+    /// around.
     MemoryServer {
         /// Override the sessions.db path. Defaults to
         /// `~/.claudepot/sessions.db`.
         #[arg(long)]
         db: Option<std::path::PathBuf>,
+        /// Confine reads/writes to this project. Defaults to the
+        /// current working directory.
+        #[arg(long)]
+        project: Option<std::path::PathBuf>,
+        /// Let this server read EVERY indexed project, not just one.
+        /// Every agent you connect to it can then search and read all
+        /// of your transcripts — including projects unrelated to the
+        /// one it is working in. Opt in only if you want that.
+        #[arg(long, conflicts_with = "project")]
+        all_projects: bool,
     },
     /// Print the recommended Claude Code / Codex agent
     /// instruction snippet to stdout. The snippet tells the
@@ -946,7 +964,29 @@ async fn main() -> Result<()> {
     if matches!(cli.command, Commands::Mcp { .. } | Commands::Codex { .. }) {
         return match cli.command {
             Commands::Mcp { action } => match action {
-                McpAction::MemoryServer { db } => commands::mcp::run(db).await,
+                McpAction::MemoryServer {
+                    db,
+                    project,
+                    all_projects,
+                } => {
+                    // Default-deny: with no flags the server is
+                    // confined to $PWD. `--all-projects` is the only
+                    // way to widen it, and it is an explicit,
+                    // auditable choice in the MCP config.
+                    let scope = if all_projects {
+                        claudepot_core::shared_memory::scope::McpScope::AllProjects
+                    } else {
+                        let root = match project {
+                            Some(p) => p,
+                            None => std::env::current_dir().context(
+                                "cannot determine the current directory to confine the memory server to; \
+                                 pass --project <path> (or --all-projects to opt out of confinement)",
+                            )?,
+                        };
+                        claudepot_core::shared_memory::scope::McpScope::project(&root)
+                    };
+                    commands::mcp::run(db, scope).await
+                }
                 McpAction::PrintSnippet => commands::mcp::print_snippet(),
                 McpAction::InstallSnippet { out, print_include } => {
                     commands::mcp::install_snippet(out, print_include)

@@ -75,9 +75,24 @@ fn bin_path() -> PathBuf {
 /// 8 seconds (generous for cold-start CI); a timeout means the
 /// test fails with diagnostic context instead of hanging.
 fn run_mcp_session(db: &std::path::Path, frames: &str, expected_ids: &[u32]) -> String {
+    // Unconfined: these tests exercise the tool surface against a
+    // synthetic multi-project fixture DB, so they need to see all of
+    // it. Real registrations default to confinement — the boundary
+    // itself is covered by `a_confined_server_refuses_another_project`
+    // and by `shared_memory::scope`'s unit tests.
+    run_mcp_session_scoped(db, &["--all-projects"], frames, expected_ids)
+}
+
+fn run_mcp_session_scoped(
+    db: &std::path::Path,
+    scope_args: &[&str],
+    frames: &str,
+    expected_ids: &[u32],
+) -> String {
     let mut child = Command::new(bin_path())
         .args(["mcp", "memory-server", "--db"])
         .arg(db)
+        .args(scope_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -305,5 +320,123 @@ fn end_to_end_codex_index_then_search() {
     assert!(
         stdout.contains("e2e-1") || stdout.contains("refactor the rate limiter"),
         "MCP search didn't find the indexed Codex rollout:\n{stdout}"
+    );
+}
+
+/// The confinement boundary, end to end.
+///
+/// `sessions.db` is a cross-project index: on a real machine it holds
+/// every project the user has ever opened, including work that has
+/// nothing to do with the repo the agent is currently in. Before the
+/// `shared_memory::scope` boundary existed, a memory server attached
+/// to project A could search project B's transcripts, read any
+/// indexed file, and enumerate every project by name — and the
+/// instruction snippet Claudepot ships actively told it to search
+/// without a scope.
+///
+/// This test stages two projects, confines the server to one, and
+/// asserts the other is unreachable through every read tool. It is a
+/// security regression test: if it ever goes green-by-accident
+/// (e.g. because a filter silently became a substring match), the
+/// leak is back.
+#[test]
+fn a_confined_server_refuses_another_project() {
+    let tmp = TempDir::new().unwrap();
+    let codex_home = tmp.path().join("codex");
+    let sessions = codex_home.join("sessions").join("2026/05/15");
+    std::fs::create_dir_all(&sessions).unwrap();
+
+    // Project A — the one the agent is working in.
+    std::fs::write(
+        sessions.join("ours.jsonl"),
+        r#"{"timestamp":"2026-05-15T11:30:00.000Z","type":"session_meta","payload":{"id":"ours-1","cwd":"/work/app","originator":"codex_cli","cli_version":"0.44.0"}}
+{"timestamp":"2026-05-15T11:30:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"refactor the rate limiter"}]}}
+"#,
+    )
+    .unwrap();
+
+    // Project B — unrelated, private. Stands in for the real case:
+    // an index that also holds the user's finances or client work.
+    std::fs::write(
+        sessions.join("theirs.jsonl"),
+        r#"{"timestamp":"2026-05-15T12:00:00.000Z","type":"session_meta","payload":{"id":"theirs-1","cwd":"/private/ledger","originator":"codex_cli","cli_version":"0.44.0"}}
+{"timestamp":"2026-05-15T12:00:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"reconcile the rate limiter payment ledger"}]}}
+"#,
+    )
+    .unwrap();
+
+    let db = tmp.path().join("sessions.db");
+    let out = Command::new(bin_path())
+        .args(["codex", "index", "--codex-home"])
+        .arg(&codex_home)
+        .args(["--db"])
+        .arg(&db)
+        .arg("--json")
+        .output()
+        .expect("spawn claudepot codex index");
+    assert!(out.status.success(), "index failed: {out:?}");
+
+    let confined = ["--project", "/work/app"];
+
+    // 1. Search reaches our project...
+    let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"e2e\",\"version\":\"0\"}}}\n\
+                  {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\
+                  {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"claudepot_search_memory\",\"arguments\":{\"query\":\"rate limiter\"}}}\n";
+    let stdout = run_mcp_session_scoped(&db, &confined, frames, &[1, 2]);
+    assert!(
+        stdout.contains("ours-1"),
+        "a confined server must still see its OWN project:\n{stdout}"
+    );
+
+    // ...and the same query does NOT surface the other project, even
+    // though its transcript matches the search terms.
+    assert!(
+        !stdout.contains("theirs-1") && !stdout.contains("ledger"),
+        "LEAK: another project's transcript surfaced in a confined search:\n{stdout}"
+    );
+
+    // 2. Reading the other project's transcript by locator is denied.
+    //    (An agent could otherwise guess or be handed a file_path.)
+    let theirs = sessions.join("theirs.jsonl");
+    let theirs_json = serde_json::to_string(&theirs.to_string_lossy()).unwrap();
+    let frames = format!(
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{{}},\"clientInfo\":{{\"name\":\"e2e\",\"version\":\"0\"}}}}}}\n\
+         {{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}}\n\
+         {{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{{\"name\":\"claudepot_read_conversation\",\"arguments\":{{\"file_path\":{theirs_json}}}}}}}\n"
+    );
+    let stdout = run_mcp_session_scoped(&db, &confined, &frames, &[1, 2]);
+    assert!(
+        stdout.contains("scope_denied"),
+        "reading another project's transcript must be denied:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("payment ledger"),
+        "LEAK: denied read still returned the other project's content:\n{stdout}"
+    );
+
+    // 3. Listing projects shows ours and only ours — a directory name
+    //    is itself disclosure (clients, subjects, private work).
+    let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"e2e\",\"version\":\"0\"}}}\n\
+                  {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\
+                  {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"claudepot_list_projects\",\"arguments\":{}}}\n";
+    let stdout = run_mcp_session_scoped(&db, &confined, frames, &[1, 2]);
+    assert!(
+        stdout.contains("/work/app"),
+        "confined list_projects must still show our own project:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("/private/ledger"),
+        "LEAK: another project was enumerated by name:\n{stdout}"
+    );
+
+    // 4. Asking for the other project by name is refused outright,
+    //    not silently answered with our own rows.
+    let frames = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"e2e\",\"version\":\"0\"}}}\n\
+                  {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\
+                  {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"claudepot_search_memory\",\"arguments\":{\"query\":\"ledger\",\"project_path\":\"/private/ledger\"}}}\n";
+    let stdout = run_mcp_session_scoped(&db, &confined, frames, &[1, 2]);
+    assert!(
+        stdout.contains("scope_denied"),
+        "an explicit request for another project must be refused:\n{stdout}"
     );
 }

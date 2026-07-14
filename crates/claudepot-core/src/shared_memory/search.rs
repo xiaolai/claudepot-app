@@ -36,7 +36,20 @@ pub struct SearchQuery {
     pub source_kind: Option<String>,
     /// Substring match on `sessions.project_path` (uses LIKE
     /// `%value%`). `None` = no filter.
+    ///
+    /// A convenience filter for humans narrowing a search. **Never
+    /// use it as a security boundary** — `/x/app` is a substring of
+    /// `/x/app-old`, a different project. Confinement goes through
+    /// [`Self::project_path_exact`]; see
+    /// [`super::scope`](super::scope).
     pub project_path: Option<String>,
+    /// Equality match on `sessions.project_path`. `None` = no filter.
+    ///
+    /// This is the filter the MCP server's project confinement is
+    /// built on ([`super::scope::McpScope::confine_search`]). It ANDs
+    /// with `project_path`, so a confined caller can still narrow
+    /// within its own project but can never widen past it.
+    pub project_path_exact: Option<String>,
     /// Exact match on `sessions.git_branch`.
     pub git_branch: Option<String>,
     /// Substring match on `sessions.models_json` (covers Claude
@@ -61,6 +74,7 @@ impl Default for SearchQuery {
             query: String::new(),
             source_kind: None,
             project_path: None,
+            project_path_exact: None,
             git_branch: None,
             model: None,
             since_ms: None,
@@ -151,6 +165,14 @@ pub fn search(
             next_idx
         ));
         binds.push(Value::Text(format!("%{}%", escape_like(pp))));
+        next_idx += 1;
+    }
+    if let Some(ref ppe) = query.project_path_exact {
+        // Equality, not LIKE — this clause carries the MCP server's
+        // project confinement, and a substring match would let
+        // `/x/app` reach `/x/app-old`. See `shared_memory::scope`.
+        sql.push_str(&format!(" AND s.project_path = ?{}", next_idx));
+        binds.push(Value::Text(ppe.clone()));
         next_idx += 1;
     }
     if let Some(ref gb) = query.git_branch {
@@ -329,21 +351,39 @@ pub fn list_sessions(
 /// count + most-recent-activity stamp per project. Ordered by
 /// most-recent-activity desc. Source-kind agnostic (a project may
 /// have both Claude and Codex sessions).
+///
+/// `confine_to` restricts the listing to a single project path
+/// (equality). The MCP server passes its
+/// [`scope::McpScope::root`](super::scope::McpScope::root) so a
+/// confined agent cannot enumerate the user's other projects — the
+/// *names* of those projects are themselves disclosure. The GUI
+/// passes `None`: showing the user their own projects on their own
+/// machine is not an exfiltration surface.
 pub fn list_projects(
     idx: &SessionIndex,
     limit: u32,
+    confine_to: Option<&str>,
 ) -> Result<Vec<ProjectSummary>, rusqlite::Error> {
     let limit = if limit == 0 { 100 } else { limit.clamp(1, 500) };
     let db = idx.db();
-    let mut stmt = db.prepare(
+    let mut sql = String::from(
         "SELECT project_path, COUNT(*) AS n, MAX(last_ts_ms) AS last_ms \
          FROM sessions \
-         WHERE project_path != '' \
-         GROUP BY project_path \
-         ORDER BY last_ms DESC NULLS LAST \
-         LIMIT ?1",
-    )?;
-    let rows = stmt.query_map([limit as i64], |row| {
+         WHERE project_path != ''",
+    );
+    let mut binds: Vec<Value> = Vec::new();
+    if let Some(root) = confine_to {
+        sql.push_str(" AND project_path = ?1");
+        binds.push(Value::Text(root.to_string()));
+    }
+    sql.push_str(&format!(
+        " GROUP BY project_path ORDER BY last_ms DESC NULLS LAST LIMIT ?{}",
+        binds.len() + 1
+    ));
+    binds.push(Value::Integer(limit as i64));
+
+    let mut stmt = db.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(binds.iter()), |row| {
         Ok(ProjectSummary {
             project_path: row.get(0)?,
             session_count: row.get(1)?,
@@ -717,10 +757,51 @@ mod tests {
     }
 
     #[test]
+    fn list_projects_confined_to_one_project_hides_the_others() {
+        // The MCP server passes its confinement root here so an agent
+        // can't enumerate the user's other projects — the directory
+        // names alone are disclosure.
+        let tmp = TempDir::new().unwrap();
+        let (idx, _) = prep(&tmp);
+        let all = list_projects(&idx, 0, None).unwrap();
+        assert_eq!(all.len(), 3);
+
+        let mine = all[0].project_path.clone();
+        let confined = list_projects(&idx, 0, Some(&mine)).unwrap();
+        assert_eq!(confined.len(), 1);
+        assert_eq!(confined[0].project_path, mine);
+    }
+
+    #[test]
+    fn search_project_path_exact_does_not_match_a_sibling_prefix() {
+        // The LIKE-based `project_path` filter WOULD match a sibling
+        // whose path extends ours (`/x/app` vs `/x/app-old`). The
+        // exact filter is what the security boundary stands on, so
+        // lock that difference down here as well as in scope.rs.
+        let tmp = TempDir::new().unwrap();
+        let (idx, _) = prep(&tmp);
+        let all = list_projects(&idx, 0, None).unwrap();
+        let real = all[0].project_path.clone();
+        let sibling = format!("{real}-old");
+
+        let q = SearchQuery {
+            query: "the".to_string(),
+            project_path_exact: Some(sibling),
+            limit: 50,
+            ..Default::default()
+        };
+        let hits = search(&idx, &q, &RedactionPolicy::default()).unwrap();
+        assert!(
+            hits.is_empty(),
+            "a sibling project sharing our path prefix must not match the exact filter"
+        );
+    }
+
+    #[test]
     fn list_projects_groups_by_project_path() {
         let tmp = TempDir::new().unwrap();
         let (idx, _) = prep(&tmp);
-        let projects = list_projects(&idx, 0).unwrap();
+        let projects = list_projects(&idx, 0, None).unwrap();
         // 3 distinct projects in the corpus.
         assert_eq!(projects.len(), 3);
         // Each project has at least 1 session.

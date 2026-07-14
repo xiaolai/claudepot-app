@@ -17,6 +17,16 @@ over those nouns and over CC's filesystem, not new domain types. See
 Scope discipline applies to the *domain model* (don't add nouns
 casually); it does not cap what the UI can usefully expose.
 
+## Shared memory (dogfooding)
+
+Claudepot indexes this repo's own Claude + Codex transcripts and
+exposes them over MCP. The snippet below tells you which tools exist
+and when to call them. It is generated — refresh with
+`claudepot mcp install-snippet --out .claude/claudepot-mcp-instructions.md`;
+never hand-edit it, and never duplicate it inline.
+
+@.claude/claudepot-mcp-instructions.md
+
 ## Build
 
 ```bash

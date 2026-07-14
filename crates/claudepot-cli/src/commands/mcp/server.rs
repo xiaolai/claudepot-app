@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use claudepot_core::redaction::{apply as redact_apply, RedactionPolicy};
 use claudepot_core::session_index::SessionIndex;
+use claudepot_core::shared_memory::scope::{McpScope, ScopeDenied};
 use claudepot_core::shared_memory::{durable, read as smr, search as sms};
 
 const SCHEMA_VERSION: u32 = 1;
@@ -39,13 +40,25 @@ fn mcp_redaction_policy() -> RedactionPolicy {
 }
 
 /// Entry point for the `mcp memory-server` subcommand.
-pub async fn run(db_path: Option<PathBuf>) -> Result<()> {
+///
+/// `scope` is the project confinement, decided by the human at
+/// registration time (see [`McpScope`] and the `--project` /
+/// `--all-projects` flags). It is not negotiable at call time.
+pub async fn run(db_path: Option<PathBuf>, scope: McpScope) -> Result<()> {
     let path = db_path.unwrap_or_else(default_db_path);
     let idx = Arc::new(SessionIndex::open(&path)?);
-    tracing::info!(db = %path.display(), "claudepot mcp memory-server starting");
+    match scope.root() {
+        Some(root) => {
+            tracing::info!(db = %path.display(), project = %root, "claudepot mcp memory-server starting (confined)")
+        }
+        None => {
+            tracing::warn!(db = %path.display(), "claudepot mcp memory-server starting with --all-projects: every indexed project is readable by this agent")
+        }
+    }
     let server = MemoryServer {
         idx,
         policy: Arc::new(mcp_redaction_policy()),
+        scope: Arc::new(scope),
     };
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
@@ -56,6 +69,17 @@ pub async fn run(db_path: Option<PathBuf>) -> Result<()> {
 struct MemoryServer {
     idx: Arc<SessionIndex>,
     policy: Arc<RedactionPolicy>,
+    /// Which project(s) this process may read. Enforced on every
+    /// read tool; see `claudepot_core::shared_memory::scope`.
+    scope: Arc<McpScope>,
+}
+
+impl MemoryServer {
+    /// Render a [`ScopeDenied`] as the standard MCP error envelope.
+    fn denied(&self, e: ScopeDenied) -> String {
+        tracing::warn!(root = %e.root, "cross-project access denied");
+        to_json(&error_with(error_code::SCOPE_DENIED, &e, &self.policy))
+    }
 }
 
 // ─── tool input/output structs ────────────────────────────────
@@ -304,6 +328,15 @@ impl MemoryServer {
         // requesting the maximum page would never learn there are
         // more results past it.
         let user_limit = req.limit.unwrap_or(20).clamp(1, 49);
+        // Confinement. `project_path_exact` carries it (equality);
+        // the caller's `project_path` stays a substring filter it may
+        // use to narrow *within* its own project, never to widen past
+        // it. A request naming a different project is refused rather
+        // than silently rewritten — see scope::confine_search.
+        let project_path_exact = match self.scope.confine_search(req.project_path.as_deref()) {
+            Ok(p) => p,
+            Err(e) => return self.denied(e),
+        };
         // Query one extra row so we can report has_more without
         // the boundary-false-positive of `len >= limit`. Slice
         // back to user_limit before returning.
@@ -311,6 +344,7 @@ impl MemoryServer {
             query: req.query,
             source_kind: req.source_kind,
             project_path: req.project_path,
+            project_path_exact,
             git_branch: None,
             model: None,
             since_ms: None,
@@ -356,6 +390,27 @@ impl MemoryServer {
         &self,
         Parameters(req): Parameters<ReadConversationRequest>,
     ) -> String {
+        // Resolve the owning project and authorize BEFORE reading any
+        // bytes. Reading first and filtering after would pull another
+        // project's transcript into this process's memory, which is
+        // the exact disclosure the confinement exists to prevent.
+        if self.scope.root().is_some() {
+            match smr::project_path_for(&self.idx, &req.file_path) {
+                Ok(owner) => {
+                    if let Err(e) = self.scope.check_read(&owner) {
+                        return self.denied(e);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "claudepot_read_conversation: owner lookup failed");
+                    return to_json(&error_with(
+                        error_code::LOCATOR_NOT_INDEXED,
+                        &e,
+                        &self.policy,
+                    ));
+                }
+            }
+        }
         let locator = smr::ConversationLocator {
             file_path: req.file_path,
             exchange_id: req.exchange_id,
@@ -421,6 +476,12 @@ impl MemoryServer {
             .clone()
             .unwrap_or_else(|| "agent:unknown".to_string());
         let pp = req.project_path.as_deref();
+        // A confined server may author a *global* memory (that
+        // discloses nothing about another project) but must not
+        // attach one to a project it cannot see.
+        if let Err(e) = self.scope.check_write(pp) {
+            return self.denied(e);
+        }
         // L4: clamp confidence to [0, 100] for consistency with
         // submit_evidence and to keep the column's semantic
         // interpretation (a percentage) intact.
@@ -457,6 +518,9 @@ impl MemoryServer {
         description = "Log a durable decision with rationale. If supersedes_id is set, the prior decision flips to 'superseded' atomically."
     )]
     fn claudepot_log_decision(&self, Parameters(req): Parameters<LogDecisionRequest>) -> String {
+        if let Err(e) = self.scope.check_write(req.project_path.as_deref()) {
+            return self.denied(e);
+        }
         let created_by = req
             .created_by
             .clone()
@@ -499,6 +563,9 @@ impl MemoryServer {
         &self,
         Parameters(req): Parameters<SubmitEvidenceRequest>,
     ) -> String {
+        if let Err(e) = self.scope.check_write(req.project_path.as_deref()) {
+            return self.denied(e);
+        }
         let created_by = req
             .created_by
             .clone()
@@ -557,9 +624,23 @@ impl MemoryServer {
                 ));
             }
         };
+        // Confinement. `scope="global"` is exempt: global memories
+        // carry a NULL project_path, so they disclose nothing about
+        // another project — and forcing the root onto them would
+        // filter every row out. Any other listing is pinned to this
+        // server's project, so an unscoped call returns *our*
+        // memories rather than everyone's.
+        let project_path = if matches!(scope, Some(durable::Scope::Global)) {
+            None
+        } else {
+            match self.scope.confine_search(req.project_path.as_deref()) {
+                Ok(p) => p,
+                Err(e) => return self.denied(e),
+            }
+        };
         let f = durable::MemoryListFilter {
             scope,
-            project_path: req.project_path,
+            project_path,
             kind,
             include_archived: req.include_archived.unwrap_or(false),
             limit: req.limit.unwrap_or(0),
@@ -595,9 +676,15 @@ impl MemoryServer {
         description = "List indexed sessions (Claude Code + Codex transcripts) ordered by most-recent activity. A discovery primitive — agents that want to browse what's indexed instead of search-by-text can call this first, then read_conversation on a chosen file_path."
     )]
     fn claudepot_list_sessions(&self, Parameters(req): Parameters<ListSessionsRequest>) -> String {
+        // SessionListFilter.project_path is already an equality
+        // match, so confine_search's result can drive it directly.
+        let project_path = match self.scope.confine_search(req.project_path.as_deref()) {
+            Ok(p) => p,
+            Err(e) => return self.denied(e),
+        };
         let f = sms::SessionListFilter {
             source_kind: req.source_kind,
-            project_path: req.project_path,
+            project_path,
             since_ms: req.since_ms,
             limit: req.limit.unwrap_or(0),
             offset: req.offset.unwrap_or(0),
@@ -632,7 +719,11 @@ impl MemoryServer {
         description = "List distinct project paths in the cache with per-project session count and most-recent-activity stamp. Use this to discover which projects have indexed transcripts before drilling in with claudepot_list_sessions(project_path=...)."
     )]
     fn claudepot_list_projects(&self, Parameters(req): Parameters<ListProjectsRequest>) -> String {
-        match sms::list_projects(&self.idx, req.limit.unwrap_or(0)) {
+        // A confined server lists exactly one project: its own. The
+        // *names* of the user's other projects are disclosure in
+        // their own right — a directory name can carry a client's
+        // name or the subject of private work.
+        match sms::list_projects(&self.idx, req.limit.unwrap_or(0), self.scope.root()) {
             Ok(rows) => to_json(&ListProjectsPayload {
                 schema_version: SCHEMA_VERSION,
                 projects: rows
@@ -691,8 +782,12 @@ impl MemoryServer {
                 ));
             }
         };
+        let project_path = match self.scope.confine_search(req.project_path.as_deref()) {
+            Ok(p) => p,
+            Err(e) => return self.denied(e),
+        };
         let f = durable::DecisionListFilter {
-            project_path: req.project_path,
+            project_path,
             status,
             limit: req.limit.unwrap_or(0),
         };
@@ -807,6 +902,9 @@ struct ListProjectsPayload {
 /// Stable error codes. Documented as part of the MCP contract; do
 /// not rename or remove without a schema bump.
 mod error_code {
+    /// The caller tried to read or write outside the project this
+    /// server is confined to. See `shared_memory::scope`.
+    pub const SCOPE_DENIED: &str = "scope_denied";
     pub const INVALID_SCOPE: &str = "invalid_scope";
     pub const INVALID_KIND: &str = "invalid_kind";
     pub const INVALID_STATUS: &str = "invalid_status";

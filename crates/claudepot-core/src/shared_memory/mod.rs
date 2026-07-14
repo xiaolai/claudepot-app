@@ -38,6 +38,7 @@ pub mod durable;
 pub mod indexer;
 pub mod read;
 pub mod schema;
+pub mod scope;
 pub mod search;
 
 #[cfg(test)]
