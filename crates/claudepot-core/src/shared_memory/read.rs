@@ -73,6 +73,28 @@ pub enum ReadError {
     Sql(#[from] rusqlite::Error),
 }
 
+/// The `project_path` a transcript belongs to, or
+/// [`ReadError::NotIndexed`] when the cache has never seen it.
+///
+/// Exists so a caller can decide whether it is *allowed* to read a
+/// transcript before any of its bytes are loaded — see
+/// [`super::scope::McpScope::check_read`]. Reading first and
+/// discarding after would put another project's content in this
+/// process's memory (and one panic-in-between away from a log), which
+/// is exactly what the confinement is there to prevent.
+pub fn project_path_for(idx: &SessionIndex, file_path: &str) -> Result<String, ReadError> {
+    idx.db()
+        .query_row(
+            "SELECT project_path FROM sessions WHERE file_path = ?1",
+            [file_path],
+            |r| r.get::<_, String>(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => ReadError::NotIndexed(file_path.to_string()),
+            other => ReadError::Sql(other),
+        })
+}
+
 /// Read the locator with default byte cap (64 KiB).
 pub fn read_locator(
     idx: &SessionIndex,

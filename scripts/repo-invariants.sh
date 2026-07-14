@@ -121,6 +121,43 @@ for runner in scripts/preflight.sh .github/workflows/ci.yml; do
   fi
 done
 
+# ── 6. MCP reads stay inside the project confinement ─────────────────
+# sessions.db is a CROSS-PROJECT index — on a real machine it holds
+# every project the user has ever opened, including work unrelated to
+# the repo an agent is running in. The memory server is therefore
+# confined to one project (claudepot_core::shared_memory::scope), and
+# every read tool must honor it.
+#
+# Two ways to silently reopen the hole, both greppable:
+#   a) hardcoding `project_path_exact: None` in the server (that field
+#      IS the confinement — the substring `project_path` filter cannot
+#      carry it, since `/x/app` is a substring of `/x/app-old`);
+#   b) calling `sms::list_projects` without passing `self.scope.root()`,
+#      which enumerates every project the user has by name.
+# Shipped in 0.1.54 with all reads unscoped; do not reintroduce.
+mcp_dir='crates/claudepot-cli/src/commands/mcp'
+if [ -d "$mcp_dir" ]; then
+  violators=$(grep -rn 'project_path_exact: *None' "$mcp_dir" --include='*.rs' || true)
+  if [ -n "$violators" ]; then
+    echo "::error::MCP server disables its project confinement:"
+    echo "$violators"
+    echo "  project_path_exact carries the cross-project boundary. Derive it"
+    echo "  from scope::McpScope::confine_search(), never hardcode None."
+    echo
+    fail=1
+  fi
+  violators=$(grep -rn 'sms::list_projects(' "$mcp_dir" --include='*.rs' \
+    | grep -v 'self\.scope\.root()' || true)
+  if [ -n "$violators" ]; then
+    echo "::error::MCP list_projects called without the confinement root:"
+    echo "$violators"
+    echo "  Pass self.scope.root() — a confined agent must not enumerate the"
+    echo "  user's other projects. Directory names are themselves disclosure."
+    echo
+    fail=1
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi

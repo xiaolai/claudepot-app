@@ -26,7 +26,16 @@ use std::path::{Path, PathBuf};
 /// v2 (Phase 2): added the "Drafting a Claudepot agent" section
 /// teaching the `claudepot agent draft` CLI verb and the
 /// human-only install gate.
-pub const SNIPPET_VERSION: &str = "2";
+///
+/// v3: project confinement. v2 told the agent to call
+/// `claudepot_search_memory(query)` with no scope, which searched
+/// *every* indexed project — on a real machine that means unrelated
+/// client work and personal transcripts. The server now confines
+/// itself (see `shared_memory::scope`) and the text no longer
+/// encourages a global reach. v3 also drops v2's "don't ask for
+/// permission" line on `claudepot_remember`: memories are proposals
+/// for the user to review, not facts an agent asserts.
+pub const SNIPPET_VERSION: &str = "3";
 
 /// Returns the canonical instruction snippet body. Pure: no I/O,
 /// no env reads.
@@ -53,13 +62,22 @@ prefixed `claudepot_*`. Use them. Specifically:
   to read the excerpt. Cross-harness — Codex transcripts surface
   alongside Claude transcripts.
 
+  Searches are **confined to the current project**. The index also
+  holds this user's *other* projects; you cannot reach them, and you
+  should not try. If you get a `scope_denied` error, that is the
+  boundary working as intended — do not attempt to route around it,
+  and do not ask the user to disable it.
+
 - **When the user states a durable fact, preference, or pattern**
   ("I always run tests with X", "this project uses Y over Z"),
   call `claudepot_remember(scope="project",
   project_path=cwd(), kind="preference"|"fact"|"pattern"|...,
-  content="...", created_by="<your-agent-id>")`. Don't ask for
-  permission; you can always archive later if it turns out to be
-  wrong.
+  content="...", created_by="<your-agent-id>")`.
+
+  What you write is a **proposal**, not a fact. The user reviews it
+  before it becomes binding. So record what the evidence supports and
+  nothing more: a wrong memory that survives review is worse than no
+  memory at all, because it will be trusted.
 
 - **When you commit to a non-trivial design decision** with the
   user (data model choice, library pick, architectural cut),
@@ -76,7 +94,7 @@ prefixed `claudepot_*`. Use them. Specifically:
 
 - **For discovery**, `claudepot_list_sessions(project_path=cwd())`
   and `claudepot_list_projects()` enumerate the cache without
-  needing a search query.
+  needing a search query. Both are confined to the current project.
 
 All `created_by` ids should identify YOU (e.g.
 `codex-cli@2026-05-16`, `claude-code@2026-05-16`,
@@ -417,9 +435,34 @@ mod tests {
     }
 
     #[test]
-    fn snippet_version_is_two() {
-        // Phase 2 bumped the snippet to v2. Pin it so a future edit
-        // to the body without a version bump is caught.
-        assert_eq!(SNIPPET_VERSION, "2");
+    fn snippet_version_is_three() {
+        // Pinned so a future edit to the body without a version bump
+        // is caught — users `@include` a file that regenerates in
+        // place, and the stamp is how they tell which text they have.
+        assert_eq!(SNIPPET_VERSION, "3");
+    }
+
+    #[test]
+    fn the_snippet_never_tells_an_agent_to_search_across_projects() {
+        // v2 said: call `claudepot_search_memory(query)` — with no
+        // scope, that searched every project the user had ever opened.
+        // The server now confines itself, but the *text* must not
+        // encourage reaching past the boundary either, and it must
+        // tell the agent what a scope_denied means so it doesn't try
+        // to route around it.
+        let body = snippet_body();
+        assert!(
+            body.contains("confined to the current project"),
+            "the snippet must state that searches are project-confined"
+        );
+        assert!(
+            body.contains("scope_denied"),
+            "the snippet must name the error so an agent doesn't treat it as a bug to work around"
+        );
+        assert!(
+            !body.contains("Don't ask for\n  permission"),
+            "v2's 'don't ask for permission' line contradicts the review gate: \
+             a memory is a proposal, not a fact"
+        );
     }
 }

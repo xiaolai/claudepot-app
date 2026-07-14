@@ -109,6 +109,13 @@ pub async fn shared_memory_search(
             query: args.query,
             source_kind: args.source_kind,
             project_path: args.project_path,
+            // No confinement in the GUI. `project_path_exact` carries
+            // the MCP server's cross-project boundary (see
+            // shared_memory::scope) — that boundary exists to stop an
+            // *agent* in one project reading another. The user
+            // browsing their own machine in their own app is not that
+            // threat, and the Memory tab is expressly cross-project.
+            project_path_exact: None,
             git_branch: None,
             model: None,
             since_ms: args.since_ms,
@@ -598,7 +605,8 @@ pub async fn shared_memory_list_projects(
 ) -> Result<Vec<ProjectSummaryDto>, String> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let rows = sms::list_projects(idx.as_ref(), limit.unwrap_or(0))
+        // `None` = unconfined; see the note in shared_memory_search.
+        let rows = sms::list_projects(idx.as_ref(), limit.unwrap_or(0), None)
             .map_err(|e| format!("list: {e}"))?;
         Ok::<_, String>(
             rows.into_iter()
