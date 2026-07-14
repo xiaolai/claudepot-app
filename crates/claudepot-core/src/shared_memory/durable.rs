@@ -329,6 +329,75 @@ pub fn create_memory(
     })
 }
 
+/// A knowledge-compiler proposal to insert atomically.
+pub struct NewProposal<'a> {
+    pub project_path: &'a str,
+    pub kind: MemoryKind,
+    pub content: &'a str,
+    pub directive: &'a str,
+    pub confidence: i64,
+    pub anchor_json: Option<&'a str>,
+    pub origin_exchange_id: Option<&'a str>,
+    pub origin_file_path: Option<&'a str>,
+    pub created_by: &'a str,
+}
+
+/// Insert a distilled claim as a **proposal** in ONE statement.
+///
+/// This is distinct from [`create_memory`] on purpose: `create_memory`
+/// leaves `review_state` at its column default (`'accepted'`, correct
+/// for the migration of pre-existing human rows). A proposal must be
+/// `'proposed'` from the instant it exists — inserting as 'accepted' and
+/// updating to 'proposed' in a second statement opens a window where a
+/// crash leaves an agent-authored claim ACCEPTED, bypassing the entire
+/// human review gate. One INSERT closes that window.
+pub fn create_proposal(
+    idx: &SessionIndex,
+    new: &NewProposal<'_>,
+) -> Result<MemoryRecord, DurableError> {
+    let id = Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp_millis();
+    with_tx(idx, |tx| {
+        tx.execute(
+            "INSERT INTO memories (
+                id, scope, project_path, kind, content,
+                created_by_kind, created_by, confidence,
+                created_at_ms, updated_at_ms, archived_at_ms,
+                review_state, directive, anchor_json,
+                origin_exchange_id, origin_file_path
+            ) VALUES (?1, 'project', ?2, ?3, ?4, 'agent', ?5, ?6, ?7, ?7, NULL,
+                      'proposed', ?8, ?9, ?10, ?11)",
+            params![
+                id,
+                new.project_path,
+                new.kind.as_str(),
+                new.content,
+                new.created_by,
+                new.confidence,
+                now,
+                new.directive,
+                new.anchor_json,
+                new.origin_exchange_id,
+                new.origin_file_path,
+            ],
+        )?;
+        Ok(())
+    })?;
+    Ok(MemoryRecord {
+        id,
+        scope: Scope::Project,
+        project_path: Some(new.project_path.to_string()),
+        kind: new.kind,
+        content: new.content.to_string(),
+        created_by_kind: CreatedByKind::Agent,
+        created_by: new.created_by.to_string(),
+        confidence: Some(new.confidence),
+        created_at_ms: now,
+        updated_at_ms: now,
+        archived_at_ms: None,
+    })
+}
+
 pub fn archive_memory(idx: &SessionIndex, id: &str) -> Result<bool, DurableError> {
     let now = chrono::Utc::now().timestamp_millis();
     with_tx(idx, |tx| {
@@ -465,6 +534,27 @@ pub fn archive_decision(idx: &SessionIndex, id: &str) -> Result<bool, DurableErr
         )?;
         Ok(n > 0)
     })
+}
+
+/// The `project_path` a decision belongs to (`None` for a global
+/// decision or a nonexistent id — the two are distinguished by the
+/// outer `Option`). Lets a confined caller authorize an operation on a
+/// decision *before* mutating it, since a decision id alone carries no
+/// scope. Returns `Ok(None)` when the id doesn't exist.
+pub fn decision_project_path(
+    idx: &SessionIndex,
+    id: &str,
+) -> Result<Option<Option<String>>, DurableError> {
+    let db = idx.db();
+    match db.query_row(
+        "SELECT project_path FROM decisions WHERE id = ?1",
+        [id],
+        |r| r.get::<_, Option<String>>(0),
+    ) {
+        Ok(pp) => Ok(Some(pp)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(DurableError::from(e)),
+    }
 }
 
 /// Create a new active decision that supersedes an existing one.

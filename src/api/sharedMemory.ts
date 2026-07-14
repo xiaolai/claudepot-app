@@ -222,7 +222,9 @@ export interface LessonListArgs {
 
 export interface LessonAcceptArgs {
   id: string;
-  anchor_commit?: string | null;
+  /** Accept without an anchor (the lesson can never go suspect). When
+   * false/omitted, the backend resolves the lesson's project HEAD. */
+  no_anchor?: boolean;
 }
 
 // ─── API surface ─────────────────────────────────────────────

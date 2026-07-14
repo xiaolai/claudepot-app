@@ -70,11 +70,16 @@ impl GuardSpec {
     /// and globs so the shell doesn't re-interpret them.
     pub fn render(&self) -> String {
         let mut s = String::new();
-        s.push_str(&format!("# guard: {}\n", self.slug));
-        s.push_str(&format!("# {}\n", self.rationale));
+        // Comment fields are model-controlled. A newline in any of them
+        // would END the `#` comment and turn the rest of the line into
+        // executable shell that runs in CI — so flatten every comment
+        // field to a single line first. `comment_safe` strips CR/LF and
+        // other control characters.
+        s.push_str(&format!("# guard: {}\n", comment_safe(&self.slug)));
+        s.push_str(&format!("# {}\n", comment_safe(&self.rationale)));
         s.push_str(&format!(
             "# compiled from lesson {}\n",
-            self.source_lesson_id
+            comment_safe(&self.source_lesson_id)
         ));
 
         let includes = self
@@ -83,14 +88,20 @@ impl GuardSpec {
             .map(|g| format!(" --include='{}'", shell_single_quote_inner(g)))
             .collect::<String>();
 
+        // `--` terminates option parsing so a detect_regex beginning with
+        // `-` is treated as a pattern, not a grep flag (which `|| true`
+        // would swallow into a silent no-fire).
         s.push_str(&format!(
-            "violators=$(grep -rnE '{}' .{} 2>/dev/null || true)\n",
+            "violators=$(grep -rnE -- '{}' .{} 2>/dev/null || true)\n",
             shell_single_quote_inner(&self.detect_regex),
             includes,
         ));
         for allow in &self.allow_substrings {
+            // `-F` = fixed string (the field is documented as a substring,
+            // and an unescaped `.` as a regex would filter everything);
+            // `--` guards a leading `-`.
             s.push_str(&format!(
-                "violators=$(echo \"$violators\" | grep -v '{}' || true)\n",
+                "violators=$(echo \"$violators\" | grep -Fv -- '{}' || true)\n",
                 shell_single_quote_inner(allow),
             ));
         }
@@ -219,6 +230,27 @@ fn shell_single_quote_inner(s: &str) -> String {
     s.replace('\'', r"'\''")
 }
 
+/// Flatten a model-controlled string to a single comment-safe line:
+/// strip every control character (including CR/LF) so it cannot end the
+/// `#` comment and inject shell into a CI script. Collapses runs of
+/// stripped whitespace to single spaces.
+fn comment_safe(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_space = false;
+    for c in s.chars() {
+        if c.is_control() || c == '\u{2028}' || c == '\u{2029}' {
+            if !last_space {
+                out.push(' ');
+                last_space = true;
+            }
+        } else {
+            out.push(c);
+            last_space = false;
+        }
+    }
+    out.trim().to_string()
+}
+
 /// A double-quoted echo argument: neutralize `"`, `` ` ``, `$`, `\`.
 fn shell_double_quote_inner(s: &str) -> String {
     s.replace('\\', r"\\")
@@ -246,11 +278,43 @@ mod tests {
     #[test]
     fn a_rendered_guard_is_valid_shell_that_traces_to_its_lesson() {
         let out = spec().render();
-        assert!(out.contains("grep -rnE '\\.canonicalize\\(\\)'"));
+        assert!(out.contains("grep -rnE -- '\\.canonicalize\\(\\)'"));
         assert!(out.contains("--include='*.rs'"));
-        assert!(out.contains("grep -v 'path_utils.rs'"));
+        assert!(out.contains("grep -Fv -- 'path_utils.rs'"));
         assert!(out.contains("fail=1"));
         assert!(out.contains("compiled from lesson abc-123"));
+    }
+
+    #[test]
+    fn a_newline_in_a_comment_field_cannot_inject_shell() {
+        // The renderer writes rationale/slug/lesson-id as `#` comments.
+        // A model (or a prompt-injected one) that puts a newline in any
+        // of them would escape the comment into executable CI shell.
+        let mut s = spec();
+        s.rationale = "harmless\nrm -rf ~ # oops".into();
+        s.slug = "evil\nfail=1".into();
+        s.source_lesson_id = "id\necho pwned".into();
+        let out = s.render();
+        // Every comment stays a single `#` line — no bare `rm -rf`,
+        // `echo pwned`, or injected `fail=1` on its own line.
+        for line in out.lines() {
+            if line.contains("rm -rf") || line.contains("echo pwned") {
+                assert!(
+                    line.trim_start().starts_with('#'),
+                    "injected content escaped the comment: {line:?}"
+                );
+            }
+        }
+        assert!(!out.contains("\n rm -rf"));
+        assert!(!out.contains("\necho pwned"));
+    }
+
+    #[test]
+    fn a_detect_regex_starting_with_dash_is_not_read_as_a_grep_flag() {
+        let mut s = spec();
+        s.detect_regex = "-x-marks-it".into();
+        let out = s.render();
+        assert!(out.contains("grep -rnE -- '-x-marks-it'"));
     }
 
     #[test]
@@ -271,7 +335,7 @@ mod tests {
         let mut s = spec();
         s.include_globs = vec![];
         let out = s.render();
-        assert!(out.contains("grep -rnE '\\.canonicalize\\(\\)' . 2>/dev/null"));
+        assert!(out.contains("grep -rnE -- '\\.canonicalize\\(\\)' . 2>/dev/null"));
     }
 
     #[test]

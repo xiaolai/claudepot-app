@@ -154,6 +154,21 @@ pub fn list(
     Ok(out)
 }
 
+/// The `project_path` a memory row belongs to (`None` if the row is
+/// global or the id doesn't exist). Lets a caller resolve the lesson's
+/// own repo before running git against it.
+pub fn memory_project_path(idx: &SessionIndex, id: &str) -> Result<Option<String>, DurableError> {
+    match idx.db().query_row(
+        "SELECT project_path FROM memories WHERE id = ?1",
+        [id],
+        |r| r.get::<_, Option<String>>(0),
+    ) {
+        Ok(pp) => Ok(pp),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(DurableError::from(e)),
+    }
+}
+
 /// Accept a claim, stamping the commit its anchored files were at.
 ///
 /// `anchor_commit` is what makes the claim *invalidatable*: it records
@@ -177,12 +192,20 @@ pub fn accept(
     let n = match anchor {
         Some(json) => idx.db().execute(
             "UPDATE memories SET review_state = 'accepted', suspect_reason = NULL, \
-             anchor_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
+             anchor_json = ?1, updated_at_ms = ?2 \
+             WHERE id = ?3 AND archived_at_ms IS NULL",
             rusqlite::params![json, now_ms, id],
         )?,
         None => idx.db().execute(
+            // Clear anchor_json too: accepting with NO anchor means "this
+            // can never go suspect". Leaving a stale commit/files behind
+            // (e.g. re-accepting a previously-anchored suspect lesson
+            // with --no-anchor) would let the next invalidation sweep
+            // flip it straight back to suspect — the opposite of what
+            // --no-anchor promises.
             "UPDATE memories SET review_state = 'accepted', suspect_reason = NULL, \
-             updated_at_ms = ?1 WHERE id = ?2",
+             anchor_json = NULL, updated_at_ms = ?1 \
+             WHERE id = ?2 AND archived_at_ms IS NULL",
             rusqlite::params![now_ms, id],
         )?,
     };
@@ -196,7 +219,8 @@ pub fn accept(
 /// it come back forever.
 pub fn reject(idx: &SessionIndex, id: &str, now_ms: i64) -> Result<bool, DurableError> {
     let n = idx.db().execute(
-        "UPDATE memories SET review_state = 'rejected', updated_at_ms = ?1 WHERE id = ?2",
+        "UPDATE memories SET review_state = 'rejected', updated_at_ms = ?1 \
+         WHERE id = ?2 AND archived_at_ms IS NULL",
         rusqlite::params![now_ms, id],
     )?;
     Ok(n > 0)
@@ -250,12 +274,24 @@ pub fn counts(
             _ => {}
         }
     }
-    c.enforced = db.query_row(
-        "SELECT COUNT(*) FROM memories WHERE archived_at_ms IS NULL \
-         AND review_state = 'accepted' AND compile_target = 'guard'",
-        [],
-        |r| r.get(0),
-    )?;
+    // `enforced` must respect the same project scope as the other
+    // counts — a per-project dashboard was showing the GLOBAL enforced
+    // total next to this project's proposed/accepted numbers.
+    c.enforced = match project_path {
+        Some(p) => db.query_row(
+            "SELECT COUNT(*) FROM memories WHERE archived_at_ms IS NULL \
+             AND review_state = 'accepted' AND compile_target = 'guard' \
+             AND project_path = ?1",
+            [p],
+            |r| r.get(0),
+        )?,
+        None => db.query_row(
+            "SELECT COUNT(*) FROM memories WHERE archived_at_ms IS NULL \
+             AND review_state = 'accepted' AND compile_target = 'guard'",
+            [],
+            |r| r.get(0),
+        )?,
+    };
     Ok(c)
 }
 

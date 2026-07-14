@@ -1,9 +1,12 @@
 //! Built-in agent templates (PRD §9.2 / D5).
 //!
-//! v1 ships **exactly one** built-in template — the **Session
-//! Narrator**, the agent that motivated the whole Agents line of
-//! work. A *catalog* of templates is explicitly v2 (PRD §13); this
-//! module is deliberately a single function, not a registry.
+//! Two built-in templates: the **Session Narrator** (the agent that
+//! motivated the whole Agents line of work — a readable digest of each
+//! settled session) and the **Knowledge Distiller** (mines each settled
+//! session for lessons and files them as review proposals via
+//! `result_sink`). A full *catalog* with a UI install surface is still
+//! future work (PRD §13); the Distiller is reachable today through the
+//! `claudepot lesson harvest` CLI path rather than a template picker.
 //!
 //! A template instantiates to a **draft** (`lifecycle = Draft`,
 //! `drafted_by = "template:session-narrator"`). The draft is inert
@@ -463,5 +466,71 @@ mod tests {
         let s = serde_json::to_string(&a).unwrap();
         let back: Agent = serde_json::from_str(&s).unwrap();
         assert_eq!(a, back);
+    }
+
+    // ─── Knowledge Distiller ────────────────────────────────────
+
+    #[test]
+    fn distiller_deposits_proposals_and_holds_no_write_power() {
+        // The two load-bearing differences from the Narrator: the run's
+        // output is deposited as memory proposals (deterministic ingest,
+        // no volunteered tool call), and it has NO way to write anything
+        // itself — no MCP servers, read-only tools.
+        let a = knowledge_distiller(&test_cwd(), now());
+        assert_eq!(a.result_sink, Some(ResultSink::MemoryProposals));
+        assert!(
+            a.mcp_servers.is_empty(),
+            "the distiller must NOT attach a memory server — if it could \
+             write, persistence would again depend on the model volunteering"
+        );
+        assert_eq!(
+            a.allowed_tools,
+            vec!["Read".to_string(), "Grep".to_string()]
+        );
+        assert!(a.disallowed_tools.is_empty());
+    }
+
+    #[test]
+    fn distiller_is_a_haiku_session_settled_draft_with_a_rate_limit() {
+        let a = knowledge_distiller(&test_cwd(), now());
+        assert_eq!(a.model.as_deref(), Some(KNOWLEDGE_DISTILLER_MODEL));
+        assert!(matches!(
+            a.trigger,
+            Trigger::Event {
+                event: EventKind::SessionSettled { .. }
+            }
+        ));
+        assert_eq!(a.lifecycle, Lifecycle::Draft);
+        assert_eq!(a.created_via, CreatedVia::Template);
+        let rl = a.rate_limit.expect("event agent must carry a rate_limit");
+        assert!(rl.min_interval_secs.is_some() && rl.max_per_day.is_some());
+    }
+
+    #[test]
+    fn distiller_emits_a_valid_claims_schema() {
+        let a = knowledge_distiller(&test_cwd(), now());
+        assert_eq!(a.output_format, OutputFormat::Json);
+        let schema: serde_json::Value =
+            serde_json::from_str(a.json_schema.as_deref().unwrap()).unwrap();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["claims"].is_object());
+    }
+
+    #[test]
+    fn distiller_passes_store_validation_and_round_trips() {
+        use super::super::draft::{
+            validate_cwd, validate_event_trigger_numerics, validate_rate_limit_numerics,
+            validate_trigger_timezone,
+        };
+        let a = knowledge_distiller(&test_cwd(), now());
+        validate_name(&a.name).expect("name");
+        validate_cwd(&a.cwd).expect("cwd");
+        validate_trigger_timezone(&a.trigger).expect("tz");
+        validate_event_trigger_numerics(&a.trigger).expect("debounce");
+        validate_rate_limit_numerics(a.rate_limit.as_ref()).expect("rate limit");
+
+        let back: Agent = serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
+        assert_eq!(a, back);
+        assert_eq!(back.result_sink, Some(ResultSink::MemoryProposals));
     }
 }

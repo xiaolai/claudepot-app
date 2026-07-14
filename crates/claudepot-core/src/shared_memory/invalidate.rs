@@ -190,15 +190,21 @@ pub fn apply(
     report: &InvalidateReport,
     now_ms: i64,
 ) -> Result<u32, DurableError> {
+    // One transaction for the whole batch: a mid-loop SQLite error must
+    // not leave some claims flipped to suspect and others not while the
+    // caller receives an error. All-or-nothing.
+    let db = idx.db();
+    let tx = db.unchecked_transaction()?;
     let mut n = 0u32;
     for inv in &report.invalidated {
-        let changed = idx.db().execute(
+        let changed = tx.execute(
             "UPDATE memories SET review_state = 'suspect', suspect_reason = ?1, \
              updated_at_ms = ?2 WHERE id = ?3 AND review_state = 'accepted'",
             rusqlite::params![inv.reason, now_ms, inv.id],
         )?;
         n += changed as u32;
     }
+    tx.commit()?;
     Ok(n)
 }
 
@@ -210,9 +216,20 @@ pub fn apply(
 /// the forgiving-but-not-sloppy rule. (`core.rs` must not match
 /// `score.rs`; the segment boundary is what prevents that.)
 fn paths_match(git_path: &str, anchor_path: &str) -> bool {
-    let g = git_path.trim_start_matches("./");
-    let a = anchor_path.trim_start_matches("./");
-    g == a || ends_on_boundary(g, a) || ends_on_boundary(a, g)
+    // Normalize separators before comparing. `git diff` emits
+    // forward-slash paths on every platform, but the distiller records
+    // whatever the model wrote — which on a Windows repo can be
+    // `src\foo.rs`. Without this, a Windows anchor never matches its own
+    // git output and the lesson silently never goes suspect.
+    let g = normalize_sep(git_path);
+    let a = normalize_sep(anchor_path);
+    g == a || ends_on_boundary(&g, &a) || ends_on_boundary(&a, &g)
+}
+
+fn normalize_sep(p: &str) -> String {
+    p.trim_start_matches("./")
+        .trim_start_matches(".\\")
+        .replace('\\', "/")
 }
 
 fn ends_on_boundary(haystack: &str, needle: &str) -> bool {

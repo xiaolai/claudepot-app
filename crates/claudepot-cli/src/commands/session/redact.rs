@@ -107,10 +107,12 @@ pub fn redact_cmd(ctx: &AppContext, args: RedactArgs) -> Result<()> {
             plan.matched_values, plan.matched_lines
         );
         for hit in &plan.hits {
-            // The pattern is the caller's own string — echoing it back
-            // discloses nothing they don't already have. The
-            // surrounding content is never shown.
-            println!("  {:>4} × {}", hit.count, hit.pattern);
+            // Print the pattern's INDEX and count, never the pattern
+            // text. The pattern you pass to redact a leaked credential IS
+            // the credential; echoing it here would re-leak it into the
+            // terminal and into this session's transcript — the exact
+            // thing the command exists to remove.
+            println!("  {:>4} × pattern #{}", hit.count, hit.pattern_index + 1);
         }
         if opts.secrets {
             println!("  (plus any built-in secret shapes matched by --secrets)");
@@ -139,8 +141,26 @@ pub fn redact_cmd(ctx: &AppContext, args: RedactArgs) -> Result<()> {
     let reindexed = reindex_after_redact();
 
     if ctx.json {
-        print_json(&report)?;
-        return Ok(());
+        // Report the reindex outcome in the machine-readable output too,
+        // so a scripted caller can tell "removed AND unsearchable" from
+        // "removed but still in the index".
+        let ok = reindexed.is_ok();
+        print_json(&serde_json::json!({
+            "matched_values": report.matched_values,
+            "matched_lines": report.matched_lines,
+            "original_bytes": report.original_bytes,
+            "final_bytes": report.final_bytes,
+            "backup_trash_id": report.backup_trash_id,
+            "reindexed": ok,
+        }))?;
+        // A rewrite that leaves the old text searchable is only a
+        // partial success — exit non-zero so a pipeline notices.
+        return reindexed.map_err(|e| {
+            anyhow::anyhow!(
+                "redaction rewrote the file but the index refresh failed: {e}. \
+                 The old text is still in sessions.db — run `claudepot session rebuild-index`."
+            )
+        });
     }
 
     println!(
@@ -150,7 +170,7 @@ pub fn redact_cmd(ctx: &AppContext, args: RedactArgs) -> Result<()> {
         format_size(report.original_bytes),
         format_size(report.final_bytes)
     );
-    match reindexed {
+    match &reindexed {
         Ok(()) => println!("Index refreshed — the removed content is no longer searchable."),
         Err(e) => eprintln!(
             "warning: rewrite succeeded but the index refresh failed: {e}\n\
@@ -168,7 +188,14 @@ pub fn redact_cmd(ctx: &AppContext, args: RedactArgs) -> Result<()> {
         }
         None => println!("\nNo backup kept (--purge). The removal is irreversible."),
     }
-    Ok(())
+    // Exit non-zero when the file was scrubbed but the index still holds
+    // the old text — "partially done" must not read as success.
+    reindexed.map_err(|e| {
+        anyhow::anyhow!(
+            "index refresh failed after the rewrite: {e} \
+             (the removed text is still searchable — run `claudepot session rebuild-index`)"
+        )
+    })
 }
 
 /// Heuristic: a transcript touched in the last minute is probably being

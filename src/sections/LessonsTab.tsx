@@ -59,13 +59,21 @@ export function LessonsTab() {
     async (row: LessonRow, verdict: "accept" | "reject") => {
       setBusyId(row.id);
       try {
-        if (verdict === "accept") {
-          // No anchor commit resolved GUI-side yet; the backend accepts
-          // without one. A later pass can pass the project's HEAD so the
-          // lesson becomes invalidatable.
-          await sharedMemoryApi.lessonAccept({ id: row.id });
-        } else {
-          await sharedMemoryApi.lessonReject(row.id);
+        // The backend resolves the lesson's project HEAD and anchors the
+        // acceptance, so stale-code invalidation works from the GUI too.
+        const ok =
+          verdict === "accept"
+            ? await sharedMemoryApi.lessonAccept({ id: row.id })
+            : await sharedMemoryApi.lessonReject(row.id);
+        // A `false` return means the row wasn't in the expected state
+        // (already judged elsewhere, archived, stale id). Don't silently
+        // drop it as if the verdict took — surface it and refresh.
+        if (!ok) {
+          setErr(
+            `Could not ${verdict} this lesson — it may have changed. Refreshing.`,
+          );
+          await refresh();
+          return;
         }
         // Drop the judged row from view; keep the cursor where it was so
         // the next card slides under it — the whole point of a fast queue.
@@ -81,7 +89,7 @@ export function LessonsTab() {
         setBusyId(null);
       }
     },
-    [],
+    [refresh],
   );
 
   // Keyboard triage: j/k move, a accept, r reject. Never while an input

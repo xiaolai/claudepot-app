@@ -815,8 +815,11 @@ pub async fn lesson_list(
             args.limit.unwrap_or(50),
         )
         .map_err(|e| format!("lesson list: {e}"))?;
-        // Redact content, directive, and reason before they cross to JS
-        // — the same emission discipline as list_memories.
+        // Redact everything free-text before it crosses to JS — the same
+        // emission discipline as list_memories. `anchor_json` is included
+        // because its `evidence` field is rendered in the triage UI and
+        // can carry emails / env assignments the proposal-time default
+        // redactor didn't mask.
         let policy = ui_redaction_policy();
         for r in &mut rows {
             r.content = redact_apply(&r.content, &policy);
@@ -825,6 +828,9 @@ pub async fn lesson_list(
             }
             if let Some(s) = &r.suspect_reason {
                 r.suspect_reason = Some(redact_apply(s, &policy));
+            }
+            if let Some(a) = &r.anchor_json {
+                r.anchor_json = Some(redact_apply(a, &policy));
             }
         }
         Ok::<_, String>(rows)
@@ -849,10 +855,11 @@ pub async fn lesson_counts(
 #[derive(Debug, Clone, Deserialize)]
 pub struct LessonAcceptArgs {
     pub id: String,
-    /// Commit to anchor to. The frontend passes the project's current
-    /// HEAD (resolved GUI-side); `None` accepts without an anchor.
+    /// Accept without an anchor — the lesson can then never go suspect.
+    /// Right for a lesson that is not about code. When false (default),
+    /// the backend resolves the lesson's project HEAD itself.
     #[serde(default)]
-    pub anchor_commit: Option<String>,
+    pub no_anchor: bool,
 }
 
 #[tauri::command]
@@ -862,12 +869,39 @@ pub async fn lesson_accept(
 ) -> Result<bool, String> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
+        // Resolve the commit HERE, in the lesson's own project repo, so a
+        // GUI accept actually anchors the lesson and stale-code
+        // invalidation works. The frontend cannot run git, so if it
+        // passed nothing, code lessons accepted from the GUI would never
+        // become invalidatable — the whole Phase-3 moat, silently off.
+        let commit = if args.no_anchor {
+            None
+        } else {
+            lesson_project_head(idx.as_ref(), &args.id)
+        };
         let now = chrono::Utc::now().timestamp_millis();
-        review::accept(idx.as_ref(), &args.id, args.anchor_commit.as_deref(), now)
+        review::accept(idx.as_ref(), &args.id, commit.as_deref(), now)
             .map_err(|e| format!("accept: {e}"))
     })
     .await
     .map_err(join_err)?
+}
+
+/// HEAD of the repo that owns the lesson `id`, or `None` if the lesson
+/// has no project_path or that project isn't a git repo.
+fn lesson_project_head(idx: &SessionIndex, id: &str) -> Option<String> {
+    let project: String = review::memory_project_path(idx, id).ok().flatten()?;
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&project)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (!sha.is_empty()).then_some(sha)
 }
 
 #[tauri::command]

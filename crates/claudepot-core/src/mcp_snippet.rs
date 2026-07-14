@@ -32,10 +32,16 @@ use std::path::{Path, PathBuf};
 /// *every* indexed project — on a real machine that means unrelated
 /// client work and personal transcripts. The server now confines
 /// itself (see `shared_memory::scope`) and the text no longer
-/// encourages a global reach. v3 also drops v2's "don't ask for
-/// permission" line on `claudepot_remember`: memories are proposals
-/// for the user to review, not facts an agent asserts.
-pub const SNIPPET_VERSION: &str = "3";
+/// encourages a global reach.
+///
+/// v4: stop instructing agents to pass `project_path=cwd()` to the
+/// list tools — the confined server scopes automatically, and a path
+/// that doesn't exactly match the server's project would be refused, so
+/// the example was setting agents up for a spurious `scope_denied`. Also
+/// corrects the `claudepot_remember` description to match the code
+/// (it records active project memory, archivable later — it is not a
+/// review proposal; only the distiller's harvested lessons are).
+pub const SNIPPET_VERSION: &str = "4";
 
 /// Returns the canonical instruction snippet body. Pure: no I/O,
 /// no env reads.
@@ -49,11 +55,13 @@ You have access to the Claudepot MCP memory server via tools
 prefixed `claudepot_*`. Use them. Specifically:
 
 - **At the start of a session in a project**, call
-  `claudepot_list_decisions(project_path=cwd(), status="active")`
-  and `claudepot_list_memories(scope="project", project_path=cwd())`.
-  These return durable facts and design decisions that earlier
-  sessions (either yours or another agent's) recorded for this
-  project. Treat them as load-bearing context.
+  `claudepot_list_decisions(status="active")` and
+  `claudepot_list_memories(scope="project")`. The server is confined
+  to this project, so you do NOT need to pass `project_path` — it is
+  scoped for you, and passing a path that doesn't exactly match the
+  server's project would be refused. These return durable facts and
+  design decisions that earlier sessions (yours or another agent's)
+  recorded for this project. Treat them as load-bearing context.
 
 - **Before asking the user a question that history might
   answer**, call `claudepot_search_memory(query)` to look for
@@ -72,12 +80,10 @@ prefixed `claudepot_*`. Use them. Specifically:
   ("I always run tests with X", "this project uses Y over Z"),
   call `claudepot_remember(scope="project",
   project_path=cwd(), kind="preference"|"fact"|"pattern"|...,
-  content="...", created_by="<your-agent-id>")`.
-
-  What you write is a **proposal**, not a fact. The user reviews it
-  before it becomes binding. So record what the evidence supports and
-  nothing more: a wrong memory that survives review is worse than no
-  memory at all, because it will be trusted.
+  content="...", created_by="<your-agent-id>")`. Record only what the
+  user actually stated — this becomes active project memory that future
+  sessions treat as true, so a wrong entry is worse than none because it
+  will be trusted. The user can archive it later.
 
 - **When you commit to a non-trivial design decision** with the
   user (data model choice, library pick, architectural cut),
@@ -435,11 +441,27 @@ mod tests {
     }
 
     #[test]
-    fn snippet_version_is_three() {
+    fn snippet_version_is_four() {
         // Pinned so a future edit to the body without a version bump
         // is caught — users `@include` a file that regenerates in
         // place, and the stamp is how they tell which text they have.
-        assert_eq!(SNIPPET_VERSION, "3");
+        assert_eq!(SNIPPET_VERSION, "4");
+    }
+
+    #[test]
+    fn the_snippet_does_not_tell_list_tools_to_pass_project_path() {
+        // A confined server scopes automatically; instructing the agent
+        // to pass project_path=cwd() sets it up for a spurious
+        // scope_denied when cwd() doesn't exactly match the root.
+        let body = snippet_body();
+        assert!(
+            !body.contains("claudepot_list_decisions(project_path=cwd()"),
+            "list_decisions example must not pass project_path"
+        );
+        assert!(
+            !body.contains("claudepot_list_memories(scope=\"project\", project_path=cwd())"),
+            "list_memories example must not pass project_path"
+        );
     }
 
     #[test]
