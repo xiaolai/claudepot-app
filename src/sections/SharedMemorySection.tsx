@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { sharedMemoryApi } from "../api/sharedMemory";
+import { LessonsTab } from "./LessonsTab";
 import type {
   Decision,
   DecisionStatus,
@@ -26,16 +27,17 @@ import { Tag } from "../components/primitives/Tag";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 
-type Tab = "search" | "memories" | "decisions";
+type Tab = "lessons" | "search" | "memories" | "decisions";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "lessons", label: "Lessons" },
   { id: "search", label: "Search" },
   { id: "memories", label: "Memories" },
   { id: "decisions", label: "Decisions" },
 ];
 
 export function SharedMemorySection() {
-  const [tab, setTab] = useState<Tab>("search");
+  const [tab, setTab] = useState<Tab>("lessons");
 
   // WAI-ARIA tabs pattern: Left/Right move selection with wrap-around
   // and focus follows. Required companion to TabButton's roving
@@ -98,6 +100,7 @@ export function SharedMemorySection() {
           padding: "var(--sp-24)",
         }}
       >
+        {tab === "lessons" && <LessonsTab />}
         {tab === "search" && <SearchTab />}
         {tab === "memories" && <MemoriesTab />}
         {tab === "decisions" && <DecisionsTab />}
