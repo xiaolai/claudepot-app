@@ -38,7 +38,10 @@ pub async fn tick(app: &AppHandle) {
             0
         });
     if emitted > 0 {
-        tracing::info!(count = emitted, "invalidation_orchestrator: lessons flagged suspect");
+        tracing::info!(
+            count = emitted,
+            "invalidation_orchestrator: lessons flagged suspect"
+        );
     }
 }
 
@@ -121,8 +124,8 @@ fn run(app: &AppHandle) -> u32 {
 }
 
 fn projects_with_accepted_lessons(idx: &SessionIndex) -> Result<Vec<String>, String> {
-    let claims =
-        claudepot_core::shared_memory::invalidate::anchored_claims_all(idx).map_err(|e| e.to_string())?;
+    let claims = claudepot_core::shared_memory::invalidate::anchored_claims_all(idx)
+        .map_err(|e| e.to_string())?;
     let mut seen = std::collections::BTreeSet::new();
     for c in claims {
         seen.insert(c.project_path);
@@ -219,7 +222,10 @@ mod tests {
         git(dir, &["add", "."]);
         git(dir, &["commit", "-qm", "seed"]);
 
-        assert_eq!(git_changed_since(dir, "0000000000000000000000000000000000000000"), None);
+        assert_eq!(
+            git_changed_since(dir, "0000000000000000000000000000000000000000"),
+            None
+        );
     }
 
     #[test]

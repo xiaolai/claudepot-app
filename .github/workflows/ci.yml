@@ -45,7 +45,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
-        run: cargo fmt --check -p claudepot-core -p claudepot-cli -p xtask
+        run: cargo fmt --all --check
 
       - name: Clippy (core + cli + xtask, all targets)
         # `--all-targets` lints test code too. Without it, test-only
@@ -188,7 +188,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
         with:
-          version: 9
+          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@v5
