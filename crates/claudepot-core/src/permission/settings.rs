@@ -99,13 +99,13 @@ pub fn read_default_mode(path: &Path) -> Result<Option<PermissionMode>, Permissi
 /// Resolve the effective `permissions.defaultMode` for `project_root`
 /// across the layering chain. Pure over the filesystem — no env vars
 /// participate in this setting (unlike `autoMemoryEnabled`).
-pub fn resolve_default_mode(project_root: &Path) -> PermissionState {
-    let user_value =
-        read_default_mode(&SettingsLayer::User.settings_file(project_root)).unwrap_or(None);
-    let project_value =
-        read_default_mode(&SettingsLayer::Project.settings_file(project_root)).unwrap_or(None);
+pub fn resolve_default_mode(
+    project_root: &Path,
+) -> Result<PermissionState, PermissionSettingsError> {
+    let user_value = read_default_mode(&SettingsLayer::User.settings_file(project_root))?;
+    let project_value = read_default_mode(&SettingsLayer::Project.settings_file(project_root))?;
     let local_project_value =
-        read_default_mode(&SettingsLayer::LocalProject.settings_file(project_root)).unwrap_or(None);
+        read_default_mode(&SettingsLayer::LocalProject.settings_file(project_root))?;
 
     let (effective, decided_by) = if let Some(v) = local_project_value.clone() {
         (v, PermissionDecisionSource::LocalProjectSettings)
@@ -117,13 +117,13 @@ pub fn resolve_default_mode(project_root: &Path) -> PermissionState {
         (PermissionMode::Default, PermissionDecisionSource::Default)
     };
 
-    PermissionState {
+    Ok(PermissionState {
         effective,
         decided_by,
         user_value,
         project_value,
         local_project_value,
-    }
+    })
 }
 
 /// Read-modify-write `permissions.defaultMode` at `path`. Creates the
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn default_when_nothing_set() {
         let (_t, project, _l) = isolated();
-        let s = resolve_default_mode(&project);
+        let s = resolve_default_mode(&project).unwrap();
         assert_eq!(s.effective, PermissionMode::Default);
         assert_eq!(s.decided_by, PermissionDecisionSource::Default);
         assert_eq!(s.local_project_value, None);
@@ -289,7 +289,7 @@ mod tests {
         )
         .unwrap();
 
-        let s = resolve_default_mode(&project);
+        let s = resolve_default_mode(&project).unwrap();
         assert_eq!(s.effective, PermissionMode::BypassPermissions);
         assert_eq!(s.decided_by, PermissionDecisionSource::LocalProjectSettings);
         assert_eq!(s.user_value, Some(PermissionMode::Plan));
