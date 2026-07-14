@@ -53,13 +53,65 @@ pub fn claude_desktop_data_dir() -> Option<PathBuf> {
 /// state across machines and violated every path reference elsewhere
 /// in the codebase.
 pub fn claudepot_data_dir() -> PathBuf {
-    std::env::var_os("CLAUDEPOT_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join(".claudepot")
-        })
+    if let Some(dir) = std::env::var_os("CLAUDEPOT_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+
+    // ─── GUARD: a TEST can never reach the real ~/.claudepot ─────────
+    //
+    // Compiled only into test builds. Without this, falling through to
+    // the default here from a test hands out the developer's LIVE data
+    // dir.
+    //
+    // This is not hypothetical. On 2026-07-14 it silently destroyed a
+    // real `sessions.db` (129 -> 1 sessions, 8131 -> 0 exchanges): a
+    // test passed a temp *config* dir, but the call chain reached
+    // `list_all_sessions()`, which resolves its *data* dir here — and
+    // that path's `refresh()` prunes rows for transcript files it cannot
+    // see. The temp config dir had none, so it pruned everything.
+    //
+    // Rather than merely DETECT the violation (a panic the next test
+    // author must remember to appease), make it UNREPRESENTABLE: hand
+    // each test thread its own private temp data dir. Rust runs every
+    // test in its own thread, so this isolates tests from each other as
+    // well as from the user. A test that wants a specific dir still sets
+    // CLAUDEPOT_DATA_DIR — that check above takes precedence.
+    //
+    // SCOPE — read this before trusting it:
+    // `cfg(test)` is per-crate. This guard therefore covers claudepot-core's
+    // own UNIT tests (where the incident happened) and NOTHING ELSE.
+    // Integration tests under `tests/`, and tests in claudepot-cli /
+    // src-tauri, link this crate as a normal dependency with `cfg(test)`
+    // OFF — they get the real `~/.claudepot` unless they set
+    // CLAUDEPOT_DATA_DIR themselves. That requirement is enforced at CI
+    // level by `scripts/repo-invariants.sh` ("test binaries isolate the
+    // data root"), not by the type system. Do not claim universal
+    // isolation on the strength of this block alone.
+    #[cfg(test)]
+    {
+        thread_local! {
+            /// Per-test-thread data root. Dropped (and deleted) when the
+            /// test thread exits.
+            static TEST_DATA_DIR: tempfile::TempDir =
+                tempfile::tempdir().expect("tempdir for test data root");
+        }
+        TEST_DATA_DIR.with(|d| d.path().to_path_buf())
+    }
+
+    #[cfg(not(test))]
+    {
+        default_data_dir()
+    }
+}
+
+/// The default data root, `$HOME/.claudepot`.
+///
+/// Split out of [`claudepot_data_dir`] so the test-build guard there can
+/// refuse the fallback while this computation stays directly testable.
+fn default_data_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".claudepot")
 }
 
 /// Per-account Desktop profile snapshot directory.
@@ -202,11 +254,50 @@ mod tests {
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }
 
+    /// THE GUARD. Reproduces the 2026-07-14 data-loss incident at its
+    /// root: with no `CLAUDEPOT_DATA_DIR` set, a test used to receive the
+    /// developer's live `~/.claudepot`, and a downstream `refresh()`
+    /// pruned a real `sessions.db` (129 -> 1 sessions, 8131 -> 0
+    /// exchanges). A test must now be structurally incapable of seeing
+    /// the real data root.
     #[test]
-    fn test_claudepot_data_dir_default_is_home_dot_claudepot() {
+    fn a_test_can_never_reach_the_real_data_dir() {
         let _lock = lock_data_dir();
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
-        let result = claudepot_data_dir();
+
+        let got = claudepot_data_dir();
+        let real = default_data_dir();
+
+        assert_ne!(
+            got, real,
+            "claudepot_data_dir() handed a test the REAL data root — this is \
+             the bug that destroyed a live sessions.db"
+        );
+        // And it must not be anywhere under the real root either.
+        assert!(
+            !got.starts_with(&real),
+            "test data dir {} is inside the real data root {}",
+            got.display(),
+            real.display()
+        );
+    }
+
+    /// Isolation is per-test-thread, so two tests can't clobber each
+    /// other's data root (the reason we don't share one process-wide
+    /// temp dir).
+    #[test]
+    fn test_data_dir_is_stable_within_a_thread() {
+        let _lock = lock_data_dir();
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+        assert_eq!(claudepot_data_dir(), claudepot_data_dir());
+    }
+
+    #[test]
+    fn test_claudepot_data_dir_default_is_home_dot_claudepot() {
+        // Tests the default COMPUTATION directly. The public accessor is
+        // guarded in test builds (see the test above), so it can't be
+        // used to exercise the fallback.
+        let result = default_data_dir();
         // Must be exactly $HOME/.claudepot per the repo contract —
         // not dirs::data_dir()/Claudepot, which was the prior default
         // and diverges from every other path reference in the codebase.

@@ -92,7 +92,22 @@ jobs:
       - name: Rust build cache
         uses: Swatinem/rust-cache@v2
 
+      # CLAUDEPOT_DATA_DIR isolates the data root for EVERY test binary.
+      # paths.rs's cfg(test) guard is per-crate — it covers claudepot-core's
+      # unit tests only. Integration tests under tests/ and other crates'
+      # tests link core with cfg(test) OFF and would resolve the real
+      # ~/.claudepot (on a dev box that once destroyed a live sessions.db).
+      # The runner is the one seam that covers them all.
+      # repo-invariants.sh guard 5 asserts this env var stays here.
       - name: Tests (core + cli)
+        env:
+          # `runner.temp` is expanded by Actions into the runner's NATIVE
+          # path (D:\a\_temp on Windows, /home/runner/work/_temp on Linux).
+          # Do NOT compute this with `mktemp -d` under `shell: bash`: on the
+          # windows-latest leg Git Bash returns a POSIX path (/tmp/…) that
+          # Rust resolves against the current drive — the exact foreign-path
+          # class rules/paths.md exists to prevent.
+          CLAUDEPOT_DATA_DIR: ${{ runner.temp }}
         run: cargo test -p claudepot-core -p claudepot-cli
 
       # The tauri crate carries real unit tests (orchestrators, DTOs,
@@ -111,6 +126,9 @@ jobs:
       - name: Tests (tauri crate)
         if: matrix.os != 'ubuntu-latest'
         shell: bash
+        env:
+          # Native per-OS temp path — see the note on the core+cli step.
+          CLAUDEPOT_DATA_DIR: ${{ runner.temp }}
         run: |
           set -eu
           cargo build -p claudepot-cli

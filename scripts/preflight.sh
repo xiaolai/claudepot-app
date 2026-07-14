@@ -58,7 +58,15 @@ bash scripts/repo-invariants.sh
 ok "invariants"
 
 step "workspace tests"
-cargo test --workspace
+# Isolate the data root for EVERY test binary. paths.rs's cfg(test) guard
+# is per-crate: it covers claudepot-core's unit tests only. Integration
+# tests and other crates' tests link core with cfg(test) OFF and would
+# otherwise resolve the developer's real ~/.claudepot — which is how a
+# test once destroyed a live sessions.db. The runner is the one seam that
+# covers all of them at once. (repo-invariants.sh guard 5 asserts this.)
+CLAUDEPOT_TEST_DATA_DIR="$(mktemp -d)"
+trap 'rm -rf "$CLAUDEPOT_TEST_DATA_DIR"' EXIT
+CLAUDEPOT_DATA_DIR="$CLAUDEPOT_TEST_DATA_DIR" cargo test --workspace
 ok "rust tests"
 
 if [ "$rust_only" -eq 0 ]; then

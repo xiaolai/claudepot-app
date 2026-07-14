@@ -94,9 +94,14 @@ impl SnapshotLog {
         Self { path }
     }
 
+    /// Default snapshot-log path.
+    ///
+    /// Resolves through [`crate::paths::claudepot_data_dir`] — NOT a
+    /// hand-built `$HOME/.claudepot`. The hardcoded form bypassed the
+    /// `CLAUDEPOT_DATA_DIR` override and the test-isolation guard in
+    /// `paths.rs`, letting a test append to the developer's live log.
     pub fn default_path() -> TipsResult<PathBuf> {
-        let home = dirs::home_dir().ok_or(TipsError::NoHome)?;
-        Ok(home.join(".claudepot").join("cc_tips_snapshots.jsonl"))
+        Ok(crate::paths::claudepot_data_dir().join("cc_tips_snapshots.jsonl"))
     }
 
     pub fn read_all(&self) -> TipsResult<Vec<Snapshot>> {
