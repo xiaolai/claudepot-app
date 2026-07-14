@@ -104,6 +104,6 @@ pub use store::{
 pub use templates::session_narrator;
 pub use types::{
     Agent, AgentBinary, AgentId, AgentRun, CreatedVia, EventKind, HostPlatform, Lifecycle,
-    McpServerRef, OutputFormat, PermissionMode, PlatformOptions, RateLimit, RunResult, Trigger,
-    TriggerKind, DEFAULT_DEBOUNCE_SECS,
+    McpServerRef, OutputFormat, PermissionMode, PlatformOptions, RateLimit, ResultSink, RunResult,
+    Trigger, TriggerKind, DEFAULT_DEBOUNCE_SECS,
 };

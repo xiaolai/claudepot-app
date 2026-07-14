@@ -420,6 +420,7 @@ mod tests {
             lifecycle: Lifecycle::Draft,
             drafted_by: Some("claude-code@test".into()),
             created_via: crate::agent::types::CreatedVia::CliDraft,
+            result_sink: None,
         }
     }
 

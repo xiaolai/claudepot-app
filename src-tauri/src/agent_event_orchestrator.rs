@@ -864,6 +864,7 @@ mod tests {
             lifecycle: Lifecycle::Installed,
             drafted_by: None,
             created_via: CreatedVia::Gui,
+            result_sink: None,
         }
     }
 

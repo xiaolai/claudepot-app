@@ -725,6 +725,10 @@ pub fn build_draft(
     }
 
     Ok(Agent {
+        // Never set from a draft. A result_sink writes into the user's
+        // knowledge base; letting a drafting agent hand itself one
+        // would be a privilege it was never granted. Templates only.
+        result_sink: None,
         id: Uuid::new_v4(),
         name,
         display_name: spec.display_name,

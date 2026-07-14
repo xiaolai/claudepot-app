@@ -130,6 +130,13 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
     let now = Utc::now();
     Ok(Agent {
         id: Uuid::new_v4(),
+        // A GUI-authored agent never gets a result_sink. A sink writes
+        // into the user's knowledge base; it is a template-only
+        // capability, not a checkbox on the Add Agent form. If that
+        // changes, it needs its own review surface — silently granting
+        // an arbitrary agent write access to `memories` would put
+        // unreviewed claims in front of the model.
+        result_sink: None,
         name: dto.name,
         display_name: dto.display_name,
         description: dto.description,

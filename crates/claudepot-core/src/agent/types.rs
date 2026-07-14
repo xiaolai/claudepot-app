@@ -224,6 +224,30 @@ pub struct Agent {
     /// deserializing to `CreatedVia::Gui`.
     #[serde(default)]
     pub created_via: CreatedVia,
+
+    /// Where this agent's structured output is deposited after a run,
+    /// beyond the usual `result.json`. `None` = nowhere; the run
+    /// artifact is the only output.
+    ///
+    /// This is the seam that makes harvesting deterministic. The
+    /// alternative — attaching the memory MCP server and asking the
+    /// model to *call* a write tool — makes persistence contingent on
+    /// the model choosing to volunteer, which is precisely why the
+    /// `memories` table sat at zero rows while 7,798 exchanges piled
+    /// up. Here the model only has to emit JSON matching its schema.
+    /// Claudepot does the writing.
+    #[serde(default)]
+    pub result_sink: Option<ResultSink>,
+}
+
+/// A destination for an agent run's structured output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultSink {
+    /// Parse `result.json` as knowledge-distiller claims and insert
+    /// them into `memories` as **proposals** awaiting human review.
+    /// Never as accepted facts — see `shared_memory::proposal`.
+    MemoryProposals,
 }
 
 fn default_enabled() -> bool {
@@ -610,6 +634,7 @@ mod tests {
             lifecycle: Lifecycle::Draft,
             drafted_by: None,
             created_via: CreatedVia::Gui,
+            result_sink: None,
         };
         let s = serde_json::to_string(&a).unwrap();
         let back: Agent = serde_json::from_str(&s).unwrap();
