@@ -17,6 +17,8 @@ import userEvent from "@testing-library/user-event";
 const searchSpy = vi.fn();
 const listMemoriesSpy = vi.fn();
 const listDecisionsSpy = vi.fn();
+const lessonListSpy = vi.fn();
+const lessonCountsSpy = vi.fn();
 
 vi.mock("../api/sharedMemory", () => ({
   sharedMemoryApi: {
@@ -27,6 +29,10 @@ vi.mock("../api/sharedMemory", () => ({
     archiveMemory: vi.fn(),
     listDecisions: (...a: unknown[]) => listDecisionsSpy(...a),
     archiveDecision: vi.fn(),
+    lessonList: (...a: unknown[]) => lessonListSpy(...a),
+    lessonCounts: (...a: unknown[]) => lessonCountsSpy(...a),
+    lessonAccept: vi.fn(),
+    lessonReject: vi.fn(),
   },
 }));
 
@@ -36,6 +42,14 @@ beforeEach(() => {
   searchSpy.mockResolvedValue({ hits: [], has_more: false });
   listMemoriesSpy.mockResolvedValue([]);
   listDecisionsSpy.mockResolvedValue([]);
+  lessonListSpy.mockResolvedValue([]);
+  lessonCountsSpy.mockResolvedValue({
+    proposed: 0,
+    accepted: 0,
+    rejected: 0,
+    suspect: 0,
+    enforced: 0,
+  });
 });
 
 describe("SharedMemorySection tabs", () => {
@@ -48,29 +62,31 @@ describe("SharedMemorySection tabs", () => {
     expect(tablist).toBeInTheDocument();
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(3);
+    expect(tabs).toHaveLength(4);
 
-    const searchTab = screen.getByRole("tab", { name: "Search" });
-    expect(searchTab).toHaveAttribute("aria-selected", "true");
-    expect(searchTab).toHaveAttribute("id", "shared-memory-tab-search");
-    expect(searchTab).toHaveAttribute(
+    // Lessons is the default landing tab — the triage queue is the
+    // primary verb of this section now.
+    const lessonsTab = screen.getByRole("tab", { name: "Lessons" });
+    expect(lessonsTab).toHaveAttribute("aria-selected", "true");
+    expect(lessonsTab).toHaveAttribute("id", "shared-memory-tab-lessons");
+    expect(lessonsTab).toHaveAttribute(
       "aria-controls",
-      "shared-memory-panel-search",
+      "shared-memory-panel-lessons",
     );
-    expect(searchTab).toHaveAttribute("tabindex", "0");
+    expect(lessonsTab).toHaveAttribute("tabindex", "0");
 
     // Inactive tabs leave the tab order (roving tabIndex).
-    for (const name of ["Memories", "Decisions"]) {
+    for (const name of ["Search", "Memories", "Decisions"]) {
       const tab = screen.getByRole("tab", { name });
       expect(tab).toHaveAttribute("aria-selected", "false");
       expect(tab).toHaveAttribute("tabindex", "-1");
     }
 
     const panel = screen.getByRole("tabpanel");
-    expect(panel).toHaveAttribute("id", "shared-memory-panel-search");
+    expect(panel).toHaveAttribute("id", "shared-memory-panel-lessons");
     expect(panel).toHaveAttribute(
       "aria-labelledby",
-      "shared-memory-tab-search",
+      "shared-memory-tab-lessons",
     );
   });
 
@@ -96,20 +112,22 @@ describe("SharedMemorySection tabs", () => {
     const user = userEvent.setup();
     render(<SharedMemorySection />);
 
-    screen.getByRole("tab", { name: "Search" }).focus();
+    // The handler navigates from the SELECTED tab (Lessons by default),
+    // not from document focus. Lessons → Search.
+    screen.getByRole("tab", { name: "Lessons" }).focus();
     await user.keyboard("{ArrowRight}");
 
-    const memoriesTab = screen.getByRole("tab", { name: "Memories" });
-    expect(memoriesTab).toHaveAttribute("aria-selected", "true");
-    expect(memoriesTab).toHaveFocus();
-    expect(listMemoriesSpy).toHaveBeenCalled();
+    const searchTab = screen.getByRole("tab", { name: "Search" });
+    expect(searchTab).toHaveAttribute("aria-selected", "true");
+    expect(searchTab).toHaveFocus();
   });
 
   it("ArrowLeft wraps from the first to the last tab", async () => {
     const user = userEvent.setup();
     render(<SharedMemorySection />);
 
-    screen.getByRole("tab", { name: "Search" }).focus();
+    // Lessons is first; ArrowLeft wraps to the last tab, Decisions.
+    screen.getByRole("tab", { name: "Lessons" }).focus();
     await user.keyboard("{ArrowLeft}");
 
     const decisionsTab = screen.getByRole("tab", { name: "Decisions" });

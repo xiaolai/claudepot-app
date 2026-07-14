@@ -182,6 +182,49 @@ export interface McpHealth {
   error: string | null;
 }
 
+// ─── knowledge compiler: lesson triage ───────────────────────
+
+export type ReviewStateName = "proposed" | "accepted" | "rejected" | "suspect";
+
+export interface LessonRow {
+  id: string;
+  review_state: ReviewStateName;
+  kind: string;
+  /** The claim, in the distiller's words. */
+  content: string;
+  /** The imperative one-liner a future agent would see. */
+  directive: string | null;
+  confidence: number | null;
+  /** `{"files":[…],"evidence":"…","commit":"…"}` */
+  anchor_json: string | null;
+  suspect_reason: string | null;
+  /** The transcript this was learned from — the "show me what burned me" link. */
+  origin_file_path: string | null;
+  origin_exchange_id: string | null;
+  project_path: string | null;
+  created_at_ms: number;
+}
+
+export interface LessonCounts {
+  proposed: number;
+  accepted: number;
+  rejected: number;
+  suspect: number;
+  /** Accepted claims compiled into a binding check. */
+  enforced: number;
+}
+
+export interface LessonListArgs {
+  project_path?: string | null;
+  state?: ReviewStateName | null;
+  limit?: number | null;
+}
+
+export interface LessonAcceptArgs {
+  id: string;
+  anchor_commit?: string | null;
+}
+
 // ─── API surface ─────────────────────────────────────────────
 
 export const sharedMemoryApi = {
@@ -216,4 +259,13 @@ export const sharedMemoryApi = {
     invoke<McpHealth>("shared_memory_mcp_health", {
       claudepotBinary,
     }),
+
+  // Knowledge compiler.
+  lessonList: (args: LessonListArgs = {}) =>
+    invoke<LessonRow[]>("lesson_list", { args }),
+  lessonCounts: (projectPath?: string) =>
+    invoke<LessonCounts>("lesson_counts", { projectPath }),
+  lessonAccept: (args: LessonAcceptArgs) =>
+    invoke<boolean>("lesson_accept", { args }),
+  lessonReject: (id: string) => invoke<boolean>("lesson_reject", { id }),
 };

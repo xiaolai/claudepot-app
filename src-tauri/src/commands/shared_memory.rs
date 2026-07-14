@@ -775,3 +775,111 @@ pub async fn shared_memory_mcp_health(
 // so the CLI and the Tauri installer emit the same bytes. Audit
 // 2026-05 found these had drifted within a single release.
 use claudepot_core::mcp_snippet::snippet_body as canonical_snippet;
+
+// ─── Knowledge compiler: lesson triage ───────────────────────────
+//
+// The Memory tab's triage surface. `review::ReviewRow` / `ReviewCounts`
+// already serialize with the field names the frontend wants, so these
+// commands are thin: resolve the shared index, run the pure core fn on
+// the blocking pool, hand back the rows. Content is redacted on the way
+// out like every other emission from this file.
+
+use claudepot_core::shared_memory::review::{self, ReviewCounts, ReviewRow, ReviewState};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LessonListArgs {
+    #[serde(default)]
+    pub project_path: Option<String>,
+    /// proposed | accepted | rejected | suspect. Omit for proposed.
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[tauri::command]
+pub async fn lesson_list(
+    args: LessonListArgs,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<ReviewRow>, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let review_state = match args.state.as_deref() {
+            None => Some(ReviewState::Proposed),
+            Some(s) => Some(ReviewState::parse(s).ok_or_else(|| format!("bad state {s:?}"))?),
+        };
+        let mut rows = review::list(
+            idx.as_ref(),
+            args.project_path.as_deref(),
+            review_state,
+            args.limit.unwrap_or(50),
+        )
+        .map_err(|e| format!("lesson list: {e}"))?;
+        // Redact content, directive, and reason before they cross to JS
+        // — the same emission discipline as list_memories.
+        let policy = ui_redaction_policy();
+        for r in &mut rows {
+            r.content = redact_apply(&r.content, &policy);
+            if let Some(d) = &r.directive {
+                r.directive = Some(redact_apply(d, &policy));
+            }
+            if let Some(s) = &r.suspect_reason {
+                r.suspect_reason = Some(redact_apply(s, &policy));
+            }
+        }
+        Ok::<_, String>(rows)
+    })
+    .await
+    .map_err(join_err)?
+}
+
+#[tauri::command]
+pub async fn lesson_counts(
+    project_path: Option<String>,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<ReviewCounts, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        review::counts(idx.as_ref(), project_path.as_deref()).map_err(|e| format!("counts: {e}"))
+    })
+    .await
+    .map_err(join_err)?
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LessonAcceptArgs {
+    pub id: String,
+    /// Commit to anchor to. The frontend passes the project's current
+    /// HEAD (resolved GUI-side); `None` accepts without an anchor.
+    #[serde(default)]
+    pub anchor_commit: Option<String>,
+}
+
+#[tauri::command]
+pub async fn lesson_accept(
+    args: LessonAcceptArgs,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<bool, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let now = chrono::Utc::now().timestamp_millis();
+        review::accept(idx.as_ref(), &args.id, args.anchor_commit.as_deref(), now)
+            .map_err(|e| format!("accept: {e}"))
+    })
+    .await
+    .map_err(join_err)?
+}
+
+#[tauri::command]
+pub async fn lesson_reject(
+    id: String,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<bool, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let now = chrono::Utc::now().timestamp_millis();
+        review::reject(idx.as_ref(), &id, now).map_err(|e| format!("reject: {e}"))
+    })
+    .await
+    .map_err(join_err)?
+}
