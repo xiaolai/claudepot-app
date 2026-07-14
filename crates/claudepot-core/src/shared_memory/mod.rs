@@ -36,6 +36,7 @@
 pub mod claude_exchanges;
 pub mod durable;
 pub mod indexer;
+pub mod invalidate;
 pub mod proposal;
 pub mod read;
 pub mod review;

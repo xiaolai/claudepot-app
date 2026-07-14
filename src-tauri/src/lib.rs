@@ -45,6 +45,7 @@ mod events;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
+mod invalidation_orchestrator;
 mod permission_orchestrator;
 mod poller;
 mod pr_orchestrator;

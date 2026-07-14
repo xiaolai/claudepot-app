@@ -80,6 +80,16 @@ async fn run_tick(app: &AppHandle) {
     // this awaits a single task that walks all projects sequentially.
     guarded("pr_orchestrator", pr_tick(app)).await;
 
+    // Invalidate accepted lessons whose anchored code has changed. Also
+    // account-independent (a lesson is anchored to a project, not an
+    // Anthropic identity). Zero cost when nothing is accepted-and-
+    // anchored: one DB query returns no candidates and it returns.
+    guarded(
+        "invalidation_orchestrator",
+        crate::invalidation_orchestrator::tick(app),
+    )
+    .await;
+
     // Fire session-settled event agents — also independent of the
     // active Anthropic account (an event agent can run as any
     // configured route / binary). Returns immediately when no
