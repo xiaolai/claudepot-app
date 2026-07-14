@@ -98,6 +98,11 @@ pub struct MoveResult {
     pub config_nested_rewrites: usize,
     /// P9 (project-local .claude/settings.json autoMemoryDirectory) rewrote.
     pub project_settings_rewritten: bool,
+    /// P10 (plugins/installed_plugins.json) — count of project-scoped
+    /// plugin `projectPath` bindings repointed to the new path.
+    pub plugin_bindings_rewritten: usize,
+    /// P10 snapshot of the pre-rewrite plugin registry, if it was touched.
+    pub plugin_registry_snapshot_path: Option<PathBuf>,
     /// P8 (auto-memory dir move on git-root change) stats.
     pub memory_git_root_changed: bool,
     pub memory_dir_moved: bool,
@@ -156,4 +161,7 @@ pub struct DryRunPlan {
     pub would_move_memory_dir: bool,
     /// P9 preview: would project-local settings.json be touched?
     pub would_rewrite_project_settings: bool,
+    /// P10 preview: does the global plugin registry hold a binding to
+    /// the old project path that a move would repoint?
+    pub would_rewrite_installed_plugins: bool,
 }

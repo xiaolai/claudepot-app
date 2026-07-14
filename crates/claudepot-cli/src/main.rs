@@ -699,6 +699,10 @@ enum ProjectAction {
         #[command(flatten)]
         args: commands::project::RepairArgs,
     },
+    /// List project-scoped plugin bindings whose project directory no
+    /// longer exists (e.g. after an external move). Fix with
+    /// `project move <old> <new>`.
+    PluginBindings,
 }
 
 #[derive(Subcommand)]
@@ -1035,6 +1039,7 @@ async fn main() -> Result<()> {
                 }
             },
             ProjectAction::Repair { args } => commands::project::repair(&ctx, args)?,
+            ProjectAction::PluginBindings => commands::project::plugin_bindings(&ctx)?,
         },
         Commands::Agent { action } => match *action {
             AgentAction::Draft {

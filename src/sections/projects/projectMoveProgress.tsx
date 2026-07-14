@@ -16,6 +16,7 @@ export const PROJECT_MOVE_PHASES: PhaseSpec[] = [
   { id: "P7", label: "Updating Claude Code config" },
   { id: "P8", label: "Moving auto-memory directory" },
   { id: "P9", label: "Updating project settings" },
+  { id: "P10", label: "Repointing plugin bindings" },
 ];
 
 /**
@@ -37,6 +38,12 @@ export function renderProjectMoveResult(info: RunningOpInfo | null): ReactNode {
         </li>
       )}
       {result.memory_dir_moved && <li>Auto-memory directory moved.</li>}
+      {result.plugin_bindings_rewritten > 0 && (
+        <li>
+          {result.plugin_bindings_rewritten} plugin binding
+          {result.plugin_bindings_rewritten === 1 ? "" : "s"} repointed.
+        </li>
+      )}
       {result.config_had_collision && result.config_snapshot_path && (
         <li>
           Pre-existing data preserved at{" "}

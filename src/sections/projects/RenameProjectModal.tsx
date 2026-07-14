@@ -337,6 +337,10 @@ export function RenameProjectModal({
                   Project-local settings:{" "}
                   {preview.plan.would_rewrite_project_settings ? "rewrite" : "skip"}
                 </li>
+                <li>
+                  Plugin bindings:{" "}
+                  {preview.plan.would_rewrite_installed_plugins ? "repoint" : "skip"}
+                </li>
                 {preview.plan.estimated_history_lines > 0 && (
                   <li>
                     History lines potentially updated: ~{preview.plan.estimated_history_lines}

@@ -769,6 +769,52 @@ pub fn move_project(
         }
     }
 
+    // Phase 10: Repoint project-scoped plugin bindings in the global
+    // registry (<config_dir>/plugins/installed_plugins.json). Claude Code
+    // binds `scope:"project"` plugin installs to the project by ABSOLUTE
+    // `projectPath` in this global file — which lives outside the project
+    // dir, so the physical move (P3) and every path-rewrite phase above
+    // miss it, and the moved project's plugins silently appear
+    // uninstalled. Snapshots before mutating; no-op when the registry has
+    // no binding to the old path.
+    //
+    // Gated on scenario (not `actual_dir_moved`) like P7/P9 — AlreadyMoved
+    // still needs the binding repointed.
+    if !cc_dir_conflict {
+        let registry_path = args
+            .config_dir
+            .join("plugins")
+            .join("installed_plugins.json");
+        let snapshots_dir = args
+            .snapshots_dir
+            .clone()
+            .unwrap_or_else(|| repair_root(args).join("snapshots"));
+        match crate::project_config_rewrite::rewrite_installed_plugins(
+            &registry_path,
+            &snapshots_dir,
+            &old_norm,
+            &new_norm,
+            &new_san,
+        ) {
+            Ok(r) => {
+                result.plugin_bindings_rewritten = r.bindings_rewritten;
+                result.plugin_registry_snapshot_path = r.snapshot_path.clone();
+                if let Some(snap) = r.snapshot_path {
+                    let _ = journal.record_snapshot(snap);
+                }
+                if result.plugin_bindings_rewritten > 0 {
+                    let _ = journal.mark_phase("P10");
+                    sink.phase("P10", PhaseStatus::Complete);
+                }
+            }
+            Err(e) => {
+                let msg = format!("P10 (installed_plugins.json) failed: {e}");
+                let _ = journal.mark_error(&msg);
+                return Err(ProjectError::Ambiguous(msg));
+            }
+        }
+    }
+
     // All phases complete. Delete the journal. (Lock is released via
     // RAII when `_lock` drops at end of scope.)
     journal.finish()?;
@@ -782,6 +828,7 @@ pub fn move_project(
         config_renamed = result.config_key_renamed,
         config_collision = result.config_had_collision,
         settings_rewritten = result.project_settings_rewritten,
+        plugin_bindings_rewritten = result.plugin_bindings_rewritten,
         "project move complete"
     );
     Ok(result)

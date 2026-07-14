@@ -107,6 +107,23 @@ pub(crate) fn compute_dry_run_plan(
             .join("settings.json")
             .exists();
 
+    // P10 preview: does the global plugin registry hold a binding to the
+    // old project path? Cheap containment check on the JSON-escaped needle
+    // (only `projectPath` fields carry a project path, so a raw substring
+    // hit is accurate in practice; the Windows-escaped form keeps this
+    // correct when the registry stores backslash paths).
+    let would_rewrite_installed_plugins = {
+        let registry = config_dir.join("plugins").join("installed_plugins.json");
+        fs::read_to_string(&registry)
+            .map(|contents| {
+                let escaped =
+                    serde_json::to_string(old_norm).unwrap_or_else(|_| format!("\"{old_norm}\""));
+                let needle = escaped.trim_matches('"');
+                contents.contains(needle) || contents.contains(old_norm)
+            })
+            .unwrap_or(false)
+    };
+
     Ok(DryRunPlan {
         would_move_dir: *scenario == super::core::MoveScenario::MoveAndUpdate,
         old_cc_dir: old_san.to_string(),
@@ -119,6 +136,7 @@ pub(crate) fn compute_dry_run_plan(
         would_rewrite_claude_json,
         would_move_memory_dir,
         would_rewrite_project_settings,
+        would_rewrite_installed_plugins,
     })
 }
 
@@ -204,6 +222,14 @@ pub(crate) fn format_dry_run_plan(plan: &DryRunPlan, old_norm: &str, new_norm: &
     if plan.would_rewrite_project_settings {
         out.push_str(&format!(
             "  {}. Rewrite project-local .claude/settings.json autoMemoryDirectory (P9)\n",
+            step
+        ));
+        step += 1;
+    }
+
+    if plan.would_rewrite_installed_plugins {
+        out.push_str(&format!(
+            "  {}. Repoint project-scoped plugin bindings in installed_plugins.json (P10)\n",
             step
         ));
         step += 1;

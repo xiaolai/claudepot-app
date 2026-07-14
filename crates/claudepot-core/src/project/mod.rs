@@ -48,3 +48,8 @@ pub mod types;
 // `crate::project::ProjectError`, `crate::project::move_project`, …
 // resolve exactly as they did when `project.rs` was a single file.
 pub use core::*;
+
+// The plugin-registry health check is a read-only surface CLI/GUI call
+// (the rest of `config_rewrite` stays crate-private, invoked only by the
+// move phases).
+pub use config_rewrite::{detect_stale_plugin_bindings, StalePluginBinding};

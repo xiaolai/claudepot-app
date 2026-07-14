@@ -108,6 +108,7 @@ fn format_relative_time(time: SystemTime) -> String {
 // private items in Rust).
 mod clean;
 mod list;
+mod plugin_bindings;
 mod remove;
 mod rename;
 mod repair;
@@ -117,6 +118,7 @@ mod trash;
 // these names.
 pub use clean::clean;
 pub use list::{list, show};
+pub use plugin_bindings::plugin_bindings;
 pub use remove::remove;
 pub use rename::{move_project, MoveArgs};
 pub use repair::{repair, RepairArgs};

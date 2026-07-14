@@ -32,6 +32,7 @@ function okPlan(overrides: Partial<DryRunPlan> = {}): DryRunPlan {
     would_rewrite_claude_json: true,
     would_move_memory_dir: false,
     would_rewrite_project_settings: false,
+    would_rewrite_installed_plugins: false,
     ...overrides,
   };
 }
