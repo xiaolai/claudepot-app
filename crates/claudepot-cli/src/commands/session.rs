@@ -80,6 +80,7 @@ mod export;
 mod inspect;
 mod orphan;
 mod prune;
+mod redact;
 mod search;
 mod slim;
 mod trash;
@@ -91,6 +92,7 @@ pub use orphan::{
     adopt_orphan_cmd, backfill_exchanges_cmd, list_orphans, move_cmd, rebuild_index_cmd,
 };
 pub use prune::{prune_cmd, PruneArgs};
+pub use redact::{redact_cmd, RedactArgs};
 pub use search::{search_cmd, worktrees_cmd};
 pub use slim::{slim_cmd, SlimArgs};
 pub use trash::{trash_empty_cmd, trash_list_cmd, trash_restore_cmd};

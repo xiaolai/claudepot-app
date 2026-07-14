@@ -434,6 +434,22 @@ enum SessionAction {
         #[command(flatten)]
         args: commands::session::SlimArgs,
     },
+    /// Remove content from an indexed transcript.
+    ///
+    /// For when something ended up in a session that must not stay
+    /// there: a pasted credential, a customer record a tool printed, a
+    /// key echoed by a shell command. Claude Code persists every turn
+    /// and Claudepot indexes it, so without this there is no way back
+    /// out — the content stays searchable forever.
+    ///
+    /// Dry-run by default; `--execute` rewrites. Matched content is
+    /// never printed. The default keeps a backup in the trash that
+    /// STILL CONTAINS the removed text — pass `--purge` when the point
+    /// is that it should be gone.
+    Redact {
+        #[command(flatten)]
+        args: commands::session::RedactArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1265,6 +1281,7 @@ async fn main() -> Result<()> {
             SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
             SessionAction::Prune { args } => commands::session::prune_cmd(&ctx, args)?,
             SessionAction::Slim { args } => commands::session::slim_cmd(&ctx, args)?,
+            SessionAction::Redact { args } => commands::session::redact_cmd(&ctx, args)?,
             SessionAction::Trash { action } => match action {
                 TrashAction::List { older_than } => {
                     commands::session::trash_list_cmd(&ctx, older_than.as_deref())?
