@@ -6,7 +6,51 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.1.54 — beta (released 2026-07-14)
+## 0.2.0 — beta (released 2026-07-14)
+
+The knowledge-compiler release: turn your own Claude sessions into
+checks that hold.
+
+### Added
+
+- **The knowledge compiler.** Claudepot now mines your finished sessions
+  for lessons — the things that broke and how to stop them breaking
+  again — and turns the ones you accept into enforcement. The loop:
+  - `claudepot lesson harvest` distills settled sessions into candidate
+    lessons (Haiku, ~$0.04/session). Every lesson lands as a *proposal*;
+    nothing takes effect until you say so.
+  - `claudepot lesson list` / `accept` / `reject` is the triage queue —
+    seconds of judging, never authoring. Also a keyboard-driven **Lessons
+    tab** in the GUI (`j`/`k` to move, `a`/`r` to judge).
+  - `claudepot lesson compile <id>` lowers an accepted lesson into a
+    grep tripwire in `scripts/repo-invariants.sh`, kept only if it does
+    not fire on the current clean tree — so a mistake learned once fails
+    the build if it recurs.
+  - Accepted lessons anchored to code go **suspect** and return to the
+    queue when that code changes — expiry by correctness, not by age or
+    usage. A dashboard shows enforced / documented / suspect, never a
+    vanity "N stored" count.
+- **`claudepot session redact`** — remove content from an indexed
+  transcript (a pasted credential, a customer record a tool printed).
+  Dry-run by default; never prints what it matched; refuses a live
+  session; re-indexes so the removed text is no longer searchable.
+
+### Changed
+
+- **The MCP memory server is now confined to one project by default.**
+  `sessions.db` indexes every project you have ever opened; the server
+  previously let any connected agent search and read all of them. It now
+  scopes to the current project (`--project`, or `--all-projects` to opt
+  out) — a decision recorded in your MCP config, not left to a prompt.
+
+### Fixed
+
+- **The MCP memory server no longer exposes unrelated projects.** Search,
+  read, and project-listing tools were unscoped in 0.1.54; a coding agent
+  in one project could reach another project's transcripts. All reads and
+  writes now honor the project boundary.
+
+
 
 ### Added
 
