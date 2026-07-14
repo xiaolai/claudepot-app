@@ -40,6 +40,48 @@ const ICON_RESET =
 const ICON_CLOSE =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * Parse Mermaid's generated markup without handing an HTML parser an
+ * attacker-controlled string. Mermaid runs in strict mode, but the source
+ * is still user-authored markdown and this is the last boundary before the
+ * result becomes live DOM. Keep Mermaid's presentation styles, while
+ * removing executable elements, event attributes, and non-web URLs.
+ */
+export function parseSafeMermaidSvg(markup: string): SVGSVGElement | null {
+  const parsed = new DOMParser().parseFromString(markup, "image/svg+xml");
+  if (parsed.querySelector("parsererror")) return null;
+
+  const root = parsed.documentElement;
+  if (root.localName !== "svg" || root.namespaceURI !== SVG_NS) return null;
+
+  for (const element of Array.from(
+    root.querySelectorAll("script, foreignObject, iframe, object, embed"),
+  )) {
+    element.remove();
+  }
+
+  const elements = [root, ...Array.from(root.querySelectorAll("*"))];
+  for (const element of elements) {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (name === "href" || name === "xlink:href") {
+        const value = attribute.value.trim();
+        if (!value.startsWith("#") && !/^https?:\/\//i.test(value)) {
+          element.removeAttribute(attribute.name);
+        }
+      }
+    }
+  }
+
+  return document.importNode(root, true) as unknown as SVGSVGElement;
+}
+
 function openZoomModal(sourceWrap: HTMLElement) {
   const sourceSvg = sourceWrap.querySelector("svg");
   if (!sourceSvg) return;
@@ -197,9 +239,11 @@ export function MermaidEnhancer() {
         const id = `mmd-${Math.random().toString(36).slice(2, 10)}`;
         try {
           const { svg } = await mermaid.render(id, source);
+          const safeSvg = parseSafeMermaidSvg(svg);
+          if (!safeSvg) throw new Error("Mermaid returned unsafe SVG");
           const wrap = document.createElement("div");
           wrap.className = "proto-mermaid";
-          wrap.innerHTML = svg;
+          wrap.appendChild(safeSvg);
           // A11y: make the diagram a real focus target so keyboard
           // users can open the zoom modal via Enter / Space.
           wrap.setAttribute("role", "button");

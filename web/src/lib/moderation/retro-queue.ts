@@ -37,6 +37,7 @@ import type { ModerationAuthor } from "./types";
 
 const MAX_ATTEMPTS = 3;
 const BATCH_SIZE = 25;
+const LEASE_MINUTES = 10;
 
 export interface EnqueueRetroParams {
   targetType: "submission" | "comment";
@@ -87,7 +88,22 @@ export async function drainRetroQueue(): Promise<DrainResult> {
     failed: 0,
   };
 
-  // Step 1: pick + lock a batch.
+  // Step 1: reclaim leases that outlived the cron invocation, then pick a
+  // batch. A serverless process can disappear after the lease update and
+  // before the per-row try/catch, so pending-only selection permanently
+  // stranded those rows. Reclaimed rows consume an attempt, preventing a
+  // repeatedly crashing worker from retrying forever.
+  await db.execute(sql`
+    UPDATE moderation_retro_queue
+       SET state = 'failed',
+           completed_at = now(),
+           last_error = 'lease expired after maximum attempts'
+     WHERE state = 'in_progress'
+       AND started_at < now() - (${LEASE_MINUTES} * interval '1 minute')
+       AND attempts >= ${MAX_ATTEMPTS}
+  `);
+
+  // Step 2: pick + lock a batch.
   // FOR UPDATE SKIP LOCKED on a single SELECT is the canonical
   // queue-leasing pattern in Postgres. Drizzle exposes it via raw
   // sql; the inner SELECT is wrapped in a CTE-update so we can
@@ -104,12 +120,22 @@ export async function drainRetroQueue(): Promise<DrainResult> {
       SELECT id
         FROM moderation_retro_queue
        WHERE state = 'pending'
+          OR (
+            state = 'in_progress'
+            AND started_at < now() - (${LEASE_MINUTES} * interval '1 minute')
+            AND attempts < ${MAX_ATTEMPTS}
+          )
        ORDER BY enqueued_at ASC
        LIMIT ${BATCH_SIZE}
        FOR UPDATE SKIP LOCKED
     )
     UPDATE moderation_retro_queue q
-       SET state = 'in_progress', started_at = now()
+       SET state = 'in_progress',
+           started_at = now(),
+           attempts = CASE
+             WHEN q.state = 'in_progress' THEN q.attempts + 1
+             ELSE q.attempts
+           END
       FROM leased
      WHERE q.id = leased.id
      RETURNING q.id, q.target_type, q.target_id, q.author_id,
@@ -124,7 +150,7 @@ export async function drainRetroQueue(): Promise<DrainResult> {
       // enter the retro queue. Defensive only: mark done.
       await db
         .update(moderationRetroQueue)
-        .set({ state: "done", completedAt: new Date() })
+        .set({ state: "done", startedAt: null, completedAt: new Date() })
         .where(eq(moderationRetroQueue.id, row.id));
       continue;
     }
@@ -146,7 +172,7 @@ export async function drainRetroQueue(): Promise<DrainResult> {
       if (!c || c.deletedAt || c.state === "rejected") {
         await db
           .update(moderationRetroQueue)
-          .set({ state: "done", completedAt: new Date() })
+          .set({ state: "done", startedAt: null, completedAt: new Date() })
           .where(eq(moderationRetroQueue.id, row.id));
         result.succeeded += 1;
         continue;
@@ -166,6 +192,7 @@ export async function drainRetroQueue(): Promise<DrainResult> {
           .update(moderationRetroQueue)
           .set({
             state: "failed",
+            startedAt: null,
             completedAt: new Date(),
             lastError: "author not found",
           })
@@ -201,6 +228,7 @@ export async function drainRetroQueue(): Promise<DrainResult> {
             .update(moderationRetroQueue)
             .set({
               state: "done",
+              startedAt: null,
               completedAt: new Date(),
               lastError: verdict.oneLineWhy,
             })
@@ -265,7 +293,7 @@ export async function drainRetroQueue(): Promise<DrainResult> {
 
       await db
         .update(moderationRetroQueue)
-        .set({ state: "done", completedAt: new Date() })
+        .set({ state: "done", startedAt: null, completedAt: new Date() })
         .where(eq(moderationRetroQueue.id, row.id));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

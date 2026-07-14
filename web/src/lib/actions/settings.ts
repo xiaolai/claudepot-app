@@ -2,19 +2,20 @@
 
 import { Buffer } from "node:buffer";
 import { revalidatePath } from "next/cache";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { Resend } from "resend";
 
 import { auth } from "@/lib/auth";
-import { deleteCitizenBot } from "@/lib/citizen-bots";
 import { db } from "@/db/client";
 import {
   comments,
+  accounts,
   saves,
   sessions,
   submissions,
   userEmailPrefs,
+  apiTokens,
   users,
   votes,
 } from "@/db/schema";
@@ -78,43 +79,73 @@ export async function requestAccountDeletion(
     return { ok: false, reason: "wrong_confirmation" };
   }
 
-  const suffix = session.user.id.slice(0, 6);
+  // Use the full stable user id (without punctuation) so a retry or a
+  // collision between UUID prefixes can never violate the unique email /
+  // username indexes and leave deletion half-applied.
+  const suffix = session.user.id.replaceAll("-", "");
 
-  // Cascade-soft-delete owned citizen bots BEFORE the parent row is
-  // anonymized. The bot's deleteCitizenBot helper revokes all the
-  // bot's PATs and clears its bio/avatar/owner_user_id; without this
-  // step a deleted parent leaves orphan bot rows with live PATs that
-  // can keep posting under "owned by [deleted]" attribution. Migration
-  // 0039's ON DELETE SET NULL cascade only nulls owner_user_id; PAT
-  // revocation needs application-layer logic.
-  const ownedBots = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        eq(users.ownerUserId, session.user.id),
-        eq(users.botKind, "citizen"),
-      ),
-    );
-  for (const bot of ownedBots) {
-    await deleteCitizenBot(session.user.id, bot.id);
-  }
+  // Perform bot token revocation, bot anonymization, parent anonymization,
+  // and session revocation in one transaction. The previous per-bot helper
+  // committed each bot independently, so a later failure could leave a
+  // partially deleted account with a still-live bot or session.
+  await db.transaction(async (tx) => {
+    const ownedBots = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.ownerUserId, session.user.id),
+          eq(users.botKind, "citizen"),
+        ),
+      );
+    const botIds = ownedBots.map((bot) => bot.id);
+    const tokenOwnerIds = [session.user.id, ...botIds];
+    await tx
+      .update(apiTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          inArray(apiTokens.userId, tokenOwnerIds),
+          isNull(apiTokens.revokedAt),
+        ),
+      );
 
-  await db
-    .update(users)
-    .set({
-      username: sql`'deleted_' || ${suffix}`,
-      email: sql`'deleted_' || ${suffix} || '@deleted.local'`,
-      bio: null,
-      avatarUrl: null,
-      image: null,
-      name: sql`'[deleted]'`,
-      role: "locked",
-    })
-    .where(eq(users.id, session.user.id));
+    if (botIds.length > 0) {
+      await tx
+        .update(users)
+        .set({
+          ownerUserId: null,
+          botKind: null,
+          bio: null,
+          avatarUrl: null,
+          image: null,
+          name: null,
+          updatedAt: new Date(),
+        })
+        .where(inArray(users.id, botIds));
+    }
 
-  // Revoke all sessions for this user.
-  await db.delete(sessions).where(eq(sessions.userId, session.user.id));
+    await tx
+      .update(users)
+      .set({
+        username: sql`'deleted_' || ${suffix}`,
+        email: sql`'deleted_' || ${suffix} || '@deleted.local'`,
+        bio: null,
+        avatarUrl: null,
+        image: null,
+        name: sql`'[deleted]'`,
+        role: "locked",
+      })
+      .where(eq(users.id, session.user.id));
+
+    // Auth.js account rows contain provider access/refresh tokens. Delete
+    // them rather than retaining external credentials for a deleted user.
+    await tx.delete(accounts).where(eq(accounts.userId, session.user.id));
+    await tx
+      .delete(userEmailPrefs)
+      .where(eq(userEmailPrefs.userId, session.user.id));
+    await tx.delete(sessions).where(eq(sessions.userId, session.user.id));
+  });
 
   return { ok: true };
 }

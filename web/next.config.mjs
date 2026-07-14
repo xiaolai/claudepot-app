@@ -1,4 +1,5 @@
 import nextMDX from "@next/mdx";
+import path from "node:path";
 
 const withMDX = nextMDX({
   extension: /\.mdx?$/,
@@ -7,6 +8,10 @@ const withMDX = nextMDX({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // This app has its own lockfile and deploy root under web/. Keep Next's
+  // standalone tracing rooted here so it does not select the unrelated
+  // Tauri app lockfile one directory above.
+  outputFileTracingRoot: path.resolve(process.cwd()),
   pageExtensions: ["ts", "tsx", "mdx"],
   async headers() {
     // Static security headers applied to every response. CSP is NOT set
