@@ -793,3 +793,167 @@ fn memories_scope_check_constraints_enforced() {
     )
     .expect("project+non-NULL should be accepted");
 }
+
+// ─── knowledge-compiler columns ──────────────────────────────────
+
+/// The columns land on a fresh DB, and land again on a DB that
+/// predates them (the real upgrade path for an existing user).
+#[test]
+fn compiler_columns_are_added_idempotently() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("sessions.db");
+
+    // First open applies them.
+    {
+        let idx = SessionIndex::open(&db_path).expect("open");
+        for (name, _) in crate::shared_memory::schema::MEMORIES_COMPILER_COLUMNS {
+            let present: bool = idx
+                .db()
+                .query_row(
+                    "SELECT 1 FROM pragma_table_info('memories') WHERE name = ?1",
+                    [name],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            assert!(present, "column {name} missing after first open");
+        }
+    }
+    // Second open is a no-op, not a duplicate-column error.
+    let idx = SessionIndex::open(&db_path).expect("reopen must not fail");
+    let n: i64 = idx
+        .db()
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name = 'review_state'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1, "review_state must exist exactly once");
+}
+
+/// An existing memory keeps working and defaults to `accepted`.
+///
+/// Rows already in `memories` were hand-authored by a human through the
+/// MCP `remember` tool. Defaulting them to `proposed` would dump a
+/// user's entire existing memory set into the triage queue and make them
+/// re-litigate decisions they already made.
+#[test]
+fn a_pre_existing_memory_defaults_to_accepted_not_proposed() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("sessions.db");
+    let idx = SessionIndex::open(&db_path).expect("open");
+    idx.db()
+        .execute(
+            "INSERT INTO memories (id, scope, project_path, kind, content, \
+             created_by_kind, created_by, created_at_ms, updated_at_ms) \
+             VALUES ('m1','global',NULL,'fact','the sky is blue','user','someone',1,1)",
+            [],
+        )
+        .expect("insert a pre-compiler memory");
+
+    let state: String = idx
+        .db()
+        .query_row(
+            "SELECT review_state FROM memories WHERE id = 'm1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "accepted");
+}
+
+/// The review states are constrained at the DDL level, so a typo in a
+/// writer fails loudly at INSERT instead of silently creating a row
+/// that no query will ever match.
+#[test]
+fn an_unknown_review_state_is_rejected_by_the_check_constraint() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("sessions.db");
+    let idx = SessionIndex::open(&db_path).expect("open");
+    let err = idx.db().execute(
+        "INSERT INTO memories (id, scope, project_path, kind, content, \
+         created_by_kind, created_by, created_at_ms, updated_at_ms, review_state) \
+         VALUES ('m2','global',NULL,'fact','x','agent','a',1,1,'aceptd')",
+        [],
+    );
+    assert!(err.is_err(), "a misspelled review_state must be refused");
+}
+
+/// **Why the compiler columns must never ride a SCHEMA_VERSION bump.**
+///
+/// This test does not exercise our code — it pins the *hazard*. A
+/// version change makes `apply_schema` run `DELETE FROM sessions` to
+/// invalidate the transcript cache, and the FK cascade carries that all
+/// the way into `memory_links`. The cache re-parses from disk; the
+/// links do not, because nothing on disk describes them.
+///
+/// So: provenance lives denormalized on the memory row
+/// (`origin_exchange_id` / `origin_file_path`, no FK), and the compiler
+/// columns are added by probe + ALTER. If someone later "tidies this up"
+/// by bumping the version, this test explains the crater.
+#[test]
+fn deleting_a_session_cascades_away_memory_links_but_not_the_memory() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("sessions.db");
+    let idx = SessionIndex::open(&db_path).expect("open");
+    let db = idx.db();
+
+    db.execute(
+        "INSERT INTO sessions (file_path, slug, session_id, file_size_bytes, file_mtime_ns, \
+         file_inode, project_path, project_from_transcript, event_count, message_count, \
+         user_message_count, assistant_message_count, models_json, tokens_input, \
+         tokens_output, tokens_cache_creation, tokens_cache_read, has_error, is_sidechain, \
+         indexed_at_ms) \
+         VALUES ('/t/s.jsonl','proj','s1',0,0,0,'/proj',1,0,0,0,0,'[]',0,0,0,0,0,0,0)",
+        [],
+    )
+    .expect("insert session");
+    db.execute(
+        "INSERT INTO exchanges (id, file_path, source_kind, turn_index, user_text, \
+         assistant_text, snippet_text) \
+         VALUES ('s1:0','/t/s.jsonl','claude_code',0,'q','a','snip')",
+        [],
+    )
+    .expect("insert exchange");
+    db.execute(
+        "INSERT INTO memories (id, scope, project_path, kind, content, created_by_kind, \
+         created_by, created_at_ms, updated_at_ms, origin_exchange_id, origin_file_path) \
+         VALUES ('m1','project','/proj','pattern','the lesson','agent','distiller',1,1, \
+                 's1:0','/t/s.jsonl')",
+        [],
+    )
+    .expect("insert memory with denormalized provenance");
+    db.execute(
+        "INSERT INTO memory_links (id, memory_id, exchange_id, relation) \
+         VALUES ('l1','m1','s1:0','origin')",
+        [],
+    )
+    .expect("insert link");
+
+    // Exactly what a SCHEMA_VERSION bump does to invalidate the cache.
+    db.execute("DELETE FROM sessions", []).expect("delete");
+
+    let links: i64 = db
+        .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        links, 0,
+        "memory_links cascades away — this is the hazard, and it is why \
+         provenance is ALSO stored on the memory row"
+    );
+
+    let (id, exch, file): (String, Option<String>, Option<String>) = db
+        .query_row(
+            "SELECT id, origin_exchange_id, origin_file_path FROM memories WHERE id = 'm1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("the memory itself must survive");
+    assert_eq!(id, "m1");
+    assert_eq!(
+        exch.as_deref(),
+        Some("s1:0"),
+        "provenance must survive the cascade that ate the link"
+    );
+    assert_eq!(file.as_deref(), Some("/t/s.jsonl"));
+}

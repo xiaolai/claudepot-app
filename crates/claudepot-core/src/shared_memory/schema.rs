@@ -247,3 +247,109 @@ pub const V4_TABLE_NAMES: &[&str] = &[
 /// that loses any of these would silently desynchronize the FTS
 /// index from `exchanges` on subsequent writes.
 pub const V4_TRIGGER_NAMES: &[&str] = &["exchange_fts_ai", "exchange_fts_ad", "exchange_fts_au"];
+
+// ─── knowledge-compiler columns on `memories` ───────────────────
+//
+// Added after the v4 DDL block, by probe + ALTER rather than by a
+// SCHEMA_VERSION bump. Read the next paragraph before touching this;
+// the reasoning is load-bearing and not obvious.
+//
+// **A version bump would be actively destructive here.** `apply_schema`
+// treats any change in `meta.schema_version` as a *cache invalidation*:
+// it runs `DELETE FROM sessions`, and `sessions -> exchanges ->
+// memory_links` all cascade on delete. So bumping the version to add a
+// column would wipe the transcript cache (recoverable — it re-parses
+// from disk) AND delete every row in `memory_links` (NOT recoverable —
+// nothing on disk to re-derive it from), even though `memories`,
+// `decisions` and `evidence_records` survive "by design".
+//
+// The version exists to invalidate the *cache*. These columns do not
+// invalidate anything: they are additive, on a durable table, and every
+// existing row gets a sensible default. So: probe + ALTER, exactly as
+// `sessions.source_kind` already does, and leave the version alone.
+//
+// That same cascade is why provenance is denormalized onto the memory
+// row (`origin_exchange_id`, `origin_file_path` — deliberately NO
+// foreign keys). A triage queue whose whole value is "click through to
+// the exchange that burned you" cannot hang its provenance on
+// `memory_links`, which any rebuild deletes. The link table stays a
+// convenience index; the memory row is self-sufficient.
+
+/// `(column_name, full ALTER TABLE ... ADD COLUMN fragment)`.
+///
+/// Order is irrelevant (each is probed independently), but keep the
+/// list stable so migration tests read as a diff.
+pub const MEMORIES_COMPILER_COLUMNS: &[(&str, &str)] = &[
+    // The review gate. Every writer — the MCP `remember` tool, the
+    // distiller agent — lands rows as 'proposed'. Only a human moves a
+    // row to 'accepted'. A wrong memory that survives review is worse
+    // than no memory, because it will be trusted.
+    (
+        "review_state",
+        "ALTER TABLE memories ADD COLUMN review_state TEXT NOT NULL DEFAULT 'accepted' \
+         CHECK (review_state IN ('proposed','accepted','rejected','suspect'))",
+    ),
+    // The compiled imperative form: one line, names a command or a
+    // file. Never an overview — those cost tokens and buy nothing.
+    (
+        "directive",
+        "ALTER TABLE memories ADD COLUMN directive TEXT",
+    ),
+    (
+        "compile_target",
+        "ALTER TABLE memories ADD COLUMN compile_target TEXT \
+         CHECK (compile_target IS NULL OR compile_target IN ('guard','directive','note'))",
+    ),
+    // Where the compiled guard landed, e.g. "scripts/repo-invariants.sh:6".
+    (
+        "guard_ref",
+        "ALTER TABLE memories ADD COLUMN guard_ref TEXT",
+    ),
+    // {"files": [...], "commit": "sha"} as of acceptance. When an
+    // anchored file changes, the claim goes back to triage as SUSPECT.
+    // Invalidation by correctness, not by age or by usage.
+    (
+        "anchor_json",
+        "ALTER TABLE memories ADD COLUMN anchor_json TEXT",
+    ),
+    (
+        "suspect_reason",
+        "ALTER TABLE memories ADD COLUMN suspect_reason TEXT",
+    ),
+    // Provenance. NO foreign key, on purpose — see the note above.
+    (
+        "origin_exchange_id",
+        "ALTER TABLE memories ADD COLUMN origin_exchange_id TEXT",
+    ),
+    (
+        "origin_file_path",
+        "ALTER TABLE memories ADD COLUMN origin_file_path TEXT",
+    ),
+];
+
+/// Idempotently add the knowledge-compiler columns to `memories`.
+///
+/// SQLite has no `ADD COLUMN IF NOT EXISTS`, so each column is probed
+/// against `pragma_table_info` first. Safe to run on every open; a
+/// no-op once applied. Runs inside the caller's migration transaction.
+///
+/// `DEFAULT 'accepted'` for `review_state` is right for pre-existing
+/// rows: anything already in `memories` was hand-authored through the
+/// MCP `remember` tool, so it was already a human's choice. Defaulting
+/// them to 'proposed' would dump a user's entire existing memory set
+/// into the triage queue for re-litigation.
+pub fn apply_memories_compiler_columns(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    for (name, ddl) in MEMORIES_COMPILER_COLUMNS {
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM pragma_table_info('memories') WHERE name = ?1",
+                [name],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !exists {
+            tx.execute_batch(ddl)?;
+        }
+    }
+    Ok(())
+}
