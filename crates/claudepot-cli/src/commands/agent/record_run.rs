@@ -208,13 +208,22 @@ pub fn record_run_cmd(
 /// `{"type":"result","result":"…"}` envelope `parse_claims` already
 /// unwraps.
 fn drain_result_sink(id: &AgentId, run_dir: &std::path::Path) -> Result<()> {
+    let data_dir = claudepot_core::paths::claudepot_data_dir();
+    drain_result_sink_at(id, run_dir, &data_dir)
+}
+
+fn drain_result_sink_at(
+    id: &AgentId,
+    run_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+) -> Result<()> {
     use claudepot_core::agent::ResultSink;
     use claudepot_core::shared_memory::proposal;
 
     // Non-blocking: if the GUI holds the store lock we skip this pass
     // rather than stall the shim. `stdout.log` stays on disk, so a
     // later `claudepot lesson harvest` picks up the source session.
-    let Some(store) = AgentStore::try_open()? else {
+    let Some(store) = AgentStore::try_open_at(data_dir.join("agents.json"))? else {
         tracing::debug!(agent_id = %id, "record-run: store lock busy — deferring sink drain");
         return Ok(());
     };
@@ -240,7 +249,7 @@ fn drain_result_sink(id: &AgentId, run_dir: &std::path::Path) -> Result<()> {
                 return Ok(());
             }
 
-            let db = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+            let db = data_dir.join("sessions.db");
             let idx = claudepot_core::session_index::SessionIndex::open(&db)
                 .context("open sessions.db to file proposals")?;
 
@@ -294,13 +303,15 @@ mod tests {
 
         let run_dir = tempfile::tempdir().unwrap();
         let cwd = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
         let cwd_str = cwd.path().to_string_lossy().into_owned();
 
         // A distiller agent (result_sink = MemoryProposals) in the store.
         let mut agent = knowledge_distiller(&cwd_str, Utc::now());
         agent.lifecycle = Lifecycle::Installed; // add() accepts installed
         let id = agent.id;
-        let mut store = AgentStore::open().expect("open agent store");
+        let mut store = AgentStore::open_at(data_dir.path().join("agents.json"))
+            .expect("open isolated agent store");
         store.add(agent).expect("add distiller");
         store.save().expect("save");
         // Release the store lock — drain uses the NON-blocking try_open()
@@ -323,10 +334,10 @@ mod tests {
         )
         .unwrap();
 
-        drain_result_sink(&id, run_dir.path()).expect("drain");
+        drain_result_sink_at(&id, run_dir.path(), data_dir.path()).expect("drain");
 
         // A proposal must now exist in sessions.db under the agent's cwd.
-        let db = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+        let db = data_dir.path().join("sessions.db");
         let idx = claudepot_core::session_index::SessionIndex::open(&db).unwrap();
         let rows =
             claudepot_core::shared_memory::review::list(&idx, Some(&cwd_str), None, 50).unwrap();
