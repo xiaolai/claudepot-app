@@ -59,14 +59,31 @@ pub struct DistilledClaims {
     pub claims: Vec<DistilledClaim>,
 }
 
+/// One distilled lesson.
+///
+/// Only `claim` and `directive` are required — they are the two fields
+/// with no sensible default, because a lesson with no statement or no
+/// instruction is not a lesson. **Everything else defaults**, and that
+/// is deliberate: a real Haiku run over a real transcript omitted `kind`
+/// entirely, and a strict struct turned a perfectly good lesson into a
+/// hard parse failure that took the other claims in the batch down with
+/// it. Being strict about a field we can default is choosing to lose
+/// data.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DistilledClaim {
     pub claim: String,
     pub directive: String,
+    /// `pattern` when absent — the least load-bearing kind.
+    #[serde(default)]
     pub kind: String,
     #[serde(default)]
     pub files: Vec<String>,
+    #[serde(default)]
     pub evidence: String,
+    /// Absent confidence is treated as "did not meet the bar" rather
+    /// than "maximally sure". Fail closed: an unrated claim should not
+    /// outrank one the model actually vouched for.
+    #[serde(default)]
     pub confidence: i64,
 }
 
@@ -116,28 +133,97 @@ impl IngestReport {
 /// that quietly does nothing.
 pub fn parse_claims(raw: &str) -> Result<DistilledClaims, serde_json::Error> {
     let cleaned = strip_markdown_fence(raw.trim());
-    let v: serde_json::Value = serde_json::from_str(cleaned)?;
 
+    // The strict path: the whole body is JSON.
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(cleaned) {
+        if let Some(found) = from_value_shapes(&v)? {
+            return Ok(found);
+        }
+    }
+
+    // The forgiving path: the model wrapped its JSON in prose ("Based on
+    // my examination of the transcript, here are the lessons: {…}").
+    // Observed on a real run. Refusing to parse that is choosing to
+    // throw away a correct answer because of its packaging.
+    if let Some(obj) = first_json_object(cleaned) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(obj) {
+            if let Some(found) = from_value_shapes(&v)? {
+                return Ok(found);
+            }
+        }
+    }
+
+    // Nothing recognizable: an empty harvest, not an error. A distiller
+    // that found no lessons is doing its job, and most sessions teach
+    // nothing.
+    Ok(DistilledClaims::default())
+}
+
+/// Recognize the payload in any of the shapes the harness produces.
+/// `Ok(None)` = "this value isn't one of them", not "it's empty".
+fn from_value_shapes(v: &serde_json::Value) -> Result<Option<DistilledClaims>, serde_json::Error> {
     // Shape 1: already the payload.
     if v.get("claims").is_some() {
-        return serde_json::from_value(v);
+        return serde_json::from_value(v.clone()).map(Some);
     }
     // Shape 2: an envelope with a `result` field.
     if let Some(inner) = v.get("result") {
         // 2a: result is the object itself.
         if inner.get("claims").is_some() {
-            return serde_json::from_value(inner.clone());
+            return serde_json::from_value(inner.clone()).map(Some);
         }
         // 2b: result is a JSON *string* holding the object — possibly
-        // itself fenced.
+        // fenced, possibly wrapped in prose of its own.
         if let Some(s) = inner.as_str() {
             let s = strip_markdown_fence(s.trim());
-            return serde_json::from_str(s);
+            if let Ok(inner_v) = serde_json::from_str::<serde_json::Value>(s) {
+                if inner_v.get("claims").is_some() {
+                    return serde_json::from_value(inner_v).map(Some);
+                }
+            }
+            if let Some(obj) = first_json_object(s) {
+                let inner_v: serde_json::Value = serde_json::from_str(obj)?;
+                if inner_v.get("claims").is_some() {
+                    return serde_json::from_value(inner_v).map(Some);
+                }
+            }
         }
     }
-    // Nothing recognizable: an empty harvest, not an error. A distiller
-    // that found no lessons is doing its job.
-    Ok(DistilledClaims::default())
+    Ok(None)
+}
+
+/// The first balanced `{…}` in `s`, brace-counting outside of string
+/// literals (so a `}` inside a claim's text doesn't end the object).
+fn first_json_object(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    let start = s.find('{')?;
+    let mut depth = 0usize;
+    let mut in_str = false;
+    let mut escaped = false;
+    for (i, &c) in bytes.iter().enumerate().skip(start) {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return s.get(start..=i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Strip a ```json … ``` wrapper if present. Returns the input
@@ -579,5 +665,70 @@ mod real_run {
         // Anchored to a file, so Phase 3 can invalidate it when that
         // file changes.
         assert!(anchor.contains("crypto.rs"));
+    }
+}
+
+/// Regression tests for shapes a REAL distiller run actually produced.
+///
+/// Every case here was a live failure, not a hypothetical. The harvest
+/// of three real transcripts failed 3/3 on its first run: two returned
+/// JSON wrapped in prose, one omitted `kind`. A strict parser turned
+/// correct lessons into nothing at all — and, worse, did it *silently
+/// enough* to look like "this session taught us nothing".
+#[cfg(test)]
+mod observed_failures {
+    use super::*;
+
+    #[test]
+    fn json_wrapped_in_prose_is_still_parsed() {
+        let raw = "Based on my examination of the transcript, I found evidence of \
+                   specific failures. Here are the durable lessons:\n\n\
+                   {\"claims\":[{\"claim\":\"c\",\"directive\":\"d\",\"kind\":\"constraint\",\
+                   \"evidence\":\"e\",\"confidence\":92}]}\n\nLet me know if you want more.";
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 1);
+        assert_eq!(p.claims[0].confidence, 92);
+    }
+
+    #[test]
+    fn a_claim_missing_kind_defaults_instead_of_failing_the_whole_batch() {
+        // The real cost of strictness: one claim without `kind` took
+        // every other claim in the same run down with it.
+        let raw = r#"{"claims":[
+            {"claim":"a","directive":"d1","evidence":"e","confidence":80},
+            {"claim":"b","directive":"d2","kind":"constraint","evidence":"e","confidence":90}
+        ]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 2, "one weak field must not lose the batch");
+        assert_eq!(p.claims[0].kind, "");
+    }
+
+    #[test]
+    fn a_claim_without_confidence_fails_closed() {
+        // Absent confidence must not read as "maximally sure". An
+        // unrated claim should not outrank one the model vouched for.
+        let raw = r#"{"claims":[{"claim":"c","directive":"d"}]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims[0].confidence, 0);
+        assert!(p.claims[0].confidence < MIN_CONFIDENCE);
+    }
+
+    #[test]
+    fn a_brace_inside_a_claim_does_not_truncate_the_object() {
+        // Brace-counting has to respect string literals, or a lesson
+        // that mentions `#[cfg(...)]` or a JSON snippet cuts its own
+        // object short and the parse silently loses everything after it.
+        let raw = "here you go: {\"claims\":[{\"claim\":\"use match { arm => x }\",\
+                   \"directive\":\"d\",\"kind\":\"pattern\",\"evidence\":\"e\",\
+                   \"confidence\":75}]}";
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 1);
+        assert!(p.claims[0].claim.contains("arm => x"));
+    }
+
+    #[test]
+    fn prose_with_no_json_at_all_is_an_empty_harvest() {
+        let p = parse_claims("I could not read that transcript.").unwrap();
+        assert!(p.claims.is_empty());
     }
 }

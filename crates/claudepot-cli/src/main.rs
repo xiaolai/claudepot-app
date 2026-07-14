@@ -120,6 +120,12 @@ enum Commands {
         #[command(subcommand)]
         action: MemoryAction,
     },
+    /// The knowledge compiler: distill lessons out of finished sessions,
+    /// review them, and let the accepted ones bind.
+    Lesson {
+        #[command(subcommand)]
+        action: LessonAction,
+    },
     /// Read or modify CC settings that Claudepot exposes as toggles
     /// (currently: auto-memory).
     Settings {
@@ -463,6 +469,63 @@ enum ActivityAction {
     /// activity index. Idempotent — re-running adds zero rows when
     /// the source hasn't changed.
     Reindex,
+}
+
+/// The knowledge compiler: mine finished sessions for lessons, review
+/// them, and let the accepted ones change what happens next.
+///
+/// Distinct from `memory`, which means the CLAUDE.md files in a project.
+/// A *lesson* is a claim distilled from something that actually went
+/// wrong, with an imperative directive and an anchor to the code it
+/// depends on.
+#[derive(Subcommand)]
+enum LessonAction {
+    /// Distill lessons from finished sessions in this project.
+    ///
+    /// Runs the distiller over transcripts that have not been mined
+    /// before. Everything it finds lands as a PROPOSAL — nothing takes
+    /// effect until you accept it.
+    Harvest {
+        /// Project to harvest. Defaults to the current directory.
+        #[arg(long)]
+        project: Option<String>,
+        /// Cap the number of sessions distilled in this run.
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        /// Show what would be distilled, and what it would cost.
+        #[arg(long)]
+        dry_run: bool,
+        /// Proceed without the cost confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Show the triage queue (proposals awaiting your yes or no).
+    List {
+        #[arg(long)]
+        project: Option<String>,
+        /// proposed (default) | accepted | rejected | suspect
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Accept a lesson. Anchors it to the current commit, so it comes
+    /// back for re-review if the code it relies on changes.
+    Accept {
+        id: String,
+        /// Accept without an anchor — it will never be re-checked. Right
+        /// for a lesson that is not about code.
+        #[arg(long)]
+        no_anchor: bool,
+    },
+    /// Reject a lesson. It is remembered as rejected, so it will not be
+    /// proposed again.
+    Reject { id: String },
+    /// Counts: to review, accepted, enforced, suspect.
+    Status {
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1188,6 +1251,34 @@ async fn main() -> Result<()> {
         Commands::Activity { action } => match action {
             ActivityAction::Recent { args } => commands::activity::recent(&ctx, args)?,
             ActivityAction::Reindex => commands::activity::reindex(&ctx)?,
+        },
+        Commands::Lesson { action } => match action {
+            LessonAction::Harvest {
+                project,
+                limit,
+                dry_run,
+                yes,
+            } => commands::lesson::harvest_cmd(
+                &ctx,
+                commands::lesson::HarvestArgs {
+                    project,
+                    limit,
+                    dry_run,
+                    yes,
+                },
+            )?,
+            LessonAction::List {
+                project,
+                state,
+                limit,
+            } => commands::lesson::list_cmd(&ctx, project.as_deref(), state.as_deref(), limit)?,
+            LessonAction::Accept { id, no_anchor } => {
+                commands::lesson::accept_cmd(&ctx, &id, no_anchor)?
+            }
+            LessonAction::Reject { id } => commands::lesson::reject_cmd(&ctx, &id)?,
+            LessonAction::Status { project } => {
+                commands::lesson::status_cmd(&ctx, project.as_deref())?
+            }
         },
         Commands::Memory { action } => match action {
             MemoryAction::List { project } => {
