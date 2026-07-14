@@ -269,7 +269,7 @@ fn slim_all_cmd(
 /// `.claude/rules/architecture.md`: zero matches → error, exactly one
 /// match → use it, more than one → error and list the ambiguous
 /// candidates so the user can disambiguate.
-fn resolve_session_path(target: &str) -> Result<PathBuf> {
+pub(super) fn resolve_session_path(target: &str) -> Result<PathBuf> {
     if target.ends_with(".jsonl") {
         let p = PathBuf::from(target);
         if !p.exists() {

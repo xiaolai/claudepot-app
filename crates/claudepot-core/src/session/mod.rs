@@ -43,6 +43,7 @@ pub mod export_delivery;
 pub mod move_;
 pub mod phases;
 pub mod prune;
+pub mod redact;
 pub mod search;
 pub mod share;
 pub mod slim;

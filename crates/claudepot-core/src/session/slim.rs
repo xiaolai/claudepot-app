@@ -189,16 +189,16 @@ pub fn plan_slim(path: &Path, opts: &SlimOpts) -> Result<SlimPlan, SlimError> {
 /// RAII-style cleanup for throwaway files we need to remove on any
 /// error path. `disarm()` cancels the cleanup once the file has been
 /// successfully renamed or moved away.
-struct FileGuard {
+pub(super) struct FileGuard {
     path: Option<PathBuf>,
 }
 impl FileGuard {
-    fn new(p: impl Into<PathBuf>) -> Self {
+    pub(super) fn new(p: impl Into<PathBuf>) -> Self {
         Self {
             path: Some(p.into()),
         }
     }
-    fn disarm(&mut self) {
+    pub(super) fn disarm(&mut self) {
         self.path = None;
     }
 }
@@ -326,13 +326,13 @@ pub fn execute_slim(
     })
 }
 
-fn temp_path_next_to(p: &Path) -> PathBuf {
+pub(super) fn temp_path_next_to(p: &Path) -> PathBuf {
     let mut s = p.as_os_str().to_os_string();
     s.push(".slim.tmp");
     PathBuf::from(s)
 }
 
-fn same_mtime(a: SystemTime, b: SystemTime) -> bool {
+pub(super) fn same_mtime(a: SystemTime, b: SystemTime) -> bool {
     // Compare the full duration since epoch with platform-native
     // precision. A whole-second compare would let a concurrent CC
     // append inside the same second slip past the guard and get
