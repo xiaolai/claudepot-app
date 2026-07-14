@@ -124,9 +124,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Setup pnpm
+        # `packageManager` in package.json pins the version (now pnpm 10,
+        # matching the pnpm-10 lockfile). Passing `version:` too trips
+        # action-setup's "Multiple versions of pnpm specified" error.
         uses: pnpm/action-setup@v5
-        with:
-          version: 9
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -288,9 +289,10 @@ jobs:
             patchelf
 
       - name: Setup pnpm
+        # `packageManager` in package.json pins the version (now pnpm 10,
+        # matching the pnpm-10 lockfile). Passing `version:` too trips
+        # action-setup's "Multiple versions of pnpm specified" error.
         uses: pnpm/action-setup@v5
-        with:
-          version: 9
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -419,9 +421,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Setup pnpm
+        # `packageManager` in package.json pins the version (now pnpm 10,
+        # matching the pnpm-10 lockfile). Passing `version:` too trips
+        # action-setup's "Multiple versions of pnpm specified" error.
         uses: pnpm/action-setup@v5
-        with:
-          version: 9
 
       - name: Setup Node
         uses: actions/setup-node@v5

@@ -40,9 +40,9 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install pnpm
+        # `packageManager` in package.json pins the version; passing
+        # `version:` too trips action-setup's "Multiple versions" error.
         uses: pnpm/action-setup@v5
-        with:
-          version: 10
 
       - name: Install Node
         uses: actions/setup-node@v5
