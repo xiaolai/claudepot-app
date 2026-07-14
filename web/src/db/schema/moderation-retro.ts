@@ -49,6 +49,9 @@ export const moderationRetroQueue = pgTable(
     index("idx_moderation_retro_queue_pending")
       .on(t.enqueuedAt)
       .where(sql`${t.state} = 'pending'`),
+    index("idx_moderation_retro_queue_in_progress")
+      .on(t.startedAt)
+      .where(sql`${t.state} = 'in_progress'`),
     index("idx_moderation_retro_queue_target").on(
       t.targetType,
       t.targetId,

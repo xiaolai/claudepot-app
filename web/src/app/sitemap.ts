@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-import { getAllSubmissions, getAllTags } from "@/db/queries";
+import { getSitemapSubmissions, getAllTags } from "@/db/queries";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://claudepot.com";
 
@@ -31,7 +31,7 @@ const APP_DOCS_WEEKLY = new Set(["/app", "/app/changelog", "/app/download"]);
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [submissions, tags] = await Promise.all([
-    getAllSubmissions(),
+    getSitemapSubmissions(),
     getAllTags(),
   ]);
   const now = new Date();

@@ -33,6 +33,11 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { Webhook } from "svix";
+import { and, eq, or, sql } from "drizzle-orm";
+
+import { db } from "@/db/client";
+import { inboundWebhookEvents } from "@/db/schema";
+import { withErrorHandling } from "@/lib/api/response";
 
 const FORWARD_TO = "xiaolaidev+claudepot@gmail.com";
 const FORWARD_FROM = "ClauDepot Inbound <forward@claudepot.com>";
@@ -47,7 +52,9 @@ type ResendInboundEvent = {
   };
 };
 
-export async function POST(req: Request) {
+const LEASE_MINUTES = 10;
+
+export const POST = withErrorHandling(async (req: Request) => {
   const secret = process.env.RESEND_WEBHOOK_SECRET;
   const apiKey = process.env.RESEND_API_KEY;
   if (!secret) {
@@ -104,12 +111,77 @@ export async function POST(req: Request) {
     );
   }
 
+  const eventId = req.headers.get("svix-id");
+  if (!eventId) {
+    return NextResponse.json(
+      { error: "missing svix-id header" },
+      { status: 400 },
+    );
+  }
+
+  // Insert before the external forward call, but only claim a pending or
+  // stale lease. A failed forward remains pending and can be retried; a
+  // completed event is acknowledged without sending a duplicate email.
+  await db
+    .insert(inboundWebhookEvents)
+    .values({ eventId, emailId })
+    .onConflictDoNothing();
+
+  const [claimed] = await db
+    .update(inboundWebhookEvents)
+    .set({ state: "in_progress", startedAt: new Date(), lastError: null })
+    .where(
+      and(
+        eq(inboundWebhookEvents.eventId, eventId),
+        or(
+          eq(inboundWebhookEvents.state, "pending"),
+          and(
+            eq(inboundWebhookEvents.state, "in_progress"),
+            sql`${inboundWebhookEvents.startedAt} < now() - (${LEASE_MINUTES} * interval '1 minute')`,
+          ),
+        ),
+      ),
+    )
+    .returning({ state: inboundWebhookEvents.state });
+
+  if (!claimed) {
+    const [existing] = await db
+      .select({ state: inboundWebhookEvents.state })
+      .from(inboundWebhookEvents)
+      .where(eq(inboundWebhookEvents.eventId, eventId))
+      .limit(1);
+    if (existing?.state === "forwarded") {
+      return NextResponse.json({ duplicate: true, emailId });
+    }
+    return NextResponse.json(
+      { retry: true, reason: "event is already being forwarded" },
+      { status: 409 },
+    );
+  }
+
   const resend = new Resend(apiKey);
-  await resend.emails.receiving.forward({
-    emailId,
-    to: FORWARD_TO,
-    from: FORWARD_FROM,
-  });
+  try {
+    await resend.emails.receiving.forward({
+      emailId,
+      to: FORWARD_TO,
+      from: FORWARD_FROM,
+    });
+  } catch (err) {
+    await db
+      .update(inboundWebhookEvents)
+      .set({
+        state: "pending",
+        startedAt: null,
+        lastError: (err instanceof Error ? err.message : String(err)).slice(0, 500),
+      })
+      .where(eq(inboundWebhookEvents.eventId, eventId));
+    throw err;
+  }
+
+  await db
+    .update(inboundWebhookEvents)
+    .set({ state: "forwarded", startedAt: null, forwardedAt: new Date() })
+    .where(eq(inboundWebhookEvents.eventId, eventId));
 
   return NextResponse.json({ forwarded: true, to: FORWARD_TO, emailId });
-}
+});

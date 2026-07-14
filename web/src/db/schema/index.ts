@@ -39,3 +39,4 @@ export * from "./metrics";
 export * from "./api-tokens";
 export * from "./bots";
 export * from "./links";
+export * from "./inbound-webhooks";

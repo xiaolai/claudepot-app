@@ -336,22 +336,25 @@ const HOT_RANK_EXPR = sql<number>`(
 // cap.
 const SITEMAP_MAX_SUBMISSIONS = 10_000;
 
-export async function getAllSubmissions(
+export async function getSitemapSubmissions(
   limit: number = SITEMAP_MAX_SUBMISSIONS,
-): Promise<Submission[]> {
+): Promise<Array<{ id: string; submitted_at: string }>> {
   // Use the same public-visibility predicate as feed reads — sitemap
   // entries are crawler-visible URLs, so anything unlisted, deleted,
   // or unapproved must NOT be enumerated. Without unlistedAt the
   // unlist moderator action would be a no-op for SEO. See FEED_BASE
   // _FILTERS for the canonical predicate.
   const rows = await db
-    .select(SUBMISSION_BASE_SELECT)
+    .select({ id: submissions.id, createdAt: submissions.createdAt })
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
     .where(FEED_BASE_FILTERS())
     .orderBy(desc(submissions.createdAt))
     .limit(limit);
-  return rows.map(mapSubmission);
+  return rows.map((row) => ({
+    id: row.id,
+    submitted_at: row.createdAt.toISOString(),
+  }));
 }
 
 // Cap the size of any caller-requested feed slice. 200 is generous
