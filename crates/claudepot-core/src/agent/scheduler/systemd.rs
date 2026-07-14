@@ -409,6 +409,7 @@ mod tests {
             lifecycle: crate::agent::types::Lifecycle::Installed,
             drafted_by: None,
             created_via: crate::agent::types::CreatedVia::Gui,
+            result_sink: None,
         }
     }
 
