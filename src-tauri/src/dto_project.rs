@@ -158,6 +158,7 @@ pub struct DryRunPlanDto {
     pub would_rewrite_claude_json: bool,
     pub would_move_memory_dir: bool,
     pub would_rewrite_project_settings: bool,
+    pub would_rewrite_installed_plugins: bool,
 }
 
 impl From<&claudepot_core::project_types::DryRunPlan> for DryRunPlanDto {
@@ -174,6 +175,7 @@ impl From<&claudepot_core::project_types::DryRunPlan> for DryRunPlanDto {
             would_rewrite_claude_json: p.would_rewrite_claude_json,
             would_move_memory_dir: p.would_move_memory_dir,
             would_rewrite_project_settings: p.would_rewrite_project_settings,
+            would_rewrite_installed_plugins: p.would_rewrite_installed_plugins,
         }
     }
 }

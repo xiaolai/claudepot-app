@@ -159,6 +159,17 @@ pub fn move_project(ctx: &AppContext, args: MoveArgs) -> Result<()> {
             "  \u{2713} Project-local .claude/settings.json autoMemoryDirectory rewritten (P9)"
         );
     }
+    if result.plugin_bindings_rewritten > 0 {
+        println!(
+            "  \u{2713} Repointed {} plugin binding{} in installed_plugins.json (P10)",
+            result.plugin_bindings_rewritten,
+            if result.plugin_bindings_rewritten == 1 {
+                ""
+            } else {
+                "s"
+            },
+        );
+    }
 
     for warning in &result.warnings {
         println!("  \u{26a0} {}", warning);

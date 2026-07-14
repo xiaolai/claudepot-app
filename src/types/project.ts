@@ -217,4 +217,5 @@ export interface DryRunPlan {
   would_rewrite_claude_json: boolean;
   would_move_memory_dir: boolean;
   would_rewrite_project_settings: boolean;
+  would_rewrite_installed_plugins: boolean;
 }

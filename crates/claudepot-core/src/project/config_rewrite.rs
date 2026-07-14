@@ -302,6 +302,230 @@ fn write_config_atomic(path: &Path, value: &Value) -> Result<(), ProjectError> {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 10: global plugin registry (plugins/installed_plugins.json)
+// ---------------------------------------------------------------------------
+
+/// Outcome of a Phase 10 rewrite.
+#[derive(Debug, Default)]
+pub struct PluginRegistryRewriteResult {
+    /// Number of `projectPath` bindings rewritten from `old_path` (or a
+    /// descendant) to `new_path`.
+    pub bindings_rewritten: usize,
+    /// Snapshot of the pre-rewrite registry file, written only when at
+    /// least one binding changed. `None` on a no-op.
+    pub snapshot_path: Option<PathBuf>,
+}
+
+/// Rewrite project-scoped plugin bindings in
+/// `<config_dir>/plugins/installed_plugins.json` on a project move.
+///
+/// Claude Code records every installed plugin as
+/// `plugins[<name>][] = { scope, projectPath, installPath, … }`. For a
+/// `scope:"project"` (or `"local"`) install, `projectPath` is the
+/// ABSOLUTE path of the project that installed it — the key Claude Code
+/// uses to decide which plugins a project has. That binding lives in
+/// this GLOBAL registry, not inside the project directory, so a project
+/// move never carries it: the moved project's plugins silently appear
+/// uninstalled because Claude Code finds no install record at the new
+/// path. This phase repoints those bindings.
+///
+/// Semantics (same boundary rule as P6/P7, via `rewrite_path_string`):
+///   - `projectPath == old_path` (the project root) → `new_path`.
+///   - `projectPath` under `old_path` (a nested install root) →
+///     rewritten prefix.
+///   - `installPath` points into the global plugin cache
+///     (`<config_dir>/plugins/cache/…`), never under a project path, so
+///     it is left untouched by the boundary rule.
+///
+/// Before mutating, the original file is snapshotted to
+/// `<snapshots_dir>/<ts>-<new_san>-P10.json` (the registry holds many
+/// projects' bindings; a bad rewrite must be recoverable). No-op —
+/// `Ok` with zero bindings and no snapshot — when the registry is
+/// absent or holds no binding to `old_path`.
+pub fn rewrite_installed_plugins(
+    registry_path: &Path,
+    snapshots_dir: &Path,
+    old_path: &str,
+    new_path: &str,
+    new_san: &str,
+) -> Result<PluginRegistryRewriteResult, ProjectError> {
+    let mut result = PluginRegistryRewriteResult::default();
+
+    if !registry_path.exists() {
+        tracing::debug!("installed_plugins.json absent; P10 no-op");
+        return Ok(result);
+    }
+
+    let contents = fs::read_to_string(registry_path).map_err(ProjectError::Io)?;
+
+    // Fast path: skip the parse when `old_path` can't appear. Mirror the
+    // JSON-escaped needle rule from `rewrite_meta_json` (Audit M11) so a
+    // Windows path (backslashes escaped as `\\` in JSON) still matches.
+    let old_escaped = serde_json::to_string(old_path).unwrap_or_else(|_| format!("\"{old_path}\""));
+    let needle = old_escaped.trim_matches('"');
+    if !contents.contains(needle) && !contents.contains(old_path) {
+        return Ok(result);
+    }
+
+    let mut root: Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(ProjectError::Ambiguous(format!(
+                "installed_plugins.json is not valid JSON: {e}"
+            )));
+        }
+    };
+
+    // Walk every string in the document under the boundary rule. Only
+    // `projectPath` fields can match `old_path` (installPath lives in the
+    // global cache), so a whole-document walk touches exactly the
+    // bindings we mean to move and naturally handles nested install
+    // roots — the same approach P7 uses for nested values.
+    let rewrites =
+        crate::project_rewrite::rewrite_strings_in_value_pub(&mut root, old_path, new_path);
+    if rewrites == 0 {
+        // Needle matched but the boundary rule didn't (e.g. `old_path`
+        // only appeared as a non-path substring). Nothing to persist.
+        return Ok(result);
+    }
+
+    // Snapshot the ORIGINAL bytes before the atomic replace.
+    result.snapshot_path = Some(write_registry_snapshot(snapshots_dir, new_san, &contents)?);
+    write_config_atomic(registry_path, &root)?;
+    result.bindings_rewritten = rewrites;
+
+    tracing::info!(
+        bindings = rewrites,
+        "P10 installed_plugins.json plugin bindings rewritten"
+    );
+    Ok(result)
+}
+
+/// A project-scoped plugin binding whose `projectPath` no longer exists
+/// on disk — the plugin registry still claims the plugin is installed for
+/// a project directory that is gone (deleted or moved externally). This
+/// is the plugin-side analogue of an orphaned transcript slug
+/// (`session::move_::detect_orphaned_projects`): the same "a project
+/// moved and CC's global, path-keyed state didn't follow" failure, on the
+/// dimension that transcript-orphan detection does not cover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StalePluginBinding {
+    /// Registry key, e.g. `"sample@acme"`.
+    pub plugin: String,
+    /// The `projectPath` that no longer exists on disk.
+    pub project_path: String,
+    /// The install scope (`"project"` or `"local"`).
+    pub scope: String,
+}
+
+/// Scan the plugin registry for project-scoped bindings whose
+/// `projectPath` directory no longer exists on disk.
+///
+/// This is the detection half of the manual-move repair story. A project
+/// moved with `claudepot project move` has its bindings repointed by P10;
+/// a project moved **externally** (Finder / `mv` / `git`) leaves the
+/// bindings pointing at a vanished path, and the moved project's plugins
+/// silently stop resolving. This surfaces exactly those bindings so the
+/// user can run `project move <old> <new>` (which repoints them) — the
+/// plugin dimension that `detect_orphaned_projects` (transcripts only)
+/// never reports.
+///
+/// Only `scope: "project"` and `"local"` bindings are considered — a
+/// `"user"`-scoped install is global and not tied to any single project
+/// directory's existence. Returns `[]` when the registry is absent, is
+/// not the expected shape, or every project binding still resolves.
+pub fn detect_stale_plugin_bindings(
+    registry_path: &Path,
+) -> Result<Vec<StalePluginBinding>, ProjectError> {
+    if !registry_path.exists() {
+        return Ok(Vec::new());
+    }
+    let contents = fs::read_to_string(registry_path).map_err(ProjectError::Io)?;
+    let root: Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        // A malformed registry is a real problem, but detection is a
+        // read-only health check — surface it rather than aborting a
+        // caller that may be listing many things.
+        Err(e) => {
+            return Err(ProjectError::Ambiguous(format!(
+                "installed_plugins.json is not valid JSON: {e}"
+            )));
+        }
+    };
+
+    let Some(plugins) = root.get("plugins").and_then(Value::as_object) else {
+        return Ok(Vec::new());
+    };
+
+    let mut out = Vec::new();
+    for (plugin, records) in plugins {
+        let Some(arr) = records.as_array() else {
+            continue;
+        };
+        for rec in arr {
+            let Some(obj) = rec.as_object() else {
+                continue;
+            };
+            let scope = obj.get("scope").and_then(Value::as_str).unwrap_or("");
+            if scope != "project" && scope != "local" {
+                continue;
+            }
+            let Some(project_path) = obj.get("projectPath").and_then(Value::as_str) else {
+                continue;
+            };
+            if project_path.is_empty() {
+                continue;
+            }
+            // Stale iff the bound directory is gone. `exists()` (not
+            // `is_dir()`) is deliberately lenient — a path that resolves
+            // to anything is not treated as orphaned.
+            if !Path::new(project_path).exists() {
+                out.push(StalePluginBinding {
+                    plugin: plugin.clone(),
+                    project_path: project_path.to_string(),
+                    scope: scope.to_string(),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Snapshot the pre-rewrite plugin registry to
+/// `<snapshots_dir>/<ts>-<safe_san>-P10.json`, verbatim (original bytes),
+/// 0600 on Unix. Mirrors [`write_snapshot`] but preserves the exact
+/// source text rather than re-serializing a parsed value.
+fn write_registry_snapshot(
+    snapshots_dir: &Path,
+    new_san: &str,
+    original: &str,
+) -> Result<PathBuf, ProjectError> {
+    fs::create_dir_all(snapshots_dir).map_err(ProjectError::Io)?;
+    let safe_san: String = new_san
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = snapshots_dir.join(format!("{ts}-{safe_san}-P10.json"));
+    fs::write(&path, original).map_err(ProjectError::Io)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(path)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -686,5 +910,298 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ProjectError::Ambiguous(_)));
+    }
+
+    // ── Phase 10: installed_plugins.json plugin-binding rewrite ──────────
+
+    /// One install record shaped like Claude Code's real schema.
+    fn plugin_record(scope: &str, project_path: &str, install_path: &str) -> Value {
+        json!({
+            "scope": scope,
+            "projectPath": project_path,
+            "installPath": install_path,
+            "version": "0.5.1",
+            "installedAt": "2026-07-14T00:36:29.392Z",
+            "lastUpdated": "2026-07-14T00:36:29.392Z",
+            "gitCommitSha": "2607c7afac185dfefe6148b214e9e186c2859ad0"
+        })
+    }
+
+    fn snap_count(dir: &Path) -> usize {
+        fs::read_dir(dir).map(|d| d.count()).unwrap_or(0)
+    }
+
+    #[test]
+    fn installed_plugins_missing_file_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        let r = rewrite_installed_plugins(&reg, &snap, "/a/b", "/c/d", "-c-d").unwrap();
+        assert_eq!(r.bindings_rewritten, 0);
+        assert!(r.snapshot_path.is_none());
+    }
+
+    #[test]
+    fn installed_plugins_no_binding_to_old_path_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "foo@owner": [plugin_record("project", "/some/other/project", "/cache/foo")]
+            }}),
+        );
+        let r = rewrite_installed_plugins(&reg, &snap, "/a/b", "/c/d", "-c-d").unwrap();
+        assert_eq!(r.bindings_rewritten, 0);
+        assert!(r.snapshot_path.is_none(), "no-op must not snapshot");
+        // File untouched.
+        assert_eq!(
+            read_json(&reg)["plugins"]["foo@owner"][0]["projectPath"],
+            json!("/some/other/project")
+        );
+    }
+
+    #[test]
+    fn exact_root_project_path_is_rewritten() {
+        // The reported bug: projectPath equals the project ROOT exactly
+        // (no trailing separator), which the boundary-prefix rule alone
+        // would miss — rewrite_path_string's exact-match arm covers it.
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "sample@acme": [plugin_record(
+                    "project",
+                    "/Users/dev/work/old-project",
+                    "/Users/dev/.claude/plugins/cache/acme/sample/1.0.0",
+                )]
+            }}),
+        );
+        let r = rewrite_installed_plugins(
+            &reg,
+            &snap,
+            "/Users/dev/work/old-project",
+            "/Users/dev/work/renamed-project",
+            "-Users-dev-work-renamed-project",
+        )
+        .unwrap();
+        assert_eq!(r.bindings_rewritten, 1);
+        let after = read_json(&reg);
+        assert_eq!(
+            after["plugins"]["sample@acme"][0]["projectPath"],
+            json!("/Users/dev/work/renamed-project")
+        );
+        // installPath (global cache) is NOT under the project path → untouched.
+        assert_eq!(
+            after["plugins"]["sample@acme"][0]["installPath"],
+            json!("/Users/dev/.claude/plugins/cache/acme/sample/1.0.0")
+        );
+    }
+
+    #[test]
+    fn descendant_project_path_is_rewritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "foo@owner": [plugin_record("local", "/a/b/nested", "/cache/foo")]
+            }}),
+        );
+        let r = rewrite_installed_plugins(&reg, &snap, "/a/b", "/c/d", "-c-d").unwrap();
+        assert_eq!(r.bindings_rewritten, 1);
+        assert_eq!(
+            read_json(&reg)["plugins"]["foo@owner"][0]["projectPath"],
+            json!("/c/d/nested")
+        );
+    }
+
+    #[test]
+    fn multiple_bindings_across_plugins_all_rewritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "a@o": [plugin_record("project", "/a/b", "/cache/a")],
+                "b@o": [plugin_record("project", "/a/b", "/cache/b")],
+                // A user-scoped record for a DIFFERENT project — must not move.
+                "c@o": [plugin_record("user", "/other", "/cache/c")],
+            }}),
+        );
+        let r = rewrite_installed_plugins(&reg, &snap, "/a/b", "/c/d", "-c-d").unwrap();
+        assert_eq!(r.bindings_rewritten, 2);
+        let after = read_json(&reg);
+        assert_eq!(after["plugins"]["a@o"][0]["projectPath"], json!("/c/d"));
+        assert_eq!(after["plugins"]["b@o"][0]["projectPath"], json!("/c/d"));
+        assert_eq!(after["plugins"]["c@o"][0]["projectPath"], json!("/other"));
+    }
+
+    #[test]
+    fn rewrite_snapshots_the_original_then_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        let original = json!({"version": 2, "plugins": {
+            "a@o": [plugin_record("project", "/a/b", "/cache/a")]
+        }});
+        write_json(&reg, &original);
+        let original_text = fs::read_to_string(&reg).unwrap();
+
+        let r1 = rewrite_installed_plugins(&reg, &snap, "/a/b", "/c/d", "-c-d").unwrap();
+        assert_eq!(r1.bindings_rewritten, 1);
+        let snap_path = r1.snapshot_path.expect("a rewrite must snapshot");
+        assert!(snap_path.to_string_lossy().ends_with("-P10.json"));
+        // Snapshot holds the verbatim pre-rewrite bytes.
+        assert_eq!(fs::read_to_string(&snap_path).unwrap(), original_text);
+        assert_eq!(snap_count(&snap), 1);
+
+        // Second run: old_path no longer present → no-op, no new snapshot.
+        let r2 = rewrite_installed_plugins(&reg, &snap, "/a/b", "/c/d", "-c-d").unwrap();
+        assert_eq!(r2.bindings_rewritten, 0);
+        assert!(r2.snapshot_path.is_none());
+        assert_eq!(snap_count(&snap), 1, "idempotent re-run must not snapshot");
+    }
+
+    #[test]
+    fn windows_drive_path_binding_is_rewritten() {
+        // Golden pure-string test on a Windows shape (runs on every host
+        // per rules/paths.md). Exact-root match, backslash separators.
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "a@o": [plugin_record(
+                    "project",
+                    r"C:\Users\dev\old-project",
+                    r"C:\Users\dev\.claude\plugins\cache\a",
+                )]
+            }}),
+        );
+        let r = rewrite_installed_plugins(
+            &reg,
+            &snap,
+            r"C:\Users\dev\old-project",
+            r"C:\Users\dev\renamed-project",
+            "-c-d",
+        )
+        .unwrap();
+        assert_eq!(r.bindings_rewritten, 1);
+        let after = read_json(&reg);
+        assert_eq!(
+            after["plugins"]["a@o"][0]["projectPath"],
+            json!(r"C:\Users\dev\renamed-project")
+        );
+        // Cache installPath untouched.
+        assert_eq!(
+            after["plugins"]["a@o"][0]["installPath"],
+            json!(r"C:\Users\dev\.claude\plugins\cache\a")
+        );
+    }
+
+    #[test]
+    fn windows_unc_descendant_binding_is_rewritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "a@o": [plugin_record("project", r"\\server\share\proj\sub", "/cache/a")]
+            }}),
+        );
+        let r = rewrite_installed_plugins(
+            &reg,
+            &snap,
+            r"\\server\share\proj",
+            r"\\server\share\renamed",
+            "-c-d",
+        )
+        .unwrap();
+        assert_eq!(r.bindings_rewritten, 1);
+        assert_eq!(
+            read_json(&reg)["plugins"]["a@o"][0]["projectPath"],
+            json!(r"\\server\share\renamed\sub")
+        );
+    }
+
+    #[test]
+    fn unparseable_registry_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("snaps");
+        let reg = tmp.path().join("installed_plugins.json");
+        // Contains the needle so the fast path doesn't skip it, but is
+        // not valid JSON → hard error, not a silent no-op.
+        fs::write(&reg, "{ not json /a/b").unwrap();
+        let err = rewrite_installed_plugins(&reg, &snap, "/a/b", "/c/d", "-c-d").unwrap_err();
+        assert!(matches!(err, ProjectError::Ambiguous(_)));
+    }
+
+    // ── detect_stale_plugin_bindings ─────────────────────────────────────
+
+    #[test]
+    fn detect_stale_missing_registry_is_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path().join("installed_plugins.json");
+        assert!(detect_stale_plugin_bindings(&reg).unwrap().is_empty());
+    }
+
+    #[test]
+    fn detect_stale_flags_gone_project_paths_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path().join("installed_plugins.json");
+        // A live project dir that exists, and a gone one.
+        let live = tmp.path().join("live-proj");
+        fs::create_dir(&live).unwrap();
+        let gone = tmp.path().join("gone-proj"); // never created
+
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "live@o":  [plugin_record("project", live.to_str().unwrap(), "/cache/live")],
+                "gone@o":  [plugin_record("project", gone.to_str().unwrap(), "/cache/gone")],
+                "local@o": [plugin_record("local",   gone.to_str().unwrap(), "/cache/local")],
+                // user-scope binding to a gone path is global → NOT flagged.
+                "user@o":  [plugin_record("user",    gone.to_str().unwrap(), "/cache/user")],
+            }}),
+        );
+
+        let mut stale = detect_stale_plugin_bindings(&reg).unwrap();
+        stale.sort_by(|a, b| a.plugin.cmp(&b.plugin));
+        assert_eq!(
+            stale.len(),
+            2,
+            "only project+local bindings to the gone path"
+        );
+        assert_eq!(stale[0].plugin, "gone@o");
+        assert_eq!(stale[0].scope, "project");
+        assert_eq!(stale[0].project_path, gone.to_string_lossy());
+        assert_eq!(stale[1].plugin, "local@o");
+        assert_eq!(stale[1].scope, "local");
+        // The live and user-scope bindings are not reported.
+        assert!(!stale.iter().any(|s| s.plugin == "live@o"));
+        assert!(!stale.iter().any(|s| s.plugin == "user@o"));
+    }
+
+    #[test]
+    fn detect_stale_all_live_is_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path().join("installed_plugins.json");
+        let live = tmp.path().join("p");
+        fs::create_dir(&live).unwrap();
+        write_json(
+            &reg,
+            &json!({"version": 2, "plugins": {
+                "a@o": [plugin_record("project", live.to_str().unwrap(), "/cache/a")]
+            }}),
+        );
+        assert!(detect_stale_plugin_bindings(&reg).unwrap().is_empty());
     }
 }
