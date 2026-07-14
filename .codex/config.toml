@@ -7,7 +7,7 @@
 
 # MCP servers mirrored from .mcp.json are added below by /cc-suite:bridge-mcp.
 # >>> cc-suite-mcp >>>
-[mcp_servers."@hypothesi/tauri-mcp-server"]
+[mcp_servers.tauri]
 command = "npx"
 args = ["@hypothesi/tauri-mcp-server"]
 # <<< cc-suite-mcp <<<

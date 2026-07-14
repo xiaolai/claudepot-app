@@ -4,6 +4,10 @@
   "version": "0.2.0",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -23,12 +27,18 @@
     "@tauri-apps/plugin-process": "^2",
     "highlight.js": "^11.11.1",
     "lucide-react": "^1.8.0",
-    "mermaid": "^11.14.0",
+    "mermaid": "^11.16.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "dompurify": "3.4.11",
+      "uuid": "11.1.1"
+    }
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.0",
