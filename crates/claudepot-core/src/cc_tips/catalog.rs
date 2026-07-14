@@ -29,9 +29,15 @@ pub struct CatalogSnapshot {
     pub tips: Vec<RawTip>,
 }
 
+/// Cache path for the extracted tips catalog.
+///
+/// Resolves through [`crate::paths::claudepot_data_dir`] — NOT a
+/// hand-built `$HOME/.claudepot`. The hardcoded form bypassed the
+/// `CLAUDEPOT_DATA_DIR` override (so a relocated data dir still wrote
+/// here) and bypassed the test-isolation guard in `paths.rs`, letting a
+/// test write to the developer's live data root.
 pub fn catalog_cache_path() -> TipsResult<PathBuf> {
-    let home = dirs::home_dir().ok_or(TipsError::NoHome)?;
-    Ok(home.join(".claudepot").join("cc_tips_catalog.json"))
+    Ok(crate::paths::claudepot_data_dir().join("cc_tips_catalog.json"))
 }
 
 fn binary_cache_key(bin: &Path) -> TipsResult<(u64, i128)> {

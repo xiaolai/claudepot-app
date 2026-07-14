@@ -77,6 +77,50 @@ if [ -n "$violators" ]; then
   fail=1
 fi
 
+# ── 4. The Claudepot data root is resolved ONLY via paths.rs ─────────
+# Hand-building `$HOME/.claudepot` bypasses BOTH the CLAUDEPOT_DATA_DIR
+# override (a relocated data dir is silently ignored) AND the test-
+# isolation guard in paths.rs. That combination is how a unit test once
+# destroyed a live sessions.db (129 -> 1 sessions, 8131 -> 0 exchanges):
+# code reached the real data root without passing the one guarded door.
+# Resolve through `paths::claudepot_data_dir()`. Temp-rooted joins in
+# tests (`tmp.path().join(".claudepot")`) are legitimate and excluded.
+violators=$(grep -rn 'join("\.claudepot")' crates src-tauri --include='*.rs' 2>/dev/null \
+  | grep -v '/paths\.rs:' \
+  | grep -v 'tmp\.path()\.join' \
+  || true)
+if [ -n "$violators" ]; then
+  echo "::error::Hand-built \$HOME/.claudepot outside paths.rs:"
+  echo "$violators"
+  echo "  Resolve the data root via claudepot_core::paths::claudepot_data_dir()."
+  echo "  A hardcoded path bypasses CLAUDEPOT_DATA_DIR and the test-isolation guard."
+  echo
+  fail=1
+fi
+
+# ── 5. Every `cargo test` invocation isolates the data root ──────────
+# `cfg(test)` is per-crate, so paths.rs's test-isolation guard covers
+# ONLY claudepot-core's own unit tests. Integration tests under `tests/`
+# and other crates' tests link core with cfg(test) OFF and would resolve
+# the developer's real ~/.claudepot.
+#
+# Enforcing that per-FILE is a weak guard (a grep proves the file
+# mentions the var, not that every test sets it). The runner is the
+# right seam: exporting CLAUDEPOT_DATA_DIR around `cargo test` covers
+# EVERY test binary at once, with no ritual to forget. So we assert the
+# runners actually do it.
+for runner in scripts/preflight.sh .github/workflows/ci.yml; do
+  [ -f "$runner" ] || continue
+  if ! grep -q 'CLAUDEPOT_DATA_DIR' "$runner"; then
+    echo "::error::$runner runs cargo test without isolating CLAUDEPOT_DATA_DIR."
+    echo "  paths.rs's cfg(test) guard does NOT reach integration tests or"
+    echo "  other crates' tests — they would use the real ~/.claudepot."
+    echo "  Export CLAUDEPOT_DATA_DIR to a tempdir around the test step."
+    echo
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
