@@ -521,6 +521,18 @@ enum LessonAction {
     /// Reject a lesson. It is remembered as rejected, so it will not be
     /// proposed again.
     Reject { id: String },
+    /// Compile an accepted lesson into a guard — a grep tripwire in
+    /// scripts/repo-invariants.sh that fails the build if the mistake
+    /// recurs.
+    ///
+    /// Prints the proposed guard by default; `--write` adds it, but only
+    /// if it does NOT fire on the current clean tree (a guard that trips
+    /// immediately has a wrong pattern and is discarded).
+    Compile {
+        id: String,
+        #[arg(long)]
+        write: bool,
+    },
     /// Counts: to review, accepted, enforced, suspect.
     Status {
         #[arg(long)]
@@ -1276,6 +1288,9 @@ async fn main() -> Result<()> {
                 commands::lesson::accept_cmd(&ctx, &id, no_anchor)?
             }
             LessonAction::Reject { id } => commands::lesson::reject_cmd(&ctx, &id)?,
+            LessonAction::Compile { id, write } => {
+                commands::lesson::compile_cmd(&ctx, commands::lesson::CompileArgs { id, write })?
+            }
             LessonAction::Status { project } => {
                 commands::lesson::status_cmd(&ctx, project.as_deref())?
             }
