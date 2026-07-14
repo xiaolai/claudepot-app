@@ -49,8 +49,17 @@ checks that hold.
   read, and project-listing tools were unscoped in 0.1.54; a coding agent
   in one project could reach another project's transcripts. All reads and
   writes now honor the project boundary.
+- **Permission grants fail safe on unreadable settings.** A corrupt or
+  unreadable `settings.json` used to read as "no permission mode set",
+  which could mask a live `bypassPermissions` elevation; the auto-revert
+  now skips the tick and warns instead of acting on an error it never saw.
+- **The environment-file editor is bounded and serialized.** `.env` reads
+  are capped and kept in zeroizing buffers, and concurrent edits take a
+  lock so two Claudepot editors can't silently lose each other's changes.
+- **Atomic writes refuse a pre-existing temp file** (`create_new`) and
+  clean up on failure — a small hardening on every credential/state write.
 
-
+## 0.1.54 — beta (released 2026-07-14)
 
 ### Added
 
