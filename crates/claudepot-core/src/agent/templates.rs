@@ -193,7 +193,7 @@ pub const KNOWLEDGE_DISTILLER_MODEL: &str = "claude-haiku-4-5";
 /// nothing went wrong in a session, the correct output is an empty list,
 /// and the prompt has to say that in as many ways as possible, because
 /// the model's every instinct is to be helpful and produce *something*.
-const KNOWLEDGE_DISTILLER_PROMPT: &str = "\
+pub const KNOWLEDGE_DISTILLER_PROMPT: &str = "\
 Read the transcript at CLAUDEPOT_EVENT_SESSION_PATH (session id in \
 CLAUDEPOT_EVENT_SESSION_ID) and extract durable LESSONS — things that \
 should change how future work in this project is done.
@@ -239,7 +239,7 @@ ones. Zero beats three invented ones.";
 /// Schema for the distiller's output. `claims` may be empty — and the
 /// description says so explicitly, because a schema that merely
 /// *permits* emptiness still reads to a model as a form to fill in.
-const KNOWLEDGE_DISTILLER_JSON_SCHEMA: &str = r#"{
+pub const KNOWLEDGE_DISTILLER_JSON_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
     "claims": {
