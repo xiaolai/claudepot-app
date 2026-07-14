@@ -137,6 +137,7 @@ fn sample_draft(name: &str) -> Agent {
         lifecycle: Lifecycle::Draft,
         drafted_by: Some("smoke@test".into()),
         created_via: CreatedVia::CliDraft,
+        result_sink: None,
     }
 }
 

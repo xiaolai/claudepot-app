@@ -140,8 +140,23 @@ pub fn record_run_cmd(
     };
     match record_run(&inputs) {
         Ok(_run) => {
-            // The shim sets exit code from the underlying `claude -p`;
-            // we just confirm we wrote the record.
+            // Drain the agent's result_sink, if it has one. This is the
+            // deterministic half of the harvester: the model emitted
+            // JSON, and Claudepot — not the model — writes it into the
+            // knowledge base. See `shared_memory::proposal`.
+            //
+            // Best-effort on purpose. A failed ingest must not fail the
+            // run: the run *happened*, `result.json` is on disk, and a
+            // later harvest can re-read it. Losing the run record to
+            // save a proposal would be the wrong trade.
+            if exit == 0 {
+                if let Err(e) = drain_result_sink(&id, &run_dir) {
+                    tracing::warn!(
+                        agent_id = %id, run_id = %run_id, error = %e,
+                        "record-run: result_sink ingest failed; result.json is still on disk"
+                    );
+                }
+            }
             Ok(())
         }
         Err(e) => {
@@ -174,6 +189,72 @@ pub fn record_run_cmd(
                     run_dir.display()
                 )
             })
+        }
+    }
+}
+
+/// Deposit a finished run's structured output into its declared sink.
+///
+/// Only [`ResultSink::MemoryProposals`] exists today: parse the run's
+/// `result.json` as distilled claims and file them as **proposals**
+/// awaiting human review. Nothing here can produce an accepted memory —
+/// that transition is the human's, and only the human's.
+fn drain_result_sink(id: &AgentId, run_dir: &std::path::Path) -> Result<()> {
+    use claudepot_core::agent::ResultSink;
+    use claudepot_core::shared_memory::proposal;
+
+    // Non-blocking: if the GUI holds the store lock we skip this pass
+    // rather than stall the shim. `result.json` stays on disk, so a
+    // later `claudepot memory harvest` picks it up.
+    let Some(store) = AgentStore::try_open()? else {
+        tracing::debug!(agent_id = %id, "record-run: store lock busy — deferring sink drain");
+        return Ok(());
+    };
+    let Some(agent) = store.get(id) else {
+        return Ok(());
+    };
+    let Some(sink) = agent.result_sink else {
+        return Ok(());
+    };
+    let cwd = agent.cwd.clone();
+    let created_by = format!("agent:{}", agent.name);
+    drop(store); // release the lock before touching sessions.db
+
+    match sink {
+        ResultSink::MemoryProposals => {
+            let raw = std::fs::read_to_string(run_dir.join("result.json"))
+                .context("read result.json for the memory sink")?;
+            let claims = proposal::parse_claims(&raw).context("parse distilled claims")?;
+            if claims.claims.is_empty() {
+                // The common case, and a correct one: most sessions
+                // teach nothing. Say so at debug, not warn.
+                tracing::debug!(agent_id = %id, "distiller returned no claims");
+                return Ok(());
+            }
+
+            let db = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+            let idx = claudepot_core::session_index::SessionIndex::open(&db)
+                .context("open sessions.db to file proposals")?;
+
+            // The transcript that taught the lesson — the orchestrator
+            // hands it to the run in the same env var the prompt reads.
+            let file_path = std::env::var("CLAUDEPOT_EVENT_SESSION_PATH").ok();
+            let origin = proposal::ProposalOrigin {
+                project_path: &cwd,
+                file_path: file_path.as_deref(),
+                exchange_id: None,
+                created_by: &created_by,
+            };
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let report = proposal::ingest_proposals(&idx, &claims, &origin, now_ms)
+                .context("file distilled claims as proposals")?;
+            tracing::info!(
+                agent_id = %id,
+                proposed = report.proposed,
+                skipped = report.total_skipped(),
+                "filed distilled claims for review"
+            );
+            Ok(())
         }
     }
 }

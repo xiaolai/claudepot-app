@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use super::types::{
     Agent, AgentBinary, CreatedVia, EventKind, Lifecycle, McpServerRef, OutputFormat,
-    PermissionMode, PlatformOptions, RateLimit, Trigger, DEFAULT_DEBOUNCE_SECS,
+    PermissionMode, PlatformOptions, RateLimit, ResultSink, Trigger, DEFAULT_DEBOUNCE_SECS,
 };
 
 /// Stable id recorded in `drafted_by` for Session-Narrator drafts.
@@ -165,6 +165,193 @@ pub fn session_narrator(cwd: &str, now: DateTime<Utc>) -> Agent {
         // install review distinguishes a template-instantiated
         // record from a hand-authored one (grill finding F19).
         created_via: CreatedVia::Template,
+        // The Narrator's output is prose for a human to read once. It
+        // deposits nothing durable; that is the Distiller's job.
+        result_sink: None,
+    }
+}
+
+// ─── Knowledge Distiller ─────────────────────────────────────────
+
+pub const KNOWLEDGE_DISTILLER_DRAFTED_BY: &str = "template:knowledge-distiller";
+pub const KNOWLEDGE_DISTILLER_TEMPLATE_ID: &str = "knowledge-distiller";
+
+/// Extraction is Haiku work. At ~$0.04 a settled session, a year of
+/// this costs less than one Opus afternoon.
+pub const KNOWLEDGE_DISTILLER_MODEL: &str = "claude-haiku-4-5";
+
+/// The distiller's prompt.
+///
+/// Every line of this is load-bearing, and most of it is *prohibition*.
+/// The published evidence says an LLM asked to "summarize what it
+/// learned" produces context files that make agents measurably **worse**
+/// (ETH) — because what it produces is overviews, and an overview is
+/// pure token cost with no behavioral payload. What changes behavior is
+/// a specific, imperative instruction that names a command or a file.
+///
+/// So the distiller is not a summarizer. It is a **failure miner**. If
+/// nothing went wrong in a session, the correct output is an empty list,
+/// and the prompt has to say that in as many ways as possible, because
+/// the model's every instinct is to be helpful and produce *something*.
+const KNOWLEDGE_DISTILLER_PROMPT: &str = "\
+Read the transcript at CLAUDEPOT_EVENT_SESSION_PATH (session id in \
+CLAUDEPOT_EVENT_SESSION_ID) and extract durable LESSONS — things that \
+should change how future work in this project is done.
+
+A lesson is admissible ONLY if something actually went wrong and was \
+corrected. Look for:
+  - an error, failed test, failed build, or crash, and the fix
+  - a wrong assumption that got corrected mid-session
+  - a landmine found (\"this silently does X\"), and how to avoid it
+  - a convention discovered the hard way (\"must call Y before Z\")
+  - a review finding, and the rule that prevents it recurring
+
+For each lesson emit:
+  - claim: what is true, stated so a stranger can act on it. One or \
+two sentences.
+  - directive: ONE imperative line for a future agent, naming a \
+concrete command, file, or symbol. Example: \"Run scripts/preflight.sh \
+before pushing; cargo test alone does not run the grep guards.\" \
+NOT: \"Be careful about tests.\"
+  - files: the file paths the lesson depends on, so it can be \
+invalidated when they change. Omit if the lesson is not about code.
+  - evidence: what happened, in one line. The failure, not the fix.
+  - confidence: 0-100. Below 60, do not emit it at all.
+
+HARD RULES — violating any of these makes the output worse than \
+emitting nothing:
+
+1. NO SUMMARIES. Do not describe what the session was about. Do not \
+write an overview of the architecture. Those are pure cost.
+2. NO LESSON WITHOUT A FAILURE. \"This project uses React\" is not a \
+lesson, it is a fact anyone can see. If nothing broke, return an \
+empty list. An empty list is a CORRECT and EXPECTED answer.
+3. NEVER COPY TRANSCRIPT TEXT. State the claim in your own words. Do \
+not quote code, output, logs, names, addresses, credentials, or \
+numbers from the transcript. If a lesson cannot be stated without \
+quoting private data, DROP IT.
+4. SKIP SENSITIVE SESSIONS. If the transcript is about personal, \
+financial, legal, or medical matters rather than software, return an \
+empty list immediately and extract nothing.
+5. Prefer FEWER, SHARPER lessons. Three real ones beat ten padded \
+ones. Zero beats three invented ones.";
+
+/// Schema for the distiller's output. `claims` may be empty — and the
+/// description says so explicitly, because a schema that merely
+/// *permits* emptiness still reads to a model as a form to fill in.
+const KNOWLEDGE_DISTILLER_JSON_SCHEMA: &str = r#"{
+  "type": "object",
+  "properties": {
+    "claims": {
+      "type": "array",
+      "description": "Durable lessons. MAY BE EMPTY — an empty array is the correct answer when nothing went wrong, or when the session is not about software.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string",
+            "description": "What is true, in your own words. Never quoted from the transcript."
+          },
+          "directive": {
+            "type": "string",
+            "description": "One imperative line for a future agent, naming a concrete command, file, or symbol."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["pattern", "constraint", "preference", "fact"],
+            "description": "constraint = a rule that must hold; pattern = a recurring shape; preference = how this user wants it; fact = a durable truth."
+          },
+          "files": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Repo-relative paths the lesson depends on. Used to invalidate the lesson when they change."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "The failure that justifies this lesson, in one line."
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": ["claim", "directive", "kind", "evidence", "confidence"]
+      }
+    }
+  },
+  "required": ["claims"]
+}"#;
+
+/// Build the **Knowledge Distiller** as a pre-filled draft [`Agent`].
+///
+/// Fires on the same `session-settled` trigger as the Narrator, but
+/// where the Narrator writes prose for a human to read once, the
+/// Distiller emits structured claims that Claudepot ingests as
+/// **proposals** for the triage queue.
+///
+/// Two deliberate omissions:
+///
+/// - **No MCP servers.** The Narrator attaches the memory server so it
+///   can read project context. The Distiller must not: if it could
+///   *write*, persistence would again depend on the model choosing to
+///   call a tool. It emits JSON; [`ResultSink::MemoryProposals`] does
+///   the writing. The model cannot decide not to.
+/// - **No write tools.** `Read` and `Grep` only. It reads a transcript
+///   and returns a value. It has no business touching the repo.
+pub fn knowledge_distiller(cwd: &str, now: DateTime<Utc>) -> Agent {
+    Agent {
+        id: Uuid::new_v4(),
+        name: "knowledge-distiller".to_string(),
+        display_name: Some("Knowledge Distiller".to_string()),
+        description: Some(
+            "Mines each finished session for lessons — things that broke and \
+             how to stop them breaking again — and files them for your review."
+                .to_string(),
+        ),
+        enabled: true,
+        binary: AgentBinary::FirstParty,
+        model: Some(KNOWLEDGE_DISTILLER_MODEL.to_string()),
+        cwd: cwd.to_string(),
+        prompt: KNOWLEDGE_DISTILLER_PROMPT.to_string(),
+        system_prompt: None,
+        append_system_prompt: None,
+        permission_mode: PermissionMode::Default,
+        allowed_tools: vec!["Read".to_string(), "Grep".to_string()],
+        add_dir: Vec::new(),
+        max_budget_usd: None,
+        fallback_model: None,
+        output_format: OutputFormat::Json,
+        json_schema: Some(KNOWLEDGE_DISTILLER_JSON_SCHEMA.to_string()),
+        bare: false,
+        extra_env: BTreeMap::new(),
+        trigger: Trigger::Event {
+            event: EventKind::SessionSettled {
+                debounce_secs: DEFAULT_DEBOUNCE_SECS,
+            },
+        },
+        platform_options: PlatformOptions::default(),
+        log_retention_runs: 50,
+        created_at: now,
+        updated_at: now,
+        claudepot_managed: true,
+        template_id: Some(KNOWLEDGE_DISTILLER_TEMPLATE_ID.to_string()),
+        disallowed_tools: Vec::new(),
+        // Deliberately empty — see the doc comment.
+        mcp_servers: Vec::new(),
+        run_as: None,
+        task_budget: None,
+        rate_limit: Some(RateLimit {
+            min_interval_secs: Some(30 * 60),
+            max_per_day: Some(12),
+        }),
+        lifecycle: Lifecycle::Draft,
+        drafted_by: Some(KNOWLEDGE_DISTILLER_DRAFTED_BY.to_string()),
+        created_via: CreatedVia::Template,
+        // The whole point: the run's JSON lands in `memories` as
+        // proposals, deterministically, without the model having to
+        // volunteer a tool call.
+        result_sink: Some(ResultSink::MemoryProposals),
     }
 }
 

@@ -157,6 +157,7 @@ fn make_agent(name: &str) -> Agent {
         lifecycle: claudepot_core::agent::Lifecycle::Installed,
         drafted_by: None,
         created_via: claudepot_core::agent::CreatedVia::Gui,
+        result_sink: None,
     }
 }
 
