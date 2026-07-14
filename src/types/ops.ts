@@ -111,6 +111,7 @@ export interface MoveResultSummary {
   config_had_collision: boolean;
   config_snapshot_path: string | null;
   memory_dir_moved: boolean;
+  plugin_bindings_rewritten: number;
   warnings: string[];
 }
 

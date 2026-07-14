@@ -946,6 +946,90 @@ fn test_move_project_rewrites_claude_json() {
     );
 }
 
+/// P10 end-to-end: a project-scoped plugin binding in the global
+/// `<config_dir>/plugins/installed_plugins.json` registry is repointed
+/// from old_path to new_path when move_project runs. This is the fix for
+/// "plugins not properly moved after a project rename".
+#[test]
+fn test_move_project_repoints_plugin_bindings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = canonical_test_path(tmp.path());
+
+    let src = base.join("origproj");
+    fs::create_dir(&src).unwrap();
+    let projects_dir = base.join("projects");
+    fs::create_dir(&projects_dir).unwrap();
+
+    let old_str = src.to_string_lossy().to_string();
+    let old_san = sanitize_path(&old_str);
+    let cc_old = projects_dir.join(&old_san);
+    fs::create_dir(&cc_old).unwrap();
+
+    // Global plugin registry at <config_dir>/plugins/installed_plugins.json.
+    let plugins_dir = base.join("plugins");
+    fs::create_dir(&plugins_dir).unwrap();
+    let registry = plugins_dir.join("installed_plugins.json");
+    let reg_before = serde_json::json!({
+        "version": 2,
+        "plugins": {
+            "sample@acme": [{
+                "scope": "project",
+                "projectPath": old_str.clone(),
+                // installPath sits in the global cache — must NOT move.
+                "installPath": base.join("plugins/cache/acme/sample/1.0.0")
+                    .to_string_lossy(),
+                "version": "1.0.0"
+            }],
+            // A different project's binding — must be left alone.
+            "other@x": [{
+                "scope": "project",
+                "projectPath": "/some/other/project",
+                "installPath": "/cache/other",
+                "version": "1.0.0"
+            }]
+        }
+    });
+    fs::write(
+        &registry,
+        serde_json::to_string_pretty(&reg_before).unwrap(),
+    )
+    .unwrap();
+
+    let dst = base.join("newproj");
+    let args = MoveArgs {
+        old_path: src.clone(),
+        new_path: dst.clone(),
+        config_dir: base.clone(),
+        claude_json_path: None,
+        snapshots_dir: Some(base.join("snaps")),
+        no_move: false,
+        merge: false,
+        overwrite: false,
+        force: true,
+        dry_run: false,
+        ignore_pending_journals: false,
+        claudepot_state_dir: None,
+    };
+    let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
+
+    assert_eq!(result.plugin_bindings_rewritten, 1);
+    assert!(result.plugin_registry_snapshot_path.is_some());
+
+    let reg_after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&registry).unwrap()).unwrap();
+    let new_str = dst.to_string_lossy().to_string();
+    // Our project's binding repointed to the new path.
+    assert_eq!(
+        reg_after["plugins"]["sample@acme"][0]["projectPath"],
+        serde_json::json!(new_str)
+    );
+    // The unrelated project's binding is untouched.
+    assert_eq!(
+        reg_after["plugins"]["other@x"][0]["projectPath"],
+        serde_json::json!("/some/other/project")
+    );
+}
+
 /// Tests without claude_json_path should not touch any config file
 /// (hermetic). Confirmed by no P7 fields being set and no file being
 /// created.

@@ -61,6 +61,7 @@ pub struct MoveResultSummary {
     pub config_had_collision: bool,
     pub config_snapshot_path: Option<String>,
     pub memory_dir_moved: bool,
+    pub plugin_bindings_rewritten: usize,
     pub warnings: Vec<String>,
 }
 
@@ -77,6 +78,7 @@ impl MoveResultSummary {
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string()),
             memory_dir_moved: r.memory_dir_moved,
+            plugin_bindings_rewritten: r.plugin_bindings_rewritten,
             warnings: r.warnings.clone(),
         }
     }
