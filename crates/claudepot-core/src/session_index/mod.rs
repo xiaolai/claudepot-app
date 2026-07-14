@@ -667,6 +667,13 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     // Apply the v4 Shared Memory tables + triggers (idempotent).
     tx.execute_batch(crate::shared_memory::schema::SCHEMA)?;
 
+    // Knowledge-compiler columns on `memories`. Probe + ALTER, NOT a
+    // SCHEMA_VERSION bump — a bump would trip the cache invalidation
+    // below, and `DELETE FROM sessions` cascades all the way through
+    // `exchanges` into `memory_links`, destroying provenance that
+    // nothing on disk can rebuild. See the note in schema.rs.
+    crate::shared_memory::schema::apply_memories_compiler_columns(&tx)?;
+
     // Read the `_pending_rescan` marker. Set by the Settings →
     // Cleanup actions and cleared inside this transaction.
     let pending_rescan: bool = tx
