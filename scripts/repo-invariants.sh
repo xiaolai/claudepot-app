@@ -158,6 +158,18 @@ if [ -d "$mcp_dir" ]; then
   fi
 fi
 
+# ─── BEGIN claudepot-generated guards ───
+# guard: no-mktemp-d-windows-ci
+# mktemp -d under Git Bash on windows-latest returns POSIX /tmp paths; Rust resolves against current drive, creating foreign-path bugs. Use ${{ runner.temp }}, which GitHub Actions expands to native OS temp path.
+# compiled from lesson 8cd1c1e6-944e-4488-973f-e0bac7bd51a5
+violators=$(grep -rnE 'mktemp\s+-d' . --include='.github/workflows/*.yml' --include='.github/workflows/*.yaml' 2>/dev/null || true)
+if [ -n "$(echo "$violators" | tr -d '[:space:]')" ]; then
+  echo "::error::Workflow uses mktemp -d, which breaks on Windows (Git Bash returns POSIX /tmp). Replace with \${{ runner.temp }} in step env, then reference via \$TEMP_DIR or similar. See rules/paths.md for multi-OS path handling."
+  echo "$violators"
+  fail=1
+fi
+
+# ─── END claudepot-generated guards ───
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
