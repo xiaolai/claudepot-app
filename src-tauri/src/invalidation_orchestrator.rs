@@ -137,7 +137,10 @@ fn git_changed_since(project: &Path, commit: &str) -> Option<Vec<String>> {
     let out = Command::new("git")
         .arg("-C")
         .arg(project)
-        .args(["diff", "--name-only", commit])
+        // `--` terminates revision parsing so a stored commit value that
+        // happens to start with `-` (a corrupt/hostile anchor) is treated
+        // as a revision, never a git option.
+        .args(["diff", "--name-only", commit, "--"])
         .output()
         .ok()?;
     if !out.status.success() {

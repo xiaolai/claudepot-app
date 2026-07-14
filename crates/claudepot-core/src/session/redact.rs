@@ -107,8 +107,12 @@ pub struct RedactOpts {
 }
 
 impl RedactOpts {
+    /// No actionable criterion: no non-empty pattern AND no `--secrets`.
+    /// An empty-string pattern does not count — it matches nothing, so
+    /// treating it as "we have a pattern" would let a redact run that
+    /// rewrites and backs up the file while removing nothing.
     fn is_empty(&self) -> bool {
-        self.patterns.is_empty() && !self.secrets
+        !self.patterns.iter().any(|p| !p.is_empty()) && !self.secrets
     }
 }
 
@@ -121,14 +125,21 @@ pub struct RedactPlan {
     /// Individual string values that would be rewritten.
     pub matched_values: u32,
     /// Per-pattern hit counts, in the order the patterns were given.
-    /// The pattern itself is echoed back (the caller supplied it); the
-    /// surrounding content never is.
+    ///
+    /// **The pattern itself is NOT echoed.** When you redact a leaked
+    /// credential you pass it as `--pattern`, so the pattern string *is*
+    /// the secret. Serializing or printing it — into a dry-run's JSON, a
+    /// log, or this very session's transcript — re-leaks the exact thing
+    /// the command exists to remove. Only the caller-supplied index and
+    /// the count cross out of this module.
     pub hits: Vec<PatternHit>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PatternHit {
-    pub pattern: String,
+    /// Zero-based index into the caller's `patterns` vec. The caller
+    /// already has the pattern text; we never hand it back.
+    pub pattern_index: usize,
     pub count: u32,
 }
 
@@ -172,7 +183,10 @@ pub fn plan_redact(path: &Path, opts: &RedactOpts) -> Result<RedactPlan, RedactE
             continue;
         }
         let mut v: serde_json::Value =
-            serde_json::from_str(&line).map_err(|e| RedactError::Json { line: i, source: e })?;
+            serde_json::from_str(&line).map_err(|e| RedactError::Json {
+                line: i + 1,
+                source: e,
+            })?;
         let stats = rewrite_value(&mut v, opts, &mut counts);
         if stats > 0 {
             matched_lines += 1;
@@ -184,12 +198,11 @@ pub fn plan_redact(path: &Path, opts: &RedactOpts) -> Result<RedactPlan, RedactE
         original_bytes: meta.len(),
         matched_lines,
         matched_values,
-        hits: opts
-            .patterns
-            .iter()
-            .zip(counts)
-            .map(|(p, count)| PatternHit {
-                pattern: p.clone(),
+        hits: counts
+            .into_iter()
+            .enumerate()
+            .map(|(pattern_index, count)| PatternHit {
+                pattern_index,
                 count,
             })
             .collect(),
@@ -227,6 +240,16 @@ pub fn execute_redact(
     let f = fs::File::open(path).map_err(|e| RedactError::io(path, e))?;
     let reader = BufReader::new(f);
     let mut tmp = fs::File::create(&tmp_path).map_err(|e| RedactError::io(&tmp_path, e))?;
+    // Carry the source file's permissions onto the temp file BEFORE the
+    // rename, so a transcript that was 0600 (private) is not silently
+    // replaced by a umask-default 0644 (world-readable) copy — a redact
+    // must never *widen* access to the file it is scrubbing.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode();
+        let _ = tmp.set_permissions(fs::Permissions::from_mode(mode));
+    }
 
     let mut counts = vec![0u32; opts.patterns.len()];
     let mut matched_lines = 0u32;
@@ -238,28 +261,52 @@ pub fn execute_redact(
             writeln!(tmp).map_err(|e| RedactError::io(&tmp_path, e))?;
             continue;
         }
-        // Fast path: a line with no match is written back byte-for-byte
-        // rather than reserialized, so a redact of 2 lines in a 5,000-
-        // line transcript leaves 4,998 lines bit-identical. Reserializing
-        // everything would churn key order and formatting across the
-        // whole file for no reason.
-        if !line_may_match(&line, opts) {
+        // Parse EVERY line and decide on the parsed value — matching a
+        // raw JSONL line by substring is unsound, because the on-disk
+        // form is JSON-escaped (`\n`, `\"`, `\uXXXX`), so a secret
+        // containing any JSON-special character would be seen by
+        // `plan_redact` (which parses) but missed by a raw-line fast
+        // path, and the secret would survive a "successful" redact.
+        //
+        // The byte-identity optimization is preserved *safely*: when a
+        // line has zero matches we write the ORIGINAL text back verbatim,
+        // so unmatched lines stay bit-for-bit identical; only lines that
+        // actually change are reserialized.
+        let mut v: serde_json::Value =
+            serde_json::from_str(&line).map_err(|e| RedactError::Json {
+                line: i + 1,
+                source: e,
+            })?;
+        let hits = rewrite_value(&mut v, opts, &mut counts);
+        if hits == 0 {
             writeln!(tmp, "{line}").map_err(|e| RedactError::io(&tmp_path, e))?;
             continue;
         }
-        let mut v: serde_json::Value =
-            serde_json::from_str(&line).map_err(|e| RedactError::Json { line: i, source: e })?;
-        let hits = rewrite_value(&mut v, opts, &mut counts);
-        if hits > 0 {
-            matched_lines += 1;
-            matched_values += hits;
-        }
-        let out =
-            serde_json::to_string(&v).map_err(|e| RedactError::Json { line: i, source: e })?;
+        matched_lines += 1;
+        matched_values += hits;
+        let out = serde_json::to_string(&v).map_err(|e| RedactError::Json {
+            line: i + 1,
+            source: e,
+        })?;
         writeln!(tmp, "{out}").map_err(|e| RedactError::io(&tmp_path, e))?;
     }
     tmp.sync_all().map_err(|e| RedactError::io(&tmp_path, e))?;
     drop(tmp);
+
+    // Nothing matched — don't rename, and above all don't create a
+    // backup. A no-match redact that still trashed a copy of the file
+    // would leave a needless secret-bearing snapshot for zero benefit.
+    // The temp file is cleaned up by `tmp_guard` on return.
+    if matched_values == 0 {
+        sink.phase("complete", PhaseStatus::Complete);
+        return Ok(RedactReport {
+            original_bytes: before_size,
+            final_bytes: before_size,
+            matched_lines: 0,
+            matched_values: 0,
+            backup_trash_id: None,
+        });
+    }
 
     sink.phase("guarding", PhaseStatus::Running);
     let after = fs::metadata(path).map_err(|e| RedactError::io(path, e))?;
@@ -327,13 +374,6 @@ pub fn execute_redact(
     })
 }
 
-/// Cheap pre-filter over the raw line. Only meaningful for literal
-/// patterns — with `secrets` on we must parse and let the redactor
-/// decide, since it matches shapes rather than fixed strings.
-fn line_may_match(line: &str, opts: &RedactOpts) -> bool {
-    opts.secrets || opts.patterns.iter().any(|p| line.contains(p))
-}
-
 /// Walk the JSON, rewriting every string that carries a match.
 /// Returns how many string values were rewritten. Structure — keys,
 /// arrays, nesting, the UUID chain CC needs to replay the session — is
@@ -341,7 +381,8 @@ fn line_may_match(line: &str, opts: &RedactOpts) -> bool {
 fn rewrite_value(v: &mut serde_json::Value, opts: &RedactOpts, counts: &mut [u32]) -> u32 {
     match v {
         serde_json::Value::String(s) => {
-            let mut hit = false;
+            // Detect literal-pattern hits (and tally them per pattern).
+            let mut pattern_hit = false;
             for (i, p) in opts.patterns.iter().enumerate() {
                 if p.is_empty() {
                     continue;
@@ -349,32 +390,35 @@ fn rewrite_value(v: &mut serde_json::Value, opts: &RedactOpts, counts: &mut [u32
                 let n = s.matches(p.as_str()).count() as u32;
                 if n > 0 {
                     counts[i] += n;
-                    hit = true;
+                    pattern_hit = true;
                 }
             }
-            if hit {
-                *s = if opts.whole_value {
-                    REDACTION_MARKER.to_string()
-                } else {
-                    let mut out = s.clone();
-                    for p in &opts.patterns {
-                        if !p.is_empty() {
-                            out = out.replace(p.as_str(), REDACTION_MARKER);
-                        }
-                    }
-                    out
-                };
+            // Detect a secret-shape hit up front so `--secrets` can also
+            // honor `--whole-value` (previously it always masked just the
+            // detected substring, ignoring whole_value).
+            let secret_hit = opts.secrets && redact_apply(s, &secret_policy()) != *s;
+
+            if !pattern_hit && !secret_hit {
+                return 0;
             }
-            if opts.secrets {
-                let masked = redact_apply(s, &secret_policy());
-                if masked != *s {
-                    *s = masked;
-                    if !hit {
-                        hit = true;
+
+            if opts.whole_value {
+                // Any hit means the whole value is tainted — replace all
+                // of it, not just the matched span.
+                *s = REDACTION_MARKER.to_string();
+            } else {
+                // Surgical: excise literal patterns, then mask secret
+                // shapes in whatever remains.
+                for p in &opts.patterns {
+                    if !p.is_empty() {
+                        *s = s.replace(p.as_str(), REDACTION_MARKER);
                     }
                 }
+                if opts.secrets {
+                    *s = redact_apply(s, &secret_policy());
+                }
             }
-            u32::from(hit)
+            1
         }
         serde_json::Value::Array(items) => items
             .iter_mut()
@@ -623,9 +667,103 @@ mod tests {
         };
         let report = execute_redact(&data, &p, &opts, &NoopSink).unwrap();
         assert_eq!(report.matched_values, 0);
-        // Byte-identical: unmatched lines take the fast path and are
+        // Byte-identical: unmatched lines are written back verbatim,
         // never reserialized.
         assert_eq!(fs::read_to_string(&p).unwrap(), before);
+    }
+
+    #[test]
+    fn a_default_no_match_redact_creates_no_backup() {
+        // Without --purge, a no-match redact must NOT trash a copy of the
+        // file — that would leave a needless secret-bearing snapshot for
+        // zero benefit.
+        let tmp = TempDir::new().unwrap();
+        let data = tmp.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        let p = write_transcript(tmp.path());
+        let before = fs::read_to_string(&p).unwrap();
+
+        let opts = RedactOpts {
+            patterns: vec!["nothing-here".into()],
+            ..Default::default() // purge: false
+        };
+        let report = execute_redact(&data, &p, &opts, &NoopSink).unwrap();
+        assert_eq!(report.matched_values, 0);
+        assert!(report.backup_trash_id.is_none(), "no match ⇒ no backup");
+        assert_eq!(fs::read_to_string(&p).unwrap(), before);
+        // Nothing under the data dir should hold the transcript.
+        assert!(
+            walk(&data).is_empty(),
+            "no snapshot should have been written"
+        );
+    }
+
+    #[test]
+    fn a_pattern_with_json_special_chars_is_actually_removed() {
+        // The regression this locks: the old execute fast path matched
+        // the RAW JSONL line by substring, but the on-disk form is
+        // JSON-escaped. A secret containing a quote or backslash was seen
+        // by plan_redact (which parses) but MISSED by execute — so it
+        // survived a "successful" redact. Now execute parses every line.
+        let tmp = TempDir::new().unwrap();
+        let data = tmp.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        let p = tmp.path().join("s.jsonl");
+        // The decoded string value contains a literal double-quote; on
+        // disk it is escaped as \".
+        fs::write(
+            &p,
+            "{\"type\":\"user\",\"message\":{\"content\":\
+             [{\"type\":\"text\",\"text\":\"token=ab\\\"cd secret\"}]}}\n",
+        )
+        .unwrap();
+        // Sanity: the raw line does NOT contain the literal pattern
+        // (it's escaped), which is exactly why the old fast path failed.
+        assert!(!fs::read_to_string(&p).unwrap().contains("ab\"cd"));
+
+        let opts = RedactOpts {
+            patterns: vec!["ab\"cd".into()],
+            purge: true,
+            ..Default::default()
+        };
+        let report = execute_redact(&data, &p, &opts, &NoopSink).unwrap();
+        assert_eq!(report.matched_values, 1, "the escaped secret must be found");
+        let body = fs::read_to_string(&p).unwrap();
+        assert!(
+            !body.contains("ab\\\"cd"),
+            "the secret must be gone from disk"
+        );
+        assert!(body.contains(REDACTION_MARKER));
+    }
+
+    #[test]
+    fn secrets_plus_whole_value_replaces_the_entire_containing_value() {
+        // --secrets used to ignore --whole-value and mask only the
+        // detected substring, leaving the rest of a tainted value behind.
+        let tmp = TempDir::new().unwrap();
+        let data = tmp.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        let p = tmp.path().join("s.jsonl");
+        fs::write(
+            &p,
+            "{\"type\":\"user\",\"message\":{\"content\":\
+             [{\"type\":\"text\",\"text\":\"key sk-ant-oat01-AAAABBBBCCCCDDDD and more secrets here\"}]}}\n",
+        )
+        .unwrap();
+
+        let opts = RedactOpts {
+            secrets: true,
+            whole_value: true,
+            purge: true,
+            ..Default::default()
+        };
+        execute_redact(&data, &p, &opts, &NoopSink).unwrap();
+        let body = fs::read_to_string(&p).unwrap();
+        assert!(!body.contains("sk-ant-oat01-AAAABBBBCCCCDDDD"));
+        assert!(
+            !body.contains("and more secrets here"),
+            "whole_value must drop the entire tainted value, not just the key"
+        );
     }
 
     fn walk(dir: &Path) -> Vec<PathBuf> {

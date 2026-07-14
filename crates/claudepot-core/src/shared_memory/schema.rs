@@ -228,7 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_links_exchange ON memory_links(exchange_id
 CREATE INDEX IF NOT EXISTS idx_memory_links_file     ON memory_links(file_path);
 "#;
 
-/// Names of the seven tables created by the v4 DDL block. Used by
+/// Names of the eight tables created by the v4 DDL block. Used by
 /// the migration's post-write validation to assert the transaction
 /// produced what it promised before committing.
 pub const V4_TABLE_NAMES: &[&str] = &[

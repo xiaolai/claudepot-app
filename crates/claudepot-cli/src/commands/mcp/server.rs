@@ -534,6 +534,28 @@ impl MemoryServer {
             created_by: &created_by,
         };
         let result = if let Some(ref prior) = req.supersedes_id {
+            // Superseding flips the PRIOR decision to 'superseded'. That
+            // prior row may belong to another project — check_write on the
+            // new decision's project_path does not cover it. Authorize the
+            // prior decision's own project before mutating it, so a
+            // confined server cannot supersede another project's decision.
+            match durable::decision_project_path(&self.idx, prior) {
+                Ok(Some(owner)) => {
+                    if let Err(e) = self.scope.check_write(owner.as_deref()) {
+                        return self.denied(e);
+                    }
+                }
+                Ok(None) => {
+                    return to_json(&error_static(
+                        error_code::DECISION_NOT_FOUND,
+                        "supersedes_id does not reference an existing decision",
+                    ));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "claudepot_log_decision: prior lookup failed");
+                    return to_json(&error_with(error_code::WRITE_FAILED, &e, &self.policy));
+                }
+            }
             durable::supersede_decision(&self.idx, prior, &new)
         } else {
             durable::log_decision(&self.idx, &new)
@@ -749,6 +771,25 @@ impl MemoryServer {
         &self,
         Parameters(req): Parameters<ArchiveDecisionRequest>,
     ) -> String {
+        // Authorize by the decision's own project before archiving — a
+        // decision id carries no scope, so without this a confined server
+        // could archive another project's decision by guessing an id.
+        if self.scope.root().is_some() {
+            match durable::decision_project_path(&self.idx, &req.id) {
+                Ok(Some(owner)) => {
+                    if let Err(e) = self.scope.check_write(owner.as_deref()) {
+                        return self.denied(e);
+                    }
+                }
+                // Unknown id: fall through to archive_decision, which
+                // returns archived=false without revealing anything.
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "claudepot_archive_decision: lookup failed");
+                    return to_json(&error_with(error_code::WRITE_FAILED, &e, &self.policy));
+                }
+            }
+        }
         match durable::archive_decision(&self.idx, &req.id) {
             Ok(archived) => to_json(&ArchiveDecisionPayload {
                 schema_version: SCHEMA_VERSION,

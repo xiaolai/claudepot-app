@@ -39,9 +39,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::redaction::{apply as redact_apply, RedactionPolicy};
 use crate::session_index::SessionIndex;
-use crate::shared_memory::durable::{
-    self, CreatedByKind, DurableError, MemoryKind, MemoryRecord, Scope,
-};
+use crate::shared_memory::durable::{self, DurableError, MemoryKind, MemoryRecord};
 
 /// Claims below this confidence are dropped without review. The
 /// distiller's prompt says the same; belt and braces.
@@ -311,16 +309,19 @@ fn is_already_known(
     project_path: &str,
     content: &str,
 ) -> Result<bool, DurableError> {
-    let found: bool = idx
-        .db()
-        .query_row(
-            "SELECT 1 FROM memories \
-             WHERE content = ?1 AND (project_path = ?2 OR project_path IS NULL) LIMIT 1",
-            rusqlite::params![content, project_path],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
-    Ok(found)
+    match idx.db().query_row(
+        "SELECT 1 FROM memories \
+         WHERE content = ?1 AND (project_path = ?2 OR project_path IS NULL) LIMIT 1",
+        rusqlite::params![content, project_path],
+        |_| Ok(true),
+    ) {
+        Ok(found) => Ok(found),
+        // Only "no such row" means "not a duplicate". A real SQL error
+        // (locked DB, corruption) must NOT be swallowed as `false` — that
+        // would file a duplicate proposal on every transient failure.
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+        Err(e) => Err(DurableError::from(e)),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -332,40 +333,26 @@ fn insert_proposal(
     kind: MemoryKind,
     confidence: i64,
     anchor: Option<&str>,
-    now_ms: i64,
+    _now_ms: i64,
 ) -> Result<MemoryRecord, DurableError> {
-    // Reuse the durable writer so the id/timestamp/CHECK-constraint
-    // behavior stays in one place, then stamp the compiler columns it
-    // does not know about. Same transaction is not required: a memory
-    // that briefly exists without its directive is still `proposed`,
-    // and therefore inert.
-    let rec = durable::create_memory(
+    // ONE atomic insert as `review_state = 'proposed'`. Going through
+    // create_memory + a follow-up UPDATE would leave a crash window in
+    // which the row is 'accepted' (create_memory's column default) and
+    // has bypassed the human review gate. See durable::create_proposal.
+    durable::create_proposal(
         idx,
-        &durable::NewMemory {
-            scope: Scope::Project,
-            project_path: Some(origin.project_path),
+        &durable::NewProposal {
+            project_path: origin.project_path,
             kind,
             content: claim,
-            created_by_kind: CreatedByKind::Agent,
-            created_by: origin.created_by,
-            confidence: Some(confidence),
-        },
-    )?;
-
-    idx.db().execute(
-        "UPDATE memories SET review_state = 'proposed', directive = ?1, anchor_json = ?2, \
-         origin_exchange_id = ?3, origin_file_path = ?4, updated_at_ms = ?5 \
-         WHERE id = ?6",
-        rusqlite::params![
             directive,
-            anchor,
-            origin.exchange_id,
-            origin.file_path,
-            now_ms,
-            rec.id,
-        ],
-    )?;
-    Ok(rec)
+            confidence,
+            anchor_json: anchor,
+            origin_exchange_id: origin.exchange_id,
+            origin_file_path: origin.file_path,
+            created_by: origin.created_by,
+        },
+    )
 }
 
 /// `{"files": [...], "evidence": "..."}`. The commit is stamped at

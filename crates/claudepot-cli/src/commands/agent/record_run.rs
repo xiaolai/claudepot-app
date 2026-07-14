@@ -196,16 +196,24 @@ pub fn record_run_cmd(
 /// Deposit a finished run's structured output into its declared sink.
 ///
 /// Only [`ResultSink::MemoryProposals`] exists today: parse the run's
-/// `result.json` as distilled claims and file them as **proposals**
+/// model output as distilled claims and file them as **proposals**
 /// awaiting human review. Nothing here can produce an accepted memory —
 /// that transition is the human's, and only the human's.
+///
+/// Reads **`stdout.log`**, NOT `result.json`: `record_run` has already
+/// overwritten `result.json` with the `AgentRun` metadata record (which
+/// has no `claims` field), so reading it back would always parse to an
+/// empty harvest and the sink would silently do nothing. `stdout.log`
+/// holds the raw `claude -p --output-format json` output — the
+/// `{"type":"result","result":"…"}` envelope `parse_claims` already
+/// unwraps.
 fn drain_result_sink(id: &AgentId, run_dir: &std::path::Path) -> Result<()> {
     use claudepot_core::agent::ResultSink;
     use claudepot_core::shared_memory::proposal;
 
     // Non-blocking: if the GUI holds the store lock we skip this pass
-    // rather than stall the shim. `result.json` stays on disk, so a
-    // later `claudepot memory harvest` picks it up.
+    // rather than stall the shim. `stdout.log` stays on disk, so a
+    // later `claudepot lesson harvest` picks up the source session.
     let Some(store) = AgentStore::try_open()? else {
         tracing::debug!(agent_id = %id, "record-run: store lock busy — deferring sink drain");
         return Ok(());
@@ -222,8 +230,8 @@ fn drain_result_sink(id: &AgentId, run_dir: &std::path::Path) -> Result<()> {
 
     match sink {
         ResultSink::MemoryProposals => {
-            let raw = std::fs::read_to_string(run_dir.join("result.json"))
-                .context("read result.json for the memory sink")?;
+            let raw = std::fs::read_to_string(run_dir.join("stdout.log"))
+                .context("read stdout.log for the memory sink")?;
             let claims = proposal::parse_claims(&raw).context("parse distilled claims")?;
             if claims.claims.is_empty() {
                 // The common case, and a correct one: most sessions
@@ -268,6 +276,63 @@ mod tests {
         assert_eq!(parse_trigger("scheduled").unwrap(), TriggerKind::Scheduled);
         assert_eq!(parse_trigger("manual").unwrap(), TriggerKind::Manual);
         assert!(parse_trigger("nope").is_err());
+    }
+
+    #[test]
+    fn the_memory_sink_reads_stdout_log_and_files_a_proposal() {
+        // Regression for the Critical: drain_result_sink used to read
+        // result.json, which record_run had already overwritten with the
+        // AgentRun metadata (no `claims` field) — so the agent-triggered
+        // harvest was a silent no-op. It must read stdout.log, the raw
+        // `claude -p --output-format json` output. This test writes BOTH
+        // a claims-free result.json AND a claims-bearing stdout.log, then
+        // asserts the claims landed — pinning that stdout.log is the
+        // source. Runs against the CLAUDEPOT_DATA_DIR the test runner
+        // isolates (repo-invariants guard 5).
+        use claudepot_core::agent::templates::knowledge_distiller;
+        use claudepot_core::agent::{AgentStore, Lifecycle};
+
+        let run_dir = tempfile::tempdir().unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let cwd_str = cwd.path().to_string_lossy().into_owned();
+
+        // A distiller agent (result_sink = MemoryProposals) in the store.
+        let mut agent = knowledge_distiller(&cwd_str, Utc::now());
+        agent.lifecycle = Lifecycle::Installed; // add() accepts installed
+        let id = agent.id;
+        let mut store = AgentStore::open().expect("open agent store");
+        store.add(agent).expect("add distiller");
+        store.save().expect("save");
+        // Release the store lock — drain uses the NON-blocking try_open()
+        // and would otherwise skip silently while we hold it.
+        drop(store);
+
+        // result.json as record_run leaves it: metadata, NO claims.
+        std::fs::write(
+            run_dir.path().join("result.json"),
+            r#"{"agent_id":"x","exit_code":0,"result":{"is_error":false}}"#,
+        )
+        .unwrap();
+        // stdout.log: the real model output — a claims envelope.
+        std::fs::write(
+            run_dir.path().join("stdout.log"),
+            "{\"type\":\"result\",\"result\":\"{\\\"claims\\\":[{\\\"claim\\\":\
+             \\\"always run preflight before pushing\\\",\\\"directive\\\":\
+             \\\"Run scripts/preflight.sh before pushing.\\\",\\\"kind\\\":\
+             \\\"constraint\\\",\\\"evidence\\\":\\\"CI went red\\\",\\\"confidence\\\":90}]}\"}",
+        )
+        .unwrap();
+
+        drain_result_sink(&id, run_dir.path()).expect("drain");
+
+        // A proposal must now exist in sessions.db under the agent's cwd.
+        let db = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+        let idx = claudepot_core::session_index::SessionIndex::open(&db).unwrap();
+        let rows =
+            claudepot_core::shared_memory::review::list(&idx, Some(&cwd_str), None, 50).unwrap();
+        assert_eq!(rows.len(), 1, "the stdout.log claim must have been filed");
+        assert_eq!(rows[0].review_state, "proposed");
+        assert!(rows[0].content.contains("preflight"));
     }
 
     #[test]

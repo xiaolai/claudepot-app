@@ -1,4 +1,4 @@
-<!-- claudepot-mcp-instructions v3 — managed by `claudepot mcp install-snippet` or Claudepot GUI -->
+<!-- claudepot-mcp-instructions v4 — managed by `claudepot mcp install-snippet` or Claudepot GUI -->
 
 # Claudepot shared memory
 
@@ -6,11 +6,13 @@ You have access to the Claudepot MCP memory server via tools
 prefixed `claudepot_*`. Use them. Specifically:
 
 - **At the start of a session in a project**, call
-  `claudepot_list_decisions(project_path=cwd(), status="active")`
-  and `claudepot_list_memories(scope="project", project_path=cwd())`.
-  These return durable facts and design decisions that earlier
-  sessions (either yours or another agent's) recorded for this
-  project. Treat them as load-bearing context.
+  `claudepot_list_decisions(status="active")` and
+  `claudepot_list_memories(scope="project")`. The server is confined
+  to this project, so you do NOT need to pass `project_path` — it is
+  scoped for you, and passing a path that doesn't exactly match the
+  server's project would be refused. These return durable facts and
+  design decisions that earlier sessions (yours or another agent's)
+  recorded for this project. Treat them as load-bearing context.
 
 - **Before asking the user a question that history might
   answer**, call `claudepot_search_memory(query)` to look for
@@ -29,12 +31,10 @@ prefixed `claudepot_*`. Use them. Specifically:
   ("I always run tests with X", "this project uses Y over Z"),
   call `claudepot_remember(scope="project",
   project_path=cwd(), kind="preference"|"fact"|"pattern"|...,
-  content="...", created_by="<your-agent-id>")`.
-
-  What you write is a **proposal**, not a fact. The user reviews it
-  before it becomes binding. So record what the evidence supports and
-  nothing more: a wrong memory that survives review is worse than no
-  memory at all, because it will be trusted.
+  content="...", created_by="<your-agent-id>")`. Record only what the
+  user actually stated — this becomes active project memory that future
+  sessions treat as true, so a wrong entry is worse than none because it
+  will be trusted. The user can archive it later.
 
 - **When you commit to a non-trivial design decision** with the
   user (data model choice, library pick, architectural cut),

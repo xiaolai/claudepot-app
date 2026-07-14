@@ -94,10 +94,24 @@ pub fn list_cmd(
 
 pub fn accept_cmd(ctx: &AppContext, id: &str, no_anchor: bool) -> Result<()> {
     let idx = open_index()?;
-    // Stamp the commit the anchored files are at right now. That pair —
-    // files + commit — is what lets us tell you later that this claim
-    // may no longer be true.
-    let commit = if no_anchor { None } else { head_commit() };
+    // Resolve the lesson first so we anchor to ITS project's HEAD, not
+    // whatever repo the CLI happens to be run from. Accepting a lesson
+    // that belongs to another project while cd'd elsewhere would stamp
+    // the wrong commit (or none), silently breaking invalidation.
+    let lesson = review::list(&idx, None, Some(ReviewState::Proposed), 1000)?
+        .into_iter()
+        .chain(review::list(&idx, None, Some(ReviewState::Suspect), 1000)?)
+        .find(|r| r.id == id)
+        .with_context(|| format!("no lesson awaiting review with id {id}"))?;
+
+    // Stamp the commit the anchored files are at right now, in the
+    // lesson's own project. That pair — files + commit — is what lets us
+    // tell you later that this claim may no longer be true.
+    let commit = if no_anchor {
+        None
+    } else {
+        lesson.project_path.as_deref().and_then(head_commit_in)
+    };
     let ok = review::accept(&idx, id, commit.as_deref(), now_ms())?;
     if !ok {
         bail!("no such lesson: {id}");
@@ -295,8 +309,13 @@ fn distill_one(idx: &SessionIndex, project: &str, path: &str) -> Result<proposal
     Ok(proposal::ingest_proposals(idx, &claims, &origin, now_ms())?)
 }
 
-fn head_commit() -> Option<String> {
+/// HEAD of the git repo containing `dir`. `None` if `dir` isn't a repo.
+/// Runs `git -C <dir>` so the commit belongs to the lesson's own
+/// project, not wherever the CLI was invoked.
+fn head_commit_in(dir: &str) -> Option<String> {
     let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
         .args(["rev-parse", "HEAD"])
         .output()
         .ok()?;
@@ -346,7 +365,14 @@ pub fn compile_cmd(ctx: &AppContext, args: CompileArgs) -> Result<()> {
     // a model that fills a struct cannot.
     let spec = propose_guard(&lesson.content, &directive, &args.id)?;
 
-    let script_path = repo_invariants_path()?;
+    // The guard belongs in the LESSON's project repo, not whatever repo
+    // the CLI is run from — a lesson mined in project B must not have its
+    // guard written into project A's repo-invariants.sh.
+    let project = lesson
+        .project_path
+        .clone()
+        .context("this lesson has no project_path; cannot locate its repo-invariants.sh")?;
+    let script_path = repo_invariants_path(&project)?;
     let script = std::fs::read_to_string(&script_path)
         .with_context(|| format!("read {}", script_path.display()))?;
     let spliced = guard::splice_into_script(&script, &spec).context("splice guard block")?;
@@ -360,6 +386,17 @@ pub fn compile_cmd(ctx: &AppContext, args: CompileArgs) -> Result<()> {
         println!("Run with --write to add it to {}.", script_path.display());
         println!("(It will be kept only if it does NOT fire on the current clean tree.)");
         return Ok(());
+    }
+
+    // Baseline the script BEFORE adding the guard. If repo-invariants.sh
+    // is already failing for an unrelated reason, we must not write the
+    // guard and then blame it for a failure it didn't cause.
+    if !run_invariants(&script_path)? {
+        bail!(
+            "{} is already failing before this guard is added — fix the existing \
+             invariant failure first, then re-run compile.",
+            script_path.display()
+        );
     }
 
     // Write, then PROVE it doesn't false-positive. A generated guard that
@@ -484,14 +521,16 @@ fn propose_guard(claim: &str, directive: &str, lesson_id: &str) -> Result<GuardS
     })
 }
 
-fn repo_invariants_path() -> Result<std::path::PathBuf> {
+fn repo_invariants_path(project: &str) -> Result<std::path::PathBuf> {
     let root = std::process::Command::new("git")
+        .arg("-C")
+        .arg(project)
         .args(["rev-parse", "--show-toplevel"])
         .output()
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .context("not in a git repository — guards live in scripts/repo-invariants.sh")?;
+        .with_context(|| format!("{project} is not a git repository"))?;
     let p = std::path::Path::new(&root).join("scripts/repo-invariants.sh");
     if !p.exists() {
         bail!(
@@ -503,8 +542,15 @@ fn repo_invariants_path() -> Result<std::path::PathBuf> {
 }
 
 fn run_invariants(script: &std::path::Path) -> Result<bool> {
+    // Run from the script's own repo root so its relative `grep`s resolve
+    // against that project, not the CLI's cwd.
+    let cwd = script
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or_else(|| std::path::Path::new("."));
     let out = std::process::Command::new("bash")
         .arg(script)
+        .current_dir(cwd)
         .output()
         .context("run repo-invariants.sh")?;
     Ok(out.status.success())
