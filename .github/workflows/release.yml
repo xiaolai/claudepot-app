@@ -107,6 +107,9 @@ jobs:
     needs: preflight
     name: macOS ${{ matrix.arch }} (CLI + GUI)
     runs-on: macos-latest
+    # Bound the job so a hung step (e.g. a wedged cache post-step)
+    # fails fast instead of tying up a runner for the 6h default.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -143,6 +146,7 @@ jobs:
       - name: Rust build cache
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: false
           key: ${{ matrix.arch }}
 
       - name: Install JS deps
@@ -273,6 +277,9 @@ jobs:
     name: Linux x86_64 (CLI + GUI)
     needs: preflight
     runs-on: ubuntu-latest
+    # Bound the job so a hung step (e.g. a wedged cache post-step)
+    # fails fast instead of tying up a runner for the 6h default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -306,6 +313,8 @@ jobs:
       # See build-macos for why rust-cache replaces actions/cache.
       - name: Rust build cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
 
       - name: Build CLI binary
         run: cargo build -p claudepot-cli --release
@@ -374,6 +383,9 @@ jobs:
     name: Linux aarch64 (CLI only)
     needs: preflight
     runs-on: ubuntu-latest
+    # Bound the job so a hung step (e.g. a wedged cache post-step)
+    # fails fast instead of tying up a runner for the 6h default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -393,6 +405,8 @@ jobs:
       # See build-macos for why rust-cache replaces actions/cache.
       - name: Rust build cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
 
       - name: Build CLI
         run: cargo build -p claudepot-cli --release --target aarch64-unknown-linux-gnu
@@ -416,6 +430,9 @@ jobs:
     name: Windows x86_64 (CLI + GUI)
     needs: preflight
     runs-on: windows-latest
+    # Bound the job so a hung step (e.g. a wedged cache post-step)
+    # fails fast instead of tying up a runner for the 6h default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -438,6 +455,8 @@ jobs:
       # See build-macos for why rust-cache replaces actions/cache.
       - name: Rust build cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
 
       - name: Build CLI
         run: cargo build -p claudepot-cli --release
