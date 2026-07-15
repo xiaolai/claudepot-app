@@ -40,6 +40,7 @@ pub mod indexer;
 pub mod invalidate;
 pub mod proposal;
 pub mod read;
+pub mod recurrence;
 pub mod review;
 pub mod schema;
 pub mod scope;

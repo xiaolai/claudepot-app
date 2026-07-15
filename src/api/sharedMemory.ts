@@ -126,6 +126,48 @@ export interface LogDecisionArgs {
   supersedes_id?: string | null;
 }
 
+// ─── evidence ────────────────────────────────────────────────
+
+export interface ListEvidenceArgs {
+  project_path?: string | null;
+  limit?: number | null;
+}
+
+export interface Evidence {
+  id: string;
+  project_path: string | null;
+  topic: string | null;
+  summary: string;
+  verification: string;
+  /** JSON array of repo-relative paths that were changed. */
+  files_changed_json: string;
+  confidence: number;
+  created_by_kind: CreatedByKind;
+  created_by: string;
+  created_at_ms: number;
+}
+
+// ─── memory links ────────────────────────────────────────────
+
+export type LinkRelation = "evidence" | "origin" | "related" | "supersedes";
+
+export interface MemoryLinksArgs {
+  /** Exactly one identifies the parent whose links to read. */
+  memory_id?: string | null;
+  decision_id?: string | null;
+  evidence_id?: string | null;
+}
+
+export interface MemoryLink {
+  id: string;
+  memory_id: string | null;
+  decision_id: string | null;
+  evidence_id: string | null;
+  exchange_id: string | null;
+  file_path: string | null;
+  relation: LinkRelation;
+}
+
 // ─── discovery ───────────────────────────────────────────────
 
 export interface ListSessionsArgs {
@@ -201,6 +243,10 @@ export interface LessonRow {
   /** The transcript this was learned from — the "show me what burned me" link. */
   origin_file_path: string | null;
   origin_exchange_id: string | null;
+  /** What an accepted claim compiled into: guard / directive / note. */
+  compile_target: string | null;
+  /** Where the compiled guard landed, e.g. `scripts/repo-invariants.sh:6`. */
+  guard_ref: string | null;
   project_path: string | null;
   created_at_ms: number;
 }
@@ -214,9 +260,16 @@ export interface LessonCounts {
   enforced: number;
 }
 
+/** One coverage-grid row: a project and its review counts. */
+export interface ProjectCounts {
+  project_path: string;
+  counts: LessonCounts;
+}
+
 export interface LessonListArgs {
   project_path?: string | null;
-  state?: ReviewStateName | null;
+  /** A review state, or "all" to list every state (Know view). */
+  state?: ReviewStateName | "all" | null;
   limit?: number | null;
 }
 
@@ -225,6 +278,36 @@ export interface LessonAcceptArgs {
   /** Accept without an anchor (the lesson can never go suspect). When
    * false/omitted, the backend resolves the lesson's project HEAD. */
   no_anchor?: boolean;
+}
+
+// ─── recurrence tracking (Phase 3) ───────────────────────────
+
+export type RecurrenceDetectedBy = "anchor" | "similarity";
+
+export interface RecurrenceEvent {
+  id: string;
+  matched_memory_id: string;
+  project_path: string;
+  /** The recurring claim, in the new session's words. */
+  new_content: string;
+  new_exchange_id: string | null;
+  new_file_path: string | null;
+  detected_by: RecurrenceDetectedBy;
+  detected_at_ms: number;
+  status: "pending" | "confirmed" | "dismissed";
+  confirmed_at_ms: number | null;
+  /** The matched lesson's claim — what we already learned. */
+  matched_content: string | null;
+  /** The matched lesson's review state (accepted / suspect). */
+  matched_state: string | null;
+}
+
+export interface RecurrenceCounts {
+  /** Confirmed recurrences within the trailing window. */
+  confirmed_window: number;
+  /** Candidates awaiting a human decision. */
+  pending: number;
+  window_days: number;
 }
 
 // ─── API surface ─────────────────────────────────────────────
@@ -249,6 +332,11 @@ export const sharedMemoryApi = {
   archiveDecision: (id: string) =>
     invoke<boolean>("shared_memory_archive_decision", { id }),
 
+  listEvidence: (args: ListEvidenceArgs = {}) =>
+    invoke<Evidence[]>("shared_memory_list_evidence", { args }),
+  memoryLinks: (args: MemoryLinksArgs) =>
+    invoke<MemoryLink[]>("shared_memory_memory_links", { args }),
+
   listSessions: (args: ListSessionsArgs = {}) =>
     invoke<SessionSummary[]>("shared_memory_list_sessions", { args }),
   listProjects: (limit?: number) =>
@@ -267,7 +355,18 @@ export const sharedMemoryApi = {
     invoke<LessonRow[]>("lesson_list", { args }),
   lessonCounts: (projectPath?: string) =>
     invoke<LessonCounts>("lesson_counts", { projectPath }),
+  lessonCountsByProject: () =>
+    invoke<ProjectCounts[]>("lesson_counts_by_project"),
   lessonAccept: (args: LessonAcceptArgs) =>
     invoke<boolean>("lesson_accept", { args }),
   lessonReject: (id: string) => invoke<boolean>("lesson_reject", { id }),
+
+  // Recurrence tracking.
+  recurrenceList: (projectPath?: string) =>
+    invoke<RecurrenceEvent[]>("recurrence_list", { projectPath }),
+  recurrenceConfirm: (id: string) =>
+    invoke<boolean>("recurrence_confirm", { id }),
+  recurrenceDismiss: (id: string) =>
+    invoke<boolean>("recurrence_dismiss", { id }),
+  recurrenceCounts: () => invoke<RecurrenceCounts>("recurrence_counts"),
 };

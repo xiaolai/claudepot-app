@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use crate::redaction::{apply as redact_apply, RedactionPolicy};
 use crate::session_index::SessionIndex;
 use crate::shared_memory::durable::{self, DurableError, MemoryKind, MemoryRecord};
+use crate::shared_memory::recurrence;
 
 /// Claims below this confidence are dropped without review. The
 /// distiller's prompt says the same; belt and braces.
@@ -106,6 +107,11 @@ pub struct IngestReport {
     pub skipped_duplicate: u32,
     pub skipped_too_long: u32,
     pub skipped_empty: u32,
+    /// New claims that matched an already-accepted/suspect lesson in this
+    /// project — filed as pending recurrences for a human to confirm. This
+    /// counts *detections*, independent of whether the claim was also filed
+    /// as a fresh proposal or skipped as a duplicate.
+    pub recurrences_detected: u32,
 }
 
 impl IngestReport {
@@ -252,6 +258,13 @@ pub fn ingest_proposals(
     let mut report = IngestReport::default();
     let policy = RedactionPolicy::default();
 
+    // The lessons a new claim can recur against: this project's committed
+    // (accepted/suspect) lessons. Fetched ONCE — every claim in the batch
+    // shares `origin.project_path`, so re-querying per claim would be
+    // wasted work. Empty on a project with no accepted lessons, in which
+    // case detection is a no-op.
+    let priors = recurrence::prior_lessons(idx, origin.project_path)?;
+
     for c in &claims.claims {
         let claim = c.claim.trim();
         let directive = c.directive.trim();
@@ -275,6 +288,31 @@ pub fn ingest_proposals(
         let claim = redact_apply(claim, &policy);
         let directive = redact_apply(directive, &policy);
         let evidence = redact_apply(c.evidence.trim(), &policy);
+
+        // Recurrence check BEFORE the dedup gate. This runs even when the
+        // claim is an exact duplicate of an accepted lesson — an exact
+        // re-derivation is the strongest possible recurrence signal, and
+        // the dedup below would otherwise swallow it silently. `record`
+        // is itself idempotent, so a re-harvest doesn't pile up events.
+        if !priors.is_empty() {
+            if let Some(m) = recurrence::detect_match(&c.files, &claim, &directive, &priors) {
+                let filed = recurrence::record(
+                    idx,
+                    &recurrence::NewRecurrence {
+                        matched_memory_id: &m.memory_id,
+                        project_path: origin.project_path,
+                        new_content: &claim,
+                        new_exchange_id: origin.exchange_id,
+                        new_file_path: origin.file_path,
+                        detected_by: m.detected_by,
+                    },
+                    now_ms,
+                )?;
+                if filed.is_some() {
+                    report.recurrences_detected += 1;
+                }
+            }
+        }
 
         if is_already_known(idx, origin.project_path, &claim)? {
             report.skipped_duplicate += 1;

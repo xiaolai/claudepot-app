@@ -11,7 +11,7 @@ describe("section registry — single source of truth", () => {
       ["accounts", "Accounts"],
       ["events", "Activities"],
       ["projects", "Projects"],
-      ["shared-memory", "Memory"],
+      ["shared-memory", "Knowledge"],
       ["keys", "Keys"],
       ["third-party", "Providers"],
       ["automations", "Agents"],

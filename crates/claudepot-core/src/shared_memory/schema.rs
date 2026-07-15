@@ -226,11 +226,54 @@ CREATE INDEX IF NOT EXISTS idx_memory_links_decision ON memory_links(decision_id
 CREATE INDEX IF NOT EXISTS idx_memory_links_evidence ON memory_links(evidence_id);
 CREATE INDEX IF NOT EXISTS idx_memory_links_exchange ON memory_links(exchange_id);
 CREATE INDEX IF NOT EXISTS idx_memory_links_file     ON memory_links(file_path);
+
+-- ─── recurrence_events ────────────────────────────────────────
+-- A recurrence: the distiller re-derived, from a NEW session, a lesson
+-- that matches one already accepted or suspect in the SAME project — the
+-- agent hit a wall we had already learned about. Detected at ingest, and
+-- deliberately NOT auto-counted: filed here as 'pending' and surfaced in
+-- Review for a human to confirm. Only a confirmed recurrence is a real
+-- datum; a fuzzy match silently incrementing a metric is a soft lie (the
+-- METR self-report trap), so the metric the dashboard shows counts only
+-- confirmed rows.
+--
+-- Durable, like `memories`: NOT cascade-cleared by "Rebuild Shared
+-- Memory". `new_exchange_id` / `new_file_path` are denormalized with NO
+-- foreign key — the exchange row is transcript cache and a rebuild deletes
+-- it, exactly the reason provenance is denormalized onto `memories`.
+CREATE TABLE IF NOT EXISTS recurrence_events (
+    id                 TEXT    PRIMARY KEY,
+    matched_memory_id  TEXT    NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    project_path       TEXT    NOT NULL,
+    new_content        TEXT    NOT NULL,
+    new_exchange_id    TEXT,
+    new_file_path      TEXT,
+    detected_by        TEXT    NOT NULL CHECK (detected_by IN ('anchor','similarity')),
+    detected_at_ms     INTEGER NOT NULL,
+    status             TEXT    NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending','confirmed','dismissed')),
+    confirmed_at_ms    INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurrence_project ON recurrence_events(project_path);
+CREATE INDEX IF NOT EXISTS idx_recurrence_status  ON recurrence_events(status);
+CREATE INDEX IF NOT EXISTS idx_recurrence_matched ON recurrence_events(matched_memory_id);
+-- Dedup backstop. `record`'s check-then-insert is atomic only within one
+-- process's connection mutex; GUI + CLI both open this DB, so a concurrent
+-- overlapping harvest could pass two SELECTs and file the same recurrence
+-- twice. This UNIQUE index makes the second INSERT fail, which `record`
+-- maps back to "already recorded". Safe to add: `record` already dedups,
+-- so no existing row set violates it.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recurrence_dedup
+    ON recurrence_events(matched_memory_id, new_content);
 "#;
 
-/// Names of the eight tables created by the v4 DDL block. Used by
-/// the migration's post-write validation to assert the transaction
-/// produced what it promised before committing.
+/// Names of the tables created by the v4 DDL block. Used by the
+/// migration's post-write validation to assert the transaction produced
+/// what it promised before committing. `recurrence_events` was added
+/// additively (the block is idempotent `IF NOT EXISTS`, so an existing DB
+/// gains the table on its next open without a version bump — the same
+/// non-destructive path as the `memories` compiler columns).
 pub const V4_TABLE_NAMES: &[&str] = &[
     "exchanges",
     "exchange_fts",
@@ -240,6 +283,7 @@ pub const V4_TABLE_NAMES: &[&str] = &[
     "decisions",
     "evidence_records",
     "memory_links",
+    "recurrence_events",
 ];
 
 /// Names of the FTS5 maintenance triggers on `exchanges`. The
