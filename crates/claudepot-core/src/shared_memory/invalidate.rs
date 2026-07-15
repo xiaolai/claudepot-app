@@ -215,7 +215,10 @@ pub fn apply(
 /// path relative to a subdirectory, so a boundary-aware suffix match is
 /// the forgiving-but-not-sloppy rule. (`core.rs` must not match
 /// `score.rs`; the segment boundary is what prevents that.)
-fn paths_match(git_path: &str, anchor_path: &str) -> bool {
+///
+/// Shared with `recurrence::detect_match`'s anchor-overlap check so a
+/// recurrence uses the identical boundary rule (`core.rs` ≠ `score.rs`).
+pub(crate) fn paths_match(git_path: &str, anchor_path: &str) -> bool {
     // Normalize separators before comparing. `git diff` emits
     // forward-slash paths on every platform, but the distiller records
     // whatever the model wrote — which on a Windows repo can be

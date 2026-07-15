@@ -128,9 +128,12 @@ export const sections: readonly SectionDef[] = [
       />
     ),
   },
+  // id kept as "shared-memory" for localStorage compatibility; the pane
+  // is now a curated knowledge base, and "Memory" collided with the
+  // `claudepot memory` CLI noun (CLAUDE.md files).
   {
     id: "shared-memory",
-    label: "Memory",
+    label: "Knowledge",
     glyph: NF.book,
     loader: importSharedMemory,
     render: () => <SharedMemorySection />,

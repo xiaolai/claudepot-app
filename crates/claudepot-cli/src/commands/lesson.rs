@@ -237,6 +237,7 @@ pub fn harvest_cmd(ctx: &AppContext, args: HarvestArgs) -> Result<()> {
                 total.skipped_low_confidence += r.skipped_low_confidence;
                 total.skipped_too_long += r.skipped_too_long;
                 total.skipped_empty += r.skipped_empty;
+                total.recurrences_detected += r.recurrences_detected;
             }
             Err(e) => {
                 // One bad transcript must not abort a 100-session
@@ -253,6 +254,7 @@ pub fn harvest_cmd(ctx: &AppContext, args: HarvestArgs) -> Result<()> {
             "failed": failed,
             "proposed": total.proposed,
             "skipped": total.total_skipped(),
+            "recurrences_detected": total.recurrences_detected,
         }));
     }
     println!("\n{} lesson(s) filed for review.", total.proposed);
@@ -260,11 +262,22 @@ pub fn harvest_cmd(ctx: &AppContext, args: HarvestArgs) -> Result<()> {
         // Never silently drop things. A harvest that says "0 proposed"
         // with no explanation looks broken.
         println!(
-            "  ({} skipped: {} duplicate, {} low-confidence, {} over-long)",
+            "  ({} skipped: {} duplicate, {} low-confidence, {} over-long, {} empty)",
             total.total_skipped(),
             total.skipped_duplicate,
             total.skipped_low_confidence,
-            total.skipped_too_long
+            total.skipped_too_long,
+            total.skipped_empty
+        );
+    }
+    if total.recurrences_detected > 0 {
+        // A recurrence is the failure the compiler exists to prevent —
+        // never bury it in the skipped line. Confirm them in the GUI's
+        // Review tab (or wherever the recurrence surface lives).
+        println!(
+            "  ⟳ {} recurrence(s) detected — a class you already learned recurred. \
+             Confirm in Review.",
+            total.recurrences_detected
         );
     }
     if failed > 0 {

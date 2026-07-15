@@ -21,6 +21,9 @@ import type {
 import { Button } from "../components/primitives/Button";
 import { SectionLabel } from "../components/primitives/SectionLabel";
 import { Tag } from "../components/primitives/Tag";
+import { RecurrencePanel } from "./knowledge/RecurrencePanel";
+import { StatCard } from "./knowledge/dashboard-primitives";
+import type { StatCardProps } from "./knowledge/dashboard-primitives";
 
 type QueueState = Extract<ReviewStateName, "proposed" | "suspect">;
 
@@ -99,7 +102,12 @@ export function LessonsTab() {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const row = rows[cursor];
-      if (e.key === "j") setCursor((i) => Math.min(i + 1, rows.length - 1));
+      // Math.max(0, …) floors the cursor at 0 (not -1) when the queue is
+      // empty — otherwise `j` on an empty queue leaves cursor at -1, which
+      // the refresh/accept clamps preserve, so the first loaded card gets
+      // no focus and a/r silently no-op until j/k is pressed again.
+      if (e.key === "j")
+        setCursor((i) => Math.min(i + 1, Math.max(0, rows.length - 1)));
       else if (e.key === "k") setCursor((i) => Math.max(i - 1, 0));
       else if (e.key === "a" && row) void act(row, "accept");
       else if (e.key === "r" && row) void act(row, "reject");
@@ -112,6 +120,10 @@ export function LessonsTab() {
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)" }}>
       <Gazette counts={counts} />
 
+      {/* High-signal: a class we already learned that recurred anyway.
+          Renders nothing when there are no pending candidates. */}
+      <RecurrencePanel />
+
       <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-12)" }}>
         <SectionLabel>Review queue</SectionLabel>
         <QueueToggle value={queue} counts={counts} onChange={setQueue} />
@@ -122,7 +134,7 @@ export function LessonsTab() {
       </div>
 
       {err && (
-        <div role="alert" style={{ color: "var(--danger)", fontSize: "var(--fs-13)" }}>
+        <div role="alert" style={{ color: "var(--danger)", fontSize: "var(--fs-base)" }}>
           {err}
         </div>
       )}
@@ -146,7 +158,7 @@ export function LessonsTab() {
       </ul>
 
       {rows.length > 0 && (
-        <p style={{ fontSize: "var(--fs-12)", color: "var(--text-dim)", margin: 0 }}>
+        <p style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)", margin: 0 }}>
           <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> accept · <kbd>r</kbd> reject.
           You judge; you never author.
         </p>
@@ -158,30 +170,33 @@ export function LessonsTab() {
 // ─── the honest gazette (Phase 5) ────────────────────────────────
 
 function Gazette({ counts }: { counts: LessonCounts | null }) {
-  const stats = useMemo(
+  // Uses the shared StatCard + toneColor from dashboard-primitives so the
+  // Review gazette and the Dashboard speak one visual language (the doc's
+  // "extract Gazette's StatCard + toneColor so both surfaces agree").
+  const stats: StatCardProps[] = useMemo(
     () => [
       {
         label: "To review",
         value: counts?.proposed ?? 0,
-        tone: "accent" as const,
+        tone: "accent",
         hint: "waiting on your yes / no",
       },
       {
         label: "Enforced",
         value: counts?.enforced ?? 0,
-        tone: "good" as const,
+        tone: "good",
         hint: "compiled into a check that fails the build",
       },
       {
         label: "Documented",
         value: Math.max(0, (counts?.accepted ?? 0) - (counts?.enforced ?? 0)),
-        tone: "neutral" as const,
+        tone: "neutral",
         hint: "accepted, not yet a check",
       },
       {
         label: "Suspect",
         value: counts?.suspect ?? 0,
-        tone: "warn" as const,
+        tone: "warn",
         hint: "the code they relied on changed",
       },
     ],
@@ -197,47 +212,10 @@ function Gazette({ counts }: { counts: LessonCounts | null }) {
       }}
     >
       {stats.map((s) => (
-        <div
-          key={s.label}
-          style={{
-            border: "var(--sp-px) solid var(--line)",
-            borderRadius: "var(--radius-8)",
-            padding: "var(--sp-16)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--sp-4)",
-          }}
-        >
-          <span
-            style={{
-              fontSize: "var(--fs-24)",
-              fontWeight: 600,
-              color: toneColor(s.tone),
-            }}
-          >
-            {s.value}
-          </span>
-          <span style={{ fontSize: "var(--fs-13)", fontWeight: 500 }}>{s.label}</span>
-          <span style={{ fontSize: "var(--fs-11)", color: "var(--text-dim)" }}>
-            {s.hint}
-          </span>
-        </div>
+        <StatCard key={s.label} {...s} />
       ))}
     </div>
   );
-}
-
-function toneColor(tone: "accent" | "good" | "warn" | "neutral"): string {
-  switch (tone) {
-    case "accent":
-      return "var(--accent)";
-    case "good":
-      return "var(--success, var(--accent))";
-    case "warn":
-      return "var(--warning, var(--danger))";
-    default:
-      return "var(--text)";
-  }
 }
 
 // ─── a single card ───────────────────────────────────────────────
@@ -264,18 +242,18 @@ function LessonCard({
         onMouseEnter={onFocus}
         style={{
           border: `var(--sp-px) solid ${focused ? "var(--accent)" : "var(--line)"}`,
-          borderRadius: "var(--radius-8)",
+          borderRadius: "var(--r-3)",
           padding: "var(--sp-16)",
           display: "flex",
           flexDirection: "column",
           gap: "var(--sp-8)",
-          background: focused ? "var(--surface-hover, transparent)" : "transparent",
+          background: focused ? "var(--accent-soft)" : "transparent",
         }}
       >
         <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "baseline" }}>
           <Tag>{row.kind}</Tag>
           {typeof row.confidence === "number" && (
-            <span style={{ fontSize: "var(--fs-11)", color: "var(--text-dim)" }}>
+            <span style={{ fontSize: "var(--fs-xs)", color: "var(--fg-muted)" }}>
               {row.confidence}%
             </span>
           )}
@@ -288,7 +266,7 @@ function LessonCard({
             style={{
               margin: 0,
               fontFamily: "var(--font-mono)",
-              fontSize: "var(--fs-13)",
+              fontSize: "var(--fs-base)",
               color: "var(--accent)",
             }}
           >
@@ -297,13 +275,13 @@ function LessonCard({
         )}
 
         {row.suspect_reason && (
-          <p style={{ margin: 0, fontSize: "var(--fs-12)", color: "var(--warning, var(--danger))" }}>
+          <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--warn)" }}>
             ! {row.suspect_reason}
           </p>
         )}
 
         {evidence && (
-          <p style={{ margin: 0, fontSize: "var(--fs-12)", color: "var(--text-dim)" }}>
+          <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
             because: {evidence}
           </p>
         )}
@@ -358,16 +336,16 @@ function EmptyQueue({ queue }: { queue: QueueState }) {
     <div
       style={{
         border: "var(--sp-px) dashed var(--line)",
-        borderRadius: "var(--radius-8)",
+        borderRadius: "var(--r-3)",
         padding: "var(--sp-24)",
         textAlign: "center",
-        color: "var(--text-dim)",
+        color: "var(--fg-muted)",
       }}
     >
       {queue === "proposed" ? (
         <>
           <p style={{ margin: 0 }}>Nothing to review.</p>
-          <p style={{ margin: "var(--sp-8) 0 0", fontSize: "var(--fs-12)" }}>
+          <p style={{ margin: "var(--sp-8) 0 0", fontSize: "var(--fs-sm)" }}>
             Harvest lessons from your sessions:{" "}
             <code>claudepot lesson harvest</code>
           </p>

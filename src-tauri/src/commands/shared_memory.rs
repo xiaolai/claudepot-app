@@ -525,6 +525,141 @@ pub async fn shared_memory_archive_decision(
     .map_err(join_err)?
 }
 
+// ─── evidence ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListEvidenceArgs {
+    #[serde(default)]
+    pub project_path: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EvidenceDto {
+    pub id: String,
+    pub project_path: Option<String>,
+    pub topic: Option<String>,
+    pub summary: String,
+    pub verification: String,
+    pub files_changed_json: String,
+    pub confidence: i64,
+    pub created_by_kind: String,
+    pub created_by: String,
+    pub created_at_ms: i64,
+}
+
+/// The audit-fix loop's receipts, made a first-class citizen. `summary`
+/// and `verification` are free text authored by an agent, so they are
+/// redacted on the way out like every other durable emission from this
+/// file. `files_changed_json` is the user's own paths (shown per
+/// `path-display.md`) and is left intact so the JSON array parses.
+#[tauri::command]
+pub async fn shared_memory_list_evidence(
+    args: ListEvidenceArgs,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<EvidenceDto>, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let policy = ui_redaction_policy();
+        let rows = durable::list_evidence(
+            idx.as_ref(),
+            args.project_path.as_deref(),
+            args.limit.unwrap_or(0),
+        )
+        .map_err(|e| format!("list_evidence: {e}"))?;
+        Ok::<_, String>(
+            rows.into_iter()
+                .map(|e| EvidenceDto {
+                    id: e.id,
+                    project_path: e.project_path,
+                    topic: e.topic.map(|t| redact_apply(&t, &policy)),
+                    summary: redact_apply(&e.summary, &policy),
+                    verification: redact_apply(&e.verification, &policy),
+                    files_changed_json: e.files_changed_json,
+                    confidence: e.confidence,
+                    created_by_kind: created_by_kind_str(e.created_by_kind).to_string(),
+                    created_by: redact_apply(&e.created_by, &policy),
+                    created_at_ms: e.created_at_ms,
+                })
+                .collect(),
+        )
+    })
+    .await
+    .map_err(join_err)?
+}
+
+// ─── memory links ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryLinksArgs {
+    /// Exactly one of these picks the parent row whose links to read.
+    #[serde(default)]
+    pub memory_id: Option<String>,
+    #[serde(default)]
+    pub decision_id: Option<String>,
+    #[serde(default)]
+    pub evidence_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MemoryLinkDto {
+    pub id: String,
+    pub memory_id: Option<String>,
+    pub decision_id: Option<String>,
+    pub evidence_id: Option<String>,
+    pub exchange_id: Option<String>,
+    pub file_path: Option<String>,
+    pub relation: String,
+}
+
+fn link_relation_str(r: durable::LinkRelation) -> &'static str {
+    match r {
+        durable::LinkRelation::Evidence => "evidence",
+        durable::LinkRelation::Origin => "origin",
+        durable::LinkRelation::Related => "related",
+        durable::LinkRelation::Supersedes => "supersedes",
+    }
+}
+
+/// Read the links attached to a durable row — its provenance and
+/// cross-references. Emits only ids, a relation enum, and the user's own
+/// `file_path` (no free prose), so nothing here needs redaction.
+#[tauri::command]
+pub async fn shared_memory_memory_links(
+    args: MemoryLinksArgs,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<MemoryLinkDto>, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let q = if let Some(id) = args.memory_id.as_deref() {
+            durable::LinkQuery::Memory(id)
+        } else if let Some(id) = args.decision_id.as_deref() {
+            durable::LinkQuery::Decision(id)
+        } else if let Some(id) = args.evidence_id.as_deref() {
+            durable::LinkQuery::Evidence(id)
+        } else {
+            return Err("one of memory_id / decision_id / evidence_id is required".to_string());
+        };
+        let rows = durable::links_for(idx.as_ref(), q).map_err(|e| format!("links: {e}"))?;
+        Ok::<_, String>(
+            rows.into_iter()
+                .map(|l| MemoryLinkDto {
+                    id: l.id,
+                    memory_id: l.memory_id,
+                    decision_id: l.decision_id,
+                    evidence_id: l.evidence_id,
+                    exchange_id: l.exchange_id,
+                    file_path: l.file_path,
+                    relation: link_relation_str(l.relation).to_string(),
+                })
+                .collect(),
+        )
+    })
+    .await
+    .map_err(join_err)?
+}
+
 // ─── discovery ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
@@ -790,7 +925,9 @@ use claudepot_core::shared_memory::review::{self, ReviewCounts, ReviewRow, Revie
 pub struct LessonListArgs {
     #[serde(default)]
     pub project_path: Option<String>,
-    /// proposed | accepted | rejected | suspect. Omit for proposed.
+    /// proposed | accepted | rejected | suspect | all. Omit for proposed
+    /// (the triage default); `all` lists every state, which the Know view
+    /// uses to render the whole curated base at once.
     #[serde(default)]
     pub state: Option<String>,
     #[serde(default)]
@@ -806,6 +943,7 @@ pub async fn lesson_list(
     tokio::task::spawn_blocking(move || {
         let review_state = match args.state.as_deref() {
             None => Some(ReviewState::Proposed),
+            Some("all") => None,
             Some(s) => Some(ReviewState::parse(s).ok_or_else(|| format!("bad state {s:?}"))?),
         };
         let mut rows = review::list(
@@ -847,6 +985,38 @@ pub async fn lesson_counts(
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         review::counts(idx.as_ref(), project_path.as_deref()).map_err(|e| format!("counts: {e}"))
+    })
+    .await
+    .map_err(join_err)?
+}
+
+/// One coverage-grid row: a project and its review counts. No redaction
+/// — counts are numbers and `project_path` is the user's own path, shown
+/// in their own GUI per `path-display.md`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectCountsDto {
+    pub project_path: String,
+    pub counts: ReviewCounts,
+}
+
+/// Per-project review counts for the dashboard coverage grid. One backend
+/// call instead of N `lesson_counts` round-trips.
+#[tauri::command]
+pub async fn lesson_counts_by_project(
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<ProjectCountsDto>, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let rows = review::counts_by_project(idx.as_ref())
+            .map_err(|e| format!("counts_by_project: {e}"))?;
+        Ok::<_, String>(
+            rows.into_iter()
+                .map(|(project_path, counts)| ProjectCountsDto {
+                    project_path,
+                    counts,
+                })
+                .collect(),
+        )
     })
     .await
     .map_err(join_err)?
@@ -913,6 +1083,98 @@ pub async fn lesson_reject(
     tokio::task::spawn_blocking(move || {
         let now = chrono::Utc::now().timestamp_millis();
         review::reject(idx.as_ref(), &id, now).map_err(|e| format!("reject: {e}"))
+    })
+    .await
+    .map_err(join_err)?
+}
+
+// ─── Recurrence tracking (Phase 3 — the moat) ────────────────────
+//
+// Confirmed recurrences are the dashboard's headline; pending candidates
+// live in Review awaiting a human's yes/no. Free-text (`new_content`, the
+// joined `matched_content`) is redacted on the way out like every other
+// durable emission here.
+
+use claudepot_core::shared_memory::recurrence::{self, RecurrenceEvent};
+
+/// How far back the dashboard's confirmed-recurrence headline looks.
+const RECURRENCE_WINDOW_DAYS: i64 = 30;
+
+#[tauri::command]
+pub async fn recurrence_list(
+    project_path: Option<String>,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<RecurrenceEvent>, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let mut rows = recurrence::list_pending(idx.as_ref(), project_path.as_deref(), 0)
+            .map_err(|e| format!("recurrence list: {e}"))?;
+        let policy = ui_redaction_policy();
+        for r in &mut rows {
+            r.new_content = redact_apply(&r.new_content, &policy);
+            if let Some(c) = &r.matched_content {
+                r.matched_content = Some(redact_apply(c, &policy));
+            }
+        }
+        Ok::<_, String>(rows)
+    })
+    .await
+    .map_err(join_err)?
+}
+
+#[tauri::command]
+pub async fn recurrence_confirm(
+    id: String,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<bool, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let now = chrono::Utc::now().timestamp_millis();
+        recurrence::confirm(idx.as_ref(), &id, now).map_err(|e| format!("confirm: {e}"))
+    })
+    .await
+    .map_err(join_err)?
+}
+
+#[tauri::command]
+pub async fn recurrence_dismiss(
+    id: String,
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<bool, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        recurrence::dismiss(idx.as_ref(), &id).map_err(|e| format!("dismiss: {e}"))
+    })
+    .await
+    .map_err(join_err)?
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecurrenceCountsDto {
+    /// Confirmed recurrences detected within the trailing window.
+    pub confirmed_window: i64,
+    /// Candidates awaiting a human decision (surfaced in Review).
+    pub pending: i64,
+    pub window_days: i64,
+}
+
+#[tauri::command]
+pub async fn recurrence_counts(
+    state: State<'_, SharedMemoryIndex>,
+) -> Result<RecurrenceCountsDto, String> {
+    let idx = require_idx(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let now = chrono::Utc::now().timestamp_millis();
+        let since = now - RECURRENCE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+        let confirmed_window = recurrence::confirmed_count_since(idx.as_ref(), since)
+            .map_err(|e| format!("confirmed count: {e}"))?;
+        let pending =
+            recurrence::pending_count(idx.as_ref()).map_err(|e| format!("pending count: {e}"))?;
+        Ok::<_, String>(RecurrenceCountsDto {
+            confirmed_window,
+            pending,
+            window_days: RECURRENCE_WINDOW_DAYS,
+        })
     })
     .await
     .map_err(join_err)?

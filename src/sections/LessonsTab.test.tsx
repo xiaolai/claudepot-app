@@ -12,12 +12,17 @@ const lessonCountsSpy = vi.fn();
 const lessonAcceptSpy = vi.fn();
 const lessonRejectSpy = vi.fn();
 
+const recurrenceListSpy = vi.fn();
+
 vi.mock("../api/sharedMemory", () => ({
   sharedMemoryApi: {
     lessonList: (...a: unknown[]) => lessonListSpy(...a),
     lessonCounts: (...a: unknown[]) => lessonCountsSpy(...a),
     lessonAccept: (...a: unknown[]) => lessonAcceptSpy(...a),
     lessonReject: (...a: unknown[]) => lessonRejectSpy(...a),
+    recurrenceList: (...a: unknown[]) => recurrenceListSpy(...a),
+    recurrenceConfirm: vi.fn(),
+    recurrenceDismiss: vi.fn(),
   },
 }));
 
@@ -49,6 +54,7 @@ beforeEach(() => {
     suspect: 0,
     enforced: 2,
   });
+  recurrenceListSpy.mockReset().mockResolvedValue([]);
 });
 
 describe("LessonsTab", () => {

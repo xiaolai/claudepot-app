@@ -709,7 +709,7 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     // Post-write validation. The v4 DDL block promises three
     // categories of objects:
     //
-    //   1. Seven named user-facing tables (`V4_TABLE_NAMES`)
+    //   1. The named user-facing tables (`V4_TABLE_NAMES`)
     //   2. Three exchange_fts maintenance triggers
     //   3. The FTS5 internal `_data` shadow table that proves the
     //      virtual table actually instantiated (a missing FTS5

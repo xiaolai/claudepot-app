@@ -6,6 +6,38 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.1 — beta (unreleased)
+
+The Knowledge pane: the Memory tab becomes a project-first knowledge base
+with a health dashboard.
+
+### Added
+
+- **Knowledge dashboard** — the pane now opens on the state of what Claude
+  knows, not a list: a trust bar (enforced / documented / suspect /
+  proposed), project coverage, the current suspect count, and confirmed
+  recurrences. A coverage grid surfaces the projects with the most
+  sessions and the least curated knowledge — the ones worth harvesting.
+- **Know view** — one project-grouped browser of the curated base
+  (memories, decisions, and now evidence) showing each item's state,
+  provenance, and cross-links. Jump from a memory to the exchange that
+  taught it, see the guard it compiled to, and navigate with j / k /
+  enter. Evidence records and memory links are now visible in the GUI
+  (previously write-only).
+- **Recurrence tracking** — the distiller now notices when a new session
+  re-derives a lesson you already accepted (by file-anchor overlap or
+  claim similarity) and files it as a pending recurrence to confirm in
+  Review. The dashboard shows confirmed recurrences, trending to zero as
+  guards absorb the classes; `claudepot lesson harvest` reports how many
+  it detected.
+
+### Changed
+
+- The **Memory** section is renamed **Knowledge** and reorganized into
+  four views — Dashboard, Know, Review, Recall — replacing the old
+  Lessons / Search / Memories / Decisions tabs. Your saved position is
+  preserved (the section id is unchanged).
+
 ## 0.2.0 — beta (released 2026-07-14)
 
 The knowledge-compiler release: turn your own Claude sessions into

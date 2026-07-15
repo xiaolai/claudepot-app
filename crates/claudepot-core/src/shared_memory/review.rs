@@ -84,6 +84,12 @@ pub struct ReviewRow {
     /// me" link. Denormalized, so it survives an index rebuild.
     pub origin_file_path: Option<String>,
     pub origin_exchange_id: Option<String>,
+    /// What an accepted claim was compiled into: `guard` / `directive` /
+    /// `note` (or `None` if never compiled). `guard` = enforced.
+    pub compile_target: Option<String>,
+    /// Where the compiled guard landed, e.g. `scripts/repo-invariants.sh:6`.
+    /// The Know view renders this as "enforced by …".
+    pub guard_ref: Option<String>,
     pub project_path: Option<String>,
     pub created_at_ms: i64,
 }
@@ -111,7 +117,8 @@ pub fn list(
     let limit = if limit == 0 { 50 } else { limit.min(500) };
     let mut sql = String::from(
         "SELECT id, review_state, kind, content, directive, confidence, anchor_json, \
-         suspect_reason, origin_file_path, origin_exchange_id, project_path, created_at_ms \
+         suspect_reason, origin_file_path, origin_exchange_id, compile_target, guard_ref, \
+         project_path, created_at_ms \
          FROM memories WHERE archived_at_ms IS NULL",
     );
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
@@ -143,8 +150,10 @@ pub fn list(
             suspect_reason: r.get(7)?,
             origin_file_path: r.get(8)?,
             origin_exchange_id: r.get(9)?,
-            project_path: r.get(10)?,
-            created_at_ms: r.get(11)?,
+            compile_target: r.get(10)?,
+            guard_ref: r.get(11)?,
+            project_path: r.get(12)?,
+            created_at_ms: r.get(13)?,
         })
     })?;
     let mut out = Vec::new();
@@ -293,6 +302,69 @@ pub fn counts(
         )?,
     };
     Ok(c)
+}
+
+/// Per-project review counts, one entry per project that has at least
+/// one non-archived memory. The dashboard's coverage grid needs a count
+/// for every project at once; calling [`counts`] N times would be N
+/// round-trips. This is one `GROUP BY project_path` pass plus one for
+/// the enforced sub-count.
+///
+/// Global memories (`project_path IS NULL`) are excluded on purpose: the
+/// coverage grid is project-first, and a global preference has no project
+/// row to land in. The rolled-up dashboard totals come from [`counts`]
+/// with `None`, which does include them.
+///
+/// The `enforced` sub-count is computed per project, mirroring the
+/// project-scope fix in [`counts`] — a coverage row must never show one
+/// project's proposed/accepted numbers next to the global enforced total.
+pub fn counts_by_project(idx: &SessionIndex) -> Result<Vec<(String, ReviewCounts)>, DurableError> {
+    use std::collections::BTreeMap;
+    let db = idx.db();
+    // BTreeMap keeps the output deterministic (project path order) so
+    // tests read as a diff; the GUI re-sorts by session count anyway.
+    let mut map: BTreeMap<String, ReviewCounts> = BTreeMap::new();
+
+    let mut stmt = db.prepare(
+        "SELECT project_path, review_state, COUNT(*) FROM memories \
+         WHERE archived_at_ms IS NULL AND project_path IS NOT NULL \
+         GROUP BY project_path, review_state",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (project, state, n) = row?;
+        let c = map.entry(project).or_default();
+        match state.as_str() {
+            "proposed" => c.proposed = n,
+            "accepted" => c.accepted = n,
+            "rejected" => c.rejected = n,
+            "suspect" => c.suspect = n,
+            _ => {}
+        }
+    }
+
+    // Enforced = accepted AND compiled to a guard. A subset of the
+    // 'accepted' rows already counted above, so `or_default()` here only
+    // ever touches a project that already has an entry.
+    let mut stmt = db.prepare(
+        "SELECT project_path, COUNT(*) FROM memories \
+         WHERE archived_at_ms IS NULL AND project_path IS NOT NULL \
+           AND review_state = 'accepted' AND compile_target = 'guard' \
+         GROUP BY project_path",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    for row in rows {
+        let (project, n) = row?;
+        map.entry(project).or_default().enforced = n;
+    }
+
+    Ok(map.into_iter().collect())
 }
 
 /// Sessions in `project_path` that have never produced a proposal.
@@ -484,5 +556,121 @@ mod tests {
         let (_t, idx, _id) = seed();
         assert!(!accept(&idx, "no-such-id", None, 1).unwrap());
         assert!(!reject(&idx, "no-such-id", 1).unwrap());
+    }
+
+    // ─── counts_by_project ─────────────────────────────────────
+
+    /// Ingest one proposal into `project` and return its memory id.
+    fn ingest_into(idx: &SessionIndex, project: &str, claim: &str, files: &[&str]) -> String {
+        let claims = DistilledClaims {
+            claims: vec![DistilledClaim {
+                claim: claim.into(),
+                directive: format!("Do the thing for {claim}."),
+                kind: "constraint".into(),
+                files: files.iter().map(|s| s.to_string()).collect(),
+                evidence: "because it burned us".into(),
+                confidence: 90,
+            }],
+        };
+        ingest_proposals(
+            idx,
+            &claims,
+            &ProposalOrigin {
+                project_path: project,
+                file_path: Some("/t/s.jsonl"),
+                exchange_id: None,
+                created_by: "agent:distiller",
+            },
+            1_000,
+        )
+        .unwrap();
+        idx.db()
+            .query_row(
+                "SELECT id FROM memories WHERE project_path = ?1 AND content = ?2",
+                rusqlite::params![project, claim],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn counts_by_project_groups_each_project_separately() {
+        let tmp = TempDir::new().unwrap();
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+        // Project A: one proposed, one accepted.
+        ingest_into(&idx, "/proj/a", "a lesson one", &["a1.rs"]);
+        let a2 = ingest_into(&idx, "/proj/a", "a lesson two", &["a2.rs"]);
+        accept(&idx, &a2, Some("aaa"), 2_000).unwrap();
+        // Project B: one proposed only.
+        ingest_into(&idx, "/proj/b", "b lesson one", &["b1.rs"]);
+
+        let by = counts_by_project(&idx).unwrap();
+        assert_eq!(by.len(), 2, "one entry per project with memories");
+        let a = &by.iter().find(|(p, _)| p == "/proj/a").unwrap().1;
+        assert_eq!(a.proposed, 1);
+        assert_eq!(a.accepted, 1);
+        let b = &by.iter().find(|(p, _)| p == "/proj/b").unwrap().1;
+        assert_eq!(b.proposed, 1);
+        assert_eq!(b.accepted, 0);
+    }
+
+    #[test]
+    fn counts_by_project_excludes_archived_rows() {
+        let tmp = TempDir::new().unwrap();
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+        let id = ingest_into(&idx, "/proj/a", "soon archived", &["x.rs"]);
+        ingest_into(&idx, "/proj/a", "still here", &["y.rs"]);
+        crate::shared_memory::durable::archive_memory(&idx, &id).unwrap();
+
+        let by = counts_by_project(&idx).unwrap();
+        let a = &by.iter().find(|(p, _)| p == "/proj/a").unwrap().1;
+        assert_eq!(a.proposed, 1, "the archived proposal is not counted");
+    }
+
+    #[test]
+    fn counts_by_project_enforced_is_per_project_not_global() {
+        // Regression for the compiler-audit bug where a per-project
+        // dashboard showed the GLOBAL enforced total. Project A has an
+        // enforced lesson; project B must report enforced = 0.
+        let tmp = TempDir::new().unwrap();
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+        let a = ingest_into(&idx, "/proj/a", "enforce me", &["a.rs"]);
+        accept(&idx, &a, Some("aaa"), 2_000).unwrap();
+        mark_compiled(&idx, &a, "guard", "scripts/repo-invariants.sh:6", 3_000).unwrap();
+
+        let b = ingest_into(&idx, "/proj/b", "just accepted", &["b.rs"]);
+        accept(&idx, &b, Some("bbb"), 2_000).unwrap();
+
+        let by = counts_by_project(&idx).unwrap();
+        let ca = &by.iter().find(|(p, _)| p == "/proj/a").unwrap().1;
+        let cb = &by.iter().find(|(p, _)| p == "/proj/b").unwrap().1;
+        assert_eq!(ca.enforced, 1);
+        assert_eq!(cb.enforced, 0, "B's enforced must not see A's guard");
+    }
+
+    #[test]
+    fn counts_by_project_excludes_global_memories() {
+        // A global preference has no project row to land in; it belongs
+        // in the rolled-up total (`counts(None)`), not the coverage grid.
+        let tmp = TempDir::new().unwrap();
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+        crate::shared_memory::durable::create_memory(
+            &idx,
+            &crate::shared_memory::durable::NewMemory {
+                scope: crate::shared_memory::durable::Scope::Global,
+                project_path: None,
+                kind: crate::shared_memory::durable::MemoryKind::Preference,
+                content: "the user prefers tabs",
+                created_by_kind: crate::shared_memory::durable::CreatedByKind::User,
+                created_by: "user:test",
+                confidence: None,
+            },
+        )
+        .unwrap();
+        ingest_into(&idx, "/proj/a", "a real lesson", &["a.rs"]);
+
+        let by = counts_by_project(&idx).unwrap();
+        assert_eq!(by.len(), 1);
+        assert_eq!(by[0].0, "/proj/a");
     }
 }

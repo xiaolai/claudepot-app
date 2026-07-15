@@ -780,6 +780,54 @@ pub enum LinkTarget<'a> {
     File(&'a str),
 }
 
+/// Which parent row's links to read back.
+#[derive(Debug, Clone, Copy)]
+pub enum LinkQuery<'a> {
+    Memory(&'a str),
+    Decision(&'a str),
+    Evidence(&'a str),
+}
+
+/// Read the links attached to one durable row — the missing read side of
+/// [`link`]. This is what makes provenance ("which exchange taught this",
+/// "which evidence supports this decision") reachable from the GUI; the
+/// link table was write-only until now.
+pub fn links_for(
+    idx: &SessionIndex,
+    q: LinkQuery<'_>,
+) -> Result<Vec<MemoryLinkRecord>, DurableError> {
+    // `col` comes from a fixed enum arm, never from caller text, so
+    // interpolating it is not an injection surface. `id` stays a bound
+    // parameter.
+    let (col, id) = match q {
+        LinkQuery::Memory(id) => ("memory_id", id),
+        LinkQuery::Decision(id) => ("decision_id", id),
+        LinkQuery::Evidence(id) => ("evidence_id", id),
+    };
+    let sql = format!(
+        "SELECT id, memory_id, decision_id, evidence_id, exchange_id, file_path, relation \
+         FROM memory_links WHERE {col} = ?1 ORDER BY relation",
+    );
+    let db = idx.db();
+    let mut stmt = db.prepare(&sql)?;
+    let rows = stmt.query_map([id], |r| {
+        Ok(MemoryLinkRecord {
+            id: r.get(0)?,
+            memory_id: r.get(1)?,
+            decision_id: r.get(2)?,
+            evidence_id: r.get(3)?,
+            exchange_id: r.get(4)?,
+            file_path: r.get(5)?,
+            relation: link_relation_from_str(&r.get::<_, String>(6)?),
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
 pub fn link(idx: &SessionIndex, l: &NewLink<'_>) -> Result<MemoryLinkRecord, DurableError> {
     let id = Uuid::new_v4().to_string();
     let (mem, dec, ev) = match l.parent {
@@ -844,6 +892,15 @@ fn decision_status_from_str(s: &str) -> DecisionStatus {
         "superseded" => DecisionStatus::Superseded,
         "archived" => DecisionStatus::Archived,
         _ => DecisionStatus::Active,
+    }
+}
+
+fn link_relation_from_str(s: &str) -> LinkRelation {
+    match s {
+        "evidence" => LinkRelation::Evidence,
+        "origin" => LinkRelation::Origin,
+        "supersedes" => LinkRelation::Supersedes,
+        _ => LinkRelation::Related,
     }
 }
 
@@ -1176,5 +1233,19 @@ mod tests {
         assert_eq!(l.relation, LinkRelation::Origin);
         assert_eq!(l.memory_id.as_deref(), Some(m.id.as_str()));
         assert_eq!(l.file_path.as_deref(), Some("/f.jsonl"));
+
+        // The read side: links_for finds the row by its parent memory,
+        // and NOT by an unrelated memory id.
+        let found = links_for(&idx, LinkQuery::Memory(&m.id)).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, l.id);
+        assert_eq!(found[0].relation, LinkRelation::Origin);
+        assert!(links_for(&idx, LinkQuery::Memory("no-such-id"))
+            .unwrap()
+            .is_empty());
+        // A decision-parent query must not match a memory-parent link.
+        assert!(links_for(&idx, LinkQuery::Decision(&m.id))
+            .unwrap()
+            .is_empty());
     }
 }
