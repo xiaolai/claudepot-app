@@ -95,6 +95,26 @@ pub fn project_path_for(idx: &SessionIndex, file_path: &str) -> Result<String, R
         })
 }
 
+/// The project a transcript exchange belongs to, resolved through its
+/// owning session (`exchanges.file_path` → `sessions.project_path`).
+/// The companion to [`project_path_for`] for the `exchange_id` shape of
+/// a locator — used to scope-authorize a link target before emitting it.
+/// `NotIndexed` when the exchange id is unknown.
+pub fn exchange_project_path(idx: &SessionIndex, exchange_id: &str) -> Result<String, ReadError> {
+    idx.db()
+        .query_row(
+            "SELECT s.project_path FROM exchanges e \
+             JOIN sessions s ON s.file_path = e.file_path \
+             WHERE e.id = ?1",
+            [exchange_id],
+            |r| r.get::<_, String>(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => ReadError::NotIndexed(exchange_id.to_string()),
+            other => ReadError::Sql(other),
+        })
+}
+
 /// Read the locator with default byte cap (64 KiB).
 pub fn read_locator(
     idx: &SessionIndex,

@@ -324,10 +324,11 @@ pub const V4_TRIGGER_NAMES: &[&str] = &["exchange_fts_ai", "exchange_fts_ad", "e
 /// Order is irrelevant (each is probed independently), but keep the
 /// list stable so migration tests read as a diff.
 pub const MEMORIES_COMPILER_COLUMNS: &[(&str, &str)] = &[
-    // The review gate. Every writer — the MCP `remember` tool, the
-    // distiller agent — lands rows as 'proposed'. Only a human moves a
-    // row to 'accepted'. A wrong memory that survives review is worse
-    // than no memory, because it will be trusted.
+    // The review gate. The distiller's harvested lessons land 'proposed'
+    // (via create_proposal) and only a human moves them to 'accepted';
+    // rows written directly — the MCP `remember` tool, manual entry —
+    // land 'accepted' on creation (the column DEFAULT), since they record
+    // what the user actually stated. Only 'accepted' rows reach an agent.
     (
         "review_state",
         "ALTER TABLE memories ADD COLUMN review_state TEXT NOT NULL DEFAULT 'accepted' \
