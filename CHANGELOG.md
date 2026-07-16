@@ -6,7 +6,24 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.2.1 — beta (unreleased)
+## 0.2.2 — beta (released 2026-07-16)
+
+Knowledge authoring and navigation follow-up.
+
+### Added
+
+- **Decision authoring in Know** — the consolidated Add form can now
+  record either a memory or a decision, including the decision's topic
+  and rationale.
+
+### Changed
+
+- **Recurrence navigation** — recurrence cards can open their
+  matched memory directly in Know, preserving the selected project and
+  item.
+- Project documentation now consistently calls the surface **Knowledge**.
+
+## 0.2.1 — beta (released 2026-07-16)
 
 The Knowledge pane: the Memory tab becomes a project-first knowledge base
 with a health dashboard.

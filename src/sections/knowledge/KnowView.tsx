@@ -48,10 +48,13 @@ type KindFilter =
 
 export function KnowView({
   initialProjectFilter = null,
+  initialMemoryId = null,
   onReview,
 }: {
   /** Deep-link from the Dashboard: pre-filter to one project. */
   initialProjectFilter?: string | null;
+  /** Deep-link from Review to the matched lesson. */
+  initialMemoryId?: string | null;
   /** Route a suspect item to the Review tab. */
   onReview: () => void;
 }) {
@@ -173,6 +176,18 @@ export function KnowView({
   useEffect(() => {
     setCursor((i) => Math.min(i, Math.max(0, visible.length - 1)));
   }, [visible.length]);
+
+  // Review → recurrence → Know carries the matched memory selection across
+  // the tab boundary. The cursor is visual rather than DOM focus, so the
+  // initiating tab control keeps focus and keyboard navigation remains
+  // available.
+  useEffect(() => {
+    if (!initialMemoryId) return;
+    const index = visible.findIndex(
+      (it) => it.type === "memory" && it.id === initialMemoryId,
+    );
+    if (index >= 0) setCursor(index);
+  }, [initialMemoryId, visible]);
 
   const toggleProvenance = useCallback((key: string) => {
     setOpenProvenance((cur) => (cur === key ? null : key));

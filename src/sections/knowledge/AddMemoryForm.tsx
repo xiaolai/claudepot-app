@@ -1,12 +1,11 @@
-// Manual memory authoring — the deliberately-secondary intake.
+// Manual knowledge authoring — the deliberately-secondary intake.
 //
 // The pipeline (Review) is the primary way knowledge enters the base; the
 // distiller proposes and the human judges. This form exists only because
-// the old flat Memories tab had a create affordance and dropping it would
-// lose a capability. It sits behind a single non-primary "Add" toggle
-// (knowledge-base-pane.md §5.3), never a primary action. A manually
-// authored memory lands `accepted` — a human wrote it, so it is not a
-// proposal awaiting review.
+// the old flat Memories and Decisions tabs had create/log affordances.
+// It sits behind a single non-primary "Add" toggle (knowledge-base-pane.md
+// §5.3), never a primary action. Manually authored records are already
+// human-gated: memories land `accepted`, and decisions land `active`.
 
 import { useCallback, useState } from "react";
 import { sharedMemoryApi } from "../../api/sharedMemory";
@@ -27,9 +26,12 @@ export function AddMemoryForm({
   const [scope, setScope] = useState<MemoryScope>(
     defaultProject ? "project" : "global",
   );
+  const [mode, setMode] = useState<"memory" | "decision">("memory");
   const [projectPath, setProjectPath] = useState(defaultProject ?? "");
   const [kind, setKind] = useState<MemoryKind>("fact");
   const [content, setContent] = useState("");
+  const [topic, setTopic] = useState("");
+  const [rationale, setRationale] = useState("");
   const [createdBy, setCreatedBy] = useState("user:me");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -43,21 +45,33 @@ export function AddMemoryForm({
     setBusy(true);
     setErr(null);
     try {
-      await sharedMemoryApi.createMemory({
-        scope,
-        project_path: scope === "project" ? projectPath.trim() : null,
-        kind,
-        content: content.trim(),
-        created_by: createdBy.trim(),
-      });
+      if (mode === "memory") {
+        await sharedMemoryApi.createMemory({
+          scope,
+          project_path: scope === "project" ? projectPath.trim() : null,
+          kind,
+          content: content.trim(),
+          created_by: createdBy.trim(),
+        });
+      } else {
+        await sharedMemoryApi.logDecision({
+          decision: content.trim(),
+          rationale: rationale.trim() || null,
+          topic: topic.trim() || null,
+          project_path: scope === "project" ? projectPath.trim() : null,
+          created_by: createdBy.trim(),
+        });
+      }
       setContent("");
+      setTopic("");
+      setRationale("");
       onCreated();
     } catch (e) {
       setErr(String(e));
     } finally {
       setBusy(false);
     }
-  }, [scope, projectPath, kind, content, createdBy, onCreated]);
+  }, [mode, scope, projectPath, kind, content, topic, rationale, createdBy, onCreated]);
 
   return (
     <div
@@ -73,6 +87,15 @@ export function AddMemoryForm({
     >
       <div style={{ display: "flex", gap: "var(--sp-8)" }}>
         <select
+          value={mode}
+          onChange={(e) => setMode(e.currentTarget.value as "memory" | "decision")}
+          aria-label="Knowledge type"
+          style={selectStyle()}
+        >
+          <option value="memory">Memory</option>
+          <option value="decision">Decision</option>
+        </select>
+        <select
           value={scope}
           onChange={(e) => setScope(e.currentTarget.value as MemoryScope)}
           aria-label="Scope"
@@ -81,18 +104,28 @@ export function AddMemoryForm({
           <option value="global">Global</option>
           <option value="project">Project</option>
         </select>
-        <select
-          value={kind}
-          onChange={(e) => setKind(e.currentTarget.value as MemoryKind)}
-          aria-label="Kind"
-          style={selectStyle()}
-        >
-          <option value="fact">Fact</option>
-          <option value="preference">Preference</option>
-          <option value="pattern">Pattern</option>
-          <option value="constraint">Constraint</option>
-          <option value="summary">Summary</option>
-        </select>
+        {mode === "memory" ? (
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.currentTarget.value as MemoryKind)}
+            aria-label="Kind"
+            style={selectStyle()}
+          >
+            <option value="fact">Fact</option>
+            <option value="preference">Preference</option>
+            <option value="pattern">Pattern</option>
+            <option value="constraint">Constraint</option>
+            <option value="summary">Summary</option>
+          </select>
+        ) : (
+          <Input
+            value={topic}
+            onChange={(e) => setTopic(e.currentTarget.value)}
+            placeholder="topic (optional)"
+            aria-label="Decision topic"
+            style={{ flex: 1 }}
+          />
+        )}
         {scope === "project" && (
           <Input
             value={projectPath}
@@ -106,8 +139,8 @@ export function AddMemoryForm({
       <textarea
         value={content}
         onChange={(e) => setContent(e.currentTarget.value)}
-        placeholder="What should we remember?"
-        aria-label="Memory content"
+        placeholder={mode === "memory" ? "What should we remember?" : "What decision should this record?"}
+        aria-label={mode === "memory" ? "Memory content" : "Decision"}
         rows={3}
         style={{
           padding: "var(--sp-8)",
@@ -119,6 +152,24 @@ export function AddMemoryForm({
           resize: "vertical",
         }}
       />
+      {mode === "decision" && (
+        <textarea
+          value={rationale}
+          onChange={(e) => setRationale(e.currentTarget.value)}
+          placeholder="Why? (optional)"
+          aria-label="Decision rationale"
+          rows={2}
+          style={{
+            padding: "var(--sp-8)",
+            background: "var(--bg-sunken)",
+            color: "var(--fg)",
+            border: "var(--sp-px) solid var(--line)",
+            borderRadius: "var(--r-2)",
+            font: "inherit",
+            resize: "vertical",
+          }}
+        />
+      )}
       <div style={{ display: "flex", gap: "var(--sp-8)" }}>
         <Input
           value={createdBy}
@@ -135,7 +186,7 @@ export function AddMemoryForm({
           onClick={() => void submit()}
           disabled={busy || !content.trim()}
         >
-          {busy ? "Saving…" : "Save"}
+          {busy ? "Saving…" : mode === "memory" ? "Save memory" : "Save decision"}
         </Button>
       </div>
       {err && <div style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>{err}</div>}

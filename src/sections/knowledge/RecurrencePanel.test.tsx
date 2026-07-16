@@ -85,4 +85,15 @@ describe("RecurrencePanel", () => {
     expect(recurrenceDismissSpy).toHaveBeenCalledWith("r1");
     expect(screen.queryByText("foo must be initialised first")).toBeNull();
   });
+
+  it("can deep-link the matched lesson into Know", async () => {
+    recurrenceListSpy.mockResolvedValue([EVENT]);
+    const onOpenMemory = vi.fn();
+    const user = userEvent.setup();
+    render(<RecurrencePanel onOpenMemory={onOpenMemory} />);
+
+    await user.click(await screen.findByRole("button", { name: "Open in Know" }));
+
+    expect(onOpenMemory).toHaveBeenCalledWith("/proj/app", "m1");
+  });
 });

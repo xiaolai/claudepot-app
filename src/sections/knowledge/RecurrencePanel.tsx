@@ -18,7 +18,12 @@ import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
 import { basename } from "../../lib/paths";
 
-export function RecurrencePanel() {
+export function RecurrencePanel({
+  onOpenMemory,
+}: {
+  /** Deep-link the matched lesson into the Know view. */
+  onOpenMemory?: (projectPath: string, memoryId: string) => void;
+}) {
   const [rows, setRows] = useState<RecurrenceEvent[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -122,6 +127,15 @@ export function RecurrencePanel() {
                 >
                   Dismiss
                 </Button>
+                {onOpenMemory && (
+                  <Button
+                    variant="ghost"
+                    disabled={busyId === row.id}
+                    onClick={() => onOpenMemory(row.project_path, row.matched_memory_id)}
+                  >
+                    Open in Know
+                  </Button>
+                )}
                 <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
                   Confirming counts it toward the recurrence metric. Compile
                   the underlying lesson to a guard so it can’t recur again.

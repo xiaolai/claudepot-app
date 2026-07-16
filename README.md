@@ -54,7 +54,7 @@ If you use Claude Code or Claude Desktop daily, you've probably hit at least one
 
 ### Install
 
-> **Status: beta** (`0.2.1`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
+> **Status: beta** (`0.2.2`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
 
 You'll need a recent **Rust toolchain** ([rustup.rs](https://rustup.rs)) and **Node 20+** with **pnpm** ([pnpm.io](https://pnpm.io)). No other system dependencies.
 
@@ -108,7 +108,12 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 ![Projects tab](assets/screenshots/projects.png)
 
-**Memory** — Cross-harness search over everything your agents have done: indexed Claude Code *and* Codex transcripts, durable memories, and design decisions, in three tabs (Search / Memories / Decisions). The same data is exposed to agents through `claudepot mcp memory-server`; this tab is the human-facing view.
+**Knowledge** — A project-first view of what Claude knows: a health
+dashboard, curated Know base (memories, decisions, and evidence), the
+human-gated Review queue, and Recall over indexed Claude Code + Codex
+transcripts. The same data is exposed to agents through
+`claudepot mcp memory-server`; the registry id remains `shared-memory` for
+localStorage compatibility.
 
 **Keys** — All your API keys and OAuth tokens, in one inventory. Stored in the OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Copy with self-clearing clipboard — the value wipes itself after 30 seconds.
 

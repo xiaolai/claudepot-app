@@ -16,6 +16,7 @@ const listEvidenceSpy = vi.fn();
 const readLocatorSpy = vi.fn();
 const memoryLinksSpy = vi.fn();
 const createMemorySpy = vi.fn();
+const logDecisionSpy = vi.fn();
 
 vi.mock("../../api/sharedMemory", () => ({
   sharedMemoryApi: {
@@ -25,6 +26,7 @@ vi.mock("../../api/sharedMemory", () => ({
     readLocator: (...a: unknown[]) => readLocatorSpy(...a),
     memoryLinks: (...a: unknown[]) => memoryLinksSpy(...a),
     createMemory: (...a: unknown[]) => createMemorySpy(...a),
+    logDecision: (...a: unknown[]) => logDecisionSpy(...a),
     archiveMemory: vi.fn().mockResolvedValue(true),
     archiveDecision: vi.fn().mockResolvedValue(true),
   },
@@ -89,6 +91,7 @@ beforeEach(() => {
   });
   memoryLinksSpy.mockResolvedValue([]);
   createMemorySpy.mockReset().mockResolvedValue({ id: "new" });
+  logDecisionSpy.mockReset().mockResolvedValue({ id: "new-decision" });
 });
 
 describe("KnowView", () => {
@@ -238,10 +241,38 @@ describe("KnowView", () => {
       screen.getByRole("textbox", { name: "Memory content" }),
       "always run cargo fmt before pushing",
     );
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save memory" }));
 
     expect(createMemorySpy).toHaveBeenCalledWith(
       expect.objectContaining({ content: "always run cargo fmt before pushing" }),
+    );
+  });
+
+  it("the same secondary Add affordance can log a decision", async () => {
+    const user = userEvent.setup();
+    render(<KnowView onReview={vi.fn()} />);
+    await screen.findByText("Run preflight before pushing.");
+
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Knowledge type" }),
+      "decision",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Decision" }),
+      "Keep the cache local",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Decision rationale" }),
+      "It avoids network coupling",
+    );
+    await user.click(screen.getByRole("button", { name: "Save decision" }));
+
+    expect(logDecisionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "Keep the cache local",
+        rationale: "It avoids network coupling",
+      }),
     );
   });
 });
