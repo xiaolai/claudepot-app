@@ -20,6 +20,7 @@ import { Tag } from "../../components/primitives/Tag";
 import type { TagTone } from "../../components/primitives/Tag";
 import { CopyButton } from "../../components/CopyButton";
 import { basename } from "../../lib/paths";
+import { toExcerptError, toUserError } from "../../lib/errors";
 
 // ─── the unified item ────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ export function KnowItemCard({
   /** Refetch after a successful archive. */
   onArchived: () => void;
   /** Route a suspect item to the Review tab (the queue that re-judges it). */
-  onReview: () => void;
+  onReview: (queue?: "proposed" | "suspect") => void;
 }) {
   return (
     <li>
@@ -183,7 +184,7 @@ function MemoryBody({
   provenanceOpen: boolean;
   onToggleProvenance?: () => void;
   onArchived: () => void;
-  onReview: () => void;
+  onReview: (queue?: "proposed" | "suspect") => void;
 }) {
   const state = memoryStateBadge(row);
   const evidence = parseAnchorEvidence(row.anchor_json);
@@ -246,11 +247,20 @@ function MemoryBody({
         />
       )}
 
+      {/* Close the loop: an accepted lesson that isn't yet a guard can be
+          compiled into one. Compilation spends a model call and writes into
+          the project's repo — a repo-authoring act — so the GUI hands over
+          the exact command to run rather than doing it silently behind a
+          button. Enforced lessons already show their guard above. */}
+      {row.review_state === "accepted" && !isEnforced(row) && (
+        <CompileHint id={id} hasProject={row.project_path != null} />
+      )}
+
       <CrossLinks memoryId={id} />
 
       <footer style={{ display: "flex", gap: "var(--sp-8)", marginTop: "var(--sp-4)" }}>
         {row.review_state === "suspect" && (
-          <Button variant="subtle" onClick={onReview}>
+          <Button variant="subtle" onClick={() => onReview("suspect")}>
             Re-review
           </Button>
         )}
@@ -363,12 +373,18 @@ function Provenance({
   onToggle?: () => void;
 }) {
   const [body, setBody] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  // Fetch the excerpt the first time it is opened. Controlled `open`
-  // means this can be triggered by a click OR by the keyboard cursor.
+  // Fetch the excerpt the first time it opens (or on an explicit retry).
+  // Controlled `open` means this can be triggered by a click OR the keyboard
+  // cursor. A failure is kept in `err`, NOT stuffed into `body` — otherwise
+  // the error string would render as if it were transcript text AND block
+  // every later refetch (body != null), pinning the failure forever.
   useEffect(() => {
     if (!open || body != null) return;
     let cancelled = false;
+    setErr(null);
     void (async () => {
       try {
         const r = await sharedMemoryApi.readLocator({
@@ -378,13 +394,13 @@ function Provenance({
         });
         if (!cancelled) setBody(r.body);
       } catch (e) {
-        if (!cancelled) setBody(`error: ${e}`);
+        if (!cancelled) setErr(toExcerptError(e));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, body, filePath, exchangeId]);
+  }, [open, body, filePath, exchangeId, reloadKey]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
@@ -409,22 +425,33 @@ function Provenance({
           {basename(filePath)}
         </button>
       </div>
-      {open && (
-        <pre
-          style={{
-            margin: 0,
-            padding: "var(--sp-12)",
-            background: "var(--bg-sunken)",
-            borderRadius: "var(--r-2)",
-            maxHeight: "var(--list-max-height-md)",
-            overflow: "auto",
-            whiteSpace: "pre-wrap",
-            fontSize: "var(--fs-2xs)",
-          }}
-        >
-          {body ?? "loading…"}
-        </pre>
-      )}
+      {open &&
+        (err ? (
+          <div
+            role="alert"
+            style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", fontSize: "var(--fs-2xs)", color: "var(--danger)" }}
+          >
+            <span>{err}</span>
+            <Button variant="ghost" onClick={() => setReloadKey((k) => k + 1)}>
+              Retry
+            </Button>
+          </div>
+        ) : (
+          <pre
+            style={{
+              margin: 0,
+              padding: "var(--sp-12)",
+              background: "var(--bg-sunken)",
+              borderRadius: "var(--r-2)",
+              maxHeight: "var(--list-max-height-md)",
+              overflow: "auto",
+              whiteSpace: "pre-wrap",
+              fontSize: "var(--fs-2xs)",
+            }}
+          >
+            {body ?? "loading…"}
+          </pre>
+        ))}
     </div>
   );
 }
@@ -451,6 +478,9 @@ function CrossLinks({
     }
     setOpen(true);
     if (links != null) return;
+    // Clear any prior error so a retry starts clean — otherwise a stale
+    // error keeps winning the render even after a later fetch succeeds.
+    setErr(null);
     try {
       const r = await sharedMemoryApi.memoryLinks({
         memory_id: memoryId ?? null,
@@ -459,7 +489,7 @@ function CrossLinks({
       });
       setLinks(r);
     } catch (e) {
-      setErr(String(e));
+      setErr(toUserError(e));
     }
   }, [open, links, memoryId, decisionId, evidenceId]);
 
@@ -498,6 +528,35 @@ function CrossLinks({
   );
 }
 
+// ─── compile-to-guard hint (loop closure) ────────────────────────
+//
+// Compilation is a repo-authoring act: it spends a model call to synthesize a
+// grep tripwire, writes it into the lesson's project scripts/repo-invariants.sh,
+// and verifies it doesn't false-positive before keeping it. That belongs at
+// the CLI, where the user reviews the git diff — so the GUI surfaces the exact
+// command rather than a one-click button that hides the spend and the write.
+// A lesson with no project has nowhere to write a guard.
+
+function CompileHint({ id, hasProject }: { id: string; hasProject: boolean }) {
+  if (!hasProject) return null;
+  const cmd = `claudepot lesson compile ${id} --write`;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
+        <span style={{ color: "var(--fg-muted)" }}>Enforce as a guard:</span>
+        <code style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
+          claudepot lesson compile … --write
+        </code>
+        <CopyButton text={cmd} ariaLabel="Copy compile command" />
+      </div>
+      <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
+        Synthesizes a grep check into this project’s scripts/repo-invariants.sh
+        (a model call) and keeps it only if it stays clean. Review the git diff.
+      </span>
+    </div>
+  );
+}
+
 // ─── archive (single-click, matches the app's ghost-archive pattern) ──
 //
 // Archive is a reversible soft-delete (sets archived_at_ms / flips a
@@ -521,11 +580,14 @@ function ArchiveButton({
     setBusy(true);
     setErr(null);
     try {
-      const ok = await onArchive();
-      if (ok) onDone();
-      else setErr("Already archived elsewhere.");
+      await onArchive();
+      // Archived just now, or already gone elsewhere — either way the row is
+      // gone from the backend, so refresh drops the stale card and recomputes
+      // counts (no zombie row that re-errors on every click). Only a thrown
+      // error keeps the card, with its reason.
+      onDone();
     } catch (e) {
-      setErr(String(e));
+      setErr(toUserError(e));
     } finally {
       setBusy(false);
     }

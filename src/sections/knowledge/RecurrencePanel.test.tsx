@@ -96,4 +96,52 @@ describe("RecurrencePanel", () => {
 
     expect(onOpenMemory).toHaveBeenCalledWith("/proj/app", "m1");
   });
+
+  it("an already-handled result drops the row without a red alert", async () => {
+    recurrenceListSpy.mockResolvedValue([EVENT]);
+    // The recurrence was confirmed/dismissed elsewhere first.
+    recurrenceConfirmSpy.mockResolvedValue(false);
+    const user = userEvent.setup();
+    render(<RecurrencePanel />);
+
+    await user.click(await screen.findByRole("button", { name: /Confirm/ }));
+
+    // The row leaves (it is no longer pending)...
+    expect(screen.queryByText("foo must be initialised first")).toBeNull();
+    // ...and a benign reconcile never fires an alarm-colored alert.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a mount-load failure shows a Retry that clears the error on success", async () => {
+    recurrenceListSpy
+      .mockRejectedValueOnce("recurrence table missing") // mount fails
+      .mockResolvedValueOnce([EVENT]); // retry succeeds
+    const user = userEvent.setup();
+    render(<RecurrencePanel />);
+
+    // The mount error surfaces with a Retry (not a dead red banner).
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+    // A successful retry clears the stale alert and renders the pending row —
+    // the panel must not look permanently broken over a healthy queue.
+    expect(
+      await screen.findByText("foo must be initialised first"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers the compile command for an accepted matched lesson", async () => {
+    recurrenceListSpy.mockResolvedValue([EVENT]); // matched_state: "accepted"
+    render(<RecurrencePanel />);
+    expect(
+      await screen.findByRole("button", { name: "Copy compile command" }),
+    ).toBeInTheDocument();
+  });
+
+  it("routes a suspect matched lesson to re-review, not compilation", async () => {
+    recurrenceListSpy.mockResolvedValue([{ ...EVENT, matched_state: "suspect" }]);
+    render(<RecurrencePanel />);
+    expect(await screen.findByText(/re-review it in the queue below/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy compile command" })).toBeNull();
+  });
 });

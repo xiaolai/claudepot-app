@@ -12,14 +12,19 @@ import { sharedMemoryApi } from "../../api/sharedMemory";
 import type { MemoryKind, MemoryScope } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
 import { Input } from "../../components/primitives/Input";
+import { toUserError } from "../../lib/errors";
 
 export function AddMemoryForm({
   defaultProject,
+  knownProjects = [],
   onCreated,
   onCancel,
 }: {
   /** Pre-fill the project path when the view is filtered to one project. */
   defaultProject?: string;
+  /** Known project paths, offered as autocomplete so a hand-typed path
+   *  can't silently orphan a record under a project that doesn't exist. */
+  knownProjects?: string[];
   onCreated: () => void;
   onCancel: () => void;
 }) {
@@ -67,7 +72,7 @@ export function AddMemoryForm({
       setRationale("");
       onCreated();
     } catch (e) {
-      setErr(String(e));
+      setErr(toUserError(e));
     } finally {
       setBusy(false);
     }
@@ -132,8 +137,16 @@ export function AddMemoryForm({
             onChange={(e) => setProjectPath(e.currentTarget.value)}
             placeholder="project path (absolute)"
             aria-label="Project path"
+            list="add-memory-projects"
             style={{ flex: 1 }}
           />
+        )}
+        {scope === "project" && knownProjects.length > 0 && (
+          <datalist id="add-memory-projects">
+            {knownProjects.map((p) => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
         )}
       </div>
       <textarea

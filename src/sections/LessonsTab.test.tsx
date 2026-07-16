@@ -94,4 +94,21 @@ describe("LessonsTab", () => {
     expect(await screen.findByText("Nothing to review.")).toBeInTheDocument();
     expect(screen.getByText(/claudepot lesson harvest/)).toBeInTheDocument();
   });
+
+  it("opens the requested sub-queue on mount", async () => {
+    // A Dashboard "Suspect" jump lands here targeting the suspect queue, not
+    // the default proposed one.
+    lessonListSpy.mockImplementation((args: { state?: string }) =>
+      Promise.resolve(
+        args.state === "suspect"
+          ? [{ ...ROW, id: "S1", review_state: "suspect", content: "stale lesson", suspect_reason: "code moved" }]
+          : [],
+      ),
+    );
+    render(<LessonsTab initialQueue="suspect" />);
+    expect(await screen.findByText("stale lesson")).toBeInTheDocument();
+    expect(lessonListSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ state: "suspect" }),
+    );
+  });
 });

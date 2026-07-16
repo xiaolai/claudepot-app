@@ -15,6 +15,7 @@ import userEvent from "@testing-library/user-event";
 const listProjectsSpy = vi.fn();
 const lessonCountsSpy = vi.fn();
 const lessonCountsByProjectSpy = vi.fn();
+const lessonListSpy = vi.fn();
 
 vi.mock("../api/sharedMemory", () => ({
   sharedMemoryApi: {
@@ -30,7 +31,7 @@ vi.mock("../api/sharedMemory", () => ({
     memoryLinks: vi.fn().mockResolvedValue([]),
     listSessions: vi.fn().mockResolvedValue([]),
     listProjects: (...a: unknown[]) => listProjectsSpy(...a),
-    lessonList: vi.fn().mockResolvedValue([]),
+    lessonList: (...a: unknown[]) => lessonListSpy(...a),
     lessonCounts: (...a: unknown[]) => lessonCountsSpy(...a),
     lessonCountsByProject: (...a: unknown[]) => lessonCountsByProjectSpy(...a),
     lessonAccept: vi.fn(),
@@ -46,10 +47,28 @@ vi.mock("../api/sharedMemory", () => ({
 
 import { SharedMemorySection } from "./SharedMemorySection";
 
+const mem = (id: string, projectPath: string, content: string) => ({
+  id,
+  review_state: "accepted" as const,
+  kind: "fact",
+  content,
+  directive: null,
+  confidence: null,
+  anchor_json: null,
+  suspect_reason: null,
+  origin_file_path: null,
+  origin_exchange_id: null,
+  compile_target: null,
+  guard_ref: null,
+  project_path: projectPath,
+  created_at_ms: 1,
+});
+
 beforeEach(() => {
-  listProjectsSpy.mockResolvedValue([]);
-  lessonCountsByProjectSpy.mockResolvedValue([]);
-  lessonCountsSpy.mockResolvedValue({
+  listProjectsSpy.mockReset().mockResolvedValue([]);
+  lessonCountsByProjectSpy.mockReset().mockResolvedValue([]);
+  lessonListSpy.mockReset().mockResolvedValue([]);
+  lessonCountsSpy.mockReset().mockResolvedValue({
     proposed: 0,
     accepted: 0,
     rejected: 0,
@@ -128,5 +147,37 @@ describe("SharedMemorySection tabs", () => {
     const recallTab = screen.getByRole("tab", { name: "Recall" });
     expect(recallTab).toHaveAttribute("aria-selected", "true");
     expect(recallTab).toHaveFocus();
+  });
+
+  it("a Know-tab click after a dashboard drill-down clears the stale filter", async () => {
+    // Alpha has curated knowledge, so the Dashboard floats a coverage row
+    // for it; both alpha and beta hold a memory in the Know base.
+    listProjectsSpy.mockResolvedValue([
+      { project_path: "/proj/alpha", session_count: 5, last_activity_ms: null },
+    ]);
+    lessonCountsByProjectSpy.mockResolvedValue([
+      {
+        project_path: "/proj/alpha",
+        counts: { proposed: 0, accepted: 1, rejected: 0, suspect: 0, enforced: 0 },
+      },
+    ]);
+    lessonListSpy.mockResolvedValue([
+      mem("a", "/proj/alpha", "alpha lesson"),
+      mem("b", "/proj/beta", "beta lesson"),
+    ]);
+    const user = userEvent.setup();
+    render(<SharedMemorySection />);
+
+    // Drill into alpha from the Dashboard's coverage grid.
+    await user.click(await screen.findByRole("button", { name: /alpha/ }));
+    // Now on Know, filtered to alpha — beta is hidden.
+    expect(await screen.findByText("alpha lesson")).toBeInTheDocument();
+    expect(screen.queryByText("beta lesson")).toBeNull();
+
+    // A plain Know-tab click is not a deep-link — it must drop the filter so
+    // the whole base is visible again (no invisible, session-long filter).
+    await user.click(screen.getByRole("tab", { name: "Know" }));
+    expect(await screen.findByText("beta lesson")).toBeInTheDocument();
+    expect(screen.getByText("alpha lesson")).toBeInTheDocument();
   });
 });
