@@ -6,6 +6,33 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.4 — beta (released 2026-07-17)
+
+Shared-memory MCP server — the knowledge-compiler surface, plus a
+read-side review-gate fix.
+
+### Added
+
+- **Read-back tools over MCP** — `claudepot_list_evidence` (see what
+  prior audit/fix runs already found and verified, so they aren't
+  re-litigated), `claudepot_memory_links` (read a record's provenance
+  links), and `claudepot_archive_memory` (retract a memory that turned
+  out wrong). Thirteen tools total.
+
+### Fixed
+
+- **The review gate now applies on read.** `claudepot_list_memories`
+  returns only accepted rows — unreviewed distiller proposals and
+  rejected claims no longer reach an agent as if a human had vetted them.
+  Pass `include_suspect=true` to also see stale-flagged lessons.
+- **Project-confined writes fill their own project.** `remember`,
+  `log_decision`, and `submit_evidence` no longer need an explicit
+  `project_path` on a confined server, and no longer silently record a
+  global row when it is omitted.
+- **Confinement holds on every new read tool** — evidence, links, and
+  archive authorize by the target row's own project, and a link's target
+  transcript is scope-checked before its path can cross the boundary.
+
 ## 0.2.3 — beta (released 2026-07-16)
 
 Knowledge pane hardening — trust, resilience, and closing the loop.
