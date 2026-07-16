@@ -1,4 +1,4 @@
-<!-- claudepot-mcp-instructions v4 — managed by `claudepot mcp install-snippet` or Claudepot GUI -->
+<!-- claudepot-mcp-instructions v5 — managed by `claudepot mcp install-snippet` or Claudepot GUI -->
 
 # Claudepot shared memory
 
@@ -13,6 +13,13 @@ prefixed `claudepot_*`. Use them. Specifically:
   server's project would be refused. These return durable facts and
   design decisions that earlier sessions (yours or another agent's)
   recorded for this project. Treat them as load-bearing context.
+
+  Memories arrive **accepted**: unreviewed distiller proposals and
+  rejected claims never appear — only human-reviewed lessons and facts
+  recorded directly (via `claudepot_remember`) from a user statement.
+  Pass `include_suspect=true` to also see lessons whose anchored code
+  has since changed — those carry `review_state="suspect"`; treat them
+  as possibly stale, not as truth.
 
 - **Before asking the user a question that history might
   answer**, call `claudepot_search_memory(query)` to look for
@@ -30,27 +37,38 @@ prefixed `claudepot_*`. Use them. Specifically:
 - **When the user states a durable fact, preference, or pattern**
   ("I always run tests with X", "this project uses Y over Z"),
   call `claudepot_remember(scope="project",
-  project_path=cwd(), kind="preference"|"fact"|"pattern"|...,
-  content="...", created_by="<your-agent-id>")`. Record only what the
+  kind="preference"|"fact"|"pattern"|..., content="...",
+  created_by="<your-agent-id>")`. You do NOT need `project_path` —
+  a confined server fills its own project in. Record only what the
   user actually stated — this becomes active project memory that future
   sessions treat as true, so a wrong entry is worse than none because it
-  will be trusted. The user can archive it later.
+  will be trusted. If a memory turns out wrong or obsolete, retract it
+  with `claudepot_archive_memory(id)` and record the corrected fact.
 
 - **When you commit to a non-trivial design decision** with the
   user (data model choice, library pick, architectural cut),
-  call `claudepot_log_decision(project_path=cwd(),
-  topic="...", decision="...", rationale="...", created_by="...")`.
-  If the new decision replaces an older one, pass `supersedes_id`.
+  call `claudepot_log_decision(topic="...", decision="...",
+  rationale="...", created_by="...")` — `project_path` is filled in
+  for you. If the new decision replaces an older one, pass
+  `supersedes_id`.
 
-- **At the end of an audit / fix loop** where you found and
-  resolved problems, call `claudepot_submit_evidence(
-  project_path=cwd(), summary="...", verification="...",
+- **At the START of an audit / fix loop**, call
+  `claudepot_list_evidence()` — it returns what prior runs already
+  found, fixed, and how it was verified, so you don't re-litigate
+  resolved findings. **At the END of the loop**, record your own run:
+  `claudepot_submit_evidence(summary="...", verification="...",
   files_changed='["src/a.rs","src/b.rs"]', confidence=N,
-  created_by="...")`. Future audit-fix runs in this project will
-  see what was already fixed and won't re-litigate.
+  created_by="...")` (`project_path` is filled in for you).
 
-- **For discovery**, `claudepot_list_sessions(project_path=cwd())`
-  and `claudepot_list_projects()` enumerate the cache without
+- **To read the provenance links recorded on a durable row**, call
+  `claudepot_memory_links(memory_id=...)` (or `decision_id` /
+  `evidence_id`). It returns explicitly-recorded links — e.g. the
+  evidence supporting a decision — and an empty list when none were
+  recorded. A file/exchange link is readable via
+  `claudepot_read_conversation`.
+
+- **For discovery**, `claudepot_list_sessions()` and
+  `claudepot_list_projects()` enumerate the cache without
   needing a search query. Both are confined to the current project.
 
 All `created_by` ids should identify YOU (e.g.

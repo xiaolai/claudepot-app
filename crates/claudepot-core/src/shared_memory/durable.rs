@@ -152,6 +152,11 @@ pub struct MemoryRecord {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub archived_at_ms: Option<i64>,
+    /// The knowledge-compiler review state (`proposed` / `accepted` /
+    /// `rejected` / `suspect`). Memories and distilled lessons share
+    /// one table, discriminated by this column — a consumer that
+    /// treats rows as truth must know which population it is reading.
+    pub review_state: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,6 +331,8 @@ pub fn create_memory(
         created_at_ms: now,
         updated_at_ms: now,
         archived_at_ms: None,
+        // The INSERT leaves review_state at its column default.
+        review_state: "accepted".to_string(),
     })
 }
 
@@ -395,6 +402,7 @@ pub fn create_proposal(
         created_at_ms: now,
         updated_at_ms: now,
         archived_at_ms: None,
+        review_state: "proposed".to_string(),
     })
 }
 
@@ -409,6 +417,33 @@ pub fn archive_memory(idx: &SessionIndex, id: &str) -> Result<bool, DurableError
     })
 }
 
+/// Which review states a memory listing surfaces.
+///
+/// Memories and distilled lessons share the `memories` table,
+/// discriminated by `review_state` — so an undiscriminated read hands
+/// out unreviewed proposals and explicitly-rejected claims as if a
+/// human had vetted them, bypassing on the read side the review gate
+/// [`create_proposal`] so carefully protects on the write side. The
+/// default is therefore the *safe* set: only `accepted` rows. Wider
+/// visibility is an explicit opt-in for triage/debug surfaces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReviewVisibility {
+    /// Only `review_state = 'accepted'` rows — vetted distiller lessons
+    /// AND facts recorded directly via `create_memory` (which are
+    /// accepted on creation). Excludes unreviewed `proposed` and
+    /// `rejected` claims. The correct choice for any consumer that
+    /// treats memories as trustworthy — every agent-facing emission.
+    #[default]
+    Accepted,
+    /// Accepted plus `suspect` (was accepted; the anchored code has
+    /// since moved). Callers must surface the state so a reader can
+    /// discount stale rows.
+    AcceptedAndSuspect,
+    /// Every review state, including `proposed` and `rejected`.
+    /// Human triage surfaces only — never emit this set to an agent.
+    All,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MemoryListFilter {
     pub scope: Option<Scope>,
@@ -416,6 +451,8 @@ pub struct MemoryListFilter {
     pub kind: Option<MemoryKind>,
     /// Include archived rows? Default `false`.
     pub include_archived: bool,
+    /// Which review states surface. Default: accepted only.
+    pub review: ReviewVisibility,
     pub limit: u32,
 }
 
@@ -426,7 +463,7 @@ pub fn list_memories(
     let limit = if f.limit == 0 { 100 } else { f.limit.min(500) };
     let mut sql = String::from(
         "SELECT id, scope, project_path, kind, content, created_by_kind, created_by, \
-                confidence, created_at_ms, updated_at_ms, archived_at_ms \
+                confidence, created_at_ms, updated_at_ms, archived_at_ms, review_state \
          FROM memories WHERE 1=1",
     );
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
@@ -449,6 +486,15 @@ pub fn list_memories(
     if !f.include_archived {
         sql.push_str(" AND archived_at_ms IS NULL");
     }
+    // The review gate, read side. States are fixed literals from our
+    // own enum, never caller text.
+    match f.review {
+        ReviewVisibility::Accepted => sql.push_str(" AND review_state = 'accepted'"),
+        ReviewVisibility::AcceptedAndSuspect => {
+            sql.push_str(" AND review_state IN ('accepted', 'suspect')")
+        }
+        ReviewVisibility::All => {}
+    }
     sql.push_str(&format!(" ORDER BY updated_at_ms DESC LIMIT ?{}", nxt));
     binds.push(rusqlite::types::Value::Integer(limit as i64));
 
@@ -467,6 +513,7 @@ pub fn list_memories(
             created_at_ms: row.get(8)?,
             updated_at_ms: row.get(9)?,
             archived_at_ms: row.get(10)?,
+            review_state: row.get(11)?,
         })
     })?;
     let mut out = Vec::new();
@@ -706,6 +753,13 @@ pub fn submit_evidence(
     })
 }
 
+/// Evidence relevant to `project_path`, newest first.
+///
+/// When a project is given, **global** rows (`project_path IS NULL`)
+/// are included alongside it: global evidence is by definition not
+/// project-specific, so it is relevant everywhere, and there is no
+/// other way for a project-scoped caller (e.g. a confined MCP server)
+/// to reach it. `None` returns every row unfiltered.
 pub fn list_evidence(
     idx: &SessionIndex,
     project_path: Option<&str>,
@@ -717,7 +771,7 @@ pub fn list_evidence(
         (
             "SELECT id, project_path, topic, summary, verification, files_changed_json, \
                     confidence, created_by_kind, created_by, created_at_ms \
-             FROM evidence_records WHERE project_path = ?1 \
+             FROM evidence_records WHERE (project_path = ?1 OR project_path IS NULL) \
              ORDER BY created_at_ms DESC LIMIT ?2",
             vec![
                 rusqlite::types::Value::Text(pp.to_string()),
@@ -752,6 +806,27 @@ pub fn list_evidence(
         out.push(r?);
     }
     Ok(out)
+}
+
+/// The `project_path` an evidence row belongs to (inner `None` = a
+/// global record, outer `None` = no such id). Mirrors
+/// [`decision_project_path`]: lets a confined caller authorize an
+/// operation on an evidence row before touching it, since an id alone
+/// carries no scope.
+pub fn evidence_project_path(
+    idx: &SessionIndex,
+    id: &str,
+) -> Result<Option<Option<String>>, DurableError> {
+    let db = idx.db();
+    match db.query_row(
+        "SELECT project_path FROM evidence_records WHERE id = ?1",
+        [id],
+        |r| r.get::<_, Option<String>>(0),
+    ) {
+        Ok(pp) => Ok(Some(pp)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(DurableError::from(e)),
+    }
 }
 
 // ─── memory links ─────────────────────────────────────────────
@@ -995,6 +1070,137 @@ mod tests {
         assert_eq!(with_archived.len(), 1);
     }
 
+    // ─── the review gate, read side ────────────────────────────
+    //
+    // Memories and distilled lessons share the `memories` table. The
+    // write side guards the gate (`create_proposal` inserts
+    // 'proposed' atomically); these tests pin the read side: the
+    // default listing never hands out unreviewed or rejected claims
+    // as if a human had vetted them.
+
+    /// One accepted memory + one lesson in each non-accepted state.
+    fn seed_review_states(idx: &SessionIndex) -> String {
+        let accepted = create_memory(
+            idx,
+            &NewMemory {
+                scope: Scope::Project,
+                project_path: Some("/p"),
+                kind: MemoryKind::Fact,
+                content: "human vetted this",
+                created_by_kind: CreatedByKind::User,
+                created_by: "user:test",
+                confidence: None,
+            },
+        )
+        .unwrap();
+        for (state, content) in [
+            ("proposed", "unreviewed distiller claim"),
+            ("rejected", "human said no to this"),
+            ("suspect", "was accepted; code moved"),
+        ] {
+            let p = create_proposal(
+                idx,
+                &NewProposal {
+                    project_path: "/p",
+                    kind: MemoryKind::Constraint,
+                    content,
+                    directive: "do the thing",
+                    confidence: 80,
+                    anchor_json: None,
+                    origin_exchange_id: None,
+                    origin_file_path: None,
+                    created_by: "agent:distiller",
+                },
+            )
+            .unwrap();
+            idx.db()
+                .execute(
+                    "UPDATE memories SET review_state = ?1 WHERE id = ?2",
+                    params![state, p.id],
+                )
+                .unwrap();
+        }
+        accepted.id
+    }
+
+    #[test]
+    fn default_listing_serves_only_accepted_rows() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let accepted_id = seed_review_states(&idx);
+
+        let listed = list_memories(&idx, &MemoryListFilter::default()).unwrap();
+        assert_eq!(
+            listed.len(),
+            1,
+            "proposed / rejected / suspect rows must not surface by default"
+        );
+        assert_eq!(listed[0].id, accepted_id);
+        assert_eq!(listed[0].review_state, "accepted");
+    }
+
+    #[test]
+    fn suspect_visibility_includes_stale_rows_with_their_state() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        seed_review_states(&idx);
+
+        let listed = list_memories(
+            &idx,
+            &MemoryListFilter {
+                review: ReviewVisibility::AcceptedAndSuspect,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(listed.len(), 2, "accepted + suspect, nothing else");
+        let states: Vec<&str> = listed.iter().map(|m| m.review_state.as_str()).collect();
+        assert!(states.contains(&"accepted"));
+        assert!(states.contains(&"suspect"));
+    }
+
+    #[test]
+    fn all_visibility_is_an_explicit_opt_in_for_triage_surfaces() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        seed_review_states(&idx);
+
+        let listed = list_memories(
+            &idx,
+            &MemoryListFilter {
+                review: ReviewVisibility::All,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(listed.len(), 4);
+    }
+
+    #[test]
+    fn evidence_project_path_distinguishes_global_from_missing() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let ev = submit_evidence(
+            &idx,
+            &NewEvidence {
+                project_path: Some("/p"),
+                topic: None,
+                summary: "fixed it",
+                verification: "cargo test",
+                files_changed_json: "[]",
+                confidence: 90,
+                created_by_kind: CreatedByKind::Agent,
+                created_by: "agent:test",
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            evidence_project_path(&idx, &ev.id).unwrap(),
+            Some(Some("/p".to_string()))
+        );
+        assert_eq!(evidence_project_path(&idx, "no-such-id").unwrap(), None);
+    }
+
     #[test]
     fn agent_authorship_recorded() {
         let tmp = TempDir::new().unwrap();
@@ -1171,6 +1377,51 @@ mod tests {
         assert_eq!(scoped.len(), 1);
         let other = list_evidence(&idx, Some("/elsewhere"), 0).unwrap();
         assert!(other.is_empty());
+    }
+
+    #[test]
+    fn project_scoped_evidence_includes_global_but_not_other_projects() {
+        // Global (project_path IS NULL) evidence is relevant everywhere,
+        // and pre-v5 rows written with an omitted path landed global — a
+        // project-scoped listing (e.g. a confined MCP server) must surface
+        // them, or that history is permanently unreachable. But the
+        // OR-NULL must NOT widen to a *different* project's rows.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let ev = |pp: Option<&str>, summary: &str| {
+            submit_evidence(
+                &idx,
+                &NewEvidence {
+                    project_path: pp,
+                    topic: None,
+                    summary,
+                    verification: "v",
+                    files_changed_json: "[]",
+                    confidence: 80,
+                    created_by_kind: CreatedByKind::Agent,
+                    created_by: "a",
+                },
+            )
+            .unwrap();
+        };
+        ev(Some("/p"), "project row");
+        ev(None, "global row");
+        ev(Some("/other"), "another project's row");
+
+        // Scoped to /p: its own row AND the global row — never /other's.
+        let scoped = list_evidence(&idx, Some("/p"), 0).unwrap();
+        let summaries: Vec<&str> = scoped.iter().map(|e| e.summary.as_str()).collect();
+        assert_eq!(
+            scoped.len(),
+            2,
+            "project scope = own + global: {summaries:?}"
+        );
+        assert!(summaries.contains(&"project row"));
+        assert!(summaries.contains(&"global row"));
+        assert!(
+            !summaries.contains(&"another project's row"),
+            "OR-NULL must not widen to another project"
+        );
     }
 
     // ─── links ────────────────────────────────────────────────

@@ -83,6 +83,9 @@ export interface Memory {
   created_at_ms: number;
   updated_at_ms: number;
   archived_at_ms: number | null;
+  /** proposed / accepted / rejected / suspect — this list surfaces all
+   *  review states, so a consumer must distinguish them. */
+  review_state: ReviewStateName;
 }
 
 export interface CreateMemoryArgs {

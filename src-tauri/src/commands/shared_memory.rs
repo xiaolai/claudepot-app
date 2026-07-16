@@ -232,6 +232,11 @@ pub struct MemoryDto {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub archived_at_ms: Option<i64>,
+    /// `proposed` / `accepted` / `rejected` / `suspect`. This surface
+    /// requests every review state (it's a human triage view), so the
+    /// consumer must be able to tell an accepted memory from an
+    /// unreviewed proposal or a rejected claim.
+    pub review_state: String,
 }
 
 fn parse_scope(s: Option<&str>) -> Option<durable::Scope> {
@@ -309,6 +314,10 @@ pub async fn shared_memory_list_memories(
             project_path: args.project_path,
             kind: parse_memory_kind(args.kind.as_deref()),
             include_archived: args.include_archived.unwrap_or(false),
+            // The GUI is a human triage surface — it may see every
+            // review state. Agent emissions (the MCP server) use the
+            // accepted-only default instead.
+            review: durable::ReviewVisibility::All,
             limit: args.limit.unwrap_or(0),
         };
         let rows = durable::list_memories(idx.as_ref(), &f).map_err(|e| format!("list: {e}"))?;
@@ -326,6 +335,7 @@ pub async fn shared_memory_list_memories(
                     created_at_ms: m.created_at_ms,
                     updated_at_ms: m.updated_at_ms,
                     archived_at_ms: m.archived_at_ms,
+                    review_state: m.review_state,
                 })
                 .collect(),
         )
@@ -380,6 +390,7 @@ pub async fn shared_memory_create_memory(
             created_at_ms: m.created_at_ms,
             updated_at_ms: m.updated_at_ms,
             archived_at_ms: m.archived_at_ms,
+            review_state: m.review_state,
         })
     })
     .await

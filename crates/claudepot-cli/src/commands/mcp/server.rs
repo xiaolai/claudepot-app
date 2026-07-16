@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use claudepot_core::redaction::{apply as redact_apply, RedactionPolicy};
 use claudepot_core::session_index::SessionIndex;
 use claudepot_core::shared_memory::scope::{McpScope, ScopeDenied};
-use claudepot_core::shared_memory::{durable, read as smr, search as sms};
+use claudepot_core::shared_memory::{durable, read as smr, review, search as sms};
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -79,6 +79,32 @@ impl MemoryServer {
     fn denied(&self, e: ScopeDenied) -> String {
         tracing::warn!(root = %e.root, "cross-project access denied");
         to_json(&error_with(error_code::SCOPE_DENIED, &e, &self.policy))
+    }
+
+    /// Whether a memory link's TARGET (a transcript file or exchange) is
+    /// within this server's read scope. The parent-scope check on
+    /// `claudepot_memory_links` is necessary but not sufficient: a global
+    /// parent skips it, and a link carries an independently-scoped
+    /// locator, so a confined server must authorize each target on its
+    /// own or a cross-project path could cross in the success payload.
+    /// Unconfined → always true. An unresolvable target (unknown/pruned,
+    /// or malformed with no target) is dropped, since it can't be proven
+    /// in-scope.
+    fn link_target_in_scope(&self, l: &durable::MemoryLinkRecord) -> bool {
+        if self.scope.root().is_none() {
+            return true;
+        }
+        let owner = if let Some(fp) = &l.file_path {
+            smr::project_path_for(&self.idx, fp)
+        } else if let Some(ex) = &l.exchange_id {
+            smr::exchange_project_path(&self.idx, ex)
+        } else {
+            return false;
+        };
+        match owner {
+            Ok(project) => self.scope.check_read(&project).is_ok(),
+            Err(_) => false,
+        }
     }
 }
 
@@ -162,7 +188,11 @@ struct ReadPayload {
 struct RememberRequest {
     /// `global` or `project`.
     scope: String,
-    /// Required when scope=`project`; must be omitted when scope=`global`.
+    /// Must be omitted when scope=`global`. For scope=`project`: a
+    /// project-confined server auto-fills its own project when this is
+    /// omitted (the common case — leave it out); an `--all-projects`
+    /// server has no project to infer, so it must be passed explicitly
+    /// there or the call errors.
     #[serde(default)]
     project_path: Option<String>,
     /// `fact` | `preference` | `pattern` | `constraint` | `summary`.
@@ -242,6 +272,11 @@ struct ListMemoriesRequest {
     kind: Option<String>,
     #[serde(default)]
     include_archived: Option<bool>,
+    /// Also return `suspect` rows — lessons that were accepted but
+    /// whose anchored code has since changed. Off by default; when
+    /// set, check `review_state` and discount stale rows.
+    #[serde(default)]
+    include_suspect: Option<bool>,
     #[serde(default)]
     limit: Option<u32>,
 }
@@ -256,6 +291,10 @@ struct MemoryOut {
     created_by_kind: String,
     created_by: String,
     created_at_ms: i64,
+    /// `accepted`, or `suspect` when `include_suspect` was set.
+    /// Unreviewed (`proposed`) and rejected rows never cross this
+    /// boundary.
+    review_state: String,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -280,6 +319,90 @@ struct ArchiveDecisionPayload {
     /// `archived`. False if the id didn't reference an active
     /// decision (already archived, superseded, or doesn't exist).
     archived: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ArchiveMemoryRequest {
+    /// The memory id to archive. A soft-delete: the row is retained (it
+    /// stops surfacing in listings but the data is not destroyed) — there
+    /// is no un-archive, so record the corrected fact with
+    /// `claudepot_remember` afterward.
+    id: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ArchiveMemoryPayload {
+    schema_version: u32,
+    /// True if the memory transitioned to archived. False if the id
+    /// didn't reference an active memory (already archived, or
+    /// doesn't exist).
+    archived: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListEvidenceRequest {
+    #[serde(default)]
+    project_path: Option<String>,
+    /// Default 100; capped at 500.
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EvidenceOut {
+    id: String,
+    project_path: Option<String>,
+    topic: Option<String>,
+    summary: String,
+    verification: String,
+    /// JSON-encoded array of repo-relative paths, as submitted.
+    files_changed: String,
+    confidence: i64,
+    created_by_kind: String,
+    created_by: String,
+    created_at_ms: i64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListEvidencePayload {
+    schema_version: u32,
+    evidence: Vec<EvidenceOut>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryLinksRequest {
+    /// Exactly one of memory_id / decision_id / evidence_id
+    /// identifies the parent row whose links to read.
+    #[serde(default)]
+    memory_id: Option<String>,
+    #[serde(default)]
+    decision_id: Option<String>,
+    #[serde(default)]
+    evidence_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryLinkOut {
+    id: String,
+    memory_id: Option<String>,
+    decision_id: Option<String>,
+    evidence_id: Option<String>,
+    /// The linked exchange id (`<session_id>:<turn_index>`) when the
+    /// target is an exchange. Resolve its transcript via
+    /// claudepot_search_memory / claudepot_list_sessions, then read with
+    /// claudepot_read_conversation.
+    exchange_id: Option<String>,
+    /// The linked transcript file when the target is a file — readable
+    /// directly with claudepot_read_conversation.
+    file_path: Option<String>,
+    /// `evidence` | `origin` | `related` | `supersedes`.
+    relation: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryLinksPayload {
+    schema_version: u32,
+    links: Vec<MemoryLinkOut>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -445,7 +568,7 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Store a durable memory (fact / preference / pattern / constraint / summary). Survives transcript rebuilds."
+        description = "Store a durable memory (fact / preference / pattern / constraint / summary). Survives transcript rebuilds. The memory is accepted immediately (not a review proposal) — record only what the user actually stated. On a project-confined server, scope='project' auto-fills project_path; an --all-projects server needs it passed explicitly."
     )]
     fn claudepot_remember(&self, Parameters(req): Parameters<RememberRequest>) -> String {
         let scope = match req.scope.as_str() {
@@ -475,7 +598,17 @@ impl MemoryServer {
             .created_by
             .clone()
             .unwrap_or_else(|| "agent:unknown".to_string());
-        let pp = req.project_path.as_deref();
+        // Auto-fill: a project-scoped memory with no explicit path
+        // from a confined server means "this project". Before this,
+        // the omission was an InvalidScope error — and the sibling
+        // write tools silently produced *global* rows, a footgun for
+        // agents told "the server is scoped for you".
+        let pp_owned: Option<String> = match req.project_path {
+            Some(ref p) => Some(p.clone()),
+            None if matches!(scope, durable::Scope::Project) => self.scope.root().map(String::from),
+            None => None,
+        };
+        let pp = pp_owned.as_deref();
         // A confined server may author a *global* memory (that
         // discloses nothing about another project) but must not
         // attach one to a project it cannot see.
@@ -515,10 +648,18 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Log a durable decision with rationale. If supersedes_id is set, the prior decision flips to 'superseded' atomically."
+        description = "Log a durable decision with rationale. If supersedes_id is set, the prior decision flips to 'superseded' atomically. On a project-confined server, project_path auto-fills to that project when omitted; on an --all-projects server, an omitted path records a global (project-less) decision."
     )]
     fn claudepot_log_decision(&self, Parameters(req): Parameters<LogDecisionRequest>) -> String {
-        if let Err(e) = self.scope.check_write(req.project_path.as_deref()) {
+        // Auto-fill: an omitted project_path on a confined server
+        // means "this project". Without the fill, the decision landed
+        // as a *global* row — which a confined `list_decisions` (pinned
+        // to the root) could then never read back.
+        let project_path: Option<String> = req
+            .project_path
+            .clone()
+            .or_else(|| self.scope.root().map(String::from));
+        if let Err(e) = self.scope.check_write(project_path.as_deref()) {
             return self.denied(e);
         }
         let created_by = req
@@ -526,7 +667,7 @@ impl MemoryServer {
             .clone()
             .unwrap_or_else(|| "agent:unknown".to_string());
         let new = durable::NewDecision {
-            project_path: req.project_path.as_deref(),
+            project_path: project_path.as_deref(),
             topic: req.topic.as_deref(),
             decision: &req.decision,
             rationale: req.rationale.as_deref(),
@@ -579,13 +720,20 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Submit evidence for a task or audit-fix run. Records the verification step and the file changes so future sessions don't re-discover the same finding."
+        description = "Submit evidence for a task or audit-fix run. Records the verification step and the file changes so future sessions don't re-discover the same finding. Read it back with claudepot_list_evidence. On a project-confined server, project_path auto-fills to that project when omitted; on an --all-projects server, an omitted path records global evidence."
     )]
     fn claudepot_submit_evidence(
         &self,
         Parameters(req): Parameters<SubmitEvidenceRequest>,
     ) -> String {
-        if let Err(e) = self.scope.check_write(req.project_path.as_deref()) {
+        // Auto-fill: an omitted project_path on a confined server
+        // means "this project" — otherwise the evidence lands global
+        // and this project's future audit runs never see it.
+        let project_path: Option<String> = req
+            .project_path
+            .clone()
+            .or_else(|| self.scope.root().map(String::from));
+        if let Err(e) = self.scope.check_write(project_path.as_deref()) {
             return self.denied(e);
         }
         let created_by = req
@@ -593,7 +741,7 @@ impl MemoryServer {
             .clone()
             .unwrap_or_else(|| "agent:unknown".to_string());
         let new = durable::NewEvidence {
-            project_path: req.project_path.as_deref(),
+            project_path: project_path.as_deref(),
             topic: req.topic.as_deref(),
             summary: &req.summary,
             verification: &req.verification,
@@ -616,7 +764,7 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "List durable memories. Without filters, returns the most recent (up to 100)."
+        description = "List durable memories. Without filters, returns the most recent (up to 100). Only accepted rows are returned (vetted lessons and directly-recorded facts); set include_suspect=true to also see stale-flagged lessons (check review_state). Unreviewed proposals and rejected claims never appear."
     )]
     fn claudepot_list_memories(&self, Parameters(req): Parameters<ListMemoriesRequest>) -> String {
         let scope = match req.scope.as_deref() {
@@ -665,6 +813,15 @@ impl MemoryServer {
             project_path,
             kind,
             include_archived: req.include_archived.unwrap_or(false),
+            // The review gate, agent side: lessons and memories share
+            // one table, and this emission is exactly the surface the
+            // human review queue exists to guard. Accepted rows only;
+            // suspect is an explicit opt-in that arrives labeled.
+            review: if req.include_suspect.unwrap_or(false) {
+                durable::ReviewVisibility::AcceptedAndSuspect
+            } else {
+                durable::ReviewVisibility::Accepted
+            },
             limit: req.limit.unwrap_or(0),
         };
         match durable::list_memories(&self.idx, &f) {
@@ -684,6 +841,7 @@ impl MemoryServer {
                         // stash a secret here. Redact before emission.
                         created_by: redact_apply(&m.created_by, &self.policy),
                         created_at_ms: m.created_at_ms,
+                        review_state: m.review_state,
                     })
                     .collect(),
             }),
@@ -800,6 +958,165 @@ impl MemoryServer {
                 to_json(&error_with(error_code::WRITE_FAILED, &e, &self.policy))
             }
         }
+    }
+
+    #[tool(
+        description = "Archive a memory — a soft-delete (the row is retained but stops surfacing; there is no un-archive). Use when a memory turned out wrong or obsolete, then record the corrected fact with claudepot_remember. Returns archived=false if the id didn't reference an active memory."
+    )]
+    fn claudepot_archive_memory(
+        &self,
+        Parameters(req): Parameters<ArchiveMemoryRequest>,
+    ) -> String {
+        // Authorize by the memory's own project before archiving — an id
+        // carries no scope, so without this a confined server could
+        // archive another project's memory by guessing an id. The lookup
+        // flattens "global memory" and "unknown id" into `None`; both are
+        // safe to fall through (global rows are visible to every server,
+        // and an unknown id archives to `false` without revealing anything).
+        if self.scope.root().is_some() {
+            match review::memory_project_path(&self.idx, &req.id) {
+                Ok(Some(owner)) => {
+                    if let Err(e) = self.scope.check_write(Some(&owner)) {
+                        return self.denied(e);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "claudepot_archive_memory: lookup failed");
+                    return to_json(&error_with(error_code::WRITE_FAILED, &e, &self.policy));
+                }
+            }
+        }
+        match durable::archive_memory(&self.idx, &req.id) {
+            Ok(archived) => to_json(&ArchiveMemoryPayload {
+                schema_version: SCHEMA_VERSION,
+                archived,
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_archive_memory: write failed");
+                to_json(&error_with(error_code::WRITE_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
+    #[tool(
+        description = "List evidence records from prior task / audit-fix runs — what was already found, fixed, and how it was verified. Call this at the START of an audit or fix loop so already-resolved findings aren't re-litigated."
+    )]
+    fn claudepot_list_evidence(&self, Parameters(req): Parameters<ListEvidenceRequest>) -> String {
+        let project_path = match self.scope.confine_search(req.project_path.as_deref()) {
+            Ok(p) => p,
+            Err(e) => return self.denied(e),
+        };
+        match durable::list_evidence(&self.idx, project_path.as_deref(), req.limit.unwrap_or(0)) {
+            Ok(rows) => to_json(&ListEvidencePayload {
+                schema_version: SCHEMA_VERSION,
+                evidence: rows
+                    .into_iter()
+                    .map(|e| EvidenceOut {
+                        id: e.id,
+                        project_path: e.project_path,
+                        // Every free-text field is agent-supplied at
+                        // submit time; redact all of them on the way out.
+                        topic: e.topic.map(|t| redact_apply(&t, &self.policy)),
+                        summary: redact_apply(&e.summary, &self.policy),
+                        verification: redact_apply(&e.verification, &self.policy),
+                        files_changed: redact_apply(&e.files_changed_json, &self.policy),
+                        confidence: e.confidence,
+                        created_by_kind: created_by_kind_str(e.created_by_kind).to_string(),
+                        created_by: redact_apply(&e.created_by, &self.policy),
+                        created_at_ms: e.created_at_ms,
+                    })
+                    .collect(),
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_list_evidence: query failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Read the explicitly-recorded provenance links attached to one durable row (pass exactly one of memory_id / decision_id / evidence_id). Each link points at a transcript file/exchange or a related record. Returns an empty list when the row has no recorded links or the id is unknown; provenance the distiller denormalizes onto a lesson is not surfaced here."
+    )]
+    fn claudepot_memory_links(&self, Parameters(req): Parameters<MemoryLinksRequest>) -> String {
+        let q = match (&req.memory_id, &req.decision_id, &req.evidence_id) {
+            (Some(id), None, None) => durable::LinkQuery::Memory(id),
+            (None, Some(id), None) => durable::LinkQuery::Decision(id),
+            (None, None, Some(id)) => durable::LinkQuery::Evidence(id),
+            _ => {
+                return to_json(&error_static(
+                    error_code::INVALID_LINK_QUERY,
+                    "pass exactly one of memory_id | decision_id | evidence_id",
+                ));
+            }
+        };
+        // Authorize by the parent row's own project before reading its
+        // links — link targets carry transcript locators, and an id alone
+        // carries no scope. A global or unknown parent falls through:
+        // global rows are visible to every server, and an unknown id
+        // yields an empty list without revealing anything.
+        if self.scope.root().is_some() {
+            let owner: Option<String> = match q {
+                durable::LinkQuery::Memory(id) => {
+                    match review::memory_project_path(&self.idx, id) {
+                        Ok(pp) => pp,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "claudepot_memory_links: lookup failed");
+                            return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy));
+                        }
+                    }
+                }
+                durable::LinkQuery::Decision(id) => {
+                    match durable::decision_project_path(&self.idx, id) {
+                        Ok(pp) => pp.flatten(),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "claudepot_memory_links: lookup failed");
+                            return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy));
+                        }
+                    }
+                }
+                durable::LinkQuery::Evidence(id) => {
+                    match durable::evidence_project_path(&self.idx, id) {
+                        Ok(pp) => pp.flatten(),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "claudepot_memory_links: lookup failed");
+                            return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy));
+                        }
+                    }
+                }
+            };
+            if let Some(owner) = owner {
+                if let Err(e) = self.scope.check_read(&owner) {
+                    return self.denied(e);
+                }
+            }
+        }
+        let rows = match durable::links_for(&self.idx, q) {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_memory_links: query failed");
+                return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy));
+            }
+        };
+        // Second gate: authorize each link by its own target, dropping any
+        // whose transcript belongs to a project this server may not read.
+        let links: Vec<MemoryLinkOut> = rows
+            .into_iter()
+            .filter(|l| self.link_target_in_scope(l))
+            .map(|l| MemoryLinkOut {
+                id: l.id,
+                memory_id: l.memory_id,
+                decision_id: l.decision_id,
+                evidence_id: l.evidence_id,
+                exchange_id: l.exchange_id,
+                file_path: l.file_path,
+                relation: link_relation_str(l.relation).to_string(),
+            })
+            .collect();
+        to_json(&MemoryLinksPayload {
+            schema_version: SCHEMA_VERSION,
+            links,
+        })
     }
 
     #[tool(
@@ -949,6 +1266,8 @@ mod error_code {
     pub const INVALID_SCOPE: &str = "invalid_scope";
     pub const INVALID_KIND: &str = "invalid_kind";
     pub const INVALID_STATUS: &str = "invalid_status";
+    /// `claudepot_memory_links` needs exactly one parent id.
+    pub const INVALID_LINK_QUERY: &str = "invalid_link_query";
     pub const LOCATOR_NOT_INDEXED: &str = "locator_not_indexed";
     pub const DECISION_NOT_FOUND: &str = "decision_not_found";
     pub const SEARCH_FAILED: &str = "search_failed";
@@ -1023,5 +1342,14 @@ fn decision_status_str(s: durable::DecisionStatus) -> &'static str {
         durable::DecisionStatus::Active => "active",
         durable::DecisionStatus::Superseded => "superseded",
         durable::DecisionStatus::Archived => "archived",
+    }
+}
+
+fn link_relation_str(r: durable::LinkRelation) -> &'static str {
+    match r {
+        durable::LinkRelation::Evidence => "evidence",
+        durable::LinkRelation::Origin => "origin",
+        durable::LinkRelation::Related => "related",
+        durable::LinkRelation::Supersedes => "supersedes",
     }
 }

@@ -1,15 +1,21 @@
 //! Claudepot MCP memory server (WI-008).
 //!
 //! `claudepot mcp memory-server` starts a stdio MCP server exposing
-//! seven tools backed by the shared_memory module:
+//! thirteen tools backed by the shared_memory module:
 //!
 //! * `claudepot_search_memory`
 //! * `claudepot_read_conversation`
 //! * `claudepot_remember`
+//! * `claudepot_archive_memory`
 //! * `claudepot_log_decision`
+//! * `claudepot_archive_decision`
 //! * `claudepot_submit_evidence`
 //! * `claudepot_list_memories`
 //! * `claudepot_list_decisions`
+//! * `claudepot_list_evidence`
+//! * `claudepot_memory_links`
+//! * `claudepot_list_sessions`
+//! * `claudepot_list_projects`
 //!
 //! All emission paths run through `claudepot_core::redaction::apply`
 //! before crossing the MCP boundary. Server logs go to stderr only;
