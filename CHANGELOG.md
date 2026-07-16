@@ -6,6 +6,37 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.3 — beta (released 2026-07-16)
+
+Knowledge pane hardening — trust, resilience, and closing the loop.
+
+### Added
+
+- **Enforce a lesson from the app** — accepted lessons and confirmed
+  recurrences surface the exact `claudepot lesson compile` command that
+  compiles a lesson into a repo guard, closing the loop the dashboard
+  measures.
+- **Search the curated base** — a free-text filter over the Know view, plus
+  paging and keyboard navigation in Recall's transcript search.
+
+### Changed
+
+- **The dashboard leads with what needs attention** — pending recurrences,
+  suspect lessons, and proposals, each routing to Review — rather than a
+  passive scoreboard. It never shows a green "all clear" that a cold start
+  or a failed load could fake, and it tells an empty base apart from an
+  unavailable one.
+
+### Fixed
+
+- A drilled-into project no longer leaves the Know tab silently filtered for
+  the rest of the session; an uncurated project lands on a named, actionable
+  empty state instead of a dead end.
+- Partial data-load failures degrade gracefully (in-place retry, honest
+  messages) instead of blanking a view or masquerading as healthy.
+- Assorted correctness fixes across search ordering, filter combinations,
+  error recovery, and recurrence handling.
+
 ## 0.2.2 — beta (released 2026-07-16)
 
 Knowledge authoring and navigation follow-up.
