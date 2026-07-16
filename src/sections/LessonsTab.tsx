@@ -27,7 +27,12 @@ import type { StatCardProps } from "./knowledge/dashboard-primitives";
 
 type QueueState = Extract<ReviewStateName, "proposed" | "suspect">;
 
-export function LessonsTab() {
+export function LessonsTab({
+  onOpenMemory,
+}: {
+  /** Deep-link a recurrence's matched lesson into Know. */
+  onOpenMemory?: (projectPath: string, memoryId: string) => void;
+}) {
   const [counts, setCounts] = useState<LessonCounts | null>(null);
   const [rows, setRows] = useState<LessonRow[]>([]);
   const [queue, setQueue] = useState<QueueState>("proposed");
@@ -122,7 +127,7 @@ export function LessonsTab() {
 
       {/* High-signal: a class we already learned that recurred anyway.
           Renders nothing when there are no pending candidates. */}
-      <RecurrencePanel />
+      <RecurrencePanel onOpenMemory={onOpenMemory} />
 
       <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-12)" }}>
         <SectionLabel>Review queue</SectionLabel>

@@ -37,9 +37,17 @@ export function SharedMemorySection() {
   // that project. `null` = no filter. Re-set on every jump so clicking the
   // same project twice still re-applies (KnowView keys an effect on it).
   const [knowProject, setKnowProject] = useState<string | null>(null);
+  const [knowMemoryId, setKnowMemoryId] = useState<string | null>(null);
 
   const openProjectInKnow = (projectPath: string) => {
     setKnowProject(projectPath);
+    setKnowMemoryId(null);
+    setTab("know");
+  };
+
+  const openMemoryInKnow = (projectPath: string, memoryId: string) => {
+    setKnowProject(projectPath);
+    setKnowMemoryId(memoryId);
     setTab("know");
   };
 
@@ -109,10 +117,11 @@ export function SharedMemorySection() {
         {tab === "know" && (
           <KnowView
             initialProjectFilter={knowProject}
+            initialMemoryId={knowMemoryId}
             onReview={() => setTab("review")}
           />
         )}
-        {tab === "review" && <LessonsTab />}
+        {tab === "review" && <LessonsTab onOpenMemory={openMemoryInKnow} />}
         {tab === "recall" && <RecallTab />}
       </div>
     </div>

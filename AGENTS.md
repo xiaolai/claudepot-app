@@ -266,8 +266,9 @@ See `dev-docs/implementation-plan.md` for the full plan.
   Accounts, Activities (id `events` for localStorage compatibility,
   label "Activities" — live + today/month dashboard + cards stream),
   Projects (hosts per-project sessions in ProjectDetail's
-  master-detail pane), Memory (id `shared-memory` — cross-harness
-  search over indexed Claude + Codex transcripts, memories,
+  master-detail pane), Knowledge (id `shared-memory` — dashboard,
+  curated base, review queue, and recall over indexed Claude + Codex
+  transcripts, memories,
   decisions), Keys, Providers (id `third-party`, localStorage
   compatibility), Agents (id `automations`, ditto), Global,
   Settings. Nine top-level tabs total.
