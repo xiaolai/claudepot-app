@@ -24,18 +24,23 @@ import { Tag } from "../components/primitives/Tag";
 import { RecurrencePanel } from "./knowledge/RecurrencePanel";
 import { StatCard } from "./knowledge/dashboard-primitives";
 import type { StatCardProps } from "./knowledge/dashboard-primitives";
+import { toUserError } from "../lib/errors";
 
 type QueueState = Extract<ReviewStateName, "proposed" | "suspect">;
 
 export function LessonsTab({
+  initialQueue = "proposed",
   onOpenMemory,
 }: {
+  /** Which sub-queue to open on mount (a Dashboard "Suspect" jump lands
+   *  here, not on the default Proposed queue). */
+  initialQueue?: QueueState;
   /** Deep-link a recurrence's matched lesson into Know. */
   onOpenMemory?: (projectPath: string, memoryId: string) => void;
 }) {
   const [counts, setCounts] = useState<LessonCounts | null>(null);
   const [rows, setRows] = useState<LessonRow[]>([]);
-  const [queue, setQueue] = useState<QueueState>("proposed");
+  const [queue, setQueue] = useState<QueueState>(initialQueue);
   const [cursor, setCursor] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -53,7 +58,7 @@ export function LessonsTab({
       setRows(r);
       setCursor((i) => Math.min(i, Math.max(0, r.length - 1)));
     } catch (e) {
-      setErr(String(e));
+      setErr(toUserError(e));
     } finally {
       setLoading(false);
     }
@@ -90,9 +95,17 @@ export function LessonsTab({
           setCursor((i) => Math.min(i, Math.max(0, next.length - 1)));
           return next;
         });
+        // Adjust counts locally so the Gazette + toggle stay honest even if
+        // the reconcile fetch below fails — a silently frozen count is the
+        // exact drift this pane exists to prevent. Decrement by the ROW's own
+        // state (not the current `queue` toggle) so a verdict landed during a
+        // queue-switch reload still moves the right bucket. The fetch then
+        // corrects any real divergence; only that background call may be
+        // swallowed.
+        setCounts((c) => (c ? adjustCounts(c, row.review_state, verdict) : c));
         void sharedMemoryApi.lessonCounts().then(setCounts).catch(() => {});
       } catch (e) {
-        setErr(String(e));
+        setErr(toUserError(e));
       } finally {
         setBusyId(null);
       }
@@ -362,6 +375,22 @@ function EmptyQueue({ queue }: { queue: QueueState }) {
       )}
     </div>
   );
+}
+
+/** Move one row's contribution from its queue bucket to accepted/rejected.
+ *  Keeps the Gazette + toggle in sync the instant a verdict lands, so a
+ *  failed reconcile fetch can't freeze the counts at a stale value. */
+function adjustCounts(
+  c: LessonCounts,
+  fromState: ReviewStateName,
+  verdict: "accept" | "reject",
+): LessonCounts {
+  const next = { ...c };
+  if (fromState === "proposed") next.proposed = Math.max(0, next.proposed - 1);
+  else if (fromState === "suspect") next.suspect = Math.max(0, next.suspect - 1);
+  if (verdict === "accept") next.accepted += 1;
+  else next.rejected += 1;
+  return next;
 }
 
 // The distiller stores evidence inside the anchor JSON so it survives an

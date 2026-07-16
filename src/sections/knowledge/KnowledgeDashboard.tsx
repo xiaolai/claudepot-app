@@ -12,7 +12,7 @@
 //   3. Freshness  — the current suspect total (the invalidation moat).
 //   4. Recurrence — the headline once Phase 3 lands; a placeholder here.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type {
   LessonCounts,
@@ -20,15 +20,18 @@ import type {
   ProjectSummary,
   RecurrenceCounts,
 } from "../../api/sharedMemory";
+import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { basename } from "../../lib/paths";
+import { toUserError } from "../../lib/errors";
+import type { QueueTarget } from "../SharedMemorySection";
 import {
   StatCard,
   TrustBar,
   trustMix,
   trustTotal,
 } from "./dashboard-primitives";
-import type { TrustMix } from "./dashboard-primitives";
+import type { StatCardProps, TrustMix } from "./dashboard-primitives";
 
 /** A merged coverage row: a project, its session count, and its trust
  *  mix. Either half can be absent (a project with memories but no indexed
@@ -51,93 +54,197 @@ const ZERO_COUNTS: LessonCounts = {
 
 export function KnowledgeDashboard({
   onOpenProject,
+  onOpenReview,
 }: {
   onOpenProject: (projectPath: string) => void;
+  onOpenReview: (queue?: QueueTarget) => void;
 }) {
   const [rollup, setRollup] = useState<LessonCounts | null>(null);
   const [rows, setRows] = useState<CoverageRow[]>([]);
   const [recurrence, setRecurrence] = useState<RecurrenceCounts | null>(null);
   const [loading, setLoading] = useState(true);
+  // `err` = every call failed (nothing to show). `partial` = some failed but
+  // we render what loaded. Distinguishing them is the whole point: a failed
+  // load must never masquerade as a healthy, empty, all-zeros dashboard.
   const [err, setErr] = useState<string | null>(null);
+  const [partial, setPartial] = useState<string | null>(null);
+  // Which specific calls failed — so a lead that ASSERTS a fact (cold-start,
+  // "no failure has recurred") is only shown when the call backing that fact
+  // actually loaded, not when its failure coerced the value to zero.
+  const [countsFailed, setCountsFailed] = useState(false);
+  const [recFailed, setRecFailed] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setErr(null);
-    try {
-      const [counts, byProject, projects, rec] = await Promise.all([
-        sharedMemoryApi.lessonCounts(),
-        sharedMemoryApi.lessonCountsByProject(),
-        sharedMemoryApi.listProjects(),
-        sharedMemoryApi.recurrenceCounts(),
-      ]);
-      setRollup(counts);
-      setRows(mergeCoverage(byProject, projects));
-      setRecurrence(rec);
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setLoading(false);
+    setPartial(null);
+    // allSettled, not all: one failing call (e.g. the newest recurrence
+    // table) must not blank the other three that succeeded.
+    const [countsR, byProjectR, projectsR, recR] = await Promise.allSettled([
+      sharedMemoryApi.lessonCounts(),
+      sharedMemoryApi.lessonCountsByProject(),
+      sharedMemoryApi.listProjects(),
+      sharedMemoryApi.recurrenceCounts(),
+    ]);
+    if (countsR.status === "fulfilled") setRollup(countsR.value);
+    if (recR.status === "fulfilled") setRecurrence(recR.value);
+    setCountsFailed(countsR.status === "rejected");
+    setRecFailed(recR.status === "rejected");
+    setRows(
+      mergeCoverage(
+        byProjectR.status === "fulfilled" ? byProjectR.value : [],
+        projectsR.status === "fulfilled" ? projectsR.value : [],
+      ),
+    );
+
+    const results = [countsR, byProjectR, projectsR, recR];
+    const failures = results.filter(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    if (failures.length === results.length) {
+      setErr(toUserError(failures[0]!.reason));
+    } else if (failures.length > 0) {
+      setPartial("Part of the dashboard couldn't load — showing what's available.");
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const coverage = useMemo(() => {
-    const withKnowledge = rows.filter((r) => r.curated > 0).length;
-    return { withKnowledge, total: rows.length };
-  }, [rows]);
-
   const rollupMix = rollup ? trustMix(rollup) : null;
+
+  // Total knowledge ever recorded — distinguishes cold-start (nothing
+  // harvested) from caught-up (harvested, nothing pending). A green "all
+  // clear" is only honest in the latter.
+  const totalKnowledge = rollup
+    ? rollup.proposed + rollup.accepted + rollup.rejected + rollup.suspect
+    : 0;
+  const proposed = rollup?.proposed ?? 0;
+  const suspect = rollup?.suspect ?? 0;
+  const enforced = rollup?.enforced ?? 0;
+  const documented = rollup ? Math.max(0, rollup.accepted - rollup.enforced) : 0;
+  const pendingRec = recurrence?.pending ?? 0;
+  const confirmedRec = recurrence?.confirmed_window ?? 0;
+  const windowDays = recurrence?.window_days ?? 30;
+
+  // Every hero is open work that clicks to the action that clears it
+  // (design.md anti-vanity rule). Recurrence leads — it is the metric the
+  // whole compiler exists to drive to zero — then stale, then intake.
+  const attention: StatCardProps[] = [];
+  if (pendingRec > 0)
+    attention.push({
+      label: pendingRec === 1 ? "Recurrence" : "Recurrences",
+      value: pendingRec,
+      tone: "warn",
+      hint: "already-learned failures seen again — confirm in Review",
+      onClick: () => onOpenReview("proposed"),
+    });
+  if (suspect > 0)
+    attention.push({
+      label: "Suspect",
+      value: suspect,
+      tone: "warn",
+      hint: "accepted lessons whose code moved — re-review",
+      onClick: () => onOpenReview("suspect"),
+    });
+  if (proposed > 0)
+    attention.push({
+      label: "Proposals",
+      value: proposed,
+      tone: "accent",
+      hint: "waiting on your yes / no",
+      onClick: () => onOpenReview("proposed"),
+    });
+
+  // Secondary context — the trust scoreboard, deliberately NOT a hero here
+  // (Review's Gazette owns the scoreboard framing). Render-if-nonzero.
+  const context: string[] = [];
+  if (enforced > 0) context.push(`${enforced} enforced`);
+  if (documented > 0) context.push(`${documented} documented`);
+  if (confirmedRec > 0)
+    context.push(
+      `${confirmedRec} confirmed repeat${confirmedRec === 1 ? "" : "s"} (${windowDays}d)`,
+    );
+
+  // ── every call failed: never render a fake-healthy zero dashboard ──
+  if (err) {
+    return (
+      <div
+        role="alert"
+        style={{ display: "flex", flexDirection: "column", gap: "var(--sp-12)", alignItems: "flex-start" }}
+      >
+        <p style={{ margin: 0, color: "var(--danger)", fontSize: "var(--fs-base)" }}>{err}</p>
+        <Button variant="subtle" onClick={() => void refresh()} disabled={loading}>
+          {loading ? "Retrying…" : "Retry"}
+        </Button>
+      </div>
+    );
+  }
+
+  // ── first load, nothing yet: hold rather than flash all-zero green ──
+  if (loading && rollup === null && recurrence === null && rows.length === 0) {
+    return <p style={{ margin: 0, color: "var(--fg-muted)" }}>Loading…</p>;
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)" }}>
-      {err && (
-        <div role="alert" style={{ color: "var(--danger)", fontSize: "var(--fs-base)" }}>
-          {err}
+      {partial && (
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", fontSize: "var(--fs-sm)", color: "var(--warn)" }}>
+          <span>{partial}</span>
+          <Button variant="ghost" onClick={() => void refresh()} disabled={loading}>
+            {loading ? "…" : "Retry"}
+          </Button>
         </div>
       )}
 
-      {/* The four signals. Recurrence leads (headline); "stored" never
-          appears as a hero — it lives as faint secondary text below. */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(11rem, 1fr))",
-          gap: "var(--sp-12)",
-        }}
-      >
-        <StatCard
-          label="Recurrence"
-          value={recurrence?.confirmed_window ?? 0}
-          tone={recurrence && recurrence.confirmed_window > 0 ? "warn" : "good"}
-          hint={
-            recurrence && recurrence.pending > 0
-              ? `${recurrence.pending} awaiting confirmation in Review`
-              : `known failures that happened again (${recurrence?.window_days ?? 30}d)`
-          }
-          emphasis
-        />
-        <StatCard
-          label="Suspect"
-          value={rollup?.suspect ?? 0}
-          tone="warn"
-          hint="lessons whose code moved — re-review"
-        />
-        <StatCard
-          label="Enforced"
-          value={rollup?.enforced ?? 0}
-          tone="good"
-          hint="compiled into a check that fails the build"
-        />
-        <StatCard
-          label="Coverage"
-          value={`${coverage.withKnowledge} / ${coverage.total}`}
-          tone="neutral"
-          hint="projects with any curated knowledge"
-        />
-      </div>
+      {/* The lead: open work first; otherwise an honest empty/quiet state —
+          never a green zero that a cold start or a failure could fake. When
+          a specific call failed, its zero can't back a claim: if counts
+          failed we suppress the cold-start/caught-up leads entirely (the
+          partial banner + Retry above is the signal), and if only recurrence
+          failed we drop the "no failure has recurred" clause. */}
+      {attention.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
+          <SectionLabel>Needs attention</SectionLabel>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(11rem, 1fr))",
+              gap: "var(--sp-12)",
+            }}
+          >
+            {attention.map((s, i) => (
+              <StatCard key={s.label} {...s} emphasis={i === 0} />
+            ))}
+          </div>
+        </div>
+      ) : countsFailed ? null : totalKnowledge === 0 && rows.length === 0 ? (
+        <EmptyDashboard />
+      ) : totalKnowledge === 0 ? (
+        <div style={{ ...calloutStyle(), color: "var(--fg-muted)" }}>
+          <p style={{ margin: 0 }}>
+            No lessons yet — harvest a busy project below to begin.
+          </p>
+        </div>
+      ) : (
+        <div style={calloutStyle()}>
+          <p style={{ margin: 0, color: "var(--ok)", fontWeight: 500 }}>All caught up.</p>
+          <p style={{ margin: "var(--sp-6) 0 0", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
+            {recFailed
+              ? "Nothing awaiting review. Recurrence status couldn't be loaded — retry above."
+              : "Nothing awaiting review, and no known failure has recurred."}
+          </p>
+        </div>
+      )}
+
+      {/* Secondary context line — the scoreboard, not a hero. */}
+      {context.length > 0 && (
+        <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
+          {context.join(" · ")}
+        </p>
+      )}
 
       {/* Trust signal: the roll-up mix across every project. */}
       {rollupMix && trustTotal(rollupMix) > 0 && (
@@ -149,29 +256,28 @@ export function KnowledgeDashboard({
 
       {/* Coverage grid: most sessions, least curated first — the projects
           worth harvesting float to the top. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
-        <SectionLabel>Projects</SectionLabel>
-        {!loading && rows.length === 0 ? (
-          <EmptyDashboard />
-        ) : (
+      {rows.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
+          <SectionLabel>Projects</SectionLabel>
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
             {rows.map((row) => (
               <CoverageRowItem key={row.projectPath} row={row} onOpen={onOpenProject} />
             ))}
           </ul>
-        )}
-      </div>
-
-      {/* "N stored" only ever appears here, faint and last — never a
-          hero. It is context, not the point. */}
-      {rollup && (
-        <p style={{ margin: 0, fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
-          {rollup.accepted + rollup.proposed + rollup.suspect} items curated across{" "}
-          {rows.length} project{rows.length === 1 ? "" : "s"}.
-        </p>
+        </div>
       )}
     </div>
   );
+}
+
+/** Shared box for the lead's non-attention callouts (cold-start / caught-up). */
+function calloutStyle(): React.CSSProperties {
+  return {
+    border: "var(--sp-px) solid var(--line)",
+    borderRadius: "var(--r-3)",
+    padding: "var(--sp-16)",
+    background: "var(--bg-raised)",
+  };
 }
 
 // ─── one project row ─────────────────────────────────────────────
@@ -222,8 +328,8 @@ function CoverageRowItem({
           <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
             {row.sessionCount} session{row.sessionCount === 1 ? "" : "s"}
             {row.curated > 0
-              ? ` · ${row.curated} curated`
-              : " · nothing curated yet"}
+              ? ` · ${row.curated} lesson${row.curated === 1 ? "" : "s"}`
+              : " · no lessons yet"}
           </span>
         </span>
         <TrustBar mix={row.mix} />

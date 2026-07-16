@@ -30,6 +30,8 @@ interface InputProps {
    */
   inputRef?: Ref<HTMLInputElement>;
   "aria-label"?: string;
+  /** id of a `<datalist>` to offer autocomplete suggestions. */
+  list?: string;
 }
 
 /**

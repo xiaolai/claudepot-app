@@ -23,6 +23,8 @@ import { RecallTab } from "./knowledge/RecallTab";
 import { ScreenHeader } from "../shell/ScreenHeader";
 
 type Tab = "dashboard" | "know" | "review" | "recall";
+/** Which Review sub-queue a deep-link should open. */
+export type QueueTarget = "proposed" | "suspect";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
@@ -33,11 +35,16 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function SharedMemorySection() {
   const [tab, setTab] = useState<Tab>("dashboard");
-  // Deep-link carrier: a Dashboard project row opens Know pre-filtered to
-  // that project. `null` = no filter. Re-set on every jump so clicking the
-  // same project twice still re-applies (KnowView keys an effect on it).
+  // Deep-link carriers: a Dashboard/Review jump pre-filters Know or targets
+  // a Review sub-queue. `null`/default = no deep-link. These are ONE-SHOT:
+  // the deep-link openers below set a carrier and jump with the raw setter,
+  // but `navTab` (a plain tab click / arrow key) clears them — otherwise a
+  // project drilled into once would keep silently filtering the Know tab for
+  // the rest of the session, making the base look empty or broken (an
+  // invisible filter is the most corrosive failure a knowledge base can have).
   const [knowProject, setKnowProject] = useState<string | null>(null);
   const [knowMemoryId, setKnowMemoryId] = useState<string | null>(null);
+  const [reviewQueue, setReviewQueue] = useState<QueueTarget>("proposed");
 
   const openProjectInKnow = (projectPath: string) => {
     setKnowProject(projectPath);
@@ -51,6 +58,23 @@ export function SharedMemorySection() {
     setTab("know");
   };
 
+  const openReview = (queue: QueueTarget = "proposed") => {
+    setReviewQueue(queue);
+    setTab("review");
+  };
+
+  // A direct tab navigation is not a deep-link, so it drops any stale
+  // carrier before switching. Deep-link openers above bypass this by calling
+  // `setTab` straight, so their carrier survives the jump.
+  const navTab = (next: Tab) => {
+    if (next === "know") {
+      setKnowProject(null);
+      setKnowMemoryId(null);
+    }
+    if (next === "review") setReviewQueue("proposed");
+    setTab(next);
+  };
+
   // WAI-ARIA tabs pattern: Left/Right move selection with wrap-around and
   // focus follows. Companion to TabButton's roving tabIndex — without it,
   // inactive tabs (tabIndex={-1}) would be keyboard-unreachable.
@@ -60,7 +84,7 @@ export function SharedMemorySection() {
     const delta = e.key === "ArrowRight" ? 1 : -1;
     const i = TABS.findIndex((t) => t.id === tab);
     const next = TABS[(i + delta + TABS.length) % TABS.length]!.id;
-    setTab(next);
+    navTab(next);
     document.getElementById(`shared-memory-tab-${next}`)?.focus();
   };
 
@@ -94,7 +118,7 @@ export function SharedMemorySection() {
             id={`shared-memory-tab-${t.id}`}
             panelId={`shared-memory-panel-${t.id}`}
             active={tab === t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => navTab(t.id)}
           >
             {t.label}
           </TabButton>
@@ -112,16 +136,21 @@ export function SharedMemorySection() {
         }}
       >
         {tab === "dashboard" && (
-          <KnowledgeDashboard onOpenProject={openProjectInKnow} />
+          <KnowledgeDashboard
+            onOpenProject={openProjectInKnow}
+            onOpenReview={openReview}
+          />
         )}
         {tab === "know" && (
           <KnowView
             initialProjectFilter={knowProject}
             initialMemoryId={knowMemoryId}
-            onReview={() => setTab("review")}
+            onReview={openReview}
           />
         )}
-        {tab === "review" && <LessonsTab onOpenMemory={openMemoryInKnow} />}
+        {tab === "review" && (
+          <LessonsTab initialQueue={reviewQueue} onOpenMemory={openMemoryInKnow} />
+        )}
         {tab === "recall" && <RecallTab />}
       </div>
     </div>

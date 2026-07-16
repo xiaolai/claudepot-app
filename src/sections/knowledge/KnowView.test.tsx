@@ -160,7 +160,8 @@ describe("KnowView", () => {
 
     const reReview = await screen.findByRole("button", { name: "Re-review" });
     await user.click(reReview);
-    expect(onReview).toHaveBeenCalled();
+    // Routes to the *suspect* queue, not the default proposed one.
+    expect(onReview).toHaveBeenCalledWith("suspect");
   });
 
   it("keyboard: Enter on the focused item opens its provenance", async () => {
@@ -274,5 +275,126 @@ describe("KnowView", () => {
         rationale: "It avoids network coupling",
       }),
     );
+  });
+
+  it("a deep-link to an uncurated project names it and offers a way out", async () => {
+    // The project has nothing curated, so it isn't in any loaded item — the
+    // exact case the Dashboard's 'busy-unmined' rows deep-link into.
+    lessonListSpy.mockResolvedValue([]);
+    listDecisionsSpy.mockResolvedValue([]);
+    listEvidenceSpy.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<KnowView initialProjectFilter="/proj/empty" onReview={vi.fn()} />);
+
+    // The empty state names the project, not a generic "nothing matches".
+    expect(await screen.findByText(/Nothing curated in/)).toBeInTheDocument();
+    // The project select shows the injected value, never silently "All".
+    const projectSelect = screen.getByRole("combobox", { name: "Project filter" });
+    expect(projectSelect).toHaveValue("/proj/empty");
+    // And there is an explicit way back to the whole base.
+    await user.click(screen.getByRole("button", { name: "Clear project filter" }));
+    expect(projectSelect).toHaveValue("all");
+  });
+
+  it("the Accepted filter includes enforced lessons", async () => {
+    lessonListSpy.mockResolvedValue([
+      { ...memory, id: "a1", review_state: "accepted", compile_target: null, content: "plain accepted" },
+      {
+        ...memory,
+        id: "a2",
+        review_state: "accepted",
+        compile_target: "guard",
+        guard_ref: "scripts/repo-invariants.sh:1",
+        content: "enforced one",
+      },
+    ]);
+    listDecisionsSpy.mockResolvedValue([]);
+    listEvidenceSpy.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<KnowView onReview={vi.fn()} />);
+    await screen.findByText("plain accepted");
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "State filter" }),
+      "accepted",
+    );
+    // "Accepted" is the superset — it must not hide the enforced item.
+    expect(screen.getByText("plain accepted")).toBeInTheDocument();
+    expect(screen.getByText("enforced one")).toBeInTheDocument();
+  });
+
+  it("an accepted, un-enforced memory offers the compile command", async () => {
+    lessonListSpy.mockResolvedValue([
+      { ...memory, review_state: "accepted", compile_target: null },
+    ]);
+    listDecisionsSpy.mockResolvedValue([]);
+    listEvidenceSpy.mockResolvedValue([]);
+    render(<KnowView onReview={vi.fn()} />);
+    await screen.findByText("Run preflight before pushing.");
+
+    expect(
+      screen.getByRole("button", { name: "Copy compile command" }),
+    ).toBeInTheDocument();
+  });
+
+  it("the free-text filter narrows the base by the record's own words", async () => {
+    lessonListSpy.mockResolvedValue([
+      { ...memory, id: "m1", content: "run preflight" },
+      { ...memory, id: "m2", content: "use sqlite cache" },
+    ]);
+    listDecisionsSpy.mockResolvedValue([]);
+    listEvidenceSpy.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<KnowView onReview={vi.fn()} />);
+    await screen.findByText("run preflight");
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Search knowledge" }),
+      "sqlite",
+    );
+    expect(screen.getByText("use sqlite cache")).toBeInTheDocument();
+    expect(screen.queryByText("run preflight")).toBeNull();
+  });
+
+  it("a search inside a deep-linked project offers 'Clear search', not 'Clear project filter'", async () => {
+    // The project HAS a lesson, but a search hides it — so the search is the
+    // real cause, and "Clear project filter" would not fix it.
+    lessonListSpy.mockResolvedValue([
+      { ...memory, project_path: "/proj/app", content: "real lesson" },
+    ]);
+    listDecisionsSpy.mockResolvedValue([]);
+    listEvidenceSpy.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<KnowView initialProjectFilter="/proj/app" onReview={vi.fn()} />);
+    await screen.findByText("real lesson");
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Search knowledge" }),
+      "zzznomatch",
+    );
+    expect(screen.getByRole("button", { name: "Clear search" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Clear project filter" }),
+    ).toBeNull();
+  });
+
+  it("clearing the deep-link carrier resets the project filter (no stale hidden filter)", async () => {
+    lessonListSpy.mockResolvedValue([
+      { ...memory, id: "a", project_path: "/proj/a", content: "alpha lesson" },
+      { ...memory, id: "b", project_path: "/proj/b", content: "beta lesson" },
+    ]);
+    listDecisionsSpy.mockResolvedValue([]);
+    listEvidenceSpy.mockResolvedValue([]);
+    const { rerender } = render(
+      <KnowView initialProjectFilter="/proj/a" onReview={vi.fn()} />,
+    );
+    // Filtered to /proj/a — beta is hidden.
+    expect(await screen.findByText("alpha lesson")).toBeInTheDocument();
+    expect(screen.queryByText("beta lesson")).toBeNull();
+
+    // Carrier cleared (a plain Know-tab click) → filter resets, beta returns.
+    rerender(<KnowView initialProjectFilter={null} onReview={vi.fn()} />);
+    expect(await screen.findByText("beta lesson")).toBeInTheDocument();
+    expect(screen.getByText("alpha lesson")).toBeInTheDocument();
   });
 });

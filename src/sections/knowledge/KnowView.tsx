@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type { Decision, Evidence, LessonRow } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
+import { Input } from "../../components/primitives/Input";
 import { Glyph } from "../../components/primitives/Glyph";
 import { CopyButton } from "../../components/CopyButton";
 import { NF } from "../../icons";
@@ -17,6 +18,7 @@ import { basename } from "../../lib/paths";
 import { AddMemoryForm } from "./AddMemoryForm";
 import { TrustBar } from "./dashboard-primitives";
 import type { TrustMix } from "./dashboard-primitives";
+import { toUserError } from "../../lib/errors";
 import {
   isEnforced,
   KnowItemCard,
@@ -26,6 +28,8 @@ import {
 import type { KnowItem } from "./knowledge-items";
 
 const GLOBAL_KEY = "(global)";
+/** Per-type row cap. A list at this length is flagged as truncated. */
+const LIMIT = 500;
 
 type StateFilter =
   | "all"
@@ -55,51 +59,73 @@ export function KnowView({
   initialProjectFilter?: string | null;
   /** Deep-link from Review to the matched lesson. */
   initialMemoryId?: string | null;
-  /** Route a suspect item to the Review tab. */
-  onReview: () => void;
+  /** Route to the Review tab, optionally targeting a sub-queue. */
+  onReview: (queue?: "proposed" | "suspect") => void;
 }) {
   const [memories, setMemories] = useState<LessonRow[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [partial, setPartial] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState<string[]>([]);
 
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string>(
     initialProjectFilter ?? "all",
   );
   const [showAdd, setShowAdd] = useState(false);
 
-  // A fresh deep-link (Dashboard → project row) resets the project filter.
+  // The deep-link carrier drives the project filter: a fresh jump
+  // (Dashboard → project row) sets it, and a cleared carrier (a plain
+  // Know-tab click after a drill-down) resets it back to "all". Without the
+  // reset, the Know tab would stay silently filtered to a project the user
+  // drilled into once — an invisible filter that makes the base look empty.
   useEffect(() => {
-    if (initialProjectFilter) setProjectFilter(initialProjectFilter);
+    setProjectFilter(initialProjectFilter ?? "all");
   }, [initialProjectFilter]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setErr(null);
-    try {
-      const [m, d, e] = await Promise.all([
-        sharedMemoryApi.lessonList({ state: "all", limit: 500 }),
-        sharedMemoryApi.listDecisions({ limit: 500 }),
-        sharedMemoryApi.listEvidence({ limit: 500 }),
-      ]);
-      // Rejected lessons are a settled "no" — they live in Review's
-      // history, never in the curated base. Everything else surfaces.
-      setMemories(m.filter((row) => row.review_state !== "rejected"));
-      // Archived decisions are the decision-side equivalent of an archived
-      // memory (which the backend already drops), so they leave the base
-      // too — otherwise archiving a decision *in this view* makes it
-      // reappear as "archived" instead of vanishing. Superseded stays: it
-      // shows the decision's evolution.
-      setDecisions(d.filter((x) => x.status !== "archived"));
-      setEvidence(e);
-    } catch (ex) {
-      setErr(String(ex));
-    } finally {
-      setLoading(false);
-    }
+    setPartial(null);
+    // allSettled: one failing list (e.g. the newest evidence table) must not
+    // blank the memories + decisions that loaded fine.
+    const [mR, dR, eR] = await Promise.allSettled([
+      sharedMemoryApi.lessonList({ state: "all", limit: LIMIT }),
+      sharedMemoryApi.listDecisions({ limit: LIMIT }),
+      sharedMemoryApi.listEvidence({ limit: LIMIT }),
+    ]);
+    // Rejected lessons are a settled "no" — they live in Review's history,
+    // never in the curated base. Archived decisions leave the base too
+    // (mirroring archived memories, which the backend already drops);
+    // superseded stays, to show a decision's evolution.
+    if (mR.status === "fulfilled")
+      setMemories(mR.value.filter((row) => row.review_state !== "rejected"));
+    if (dR.status === "fulfilled")
+      setDecisions(dR.value.filter((x) => x.status !== "archived"));
+    if (eR.status === "fulfilled") setEvidence(eR.value);
+
+    // A list at the cap is almost certainly hiding rows — say so rather than
+    // present a truncated base as complete.
+    setTruncated(
+      [
+        mR.status === "fulfilled" && mR.value.length >= LIMIT ? "memories" : null,
+        dR.status === "fulfilled" && dR.value.length >= LIMIT ? "decisions" : null,
+        eR.status === "fulfilled" && eR.value.length >= LIMIT ? "evidence" : null,
+      ].filter((x): x is string => x !== null),
+    );
+
+    const results = [mR, dR, eR];
+    const failures = results.filter(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    if (failures.length === results.length) setErr(toUserError(failures[0]!.reason));
+    else if (failures.length > 0)
+      setPartial("Part of the base couldn't load — showing what's available.");
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -147,9 +173,10 @@ export function KnowView({
         (it) =>
           matchesProject(it, projectFilter) &&
           matchesKind(it, kindFilter) &&
-          matchesState(it, stateFilter),
+          matchesState(it, stateFilter) &&
+          matchesText(it, query),
       ),
-    [items, projectFilter, kindFilter, stateFilter],
+    [items, projectFilter, kindFilter, stateFilter, query],
   );
 
   const groups = useMemo(() => groupByProject(filtered), [filtered]);
@@ -163,6 +190,11 @@ export function KnowView({
   const [cursor, setCursor] = useState(0);
   const [openProvenance, setOpenProvenance] = useState<string | null>(null);
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  // The deep-linked memory is sought exactly once (when it first appears in
+  // the visible set). Without this one-shot latch it would re-fire on every
+  // `visible` change and yank the cursor back on every later filter/search,
+  // defeating the cursor-reset effect below.
+  const memorySeekDone = useRef(false);
 
   const visible = useMemo(
     () =>
@@ -177,16 +209,36 @@ export function KnowView({
     setCursor((i) => Math.min(i, Math.max(0, visible.length - 1)));
   }, [visible.length]);
 
+  // A filter change re-anchors the cursor to the top rather than keeping a
+  // now-meaningless index — otherwise the focus ring jumps to an unrelated
+  // card whenever the visible set changes identity without changing length.
+  useEffect(() => {
+    setCursor(0);
+  }, [projectFilter, kindFilter, stateFilter, query]);
+
   // Review → recurrence → Know carries the matched memory selection across
   // the tab boundary. The cursor is visual rather than DOM focus, so the
   // initiating tab control keeps focus and keyboard navigation remains
   // available.
   useEffect(() => {
-    if (!initialMemoryId) return;
+    // The latch resets only when the deep-link clears (id → null). Today that
+    // always happens between two memory deep-links, because `openMemoryInKnow`
+    // switches tabs and KnowView is conditionally unmounted, so its ref is
+    // fresh on the next mount. If a future refactor keeps KnowView always
+    // mounted, a direct A→B relink (no null between) would keep this latched
+    // and never seek B — reset on any id change, not just on clear.
+    if (!initialMemoryId) {
+      memorySeekDone.current = false;
+      return;
+    }
+    if (memorySeekDone.current) return;
     const index = visible.findIndex(
       (it) => it.type === "memory" && it.id === initialMemoryId,
     );
-    if (index >= 0) setCursor(index);
+    if (index >= 0) {
+      setCursor(index);
+      memorySeekDone.current = true;
+    }
   }, [initialMemoryId, visible]);
 
   const toggleProvenance = useCallback((key: string) => {
@@ -237,11 +289,13 @@ export function KnowView({
       <FilterBar
         stateFilter={stateFilter}
         kindFilter={kindFilter}
+        query={query}
         projectFilter={projectFilter}
         projects={projects}
         addOpen={showAdd}
         onState={setStateFilter}
         onKind={setKindFilter}
+        onQuery={setQuery}
         onProject={setProjectFilter}
         onToggleAdd={() => setShowAdd((v) => !v)}
       />
@@ -253,6 +307,7 @@ export function KnowView({
               ? projectFilter
               : undefined
           }
+          knownProjects={projects.filter((p) => p !== GLOBAL_KEY)}
           onCreated={() => {
             setShowAdd(false);
             void refresh();
@@ -262,27 +317,49 @@ export function KnowView({
       )}
 
       {err && (
-        <div role="alert" style={{ color: "var(--danger)", fontSize: "var(--fs-base)" }}>
-          {err}
+        <div
+          role="alert"
+          style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", flexWrap: "wrap" }}
+        >
+          <span style={{ color: "var(--danger)", fontSize: "var(--fs-base)" }}>{err}</span>
+          <Button variant="subtle" onClick={() => void refresh()} disabled={loading}>
+            {loading ? "Retrying…" : "Retry"}
+          </Button>
         </div>
       )}
 
-      {!loading && filtered.length === 0 && (
-        <div
-          style={{
-            border: "var(--sp-px) dashed var(--line)",
-            borderRadius: "var(--r-3)",
-            padding: "var(--sp-24)",
-            textAlign: "center",
-            color: "var(--fg-muted)",
-          }}
-        >
-          <p style={{ margin: 0 }}>Nothing curated matches these filters.</p>
-          <p style={{ margin: "var(--sp-8) 0 0", fontSize: "var(--fs-sm)" }}>
-            The pipeline is the intake — accept lessons in Review, or harvest
-            more with <code>claudepot lesson harvest</code>.
-          </p>
+      {partial && (
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", fontSize: "var(--fs-sm)", color: "var(--warn)" }}>
+          <span>{partial}</span>
+          <Button variant="ghost" onClick={() => void refresh()} disabled={loading}>
+            {loading ? "…" : "Retry"}
+          </Button>
         </div>
+      )}
+
+      {truncated.length > 0 && (
+        <p style={{ margin: 0, fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
+          Showing the {LIMIT} most recent {truncated.join(" and ")}; older ones
+          may be hidden — narrow with filters or search to see them.
+        </p>
+      )}
+
+      {!err && !partial && !loading && filtered.length === 0 && (
+        <KnowEmptyState
+          projectFilter={projectFilter}
+          kindFilter={kindFilter}
+          stateFilter={stateFilter}
+          query={query}
+          onClearProject={() => setProjectFilter("all")}
+          onClearState={() => setStateFilter("all")}
+          onClearSearch={() => setQuery("")}
+          onClearAll={() => {
+            setProjectFilter("all");
+            setKindFilter("all");
+            setStateFilter("all");
+            setQuery("");
+          }}
+        />
       )}
 
       {groups.map((g) => (
@@ -313,7 +390,8 @@ export function KnowView({
       {visible.length > 0 && (
         <p style={{ margin: 0, fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
           <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>enter</kbd> opens the source
-          exchange. The pipeline (Review) is the intake — you judge, never author.
+          exchange for a memory learned from a transcript. The pipeline
+          (Review) is the intake — you judge, never author.
         </p>
       )}
     </div>
@@ -348,7 +426,7 @@ function ProjectGroup({
   onToggleProvenance: (key: string) => void;
   registerCard: (key: string, el: HTMLDivElement | null) => void;
   onArchived: () => void;
-  onReview: () => void;
+  onReview: (queue?: "proposed" | "suspect") => void;
 }) {
   const name =
     group.projectPath == null ? "Global" : basename(group.projectPath);
@@ -447,26 +525,46 @@ function ProjectGroup({
 function FilterBar({
   stateFilter,
   kindFilter,
+  query,
   projectFilter,
   projects,
   addOpen,
   onState,
   onKind,
+  onQuery,
   onProject,
   onToggleAdd,
 }: {
   stateFilter: StateFilter;
   kindFilter: KindFilter;
+  query: string;
   projectFilter: string;
   projects: string[];
   addOpen: boolean;
   onState: (s: StateFilter) => void;
   onKind: (k: KindFilter) => void;
+  onQuery: (q: string) => void;
   onProject: (p: string) => void;
   onToggleAdd: () => void;
 }) {
+  // A deep-linked project (from the Dashboard's coverage grid) may hold no
+  // curated items yet, so it isn't in `projects` — inject it as an option so
+  // the control shows the truth ("<name> — uncurated") instead of silently
+  // rendering "All projects" while the base stays filtered and empty.
+  const injectProject =
+    projectFilter !== "all" &&
+    projectFilter !== GLOBAL_KEY &&
+    !projects.includes(projectFilter);
+
   return (
     <div style={{ display: "flex", gap: "var(--sp-8)", flexWrap: "wrap", alignItems: "center" }}>
+      <Input
+        value={query}
+        onChange={(e) => onQuery(e.currentTarget.value)}
+        placeholder="Filter this base…"
+        aria-label="Search knowledge"
+        style={{ minWidth: "12rem", flex: "0 1 16rem" }}
+      />
       <select
         value={stateFilter}
         onChange={(e) => onState(e.currentTarget.value as StateFilter)}
@@ -475,11 +573,11 @@ function FilterBar({
       >
         <option value="all">All states</option>
         <option value="proposed">Proposed</option>
-        <option value="accepted">Accepted</option>
+        <option value="accepted">Accepted (incl. enforced)</option>
         <option value="enforced">Enforced</option>
         <option value="suspect">Suspect</option>
         <option value="active">Active (decisions)</option>
-        <option value="superseded">Superseded</option>
+        <option value="superseded">Superseded (decisions)</option>
       </select>
       <select
         value={kindFilter}
@@ -503,6 +601,9 @@ function FilterBar({
         style={{ ...selectStyle(), maxWidth: "16rem" }}
       >
         <option value="all">All projects</option>
+        {injectProject && (
+          <option value={projectFilter}>{basename(projectFilter)} — uncurated</option>
+        )}
         {projects.map((p) => (
           <option key={p} value={p}>
             {p === GLOBAL_KEY ? "Global" : basename(p)}
@@ -515,6 +616,120 @@ function FilterBar({
       <Button variant="ghost" glyph={NF.plus} onClick={onToggleAdd}>
         {addOpen ? "Cancel" : "Add"}
       </Button>
+    </div>
+  );
+}
+
+// ─── empty state ─────────────────────────────────────────────────
+//
+// Never a dead-end: the empty state names the filter that emptied the view
+// and offers the exact way out. The most common trigger is a Dashboard
+// deep-link into a busy-but-uncurated project — so that case leads with the
+// project's own harvest command, not a generic "accept in Review".
+
+function KnowEmptyState({
+  projectFilter,
+  kindFilter,
+  stateFilter,
+  query,
+  onClearProject,
+  onClearState,
+  onClearSearch,
+  onClearAll,
+}: {
+  projectFilter: string;
+  kindFilter: KindFilter;
+  stateFilter: StateFilter;
+  query: string;
+  onClearProject: () => void;
+  onClearState: () => void;
+  onClearSearch: () => void;
+  onClearAll: () => void;
+}) {
+  const evidenceStateClash = kindFilter === "evidence" && stateFilter !== "all";
+  const searching = query.trim().length > 0;
+  const otherFilterActive = kindFilter !== "all" || stateFilter !== "all";
+  // "Nothing curated in <project>" is only the right message when the project
+  // filter is the SOLE reason the view is empty. If a search or a kind/state
+  // filter is also active, that is the real cause — and "Clear project
+  // filter" wouldn't fix it — so defer to those branches instead.
+  const projectScoped =
+    projectFilter !== "all" &&
+    projectFilter !== GLOBAL_KEY &&
+    !searching &&
+    !otherFilterActive;
+
+  let title: React.ReactNode;
+  let detail: React.ReactNode = null;
+  let action: React.ReactNode = null;
+
+  if (projectScoped) {
+    const cmd = `claudepot lesson harvest --project ${shellQuote(projectFilter)}`;
+    title = (
+      <>
+        Nothing curated in <strong>{basename(projectFilter)}</strong> yet.
+      </>
+    );
+    detail = (
+      <>
+        Harvest this project’s sessions, then judge what surfaces in Review:
+        <br />
+        <code style={{ wordBreak: "break-all" }}>{cmd}</code>{" "}
+        <CopyButton text={cmd} ariaLabel="Copy harvest command" />
+      </>
+    );
+    action = (
+      <Button variant="ghost" onClick={onClearProject}>
+        Clear project filter
+      </Button>
+    );
+  } else if (evidenceStateClash) {
+    title = <>Evidence has no lifecycle state.</>;
+    detail = <>Clear the State filter to see evidence records.</>;
+    action = (
+      <Button variant="ghost" onClick={onClearState}>
+        Clear state filter
+      </Button>
+    );
+  } else if (searching) {
+    title = <>No curated records match “{query.trim()}”.</>;
+    action = (
+      <Button variant="ghost" onClick={onClearSearch}>
+        Clear search
+      </Button>
+    );
+  } else {
+    title = <>Nothing curated matches these filters.</>;
+    detail = (
+      <>
+        The pipeline is the intake — accept lessons in Review, or harvest more
+        with <code>claudepot lesson harvest</code>.
+      </>
+    );
+    action = otherFilterActive ? (
+      <Button variant="ghost" onClick={onClearAll}>
+        Clear filters
+      </Button>
+    ) : null;
+  }
+
+  return (
+    <div
+      style={{
+        border: "var(--sp-px) dashed var(--line)",
+        borderRadius: "var(--r-3)",
+        padding: "var(--sp-24)",
+        textAlign: "center",
+        color: "var(--fg-muted)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--sp-8)",
+        alignItems: "center",
+      }}
+    >
+      <p style={{ margin: 0 }}>{title}</p>
+      {detail && <p style={{ margin: 0, fontSize: "var(--fs-sm)" }}>{detail}</p>}
+      {action}
     </div>
   );
 }
@@ -536,8 +751,14 @@ function matchesKind(it: KnowItem, filter: KindFilter): boolean {
 function matchesState(it: KnowItem, filter: StateFilter): boolean {
   if (filter === "all") return true;
   switch (it.type) {
-    case "memory":
-      return memoryStateBadge(it.row).label === filter;
+    case "memory": {
+      const label = memoryStateBadge(it.row).label;
+      // "Accepted" is the superset: an enforced lesson is still accepted
+      // (accepted + compiled). Filtering "Accepted" must not hide exactly
+      // the strongest, guard-backed items. "Enforced" is the narrower view.
+      if (filter === "accepted") return label === "accepted" || label === "enforced";
+      return label === filter;
+    }
     case "decision":
       return decisionStateBadge(it.row).label === filter;
     case "evidence":
@@ -545,6 +766,21 @@ function matchesState(it: KnowItem, filter: StateFilter): boolean {
       // for lifecycle items, so it drops out.
       return false;
   }
+}
+
+/** Free-text match over the record's own words (claim / decision / summary,
+ *  plus directive, rationale, topic, kind). Searches the curated base — not
+ *  raw transcripts, which is Recall's job. */
+function matchesText(it: KnowItem, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const hay =
+    it.type === "memory"
+      ? `${it.row.content} ${it.row.directive ?? ""} ${it.row.kind}`
+      : it.type === "decision"
+        ? `${it.row.decision} ${it.row.rationale ?? ""} ${it.row.topic ?? ""}`
+        : `${it.row.summary} ${it.row.verification} ${it.row.topic ?? ""}`;
+  return hay.toLowerCase().includes(q);
 }
 
 export function groupByProject(items: KnowItem[]): Group[] {
@@ -599,4 +835,11 @@ function selectStyle(): React.CSSProperties {
     borderRadius: "var(--r-2)",
     font: "inherit",
   };
+}
+
+/** Single-quote a path for safe shell interpolation — a project path can
+ *  contain spaces, so the copied harvest command must quote it or the shell
+ *  would split it into the wrong args. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
 }

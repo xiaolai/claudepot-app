@@ -16,7 +16,9 @@ import type { RecurrenceEvent } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
+import { CopyButton } from "../../components/CopyButton";
 import { basename } from "../../lib/paths";
+import { toUserError } from "../../lib/errors";
 
 export function RecurrencePanel({
   onOpenMemory,
@@ -25,14 +27,24 @@ export function RecurrencePanel({
   onOpenMemory?: (projectPath: string, memoryId: string) => void;
 }) {
   const [rows, setRows] = useState<RecurrenceEvent[]>([]);
+  // `err` = a real, unexpected failure (red; the row stays). `note` = a
+  // benign "already handled elsewhere" reconcile (neutral; the row leaves).
+  // Conflating them was the bug: a red alarm fired while the row vanished as
+  // if the action had succeeded.
   const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    // Clear any prior banner/note first, so a successful retry doesn't leave a
+    // stale red alert over a healthy queue — and so the empty-panel `return
+    // null` below isn't blocked by an error that no longer holds.
+    setErr(null);
+    setNote(null);
     try {
       setRows(await sharedMemoryApi.recurrenceList());
     } catch (e) {
-      setErr(String(e));
+      setErr(toUserError(e));
     }
   }, []);
 
@@ -44,17 +56,20 @@ export function RecurrencePanel({
     async (row: RecurrenceEvent, verdict: "confirm" | "dismiss") => {
       setBusyId(row.id);
       setErr(null);
+      setNote(null);
       try {
         const ok =
           verdict === "confirm"
             ? await sharedMemoryApi.recurrenceConfirm(row.id)
             : await sharedMemoryApi.recurrenceDismiss(row.id);
-        if (!ok) {
-          setErr("This recurrence was already handled elsewhere.");
-        }
+        // Whether it took now or was already resolved elsewhere, the backend
+        // no longer has it pending — drop the row. Only the second case
+        // leaves a neutral note; neither is an error.
+        if (!ok) setNote("That recurrence was already handled elsewhere.");
         setRows((prev) => prev.filter((r) => r.id !== row.id));
       } catch (e) {
-        setErr(String(e));
+        // A true failure — the row stays so the user can retry.
+        setErr(toUserError(e));
       } finally {
         setBusyId(null);
       }
@@ -62,15 +77,24 @@ export function RecurrencePanel({
     [],
   );
 
+  // Once nothing is pending, the panel disappears entirely (a lingering note
+  // never strands an empty, un-dismissable banner). A real error keeps the
+  // panel so the failed row and its reason remain visible.
   if (rows.length === 0 && !err) return null;
 
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
       <SectionLabel>Recurrences — you learned this, and it happened again</SectionLabel>
       {err && (
-        <div role="alert" style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>
-          {err}
+        <div role="alert" style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", flexWrap: "wrap" }}>
+          <span style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>{err}</span>
+          <Button variant="ghost" onClick={() => void refresh()}>
+            Retry
+          </Button>
         </div>
+      )}
+      {note && (
+        <div style={{ color: "var(--fg-muted)", fontSize: "var(--fs-sm)" }}>{note}</div>
       )}
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
         {rows.map((row) => (
@@ -112,7 +136,7 @@ export function RecurrencePanel({
                 </p>
               )}
 
-              <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center", marginTop: "var(--sp-4)" }}>
+              <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center", flexWrap: "wrap", marginTop: "var(--sp-4)" }}>
                 <Button
                   variant="solid"
                   disabled={busyId === row.id}
@@ -127,7 +151,7 @@ export function RecurrencePanel({
                 >
                   Dismiss
                 </Button>
-                {onOpenMemory && (
+                {onOpenMemory && row.matched_memory_id && (
                   <Button
                     variant="ghost"
                     disabled={busyId === row.id}
@@ -136,11 +160,30 @@ export function RecurrencePanel({
                     Open in Know
                   </Button>
                 )}
-                <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
-                  Confirming counts it toward the recurrence metric. Compile
-                  the underlying lesson to a guard so it can’t recur again.
-                </span>
               </div>
+
+              {/* Loop closure: confirming exists to then make the class
+                  impossible. An accepted lesson can be compiled to a guard
+                  now; a suspect one must be re-reviewed first — never enforce
+                  knowledge whose code has already moved. Guard the id: a
+                  malformed row must not hand over `compile null --write`. */}
+              {row.matched_state === "accepted" && row.matched_memory_id ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", flexWrap: "wrap", fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
+                  <span>Stop it recurring — enforce the lesson as a guard:</span>
+                  <code style={{ fontSize: "var(--fs-2xs)" }}>
+                    claudepot lesson compile … --write
+                  </code>
+                  <CopyButton
+                    text={`claudepot lesson compile ${row.matched_memory_id} --write`}
+                    ariaLabel="Copy compile command"
+                  />
+                </div>
+              ) : row.matched_state === "suspect" ? (
+                <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
+                  The matched lesson is suspect — re-review it in the queue below
+                  before it can be enforced.
+                </span>
+              ) : null}
             </div>
           </li>
         ))}

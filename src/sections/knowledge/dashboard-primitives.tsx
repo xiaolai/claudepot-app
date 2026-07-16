@@ -37,23 +37,19 @@ export interface StatCardProps {
   hint: string;
   /** Optional emphasis: the headline signal gets a heavier value. */
   emphasis?: boolean;
+  /** When set, the card becomes a button that routes to the next action
+   *  (design.md: a headline number must click to something that changes
+   *  it). A disabled reason is shown inline instead of a tooltip. */
+  onClick?: () => void;
 }
 
 /** One dashboard cell: a big toned number, a label, and a one-line hint
- *  that says what the number *means* — never a bare count. */
-export function StatCard({ label, value, tone, hint, emphasis }: StatCardProps) {
-  return (
-    <div
-      style={{
-        border: "var(--sp-px) solid var(--line)",
-        borderRadius: "var(--r-3)",
-        padding: "var(--sp-16)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--sp-4)",
-        background: "var(--bg-raised)",
-      }}
-    >
+ *  that says what the number *means* — never a bare count. A `value` of
+ *  `"—"` is the honest placeholder for "not loaded / failed", distinct
+ *  from a real `0`. */
+export function StatCard({ label, value, tone, hint, emphasis, onClick }: StatCardProps) {
+  const inner = (
+    <>
       <span
         style={{
           fontSize: emphasis ? "var(--fs-2xl)" : "var(--fs-xl)",
@@ -68,8 +64,31 @@ export function StatCard({ label, value, tone, hint, emphasis }: StatCardProps) 
       <span style={{ fontSize: "var(--fs-xs)", color: "var(--fg-muted)" }}>
         {hint}
       </span>
-    </div>
+    </>
   );
+  const boxStyle: React.CSSProperties = {
+    border: "var(--sp-px) solid var(--line)",
+    borderRadius: "var(--r-3)",
+    padding: "var(--sp-16)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "var(--sp-4)",
+    background: "var(--bg-raised)",
+    textAlign: "left",
+  };
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className="pm-focus"
+        onClick={onClick}
+        style={{ ...boxStyle, cursor: "pointer", font: "inherit", color: "var(--fg)" }}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return <div style={boxStyle}>{inner}</div>;
 }
 
 // ─── trust bar ───────────────────────────────────────────────────
@@ -103,7 +122,7 @@ export function trustTotal(mix: TrustMix): number {
 
 const TRUST_SEGMENTS: { key: keyof TrustMix; label: string; color: string }[] = [
   { key: "enforced", label: "enforced", color: "var(--ok)" },
-  { key: "documented", label: "documented", color: "var(--fg-faint)" },
+  { key: "documented", label: "documented", color: "var(--info)" },
   { key: "suspect", label: "suspect", color: "var(--warn)" },
   { key: "proposed", label: "proposed", color: "var(--accent)" },
 ];
