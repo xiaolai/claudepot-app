@@ -6,6 +6,56 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.5 — beta (released 2026-07-18)
+
+A whole-project audit release: five parallel audit passes over core,
+CLI, GUI, frontend, and claudepot.com produced ~70 verified findings;
+this release fixes them.
+
+### Fixed
+
+- **Time-boxed permission grants always revert.** One unreadable or
+  malformed settings file no longer aborts the whole auto-revert
+  sweep — a single broken project could previously leave every other
+  project's `bypassPermissions` grant elevated indefinitely.
+- **Closing a toast no longer cancels the action it promised.**
+  Dismissing "Switching Desktop to X…" (or account removal) with the
+  X button now commits the deferred action; only Undo cancels it.
+- **Rotation confirms can't double-fire.** Two rapid confirms of the
+  same suggested swap performed the keychain swap twice; applying now
+  claims the suggestion atomically.
+- **Windows paths render correctly.** Every basename display (status
+  bar, project header, sessions table, live activity, rename/move
+  modals) and Config artifact-key resolution now handles `C:\` paths
+  and backslash separators.
+- **claudepot.com authorization hardening.** Editorial and bot API
+  scopes can no longer be minted or exercised by ordinary accounts;
+  hidden submissions no longer leak through OG images, page metadata,
+  timeline endpoints, or comments; data export is rate-limited;
+  vote flips no longer double-count in the daily rollup.
+- **Secret hygiene.** MCP shared-memory search/read now masks
+  third-party secrets (AWS, OpenAI, GitHub, JWT, PEM) rather than
+  only `sk-ant-*`; route add/edit scrubs inbound secrets on every
+  exit path; three SQLite stores gain 0600-from-creation.
+
+### Changed
+
+- **One secret-masking core.** The three masking engines (live
+  sessions, exports/MCP, Config viewer) now share a single
+  token-family definition module — a new token family is added once.
+- **Lesson tooling moved into core.** The `claude -p` distiller,
+  guard-proposal, and invariants-compile orchestration moved from the
+  CLI into `claudepot-core::shared_memory`, so the GUI can grow the
+  same surface without drift.
+- **Faster CLI on large corpora.** `session search`, `session
+  worktrees`, `usage report`, and `session slim` now use the session
+  index instead of re-parsing every transcript.
+- **Slimmer production builds.** The unshipped caregiver template
+  bundle (and its SMTP stack) is feature-gated out of shipped
+  binaries; ~30 dead core functions and five unshipped IPC commands
+  removed. Dependency bump clears two quick-xml security advisories
+  on the Windows notification path.
+
 ## 0.2.4 — beta (released 2026-07-17)
 
 Shared-memory MCP server — the knowledge-compiler surface, plus a
