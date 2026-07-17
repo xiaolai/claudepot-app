@@ -91,21 +91,11 @@ fn print_files_table(
             "  {:<28}  {:<6}  {:>9}  {:>12}  {:>14}  {:>9}",
             role_label(f.role),
             f.line_count,
-            pretty_bytes(f.size_bytes),
+            crate::output::format_size(f.size_bytes),
             cutoff,
             last,
             stat.map(|s| s.change_count_30d).unwrap_or(0),
         );
         println!("    {}", f.abs_path.display());
-    }
-}
-
-fn pretty_bytes(n: u64) -> String {
-    if n < 1024 {
-        format!("{n} B")
-    } else if n < 1024 * 1024 {
-        format!("{:.1} KB", n as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
     }
 }

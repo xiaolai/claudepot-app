@@ -10,7 +10,7 @@
 //! interrupted or the result never came back) are kept with
 //! `result: None` — silently dropping them hides broken turns.
 
-use crate::session::{SessionEvent, TokenUsage};
+use crate::session::SessionEvent;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,24 +47,6 @@ pub struct LinkedTool {
     pub call_index: usize,
     /// Index of the matching `UserToolResult`, or `None` if orphaned.
     pub result_index: Option<usize>,
-}
-
-/// Per-event annotation: either the event is `Standalone` (render it
-/// as-is), or it's the anchor of a `Linked` call (render the linked
-/// block here), or it's the `Absorbed` result that the Linked anchor
-/// already covered and should be skipped.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum LinkedEvent {
-    /// Render the event as a plain bubble.
-    #[serde(rename = "standalone")]
-    Standalone { index: usize },
-    /// Render the linked tool block at this position.
-    #[serde(rename = "linked")]
-    Linked { index: usize, tool: Box<LinkedTool> },
-    /// Skip — already rendered as part of a `Linked` anchor.
-    #[serde(rename = "absorbed")]
-    Absorbed { index: usize, call_index: usize },
 }
 
 /// Walk `events` once, emit pair metadata for every tool call.
@@ -122,78 +104,6 @@ pub fn link_tools(events: &[SessionEvent]) -> Vec<LinkedTool> {
         }
     }
     out
-}
-
-/// Tag every event with a linking role so a renderer can decide in one
-/// pass whether to draw a bubble, a linked block, or nothing.
-pub fn annotate_linked(events: &[SessionEvent]) -> Vec<LinkedEvent> {
-    let linked = link_tools(events);
-    // Map result_index → call_index so we can flag absorbed results.
-    let mut result_to_call: HashMap<usize, usize> = HashMap::new();
-    let mut linked_by_call: HashMap<usize, LinkedTool> = HashMap::new();
-    for lt in linked {
-        if let Some(ri) = lt.result_index {
-            result_to_call.insert(ri, lt.call_index);
-        }
-        linked_by_call.insert(lt.call_index, lt);
-    }
-    events
-        .iter()
-        .enumerate()
-        .map(|(idx, _)| {
-            if let Some(tool) = linked_by_call.remove(&idx) {
-                LinkedEvent::Linked {
-                    index: idx,
-                    tool: Box::new(tool),
-                }
-            } else if let Some(&call_index) = result_to_call.get(&idx) {
-                LinkedEvent::Absorbed {
-                    index: idx,
-                    call_index,
-                }
-            } else {
-                LinkedEvent::Standalone { index: idx }
-            }
-        })
-        .collect()
-}
-
-/// Estimate the token cost of a linked tool: sum of input preview chars
-/// + result bytes divided by 4 (the same heuristic claude-devtools uses
-/// for unenriched result text). Callers with better info (e.g. the
-/// assistant turn's usage field) should override.
-pub fn estimate_tool_tokens(tool: &LinkedTool) -> u64 {
-    let preview = tool.input_preview.len() as u64;
-    let result = tool
-        .result_content
-        .as_ref()
-        .map(|s| s.len() as u64)
-        .unwrap_or(0);
-    (preview + result).div_ceil(4)
-}
-
-/// Roll up per-tool costs into one bucket keyed by tool name.
-pub fn tokens_by_tool(tools: &[LinkedTool]) -> HashMap<String, u64> {
-    let mut out: HashMap<String, u64> = HashMap::new();
-    for t in tools {
-        *out.entry(t.tool_name.clone()).or_default() += estimate_tool_tokens(t);
-    }
-    out
-}
-
-/// Sum tokens for a set of tools — handy for attributing an AI chunk's
-/// tool I/O in one number.
-pub fn tool_io_usage(tools: &[LinkedTool]) -> TokenUsage {
-    let mut u = TokenUsage::default();
-    for t in tools {
-        u.input += t.input_preview.len() as u64;
-        u.output += t
-            .result_content
-            .as_ref()
-            .map(|s| s.len() as u64)
-            .unwrap_or(0);
-    }
-    u
 }
 
 // ---------------------------------------------------------------------------
@@ -315,53 +225,6 @@ mod tests {
     }
 
     #[test]
-    fn annotate_marks_absorbed_results() {
-        let events = vec![
-            SessionEvent::AssistantText {
-                ts: None,
-                uuid: None,
-                model: None,
-                text: "hi".into(),
-                usage: None,
-                stop_reason: None,
-            },
-            tool_use("a", "Read", ts("2026-04-10T10:00:00Z")),
-            tool_result("a", "body", false, ts("2026-04-10T10:00:01Z")),
-            tool_use("b", "Bash", None),
-        ];
-        let annots = annotate_linked(&events);
-        assert_eq!(annots.len(), 4);
-        assert!(matches!(annots[0], LinkedEvent::Standalone { index: 0 }));
-        assert!(matches!(annots[1], LinkedEvent::Linked { index: 1, .. }));
-        assert!(matches!(
-            annots[2],
-            LinkedEvent::Absorbed {
-                index: 2,
-                call_index: 1
-            }
-        ));
-        assert!(matches!(annots[3], LinkedEvent::Linked { index: 3, .. }));
-    }
-
-    #[test]
-    fn tokens_by_tool_sums_same_tool_name() {
-        let events = vec![
-            tool_use("a", "Read", None),
-            tool_result("a", "abcd", false, None),
-            tool_use("b", "Read", None),
-            tool_result("b", "efgh", false, None),
-            tool_use("c", "Bash", None),
-            tool_result("c", "ls", false, None),
-        ];
-        let linked = link_tools(&events);
-        let m = tokens_by_tool(&linked);
-        // Read: preview ~14 each × 2 + 4+4 result = ~(28+8)/4 = 9
-        assert!(m.get("Read").copied().unwrap_or(0) > 0);
-        assert!(m.get("Bash").copied().unwrap_or(0) > 0);
-        assert!(m.get("Read").copied().unwrap_or(0) > m.get("Bash").copied().unwrap_or(0));
-    }
-
-    #[test]
     fn duration_handles_missing_timestamp_on_either_side() {
         let cases = vec![
             (None, None),
@@ -373,17 +236,5 @@ mod tests {
             let linked = link_tools(&events);
             assert_eq!(linked[0].duration_ms, None);
         }
-    }
-
-    #[test]
-    fn tool_io_usage_aggregates_over_linked_set() {
-        let events = vec![
-            tool_use("a", "Read", None),
-            tool_result("a", "0123456789", false, None),
-        ];
-        let linked = link_tools(&events);
-        let u = tool_io_usage(&linked);
-        assert!(u.input > 0);
-        assert_eq!(u.output, 10);
     }
 }

@@ -44,7 +44,9 @@ pub enum SidecarError {
 /// Resolve the `pending-changes.json` path for a run, given the
 /// blueprint's `pending_changes_path` template (e.g.
 /// `"{output_dir}/.pending-changes.json"`) and the actual
-/// resolved output path of this run.
+/// resolved output path of this run. Test-only — no production
+/// consumer, so it's cfg(test)-gated.
+#[cfg(test)]
 pub fn pending_path_for(pending_changes_path_template: &str, output_path: &Path) -> PathBuf {
     let dir = output_path
         .parent()

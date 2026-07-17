@@ -11,7 +11,6 @@
 //! - When we bail out dirty, the emitted patch carries
 //!   `dirty_during_emit = true`.
 
-use crate::config_view::diff::{diff, ConfigTreePatch};
 use crate::config_view::model::ConfigTree;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
@@ -61,18 +60,6 @@ where
             return (tree, true); // dirty — bail
         }
     }
-}
-
-/// Compute the patch between `prev` and `next`, tagging it with the
-/// `dirty_during_emit` flag from `scan_until_stable`.
-pub fn make_patch(
-    prev: &ConfigTree,
-    next: &ConfigTree,
-    dirty_during_emit: bool,
-) -> ConfigTreePatch {
-    let mut p = diff(prev, next);
-    p.dirty_during_emit = dirty_during_emit;
-    p
 }
 
 // ---------- Event-source trait (real + fake) --------------------------
@@ -259,13 +246,5 @@ mod tests {
         let drained = fake.drain();
         assert_eq!(drained.len(), 1);
         assert!(fake.drain().is_empty());
-    }
-
-    #[test]
-    fn make_patch_sets_dirty_flag() {
-        let a = empty_tree(1);
-        let b = empty_tree(2);
-        let patch = make_patch(&a, &b, true);
-        assert!(patch.dirty_during_emit);
     }
 }

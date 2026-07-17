@@ -212,17 +212,6 @@ pub fn parse_memory_index(bytes: &[u8]) -> (Vec<MemoryIndexEntry>, Parsed) {
     (entries, parsed)
 }
 
-// ---------- Skills (strict dir shape) ---------------------------------
-
-/// A flat `.md` under `skills/` is invalid — CC only accepts
-/// `skills/<name>/SKILL.md`. See plan §6.5.
-pub fn invalid_flat_skill() -> Parsed {
-    Parsed {
-        summary: None,
-        issues: vec![ParseIssue::NotASkill],
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

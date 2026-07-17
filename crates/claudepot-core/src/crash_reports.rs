@@ -173,12 +173,15 @@ pub fn summary_line(s: &CrashSummary) -> String {
     // value would split the record across lines and corrupt the
     // append-only log. Collapse every control char to a space so the
     // record is genuinely one line.
-    sanitize_one_line(&parts.join(" | "))
+    collapse_control_chars(&parts.join(" | "))
 }
 
 /// Replace every control character (newline, CR, tab, …) with a space
-/// so a value can't break the one-line log format.
-fn sanitize_one_line(s: &str) -> String {
+/// so a value can't break the one-line log format. Named for its
+/// contract — `agent::scheduler::systemd::collapse_newlines` is a
+/// different, narrower rule (\n and \r only); don't copy-paste one
+/// where the other is meant.
+fn collapse_control_chars(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect()

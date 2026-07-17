@@ -26,7 +26,7 @@
 //!    `cwd` project, so an agent narrates sessions in its own
 //!    project, not every session on the machine.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 
@@ -104,6 +104,18 @@ pub fn evaluate(
     run_stats: &dyn Fn(&str) -> AgentRunStats,
     now: DateTime<Utc>,
 ) -> Vec<EventFire> {
+    // Borrow-only probe index. Probing the `HashSet<(String, String)>`
+    // directly would allocate two heap Strings per candidate (a tuple
+    // of Strings can't be looked up by `(&str, &str)`), so index the
+    // ledger once per call — O(fired) — and probe with borrowed keys.
+    let mut fired_by_agent: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for (agent_id, session_id) in fired_pairs {
+        fired_by_agent
+            .entry(agent_id.as_str())
+            .or_default()
+            .insert(session_id.as_str());
+    }
+
     let mut out = Vec::new();
     for agent in agents {
         // Only `session-settled` event agents are evaluated here.
@@ -126,6 +138,7 @@ pub fn evaluate(
         }
 
         let agent_project = normalize_project(&agent.cwd);
+        let already_fired = fired_by_agent.get(agent_id.as_str());
 
         // Of every eligible settled session, fire for the single
         // oldest one. Eligibility, in cheapest-first order:
@@ -146,7 +159,7 @@ pub fn evaluate(
             if normalize_project(&session.project_path) != agent_project {
                 continue;
             }
-            if fired_pairs.contains(&(agent_id.clone(), session.session_id.clone())) {
+            if already_fired.is_some_and(|s| s.contains(session.session_id.as_str())) {
                 continue;
             }
             // Track the oldest-settled eligible session. Ties keep

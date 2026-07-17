@@ -300,16 +300,13 @@ impl KeyStore {
         }
         Ok(())
     }
-
-    pub fn update_oauth_token_probe(&self, uuid: Uuid, status: &str) -> Result<(), KeyError> {
-        let now = Utc::now().to_rfc3339();
-        self.db().execute(
-            "UPDATE oauth_tokens SET last_probed_at = ?1, last_probe_status = ?2 WHERE uuid = ?3",
-            params![now, status, uuid.to_string()],
-        )?;
-        Ok(())
-    }
 }
+
+// `update_oauth_token_probe` was removed in the 2026-07 audit: no
+// OAuth probe path ever shipped (only `key_api_probe` for API keys),
+// so the writer was dead. The `last_probed_at`/`last_probe_status`
+// columns stay in the schema — inert until a probe feature lands;
+// recover the writer from git history then.
 
 fn parse_uuid(s: &str, col: usize) -> rusqlite::Result<Uuid> {
     s.parse::<Uuid>().map_err(|e| {
@@ -491,19 +488,6 @@ mod tests {
             store.rename_oauth_token(Uuid::new_v4(), "x"),
             Err(KeyError::NotFound(_))
         ));
-    }
-
-    #[test]
-    fn update_probe_persists_status() {
-        let (store, _dir) = tmp_store();
-        let account = Uuid::new_v4();
-        let token = store
-            .insert_oauth_token("t", "sk-ant-oat01-a…z", account, "sk-ant-oat01-x")
-            .unwrap();
-        store.update_oauth_token_probe(token.uuid, "ok").unwrap();
-        let found = store.find_oauth_token(token.uuid).unwrap().unwrap();
-        assert_eq!(found.last_probe_status.as_deref(), Some("ok"));
-        assert!(found.last_probed_at.is_some());
     }
 
     #[test]
