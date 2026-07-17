@@ -19,11 +19,12 @@
 //! > construction.** The lesson was already fixed — that is why it is an
 //! > accepted lesson — so the anti-pattern should NOT be present now.
 //!
-//! [`GuardSpec::render`] produces the block; the caller (the CLI) writes
+//! [`GuardSpec::render`] produces the block; [`super::compile`] writes
 //! it, runs the script, and *keeps it only if the tree is still clean*.
 //! A generated guard that trips immediately is discarded, not committed.
 //! This module owns the rendering and the marker bookkeeping; the
-//! run-and-check is the CLI's, because running a subprocess is I/O.
+//! run-and-check is [`super::compile`]'s, because running a subprocess
+//! is I/O.
 
 use serde::{Deserialize, Serialize};
 
