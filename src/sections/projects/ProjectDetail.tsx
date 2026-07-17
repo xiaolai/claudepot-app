@@ -19,6 +19,7 @@ import type {
 } from "../../types";
 import { classifyProject } from "./projectStatus";
 import { formatRelativeTime, formatSize } from "./format";
+import { basename } from "../../lib/paths";
 import { MoveSessionModal } from "./MoveSessionModal";
 import { PermissionPanel } from "./PermissionPanel";
 import { ProjectEnvPanel } from "./ProjectEnvPanel";
@@ -287,8 +288,7 @@ export function ProjectDetail({
             </button>
           )}
           <h2 className="selectable" title={info.original_path}>
-            {info.original_path.split("/").filter(Boolean).pop() ??
-              info.sanitized_name}
+            {basename(info.original_path) || info.sanitized_name}
           </h2>
           {info.pr && (
             <button

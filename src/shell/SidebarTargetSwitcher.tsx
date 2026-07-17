@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { NfIcon } from "../icons";
 import { Avatar, avatarColorFor } from "../components/primitives/Avatar";
 import { Glyph } from "../components/primitives/Glyph";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 import { NF } from "../icons";
 import type { AccountSummary } from "../types";
 
@@ -43,24 +44,7 @@ export function SidebarTargetSwitcher({
     ? accounts.find((a) => a.uuid === boundUuid) ?? null
     : null;
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const t = window.setTimeout(() => {
-      document.addEventListener("mousedown", onDocClick);
-    }, 0);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.clearTimeout(t);
-      document.removeEventListener("mousedown", onDocClick);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  usePopoverDismiss(rootRef, open, () => setOpen(false));
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>

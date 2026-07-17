@@ -17,6 +17,7 @@ import {
   OptionRow,
 } from "../../components/primitives/modalParts";
 import { NF } from "../../icons";
+import { basename } from "../../lib/paths";
 import { DRY_RUN_SUPERSEDED, type DryRunPlan, type MoveArgs } from "../../types";
 
 const DEBOUNCE_MS = 300;
@@ -402,5 +403,7 @@ export function RenameProjectModal({
 }
 
 function currentBasename(path: string): string {
-  return path.split("/").filter(Boolean).pop() ?? "";
+  // Windows-aware via lib/paths — `C:\a\b` must yield `b`, not the
+  // whole string (audit 2026-07 F2). Empty input stays "".
+  return basename(path);
 }

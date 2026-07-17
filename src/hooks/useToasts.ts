@@ -10,12 +10,6 @@ export type Toast = {
   /** Label of the undo button. Defaults to "Undo". */
   undoLabel?: string;
   /**
-   * Internal: fires when the toast auto-dismisses *without* the user
-   * clicking Undo. Consumers use this to commit deferred actions so
-   * the Undo-vs-commit race is eliminated by construction.
-   */
-  onCommit?: () => void;
-  /**
    * Optional dedupe key. If a new toast is pushed with the same
    * `dedupeKey` as an existing one, the older toast is dismissed
    * silently (without running its onCommit) before the new one is
@@ -47,13 +41,21 @@ export function useToasts() {
   const [lastDismissed, setLastDismissed] =
     useState<DismissedToast | null>(null);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  // Deferred commits live OUTSIDE the toast state so `dismissToast`
+  // can run them without reading `toasts` (stale closure) and without
+  // side effects inside a state updater (StrictMode double-invokes
+  // updaters — a commit in there would fire twice).
+  const commitsRef = useRef<Map<number, () => void>>(new Map());
 
-  // Clear all pending timers on unmount
+  // Clear all pending timers on unmount. Pending commits are dropped,
+  // not fired — teardown is not a user decision to commit.
   useEffect(() => {
     const timers = timersRef.current;
+    const commits = commitsRef.current;
     return () => {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
+      commits.clear();
     };
   }, []);
 
@@ -76,7 +78,21 @@ export function useToasts() {
     timersRef.current.delete(id);
   }, []);
 
-  const dismissToast = useCallback((id: number) => {
+  /**
+   * Dismiss a toast. By default this COMMITS the toast's deferred
+   * action first: the auto-dismiss timer and the manual close (X)
+   * button both land here, and both mean "the user did not undo" —
+   * an X-click must not silently cancel the action the toast said
+   * was happening (audit F1: closing "Switching Desktop to X…"
+   * dropped the switch). Only the Undo button passes
+   * `skipCommit: true`; dedupe-supersede clears the commit without
+   * ever reaching this path. Deleting from the map before invoking
+   * makes re-entry (double-click, timer + X race) a no-op.
+   */
+  const dismissToast = useCallback((id: number, opts?: { skipCommit?: boolean }) => {
+    const commit = commitsRef.current.get(id);
+    commitsRef.current.delete(id);
+    if (commit && !opts?.skipCommit) commit();
     const timer = timersRef.current.get(id);
     if (timer) {
       clearTimeout(timer);
@@ -107,11 +123,13 @@ export function useToasts() {
    *     and error kinds — long enough to read without locking the UI
    *     under a persistent banner. Pass `Infinity` for sticky
    *     notifications that the user must close manually.
-   *   - `onCommit` — a callback fired iff the toast auto-dismisses
-   *     WITHOUT the user clicking Undo. This is the idiomatic way to
-   *     schedule a deferred action: the commit and the dismissal are
-   *     the same event, so "Undo is clickable ↔ action hasn't fired".
-   *     Clicking Undo cancels the commit.
+   *   - `onCommit` — a callback fired exactly once when the toast
+   *     leaves by any path EXCEPT Undo: auto-dismiss, the manual
+   *     close (X) button, or a programmatic dismiss. This is the
+   *     idiomatic way to schedule a deferred action: the commit and
+   *     the dismissal are the same event, so "Undo is clickable ↔
+   *     action hasn't fired". Clicking Undo — or being superseded by
+   *     a same-`dedupeKey` toast — cancels the commit.
    *
    * **Visual primitive only.** Logging is owned by `emit()` in
    * `src/lib/notifications/dispatch.ts`. The public `pushToast`
@@ -152,9 +170,15 @@ export function useToasts() {
               clearTimeout(timer);
               timersRef.current.delete(s.id);
             }
+            // Superseded, not dismissed: the stale commit must never
+            // fire ("latest wins"), so drop it silently.
+            commitsRef.current.delete(s.id);
           }
           return prev.filter((t) => t.dedupeKey !== opts.dedupeKey);
         });
+      }
+      if (opts?.onCommit) {
+        commitsRef.current.set(id, opts.onCommit);
       }
       setToasts((t) => [
         ...t,
@@ -165,7 +189,6 @@ export function useToasts() {
           exiting: false,
           onUndo: wrappedUndo,
           undoLabel: opts?.undoLabel,
-          onCommit: opts?.onCommit,
           dedupeKey: opts?.dedupeKey,
         },
       ]);
@@ -191,11 +214,11 @@ export function useToasts() {
         : opts?.durationMs ?? (kind === "error" ? Infinity : 10_000);
       if (Number.isFinite(delay)) {
         const timer = setTimeout(() => {
-          // If the user never clicked Undo, run the commit callback
-          // just before dismissing. This makes "toast visible ⇔ Undo
-          // still effective" an invariant, eliminating the prior race
-          // between a parallel action timer and the toast lifetime.
-          opts?.onCommit?.();
+          // `dismissToast` runs the commit (single run-once site via
+          // `commitsRef`) before dismissing. This makes "toast
+          // visible ⇔ Undo still effective" an invariant, eliminating
+          // the prior race between a parallel action timer and the
+          // toast lifetime.
           dismissToast(id);
         }, delay);
         timersRef.current.set(id, timer);

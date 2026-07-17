@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
@@ -85,11 +85,35 @@ export function AgentsSection() {
     });
   }
 
+  // In-flight "Run now" cleanups (op-progress unlisten + safety
+  // timeout), keyed by identity. handleRun's listener/timeout used to
+  // be handler-scoped only — unmounting mid-run leaked them and let
+  // late events setState on an unmounted component (audit 2026-07
+  // F5). Every cleanup registers here and self-removes; the unmount
+  // effect drains whatever is still pending.
+  const runCleanupsRef = useRef<Set<() => void>>(new Set());
+  useEffect(() => {
+    const cleanups = runCleanupsRef.current;
+    return () => {
+      for (const c of Array.from(cleanups)) {
+        try {
+          c();
+        } catch {
+          /* already torn down */
+        }
+      }
+      cleanups.clear();
+    };
+  }, []);
+
   async function handleRun(id: string) {
     setBusy(id, true);
     let unlisten: (() => void) | null = null;
     let timeoutHandle: number | undefined;
+    let cancelled = false;
     const cleanup = () => {
+      cancelled = true;
+      runCleanupsRef.current.delete(cleanup);
       if (unlisten) {
         try {
           unlisten();
@@ -103,14 +127,16 @@ export function AgentsSection() {
         timeoutHandle = undefined;
       }
     };
+    runCleanupsRef.current.add(cleanup);
     try {
       const opId = await api.agentsRunNowStart(id);
+      if (cancelled) return; // unmounted while starting
       // Listen for the terminal event on this op channel. The
       // backend (src-tauri/src/ops.rs::ProgressEvent) emits the
       // terminal event as `{phase: "op", status: "complete" | "error", ...}`.
       // Per-phase events use other phase names with status="running"
       // / "complete" — we only fire on the op-level signal.
-      unlisten = await listen<{
+      const u = await listen<{
         phase: string;
         status: string;
         detail?: string;
@@ -126,6 +152,17 @@ export function AgentsSection() {
           cleanup();
         }
       });
+      if (cancelled) {
+        // Unmount drained the cleanup while `listen` was in flight —
+        // tear the late-arriving subscription down immediately.
+        try {
+          u();
+        } catch {
+          /* already torn down */
+        }
+        return;
+      }
+      unlisten = u;
       // Safety timeout in case the event channel drops — clear busy
       // after 5 minutes so the UI doesn't get stuck forever.
       timeoutHandle = window.setTimeout(() => {
@@ -133,7 +170,9 @@ export function AgentsSection() {
         cleanup();
       }, 5 * 60 * 1000);
     } catch (e) {
+      const wasCancelled = cancelled;
       cleanup();
+      if (wasCancelled) return; // unmounted — no setState/toast
       setBusy(id, false);
       pushToast("error", String(e));
     }

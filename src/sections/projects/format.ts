@@ -1,18 +1,14 @@
 /**
  * Shared formatting helpers for the projects subtree.
  *
- * Audit Low: formatSize was duplicated across ProjectsList, ProjectDetail,
- * and CleanOrphansModal. Moved here so formatting changes (precision,
- * locale, unit cap) happen in exactly one place.
+ * `formatSize` and `basename` are re-exports of the canonical lib
+ * implementations (`src/lib/format.ts`, `src/lib/paths.ts`) — kept
+ * here so the projects subtree's many importers don't churn
+ * (audit 2026-07 F10/F12).
  */
 
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
+export { formatSize } from "../../lib/format";
+export { basename } from "../../lib/paths";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -24,6 +20,11 @@ const WEEK = 7 * DAY;
  * always rounded down so "5 minutes and 50 seconds ago" → "5m ago".
  * For instants in the future (clock skew) returns "just now" rather
  * than confusing the user with a negative magnitude.
+ *
+ * Deliberately NOT consolidated onto `lib/formatRelative` — that
+ * ladder shows seconds ("12s ago"), caps hours at 48, and has no
+ * week tier, so merging would change user-visible strings on every
+ * projects surface (audit 2026-07 F13, drift risk accepted).
  */
 export function formatRelativeTime(ms: number): string {
   const diff = Date.now() - ms;
@@ -32,17 +33,4 @@ export function formatRelativeTime(ms: number): string {
   if (diff < DAY) return `${Math.floor(diff / HOUR)}h ago`;
   if (diff < WEEK) return `${Math.floor(diff / DAY)}d ago`;
   return `${Math.floor(diff / WEEK)}w ago`;
-}
-
-/**
- * Cross-platform basename. Splits on both `/` and `\` so a Windows path
- * (`C:\Users\joker\proj`) renders the right tail. The previous
- * `split("/").pop()` returned the whole string on Windows-shaped paths
- * (audit 2026-05 #11/#12). Falls back to the input when no separator
- * is present.
- */
-export function basename(absPath: string): string {
-  // Handles `/`, `\`, and mixed separators (msys/IntelliJ emit C:/x/y).
-  const parts = absPath.split(/[\\/]/).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : absPath;
 }

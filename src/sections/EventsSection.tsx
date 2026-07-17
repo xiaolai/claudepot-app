@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { api } from "../api";
+import { basename } from "../lib/paths";
 import type {
   ActivityCard,
   CardKindLabel,
@@ -1092,11 +1093,6 @@ function formatTime(ms: number): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
 }
 
 function rangeBucket(sinceMs: number): number {

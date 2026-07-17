@@ -64,18 +64,6 @@ const COLD_START_ENABLED_BY_DEFAULT: ReadonlyArray<Category> = [
 const COLD_START_ENABLED_SET = new Set<Category>(COLD_START_ENABLED_BY_DEFAULT);
 
 let cache: Partial<Record<Category, CategoryPrefs>> = {};
-let hydrated = false;
-const subscribers = new Set<() => void>();
-
-function notify() {
-  for (const fn of subscribers) {
-    try {
-      fn();
-    } catch {
-      /* swallow — one bad subscriber must not poison the rest */
-    }
-  }
-}
 
 /** Read the effective preference for `category`. Falls back to the
  *  category-aware cold-start default when the cache hasn't hydrated
@@ -90,23 +78,13 @@ export function getCategoryPref(category: Category): CategoryPrefs {
   };
 }
 
-/** Subscribe to cache changes. Returns an unsubscribe. */
-export function subscribeCategoryPrefs(fn: () => void): () => void {
-  subscribers.add(fn);
-  return () => {
-    subscribers.delete(fn);
-  };
-}
-
 /** Hydrate the cache from the Rust side. Idempotent — repeated
- *  calls re-fetch and update subscribers. Settings pane (Phase 4)
- *  invokes this on mount and after each setter. */
+ *  calls re-fetch. Settings pane (Phase 4) invokes this on mount
+ *  and after each setter. */
 export async function hydrateCategoryPrefs(): Promise<void> {
   try {
     const map = await settingsApi.preferencesCategoryPrefsGet();
     cache = map;
-    hydrated = true;
-    notify();
   } catch {
     // Non-Tauri env or IPC error. Leave cache as-is; the
     // cold-start defaults already produce sensible behavior.
@@ -122,7 +100,6 @@ export function setCategoryPrefLocal(
   prefs: CategoryPrefs,
 ): void {
   cache[category] = prefs;
-  notify();
 }
 
 /** Update a category preference via IPC + optimistic cache update.
@@ -140,15 +117,8 @@ export async function updateCategoryPref(
   return confirmed;
 }
 
-/** Test-only: introspect the cache hydration state. */
-export function __isHydratedForTests(): boolean {
-  return hydrated;
-}
-
 /** Test-only: reset the cache. Vitest needs this between tests
  *  because the singleton outlives any one render tree. */
 export function __resetForTests(): void {
   cache = {};
-  hydrated = false;
-  subscribers.clear();
 }

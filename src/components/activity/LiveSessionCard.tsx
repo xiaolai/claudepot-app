@@ -16,6 +16,7 @@
 
 import type { LiveSessionSummary } from "../../types";
 import { NF } from "../../icons";
+import { basename } from "../../lib/paths";
 import { Tag } from "../primitives/Tag";
 
 interface Props {
@@ -119,8 +120,8 @@ export function LiveSessionCard({ summary, onClick }: Props) {
 }
 
 function projectFromCwd(cwd: string): string {
-  const parts = cwd.split("/").filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : cwd;
+  // Windows-aware via lib/paths (audit 2026-07 F2).
+  return basename(cwd);
 }
 
 function humanizeMs(ms: number): string {

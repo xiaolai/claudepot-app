@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Glyph } from "./primitives/Glyph";
 import { NF } from "../icons";
+import { basename } from "../lib/paths";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 import type { RunningOpInfo } from "../types";
 
 /**
@@ -28,28 +30,8 @@ export function RunningOpsChip({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click + Escape — same shape as the sidebar
-  // target switcher's popover. The 0ms timeout defers wiring past
-  // the click that opened the popover so it doesn't re-close on the
-  // same event tick.
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const t = window.setTimeout(() => {
-      document.addEventListener("mousedown", onDocClick);
-    }, 0);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.clearTimeout(t);
-      document.removeEventListener("mousedown", onDocClick);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  // Close on outside click + Escape — shared popover-dismiss hook.
+  usePopoverDismiss(rootRef, open, () => setOpen(false));
 
   // Auto-close when the last op finishes — otherwise the popover
   // would render against an empty list. The chip itself disappears
@@ -179,8 +161,4 @@ export function labelFor(op: RunningOpInfo): string {
   }
   if (op.current_phase) return `${base} (${op.current_phase})`;
   return base;
-}
-
-function basename(path: string): string {
-  return path.split("/").filter(Boolean).pop() ?? path;
 }

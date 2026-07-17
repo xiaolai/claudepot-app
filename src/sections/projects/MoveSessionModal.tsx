@@ -16,6 +16,7 @@ import {
 } from "../../components/primitives/modalParts";
 import { useOperations } from "../../hooks/useOperations";
 import { NF } from "../../icons";
+import { basename } from "../../lib/paths";
 import type { MoveSessionReport, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
 import {
@@ -135,8 +136,8 @@ export function MoveSessionModal({
         forceConflict,
         cleanupSource,
       });
-      const shortFromBase = basename(fromCwd) ?? fromCwd;
-      const shortToBase = basename(target) ?? target;
+      const shortFromBase = basename(fromCwd);
+      const shortToBase = basename(target);
       openOpModal({
         opId,
         title: `Moving session ${sessionId.slice(0, 8)} → ${shortToBase}`,
@@ -165,8 +166,8 @@ export function MoveSessionModal({
   }
 
   const shortSid = sessionId.slice(0, 8);
-  const shortFrom = basename(fromCwd) ?? fromCwd;
-  const shortTo = target ? (basename(target) ?? target) : "";
+  const shortFrom = basename(fromCwd);
+  const shortTo = target ? basename(target) : "";
 
   return (
     <Modal open onClose={handleClose} width="lg" aria-labelledby={headingId}>
@@ -242,7 +243,7 @@ export function MoveSessionModal({
               </option>
             )}
             {options.map((p) => {
-              const base = basename(p.original_path) ?? p.original_path;
+              const base = basename(p.original_path);
               return (
                 <option key={p.sanitized_name} value={p.original_path}>
                   {base} — {p.original_path}
@@ -374,9 +375,4 @@ export function MoveSessionModal({
       </ModalFooter>
     </Modal>
   );
-}
-
-function basename(p: string): string | null {
-  const parts = p.split("/").filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : null;
 }

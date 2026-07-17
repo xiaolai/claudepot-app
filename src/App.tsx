@@ -6,6 +6,7 @@ import {
   triggerOpenAddRoute,
   triggerSettingsTab,
 } from "./lib/networkPanelDeepLink";
+import { basename } from "./lib/paths";
 import { ToastContainer } from "./components/ToastContainer";
 import { ShellCommandPalette } from "./components/ShellCommandPalette";
 import { QuitConfirm } from "./components/QuitConfirm";
@@ -64,8 +65,7 @@ function labelFor(op: RunningOpInfo): string {
         : op.kind === "session_move"
           ? "Moving session"
           : "Renaming";
-  const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
-  return `${verb} ${base(op.old_path)} → ${base(op.new_path)}`;
+  return `${verb} ${basename(op.old_path)} → ${basename(op.new_path)}`;
 }
 
 /**

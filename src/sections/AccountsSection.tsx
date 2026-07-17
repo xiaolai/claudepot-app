@@ -3,7 +3,10 @@ import type { AccountSummary } from "../types";
 import { api } from "../api";
 import { useUsage } from "../hooks/useUsage";
 import { useTauriEvent } from "../hooks/useTauriEvent";
-import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import {
+  isShortcutContextBlocked,
+  useGlobalShortcuts,
+} from "../hooks/useGlobalShortcuts";
 import { useCompactHeader } from "../hooks/useWindowWidth";
 import { useAppState } from "../providers/AppStateProvider";
 import { Button } from "../components/primitives/Button";
@@ -11,6 +14,7 @@ import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { ScreenHeader } from "../shell/ScreenHeader";
+import { setPendingKeysFilter } from "./keys/pendingFilter";
 import { AccountsGrid } from "./accounts/AccountsGrid";
 import { AddAccountModal } from "./accounts/AddAccountModal";
 import { HealthChips } from "./accounts/HealthChips";
@@ -96,14 +100,16 @@ export function AccountsSection({
 
   const handleOpenTokensFor = useCallback(
     (email: string) => {
+      // Stage the query for a lazy-mounting KeysSection (its listener
+      // isn't wired until the chunk mounts — a delayed CustomEvent
+      // alone dropped on first navigation, audit 2026-07 F4), then
+      // dispatch for an already-mounted one. Whichever path consumes
+      // the query clears the staged copy.
+      setPendingKeysFilter(email);
       onNavigate?.("keys");
-      // Dispatch on the next tick so KeysSection has mounted and its
-      // cp-keys-filter listener is wired up before we fire.
-      window.setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent("cp-keys-filter", { detail: { query: email } }),
-        );
-      }, 0);
+      window.dispatchEvent(
+        new CustomEvent("cp-keys-filter", { detail: { query: email } }),
+      );
     },
     [onNavigate],
   );
@@ -137,19 +143,23 @@ export function AccountsSection({
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
   // Cmd+Shift+C — copy first matching email when a filter is active,
-  // else the first account in the list.
+  // else the first account in the list. Shift makes `e.key` report
+  // "C", so match case-insensitively (same convention as
+  // useShellShortcuts' ⌘⇧L), and respect the shared modal/editable
+  // gate so the shortcut never fires over a dialog or while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.shiftKey && e.key === "c") {
-        e.preventDefault();
-        const target = shown[0];
-        if (!target) return;
-        void navigator.clipboard
-          .writeText(target.email)
-          .then(() => pushToast("info", `Copied ${target.email}`))
-          .catch((err) => pushToast("error", `Copy failed: ${err}`));
-      }
+      if (!mod || !e.shiftKey || e.altKey) return;
+      if (e.key !== "c" && e.key !== "C") return;
+      if (isShortcutContextBlocked()) return;
+      e.preventDefault();
+      const target = shown[0];
+      if (!target) return;
+      void navigator.clipboard
+        .writeText(target.email)
+        .then(() => pushToast("info", `Copied ${target.email}`))
+        .catch((err) => pushToast("error", `Copy failed: ${err}`));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

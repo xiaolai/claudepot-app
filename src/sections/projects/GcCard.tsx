@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { formatSize } from "../../lib/format";
 import type { GcOutcome } from "../../types";
 
 /**
@@ -61,7 +62,7 @@ export function GcCard({
       setPreviewDays(null);
       pushToast(
         "info",
-        `GC: removed ${r.removed_journals} journals, ${r.removed_snapshots} snapshots, freed ${formatBytes(
+        `GC: removed ${r.removed_journals} journals, ${r.removed_snapshots} snapshots, freed ${formatSize(
           r.bytes_freed,
         )}`,
       );
@@ -191,10 +192,4 @@ export function GcCard({
       )}
     </section>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
