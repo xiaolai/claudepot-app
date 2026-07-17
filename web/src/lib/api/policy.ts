@@ -23,39 +23,14 @@ import { forbidden, rateLimited } from "./errors";
 import { problemResponse } from "./response";
 import { checkAndIncrement, type LimitCategory } from "./rate-limit";
 import type { EndpointSpec } from "./manifest";
-import type { Scope } from "./scopes";
-
-/**
- * Defense-in-depth: scopes that citizen-bot PATs MUST NEVER hold.
- *
- * The primary gate is at PAT mint time (lib/citizen-bots/scopes.ts
- * filters requested scopes down to CITIZEN_SCOPES). This set is the
- * backstop — if a token somehow holds one of these scopes (manual
- * /admin/users grant, future bug, scope catalog growth) the route
- * handler still refuses. Mirrors the bot_kind='reader' gate on
- * /api/v1/submissions/[id]/decisions.
- *
- * Keep this list in lockstep with the "permanently denied" section
- * of web/dev-docs/citizen-bots.md.
- */
-const CITIZEN_BOT_DENIED_SCOPES: ReadonlySet<Scope> = new Set<Scope>([
-  "vote:write",
-  "save:write",
-  "submission:write",
-  "submission:update",
-  "submission:delete",
-  "submission:publish",
-  // comment:delete is in the allowlist's explicit deny per the
-  // design doc — citizen bots can't erase miscalibration evidence
-  // (mirrors the reader-bot rule). The primary gate at PAT mint
-  // filters it out; this is the backstop if a token over-grants.
-  "comment:delete",
-  "decision:write",
-  "decision:override",
-  "scout:write",
-  "engagement:write",
-  "avatar:write",
-]);
+// CITIZEN_BOT_DENIED_SCOPES + the privileged-scope pair live in
+// scopes.ts (pure, DB-free) so unit tests and the MCP twin
+// (lib/mcp/policy.ts) share the exact same constants.
+import {
+  canHoldPrivilegedScopes,
+  CITIZEN_BOT_DENIED_SCOPES,
+  PRIVILEGED_SCOPES,
+} from "./scopes";
 
 /**
  * Authenticate + requireScope per the spec's `auth` field. Does
@@ -101,6 +76,26 @@ export async function checkAuthForSpec(
         response: problemResponse(
           forbidden(
             `Citizen bots cannot perform "${spec.auth}". This action is for human users and operator-owned bots only. See web/dev-docs/citizen-bots.md.`,
+          ),
+        ),
+      };
+    }
+    // Privileged-scope defense-in-depth: the office-only scopes
+    // (editorial writes, bot self-reporting) require the token's
+    // OWNER to be entitled, not just the token to carry the scope.
+    // Mirrors the publish route's is_agent gate and the mint-time
+    // check in lib/actions/api-tokens.ts — a token minted before
+    // that gate existed (or via a future mint bug) is still refused
+    // here.
+    if (
+      PRIVILEGED_SCOPES.has(spec.auth) &&
+      !canHoldPrivilegedScopes(auth.user)
+    ) {
+      return {
+        ok: false,
+        response: problemResponse(
+          forbidden(
+            `"${spec.auth}" is reserved for staff and bot accounts. This token's owner is not entitled to it.`,
           ),
         ),
       };

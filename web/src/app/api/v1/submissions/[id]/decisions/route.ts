@@ -15,9 +15,10 @@
  * the office's stance on a submission evolve over time.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
+import { approvedVisibleSubmission } from "@/db/queries";
 import { submissions } from "@/db/schema";
 import { forbidden, notFound } from "@/lib/api/errors";
 import { ok, preflight, problemResponse, withErrorHandling } from "@/lib/api/response";
@@ -25,7 +26,7 @@ import { getDecisionsBySubmission } from "@/db/office-queries";
 import { isUuid } from "@/lib/api/inputs";
 import { endpointSpec } from "@/lib/api/manifest";
 import { buildPublicOfficeDecisionDto } from "@/lib/api/office-decision-dto";
-import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
+import { chargeForSpec, checkAuthForSpec, isStaffAuth } from "@/lib/api/policy";
 
 export async function OPTIONS(): Promise<Response> {
   return preflight();
@@ -61,10 +62,19 @@ export const GET = withErrorHandling(async (
   const charge = await chargeForSpec(SPEC, auth.token.id);
   if (!charge.ok) return charge.response;
 
+  // Visibility gate: same shape as the engagement timeline — the
+  // decision list of hidden content (pending/draft/rejected,
+  // deleted, unlisted) 404s for non-staff callers. Staff/system
+  // (which includes the office bots) keep the existence-only check
+  // so the office can read decisions on its own drafts pre-publish.
   const [sub] = await db
     .select({ id: submissions.id })
     .from(submissions)
-    .where(eq(submissions.id, id))
+    .where(
+      isStaffAuth(auth)
+        ? eq(submissions.id, id)
+        : and(eq(submissions.id, id), approvedVisibleSubmission()),
+    )
     .limit(1);
   if (!sub) return problemResponse(notFound("Submission not found."));
 

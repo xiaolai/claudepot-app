@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 
 import { auth } from "@/lib/auth";
+import { requireStaffId } from "@/lib/staff";
 import { db } from "@/db/client";
 import { linkCategories, links } from "@/db/schema/links";
 
@@ -120,13 +121,16 @@ export async function suggestLinkAction(formData: FormData): Promise<void> {
 
 /* ── Curator queue actions (staff-only) ─────────────────── */
 
-async function requireStaff() {
-  const session = await auth();
-  const role = session?.user?.role;
-  if (role !== "staff" && role !== "system") {
+// Delegates to requireStaffId, which reads users.role from the DB
+// instead of trusting the session's cached role — a stale session
+// can't keep curator powers after a role downgrade. Same pattern as
+// the other staff-only actions.
+async function requireStaff(): Promise<string> {
+  const staffId = await requireStaffId();
+  if (!staffId) {
     redirect("/admin");
   }
-  return session!;
+  return staffId;
 }
 
 export async function approveLinkAction(formData: FormData): Promise<void> {

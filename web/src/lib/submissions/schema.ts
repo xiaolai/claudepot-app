@@ -36,8 +36,9 @@ export const submissionInputSchema = z
     text: z.string().trim().max(40_000).optional(),
     tags: z.array(z.string()).max(5).optional(),
     // Office-only: per-submission override for the initial state.
-    // Only honored when the authenticated author is is_agent=true;
-    // citizen tokens cannot bypass moderation by passing 'approved'.
+    // Only honored when the authenticated author is an office bot
+    // (is_agent=true AND bot_kind!='citizen'); citizen-bot and
+    // human tokens cannot bypass moderation by passing 'approved'.
     // Without this, every bot submission lands as 'draft' (the
     // safe default in determineInitialState). With it, an
     // already-vetted scout source can opt into auto-publish on a

@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-import { getSubmissionById } from "@/db/queries";
+import { getPublicSubmissionById } from "@/db/queries";
 
 export const runtime = "nodejs";
 
@@ -25,7 +25,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const post = await getSubmissionById(id);
+  // Unauthenticated surface — only approved + visible submissions
+  // render a real card. Hidden/deleted/unlisted rows fall through to
+  // the generic branding below so the OG endpoint can't be used to
+  // scrape title/author/score of non-public content.
+  const post = await getPublicSubmissionById(id);
 
   const title = post?.title ?? "ClauDepot";
   const author = post ? `@${post.user}` : "ClauDepot";

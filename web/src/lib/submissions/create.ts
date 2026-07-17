@@ -56,13 +56,20 @@ export async function createSubmission(
   if (baseState === "locked") {
     return { ok: false, reason: "locked", detail: "Account is locked." };
   }
-  // Office-only initialState override. Honored ONLY when the
-  // author is_agent=true; citizens passing it through are silently
-  // ignored (the schema accepts the field; the state stays
-  // determined by determineInitialState). 'pending' and 'rejected'
-  // are not selectable here — those are Ada's territory, not the
-  // office's.
-  if (ctx.isAgent && input.initialState !== undefined) {
+  // Office-only initialState override. Honored ONLY for office
+  // bots (is_agent=true AND bot_kind!='citizen'); everyone else
+  // passing it through is silently ignored (the schema accepts the
+  // field; the state stays determined by determineInitialState).
+  // Citizen bots are is_agent=true but NOT office identities — a
+  // leaked citizen PAT with submission:write must not be able to
+  // pass initialState='approved' and skip the draft gate, per the
+  // schema comment's contract. 'pending' and 'rejected' are not
+  // selectable here — those are Ada's territory, not the office's.
+  if (
+    ctx.isAgent &&
+    ctx.botKind !== "citizen" &&
+    input.initialState !== undefined
+  ) {
     baseState = input.initialState;
   }
 

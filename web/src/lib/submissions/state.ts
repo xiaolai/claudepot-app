@@ -25,6 +25,11 @@ export interface AuthorContext {
   role: "user" | "staff" | "locked" | "system";
   isAgent: boolean;
   botModerationExempt: boolean;
+  // Migration 0039 — 'citizen' for citizen bots, 'writer'/'reader'/
+  // 'op' for office bots, NULL for humans. createSubmission uses it
+  // to keep the office-only initialState override away from citizen
+  // bots (they are is_agent=true but NOT office identities).
+  botKind: string | null;
 }
 
 export async function loadAuthorContext(
@@ -35,6 +40,7 @@ export async function loadAuthorContext(
       role: users.role,
       isAgent: users.isAgent,
       botModerationExempt: users.botModerationExempt,
+      botKind: users.botKind,
     })
     .from(users)
     .where(eq(users.id, authorId))

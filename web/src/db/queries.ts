@@ -216,15 +216,25 @@ function mapUser(r: typeof users.$inferSelect): User {
 
 /* ── Submission feed queries ────────────────────────────────────── */
 
-// Audit finding 3.3 — feeds exclude unlisted submissions. The permalink
-// (getSubmissionById) does NOT filter on this; staff-unlisted content
-// stays accessible by direct URL.
-const FEED_BASE_FILTERS = () =>
+/**
+ * The approved + publicly-visible predicate: approved state, not
+ * deleted, not unlisted. Shared by the feed queries below, the
+ * public single-submission reads (getPublicSubmissionById, the API
+ * timeline routes), and anything else that must not leak hidden
+ * content to anonymous or read-scoped viewers. Matches
+ * lib/api/queries.ts:getSubmissionByIdForApi.
+ */
+export const approvedVisibleSubmission = () =>
   and(
     eq(submissions.state, "approved"),
     isNull(submissions.deletedAt),
     isNull(submissions.unlistedAt),
   );
+
+// Audit finding 3.3 — feeds exclude unlisted submissions. The permalink
+// (getSubmissionById) does NOT filter on this; staff-unlisted content
+// stays accessible by direct URL.
+const FEED_BASE_FILTERS = approvedVisibleSubmission;
 
 
 const SUBMISSION_BASE_SELECT = {
@@ -481,6 +491,26 @@ export async function getSubmissionById(
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
     .where(eq(submissions.id, id))
+    .limit(1);
+  return row ? mapSubmission(row) : undefined;
+}
+
+/**
+ * Single-submission read for unauthenticated public surfaces (the
+ * OG-image route). Unlike getSubmissionById it applies the
+ * approved + visible predicate, so pending/draft/rejected, deleted,
+ * and unlisted rows come back as undefined — callers fall back to a
+ * generic rendering instead of leaking title/author/score.
+ */
+export async function getPublicSubmissionById(
+  id: string,
+): Promise<Submission | undefined> {
+  if (!isUuid(id)) return undefined;
+  const [row] = await db
+    .select(SUBMISSION_BASE_SELECT)
+    .from(submissions)
+    .innerJoin(users, eq(users.id, submissions.authorId))
+    .where(and(eq(submissions.id, id), approvedVisibleSubmission()))
     .limit(1);
   return row ? mapSubmission(row) : undefined;
 }

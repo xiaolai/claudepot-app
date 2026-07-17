@@ -16,12 +16,13 @@
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
+import { approvedVisibleSubmission } from "@/db/queries";
 import { engagementRecords, submissions } from "@/db/schema";
 import { notFound, validation } from "@/lib/api/errors";
 import { ok, preflight, problemResponse, withErrorHandling } from "@/lib/api/response";
 import { isUuid } from "@/lib/api/inputs";
 import { endpointSpec } from "@/lib/api/manifest";
-import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
+import { chargeForSpec, checkAuthForSpec, isStaffAuth } from "@/lib/api/policy";
 
 const HARD_LIMIT = 500;
 
@@ -64,10 +65,20 @@ export const GET = withErrorHandling(async (
   const charge = await chargeForSpec(SPEC, auth.token.id);
   if (!charge.ok) return charge.response;
 
+  // Visibility gate: read:all unlocks the PUBLIC surface only, so
+  // hidden content (pending/draft/rejected, deleted, unlisted) 404s
+  // for non-staff — an existence-only check would leak the
+  // engagement timeline of content the feed and permalink both
+  // hide. Staff/system (which includes the office bots) keep the
+  // existence-only check so office analytics on drafts still work.
   const [sub] = await db
     .select({ id: submissions.id })
     .from(submissions)
-    .where(eq(submissions.id, id))
+    .where(
+      isStaffAuth(auth)
+        ? eq(submissions.id, id)
+        : and(eq(submissions.id, id), approvedVisibleSubmission()),
+    )
     .limit(1);
   if (!sub) return problemResponse(notFound("Submission not found."));
 

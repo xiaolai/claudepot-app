@@ -38,6 +38,22 @@ export async function generateMetadata({
   const { id } = await params;
   const post = await getCachedSubmissionById(id);
   if (!post) return { title: "Not found" };
+  // Same visibility gate as the page body below: non-approved
+  // submissions expose title/description only to the author and
+  // staff. Without this, crawlers and anonymous viewers could read
+  // hidden-content metadata that the page itself 404s. (The dev-only
+  // `?as=` shim isn't consulted here — metadata for a shimmed viewer
+  // just falls back to the generic title.)
+  if (effectiveState(post) !== "approved") {
+    const session = await auth();
+    const viewerUsername = session?.user?.username ?? null;
+    const viewerRole = session?.user?.role;
+    const canSeeNonApproved =
+      viewerUsername === post.user ||
+      viewerRole === "staff" ||
+      viewerRole === "system";
+    if (!canSeeNonApproved) return { title: "Not found" };
+  }
   return {
     title: post.title,
     openGraph: {
