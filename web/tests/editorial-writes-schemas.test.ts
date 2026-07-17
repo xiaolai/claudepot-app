@@ -18,6 +18,8 @@ import assert from "node:assert/strict";
 // elsewhere.
 import {
   decisionInputSchema,
+  engagementMetadataSchema,
+  ENGAGEMENT_METADATA_MAX_CHARS,
   overrideInputSchema,
   scoutRunInputSchema,
 } from "../src/lib/editorial-writes/schemas";
@@ -244,6 +246,33 @@ test("decisionInputSchema accepts a missing promptHash (NULL idempotency key)", 
     // promptHash deliberately omitted
   });
   assert.equal(result.success, true);
+});
+
+/* ── Engagement metadata — serialized-size cap ───────────────── */
+
+test("engagementMetadataSchema accepts a small metadata object", () => {
+  const result = engagementMetadataSchema.safeParse({
+    threadLength: 12,
+    trigger: "quiet_period_broken",
+  });
+  assert.equal(result.success, true);
+});
+
+test("engagementMetadataSchema accepts metadata at the cap boundary", () => {
+  // {"pad":"…"} serializes to 10 chars of scaffolding + the pad
+  // value; size the pad so the whole JSON string is exactly at the
+  // cap.
+  const scaffolding = JSON.stringify({ pad: "" }).length;
+  const pad = "x".repeat(ENGAGEMENT_METADATA_MAX_CHARS - scaffolding);
+  const result = engagementMetadataSchema.safeParse({ pad });
+  assert.equal(result.success, true);
+});
+
+test("engagementMetadataSchema rejects metadata over 4 KB serialized", () => {
+  const result = engagementMetadataSchema.safeParse({
+    pad: "x".repeat(ENGAGEMENT_METADATA_MAX_CHARS),
+  });
+  assert.equal(result.success, false);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -22,6 +22,15 @@
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * ECMAScript date range bound: |epoch ms| ≤ 8.64e15 (±100M days from
+ * the epoch, ES2026 §21.4.1.1). A finite `t` outside this range makes
+ * `new Date(t)` an Invalid Date, which then throws inside SQL
+ * building — so a hand-crafted cursor must be rejected here, where
+ * "invalid cursor" already means null.
+ */
+const MAX_EPOCH_MS = 8.64e15;
+
 export type CursorTime = { t: number; id: string };
 export type CursorScore = { s: number; id: string };
 export type Cursor = CursorTime | CursorScore;
@@ -56,6 +65,7 @@ export function decodeCursor(s: string | null | undefined): Cursor | null {
 
   if ("t" in o) {
     if (typeof o.t !== "number" || !Number.isFinite(o.t)) return null;
+    if (Math.abs(o.t) > MAX_EPOCH_MS) return null;
     return { t: o.t, id: o.id };
   }
   if ("s" in o) {

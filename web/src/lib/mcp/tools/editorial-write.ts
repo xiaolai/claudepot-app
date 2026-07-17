@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import {
   decisionInputSchema,
+  engagementMetadataSchema,
   overrideInputSchema,
   persistDecision,
   persistOverride,
@@ -296,7 +297,9 @@ export function registerEditorialWriteTools(server: McpServer): void {
           .describe(
             "Office-defined kind. Avoid 'vote', 'comment', 'save' — those are auto-recorded.",
           ),
-        metadata: z.record(z.string(), z.unknown()).optional(),
+        // Serialized size capped at 4 KB — shared with the REST
+        // twin via engagementMetadataSchema.
+        metadata: engagementMetadataSchema.optional(),
       },
     },
     async (args, extra) => {
@@ -312,6 +315,18 @@ export function registerEditorialWriteTools(server: McpServer): void {
       }
       if (kind.length === 0 || kind.length > 80) {
         return textResult("kind must be 1-80 chars.", true);
+      }
+      // Explicit re-check of the metadata size cap, mirroring the
+      // manual kind checks above rather than trusting the SDK's
+      // inputSchema validation alone.
+      if (args.metadata !== undefined) {
+        const meta = engagementMetadataSchema.safeParse(args.metadata);
+        if (!meta.success) {
+          return textResult(
+            `Validation failed: ${formatZodIssues(meta.error)}`,
+            true,
+          );
+        }
       }
 
       const c = await chargeForTool("record_engagement", a.ctx.tokenId);

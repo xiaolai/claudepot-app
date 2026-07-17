@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Resend } from "resend";
 
 import { auth } from "@/lib/auth";
+import { allowDataExportSend } from "@/lib/data-export-rate-limit";
 import { db } from "@/db/client";
 import {
   comments,
@@ -167,6 +168,15 @@ export async function requestDataExport(): Promise<
   if (!session?.user?.id) return { ok: false, reason: "unauth" };
 
   const userId = session.user.id;
+
+  // Fixed-window cap (2/UTC day) — each call below runs full-table-
+  // per-user dump queries and sends a paid Resend email. Charged
+  // BEFORE the dump work, like the magic-link throttle. A throttled
+  // call is masked as success (same oracle-free style as the
+  // magic-link path): the response is indistinguishable from a sent
+  // export, the email simply doesn't arrive again today.
+  const allowed = await allowDataExportSend(userId);
+  if (!allowed) return { ok: true, emailed: true };
 
   const [me, userSubs, userComments, userVotes, userSaves, prefs] =
     await Promise.all([

@@ -152,3 +152,23 @@ export const magicLinkSends = pgTable(
   },
   (t) => [primaryKey({ columns: [t.key, t.bucketHour] })],
 );
+
+// Data-export send throttle buckets (migration 0044). One row per
+// (user, UTC day bucket); mirrors the magic_link_sends pattern.
+// Incremented atomically via INSERT … ON CONFLICT DO UPDATE in
+// src/lib/data-export-rate-limit.ts; rows older than 48h are pruned
+// opportunistically on each send.
+export const dataExportSends = pgTable(
+  "data_export_sends",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bucketDay: timestamp("bucket_day", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    count: integer("count").notNull().default(1),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.bucketDay] })],
+);

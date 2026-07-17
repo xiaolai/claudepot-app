@@ -8,6 +8,8 @@
 
 export {
   decisionInputSchema,
+  engagementMetadataSchema,
+  ENGAGEMENT_METADATA_MAX_CHARS,
   overrideInputSchema,
   scoutRunInputSchema,
   type DecisionInput,
