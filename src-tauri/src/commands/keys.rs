@@ -511,11 +511,16 @@ pub async fn key_oauth_usage_cached(
     cache: tauri::State<'_, UsageCache>,
 ) -> Result<Option<crate::dto::AccountUsageDto>, String> {
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
-    let keys = open_keys_store()?;
-    let token = keys
-        .find_oauth_token(id)
-        .map_err(|e| format!("{e}"))?
-        .ok_or_else(|| format!("oauth token {id} not found"))?;
+    // SQLite open/read off the IPC worker — same policy as
+    // `key_copy_inner` / `key_api_probe` in this file.
+    let token = tokio::task::spawn_blocking(move || {
+        let keys = open_keys_store()?;
+        keys.find_oauth_token(id)
+            .map_err(|e| format!("{e}"))?
+            .ok_or_else(|| format!("oauth token {id} not found"))
+    })
+    .await
+    .map_err(|e| format!("blocking task failed: {e}"))??;
     let snapshot = cache.peek_cached(token.account_uuid).await;
     Ok(snapshot
         .as_ref()

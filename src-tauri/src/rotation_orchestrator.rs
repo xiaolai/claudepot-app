@@ -54,6 +54,14 @@ use claudepot_core::rotation::breaker_gated_rules;
 #[derive(Default)]
 struct Inner {
     pending: HashMap<String, QueuedSwap>,
+    /// Swap ids currently inside `apply_confirmed`'s multi-second
+    /// swap window (token refresh + profile fetch + keychain
+    /// writes). `begin_apply` compare-and-sets an id in here so a
+    /// second concurrent apply of the same suggestion (toast press
+    /// racing a reload-hydrated toast press) is a no-op instead of
+    /// two interleaved `switch_force` runs. Cleared by
+    /// `finish_apply` on both outcomes.
+    in_flight: HashSet<String>,
     /// Per-rule deferral state for `skip_when_cc_running`. Keyed by
     /// rule_id; the value is the time we first observed CC running
     /// for this rule. Once set, subsequent ticks see the entry and
@@ -391,8 +399,14 @@ impl RotationOrchestrator {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        g.pending
-            .retain(|_, q| (now - q.queued_at).num_seconds() < PENDING_TTL_SECS);
+        let Inner {
+            pending, in_flight, ..
+        } = &mut *g;
+        pending.retain(|_, q| (now - q.queued_at).num_seconds() < PENDING_TTL_SECS);
+        // An in-flight marker whose pending entry is gone (TTL'd
+        // mid-apply, or the apply future was dropped) must not block
+        // a future suggestion forever.
+        in_flight.retain(|id| pending.contains_key(id));
     }
 
     /// Look up + remove a pending swap. Used by
@@ -409,29 +423,41 @@ impl RotationOrchestrator {
         g.pending.remove(swap_id)
     }
 
-    /// Like [`take_pending`] but only peeks — does not remove.
-    /// Used by `apply_pending` so a transient swap failure leaves
-    /// the entry available for retry.
-    pub fn peek_pending(&self, swap_id: &str) -> Option<QueuedSwap> {
-        self.evict_stale();
-        let g = match self.inner.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        };
-        g.pending.get(swap_id).cloned()
-    }
-
-    /// Remove a pending swap by id. Used after a confirmed swap
-    /// succeeds (peek-then-apply-then-remove) and as the
-    /// `dismiss-pending` command's effect. Evicting first keeps the
-    /// stash bounded.
-    pub fn remove_pending(&self, swap_id: &str) {
+    /// Claim a pending swap for application: returns the entry and
+    /// marks it in-flight, in one critical section. A second call
+    /// with the same id while the first apply is still running
+    /// returns `None` — the peek-then-apply shape this replaces let
+    /// two concurrent confirms both observe the entry and run
+    /// `switch_force` twice, interleaving keychain writes. The entry
+    /// itself is NOT removed, so a transient swap failure leaves it
+    /// available for retry once [`Self::finish_apply`] clears the
+    /// in-flight marker.
+    pub fn begin_apply(&self, swap_id: &str) -> Option<QueuedSwap> {
         self.evict_stale();
         let mut g = match self.inner.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        g.pending.remove(swap_id);
+        if g.in_flight.contains(swap_id) {
+            return None;
+        }
+        let queued = g.pending.get(swap_id).cloned()?;
+        g.in_flight.insert(swap_id.to_string());
+        Some(queued)
+    }
+
+    /// Release a [`Self::begin_apply`] claim. Success also removes
+    /// the pending entry (the suggestion is consumed); failure keeps
+    /// it so the user can retry.
+    fn finish_apply(&self, swap_id: &str, success: bool) {
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        g.in_flight.remove(swap_id);
+        if success {
+            g.pending.remove(swap_id);
+        }
     }
 
     /// Snapshot of currently queued confirm-mode swaps. Used by the
@@ -449,12 +475,15 @@ impl RotationOrchestrator {
     }
 
     /// Apply a swap by uuid pair, recording an audit entry. Used by
-    /// the apply-pending command after the user confirms.
+    /// the apply-pending command after the user confirms. `queued`
+    /// must come from [`Self::begin_apply`] — the in-flight claim is
+    /// what makes a concurrent second confirm a no-op.
     ///
     /// On success: removes the pending entry. On failure: leaves the
     /// pending entry in the stash so the user can retry — a
     /// transient error (token refresh hiccup, identity-gate flap)
-    /// shouldn't silently lose the suggestion.
+    /// shouldn't silently lose the suggestion. Both outcomes release
+    /// the in-flight claim.
     pub async fn apply_confirmed(&self, app: &AppHandle, queued: QueuedSwap) -> Result<(), String> {
         match perform_swap(queued.pending.from_uuid, queued.pending.to_uuid).await {
             Ok(()) => {
@@ -471,7 +500,7 @@ impl RotationOrchestrator {
                 // A successful swap clears any prior failure run.
                 self.record_breaker_outcome(&queued.pending.rule_id, true);
                 emit_applied(app, &queued.pending);
-                self.remove_pending(&queued.swap_id);
+                self.finish_apply(&queued.swap_id, true);
                 Ok(())
             }
             Err(e) => {
@@ -495,6 +524,7 @@ impl RotationOrchestrator {
                 }
                 // Do NOT remove the pending entry — let the user
                 // retry. The 30-min TTL still bounds blast radius.
+                self.finish_apply(&queued.swap_id, false);
                 Err(e)
             }
         }
@@ -680,3 +710,71 @@ fn window_kind_str(k: claudepot_core::services::usage_alerts::UsageWindowKind) -
 
 // The breaker-gate tests moved to
 // `claudepot_core::rotation::gating::tests` with the function.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudepot_core::rotation::RotationTriggerSummary;
+
+    fn orchestrator_with_pending(swap_id: &str) -> RotationOrchestrator {
+        let orch = RotationOrchestrator::new(Arc::new(RotationAuditLog::in_memory_only()));
+        let queued = QueuedSwap {
+            swap_id: swap_id.to_string(),
+            pending: PendingSwap {
+                rule_id: "r1".into(),
+                from_uuid: uuid::Uuid::nil(),
+                from_email: "a@example.com".into(),
+                to_uuid: uuid::Uuid::nil(),
+                to_email: "b@example.com".into(),
+                trigger: RotationTriggerSummary {
+                    window: None,
+                    utilization_pct: 90.0,
+                    threshold_pct: 80,
+                    is_extra_usage: false,
+                    cycle_resets_at: None,
+                    bg_workers: None,
+                },
+                mode: AuditMode::Confirm,
+                skip_when_cc_running: false,
+            },
+            queued_at: Utc::now(),
+        };
+        let mut g = orch.inner.lock().unwrap();
+        g.pending.insert(swap_id.to_string(), queued);
+        drop(g);
+        orch
+    }
+
+    #[test]
+    fn begin_apply_claims_once_until_finished() {
+        // The double-apply race this closes: two toast presses both
+        // peeked the same entry and both ran switch_force. The second
+        // claim must be refused while the first is in flight.
+        let orch = orchestrator_with_pending("s1");
+        assert!(orch.begin_apply("s1").is_some());
+        assert!(
+            orch.begin_apply("s1").is_none(),
+            "concurrent claim must be refused"
+        );
+
+        // Failure releases the claim but keeps the entry for retry.
+        orch.finish_apply("s1", false);
+        assert!(
+            orch.begin_apply("s1").is_some(),
+            "retry after failure must re-claim"
+        );
+
+        // Success consumes the entry entirely.
+        orch.finish_apply("s1", true);
+        assert!(
+            orch.begin_apply("s1").is_none(),
+            "applied entry must be gone"
+        );
+    }
+
+    #[test]
+    fn begin_apply_unknown_id_is_none() {
+        let orch = orchestrator_with_pending("s1");
+        assert!(orch.begin_apply("nope").is_none());
+    }
+}

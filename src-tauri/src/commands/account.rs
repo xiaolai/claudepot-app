@@ -506,22 +506,20 @@ pub async fn verify_all_accounts_start(
     ops: State<'_, RunningOps>,
     app: AppHandle,
 ) -> Result<String, String> {
-    // Defensive concurrency guard: bail out if any VerifyAll op is still
-    // running. Polling backstop guarantees the prior op_id is reachable
-    // until the 5s grace window expires.
-    if ops.list().iter().any(|op| {
-        matches!(op.kind, OpKind::VerifyAll) && op.status == crate::ops::OpStatus::Running
-    }) {
-        return Err("verify_all is already in progress".to_string());
-    }
-
+    // Concurrency guard: check-and-insert under ONE RunningOps guard
+    // (audit T9 — the earlier separate `list()` check let two rapid
+    // starts both pass before either inserted, doubling the /profile
+    // traffic). Polling backstop guarantees the prior op_id is
+    // reachable until the 5s grace window expires.
     let op_id = new_op_id();
-    ops.insert(new_running_op(
+    if !ops.insert_if_kind_not_running(new_running_op(
         &op_id,
         OpKind::VerifyAll,
         String::new(),
         String::new(),
-    ));
+    )) {
+        return Err("verify_all is already in progress".to_string());
+    }
 
     let ops_for_task = ops.inner().clone();
     spawn_op_thread(

@@ -99,14 +99,23 @@ fn user_changed_layer(current: Option<&PermissionMode>, granted: &PermissionMode
 /// grant was created, so the on-disk record is no longer managing
 /// anything. [`tick`] injects `resolve_default_mode`; tests inject a
 /// closure over a fixture map.
-#[cfg(test)]
-fn stale_grant_paths<F>(grants: &[Grant], local_value: F) -> Vec<String>
+///
+/// A resolver error (unreadable settings for that project) skips
+/// that ONE grant — never marked stale, never aborting the sweep.
+/// Anything stronger would fail-open: one malformed settings file
+/// would block the expired-grant revert loop for every other
+/// project. The unreadable project's own revert attempt fails
+/// downstream and advances its circuit breaker.
+fn stale_grant_paths<F, E>(grants: &[Grant], local_value: F) -> Vec<String>
 where
-    F: Fn(&str) -> Option<PermissionMode>,
+    F: Fn(&str) -> Result<Option<PermissionMode>, E>,
 {
     grants
         .iter()
-        .filter(|g| local_value(&g.project_path).as_ref() != Some(&g.granted_mode))
+        .filter(|g| match local_value(&g.project_path) {
+            Ok(current) => current.as_ref() != Some(&g.granted_mode),
+            Err(_) => false,
+        })
         .map(|g| g.project_path.clone())
         .collect()
 }
@@ -179,23 +188,17 @@ pub async fn tick(app: &AppHandle) {
     // otherwise linger on disk indefinitely. Drop them here so disk
     // state matches what `current_dto::filter_stale` already hides
     // from the UI.
-    let mut stale_paths = Vec::new();
-    for grant in &file.grants {
-        let state = match resolve_default_mode(std::path::Path::new(&grant.project_path)) {
-            Ok(state) => state,
-            Err(e) => {
+    let stale_paths = stale_grant_paths(&file.grants, |path| {
+        resolve_default_mode(std::path::Path::new(path))
+            .map(|state| state.local_project_value)
+            .inspect_err(|e| {
                 tracing::warn!(
-                    project_path = %grant.project_path,
+                    project_path = %path,
                     error = %e,
-                    "permission_orchestrator: settings unreadable; skipping tick"
+                    "permission_orchestrator: settings unreadable; skipping stale check for this grant"
                 );
-                return;
-            }
-        };
-        if state.local_project_value.as_ref() != Some(&grant.granted_mode) {
-            stale_paths.push(grant.project_path.clone());
-        }
-    }
+            })
+    });
     let mut changed = false;
     for path in &stale_paths {
         if file.remove(path).is_some() {
@@ -618,7 +621,9 @@ mod tests {
     #[test]
     fn test_stale_grant_paths_keeps_matching_grant() {
         let grants = vec![grant("/p/a", PermissionMode::BypassPermissions, None)];
-        let stale = stale_grant_paths(&grants, |_| Some(PermissionMode::BypassPermissions));
+        let stale = stale_grant_paths(&grants, |_| {
+            Ok::<_, String>(Some(PermissionMode::BypassPermissions))
+        });
         assert!(stale.is_empty());
     }
 
@@ -630,11 +635,11 @@ mod tests {
         ];
         // /p/a was hand-reverted to default; /p/b still matches.
         let stale = stale_grant_paths(&grants, |path| {
-            if path == "/p/a" {
+            Ok::<_, String>(if path == "/p/a" {
                 Some(PermissionMode::Default)
             } else {
                 Some(PermissionMode::BypassPermissions)
-            }
+            })
         });
         assert_eq!(stale, vec!["/p/a".to_string()]);
     }
@@ -642,8 +647,28 @@ mod tests {
     #[test]
     fn test_stale_grant_paths_flags_cleared_key() {
         let grants = vec![grant("/p/a", PermissionMode::BypassPermissions, None)];
-        let stale = stale_grant_paths(&grants, |_| None);
+        let stale = stale_grant_paths(&grants, |_| Ok::<_, String>(None));
         assert_eq!(stale, vec!["/p/a".to_string()]);
+    }
+
+    #[test]
+    fn unreadable_settings_skips_that_grant_not_the_sweep() {
+        // One project's unreadable settings must neither mark that
+        // grant stale nor abort evaluation of the others — the
+        // whole-tick abort was the fail-open that let a single
+        // malformed settings file block every project's auto-revert.
+        let grants = vec![
+            grant("/p/broken", PermissionMode::BypassPermissions, None),
+            grant("/p/edited", PermissionMode::BypassPermissions, None),
+        ];
+        let stale = stale_grant_paths(&grants, |path| {
+            if path == "/p/broken" {
+                Err("settings unreadable".to_string())
+            } else {
+                Ok(Some(PermissionMode::Default))
+            }
+        });
+        assert_eq!(stale, vec!["/p/edited".to_string()]);
     }
 
     // ── advance_breaker_on_failure — trip-exactly-once semantics ───

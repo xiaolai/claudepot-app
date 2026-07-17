@@ -41,7 +41,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 /// Active search cancel tokens, keyed by client-supplied search_id.
 #[derive(Default)]
@@ -204,17 +204,26 @@ pub async fn config_set_editor_default(
     if editor_id.trim().is_empty() {
         return Err("editor_id is empty".to_string());
     }
-    let mut g = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
-    match kind {
-        None => {
-            g.editor_defaults.fallback = editor_id;
+    // Mutate under the lock, drop the guard, persist on a blocking
+    // thread — same discipline as `preferences_set_activity`. Holding
+    // the std mutex across the disk write blocks every concurrent
+    // preferences reader for the write duration.
+    let snapshot = {
+        let mut g = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
+        match kind {
+            None => {
+                g.editor_defaults.fallback = editor_id;
+            }
+            Some(k) => {
+                let parsed = kind_from_str(&k).ok_or_else(|| format!("unknown kind: {k}"))?;
+                g.editor_defaults.by_kind.insert(parsed, editor_id);
+            }
         }
-        Some(k) => {
-            let parsed = kind_from_str(&k).ok_or_else(|| format!("unknown kind: {k}"))?;
-            g.editor_defaults.by_kind.insert(parsed, editor_id);
-        }
-    }
-    g.save()?;
+        g.clone()
+    };
+    tokio::task::spawn_blocking(move || snapshot.save())
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))??;
     Ok(())
 }
 
@@ -342,6 +351,14 @@ pub async fn config_search_start(
             .with_error(&e.to_string()),
         };
         let _ = app_for_task.emit(&format!("config-search-done::{search_id_for_task}"), &dto);
+        // Completion removes the registry entry (audit T5): only
+        // `config_search_cancel` removed tokens before, so every
+        // search that RAN TO COMPLETION leaked its CancelToken for
+        // the app lifetime. Reach the registry via the AppHandle —
+        // the `State` guard can't move into a 'static closure.
+        if let Ok(mut g) = app_for_task.state::<SearchRegistry>().0.lock() {
+            g.remove(&search_id_for_task);
+        }
     });
 
     Ok(())

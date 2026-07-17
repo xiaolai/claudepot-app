@@ -61,13 +61,51 @@ fn secret_empty_to_none(mut s: String) -> Option<String> {
     out
 }
 
+/// Scrub the secret fields of route-input DTOs. For error exits that
+/// return BEFORE `build_provider` consumes the DTOs — the file
+/// header's zeroize-on-every-exit contract covers those too (audit
+/// T7). Vertex carries no secret.
+fn zeroize_route_inputs(
+    gateway: &mut Option<GatewayInputDto>,
+    bedrock: &mut Option<BedrockInputDto>,
+    foundry: &mut Option<FoundryInputDto>,
+) {
+    if let Some(g) = gateway.as_mut() {
+        g.api_key.zeroize();
+    }
+    if let Some(b) = bedrock.as_mut() {
+        b.bearer_token.zeroize();
+    }
+    if let Some(f) = foundry.as_mut() {
+        f.api_key.zeroize();
+    }
+}
+
 fn build_provider(
     kind: ProviderKind,
-    gateway: Option<GatewayInputDto>,
-    bedrock: Option<BedrockInputDto>,
+    mut gateway: Option<GatewayInputDto>,
+    mut bedrock: Option<BedrockInputDto>,
     vertex: Option<VertexInputDto>,
-    foundry: Option<FoundryInputDto>,
+    mut foundry: Option<FoundryInputDto>,
 ) -> Result<RouteProvider, String> {
+    // Scrub the NON-selected provider inputs up front: they are never
+    // read, and the `config missing` error arms below would otherwise
+    // drop their secrets unscrubbed (audit T7).
+    if !matches!(kind, ProviderKind::Gateway) {
+        if let Some(g) = gateway.as_mut() {
+            g.api_key.zeroize();
+        }
+    }
+    if !matches!(kind, ProviderKind::Bedrock) {
+        if let Some(b) = bedrock.as_mut() {
+            b.bearer_token.zeroize();
+        }
+    }
+    if !matches!(kind, ProviderKind::Foundry) {
+        if let Some(f) = foundry.as_mut() {
+            f.api_key.zeroize();
+        }
+    }
     match kind {
         ProviderKind::Gateway => {
             let mut g = gateway.ok_or_else(|| String::from("gateway config missing"))?;
@@ -367,7 +405,13 @@ pub async fn routes_settings_set(settings: RouteSettingsDto) -> Result<RouteSett
 
 #[tauri::command]
 pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, String> {
-    let provider_kind = parse_provider(&route.provider_kind)?;
+    let provider_kind = match parse_provider(&route.provider_kind) {
+        Ok(k) => k,
+        Err(e) => {
+            zeroize_route_inputs(&mut route.gateway, &mut route.bedrock, &mut route.foundry);
+            return Err(e);
+        }
+    };
     let mut provider = build_provider(
         provider_kind,
         route.gateway.take(),
@@ -417,8 +461,15 @@ pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, St
 
 #[tauri::command]
 pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, String> {
-    let id = parse_route_id(&route.id)?;
-    let provider_kind = parse_provider(&route.provider_kind)?;
+    let (id, provider_kind) = match parse_route_id(&route.id)
+        .and_then(|id| Ok((id, parse_provider(&route.provider_kind)?)))
+    {
+        Ok(pair) => pair,
+        Err(e) => {
+            zeroize_route_inputs(&mut route.gateway, &mut route.bedrock, &mut route.foundry);
+            return Err(e);
+        }
+    };
 
     let mut provider = build_provider(
         provider_kind,

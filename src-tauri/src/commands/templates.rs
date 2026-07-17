@@ -21,8 +21,6 @@ use claudepot_core::agent::types::HostPlatform;
 use claudepot_core::agent::AgentStore;
 use claudepot_core::paths::claudepot_data_dir;
 use claudepot_core::routes::{Route, RouteProvider, RouteStore};
-use claudepot_core::templates::apply::{apply_selected, sidecar, ApplyReceipt, PendingChanges};
-use claudepot_core::templates::routing::{evaluate, RoutingRules, RoutingStore, Suggestion};
 use claudepot_core::templates::{
     self as tpl, Blueprint, PrivacyClass, TemplateInstance, TemplateRegistry,
 };
@@ -82,145 +80,14 @@ pub async fn templates_sample_report(id: String) -> Result<String, String> {
         .ok_or_else(|| format!("no sample report bundled for template id: {id}"))
 }
 
-/// Read a `pending-changes.json` side-car for a specific run.
-/// The path is scoped to the claudepot data dir (which honors
-/// `CLAUDEPOT_DATA_DIR`) like other report reads. Returns the
-/// parsed structure.
-#[tauri::command]
-pub async fn templates_pending_changes(path: String) -> Result<PendingChanges, String> {
-    use std::path::PathBuf;
-    let claudepot_root = claudepot_data_dir();
-    let target = PathBuf::from(&path);
-    let canonical_target = claudepot_core::path_utils::canonicalize_simplified(&target)
-        .map_err(|e| format!("cannot resolve {path}: {e}"))?;
-    let canonical_root = claudepot_core::path_utils::canonicalize_simplified(&claudepot_root)
-        .unwrap_or(claudepot_root.clone());
-    if !canonical_target.starts_with(&canonical_root) {
-        return Err(format!(
-            "pending-changes path is outside {}: {}",
-            canonical_root.display(),
-            canonical_target.display()
-        ));
-    }
-    sidecar::read(&canonical_target).map_err(|e| e.to_string())
-}
-
-/// Apply selected items from a `pending-changes.json` side-car.
-/// Re-validates every operation against the blueprint's apply
-/// configuration before execution; rejected items appear in
-/// the receipt as `Rejected` (and are never executed).
-#[tauri::command]
-pub async fn templates_apply_pending(
-    agent_id: String,
-    pending_path: String,
-    selected_ids: Vec<String>,
-) -> Result<ApplyReceipt, String> {
-    let pending = templates_pending_changes(pending_path).await?;
-
-    // Refuse to apply pending changes whose recorded
-    // `agent_id` doesn't match the caller's argument.
-    // Otherwise a sidecar from agent A could be paired with
-    // agent B's broader apply policy and execute under the
-    // wrong scope.
-    if pending.agent_id != agent_id {
-        return Err(format!(
-            "pending-changes file belongs to agent {} but apply was requested for {}",
-            pending.agent_id, agent_id
-        ));
-    }
-
-    // Resolve the blueprint via the agent's template_id.
-    let store = AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
-    let auto = store
-        .list()
-        .iter()
-        .find(|a| a.id.to_string() == agent_id)
-        .ok_or_else(|| format!("agent {agent_id} not found"))?
-        .clone();
-    let template_id = auto
-        .template_id
-        .clone()
-        .ok_or_else(|| format!("agent {agent_id} is not template-driven"))?;
-    let r = registry()?;
-    let bp = r
-        .get(&template_id)
-        .ok_or_else(|| format!("blueprint {template_id} not in registry"))?;
-    let apply = bp
-        .apply
-        .as_ref()
-        .ok_or_else(|| format!("blueprint {template_id} has no apply config"))?;
-
-    let receipt = apply_selected(&pending, apply, &selected_ids).await;
-    Ok(receipt)
-}
-
-// ---------- Routing rules ----------
-
-#[tauri::command]
-pub async fn routing_rules_get() -> Result<RoutingRules, String> {
-    let store = RoutingStore::open().map_err(|e| format!("routing rules open: {e}"))?;
-    Ok(store.rules().clone())
-}
-
-#[tauri::command]
-pub async fn routing_rules_set(rules: RoutingRules) -> Result<(), String> {
-    let mut store = RoutingStore::open().map_err(|e| format!("routing rules open: {e}"))?;
-    store.replace(rules);
-    store
-        .save()
-        .map_err(|e| format!("routing rules save: {e}"))?;
-    Ok(())
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RoutingSuggestionDto {
-    pub kind: String,
-    pub route_id: Option<String>,
-}
-
-#[tauri::command]
-pub async fn routing_rules_evaluate_for(
-    blueprint_id: String,
-) -> Result<RoutingSuggestionDto, String> {
-    let r = registry()?;
-    let bp = r
-        .get(&blueprint_id)
-        .ok_or_else(|| format!("unknown template id: {blueprint_id}"))?;
-    let store = RoutingStore::open().map_err(|e| format!("routing rules open: {e}"))?;
-    let route_store = RouteStore::open().map_err(|e| format!("routes store open: {e}"))?;
-    let routes: Vec<&Route> = route_store.list().iter().collect();
-    let privacy_str = match bp.privacy {
-        PrivacyClass::Local => "local",
-        PrivacyClass::PrivateCloud => "private_cloud",
-        PrivacyClass::Any => "any",
-    };
-    let category_str = format!("{:?}", bp.category).to_lowercase();
-    let cost_str = format!("{:?}", bp.cost_class).to_lowercase();
-
-    let suggestion = evaluate(
-        store.rules(),
-        privacy_str,
-        &category_str,
-        &cost_str,
-        &bp.id().0,
-        &routes,
-        &|r| is_local_route(r),
-        &|r| {
-            let caps = effective_capabilities(r);
-            caps.contains_all(&bp.capabilities_required)
-        },
-    );
-    Ok(match suggestion {
-        Suggestion::Route(id) => RoutingSuggestionDto {
-            kind: "route".into(),
-            route_id: Some(id),
-        },
-        Suggestion::DefaultClaude => RoutingSuggestionDto {
-            kind: "default_claude".into(),
-            route_id: None,
-        },
-    })
-}
+// The pending-changes sidecar and routing-rules command surface
+// (templates_pending_changes / templates_apply_pending /
+// routing_rules_get / routing_rules_set / routing_rules_evaluate_for)
+// was removed in the 2026-07 audit: no renderer call site ever
+// shipped, and an unreachable-but-registered IPC surface is unaudited
+// attack/maintenance surface. The domain layer it wrapped
+// (`claudepot_core::templates::{apply, routing}`) is untouched —
+// re-add commands from git history when the UI ships.
 
 /// Read a generated report file. Scoped to `~/.claudepot/` —
 /// any path outside that directory is rejected. Caps file size
