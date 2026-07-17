@@ -30,6 +30,14 @@
 pub mod apply;
 pub mod blueprint;
 pub mod capabilities;
+/// Consent store, SMTP delivery, and report rendering for the
+/// caregiver template bundle. Feature-gated: E2E-tested but not yet
+/// wired into the shipped agent runtime, so production builds (the
+/// CLI and the Tauri app) exclude it and the `lettre` SMTP stack.
+/// The crate's own test builds enable it via the self-dev-dependency
+/// in Cargo.toml — coverage stays on CI. Wire-or-delete is tracked
+/// in dev-docs/reports/2026-07-18-full-audit.md.
+#[cfg(feature = "caregiver")]
 pub mod caregiver;
 pub mod error;
 pub mod instantiate;
