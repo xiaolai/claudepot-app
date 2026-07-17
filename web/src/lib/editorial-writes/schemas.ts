@@ -69,6 +69,29 @@ export const overrideInputSchema = z.object({
 });
 export type OverrideInput = z.infer<typeof overrideInputSchema>;
 
+/* ── Engagement metadata ────────────────────────────────────── */
+
+/**
+ * Serialized-size cap for the free-form engagement `metadata` jsonb.
+ * The column is unconstrained on the DB side; without a cap a single
+ * engagement:write call could park megabytes per row. 4 KB covers
+ * every documented office kind with room to spare. Shared by the
+ * REST route (POST /api/v1/engagement) and the MCP twin
+ * (record_engagement) so the two surfaces can't drift.
+ */
+export const ENGAGEMENT_METADATA_MAX_CHARS = 4096;
+
+export const engagementMetadataSchema = z
+  .record(z.string(), z.unknown())
+  .superRefine((v, ctx) => {
+    if (JSON.stringify(v).length > ENGAGEMENT_METADATA_MAX_CHARS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `metadata must serialize to at most ${ENGAGEMENT_METADATA_MAX_CHARS} characters of JSON`,
+      });
+    }
+  });
+
 /* ── Scout-run input ────────────────────────────────────────── */
 
 export const scoutRunInputSchema = z

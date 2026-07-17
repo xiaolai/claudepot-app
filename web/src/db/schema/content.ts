@@ -236,6 +236,12 @@ export const comments = pgTable(
       .where(
         sql`${t.state} = 'approved' AND ${t.deletedAt} IS NULL AND ${t.isMeta} = false AND ${t.authorIsBot} = true`,
       ),
+    // Migration 0043 — pg_trgm GIN index backing the comment-search
+    // ILIKE '%…%' filter (lib/api/queries.ts). The extension itself
+    // (CREATE EXTENSION pg_trgm) is owned by the migration; the
+    // index is declared here so drizzle-kit push doesn't see a
+    // phantom index to drop.
+    index("idx_comments_body_trgm").using("gin", t.body.op("gin_trgm_ops")),
   ],
 );
 

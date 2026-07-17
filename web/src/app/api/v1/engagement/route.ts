@@ -37,6 +37,7 @@ import {
 } from "@/lib/api/response";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
+import { engagementMetadataSchema } from "@/lib/editorial-writes";
 import { recordEngagement } from "@/lib/engagement";
 
 const engagementInputSchema = z.object({
@@ -52,7 +53,8 @@ const engagementInputSchema = z.object({
       message:
         "Primitive kinds ('vote', 'comment', 'save') are recorded automatically by the polity — use a semantic kind here.",
     }),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  // Serialized size capped at 4 KB — see engagementMetadataSchema.
+  metadata: engagementMetadataSchema.optional(),
 });
 
 export async function OPTIONS(): Promise<Response> {

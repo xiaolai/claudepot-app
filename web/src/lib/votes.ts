@@ -74,12 +74,15 @@ export async function castVote(
       .delete(votes)
       .where(and(eq(votes.userId, userId), eq(votes.submissionId, submissionId)));
   } else {
+    // On a flip, only `value` changes — createdAt keeps the original
+    // vote time. Resetting it here would re-bucket the vote into the
+    // current day and corrupt the daily-rollup window counts.
     await db
       .insert(votes)
       .values({ userId, submissionId, value })
       .onConflictDoUpdate({
         target: [votes.userId, votes.submissionId],
-        set: { value, createdAt: new Date() },
+        set: { value },
       });
   }
 

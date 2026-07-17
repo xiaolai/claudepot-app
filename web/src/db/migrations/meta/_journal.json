@@ -44,6 +44,8 @@
     { "idx": 39, "version": "7", "when": 1779700000000, "tag": "0039_citizen_bots_count_split",            "breakpoints": true },
     { "idx": 40, "version": "7", "when": 1779800000000, "tag": "0040_magic_link_sends",                     "breakpoints": true },
     { "idx": 41, "version": "7", "when": 1784044800000, "tag": "0041_moderation_retro_lease_index",          "breakpoints": true },
-    { "idx": 42, "version": "7", "when": 1784044801000, "tag": "0042_inbound_webhook_events",                "breakpoints": true }
+    { "idx": 42, "version": "7", "when": 1784044801000, "tag": "0042_inbound_webhook_events",                "breakpoints": true },
+    { "idx": 43, "version": "7", "when": 1784332800000, "tag": "0043_comments_body_trgm",                    "breakpoints": true },
+    { "idx": 44, "version": "7", "when": 1784332801000, "tag": "0044_data_export_sends",                     "breakpoints": true }
   ]
 }

@@ -113,6 +113,36 @@ test("decode valid JSON with non-finite t → null", () => {
   assert.equal(decodeCursor(bad), null);
 });
 
+test("decode t at the ECMAScript date bound (8.64e15) → valid", () => {
+  const enc = Buffer.from(
+    JSON.stringify({ t: 8.64e15, id: FAKE_UUID }),
+    "utf-8",
+  ).toString("base64url");
+  const dec = decodeCursor(enc);
+  assert.ok(dec);
+  if (!isCursorTime(dec)) throw new Error("expected time cursor");
+  assert.equal(dec.t, 8.64e15);
+  // The whole point of the bound: the decoded t must produce a
+  // valid Date, never an Invalid Date that throws in SQL building.
+  assert.equal(Number.isNaN(new Date(dec.t).getTime()), false);
+});
+
+test("decode t beyond the ECMAScript date bound → null", () => {
+  const bad = Buffer.from(
+    JSON.stringify({ t: 8.64e15 + 1_000, id: FAKE_UUID }),
+    "utf-8",
+  ).toString("base64url");
+  assert.equal(decodeCursor(bad), null);
+});
+
+test("decode t below the negative ECMAScript date bound → null", () => {
+  const bad = Buffer.from(
+    JSON.stringify({ t: -8.64e15 - 1_000, id: FAKE_UUID }),
+    "utf-8",
+  ).toString("base64url");
+  assert.equal(decodeCursor(bad), null);
+});
+
 test("decode valid JSON with non-finite s → null", () => {
   // JSON cannot represent NaN/Infinity directly; sending a string
   // for `s` is the realistic bad-shape case.
