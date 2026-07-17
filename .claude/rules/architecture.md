@@ -102,6 +102,15 @@ stop — it belongs in `claudepot-core`.
    Linux/Windows (Secret Service / Credential Manager are per-user,
    not per-binary — the GitHub PAT slot uses `keyring` there,
    cfg-gated `not(target_os = "macos")`).
+4. 0600 SQLite column, no OS keychain at all — the shipped pattern
+   for local secret *inventories* the user pastes in and expects to
+   read back across binaries and platforms without prompts:
+   `keys.db` (`keys::store`) and `env-vault.db`
+   (`env_vault::store`). These are deliberate: cross-binary +
+   cross-platform + bulk rows make both `security`-subprocess and
+   `keyring` the wrong shape. A new secret inventory should follow
+   this pattern; a new single-credential slot should use surface
+   2 or 3 above.
 
 Any PR that uses `keyring` to touch `Claude Code-credentials` must
 be rejected. A new macOS secret slot that both the GUI and the CLI
@@ -154,6 +163,11 @@ Rules:
 
 These permissions are renderer-callable in principle, but the
 renderer is our own code — no third-party JS reaches them under our
-CSP. New surfaces that touch the clipboard must go through Rust;
-adding a `__TAURI_INVOKE__('plugin:clipboard-manager|…')` call from
-JS is a review finding.
+CSP.
+
+Carve-out: JS-side `navigator.clipboard.writeText` of NON-secret
+values (paths, emails, ids — e.g. `<CopyButton>`) from our own
+renderer is acceptable. Secrets must use the Rust-side `key_*_copy`
+pattern. The review findings remain: any
+`__TAURI_INVOKE__('plugin:clipboard-manager|…')` call from JS, and
+any secret touching the JS clipboard API.
