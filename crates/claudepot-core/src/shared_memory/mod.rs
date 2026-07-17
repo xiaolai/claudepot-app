@@ -34,7 +34,10 @@
 //! history that produced the current shape.
 
 pub mod claude_exchanges;
+pub mod compile;
+pub mod distill;
 pub mod durable;
+pub mod git;
 pub mod guard;
 pub mod indexer;
 pub mod invalidate;

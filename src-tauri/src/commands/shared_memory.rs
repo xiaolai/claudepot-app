@@ -1069,20 +1069,13 @@ pub async fn lesson_accept(
 }
 
 /// HEAD of the repo that owns the lesson `id`, or `None` if the lesson
-/// has no project_path or that project isn't a git repo.
+/// has no project_path or that project isn't a git repo. HEAD
+/// resolution itself is the shared `shared_memory::git::head_commit`
+/// — the same helper the CLI's `lesson accept` uses, so both accept
+/// paths anchor identically.
 fn lesson_project_head(idx: &SessionIndex, id: &str) -> Option<String> {
     let project: String = review::memory_project_path(idx, id).ok().flatten()?;
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&project)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let sha = String::from_utf8(out.stdout).ok()?.trim().to_string();
-    (!sha.is_empty()).then_some(sha)
+    claudepot_core::shared_memory::git::head_commit(std::path::Path::new(&project))
 }
 
 #[tauri::command]
