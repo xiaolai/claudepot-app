@@ -80,8 +80,11 @@ breadcrumb segment that's the only place the path appears.
 ## Implementation primitives
 
 - `<CopyButton text={fullPath} />` — paper-mono icon button, copies
-  to OS clipboard via Tauri, shows a brief success state. Use this
-  for state C and for the canonical copy site in state B.
+  via `navigator.clipboard` (fine for non-secret values from our own
+  renderer; secrets must use the Rust-side `key_*_copy` clipboard
+  commands — see rules/architecture.md), shows a brief success
+  state. Use this for state C and for the canonical copy site in
+  state B.
 - `title={fullPath}` — native tooltip, sufficient for state B.
 - `.mono.selectable` — span class that combines monospace font and
   `user-select: text`. Pair with `direction` flip if you need
