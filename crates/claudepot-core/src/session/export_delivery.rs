@@ -294,7 +294,14 @@ pub async fn github_token_keychain_read() -> Result<Option<String>, DeliverError
         .map_err(|e| DeliverError::Keychain(e.to_string()))?;
     match entry.get_password() {
         Ok(v) if !v.is_empty() => Ok(Some(v)),
-        _ => Ok(None),
+        // Present-but-empty is treated as absent — nothing usable stored.
+        Ok(_) => Ok(None),
+        // `NoEntry` is a clean miss. Everything else (locked store,
+        // platform failure, bad encoding, …) is a real error — same
+        // invariant as the macOS arm: never report a
+        // present-but-unreadable token as "absent".
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(DeliverError::Keychain(e.to_string())),
     }
 }
 

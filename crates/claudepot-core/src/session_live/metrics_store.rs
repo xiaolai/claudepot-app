@@ -72,6 +72,12 @@ impl MetricsStore {
 
     /// Open a store at the given path. Used by tests against tempdir.
     pub fn open(path: &Path) -> Result<Self, MetricsError> {
+        // Pre-create the DB file with user-only perms BEFORE rusqlite
+        // opens it — `Connection::open` creates files at the process
+        // umask (typically 0644), leaving a create→chmod window where
+        // another local user can open the file and keep the fd. Same
+        // M9 fix as `session_index::SessionIndex::open`.
+        crate::secure_perms::precreate_user_only(path);
         let conn = Connection::open(path)?;
         apply_standard_pragmas(&conn)?;
         // Live metrics are rebuildable from session JSONL — accepting
@@ -82,11 +88,10 @@ impl MetricsStore {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(md) = std::fs::metadata(path) {
-                let mut p = md.permissions();
-                p.set_mode(0o600);
-                let _ = std::fs::set_permissions(path, p);
-            }
+            let md = std::fs::metadata(path)?;
+            let mut p = md.permissions();
+            p.set_mode(0o600);
+            std::fs::set_permissions(path, p)?;
         }
         Ok(Self {
             conn: Mutex::new(conn),

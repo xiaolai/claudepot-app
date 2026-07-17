@@ -57,6 +57,23 @@ pub enum UpdateError {
     /// "binary missing".
     #[error("tool not found: {0}")]
     ToolMissing(String),
+
+    /// An install step failed AND moving the backup copy back into
+    /// place also failed — the app at the install path may be missing
+    /// or partial. `cause` is the original install failure; the
+    /// message names the backup so the user can restore it by hand.
+    #[error(
+        "{cause}; restoring the backup also failed ({restore_err}) — \
+         the previous app is preserved at {} and must be moved back \
+         manually",
+        .backup.display()
+    )]
+    RestoreFailed {
+        backup: std::path::PathBuf,
+        restore_err: std::io::Error,
+        #[source]
+        cause: Box<UpdateError>,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, UpdateError>;

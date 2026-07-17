@@ -136,7 +136,12 @@ impl std::fmt::Debug for DecryptedTokenCache {
             let short_key = match Self::parse_bundle_key(key) {
                 Some(b) => format!(
                     "{}…@{} [{}]",
-                    &b.user_uuid[..8.min(b.user_uuid.len())],
+                    // Panic-free shortening: `get` returns None when
+                    // byte 8 lands inside a multibyte char (or the
+                    // uuid is shorter); fall back to the full uuid —
+                    // it isn't a secret, only shortened for
+                    // readability, and a Debug impl must never panic.
+                    b.user_uuid.get(..8).unwrap_or(b.user_uuid),
                     b.org_uuid,
                     b.scopes
                 ),
@@ -171,7 +176,14 @@ fn redact(token: &str) -> String {
     if token.len() <= PREFIX + SUFFIX + 3 {
         return "***".to_string();
     }
-    format!("{}…{}", &token[..PREFIX], &token[token.len() - SUFFIX..])
+    // Byte-index slicing panics when a cut lands inside a multibyte
+    // char, and a malformed cache can carry arbitrary UTF-8 — a Debug
+    // impl must never panic. `get` returns None on a boundary miss;
+    // fall back to full masking.
+    match (token.get(..PREFIX), token.get(token.len() - SUFFIX..)) {
+        (Some(head), Some(tail)) => format!("{head}…{tail}"),
+        _ => "***".to_string(),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -256,6 +268,28 @@ mod tests {
     fn test_org_uuid_from_cache() {
         let t = DecryptedTokenCache::from_json(sample()).unwrap();
         assert_eq!(t.org_uuid(), Some("org-5678-efgh"));
+    }
+
+    #[test]
+    fn debug_never_panics_on_multibyte_input() {
+        // The 12-byte prefix cut lands inside '€' (3 bytes at 10..13)
+        // and the 3-byte suffix cut lands inside '🎉' (4 bytes at the
+        // end) — both were byte-index panics before the `get`-based
+        // slicing. Malformed input still redacts, never panics.
+        let out = redact("sk-ant-oat€SECRET-BODY-🎉");
+        assert!(!out.contains("SECRET"), "secret body must not leak: {out}");
+
+        // Same boundary hazard on the user_uuid shortening in the
+        // Debug impl: byte 8 lands inside the second 'é' of
+        // "uuid-ééé" (5 ASCII bytes + 2 bytes per 'é').
+        let json = "{\"uuid-ééé:org-1:https://api.anthropic.com:user:profile\": \
+                    {\"token\": \"sk-ant-oat01-ACCESS-EEEEEEEEEEEE\", \"expiresAt\": 1}}";
+        let t = DecryptedTokenCache::from_json(json.as_bytes()).unwrap();
+        let dbg = format!("{t:?}");
+        assert!(
+            !dbg.contains("ACCESS-EEEEEEEEEEEE"),
+            "full access token must not leak: {dbg}"
+        );
     }
 
     #[test]
