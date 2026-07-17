@@ -163,7 +163,9 @@ impl LiveRuntime {
         }
         Arc::new(Self {
             check,
-            sessions_dir: cfg.join("sessions"),
+            // Shared with the registry's default so the two can't
+            // drift to different directories.
+            sessions_dir: super::registry::default_sessions_dir(),
             projects_dir: cfg.join("projects"),
             aggregate: AggregateBus::new(),
             detail: DetailBus::new(),

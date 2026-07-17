@@ -381,13 +381,6 @@ pub fn detect_cached(force: bool) -> Vec<EditorCandidate> {
     fresh
 }
 
-#[cfg(test)]
-pub fn clear_cache_for_test() {
-    if let Ok(mut g) = CACHE.lock() {
-        *g = None;
-    }
-}
-
 // ---------- Launch ----------------------------------------------------
 
 #[derive(Debug, thiserror::Error)]

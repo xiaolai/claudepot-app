@@ -44,19 +44,6 @@ pub fn default_trash_root() -> PathBuf {
     crate::paths::claudepot_data_dir().join("trash")
 }
 
-/// One-shot list_disabled with the default scope roots
-/// (`~/.claude/` + an optional project anchor passed by the caller).
-pub fn list_disabled_for(
-    user_root: PathBuf,
-    project_root: Option<PathBuf>,
-) -> Result<Vec<DisabledRecord>> {
-    let mut roots = ActiveRoots::user(user_root);
-    if let Some(p) = project_root {
-        roots = roots.with_project(p);
-    }
-    list_disabled(&roots)
-}
-
 /// Convenience for tests + Tauri: classify, then disable.
 ///
 /// Idempotent: a path that's already under `<root>/.disabled/` is
@@ -72,35 +59,10 @@ pub fn disable_path(
     disable_at(&trackable, on_conflict, roots)
 }
 
-/// Convenience for tests + Tauri: classify, then enable.
-pub fn enable_path(
-    abs_path: &Path,
-    roots: &ActiveRoots,
-    on_conflict: OnConflict,
-) -> Result<DisabledRecord> {
-    let trackable = classify_path(abs_path, roots)?;
-    if !trackable.already_disabled {
-        return Ok(record_for_already_active(&trackable));
-    }
-    enable_at(&trackable, on_conflict, roots)
-}
-
 /// Convenience for tests + Tauri: classify, then trash.
 pub fn trash_path(abs_path: &Path, roots: &ActiveRoots, trash_root: &Path) -> Result<TrashEntry> {
     let trackable = classify_path(abs_path, roots)?;
     trash_at(&trackable, trash_root, roots)
-}
-
-fn record_for_already_active(t: &Trackable) -> DisabledRecord {
-    DisabledRecord {
-        scope: t.scope,
-        scope_root: t.scope_root.clone(),
-        kind: t.kind,
-        name: t.relative_path.clone(),
-        original_path: enabled_target_for(t),
-        current_path: enabled_target_for(t),
-        payload_kind: t.payload_kind,
-    }
 }
 
 #[cfg(test)]
@@ -137,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn end_to_end_disable_then_enable_via_path_api() {
+    fn end_to_end_disable_then_enable_via_classify() {
         let tmp = tempfile::tempdir().unwrap();
         let claude = tmp.path().join(".claude");
         let agent = claude.join("agents/foo.md");
@@ -148,7 +110,11 @@ mod tests {
         assert!(!agent.exists());
         assert!(disabled.current_path.exists());
 
-        let restored = enable_path(&disabled.current_path, &roots, OnConflict::Refuse).unwrap();
+        // Classify the disabled location, then enable through the
+        // triple-based API (the former `enable_path` wrapper is gone).
+        let trackable = classify_path(&disabled.current_path, &roots).unwrap();
+        assert!(trackable.already_disabled);
+        let restored = enable_at(&trackable, OnConflict::Refuse, &roots).unwrap();
         assert!(agent.exists());
         assert_eq!(restored.current_path, agent);
     }

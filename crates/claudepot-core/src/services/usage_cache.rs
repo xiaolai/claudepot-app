@@ -344,22 +344,6 @@ impl UsageCache {
         }
     }
 
-    /// Identity-gated variant of `fetch_usage`. Refuses to serve when
-    /// the stored slot's `verify_status` is drift/rejected, preventing
-    /// /usage from being called with a misfiled token (H4). The
-    /// authoritative reconciliation path is
-    /// `services::identity::verify_account_identity`; callers who see
-    /// this error should run it and retry.
-    pub async fn fetch_usage_verified(
-        &self,
-        store: &crate::account::AccountStore,
-        uuid: Uuid,
-        force: bool,
-    ) -> Result<Option<UsageResponse>, UsageFetchError> {
-        Self::identity_gate(store, uuid)?;
-        self.fetch_usage(uuid, force).await
-    }
-
     /// Fetch usage gracefully: never returns rate-limit errors.
     ///
     /// On cooldown or rate-limit: returns the last cached value (even if
@@ -375,23 +359,6 @@ impl UsageCache {
             }
             Err(_) => None,
         }
-    }
-
-    /// Batch-fetch for the GUI: never exposes rate-limit errors.
-    pub async fn fetch_batch_graceful(
-        &self,
-        uuids: &[Uuid],
-    ) -> HashMap<Uuid, Option<UsageResponse>> {
-        let mut out = HashMap::new();
-        let mut first = true;
-        for &uuid in uuids {
-            if !first {
-                tokio::time::sleep(BATCH_STAGGER).await;
-            }
-            first = false;
-            out.insert(uuid, self.fetch_usage_graceful(uuid).await);
-        }
-        out
     }
 
     /// Identity-gated batch detailed fetch. Every input uuid goes
@@ -457,22 +424,6 @@ impl UsageCache {
             Err(UsageFetchError::TokenExpired) => UsageOutcome::Expired,
             Err(UsageFetchError::FetchFailed(msg)) => UsageOutcome::Error(msg),
         }
-    }
-
-    /// Batch variant of `fetch_usage_detailed`. Every input uuid appears
-    /// in the output map — status is carried per entry so the UI can
-    /// render the exact reason each account is unavailable.
-    pub async fn fetch_batch_detailed(&self, uuids: &[Uuid]) -> HashMap<Uuid, UsageOutcome> {
-        let mut out = HashMap::new();
-        let mut first = true;
-        for &uuid in uuids {
-            if !first {
-                tokio::time::sleep(BATCH_STAGGER).await;
-            }
-            first = false;
-            out.insert(uuid, self.fetch_usage_detailed(uuid).await);
-        }
-        out
     }
 
     /// Peek cached age in seconds, or None if nothing cached.

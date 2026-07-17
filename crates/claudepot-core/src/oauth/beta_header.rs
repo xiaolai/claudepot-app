@@ -1,12 +1,15 @@
 /// The anthropic-beta header value required for OAuth endpoints.
 ///
-/// Hardcoded fallback. In production, this should be extracted from
-/// the installed `claude` binary (see reference.md §III.3).
-/// For now, use the known-good value verified on 2026-04-12.
+/// Pinned value, verified against the installed `claude` binary on
+/// 2026-04-12 (see reference.md §III.3 for where the binary carries
+/// it). Deliberately NOT extracted at runtime — the value has been
+/// stable across CC releases, and a parse of the minified binary is
+/// far more fragile than a pin. Maintenance rule: if OAuth calls
+/// start failing with header/beta errors, re-verify this value
+/// against the current `claude` binary and bump the date here.
 const DEFAULT_BETA_HEADER: &str = "oauth-2025-04-20";
 
-/// Get the beta header value. Currently returns the hardcoded default.
-/// TODO: implement extraction from the claude binary (Step 4).
+/// Get the beta header value (the pinned default above).
 pub fn get_or_default() -> &'static str {
     DEFAULT_BETA_HEADER
 }

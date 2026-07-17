@@ -277,9 +277,14 @@ pub(super) fn resolve_session_path(target: &str) -> Result<PathBuf> {
         }
         return Ok(p);
     }
-    // Treat as UUID — search the index.
+    // Treat as UUID — search the index. Warm path: refresh the
+    // persistent index and read rows from it rather than re-parsing
+    // every transcript.
     let cfg = paths::claude_config_dir();
-    let rows = claudepot_core::session::list_all_sessions(&cfg)?;
+    let db_path = paths::claudepot_data_dir().join("sessions.db");
+    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+        .context("open session index")?;
+    let rows = idx.list_all(&cfg).context("list sessions")?;
     resolve_session_path_from_rows(target, &rows)
 }
 

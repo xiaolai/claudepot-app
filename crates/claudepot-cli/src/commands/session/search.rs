@@ -7,8 +7,13 @@ use super::*;
 
 pub fn search_cmd(ctx: &AppContext, query: &str, limit: usize) -> Result<()> {
     let cfg = paths::claude_config_dir();
-    let rows =
-        claudepot_core::session::list_all_sessions(&cfg).context("list sessions for search")?;
+    // Warm path: refresh the persistent index and read rows from it —
+    // the fold cost is paid only on changed transcripts, unlike the
+    // full-reparse `session::list_all_sessions`.
+    let db_path = paths::claudepot_data_dir().join("sessions.db");
+    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+        .context("open session index")?;
+    let rows = idx.list_all(&cfg).context("list sessions for search")?;
     let hits = claudepot_core::session_search::search_rows(&rows, query, limit)
         .context("search sessions")?;
     if ctx.json {
@@ -38,7 +43,12 @@ pub fn search_cmd(ctx: &AppContext, query: &str, limit: usize) -> Result<()> {
 /// `claudepot session worktrees`
 pub fn worktrees_cmd(ctx: &AppContext) -> Result<()> {
     let cfg = paths::claude_config_dir();
-    let rows = claudepot_core::session::list_all_sessions(&cfg)
+    // Same warm path as `search_cmd` above.
+    let db_path = paths::claudepot_data_dir().join("sessions.db");
+    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+        .context("open session index")?;
+    let rows = idx
+        .list_all(&cfg)
         .context("list sessions for worktree grouping")?;
     let groups = claudepot_core::session_worktree::group_by_repo(rows);
     if ctx.json {

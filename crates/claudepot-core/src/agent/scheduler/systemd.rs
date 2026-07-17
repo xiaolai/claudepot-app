@@ -346,7 +346,12 @@ fn on_calendar_for(slot: &LaunchSlot) -> String {
     }
 }
 
-fn sanitize_one_line(s: &str) -> String {
+/// Replace newlines (\n, \r) with spaces — the one-line invariant for
+/// systemd unit-file values. Named for its contract —
+/// `crash_reports::collapse_control_chars` is a different, wider rule
+/// (every control char); don't copy-paste one where the other is
+/// meant.
+fn collapse_newlines(s: &str) -> String {
     s.replace(['\n', '\r'], " ")
 }
 
@@ -357,7 +362,7 @@ fn sanitize_one_line(s: &str) -> String {
 /// `systemd.unit(5)` under "SPECIFIERS"; we don't use any specifiers
 /// in our generated units, so escaping all `%` is the safe default.
 fn unit_value_escape(s: &str) -> String {
-    let single = sanitize_one_line(s);
+    let single = collapse_newlines(s);
     single.replace('%', "%%")
 }
 

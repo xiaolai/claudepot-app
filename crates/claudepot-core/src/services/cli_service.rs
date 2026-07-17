@@ -16,28 +16,8 @@ pub async fn clear_credentials(
     store: &AccountStore,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(), ClearError> {
-    clear_credentials_inner(store, fetcher, false).await
-}
-
-/// Clear CC credentials, overriding the safety refusal that fires when
-/// the active-CLI pointer doesn't match a known account but CC still
-/// holds a live blob, OR when the live blob's identity disagrees with
-/// the active-CLI account. The caller takes responsibility for the
-/// loss of that blob.
-pub async fn clear_credentials_force(
-    store: &AccountStore,
-    fetcher: &dyn ProfileFetcher,
-) -> Result<(), ClearError> {
-    clear_credentials_inner(store, fetcher, true).await
-}
-
-async fn clear_credentials_inner(
-    store: &AccountStore,
-    fetcher: &dyn ProfileFetcher,
-    force: bool,
-) -> Result<(), ClearError> {
     let platform = cli_backend::create_platform();
-    clear_credentials_with_platform_inner(store, platform.as_ref(), fetcher, force).await?;
+    clear_credentials_with_platform(store, platform.as_ref(), fetcher).await?;
 
     // Also clear CC's keychain entry on macOS
     #[cfg(target_os = "macos")]
@@ -55,24 +35,6 @@ pub async fn clear_credentials_with_platform(
     store: &AccountStore,
     platform: &dyn cli_backend::CliPlatform,
     fetcher: &dyn ProfileFetcher,
-) -> Result<(), ClearError> {
-    clear_credentials_with_platform_inner(store, platform, fetcher, false).await
-}
-
-/// Force-clear variant for the testable path.
-pub async fn clear_credentials_with_platform_force(
-    store: &AccountStore,
-    platform: &dyn cli_backend::CliPlatform,
-    fetcher: &dyn ProfileFetcher,
-) -> Result<(), ClearError> {
-    clear_credentials_with_platform_inner(store, platform, fetcher, true).await
-}
-
-async fn clear_credentials_with_platform_inner(
-    store: &AccountStore,
-    platform: &dyn cli_backend::CliPlatform,
-    fetcher: &dyn ProfileFetcher,
-    force: bool,
 ) -> Result<(), ClearError> {
     // Read CC's live credential blob FIRST. The active-CLI pointer in
     // our store can drift (stale, never set, manually edited). Treating
@@ -118,34 +80,22 @@ async fn clear_credentials_with_platform_inner(
                             .await
                             .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
                     }
-                    Err(e) if force => {
-                        tracing::warn!(
-                            "clear_credentials force: live blob fails identity check ({e}); \
-                             dropping it rather than misfiling"
-                        );
-                    }
                     Err(e) => {
                         return Err(ClearError::IdentityMismatch(e.to_string()));
                     }
                 }
             }
-            None if force => {
-                // Caller explicitly accepted blob loss. Proceed.
-                tracing::warn!(
-                    "clear_credentials force: dropping live CC blob with no active-CLI pointer"
-                );
-            }
             None => {
                 // Live CC blob with no claim to it. Refuse the
                 // destructive clear. Without a uuid we can't address
                 // a private slot to back up to; without a backup the
-                // clear is irreversible. Force flag is required.
+                // clear is irreversible.
                 //
                 // Best-effort identification (read the blob, parse
                 // email) is intentionally NOT done here — even if we
                 // can name the account, it isn't registered with us
                 // and we have no slot to write to. The right path is
-                // for the caller to register first or pass force.
+                // for the caller to register the account first.
                 let _ = blob_str;
                 return Err(ClearError::UnknownLiveBlob);
             }
@@ -177,14 +127,11 @@ pub enum ClearError {
     /// CC holds live credentials but Claudepot has no active-CLI
     /// pointer to attribute them to. Refusing the destructive clear
     /// because we can't safely back the blob up.
-    #[error(
-        "CC holds credentials with no Claudepot account claim — register the account or pass force"
-    )]
+    #[error("CC holds credentials with no Claudepot account claim — register the account first")]
     UnknownLiveBlob,
     /// CC's live credential blob disagrees with the active-CLI
     /// account's stored email. Refusing to save it under that uuid
-    /// because doing so would corrupt the private slot. Pass force
-    /// to drop the live blob without saving.
+    /// because doing so would corrupt the private slot.
     #[error("CC blob does not belong to the active account: {0}")]
     IdentityMismatch(String),
 }
@@ -366,22 +313,6 @@ mod tests {
             platform.storage.lock().unwrap().as_deref(),
             Some("stranger-cc-blob")
         );
-        assert!(store.active_cli_uuid().unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn test_clear_credentials_force_drops_unknown_blob() {
-        let _lock = lock_data_dir();
-        let _env = setup_test_data_dir();
-        let (store, _db) = test_store();
-
-        // Force variant accepts the loss when no active pointer exists.
-        let platform = MockPlatform::new(Some("stranger-cc-blob"));
-        let fetcher = ConstFetcher("stranger@example.com");
-        clear_credentials_with_platform_force(&store, &platform, &fetcher)
-            .await
-            .unwrap();
-
         assert!(store.active_cli_uuid().unwrap().is_none());
     }
 

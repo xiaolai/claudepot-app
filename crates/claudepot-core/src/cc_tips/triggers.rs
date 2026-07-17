@@ -405,11 +405,6 @@ pub fn known_id_count() -> usize {
     TRIGGERS.len()
 }
 
-/// Iterate every known id (for "is this id known?" checks).
-pub fn known_ids() -> impl Iterator<Item = &'static str> {
-    TRIGGERS.iter().map(|(k, _)| *k)
-}
-
 /// Default shortcut bindings used when the user hasn't customized
 /// their keybindings. Used to render `${Mf("chat:cycleMode","Chat",
 /// "shift+tab")}` as `Shift+Tab`.

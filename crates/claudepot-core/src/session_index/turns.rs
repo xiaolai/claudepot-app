@@ -157,6 +157,11 @@ pub fn fetch_turn_candidates(
 /// Load every persisted turn for one file, ordered by `turn_index`.
 /// Empty result is normal — sessions on disk before this table
 /// existed have no turns until their next re-scan.
+///
+/// Test-only since the public `turns_for` wrapper was deleted as
+/// speculative surface — the per-turn write path is exercised through
+/// this reader in `session_index`'s tests.
+#[cfg(test)]
 pub fn load_turns(db: &Connection, file_path: &str) -> Result<Vec<TurnRecord>, SessionIndexError> {
     let mut stmt = db.prepare(SQL_SELECT_TURNS_BY_FILE)?;
     let rows = stmt.query_map(params![file_path], |r| {
@@ -245,6 +250,8 @@ INSERT INTO session_turns (
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
 "#;
 
+// Test-only, paired with `load_turns` above.
+#[cfg(test)]
 const SQL_SELECT_TURNS_BY_FILE: &str = r#"
 SELECT
     turn_index, ts_ms, model,

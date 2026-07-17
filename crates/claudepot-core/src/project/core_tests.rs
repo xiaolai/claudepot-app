@@ -260,12 +260,14 @@ fn test_format_radix_base36() {
 
 #[test]
 fn test_format_size() {
+    // Deliberate label change (audit Q1): the math was always
+    // 1024-based, so the labels are the binary units KiB/MiB/GiB.
     assert_eq!(format_size(0), "0 B");
     assert_eq!(format_size(512), "512 B");
-    assert_eq!(format_size(1024), "1.0 KB");
-    assert_eq!(format_size(1536), "1.5 KB");
-    assert_eq!(format_size(1048576), "1.0 MB");
-    assert_eq!(format_size(1073741824), "1.0 GB");
+    assert_eq!(format_size(1024), "1.0 KiB");
+    assert_eq!(format_size(1536), "1.5 KiB");
+    assert_eq!(format_size(1048576), "1.0 MiB");
+    assert_eq!(format_size(1073741824), "1.0 GiB");
 }
 
 #[test]

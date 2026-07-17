@@ -17,7 +17,6 @@ use crate::AppContext;
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use claudepot_core::pricing;
-use claudepot_core::session::list_all_sessions;
 use claudepot_core::usage_local::{
     aggregate_from_rows, LocalUsageReport, ProjectUsageRow, TimeWindow,
 };
@@ -49,8 +48,15 @@ pub async fn report(ctx: &AppContext, window: &str) -> Result<()> {
     let tw = parse_window(window, now_ms)?;
 
     let config_dir = claudepot_core::paths::claude_config_dir();
-    let sessions =
-        list_all_sessions(&config_dir).with_context(|| "failed to read CC session index")?;
+    // Warm path: refresh the persistent index and read rows from it —
+    // the fold cost is paid only on changed transcripts, unlike the
+    // full-reparse `session::list_all_sessions`.
+    let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+        .context("open session index")?;
+    let sessions = idx
+        .list_all(&config_dir)
+        .with_context(|| "failed to read CC session index")?;
 
     // Pricing comes from the bundled defaults. The cache-and-refresh
     // service exists for the GUI; CLI is one-shot, so paying the

@@ -78,7 +78,14 @@ async fn drain_stderr_tail(tail: &StderrTail) -> Option<String> {
     if buf.is_empty() {
         return None;
     }
-    Some(buf.iter().cloned().collect::<Vec<_>>().join("\n"))
+    // Fold without the intermediate cloned Vec — join over &str works
+    // straight off the deque iterator.
+    Some(
+        buf.iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 /// Cancellable variant: pass a shared `Notify`; when another task calls

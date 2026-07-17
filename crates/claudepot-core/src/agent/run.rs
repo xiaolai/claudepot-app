@@ -727,32 +727,6 @@ fn synthesize_run(
     }
 }
 
-/// Find the most recent `runs/<run-id>/` directory by name.
-/// Skips dotfiles (`.latest` symlink and pointer files).
-#[allow(dead_code)]
-fn find_latest_run_dir(runs_dir: &Path) -> Option<PathBuf> {
-    if !runs_dir.exists() {
-        return None;
-    }
-    let mut best: Option<PathBuf> = None;
-    let mut best_name = String::new();
-    for entry in std::fs::read_dir(runs_dir).ok()?.flatten() {
-        let path = entry.path();
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let name = match entry.file_name().to_str() {
-            Some(n) if !n.starts_with('.') => n.to_string(),
-            _ => continue,
-        };
-        if name > best_name {
-            best_name = name;
-            best = Some(path);
-        }
-    }
-    best
-}
-
 /// Convenience: list all run-id directory names for an agent,
 /// sorted descending (newest first).
 pub fn list_run_ids(id: &AgentId) -> Result<Vec<String>, AgentError> {

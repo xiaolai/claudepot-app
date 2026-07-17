@@ -17,22 +17,10 @@ pub fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
 }
 
 /// Human-readable byte size, 1024-based with the matching binary
-/// unit labels (KiB/MiB/GiB).
-pub fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.1} GiB", b / GB)
-    } else if b >= MB {
-        format!("{:.1} MiB", b / MB)
-    } else if b >= KB {
-        format!("{:.1} KiB", b / KB)
-    } else {
-        format!("{bytes} B")
-    }
-}
+/// unit labels (KiB/MiB/GiB). Re-exported from core so the CLI and
+/// core's dry-run formatter can't drift (the CLI used to carry its
+/// own copy).
+pub use claudepot_core::project::core::format_size;
 
 /// Render an epoch-milliseconds timestamp as a `YYYY-MM-DD` date,
 /// `—` when out of range.

@@ -115,11 +115,6 @@ impl VerifiedIdentity {
     pub fn org_uuid(&self) -> &str {
         &self.0.org_uuid
     }
-    /// Unwrap — intentionally consumes. Rarely needed; most callers
-    /// should use the accessors above.
-    pub fn into_identity(self) -> LiveDesktopIdentity {
-        self.0
-    }
 
     /// In-crate-only constructor used by `desktop_service` tests to
     /// exercise mutators without running the full decrypt + /profile

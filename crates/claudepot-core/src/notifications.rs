@@ -137,8 +137,9 @@ pub struct SurfaceSet {
 
 impl SurfaceSet {
     /// Convert this set to a [`Vec`] of requested [`Surface`] variants.
-    /// Stable order: Toast, OsBanner, Banner. Used to populate
-    /// `NotificationEntry::surfaces_requested`.
+    /// Stable order: Toast, OsBanner, Banner. Test-only assertion
+    /// surface — no production consumer, so it's cfg(test)-gated.
+    #[cfg(test)]
     pub fn requested_surfaces(self) -> Vec<Surface> {
         let mut v = Vec::with_capacity(3);
         if self.toast {

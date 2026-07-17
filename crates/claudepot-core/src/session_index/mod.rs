@@ -385,20 +385,6 @@ impl SessionIndex {
         })
     }
 
-    /// Read every persisted per-turn row for one transcript file,
-    /// ordered by `turn_index`. This is the consumer surface for
-    /// per-turn dashboards (top-N costliest prompts, per-turn
-    /// pacing). Empty for transcripts that haven't been re-scanned
-    /// since this table was added — consumers should treat absence
-    /// the same as "no data yet" rather than "no turns ever ran."
-    ///
-    /// Does not refresh the cache; pair with `list_all` (or accept
-    /// stale data) at call sites that want fresh numbers.
-    pub fn turns_for(&self, file_path: &str) -> Result<Vec<TurnRecord>, SessionIndexError> {
-        let db = self.db();
-        turns::load_turns(&db, file_path)
-    }
-
     /// Coarse top-K-by-token-sum across the install. Used by the
     /// `usage_local::top_costly_turns` consumer to seed a model-aware
     /// re-rank in Rust. Open-ended bounds on either end of `window`
@@ -972,6 +958,14 @@ mod tests {
         (idx, tmp)
     }
 
+    /// Read seam for the per-turn tests. The public `turns_for`
+    /// wrapper was deleted as speculative surface (no production
+    /// consumer); tests read straight through the inner loader.
+    fn turns_for(idx: &SessionIndex, file_path: &str) -> Vec<TurnRecord> {
+        let db = idx.db();
+        turns::load_turns(&db, file_path).unwrap()
+    }
+
     #[test]
     fn open_creates_file_and_tables() {
         let tmp = TempDir::new().unwrap();
@@ -1070,7 +1064,7 @@ mod tests {
         let path = write_session(cfg.path(), "-p", "S1", &lines);
         idx.refresh(cfg.path()).unwrap();
 
-        let turns = idx.turns_for(&path.to_string_lossy()).unwrap();
+        let turns = turns_for(&idx, &path.to_string_lossy());
         assert_eq!(turns.len(), 2);
         // First assistant turn — Opus, prompt = "first ask".
         assert_eq!(turns[0].turn_index, 0);
@@ -1108,7 +1102,7 @@ mod tests {
         let cfg = TempDir::new().unwrap();
         let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
         idx.refresh(cfg.path()).unwrap();
-        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 1);
+        assert_eq!(turns_for(&idx, &path.to_string_lossy()).len(), 1);
 
         // Rewrite with two assistant turns this time, then bump mtime
         // forward so the (size, mtime, inode) guard fires a re-scan.
@@ -1128,7 +1122,7 @@ mod tests {
         let _ = filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(new_mtime));
 
         idx.refresh(cfg.path()).unwrap();
-        let turns = idx.turns_for(&path.to_string_lossy()).unwrap();
+        let turns = turns_for(&idx, &path.to_string_lossy());
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].turn_index, 0);
         assert_eq!(turns[1].turn_index, 1);
@@ -1152,7 +1146,7 @@ mod tests {
         let path = write_session(cfg.path(), "-p", "S1", &lines);
         idx.refresh(cfg.path()).unwrap();
 
-        let turns = idx.turns_for(&path.to_string_lossy()).unwrap();
+        let turns = turns_for(&idx, &path.to_string_lossy());
         assert_eq!(turns.len(), 2);
         let preview = turns[1].user_prompt_preview.as_deref().unwrap();
         assert!(
@@ -1171,11 +1165,11 @@ mod tests {
         let cfg = TempDir::new().unwrap();
         let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
         idx.refresh(cfg.path()).unwrap();
-        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 1);
+        assert_eq!(turns_for(&idx, &path.to_string_lossy()).len(), 1);
 
         std::fs::remove_file(&path).unwrap();
         idx.refresh(cfg.path()).unwrap();
-        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 0);
+        assert_eq!(turns_for(&idx, &path.to_string_lossy()).len(), 0);
     }
 
     // -----------------------------------------------------------------
@@ -2012,7 +2006,7 @@ mod tests {
         let cfg = TempDir::new().unwrap();
         let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
         idx.refresh(cfg.path()).unwrap();
-        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 1);
+        assert_eq!(turns_for(&idx, &path.to_string_lossy()).len(), 1);
 
         // File vanishes, then the user hits Rebuild without an
         // intervening refresh.

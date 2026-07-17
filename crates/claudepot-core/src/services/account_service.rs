@@ -457,85 +457,6 @@ pub async fn login_and_reimport(
     login_and_reimport_with_progress(store, account_id, cancel, &NoopLoginSink).await
 }
 
-/// Re-import credentials into an EXISTING account's slot from the blob
-/// CC is currently holding. One-click recovery when Claudepot's stored
-/// blob is missing/corrupt but the user has logged back into CC as the
-/// matching account.
-///
-/// Verifies identity first: fetches the profile for CC's current token and
-/// refuses the re-import if the email doesn't match the stored account's
-/// email. That prevents re-creating the mis-filed-blob corruption the
-/// identity-verified swap was designed to catch.
-pub async fn reimport_from_current(
-    store: &AccountStore,
-    account_id: Uuid,
-) -> Result<(), RegisterError> {
-    let platform = cli_backend::create_platform();
-    reimport_from_current_with(store, account_id, platform.as_ref(), &DefaultProfileFetcher).await
-}
-
-/// Testable variant: accepts injectable platform and profile fetcher.
-pub(crate) async fn reimport_from_current_with(
-    store: &AccountStore,
-    account_id: Uuid,
-    platform: &dyn cli_backend::CliPlatform,
-    fetch_profile: &dyn ProfileFetcher,
-) -> Result<(), RegisterError> {
-    let account = store
-        .find_by_uuid(account_id)
-        .map_err(|e| RegisterError::Store(e.to_string()))?
-        .ok_or(RegisterError::NotFound)?;
-
-    let blob_str = platform
-        .read_default()
-        .await
-        .map_err(|e| RegisterError::CredentialRead(e.to_string()))?
-        .ok_or(RegisterError::NoCredentials)?;
-
-    let blob = CredentialBlob::from_json(&blob_str)
-        .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
-
-    let prof = fetch_profile
-        .fetch(&blob.claude_ai_oauth.access_token)
-        .await
-        .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?;
-
-    if !prof.email.eq_ignore_ascii_case(&account.email) {
-        return Err(RegisterError::ProfileFetch(format!(
-            "CC is currently signed in as {}, not {}. Log into CC as {} first.",
-            prof.email, account.email, account.email
-        )));
-    }
-
-    swap::save_private(account_id, &blob_str)
-        .await
-        .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
-
-    // Sync the flag — storage is now populated.
-    let _ = store.update_credentials_flag(account_id, true);
-
-    // Profile fetch just confirmed label == blob identity. Persist that
-    // so the DB row reflects reality; otherwise a prior Drift/Rejected/
-    // NetworkError state would linger until the next verify pass even
-    // though re-login has already fixed things.
-    let _ = store.update_verification(
-        account_id,
-        &crate::account::VerifyOutcome::Ok {
-            email: prof.email.clone(),
-        },
-    );
-
-    // Align Claudepot's active_cli with CC's reality: CC is now holding
-    // this account's blob (that's the premise of re-import), so this
-    // account IS the active CLI. Without this sync a subsequent swap
-    // would see drift on the outgoing-blob check.
-    if let Err(e) = store.set_active_cli(account_id) {
-        tracing::warn!("post-reimport failed to sync active_cli to {account_id}: {e}");
-    }
-
-    Ok(())
-}
-
 /// Remove an account and all its associated data.
 /// Collects non-fatal warnings instead of silently swallowing errors.
 pub async fn remove_account(
@@ -885,8 +806,8 @@ async fn finish_login_after_subprocess(
     expected_email: &str,
     progress: &dyn LoginProgressSink,
 ) -> Result<(), RegisterError> {
-    // After success, CC holds fresh credentials. Mirror the post-spawn
-    // pipeline of `reimport_from_current_with` but emit per-step progress
+    // After success, CC holds fresh credentials: read blob → fetch
+    // profile → verify identity → persist, emitting per-step progress
     // so the GUI can show progress through the (fast) tail.
     let platform = cli_backend::create_platform();
     let fetch_profile = DefaultProfileFetcher;

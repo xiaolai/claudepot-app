@@ -224,10 +224,12 @@ impl RotationRule {
         Ok(())
     }
 
-    /// The threshold percent this rule fires at, used by the evaluator
-    /// to ask "is this candidate also above the threshold?" Returns
-    /// `None` for trigger shapes that don't carry a percent (currently
-    /// none — kept as `Option` so future trigger kinds can opt out).
+    /// The threshold percent this rule fires at. Returns `None` for
+    /// trigger shapes that don't carry a percent (currently none —
+    /// kept as `Option` so future trigger kinds can opt out).
+    /// Test-only assertion surface — no production consumer, so it's
+    /// cfg(test)-gated.
+    #[cfg(test)]
     pub fn trigger_threshold_pct(&self) -> Option<u32> {
         match &self.trigger {
             Trigger::UtilizationThreshold { pct, .. } => Some(*pct),

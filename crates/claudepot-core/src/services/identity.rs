@@ -174,33 +174,6 @@ pub async fn verify_account_identity_with(
     Ok(outcome)
 }
 
-/// Convenience wrapper for callers that need both an outcome AND the
-/// usable access_token (e.g. `usage_cache` immediately calls /usage with
-/// it). Returns the access_token from the slot only when verification
-/// succeeded — on Drift / Rejected / NetworkError the caller gets `None`,
-/// preventing them from making an API call with a token whose identity
-/// just failed to confirm.
-pub async fn verify_and_get_access_token(
-    store: &AccountStore,
-    uuid: Uuid,
-    fetcher: &dyn ProfileFetcher,
-) -> Result<(VerifyOutcome, Option<String>), VerifyError> {
-    let outcome = verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await?;
-    let token = if matches!(outcome, VerifyOutcome::Ok { .. }) {
-        // Re-read the slot — it may have been rotated by a refresh inside
-        // `verify_account_identity`.
-        match swap::load_private(uuid).await {
-            Ok(s) => CredentialBlob::from_json(&s)
-                .ok()
-                .map(|b| b.claude_ai_oauth.access_token),
-            Err(_) => None,
-        }
-    } else {
-        None
-    };
-    Ok((outcome, token))
-}
-
 fn classify(stored: &str, actual: String) -> VerifyOutcome {
     if actual.eq_ignore_ascii_case(stored) {
         VerifyOutcome::Ok { email: actual }

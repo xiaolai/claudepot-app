@@ -481,24 +481,6 @@ fn build_cli_flags_windows(a: &Agent, inputs: &ShimInputs<'_>) -> Vec<String> {
     v
 }
 
-/// CMD value escape. We use double-quoted `set "K=V"` form, so
-/// inside the quotes we must escape `%` as `%%` (delayed expansion
-/// is on, but the assignment happens before expansion) and refuse
-/// the few characters cmd will not let through.
-#[allow(dead_code)]
-fn cmd_escape_value(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '%' => out.push_str("%%"),
-            '"' => out.push_str("\"\""),
-            '\r' | '\n' => {} // reject silently — env validator already rejected
-            other => out.push(other),
-        }
-    }
-    out
-}
-
 fn base64_encode(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s.as_bytes())
 }
