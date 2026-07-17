@@ -13,7 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 globset.workspace = true
-lettre.workspace = true
+lettre = { workspace = true, optional = true }
 chrono.workspace = true
 sha2.workspace = true
 hex.workspace = true
@@ -67,3 +67,16 @@ system-configuration.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 aes-gcm.workspace = true
 windows-sys.workspace = true
+
+[features]
+# The caregiver templates bundle (templates::caregiver — consent
+# store, SMTP delivery, report rendering) is built and E2E-tested but
+# not yet wired into the shipped agent runtime, so production builds
+# (claudepot-cli, claudepot-tauri) exclude it and the lettre SMTP
+# stack it pulls in. The self-dev-dependency below turns it on for
+# this crate's own test builds, so `cargo test --workspace` keeps
+# compiling and running the caregiver unit + E2E suites on CI.
+caregiver = ["dep:lettre"]
+
+[dev-dependencies]
+claudepot-core = { path = ".", features = ["caregiver"] }
