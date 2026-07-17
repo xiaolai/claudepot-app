@@ -10,6 +10,7 @@ import { Glyph } from "./Glyph";
 import { NF } from "../../icons";
 import { Button } from "./Button";
 import { BackAffordance } from "./BackAffordance";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import type {
   ConfigKind,
   EditorCandidateDto,
@@ -77,23 +78,7 @@ export function PreviewHeader({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const splitRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (menuRef.current.contains(e.target as Node)) return;
-      setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
+  usePopoverDismiss(menuRef, menuOpen, () => setMenuOpen(false));
 
   // When the menu opens, measure the anchor against the viewport so we
   // can cap max-height at (viewport-bottom - anchor-bottom - padding).

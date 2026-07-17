@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { api } from "../api";
+import { formatSize } from "../lib/format";
 import type { GcOutcome } from "../types";
 
 export function useSettingsActions(pushToast: (kind: "info" | "error", text: string) => void) {
@@ -22,7 +23,7 @@ export function useSettingsActions(pushToast: (kind: "info" | "error", text: str
     try {
       const r = await api.repairGc(gcDays, false);
       setGcResult(null);
-      pushToast("info", `GC: removed ${r.removed_journals} journals, ${r.removed_snapshots} snapshots, freed ${formatBytes(r.bytes_freed)}`);
+      pushToast("info", `GC: removed ${r.removed_journals} journals, ${r.removed_snapshots} snapshots, freed ${formatSize(r.bytes_freed)}`);
     } catch (e) { pushToast("error", `GC failed: ${e}`); }
     finally { setGcBusy(false); }
   }, [gcDays, pushToast]);
@@ -39,10 +40,4 @@ export function useSettingsActions(pushToast: (kind: "info" | "error", text: str
   }, [lockPath, pushToast]);
 
   return { gcDays, setGcDays, gcBusy, gcResult, gcDryRun, gcExecute, lockPath, setLockPath, lockBusy, breakLock };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

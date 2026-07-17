@@ -27,7 +27,7 @@ interface AppStateValue {
   // Toasts (lifted so shell can render them above the accounts view too).
   toasts: Toast[];
   pushToast: ReturnType<typeof useToasts>["pushToast"];
-  dismissToast: (id: number) => void;
+  dismissToast: ReturnType<typeof useToasts>["dismissToast"];
   /**
    * Unified notification dispatcher. Call sites pass a typed event;
    * the facade picks surfaces from routing, writes one log entry,

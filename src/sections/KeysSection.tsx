@@ -27,6 +27,7 @@ import type {
 import { AddKeyModal } from "./keys/AddKeyModal";
 import { OAuthUsageModal } from "./keys/OAuthUsageModal";
 import { EnvVaultSection } from "./keys/EnvVaultSection";
+import { consumePendingKeysFilter } from "./keys/pendingFilter";
 
 type PendingRemoval =
   | { kind: "api"; row: ApiKeySummary }
@@ -105,11 +106,19 @@ export function KeysSection() {
     void refresh();
   }, [refresh]);
 
-  // Cross-section deep-link: AccountCard's "N tokens" chip dispatches
-  // `cp-keys-filter` so this section can land pre-filtered to an
-  // account. Payload is the literal filter query (typically an email).
+  // Cross-section deep-link: AccountCard's "N tokens" chip stages a
+  // query in the pending store (consumed here on mount — covers the
+  // lazy-load path where this section wasn't mounted when the chip
+  // was clicked) AND dispatches `cp-keys-filter` (covers an
+  // already-mounted section). The event handler also drains the
+  // pending slot so a query never goes stale and re-applies on a
+  // later mount. Payload is the literal filter query (typically an
+  // email).
   useEffect(() => {
+    const pending = consumePendingKeysFilter();
+    if (pending != null) setFilter(pending);
     const onFilter = (e: Event) => {
+      consumePendingKeysFilter();
       const detail = (e as CustomEvent<{ query: string }>).detail;
       if (typeof detail?.query === "string") setFilter(detail.query);
     };

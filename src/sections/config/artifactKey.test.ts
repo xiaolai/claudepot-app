@@ -35,6 +35,20 @@ describe("pluginIdFromPath", () => {
   it("returns null when path lacks the plugin segment", () => {
     expect(pluginIdFromPath("/Users/me/.claude/plugins/cache/")).toBeNull();
   });
+
+  it("extracts plugin id from a Windows-shaped cache path", () => {
+    expect(
+      pluginIdFromPath(
+        "C:\\Users\\me\\.claude\\plugins\\cache\\xiaolai\\codex-toolkit\\0.8.2\\skills\\audit\\SKILL.md",
+      ),
+    ).toBe("codex-toolkit");
+  });
+
+  it("returns null when a Windows path lacks the plugin segment", () => {
+    expect(
+      pluginIdFromPath("C:\\Users\\me\\.claude\\plugins\\cache\\"),
+    ).toBeNull();
+  });
 });
 
 describe("artifactKeyForFile — user artifacts", () => {
@@ -199,6 +213,83 @@ describe("artifactKeyForFile — project scope", () => {
       "/Users/joker",
     );
     expect(r?.artifactKey).toBe("projectSettings:hands-off");
+  });
+});
+
+describe("artifactKeyForFile — Windows-shaped paths", () => {
+  // CC records native separators, so on Windows every abs_path uses
+  // `\`. Each trackable kind must resolve the same key it would from
+  // the equivalent Unix path (rules/paths.md).
+  it("user skill (dir form) with backslashes becomes userSettings:<name>", () => {
+    const r = artifactKeyForFile(
+      file({
+        kind: "skill",
+        abs_path: "C:\\Users\\me\\.claude\\skills\\hands-off\\SKILL.md",
+      }),
+    );
+    expect(r).toEqual({
+      kind: "skill",
+      artifactKey: "userSettings:hands-off",
+      pluginId: null,
+    });
+  });
+
+  it("user agent with backslashes becomes the bare stem", () => {
+    const r = artifactKeyForFile(
+      file({
+        kind: "agent",
+        abs_path: "C:\\Users\\me\\.claude\\agents\\Explore.md",
+      }),
+    );
+    expect(r).toEqual({
+      kind: "agent",
+      artifactKey: "Explore",
+      pluginId: null,
+    });
+  });
+
+  it("user command with backslashes becomes /<stem>", () => {
+    const r = artifactKeyForFile(
+      file({
+        kind: "command",
+        abs_path: "C:\\Users\\me\\.claude\\commands\\audit.md",
+      }),
+    );
+    expect(r).toEqual({
+      kind: "command",
+      artifactKey: "/audit",
+      pluginId: null,
+    });
+  });
+
+  it("plugin skill with backslashes becomes plugin:<id>:<name>", () => {
+    const r = artifactKeyForFile(
+      file({
+        kind: "skill",
+        abs_path:
+          "C:\\Users\\me\\.claude\\plugins\\cache\\xiaolai\\codex-toolkit\\0.8.2\\skills\\audit-fix\\SKILL.md",
+      }),
+    );
+    expect(r).toEqual({
+      kind: "skill",
+      artifactKey: "plugin:codex-toolkit:audit-fix",
+      pluginId: "codex-toolkit",
+    });
+  });
+
+  it("project-scope skill with backslashes becomes projectSettings:<name>", () => {
+    const r = artifactKeyForFile(
+      file({
+        kind: "skill",
+        abs_path: "C:\\repo\\.claude\\skills\\lint\\SKILL.md",
+      }),
+      "C:\\repo",
+    );
+    expect(r).toEqual({
+      kind: "skill",
+      artifactKey: "projectSettings:lint",
+      pluginId: null,
+    });
   });
 });
 

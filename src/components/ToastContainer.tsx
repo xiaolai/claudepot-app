@@ -19,7 +19,12 @@ export function ToastContainer({
   onDismiss,
 }: {
   toasts: Toast[];
-  onDismiss: (id: number) => void;
+  /**
+   * Dismiss commits the toast's deferred action by default (X-close
+   * means "I read it, proceed"); only the Undo button passes
+   * `skipCommit` — undoing and committing are mutually exclusive.
+   */
+  onDismiss: (id: number, opts?: { skipCommit?: boolean }) => void;
 }) {
   return (
     <div className="toasts">
@@ -36,7 +41,7 @@ export function ToastContainer({
               className="toast-undo"
               onClick={() => {
                 t.onUndo?.();
-                onDismiss(t.id);
+                onDismiss(t.id, { skipCommit: true });
               }}
             >
               {t.undoLabel ?? "Undo"}

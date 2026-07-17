@@ -47,11 +47,14 @@ export function artifactKeyForFile(
   // segment specifically — `path.startsWith(projectRoot)` alone is too loose
   // (in global-only mode the backend reports project_root as the user home,
   // and `~/.claude/skills/*` would otherwise be mis-keyed as project scope).
+  // Separator-agnostic: CC records native separators, so a Windows
+  // tree arrives as `C:\repo\.claude\skills\…` (rules/paths.md).
   const isProjectScope =
     !pluginId &&
     projectRoot != null &&
     projectRoot.length > 0 &&
-    path.startsWith(`${projectRoot}/.claude/`);
+    (path.startsWith(`${projectRoot}/.claude/`) ||
+      path.startsWith(`${projectRoot}\\.claude\\`));
 
   switch (file.kind) {
     case "skill": {
@@ -86,12 +89,17 @@ export function artifactKeyForFile(
   }
 }
 
+// These are CC artifact abs paths with NATIVE separators — every
+// marker match and segment split must accept both `/` and `\`
+// (rules/paths.md; audit 2026-07 F2).
+const PLUGINS_CACHE_MARKER = /plugins[/\\]cache[/\\]/;
+
 /** Pull the plugin id from `~/.claude/plugins/cache/<owner>/<plugin>/...`. */
 export function pluginIdFromPath(path: string): string | null {
-  const i = path.indexOf("plugins/cache/");
-  if (i < 0) return null;
-  const after = path.slice(i + "plugins/cache/".length);
-  const parts = after.split("/");
+  const m = PLUGINS_CACHE_MARKER.exec(path);
+  if (!m) return null;
+  const after = path.slice(m.index + m[0].length);
+  const parts = after.split(/[/\\]/);
   if (parts.length < 2) return null;
   // owner = parts[0], plugin = parts[1]
   const plugin = parts[1];
@@ -99,7 +107,7 @@ export function pluginIdFromPath(path: string): string | null {
 }
 
 function stemFromMd(path: string): string | null {
-  const last = path.split("/").pop();
+  const last = path.split(/[/\\]/).pop();
   if (!last) return null;
   if (!last.endsWith(".md")) return null;
   return last.slice(0, -3);
@@ -109,7 +117,7 @@ function skillNameFromPath(path: string): string | null {
   // Two layouts CC supports:
   //   <root>/skills/<name>/SKILL.md   (canonical, dir-form)
   //   <root>/skills/<name>.md         (rarely seen, file-form)
-  const parts = path.split("/");
+  const parts = path.split(/[/\\]/);
   const last = parts[parts.length - 1];
   const parent = parts[parts.length - 2];
   if (last === "SKILL.md" && parent) return parent;

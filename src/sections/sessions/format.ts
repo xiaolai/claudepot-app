@@ -5,6 +5,8 @@
  * "0 tokens" in the UI.
  */
 
+import { basename } from "../../lib/paths";
+
 export function formatTokens(n: number): string {
   if (n <= 0) return "";
   if (n < 1_000) return `${n}`;
@@ -39,11 +41,12 @@ function compactModel(id: string): string {
 }
 
 /**
- * Short project basename for table rows. `/a/b/c` → `c`.
+ * Short project basename for table rows. `/a/b/c` → `c`; Windows-aware
+ * (`C:\a\b` → `b`) via lib/paths (audit 2026-07 F2).
  * Empty string survives as-is so the caller can fall back to the slug.
  */
 export function projectBasename(path: string): string {
-  return path.split("/").filter(Boolean).pop() ?? path;
+  return basename(path);
 }
 
 export function shortSessionId(id: string): string {

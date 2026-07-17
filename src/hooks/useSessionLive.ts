@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type { LiveSessionSummary } from "../types";
@@ -166,14 +166,6 @@ export function useSessionLiveSelector<
 
 const EMPTY: LiveSessionSummary[] = [];
 const EMPTY_SERVER_SNAPSHOT = (): LiveSessionSummary[] => EMPTY;
-
-/** Lifecycle hook — no-op today; App.tsx owns the
- *  sessionLiveStop call path on unmount when applicable. Kept as a
- *  named export so consumer components don't need to rethread
- *  imports if we later restore the auto-stop behavior. */
-export function useSessionLiveLifecycle(): void {
-  useEffect(() => undefined, []);
-}
 
 /** Test-only: reset the module-scoped store. Not exported from
  *  the public API, but available to vitest suites that `import *

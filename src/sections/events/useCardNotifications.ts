@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../../api";
+import { basename } from "../../lib/paths";
 import { useEmit } from "../../providers/AppStateProvider";
 import type { LiveSessionSummary } from "../../types";
 
@@ -132,7 +133,7 @@ export function useCardNotifications() {
       // dedupeKey grain: kind+title — identical failures produce
       // identical titles (e.g. "Hook failed: PostToolUse:Edit") so
       // they land in the same bucket and stop after `maxBurst`.
-      const project = shortCwd(card.cwd);
+      const project = basename(card.cwd);
       // Click intent: send the user back to the host terminal of
       // this session. The CardEmittedWire carries the wrapping
       // delta's `session_id` at the top level (LiveDeltaDto has
@@ -202,11 +203,6 @@ export function useCardNotifications() {
       // window expiry.
     };
   }, []);
-}
-
-function shortCwd(cwd: string): string {
-  const parts = cwd.split(/[\\/]/);
-  return parts[parts.length - 1] || cwd;
 }
 
 // Mirror of the Rust `LiveDeltaKindDto` discriminator. Kept narrow

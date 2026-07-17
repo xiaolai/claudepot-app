@@ -12,6 +12,7 @@
 
 import type { CostlyTurn, TopCostlyPrompts } from "../../types";
 import { shortModelId } from "./CostTabHelpers";
+import { displayPath, formatCompact } from "./format";
 
 export function TopPromptsPanel({ data }: { data: TopCostlyPrompts }) {
   return (
@@ -144,20 +145,3 @@ function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
   );
 }
 
-/** Render the project's basename — duplicated from CostTab to keep
- *  the panel self-contained. CC project CWDs share long
- *  `/Users/<user>/...` prefixes that waste space; the leaf folder
- *  is what users recognise. Windows-aware for `\` separators. */
-function displayPath(p: string): string {
-  if (!p) return p;
-  const trimmed = p.replace(/[/\\]+$/, "");
-  const segs = trimmed.split(/[/\\]/).filter(Boolean);
-  return segs[segs.length - 1] ?? trimmed;
-}
-
-function formatCompact(n: number): string {
-  if (n < 1_000) return String(n);
-  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return `${(n / 1_000_000_000).toFixed(2)}B`;
-}

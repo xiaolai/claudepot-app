@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { deriveSessionTitle } from "./format";
+import { deriveSessionTitle, projectBasename } from "./format";
+
+describe("projectBasename", () => {
+  it("returns the leaf of a Unix path", () => {
+    expect(projectBasename("/a/b/c")).toBe("c");
+    expect(projectBasename("/a/b/c/")).toBe("c");
+  });
+
+  it("returns the leaf of a Windows path (rules/paths.md)", () => {
+    expect(projectBasename("C:\\Users\\joker\\proj")).toBe("proj");
+    expect(projectBasename("C:/work\\proj")).toBe("proj");
+  });
+
+  it("lets an empty string survive so callers can fall back to the slug", () => {
+    expect(projectBasename("")).toBe("");
+  });
+
+  it("passes a bare name through", () => {
+    expect(projectBasename("proj")).toBe("proj");
+  });
+});
 
 describe("deriveSessionTitle", () => {
   it("returns null for null, empty, and whitespace-only input", () => {

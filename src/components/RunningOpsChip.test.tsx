@@ -148,4 +148,16 @@ describe("labelFor", () => {
       ),
     ).toBe("Slimming abc.jsonl (P2)");
   });
+
+  it("renders basenames from Windows-shaped paths (rules/paths.md)", () => {
+    expect(
+      labelFor(
+        op({
+          kind: "move_project",
+          old_path: "C:\\Users\\me\\old-proj",
+          new_path: "C:\\Users\\me\\new-proj",
+        }),
+      ),
+    ).toBe("Renaming old-proj → new-proj");
+  });
 });

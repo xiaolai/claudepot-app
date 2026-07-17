@@ -31,6 +31,7 @@ import type {
   UsageWindowSpec,
 } from "../../types";
 import { cacheHitRate, formatHitRate, shortModelId } from "./CostTabHelpers";
+import { displayPath, formatCompact } from "./format";
 import { TopPromptsPanel } from "./TopPromptsPanel";
 
 // Re-exported for backward compatibility with tests that imported
@@ -455,13 +456,6 @@ function renderTokens(n: number | undefined, suffix?: string): string {
   return suffix ? `${formatted} ${suffix}` : formatted;
 }
 
-function formatCompact(n: number): string {
-  if (n < 1_000) return String(n);
-  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return `${(n / 1_000_000_000).toFixed(2)}B`;
-}
-
 function Tile({
   label,
   value,
@@ -842,18 +836,8 @@ function sortRows(
   return [...real, ...nullsAtEnd];
 }
 
-/** Render the project's basename — the CWD's leaf folder name. CC
- *  project CWDs share long `/Users/<user>/...` prefixes that waste
- *  column width without telling the user anything new; the leaf
- *  folder is what they recognise ("claudepot-app", "vmark"). The
- *  full path is on the row's `title` for hover disclosure.
- *  Windows-aware for `\` separators. */
-function displayPath(p: string): string {
-  if (!p) return p;
-  const trimmed = p.replace(/[/\\]+$/, "");
-  const segs = trimmed.split(/[/\\]/).filter(Boolean);
-  return segs[segs.length - 1] ?? trimmed;
-}
+// `displayPath` and `formatCompact` moved to `./format.ts` — shared
+// with TopPromptsPanel (audit 2026-07 F11).
 
 // `nullableNumberCmp` was removed when sortRows started partitioning
 // nulls explicitly. The previous impl returned -1 for `a == null` and

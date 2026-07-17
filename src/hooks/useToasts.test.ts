@@ -103,6 +103,52 @@ describe("useToasts — auto-dismiss policy", () => {
     expect(result.current.toasts).toHaveLength(0);
   });
 
+  it("manual dismiss (X) commits the deferred action", () => {
+    // Audit F1 regression: closing "Switching Desktop to X…" with the
+    // X button used to silently cancel the switch — the toast said the
+    // action was happening, then nothing happened. A dismiss that
+    // isn't an Undo must commit.
+    const onCommit = vi.fn();
+    const { result } = renderHook(() => useToasts());
+    act(() =>
+      result.current.pushToast("info", "switching…", () => {}, {
+        undoMs: 3000,
+        onCommit,
+      }),
+    );
+    const id = result.current.toasts[0].id;
+    act(() => result.current.dismissToast(id));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+
+    // The cleared auto-timer + run-once map must not double-commit.
+    act(() => vi.advanceTimersByTime(5000));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("undo dismiss (skipCommit) does NOT commit", () => {
+    const onCommit = vi.fn();
+    const onUndo = vi.fn();
+    const { result } = renderHook(() => useToasts());
+    act(() =>
+      result.current.pushToast("info", "switching…", onUndo, {
+        undoMs: 3000,
+        onCommit,
+      }),
+    );
+    const id = result.current.toasts[0].id;
+    // Mirrors the ToastContainer Undo button: onUndo() then a
+    // skipCommit dismiss.
+    act(() => {
+      result.current.toasts[0].onUndo?.();
+      result.current.dismissToast(id, { skipCommit: true });
+    });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(5000));
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it("dedupeKey cancels the prior toast's timer before replacing it", () => {
     // Regression guard: without the timer clear on dedupe, rapid-fire
     // actions would both commit because two parallel timers were still
