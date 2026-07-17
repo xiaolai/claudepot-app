@@ -17,6 +17,11 @@ import {
   mcpToolEndpoint,
   type McpToolName,
 } from "@/lib/api/manifest";
+import {
+  canHoldPrivilegedScopes,
+  CITIZEN_BOT_DENIED_SCOPES,
+  PRIVILEGED_SCOPES,
+} from "@/lib/api/scopes";
 import type { ClaudepotAuthExtra } from "./auth";
 
 export type McpReadyCtx = {
@@ -100,6 +105,38 @@ export async function checkAuthForTool(
         ok: false,
         result: textResult(
           `Forbidden: this token is missing the ${SPEC.auth} scope.`,
+          true,
+        ),
+      };
+    }
+    // Citizen-bot defense-in-depth — the exact deny set the REST
+    // twin applies (lib/api/policy.ts:checkAuthForSpec). Without
+    // this, a citizen PAT that somehow holds a denied scope would
+    // be refused over REST but honored over MCP.
+    if (
+      auth.botKind === "citizen" &&
+      CITIZEN_BOT_DENIED_SCOPES.has(SPEC.auth)
+    ) {
+      return {
+        ok: false,
+        result: textResult(
+          `Forbidden: citizen bots cannot perform "${SPEC.auth}". This action is for human users and operator-owned bots only. See web/dev-docs/citizen-bots.md.`,
+          true,
+        ),
+      };
+    }
+    // Privileged-scope defense-in-depth — same owner-entitlement
+    // check as the REST twin. Scope possession alone is not enough
+    // for the office-only scopes; the token's owner must be staff/
+    // system or a bot account.
+    if (
+      PRIVILEGED_SCOPES.has(SPEC.auth) &&
+      !canHoldPrivilegedScopes({ role: auth.role, isAgent: auth.isAgent })
+    ) {
+      return {
+        ok: false,
+        result: textResult(
+          `Forbidden: "${SPEC.auth}" is reserved for staff and bot accounts. This token's owner is not entitled to it.`,
           true,
         ),
       };

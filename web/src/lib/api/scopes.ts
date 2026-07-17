@@ -68,6 +68,92 @@ export function normalizeScopes(input: readonly string[]): Scope[] {
   return [...out];
 }
 
+/**
+ * Defense-in-depth: scopes that citizen-bot PATs MUST NEVER hold.
+ *
+ * The primary gate is at PAT mint time (lib/citizen-bots/scopes.ts
+ * filters requested scopes down to CITIZEN_SCOPES). This set is the
+ * backstop — if a token somehow holds one of these scopes (manual
+ * /admin/users grant, future bug, scope catalog growth) the
+ * enforcement layers still refuse: lib/api/policy.ts:checkAuthForSpec
+ * for REST and lib/mcp/policy.ts:checkAuthForTool for MCP both apply
+ * this one constant, so the two surfaces can't drift. Mirrors the
+ * bot_kind='reader' gate on /api/v1/submissions/[id]/decisions.
+ *
+ * Lives here (not in policy.ts) so DB-free unit tests can import it —
+ * policy.ts pulls in @/db/client, which throws at module load
+ * without a connection string.
+ *
+ * Keep this list in lockstep with the "permanently denied" section
+ * of web/dev-docs/citizen-bots.md.
+ */
+export const CITIZEN_BOT_DENIED_SCOPES: ReadonlySet<Scope> = new Set<Scope>([
+  "vote:write",
+  "save:write",
+  "submission:write",
+  "submission:update",
+  "submission:delete",
+  "submission:publish",
+  // comment:delete is in the allowlist's explicit deny per the
+  // design doc — citizen bots can't erase miscalibration evidence
+  // (mirrors the reader-bot rule). The primary gate at PAT mint
+  // filters it out; this is the backstop if a token over-grants.
+  "comment:delete",
+  "decision:write",
+  "decision:override",
+  "scout:write",
+  "engagement:write",
+  "avatar:write",
+]);
+
+/**
+ * Scopes reserved for platform identities — the office bots and
+ * staff. Ordinary human accounts must never mint (or use) tokens
+ * carrying these: the editorial-write sinks behind them
+ * (/api/v1/decisions, /decisions/{id}/override, /scout-runs,
+ * /engagement, /submissions/{id}/publish, /bots/reports) authorize
+ * on scope possession, so an unrestricted mint would let any
+ * registered user write editorial decisions.
+ *
+ * Enforced in BOTH layers:
+ *   - mint time — lib/actions/api-tokens.ts rejects privileged
+ *     scopes for non-entitled minters (and the /settings/tokens
+ *     form hides the checkboxes);
+ *   - enforcement time — lib/api/policy.ts:checkAuthForSpec and
+ *     lib/mcp/policy.ts:checkAuthForTool refuse the request when
+ *     the token's owner fails `canHoldPrivilegedScopes`, so a
+ *     token minted before this gate (or via a future bug) is still
+ *     dead on arrival.
+ */
+export const PRIVILEGED_SCOPES: ReadonlySet<Scope> = new Set<Scope>([
+  "bots:report",
+  "decision:write",
+  "decision:override",
+  "scout:write",
+  "submission:publish",
+  "engagement:write",
+]);
+
+/**
+ * Entitlement predicate for PRIVILEGED_SCOPES, shared by the mint
+ * path and both enforcement paths so they can never disagree.
+ *
+ * Admitted: `staff` and `system` roles (the same staff-equivalence
+ * definition as lib/api/policy.ts:isStaffAuth / lib/staff.ts) and
+ * bot accounts (is_agent=true — mirrors the publish route's gate).
+ * Citizen bots ARE is_agent=true and legitimately hold bots:report;
+ * the editorial scopes stay out of their reach via the
+ * CITIZEN_SCOPES mint filter and the CITIZEN_BOT_DENIED_SCOPES
+ * enforcement backstop. Ordinary humans (role='user',
+ * is_agent=false) are refused.
+ */
+export function canHoldPrivilegedScopes(user: {
+  role: string;
+  isAgent: boolean;
+}): boolean {
+  return user.role === "staff" || user.role === "system" || user.isAgent;
+}
+
 /** Human-facing labels for the /settings/tokens UI. */
 export const SCOPE_LABELS: Record<Scope, string> = {
   "submission:write": "Create submissions",

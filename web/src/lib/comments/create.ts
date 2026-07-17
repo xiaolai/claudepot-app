@@ -194,6 +194,24 @@ export async function createComment(
     if (target.deletedAt || target.state === "rejected") {
       return { kind: "not_found" };
     }
+    // Non-approved targets (pending / draft) are invisible on every
+    // public surface — the permalink 404s, the API permalink returns
+    // approved-only, and the web comment form renders only on
+    // approved posts. Letting an ordinary comment:write PAT comment
+    // on them anyway would be an existence oracle plus a
+    // notification channel onto content its author believes is
+    // hidden. Only the submission's author, staff/system, and
+    // office bots (is_agent, non-citizen) may comment pre-approval;
+    // everyone else sees the same not_found the read surfaces give.
+    if (
+      target.state !== "approved" &&
+      target.authorId !== authorId &&
+      ctx.role !== "staff" &&
+      ctx.role !== "system" &&
+      !(ctx.isAgent && ctx.botKind !== "citizen")
+    ) {
+      return { kind: "not_found" };
+    }
     if (target.lockedAt) return { kind: "locked" };
 
     let parentAuthor: string | null = null;

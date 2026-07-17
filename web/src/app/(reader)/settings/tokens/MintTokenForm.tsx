@@ -7,7 +7,7 @@ import {
   type MintFormState,
 } from "@/lib/actions/api-tokens";
 import {
-  SCOPES,
+  PRIVILEGED_SCOPES,
   SCOPE_GROUPS,
   SCOPE_LABELS,
   type Scope,
@@ -35,7 +35,19 @@ export function MintTokenForm({ staff }: { staff: boolean }) {
   const [selected, setSelected] = useState<Set<Scope>>(new Set());
   const formId = useId();
 
-  const allSelected = selected.size === SCOPES.length;
+  // Privileged scopes (Editorial + Bots groups) are staff/bot-only.
+  // Session-holding minters are humans, so `staff` is the UI-side
+  // entitlement signal; createApiToken re-checks server-side against
+  // the DB, so hiding here is presentation, not the security gate.
+  const visibleGroups = SCOPE_GROUPS.map((group) => ({
+    label: group.label,
+    scopes: staff
+      ? group.scopes
+      : group.scopes.filter((s) => !PRIVILEGED_SCOPES.has(s)),
+  })).filter((group) => group.scopes.length > 0);
+  const visibleScopes = visibleGroups.flatMap((group) => group.scopes);
+
+  const allSelected = selected.size === visibleScopes.length;
   const someSelected = selected.size > 0 && !allSelected;
 
   function toggleScope(s: Scope, on: boolean) {
@@ -48,7 +60,7 @@ export function MintTokenForm({ staff }: { staff: boolean }) {
   }
 
   function toggleAll(on: boolean) {
-    setSelected(on ? new Set(SCOPES) : new Set());
+    setSelected(on ? new Set(visibleScopes) : new Set());
   }
 
   return (
@@ -81,7 +93,7 @@ export function MintTokenForm({ staff }: { staff: boolean }) {
           />
           <strong>Select all</strong>
         </label>
-        {SCOPE_GROUPS.map((group) => (
+        {visibleGroups.map((group) => (
           <div key={group.label} className="proto-token-scope-group">
             <p className="proto-token-scope-group-label">{group.label}</p>
             {group.scopes.map((s) => (

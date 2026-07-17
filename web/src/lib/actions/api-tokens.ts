@@ -7,10 +7,16 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/db/client";
-import { apiTokens, apiTokenEvents } from "@/db/schema";
+import { apiTokens, apiTokenEvents, users } from "@/db/schema";
 import { generateToken } from "@/lib/api/tokens";
 import { setRevealCookie } from "@/lib/api/reveal-cookie";
-import { SCOPES, normalizeScopes, type Scope } from "@/lib/api/scopes";
+import {
+  PRIVILEGED_SCOPES,
+  SCOPES,
+  canHoldPrivilegedScopes,
+  normalizeScopes,
+  type Scope,
+} from "@/lib/api/scopes";
 
 /* ── Defaults ───────────────────────────────────────────────────
  *
@@ -90,6 +96,31 @@ export async function createApiToken(
       reason: "validation",
       detail: "Pick at least one scope.",
     };
+  }
+
+  // Privileged scopes (the Editorial + Bots groups in SCOPE_GROUPS)
+  // are mintable only by entitled accounts — staff/system roles and
+  // bot accounts, per canHoldPrivilegedScopes. Without this gate any
+  // registered user could mint a PAT carrying decision:write and
+  // reach the editorial-write sinks. Role/is_agent are read from the
+  // DB, not the session, so a stale session can't out-privilege a
+  // downgraded account (same rationale as lib/staff.ts:requireStaffId).
+  // checkAuthForSpec / checkAuthForTool re-check the same predicate
+  // at enforcement time as defense in depth.
+  const privileged = scopes.filter((s) => PRIVILEGED_SCOPES.has(s));
+  if (privileged.length > 0) {
+    const [me] = await db
+      .select({ role: users.role, isAgent: users.isAgent })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
+    if (!me || !canHoldPrivilegedScopes(me)) {
+      return {
+        ok: false,
+        reason: "validation",
+        detail: `These scopes are reserved for staff and bot accounts: ${privileged.join(", ")}.`,
+      };
+    }
   }
 
   // Only `staff` may mint never-expiring tokens. `system` (agent) users
