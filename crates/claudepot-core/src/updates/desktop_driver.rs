@@ -291,24 +291,20 @@ async fn install_via_zip(
         .await
         .map_err(|e| {
             // Try to restore backup on infrastructural failure.
-            if backup.exists() {
-                let _ = std::fs::rename(&backup, target);
-            }
-            if e.kind() == std::io::ErrorKind::NotFound {
+            let cause = if e.kind() == std::io::ErrorKind::NotFound {
                 UpdateError::ToolMissing("ditto".into())
             } else {
                 UpdateError::Io(e)
-            }
+            };
+            restore_backup_after_failure(&backup, target, cause)
         })?;
     if !ditto.status.success() {
-        if backup.exists() {
-            let _ = std::fs::rename(&backup, target);
-        }
-        return Err(UpdateError::Subprocess {
+        let cause = UpdateError::Subprocess {
             cmd: "ditto".into(),
             status: ditto.status.code().unwrap_or(-1),
             stderr: String::from_utf8_lossy(&ditto.stderr).into_owned(),
-        });
+        };
+        return Err(restore_backup_after_failure(&backup, target, cause));
     }
 
     // Strip quarantine attribute so first-launch doesn't show
@@ -346,6 +342,27 @@ async fn install_via_zip(
     _install: &DesktopInstall,
 ) -> Result<DesktopUpdateOutcome> {
     Err(UpdateError::UnsupportedPlatform)
+}
+
+/// After a failed install step, try to move the backup copy back into
+/// place. On success (or when no backup exists) the original `cause`
+/// passes through unchanged; if the restore rename itself fails, the
+/// user's app is left missing at the install path, so wrap `cause` in
+/// [`UpdateError::RestoreFailed`] naming the backup path — never
+/// swallow a failed restore.
+#[cfg(target_os = "macos")]
+fn restore_backup_after_failure(backup: &Path, target: &Path, cause: UpdateError) -> UpdateError {
+    if !backup.exists() {
+        return cause;
+    }
+    match std::fs::rename(backup, target) {
+        Ok(()) => cause,
+        Err(restore_err) => UpdateError::RestoreFailed {
+            backup: backup.to_path_buf(),
+            restore_err,
+            cause: Box::new(cause),
+        },
+    }
 }
 
 /// Outcome of a startup orphan-backup recovery sweep.

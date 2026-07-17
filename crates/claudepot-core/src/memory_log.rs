@@ -223,6 +223,14 @@ impl MemoryLog {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        // Pre-create the DB file with user-only perms BEFORE rusqlite
+        // opens it — `Connection::open` creates files at the process
+        // umask (typically 0644), leaving a create→chmod window where
+        // another local user can open the file and keep the fd. Same
+        // M9 fix as `session_index::SessionIndex::open`; the post-init
+        // chmod below is the backstop for the pre-existing-file and
+        // quarantine-recreate cases.
+        crate::secure_perms::precreate_user_only(path);
         let db = match Self::init_connection(path) {
             Ok(c) => c,
             Err(MemoryLogError::Sql(e)) if is_corrupt(&e) => {

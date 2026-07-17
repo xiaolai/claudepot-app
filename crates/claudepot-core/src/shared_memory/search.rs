@@ -15,14 +15,16 @@
 //!      embedded `"`) from changing the query's meaning when a
 //!      user types e.g. `sk-ant-oat01`.
 //!   2. **Snippet redaction.** Every hit's `snippet` is run
-//!      through `redaction::apply` before it leaves this function.
-//!      Callers (MCP responses, UI cards) emit `hit.snippet`
-//!      verbatim; they never reach into the raw `exchanges`
-//!      columns directly.
+//!      through `redaction::apply` plus the always-on
+//!      `config_view::mask` token bank before it leaves this
+//!      function. Callers (MCP responses, UI cards) emit
+//!      `hit.snippet` verbatim; they never reach into the raw
+//!      `exchanges` columns directly.
 
 use rusqlite::params_from_iter;
 use rusqlite::types::Value;
 
+use crate::config_view::mask::mask_text;
 use crate::redaction::{apply as redact_apply, RedactionPolicy};
 use crate::session_index::SessionIndex;
 
@@ -233,7 +235,15 @@ pub fn search(
         // R9: redact the snippet before it leaves this function.
         // `redaction::apply` is regex-based and constant-time per
         // pattern; for ≤ 50 hits this is sub-millisecond.
-        hit.snippet = redact_apply(&hit.snippet, policy);
+        //
+        // The policy's own bank only covers `sk-ant-*` (plus the
+        // opt-in email/env/custom clauses), so third-party secrets
+        // (AWS, OpenAI, GitHub, JWT, …) would pass verbatim. The
+        // `config_view::mask` bank — CC's secretScanner families —
+        // is therefore always-on at this emission boundary; every
+        // caller of this fn is an emission surface (MCP server, GUI
+        // Knowledge pane).
+        hit.snippet = mask_text(&redact_apply(&hit.snippet, policy));
         hits.push(hit);
     }
     Ok(hits)
@@ -588,6 +598,43 @@ mod tests {
         // The default redaction policy masks to `sk-ant-***<last4>`.
         // We don't need the literal mask here — just verify the
         // raw token is absent.
+    }
+
+    #[test]
+    fn search_masks_third_party_tokens_in_snippets() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let root = tmp.path().join("codex").join("sessions");
+        let day = root.join("2026").join("05").join("16");
+        fs::create_dir_all(&day).unwrap();
+        // Runtime-assembled needle so source scanners don't
+        // false-positive on the literal (mask.rs test convention);
+        // the AKIA value is AWS's documented example key.
+        let openai = format!("sk-{}", "a".repeat(40));
+        let aws = "AKIAIOSFODNN7EXAMPLE";
+        fs::write(
+            day.join("t.jsonl"),
+            format!(
+                r#"{{"timestamp":"2026-05-16T11:30:00.000Z","type":"session_meta","payload":{{"id":"st","cwd":"/proj-t","originator":"codex_cli","cli_version":"0.44.0"}}}}
+{{"timestamp":"2026-05-16T11:30:00.200Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"leaked {openai} and {aws} here"}}]}}}}
+{{"timestamp":"2026-05-16T11:30:02.000Z","type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"rotate both keys"}}]}}}}
+"#
+            ),
+        )
+        .unwrap();
+        backfill_codex(&idx, &root).expect("backfill");
+        let q = SearchQuery {
+            query: "leaked".to_string(),
+            ..Default::default()
+        };
+        let hits = search(&idx, &q, &RedactionPolicy::default()).unwrap();
+        assert_eq!(hits.len(), 1);
+        let s = &hits[0].snippet;
+        // The policy only masks `sk-ant-*`; the always-on
+        // `config_view::mask` bank must catch third-party families.
+        assert!(!s.contains(&openai), "OpenAI-style key must be masked: {s}");
+        assert!(!s.contains(aws), "AWS-style key must be masked: {s}");
+        assert!(s.contains("<redacted:"), "mask marker expected: {s}");
     }
 
     // ─── adversarial query inputs ──────────────────────────────

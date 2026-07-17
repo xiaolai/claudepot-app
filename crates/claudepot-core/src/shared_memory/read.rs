@@ -13,13 +13,15 @@
 //!   * `read_locator_lines` — explicit line range with a hard
 //!     byte cap.
 //!
-//! Both apply `redaction::apply` to the returned body before
+//! Both apply `redaction::apply` plus the always-on
+//! `config_view::mask` token bank to the returned body before
 //! emission.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use crate::config_view::mask::mask_text;
 use crate::redaction::{apply as redact_apply, RedactionPolicy};
 use crate::session_index::SessionIndex;
 
@@ -188,7 +190,13 @@ pub fn read_locator_bounded(
         }
     };
 
-    let redacted = redact_apply(&body, policy);
+    // The policy's own bank only covers `sk-ant-*` (plus the opt-in
+    // email/env/custom clauses), so third-party secrets (AWS, OpenAI,
+    // GitHub, JWT, …) would pass verbatim. The `config_view::mask`
+    // bank — CC's secretScanner families — is therefore always-on at
+    // this emission boundary; every caller of this fn is an emission
+    // surface (MCP server, GUI Knowledge pane).
+    let redacted = mask_text(&redact_apply(&body, policy));
     Ok(ConversationRead {
         file_path: locator.file_path.clone(),
         exchange_id: locator.exchange_id.clone(),
@@ -485,6 +493,51 @@ mod tests {
         assert!(!result.truncated);
         assert!(result.line_start >= 1);
         assert!(result.line_end >= result.line_start);
+    }
+
+    #[test]
+    fn read_locator_masks_third_party_tokens() {
+        let tmp = TempDir::new().unwrap();
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+        let root = tmp.path().join("codex").join("sessions");
+        let day = root.join("2026").join("05").join("16");
+        fs::create_dir_all(&day).unwrap();
+        // Runtime-assembled needle so source scanners don't
+        // false-positive on the literal (mask.rs test convention);
+        // the AKIA value is AWS's documented example key.
+        let openai = format!("sk-{}", "a".repeat(40));
+        let aws = "AKIAIOSFODNN7EXAMPLE";
+        fs::write(
+            day.join("t.jsonl"),
+            format!(
+                r#"{{"timestamp":"2026-05-16T11:30:00.000Z","type":"session_meta","payload":{{"id":"st","cwd":"/proj-t","originator":"codex_cli","cli_version":"0.44.0"}}}}
+{{"timestamp":"2026-05-16T11:30:00.200Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"leaked {openai} and {aws} here"}}]}}}}
+{{"timestamp":"2026-05-16T11:30:02.000Z","type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"rotate both keys"}}]}}}}
+"#
+            ),
+        )
+        .unwrap();
+        backfill_codex(&idx, &root).unwrap();
+        let path = day.join("t.jsonl").to_string_lossy().into_owned();
+        let locator = locator_for_exchange(&path, "codex:st:0");
+        let result = read_locator(&idx, &locator, &RedactionPolicy::default()).unwrap();
+        // The policy only masks `sk-ant-*`; the always-on
+        // `config_view::mask` bank must catch third-party families.
+        assert!(
+            !result.body.contains(&openai),
+            "OpenAI-style key must be masked: {}",
+            result.body
+        );
+        assert!(
+            !result.body.contains(aws),
+            "AWS-style key must be masked: {}",
+            result.body
+        );
+        assert!(
+            result.body.contains("<redacted:"),
+            "mask marker expected: {}",
+            result.body
+        );
     }
 
     #[test]

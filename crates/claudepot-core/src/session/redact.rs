@@ -248,7 +248,8 @@ pub fn execute_redact(
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = meta.permissions().mode();
-        let _ = tmp.set_permissions(fs::Permissions::from_mode(mode));
+        tmp.set_permissions(fs::Permissions::from_mode(mode))
+            .map_err(|e| RedactError::io(&tmp_path, e))?;
     }
 
     let mut counts = vec![0u32; opts.patterns.len()];

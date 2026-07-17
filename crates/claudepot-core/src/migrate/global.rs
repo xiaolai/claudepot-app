@@ -452,7 +452,9 @@ fn apply_hooks(
 
     let new_bytes =
         serde_json::to_vec_pretty(&settings).map_err(|e| MigrateError::Serialize(e.to_string()))?;
-    fs::write(&settings_path, new_bytes).map_err(MigrateError::from)?;
+    // Live settings.json — atomic temp+rename so a crash mid-write can't
+    // leave a truncated file (same pattern as `updates/settings_bridge.rs`).
+    crate::fs_utils::atomic_write(&settings_path, &new_bytes).map_err(MigrateError::from)?;
     Ok(Some(GlobalApplyStep {
         after: settings_path.to_string_lossy().to_string(),
         snapshot,
