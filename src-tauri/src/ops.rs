@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter};
 
 /// What kind of long-running op is this? Used by the UI to render
 /// the right verb in the running-op strip.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OpKind {
     RepairResume,
@@ -340,6 +340,23 @@ impl RunningOps {
 
     pub fn insert(&self, op: RunningOpInfo) {
         self.guard().insert(op.op_id.clone(), op);
+    }
+
+    /// Atomic "no such op running → insert" for singleton op kinds
+    /// (verify-all). The check and the insert share one guard so two
+    /// rapid starts can't both pass a separate `list()` check and
+    /// spawn twice. Returns `false` (without inserting) when an op of
+    /// `op.kind` is already `Running`.
+    pub fn insert_if_kind_not_running(&self, op: RunningOpInfo) -> bool {
+        let mut g = self.guard();
+        let running = g
+            .values()
+            .any(|o| o.kind == op.kind && o.status == OpStatus::Running);
+        if running {
+            return false;
+        }
+        g.insert(op.op_id.clone(), op);
+        true
     }
 
     pub fn get(&self, op_id: &str) -> Option<RunningOpInfo> {

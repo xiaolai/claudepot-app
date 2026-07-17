@@ -72,7 +72,14 @@ pub async fn rotation_dry_run(
     // and the next tick will use whatever the snapshot writer
     // produces.
     let snapshot_path = usage_snapshot::snapshot_path();
-    let snapshot_bytes = match std::fs::read(&snapshot_path) {
+    // Disk read off the IPC worker, per the command-layer policy.
+    let read_result = {
+        let p = snapshot_path.clone();
+        tokio::task::spawn_blocking(move || std::fs::read(p))
+            .await
+            .map_err(|e| format!("blocking task failed: {e}"))?
+    };
+    let snapshot_bytes = match read_result {
         Ok(b) => b,
         Err(e) => {
             return Ok(RotationDryRunDto {
@@ -204,20 +211,20 @@ pub async fn rotation_pending_list(
 
 /// User confirmed a suggested swap; perform it now. Returns Ok(()) on
 /// success or a string error on swap failure (also logged to audit).
-/// `Ok(())` with `swap_id` not present in the pending map is treated
-/// as a no-op — the entry may have TTL'd or been already-applied by a
-/// concurrent click.
+/// `Ok(())` with `swap_id` not claimable is a no-op — the entry may
+/// have TTL'd, been applied already, or be mid-apply from a
+/// concurrent click (`begin_apply`'s in-flight claim makes the
+/// no-op guarantee real; a bare peek let both clicks swap).
 ///
-/// Peeks the pending entry (does not remove). The orchestrator
-/// removes it only on a successful swap, so a transient failure
-/// leaves the entry available for the user to retry.
+/// The entry is removed only on a successful swap, so a transient
+/// failure leaves it available for the user to retry.
 #[tauri::command]
 pub async fn rotation_apply_pending(
     app: AppHandle,
     orchestrator: State<'_, Arc<RotationOrchestrator>>,
     swap_id: String,
 ) -> Result<(), String> {
-    let queued = match orchestrator.peek_pending(&swap_id) {
+    let queued = match orchestrator.begin_apply(&swap_id) {
         Some(q) => q,
         None => return Ok(()),
     };

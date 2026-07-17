@@ -1,9 +1,11 @@
 //! Keys DTOs — ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN surface.
 //!
-//! The token itself NEVER crosses the IPC bridge on list / probe / add.
-//! Only the redacted preview and metadata surface. `key_*_copy` is the
-//! single deliberate exit — the user is explicitly asking to paste the
-//! token into another tool, so we return the real value there.
+//! The token itself NEVER crosses the IPC bridge — in either
+//! direction after add. List / probe surface only the redacted
+//! preview and metadata; `key_*_copy` writes the real value to the
+//! OS clipboard Rust-side and returns only a `KeyCopyReceiptDto`
+//! (label + preview + clear deadline). No command returns a raw
+//! secret string to JS.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
