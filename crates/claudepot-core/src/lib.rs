@@ -107,6 +107,7 @@ pub mod resolve;
 pub mod retention;
 pub mod rotation;
 pub mod routes;
+pub mod secret_patterns;
 pub mod secure_perms;
 pub mod service_status;
 pub mod services;

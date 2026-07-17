@@ -495,73 +495,24 @@ fn short_id(s: &str) -> String {
 /// Truncate any `sk-ant-...` token found inside `text`. The mask keeps
 /// the prefix and last four characters so readers can still tell the
 /// tokens apart without being able to reuse them.
+///
+/// Matching is delegated to [`crate::secret_patterns::sk_ant_scan_ranges`]
+/// (the shared linear scanner — bare-prefix matches, existing masks
+/// skipped for idempotency); only the render shape lives here.
 pub fn redact_secrets(text: &str) -> String {
-    // Work on bytes so we can scan linearly. The token set we guard
-    // against: `sk-ant-` followed by a base64url-ish run.
-    let needle = "sk-ant-";
-    if !text.contains(needle) {
+    let ranges = crate::secret_patterns::sk_ant_scan_ranges(text);
+    if ranges.is_empty() {
         return text.to_string();
     }
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
-    let bytes = text.as_bytes();
-    while cursor < bytes.len() {
-        if let Some(start) = find_from(bytes, cursor, needle.as_bytes()) {
-            let tok_end = token_end(bytes, start);
-            // Idempotency: the mask form is `sk-ant-***<last4>`, so
-            // the `*` sentinel always sits immediately after the
-            // `sk-ant-` prefix, with no token chars in between. If
-            // any token chars were consumed before the `*`, this is a
-            // real `sk-ant-realToken*` — redact instead of skipping.
-            let prefix_end = start + needle.len();
-            if tok_end == prefix_end && tok_end < bytes.len() && bytes[tok_end] == b'*' {
-                let mask_end = skip_existing_mask(bytes, tok_end);
-                out.push_str(&text[cursor..mask_end]);
-                cursor = mask_end;
-                continue;
-            }
-            out.push_str(&text[cursor..start]);
-            let token = &text[start..tok_end];
-            out.push_str(&mask(token));
-            cursor = tok_end;
-        } else {
-            out.push_str(&text[cursor..]);
-            break;
-        }
+    for (start, end) in ranges {
+        out.push_str(&text[cursor..start]);
+        out.push_str(&mask(&text[start..end]));
+        cursor = end;
     }
+    out.push_str(&text[cursor..]);
     out
-}
-
-fn skip_existing_mask(bytes: &[u8], from: usize) -> usize {
-    // Consume the `*` run.
-    let mut i = from;
-    while i < bytes.len() && bytes[i] == b'*' {
-        i += 1;
-    }
-    // Then the optional 4-char last4 suffix (alnum / - / _).
-    while i < bytes.len() && is_token_char(bytes[i]) {
-        i += 1;
-    }
-    i
-}
-
-fn find_from(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || from > hay.len().saturating_sub(needle.len()) {
-        return None;
-    }
-    (from..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
-}
-
-fn token_end(bytes: &[u8], start: usize) -> usize {
-    let mut i = start;
-    while i < bytes.len() && is_token_char(bytes[i]) {
-        i += 1;
-    }
-    i
-}
-
-fn is_token_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')
 }
 
 fn mask(token: &str) -> String {

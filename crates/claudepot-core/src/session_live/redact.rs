@@ -25,80 +25,20 @@
 //! complete sanitizer. Every call site that emits a user-content
 //! string must invoke `redact_secrets` before crossing out.
 //!
-//! Extension pattern: add a new `static FAMILY_RE: Lazy<Regex>`,
-//! apply it inside `redact_secrets` with a `replace_all` closure,
-//! and ship a fixture pair (positive + negative) under `tests`.
+//! Extension pattern: add the family's matcher to
+//! `crate::secret_patterns` (one definition, all consumers), select
+//! it inside `redact_secrets` with a `replace_all` closure, and ship
+//! a fixture pair (positive + negative) under `tests`.
+//!
+//! This module is a PROFILE over `crate::secret_patterns`: the
+//! shared module decides what IS a match (family definitions); this
+//! profile decides which families the live surface selects and how
+//! each match renders (`sk-ant-***<last4>`, `Bearer ***`, …).
 
-use once_cell::sync::Lazy;
-use regex::Regex;
-
-/// Anthropic key family. `sk-ant-` plus one or more of
-/// `[A-Za-z0-9_-]`. Matches OAuth variants (`sk-ant-oat01-...`)
-/// because the prefix family is shared.
-static SK_ANT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"sk-ant-[A-Za-z0-9_-]+").expect("static regex"));
-
-/// `Authorization: Bearer <token>` and `Authorization: Basic <blob>`
-/// HTTP headers. Case-insensitive on the scheme, whitespace-tolerant
-/// between header name and value. Captures the token body as group 1
-/// so we can replace it individually.
-static AUTH_HEADER_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(Authorization\s*:\s*(?:Bearer|Basic)\s+)([A-Za-z0-9._\-=/+]+)")
-        .expect("static regex")
-});
-
-/// JWT-shaped tokens: three base64url-safe runs separated by dots.
-/// `eyJ` is the literal ASCII prefix of any JWT whose header begins
-/// `{"typ"...` or `{"alg"...`, which is essentially all of them.
-/// Anchoring on `eyJ` keeps false positives away from arbitrary
-/// dotted identifiers.
-static JWT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+").expect("static regex")
-});
-
-/// Key=value pairs with a sensitive-looking key name. The delimiter
-/// may be `=` (query/form) or `:` with a space (YAML/JSON-ish). The
-/// key-name alternation is intentionally narrow so generic names
-/// like `data` or `content` don't trigger. Matches case-insensitively
-/// via the `(?i)` flag, so `PASSWORD=`, `Api_Key=`, etc. all hit.
-///
-/// The bare `token` keyword catches `token=...` and `AUTHORIZATION:
-/// Token ...` forms the narrower Authorization regex would miss.
-static SENSITIVE_KV_RE: Lazy<Regex> = Lazy::new(|| {
-    // `Authorization:` is handled by the outer AUTH_HEADER_RE pass
-    // specifically so we can preserve the `Authorization: Bearer ***`
-    // shape; don't duplicate `auth(orization)?` here or it would
-    // overwrite the structured mask with the generic one.
-    //
-    // Explicit OAuth variants (`client_secret`, `id_token`, `client_id`)
-    // are listed before the bare `secret`/`token` keywords because `\b`
-    // does NOT trip between `_` and a letter — both are word chars in
-    // regex — so `\bsecret` would miss `client_secret=…`. Naming the
-    // compound forms in their own alternatives sidesteps that.
-    Regex::new(
-        r#"(?i)\b(password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|client[_-]?id|id[_-]?token|secret|bearer|token)\s*[:=]\s*"?([^"\s&;,}]+)"?"#,
-    )
-    .expect("static regex")
-});
-
-/// `Cookie:` and `Set-Cookie:` headers. Captures the entire rest of
-/// the line so we can mask cookie VALUES while preserving the key=
-/// shape + attribute keywords (Path, HttpOnly, Secure, SameSite …)
-/// which are useful context and never sensitive.
-static COOKIE_HEADER_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)(Cookie|Set-Cookie)\s*:\s*([^\r\n]+)").expect("static regex"));
-
-const COOKIE_ATTR_NAMES: &[&str] = &[
-    "path",
-    "domain",
-    "expires",
-    "max-age",
-    "secure",
-    "httponly",
-    "samesite",
-    "partitioned",
-    "priority",
-];
+use crate::secret_patterns::{
+    is_cookie_attr_name, AUTH_HEADER_CAPTURE_RE, COOKIE_HEADER_RE, JWT_LOOSE_RE, SENSITIVE_KV_RE,
+    SK_ANT_GENERIC_RE,
+};
 
 /// Length threshold below which a matched sk-ant token is masked
 /// entirely rather than keeping a suffix.
@@ -132,7 +72,7 @@ pub fn redact_secrets(text: &str) -> String {
     // (which might itself look JWT-shaped) is hidden before the JWT
     // pass runs. Order matters: outer-to-inner lets us avoid
     // double-masking.
-    let mut out = AUTH_HEADER_RE
+    let mut out = AUTH_HEADER_CAPTURE_RE
         .replace_all(text, |caps: &regex::Captures<'_>| {
             format!("{}***", &caps[1])
         })
@@ -144,7 +84,9 @@ pub fn redact_secrets(text: &str) -> String {
             format!("{}: {}", header, mask_cookie_body(body))
         })
         .into_owned();
-    out = JWT_RE.replace_all(&out, "eyJ***.***.***").into_owned();
+    out = JWT_LOOSE_RE
+        .replace_all(&out, "eyJ***.***.***")
+        .into_owned();
     out = SENSITIVE_KV_RE
         .replace_all(&out, |caps: &regex::Captures<'_>| {
             // Preserve the original separator so Bash-style args like
@@ -156,7 +98,7 @@ pub fn redact_secrets(text: &str) -> String {
             format!("{key}{sep_chunk}***")
         })
         .into_owned();
-    SK_ANT_RE
+    SK_ANT_GENERIC_RE
         .replace_all(&out, |caps: &regex::Captures<'_>| {
             let tok = &caps[0];
             if tok.len() <= SHORT_TOKEN_THRESHOLD {
@@ -183,17 +125,11 @@ fn mask_cookie_body(body: &str) -> String {
                 let (k, _v) = trimmed.split_at(eq);
                 // Attribute keywords (Path=/, Max-Age=3600) keep
                 // their shape with masked values.
-                if COOKIE_ATTR_NAMES
-                    .iter()
-                    .any(|a| a.eq_ignore_ascii_case(k.trim()))
-                {
+                if is_cookie_attr_name(k.trim()) {
                     return format!("{k}=***");
                 }
                 format!("{k}=***")
-            } else if COOKIE_ATTR_NAMES
-                .iter()
-                .any(|a| a.eq_ignore_ascii_case(trimmed))
-            {
+            } else if is_cookie_attr_name(trimmed) {
                 // Value-less attribute like `HttpOnly`, `Secure`.
                 trimmed.to_string()
             } else {
@@ -528,5 +464,26 @@ mod tests {
         ] {
             assert!(!once.contains(leak), "{leak} leaked through");
         }
+    }
+
+    // ── Shared-core profile wiring ─────────────────────────────────
+
+    /// This profile's family selection is exactly the five live
+    /// families from `crate::secret_patterns` — a shared-core family
+    /// it selects (sk-ant) is masked, while provider-bank-only
+    /// families (GitHub PAT, AWS access key) deliberately pass
+    /// through: the config_view profile owns the broad bank.
+    #[test]
+    fn profile_selects_live_families_from_shared_core() {
+        let out = redact_secrets("x sk-ant-abcdefghijkl y");
+        assert!(!out.contains("abcdefghijkl"));
+        assert!(out.contains("sk-ant-***"));
+
+        let pat = format!("ghp_{}", "A".repeat(40));
+        assert_eq!(redact_secrets(&pat), pat);
+        assert_eq!(
+            redact_secrets("AKIAIOSFODNN7EXAMPLE"),
+            "AKIAIOSFODNN7EXAMPLE"
+        );
     }
 }

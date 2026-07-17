@@ -2,7 +2,9 @@
 //! session export.
 //!
 //! Three independent axes:
-//!   · Anthropic tokens    — always-on by default, regex bank
+//!   · Anthropic tokens    — always-on by default; matches come from
+//!     the shared `crate::secret_patterns` scanner, rendered here as
+//!     `sk-ant-***<last4>`
 //!   · Path strategy       — off / relative-to-root / hash
 //!   · Opt-in clauses      — emails, env assignments, custom regex
 //!
@@ -55,7 +57,7 @@ impl Default for RedactionPolicy {
 pub fn apply(input: &str, p: &RedactionPolicy) -> String {
     let mut s: String = input.to_string();
     if p.anthropic_keys {
-        s = crate::session_export::redact_secrets(&s);
+        s = apply_anthropic(&s);
     }
     s = apply_paths(&s, &p.paths);
     if p.emails {
@@ -73,6 +75,36 @@ pub fn apply(input: &str, p: &RedactionPolicy) -> String {
 // ---------------------------------------------------------------------------
 // Individual clauses
 // ---------------------------------------------------------------------------
+
+/// Mask every `sk-ant-*` token to `sk-ant-***<last4>` (≤12-char
+/// matches fully masked to `sk-ant-***`). Match extraction comes
+/// from the shared `crate::secret_patterns::sk_ant_scan_ranges`
+/// linear scanner — which also matches a bare `sk-ant-` prefix and
+/// skips already-masked runs for idempotency — while this profile
+/// owns the render style.
+fn apply_anthropic(input: &str) -> String {
+    let ranges = crate::secret_patterns::sk_ant_scan_ranges(input);
+    if ranges.is_empty() {
+        return input.to_string();
+    }
+    let mut out = String::with_capacity(input.len());
+    let mut cursor = 0usize;
+    for (start, end) in ranges {
+        out.push_str(&input[cursor..start]);
+        out.push_str(&mask_sk_ant(&input[start..end]));
+        cursor = end;
+    }
+    out.push_str(&input[cursor..]);
+    out
+}
+
+fn mask_sk_ant(token: &str) -> String {
+    if token.len() <= 12 {
+        return "sk-ant-***".to_string();
+    }
+    let last4 = &token[token.len() - 4..];
+    format!("sk-ant-***{last4}")
+}
 
 fn apply_paths(input: &str, strat: &PathStrategy) -> String {
     match strat {
@@ -345,6 +377,18 @@ mod tests {
         let p = RedactionPolicy::default();
         let input = "completely clean prose — no secrets here.";
         assert_eq!(apply(input, &p), input);
+    }
+
+    /// The anthropic clause runs on the shared scanner semantics
+    /// (`secret_patterns::sk_ant_scan_ranges`): a bare `sk-ant-`
+    /// prefix with an empty body is masked — a regex-based engine
+    /// requiring ≥1 body char would leave it alone. Locks this
+    /// profile onto the shared core's scanner variant.
+    #[test]
+    fn anthropic_clause_uses_shared_scanner_semantics() {
+        let p = RedactionPolicy::default();
+        let out = apply("bare sk-ant- and text", &p);
+        assert_eq!(out, "bare sk-ant-*** and text");
     }
 
     #[test]

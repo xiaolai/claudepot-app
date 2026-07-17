@@ -1,176 +1,27 @@
 //! Secret masking — port of CC's `secretScanner.ts` rules.
 //!
 //! Applied to every string that crosses the IPC boundary: preview bodies,
-//! search snippets, and all DTOs under `config_view`. The `RuleSet`
-//! below is modelled after CC's 28-family rule list (plan §7.1) plus
+//! search snippets, and all DTOs under `config_view`. The rule bank is
+//! modelled after CC's 28-family rule list (plan §7.1) plus
 //! `Authorization: Bearer`, PEM private-key multi-line, JWT-ish, and
 //! the runtime-assembled Anthropic prefix families.
+//!
+//! This module is a PROFILE over `crate::secret_patterns`: the family
+//! definitions live in [`crate::secret_patterns::provider_rules`]
+//! (one definition, all consumers); this profile selects the full
+//! bank and renders every match as `<redacted:{name}>`.
 //!
 //! Masking is **idempotent**: running `mask_text` twice is a no-op on
 //! the second pass (all replacement strings are themselves
 //! unambiguously non-secret).
 
-use once_cell::sync::Lazy;
-use regex::Regex;
 use serde_json::Value;
-
-/// A secret masking rule — name + pattern. Order-insensitive since each
-/// rule independently rewrites its own matches to `<redacted:name>`.
-struct Rule {
-    name: &'static str,
-    re: Regex,
-}
-
-fn r(name: &'static str, pat: &str) -> Rule {
-    Rule {
-        name,
-        re: Regex::new(pat).unwrap_or_else(|_| panic!("bad secret regex: {name}")),
-    }
-}
-
-static RULES: Lazy<Vec<Rule>> = Lazy::new(|| {
-    let anthropic_families = ["api", "admin", "oat", "ort", "cc"];
-    let mut rules: Vec<Rule> = Vec::new();
-
-    // Anthropic runtime-assembled families (sk-ant-<family>-…). Runtime
-    // assembly keeps the literal needle out of our binary so scanners
-    // don't false-positive on it.
-    for fam in anthropic_families {
-        let pat = format!(r"sk-ant-{fam}[0-9]{{2}}-[A-Za-z0-9_\-]{{20,}}");
-        rules.push(r("anthropic", Box::leak(pat.into_boxed_str())));
-    }
-
-    // AWS (prefixed first; `aws_secret_key`'s 40-char pattern runs LAST so
-    // it doesn't consume more-specific prefixed tokens below).
-    rules.push(r("aws_access_key", r"\bAKIA[0-9A-Z]{16}\b"));
-    rules.push(r("aws_session_token", r"\bASIA[0-9A-Z]{16}\b"));
-    // NOTE: aws_secret_key is pushed at the very end of this function.
-
-    // GCP
-    rules.push(r("gcp_key", r"\bAIza[0-9A-Za-z_\-]{35}\b"));
-    rules.push(r("gcp_service_account", r#""type":\s*"service_account""#));
-
-    // Azure
-    rules.push(r(
-        "azure_storage_key",
-        r"DefaultEndpointsProtocol=https?;AccountName=[A-Za-z0-9]+;AccountKey=[A-Za-z0-9+/=]+",
-    ));
-
-    // DigitalOcean
-    rules.push(r("digitalocean_token", r"\bdop_v1_[a-f0-9]{64}\b"));
-
-    // OpenAI
-    rules.push(r("openai", r"\bsk-[A-Za-z0-9]{20,}\b"));
-
-    // HuggingFace
-    rules.push(r("huggingface", r"\bhf_[A-Za-z0-9]{30,}\b"));
-
-    // GitHub (PAT, fine-grained, app, OAuth, refresh)
-    rules.push(r("github_pat_classic", r"\bghp_[A-Za-z0-9]{36,}\b"));
-    rules.push(r("github_pat_fine", r"\bgithub_pat_[A-Za-z0-9_]{82,}\b"));
-    rules.push(r("github_app", r"\bghs_[A-Za-z0-9]{36,}\b"));
-    rules.push(r("github_oauth", r"\bgho_[A-Za-z0-9]{36,}\b"));
-    rules.push(r("github_refresh", r"\bghr_[A-Za-z0-9]{36,}\b"));
-
-    // GitLab
-    rules.push(r("gitlab_pat", r"\bglpat-[A-Za-z0-9_\-]{20,}\b"));
-    rules.push(r("gitlab_deploy", r"\bgldt-[A-Za-z0-9_\-]{20,}\b"));
-
-    // Slack
-    rules.push(r("slack_bot", r"\bxoxb-[0-9A-Za-z\-]{20,}\b"));
-    rules.push(r("slack_user", r"\bxoxp-[0-9A-Za-z\-]{20,}\b"));
-    rules.push(r(
-        "slack_webhook",
-        r"https://hooks\.slack\.com/services/[A-Za-z0-9/_\-]+",
-    ));
-
-    // Twilio
-    rules.push(r("twilio_account_sid", r"\bAC[0-9a-f]{32}\b"));
-
-    // SendGrid
-    rules.push(r(
-        "sendgrid",
-        r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b",
-    ));
-
-    // npm
-    rules.push(r("npm_token", r"\bnpm_[A-Za-z0-9]{36,}\b"));
-
-    // PyPI
-    rules.push(r("pypi_token", r"\bpypi-AgEIc[A-Za-z0-9_\-]{80,}\b"));
-
-    // Databricks
-    rules.push(r("databricks", r"\bdapi[a-f0-9]{32}\b"));
-
-    // HashiCorp TF
-    rules.push(r(
-        "terraform_cloud",
-        r"\b[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_\-]{60,}\b",
-    ));
-
-    // Pulumi
-    rules.push(r("pulumi", r"\bpul-[A-Fa-f0-9]{40}\b"));
-
-    // Postman
-    rules.push(r("postman", r"\bPMAK-[A-Fa-f0-9]{24}-[A-Fa-f0-9]{34}\b"));
-
-    // Grafana
-    rules.push(r("grafana_api", r"\beyJrIjoi[A-Za-z0-9+/=_\-]{40,}\b"));
-    rules.push(r(
-        "grafana_service_account",
-        r"\bglsa_[A-Za-z0-9_]{32}_[A-Fa-f0-9]{8}\b",
-    ));
-    rules.push(r("grafana_cloud", r"\bglc_[A-Za-z0-9+/=]{64,}\b"));
-
-    // Sentry
-    rules.push(r("sentry_auth", r"\bsntrys_[A-Za-z0-9+/=_\-]{60,}\b"));
-    rules.push(r(
-        "sentry_dsn",
-        r"https://[0-9a-f]{32}@[A-Za-z0-9.\-]+\.ingest\.sentry\.io/[0-9]+",
-    ));
-
-    // Stripe
-    rules.push(r("stripe_live_secret", r"\bsk_live_[A-Za-z0-9]{20,}\b"));
-    rules.push(r(
-        "stripe_live_publishable",
-        r"\bpk_live_[A-Za-z0-9]{20,}\b",
-    ));
-
-    // Shopify
-    rules.push(r("shopify_access", r"\bshpat_[A-Fa-f0-9]{32}\b"));
-    rules.push(r("shopify_custom", r"\bshpca_[A-Fa-f0-9]{32}\b"));
-
-    // PEM private key (multi-line header match)
-    rules.push(r(
-        "pem_private_key",
-        r"-----BEGIN (RSA |EC |DSA |OPENSSH |PGP |)PRIVATE KEY-----[\s\S]*?-----END (RSA |EC |DSA |OPENSSH |PGP |)PRIVATE KEY-----",
-    ));
-
-    // Bearer + JWT (Claudepot additions, plan §7.1)
-    rules.push(r(
-        "bearer_token",
-        r"(?i)Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=\-]{10,}",
-    ));
-    rules.push(r(
-        "jwt",
-        r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b",
-    ));
-
-    // AWS secret-key pattern (unprefixed 40-char) runs LAST so it never
-    // swallows a more-specific prefixed token that came before it.
-    rules.push(r(
-        "aws_secret_key",
-        r"\b[A-Za-z0-9/+=]{40}\b(?:[^A-Za-z0-9/+=]|$)",
-    ));
-
-    rules
-});
 
 /// Replace every match with `<redacted:{name}>`. Idempotent — the
 /// replacement format never matches any of the rules again.
 pub fn mask_text(input: &str) -> String {
     let mut out = input.to_string();
-    for rule in RULES.iter() {
+    for rule in crate::secret_patterns::provider_rules() {
         out = rule
             .re
             .replace_all(&out, format!("<redacted:{}>", rule.name))
@@ -377,6 +228,20 @@ mod tests {
         let tok = format!("sk-{}", "a".repeat(40));
         let out = mask_text(&tok);
         assert!(out.contains("<redacted:openai>"));
+    }
+
+    /// A family defined once in `crate::secret_patterns` is picked up
+    /// by this profile and rendered in its `<redacted:{name}>` style —
+    /// the DigitalOcean rule has no definition anywhere in this file.
+    #[test]
+    fn shared_core_family_propagates_to_this_profile() {
+        assert!(crate::secret_patterns::provider_rules()
+            .iter()
+            .any(|r| r.name == "digitalocean_token"));
+        let tok = format!("dop_v1_{}", "a".repeat(64));
+        let out = mask_text(&tok);
+        assert!(out.contains("<redacted:digitalocean_token>"));
+        assert!(!out.contains(&tok));
     }
 
     #[test]
