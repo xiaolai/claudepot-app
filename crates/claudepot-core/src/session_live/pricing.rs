@@ -53,24 +53,39 @@ pub fn rates_for(model: &str) -> Option<ModelRates> {
     rates_by_canonical_id(&key).or_else(|| rates_by_family_prefix(&key))
 }
 
-/// Exact-match lookup against the baked table.
+/// Exact-match lookup against the baked table. Rates verified against
+/// the `claude-api` pricing reference on 2026-07-19 (USD per million
+/// tokens; `cache_read` = 0.1× input, `cache_write` = 1.25× input, per
+/// Anthropic's published cache multipliers).
 fn rates_by_canonical_id(id: &str) -> Option<ModelRates> {
     Some(match id {
-        // Opus 4.7 (current generation)
-        "claude-opus-4-7" => ModelRates {
-            input_per_million_usd: 15.0,
-            output_per_million_usd: 75.0,
-            cache_read_per_million_usd: 1.5,
-            cache_write_per_million_usd: 18.75,
+        // Opus 4.6 / 4.7 / 4.8 — current standard Opus tier ($5 / $25).
+        // NOT the old $15 / $75 tier: Anthropic dropped Opus pricing
+        // with the 4.5+ generation, and the bundled table had never
+        // been updated (every Opus cost was inflated 3×).
+        "claude-opus-4-8" | "claude-opus-4-7" | "claude-opus-4-6" => ModelRates {
+            input_per_million_usd: 5.0,
+            output_per_million_usd: 25.0,
+            cache_read_per_million_usd: 0.5,
+            cache_write_per_million_usd: 6.25,
         },
-        // Sonnet 4.6 (current generation)
-        "claude-sonnet-4-6" => ModelRates {
+        // Sonnet 5 / 4.6 — $3 / $15. (Sonnet 5 carries a $2 / $10 intro
+        // price through 2026-08-31; we bake the standard rate so the
+        // estimate doesn't under-report once the intro window closes.)
+        "claude-sonnet-5" | "claude-sonnet-4-6" => ModelRates {
             input_per_million_usd: 3.0,
             output_per_million_usd: 15.0,
             cache_read_per_million_usd: 0.3,
             cache_write_per_million_usd: 3.75,
         },
-        // Haiku 4.5 (current generation)
+        // Fable 5 / Mythos 5 — most capable tier, above Opus ($10 / $50).
+        "claude-fable-5" | "claude-mythos-5" => ModelRates {
+            input_per_million_usd: 10.0,
+            output_per_million_usd: 50.0,
+            cache_read_per_million_usd: 1.0,
+            cache_write_per_million_usd: 12.5,
+        },
+        // Haiku 4.5 — $1 / $5.
         "claude-haiku-4-5" => ModelRates {
             input_per_million_usd: 1.0,
             output_per_million_usd: 5.0,
@@ -82,18 +97,21 @@ fn rates_by_canonical_id(id: &str) -> Option<ModelRates> {
 }
 
 /// Fallback: match by `claude-<family>-` prefix so a new point
-/// release like `claude-opus-4-8` still gets a reasonable rate
-/// (the last-seen rate for that family) before a release updates
-/// the baked table.
+/// release like `claude-opus-4-9` still gets a reasonable rate (the
+/// latest-known rate for that family) before a release updates the
+/// baked table.
 fn rates_by_family_prefix(id: &str) -> Option<ModelRates> {
     if id.starts_with("claude-opus-") {
-        return rates_by_canonical_id("claude-opus-4-7");
+        return rates_by_canonical_id("claude-opus-4-8");
     }
     if id.starts_with("claude-sonnet-") {
-        return rates_by_canonical_id("claude-sonnet-4-6");
+        return rates_by_canonical_id("claude-sonnet-5");
     }
     if id.starts_with("claude-haiku-") {
         return rates_by_canonical_id("claude-haiku-4-5");
+    }
+    if id.starts_with("claude-fable-") || id.starts_with("claude-mythos-") {
+        return rates_by_canonical_id("claude-fable-5");
     }
     None
 }
@@ -170,15 +188,26 @@ mod tests {
 
     #[test]
     fn exact_rates_for_known_ids() {
-        let opus = rates_for("claude-opus-4-7").unwrap();
-        assert_eq!(opus.input_per_million_usd, 15.0);
-        assert_eq!(opus.output_per_million_usd, 75.0);
+        // Current-generation Opus is $5 / $25 (the standard tier), not
+        // the retired $15 / $75.
+        let opus = rates_for("claude-opus-4-8").unwrap();
+        assert_eq!(opus.input_per_million_usd, 5.0);
+        assert_eq!(opus.output_per_million_usd, 25.0);
+        assert_eq!(rates_for("claude-opus-4-7").unwrap(), opus);
+        assert_eq!(rates_for("claude-opus-4-6").unwrap(), opus);
 
-        let son = rates_for("claude-sonnet-4-6").unwrap();
+        let son = rates_for("claude-sonnet-5").unwrap();
         assert_eq!(son.input_per_million_usd, 3.0);
+        assert_eq!(son.output_per_million_usd, 15.0);
+        assert_eq!(rates_for("claude-sonnet-4-6").unwrap(), son);
+
+        let fable = rates_for("claude-fable-5").unwrap();
+        assert_eq!(fable.input_per_million_usd, 10.0);
+        assert_eq!(fable.output_per_million_usd, 50.0);
 
         let hai = rates_for("claude-haiku-4-5").unwrap();
         assert_eq!(hai.input_per_million_usd, 1.0);
+        assert_eq!(hai.output_per_million_usd, 5.0);
     }
 
     #[test]
@@ -192,12 +221,12 @@ mod tests {
 
     #[test]
     fn future_point_release_falls_back_to_family() {
-        // `claude-opus-4-8` isn't in the table yet; the family
-        // prefix path should return the 4-7 rate until a release
-        // updates it.
-        let future = rates_for("claude-opus-4-8").unwrap();
-        let known = rates_for("claude-opus-4-7").unwrap();
-        assert_eq!(future, known);
+        // `claude-opus-4-9` isn't in the table yet; the family prefix
+        // path should return the latest known Opus rate until a release
+        // updates the baked table.
+        let future = rates_for("claude-opus-4-9").unwrap();
+        let latest = rates_for("claude-opus-4-8").unwrap();
+        assert_eq!(future, latest);
     }
 
     #[test]
@@ -217,16 +246,16 @@ mod tests {
 
     #[test]
     fn estimate_opus_million_in_million_out() {
-        // 1M in at $15 + 1M out at $75 = $90.
-        let c = estimate_cost_usd("claude-opus-4-7", 1_000_000, 1_000_000, 0, 0).unwrap();
-        assert!((c - 90.0).abs() < 1e-6);
+        // 1M in at $5 + 1M out at $25 = $30 (current Opus tier).
+        let c = estimate_cost_usd("claude-opus-4-8", 1_000_000, 1_000_000, 0, 0).unwrap();
+        assert!((c - 30.0).abs() < 1e-6);
     }
 
     #[test]
     fn estimate_cache_read_is_dramatically_cheaper() {
-        // 1M cache-read at $1.50 vs 1M input at $15 — 10× savings.
-        let read = estimate_cost_usd("claude-opus-4-7", 0, 0, 1_000_000, 0).unwrap();
-        let raw_in = estimate_cost_usd("claude-opus-4-7", 1_000_000, 0, 0, 0).unwrap();
+        // 1M cache-read at $0.50 vs 1M input at $5 — 10× savings.
+        let read = estimate_cost_usd("claude-opus-4-8", 0, 0, 1_000_000, 0).unwrap();
+        let raw_in = estimate_cost_usd("claude-opus-4-8", 1_000_000, 0, 0, 0).unwrap();
         assert!(read * 10.0 > raw_in * 0.99 && read * 10.0 < raw_in * 1.01);
     }
 

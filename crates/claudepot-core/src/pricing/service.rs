@@ -221,6 +221,13 @@ impl PricingCacheService {
 }
 
 #[cfg(test)]
+// Tests that call `refresh_now` persist a fetched table to the on-disk
+// cache (`write_cache`). They isolate `CLAUDEPOT_DATA_DIR` to a temp dir
+// via `setup_test_data_dir`, holding `lock_data_dir()` across `.await` to
+// serialize that process-global env — otherwise the write lands in the
+// real `~/.claudepot/pricing-cache.json`. The guard is single-threaded,
+// never poisoned, and never contended in a deadlocking way.
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
@@ -294,6 +301,8 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_refreshes_yield_one_fetch() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
         let fetcher = Arc::new(CountingFetcher {
             calls: AtomicUsize::new(0),
         });
@@ -352,6 +361,8 @@ mod tests {
 
     #[tokio::test]
     async fn failed_fetch_does_not_poison_singleflight() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
         let fetcher = Arc::new(FlakyFetcher {
             calls: AtomicUsize::new(0),
             outcomes: StdMutex::new(vec![Err("network down".into())]),
