@@ -19,11 +19,28 @@
 //! must re-login). If the profile fetch comes back with a different email
 //! than the label, the outcome is `Drift` — and we do NOT persist the
 //! refreshed blob, so we don't entrench the misfiling.
+//!
+//! ## The active CLI account reads CC's keychain, not the private slot
+//!
+//! For every account EXCEPT the one CC is currently signed in as, the
+//! per-account private slot is authoritative — CC never touches those
+//! tokens, so refreshing a slot copy is safe. The *active* account is
+//! different: CC holds its live token in the keychain and rotates it on
+//! its own schedule (single-use refresh tokens). Verifying the active
+//! account off the private slot would either (a) present an
+//! already-rotated token and falsely report `Rejected`, or (b) rotate a
+//! token CC still holds, orphaning CC's session and forcing a real
+//! re-login. So for the active account we delegate to the keychain-aware
+//! resolver (`account_service::resolve_cc_identity`), which reads CC's
+//! keychain, re-checks on 401 before spending a refresh token, and writes
+//! any rotation back to the keychain (healing CC, not orphaning it).
 use crate::account::{AccountStore, VerifyOutcome};
 use crate::blob::CredentialBlob;
 use crate::cli_backend::swap;
 use crate::cli_backend::swap::{DefaultRefresher, ProfileFetcher, TokenRefresher};
+use crate::cli_backend::CliPlatform;
 use crate::error::OAuthError;
+use crate::services::account_service;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -69,7 +86,8 @@ pub async fn verify_account_identity(
     uuid: Uuid,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<VerifyOutcome, VerifyError> {
-    verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await
+    let platform = crate::cli_backend::create_platform();
+    verify_account_identity_with(store, uuid, platform.as_ref(), fetcher, &DefaultRefresher).await
 }
 
 /// Testable variant: inject a [`TokenRefresher`] so the 401→refresh
@@ -77,6 +95,7 @@ pub async fn verify_account_identity(
 pub async fn verify_account_identity_with(
     store: &AccountStore,
     uuid: Uuid,
+    platform: &dyn CliPlatform,
     fetcher: &dyn ProfileFetcher,
     refresher: &dyn TokenRefresher,
 ) -> Result<VerifyOutcome, VerifyError> {
@@ -84,6 +103,39 @@ pub async fn verify_account_identity_with(
         .find_by_uuid(uuid)
         .map_err(|e| VerifyError::Store(e.to_string()))?
         .ok_or(VerifyError::AccountNotFound(uuid))?;
+
+    // Active CLI account: verify against CC's LIVE keychain and heal a
+    // rotated token in place, rather than rotating the stale private-slot
+    // copy (which would orphan CC's session → forced re-login). Only when
+    // CC's keychain holds no usable blob do we fall through to the
+    // private-slot check below (there is nothing live to protect then).
+    if active_cli_matches(store, uuid)? {
+        if let Some(outcome) =
+            verify_active_via_keychain(&account.email, platform, fetcher, refresher).await
+        {
+            // TOCTOU guard: a concurrent swap may have changed the active
+            // account during the keychain round-trip above (verify holds no
+            // swap lock). If `uuid` is no longer active, the outcome we just
+            // computed describes CC's keychain — which now belongs to a
+            // DIFFERENT account — so it can't be persisted against `uuid`.
+            // Downgrade to NetworkError ("couldn't confirm this pass"); the
+            // next tick re-runs with a stable view. Any keychain heal the
+            // resolver performed was CAS-guarded and remains valid regardless.
+            let outcome = if active_cli_matches(store, uuid)? {
+                outcome
+            } else {
+                tracing::info!(
+                    account = %uuid,
+                    "active account changed during keychain verify — recording NetworkError instead of a cross-account outcome"
+                );
+                VerifyOutcome::NetworkError
+            };
+            store
+                .update_verification(uuid, &outcome)
+                .map_err(|e| VerifyError::Store(e.to_string()))?;
+            return Ok(outcome);
+        }
+    }
 
     let blob_str = match swap::load_private(uuid).await {
         Ok(s) => s,
@@ -172,6 +224,107 @@ pub async fn verify_account_identity_with(
         .update_verification(uuid, &outcome)
         .map_err(|e| VerifyError::Store(e.to_string()))?;
     Ok(outcome)
+}
+
+/// True when `uuid` is the account CC is currently signed in as (the
+/// active CLI slot).
+///
+/// Fails CLOSED, not open. Both an unreadable pointer (DB error) and a
+/// present-but-unparseable pointer surface as `VerifyError::Store` rather
+/// than being treated as "not active". Silently returning `false` on a
+/// corrupt pointer would route the account that is *actually* active down
+/// the private-slot path — reintroducing the rotation kill this module
+/// exists to prevent, on the one account where it matters, precisely when
+/// state is already corrupt. A no-active-account pointer (`None`) is the
+/// only benign "not active" case.
+fn active_cli_matches(store: &AccountStore, uuid: Uuid) -> Result<bool, VerifyError> {
+    match store
+        .active_cli_uuid()
+        .map_err(|e| VerifyError::Store(e.to_string()))?
+    {
+        None => Ok(false),
+        Some(raw) => {
+            let active = Uuid::parse_str(&raw).map_err(|e| {
+                VerifyError::Store(format!(
+                    "active_cli pointer is not a valid uuid ({raw:?}): {e}"
+                ))
+            })?;
+            Ok(active == uuid)
+        }
+    }
+}
+
+/// Verify the ACTIVE CLI account against CC's live keychain via the
+/// hardened, single-use-rotation-safe resolver. Returns:
+/// - `Some(outcome)` — a definitive verification outcome to persist.
+/// - `None` — CC's keychain holds no usable blob (empty / unparseable);
+///   the caller falls back to the private-slot check.
+///
+/// The resolver reads CC's keychain, re-checks `/profile` on a 401 before
+/// spending a refresh token, and CAS-writes any rotation back to the
+/// keychain — so a refresh HEALS CC's session instead of orphaning it. It
+/// never touches the private slot, so the "don't entrench a misfiling in
+/// the slot" invariant holds trivially for the drift case.
+async fn verify_active_via_keychain(
+    stored_email: &str,
+    platform: &dyn CliPlatform,
+    fetcher: &dyn ProfileFetcher,
+    refresher: &dyn TokenRefresher,
+) -> Option<VerifyOutcome> {
+    use account_service::RegisterError as RE;
+    let adapter = KeychainFetcher(fetcher);
+    match account_service::resolve_cc_identity(platform, &adapter, refresher).await {
+        Ok(Some((_blob, cc_email))) => Some(classify(stored_email, cc_email)),
+        // CC has no credentials / unparseable blob — nothing live to
+        // verify against. Defer to the private-slot path.
+        Ok(None) => None,
+        // The ONE terminal outcome: access token AND refresh token both
+        // refused → the user must re-login.
+        Err(RE::AuthRejected) => Some(VerifyOutcome::Rejected),
+        // Transient — never flip to Rejected on a blip; NetworkError
+        // preserves verified_email history. These are the variants
+        // resolve_cc_identity actually emits on a non-terminal failure.
+        Err(e @ (RE::ProfileFetch(_) | RE::CredentialRead(_) | RE::CredentialWrite(_))) => {
+            tracing::debug!("active-account verify: transient resolver error: {e}");
+            Some(VerifyOutcome::NetworkError)
+        }
+        Err(e @ RE::CcChangedDuringRefresh) => {
+            tracing::debug!("active-account verify: keychain changed mid-refresh: {e}");
+            Some(VerifyOutcome::NetworkError)
+        }
+        // resolve_cc_identity does not emit these today. They are listed
+        // EXPLICITLY (no `_` wildcard) on purpose: adding a new variant to
+        // RegisterError makes THIS match non-exhaustive and breaks the
+        // build here, forcing a deliberate terminal-vs-transient decision
+        // rather than silently defaulting a future terminal variant to
+        // NetworkError. For now the conservative mapping is NetworkError
+        // (never a *false* re-login), logged loudly since reaching here is
+        // unexpected.
+        Err(e @ (RE::NoCredentials | RE::AlreadyRegistered(..) | RE::Store(_) | RE::NotFound)) => {
+            tracing::warn!(
+                "active-account verify: unexpected resolver error mapped to NetworkError: {e}"
+            );
+            Some(VerifyOutcome::NetworkError)
+        }
+    }
+}
+
+/// Adapts a [`swap::ProfileFetcher`] (the `fetch_email` / `fetch_profile`
+/// trait threaded through this module) to the
+/// [`account_service::ProfileFetcher`] (`fetch`) that
+/// `resolve_cc_identity` expects. Both return a `profile::Profile`; this
+/// is a pure trait bridge so the same injected fetcher (real or mock)
+/// drives both verification paths.
+struct KeychainFetcher<'a>(&'a dyn ProfileFetcher);
+
+#[async_trait::async_trait]
+impl account_service::ProfileFetcher for KeychainFetcher<'_> {
+    async fn fetch(
+        &self,
+        access_token: &str,
+    ) -> Result<crate::oauth::profile::Profile, OAuthError> {
+        self.0.fetch_profile(access_token).await
+    }
 }
 
 fn classify(stored: &str, actual: String) -> VerifyOutcome {
@@ -339,6 +492,44 @@ mod tests {
         }
     }
 
+    /// Mock CC keychain: `read_default` returns the configured blob;
+    /// `write_default` records the write AND updates the stored blob so
+    /// the resolver's CAS re-read sees exactly what it just wrote.
+    struct MockKeychain {
+        blob: Mutex<Option<String>>,
+        writes: Mutex<Vec<String>>,
+    }
+
+    impl MockKeychain {
+        fn with(blob: Option<&str>) -> Self {
+            Self {
+                blob: Mutex::new(blob.map(|s| s.to_string())),
+                writes: Mutex::new(Vec::new()),
+            }
+        }
+        fn empty() -> Self {
+            Self::with(None)
+        }
+        fn writes(&self) -> Vec<String> {
+            self.writes.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::cli_backend::CliPlatform for MockKeychain {
+        async fn read_default(&self) -> Result<Option<String>, crate::cli_backend::SwapError> {
+            Ok(self.blob.lock().unwrap().clone())
+        }
+        async fn write_default(&self, blob: &str) -> Result<(), crate::cli_backend::SwapError> {
+            self.writes.lock().unwrap().push(blob.to_string());
+            *self.blob.lock().unwrap() = Some(blob.to_string());
+            Ok(())
+        }
+        async fn touch_credfile(&self) -> Result<(), crate::cli_backend::SwapError> {
+            Ok(())
+        }
+    }
+
     /// Caller MUST already hold the data-dir lock — std::sync::Mutex isn't
     /// reentrant, so taking it a second time on the same thread deadlocks.
     fn setup_account(email: &str) -> (AccountStore, tempfile::TempDir, Uuid) {
@@ -411,7 +602,8 @@ mod tests {
 
         let fetcher = MockFetcher::rejecting();
         let refresher = MockRefresher::rejecting();
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+        let platform = MockKeychain::empty();
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
             .await
             .unwrap();
         assert_eq!(outcome, VerifyOutcome::Rejected);
@@ -442,7 +634,8 @@ mod tests {
 
         let fetcher = MockFetcher::rejecting();
         let refresher = MockRefresher::server_erroring();
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+        let platform = MockKeychain::empty();
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
             .await
             .unwrap();
         assert_eq!(outcome, VerifyOutcome::NetworkError);
@@ -471,8 +664,9 @@ mod tests {
             err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
         };
         let refresher = MockRefresher::ok_with("sk-ant-oat01-new", "sk-ant-ort01-new");
+        let platform = MockKeychain::empty();
 
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
             .await
             .unwrap();
         assert_eq!(
@@ -507,8 +701,9 @@ mod tests {
             err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
         };
         let refresher = MockRefresher::ok_with("new-access", "new-refresh");
+        let platform = MockKeychain::empty();
 
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
             .await
             .unwrap();
         assert!(matches!(outcome, VerifyOutcome::Drift { .. }));
@@ -563,5 +758,259 @@ mod tests {
         let fetcher = MockFetcher::ok("alice@example.com");
         let result = verify_account_identity(&store, uuid, &fetcher).await;
         assert!(matches!(result, Err(VerifyError::NoBlob)));
+    }
+
+    // ---- Active CLI account: verify against CC's keychain, not the slot ----
+
+    /// The active account is verified against CC's live keychain even when
+    /// its private slot is EMPTY. Under the old private-slot-only path this
+    /// returned `NoBlob`; now the keychain is the source of truth, so a
+    /// valid live token verifies `Ok`. Proves the read source switched.
+    #[tokio::test]
+    async fn active_account_verifies_against_keychain_when_slot_empty() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        // No private slot saved on purpose — the old path would NoBlob here.
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = MockFetcher::ok("alice@example.com");
+        let refresher = MockRefresher::ok_with("unused", "unused");
+
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        // Valid token → no refresh → keychain untouched.
+        assert!(platform.writes().is_empty());
+    }
+
+    /// THE mode-B fix: when CC's live access token is expired, the refresh
+    /// is written back to the KEYCHAIN (healing CC's session), NOT rotated
+    /// into the private slot while CC keeps the dead token. Proves the
+    /// rotation lands where CC will read it.
+    #[tokio::test]
+    async fn active_account_expired_token_heals_keychain_in_place() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        // A stale private slot must be left untouched by the active path.
+        let stale_slot = crate::testing::expired_blob_json();
+        swap::save_private(uuid, &stale_slot).await.unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        // /profile 401 first (token rejected), then the post-refresh call
+        // returns the matching email.
+        let fetcher = MockFetcher {
+            email: Mutex::new(Some("alice@example.com".into())),
+            err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
+        };
+        let refresher = MockRefresher::ok_with("sk-ant-oat01-healed", "sk-ant-ort01-healed");
+
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+
+        // The rotated token was written to CC's keychain — CC stays alive.
+        let writes = platform.writes();
+        assert_eq!(writes.len(), 1, "exactly one keychain heal write");
+        assert!(
+            writes[0].contains("sk-ant-oat01-healed"),
+            "keychain must hold the rotated access token"
+        );
+        // The private slot was NOT the thing we rotated.
+        let slot_after = swap::load_private(uuid).await.unwrap();
+        assert_eq!(
+            slot_after, stale_slot,
+            "active path must not touch the slot"
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// Drift is reported from CC's ACTUAL keychain identity. No refresh on
+    /// the happy path, so the keychain is not written (nothing to entrench).
+    #[tokio::test]
+    async fn active_account_drift_reported_from_keychain_identity() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = MockFetcher::ok("bob@example.com");
+        let refresher = MockRefresher::ok_with("unused", "unused");
+
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, VerifyOutcome::Drift { .. }));
+
+        let row = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(row.verify_status, "drift");
+        assert_eq!(row.verified_email.as_deref(), Some("bob@example.com"));
+        assert!(platform.writes().is_empty());
+    }
+
+    /// Active account, keychain token rejected AND refresh definitively
+    /// refused → `Rejected` (genuine re-login), same terminal semantics as
+    /// the private-slot path.
+    #[tokio::test]
+    async fn active_account_rejected_when_keychain_token_and_refresh_fail() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = MockFetcher::rejecting();
+        let refresher = MockRefresher::rejecting();
+
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(outcome, VerifyOutcome::Rejected);
+    }
+
+    /// Active account, keychain token rejected but refresh hits a 5xx →
+    /// `NetworkError`, NOT `Rejected`. A transient blip must never push the
+    /// user to re-login.
+    #[tokio::test]
+    async fn active_account_transient_refresh_error_is_network_not_rejected() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = MockFetcher::rejecting();
+        let refresher = MockRefresher::server_erroring();
+
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(outcome, VerifyOutcome::NetworkError);
+    }
+
+    /// Active account but CC's keychain is EMPTY — nothing live to protect,
+    /// so we fall back to the private-slot check and verify that blob.
+    #[tokio::test]
+    async fn active_account_falls_back_to_slot_when_keychain_empty() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
+
+        let platform = MockKeychain::empty(); // CC has no credentials
+        let fetcher = MockFetcher::ok("alice@example.com");
+        let refresher = MockRefresher::ok_with("unused", "unused");
+
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// F2 regression: a corrupt `active_cli` pointer must FAIL CLOSED —
+    /// verify errors rather than silently routing the (possibly
+    /// truly-active) account down the unsafe private-slot path.
+    #[tokio::test]
+    async fn malformed_active_pointer_fails_closed() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
+        // set_active_cli only accepts a real Uuid — inject garbage directly
+        // into the state table to simulate DB corruption / hand-editing.
+        store
+            .db()
+            .execute(
+                "INSERT OR REPLACE INTO state (key, value) VALUES ('active_cli', 'not-a-uuid')",
+                [],
+            )
+            .unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = MockFetcher::ok("alice@example.com");
+        let refresher = MockRefresher::ok_with("unused", "unused");
+
+        let result =
+            verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher).await;
+        assert!(
+            matches!(result, Err(VerifyError::Store(_))),
+            "expected Store error on malformed active pointer, got {result:?}"
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// A [`ProfileFetcher`] that clears the active-CLI pointer the first
+    /// time it is called — simulating a concurrent swap landing DURING the
+    /// keychain verify round-trip.
+    struct ActiveFlippingFetcher {
+        store2: AccountStore,
+        email: String,
+    }
+
+    #[async_trait::async_trait]
+    impl ProfileFetcher for ActiveFlippingFetcher {
+        async fn fetch_email(&self, _access_token: &str) -> Result<String, OAuthError> {
+            self.store2.clear_active_cli().unwrap();
+            Ok(self.email.clone())
+        }
+    }
+
+    /// F1 regression: if a concurrent swap changes the active account while
+    /// the keychain verify is in flight, the computed outcome (about CC's
+    /// keychain, now a DIFFERENT account) must NOT be persisted against this
+    /// uuid — it downgrades to NetworkError.
+    #[tokio::test]
+    async fn active_change_mid_verify_downgrades_to_network_error() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        // A second connection on the same DB, handed to the fetcher so it
+        // can flip the active pointer mid-call.
+        let store2 = AccountStore::open(&dir.path().join("t.db")).unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = ActiveFlippingFetcher {
+            store2,
+            email: "alice@example.com".into(),
+        };
+        let refresher = MockRefresher::ok_with("unused", "unused");
+
+        let outcome = verify_account_identity_with(&store, uuid, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+        // Keychain said "alice = Ok", but active flipped away mid-verify, so
+        // we must not persist that as this account's truth — the returned
+        // outcome AND the persisted row must both be NetworkError.
+        assert_eq!(outcome, VerifyOutcome::NetworkError);
+        let row = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(row.verify_status, "network_error");
     }
 }

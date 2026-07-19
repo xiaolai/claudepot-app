@@ -6,6 +6,25 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.6 — beta (released 2026-07-19)
+
+### Fixed
+
+- **Active Claude Code accounts stop needing frequent re-logins.**
+  Verifying the currently-signed-in account used to refresh that
+  account's stored credential copy on a 401. Under Anthropic's
+  single-use refresh-token rotation that either presented an
+  already-rotated token — falsely marking the account "rejected" — or
+  rotated the token Claude Code still held in its keychain, orphaning
+  the live session and forcing a `/login`. The active account is now
+  verified against Claude Code's keychain directly, healing any token
+  rotation back into it so the live session survives. Non-active
+  accounts are unchanged. Hardened alongside the fix: a corrupt
+  active-account pointer fails closed instead of silently taking the
+  unsafe path, the active-status check is re-guarded across the
+  keychain round-trip, and resolver errors are matched exhaustively so
+  a future terminal error can't masquerade as a transient one.
+
 ## 0.2.5 — beta (released 2026-07-18)
 
 A whole-project audit release: five parallel audit passes over core,
