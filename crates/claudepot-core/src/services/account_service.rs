@@ -59,7 +59,9 @@ pub(crate) trait ProfileFetcher: Send + Sync {
 }
 
 /// Production implementation that calls the Anthropic API.
-struct DefaultProfileFetcher;
+/// `pub(crate)` so `launcher` can drive `resolve_cc_identity` with the
+/// real profile fetcher when healing the active account's keychain token.
+pub(crate) struct DefaultProfileFetcher;
 
 #[async_trait::async_trait]
 impl ProfileFetcher for DefaultProfileFetcher {
@@ -250,6 +252,40 @@ pub(crate) async fn resolve_cc_identity(
     fetch_profile: &dyn ProfileFetcher,
     refresher: &dyn crate::cli_backend::swap::TokenRefresher,
 ) -> Result<Option<(String, String)>, RegisterError> {
+    let _lock = swap::acquire_swap_lock().map_err(|e| {
+        RegisterError::CredentialRead(format!("failed to acquire credential lock: {e}"))
+    })?;
+    resolve_cc_identity_locked(platform, fetch_profile, refresher, false, None, None).await
+}
+
+/// Force-refresh the resolver for callers that already hold `swap`'s
+/// cross-process credential lock.
+pub(crate) async fn resolve_cc_identity_force_refresh_locked(
+    platform: &dyn cli_backend::CliPlatform,
+    fetch_profile: &dyn ProfileFetcher,
+    refresher: &dyn crate::cli_backend::swap::TokenRefresher,
+    expected_email: &str,
+    expected_refresh_token: &str,
+) -> Result<Option<(String, String)>, RegisterError> {
+    resolve_cc_identity_locked(
+        platform,
+        fetch_profile,
+        refresher,
+        true,
+        Some(expected_email),
+        Some(expected_refresh_token),
+    )
+    .await
+}
+
+async fn resolve_cc_identity_locked(
+    platform: &dyn cli_backend::CliPlatform,
+    fetch_profile: &dyn ProfileFetcher,
+    refresher: &dyn crate::cli_backend::swap::TokenRefresher,
+    force_refresh: bool,
+    expected_email: Option<&str>,
+    expected_refresh_token: Option<&str>,
+) -> Result<Option<(String, String)>, RegisterError> {
     let blob_str_t0 = match platform
         .read_default()
         .await
@@ -261,14 +297,34 @@ pub(crate) async fn resolve_cc_identity(
 
     let blob_t0 = match CredentialBlob::from_json(&blob_str_t0) {
         Ok(b) => b,
+        Err(e) if force_refresh => {
+            return Err(RegisterError::CredentialRead(format!(
+                "CC credentials became unparseable during token heal: {e}"
+            )))
+        }
         Err(_) => return Ok(None), // Unparseable — leave it alone.
     };
 
-    // Step 1 — happy path. Most calls end here.
-    match fetch_profile
+    if let Some(expected_refresh_token) = expected_refresh_token {
+        if blob_t0.claude_ai_oauth.refresh_token != expected_refresh_token {
+            return Err(RegisterError::CcChangedDuringRefresh);
+        }
+    }
+
+    // Step 1 — happy path. Most calls end here. The forced path still
+    // verifies the current identity, but deliberately continues to the
+    // refresh even when /profile accepts the near-expiry access token.
+    let initial_profile = fetch_profile
         .fetch(&blob_t0.claude_ai_oauth.access_token)
-        .await
-    {
+        .await;
+    match initial_profile {
+        Ok(prof) if force_refresh => {
+            if let Some(expected_email) = expected_email {
+                if !prof.email.eq_ignore_ascii_case(expected_email) {
+                    return Err(RegisterError::CcChangedDuringRefresh);
+                }
+            }
+        }
         Ok(prof) => return Ok(Some((blob_str_t0, prof.email))),
         Err(OAuthError::AuthFailed(_)) => {}
         Err(e) => return Err(RegisterError::ProfileFetch(e.to_string())),
@@ -289,15 +345,57 @@ pub(crate) async fn resolve_cc_identity(
     };
     let latest_blob = match CredentialBlob::from_json(&latest_blob_str) {
         Ok(b) => b,
+        Err(e) if force_refresh => {
+            return Err(RegisterError::CredentialRead(format!(
+                "CC credentials became unparseable during token heal: {e}"
+            )))
+        }
         Err(_) => return Ok(None),
     };
 
-    if latest_blob_str != blob_str_t0 {
+    let expected_token_changed = match expected_refresh_token {
+        Some(expected_refresh_token) => {
+            latest_blob.claude_ai_oauth.refresh_token != expected_refresh_token
+        }
+        None => false,
+    };
+
+    if let Some(expected_email) = expected_email {
+        if expected_token_changed {
+            // Another serialized healer may already have installed a fresh
+            // token. Adopt it after verifying its identity instead of
+            // spending a second single-use refresh token. A different
+            // account, or an unverifiable live blob, fails closed.
+            match fetch_profile
+                .fetch(&latest_blob.claude_ai_oauth.access_token)
+                .await
+            {
+                Ok(prof) if prof.email.eq_ignore_ascii_case(expected_email) => {
+                    if !latest_blob.is_expired(300) {
+                        return Ok(Some((latest_blob_str, prof.email)));
+                    }
+                }
+                _ => return Err(RegisterError::CcChangedDuringRefresh),
+            }
+        }
+    }
+
+    if latest_blob_str != blob_str_t0 && !expected_token_changed {
         match fetch_profile
             .fetch(&latest_blob.claude_ai_oauth.access_token)
             .await
         {
-            Ok(prof) => return Ok(Some((latest_blob_str, prof.email))),
+            Ok(prof) if !force_refresh => return Ok(Some((latest_blob_str, prof.email))),
+            Ok(prof) => {
+                if let Some(expected_email) = expected_email {
+                    if !prof.email.eq_ignore_ascii_case(expected_email) {
+                        return Err(RegisterError::CcChangedDuringRefresh);
+                    }
+                }
+                if !latest_blob.is_expired(300) {
+                    return Ok(Some((latest_blob_str, prof.email)));
+                }
+            }
             Err(OAuthError::AuthFailed(_)) => {}
             Err(e) => return Err(RegisterError::ProfileFetch(e.to_string())),
         }
@@ -340,6 +438,28 @@ pub(crate) async fn resolve_cc_identity(
         .read_default()
         .await
         .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
+
+    if let (Some(expected_email), Some(expected_refresh_token)) =
+        (expected_email, expected_refresh_token)
+    {
+        let live_blob_str = pre_write
+            .as_deref()
+            .ok_or(RegisterError::CcChangedDuringRefresh)?;
+        let live_blob = CredentialBlob::from_json(live_blob_str)
+            .map_err(|_| RegisterError::CcChangedDuringRefresh)?;
+        if live_blob.claude_ai_oauth.refresh_token != expected_refresh_token {
+            match fetch_profile
+                .fetch(&live_blob.claude_ai_oauth.access_token)
+                .await
+            {
+                Ok(prof) if prof.email.eq_ignore_ascii_case(expected_email) => {
+                    return Ok(Some((live_blob_str.to_string(), prof.email)));
+                }
+                _ => return Err(RegisterError::CcChangedDuringRefresh),
+            }
+        }
+    }
+
     if pre_write.as_deref() == Some(latest_blob_str.as_str()) {
         platform
             .write_default(&new_blob_str)

@@ -167,9 +167,11 @@ pub(crate) async fn is_cc_process_running() -> bool {
     }
 }
 
-/// Acquire an exclusive file lock for swap operations.
-/// Returns the locked file handle — lock is released when dropped.
-fn acquire_swap_lock() -> Result<fs::File, SwapError> {
+/// Acquire the cross-process lock shared by swaps and every token-refresh
+/// path. Refresh tokens are single-use, so callers must hold this lock from
+/// their final credential read through the refresh and corresponding write.
+/// The lock is released when the returned file handle is dropped.
+pub(crate) fn acquire_swap_lock() -> Result<fs::File, SwapError> {
     let lock_path = crate::paths::claudepot_data_dir().join(".swap.lock");
     if let Some(parent) = lock_path.parent() {
         fs::create_dir_all(parent)?;
