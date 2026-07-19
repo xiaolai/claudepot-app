@@ -29,7 +29,7 @@ pub async fn run(
     match classify_run_mode(print_token, args).map_err(|e| anyhow::anyhow!("{e}"))? {
         RunMode::PrintToken => {
             eprintln!("⚠ WARNING: outputting raw access token. Do not log or share this value.");
-            let token = launcher::get_access_token(account.uuid)
+            let token = launcher::get_access_token(account.uuid, &account.email)
                 .await
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("{token}");
@@ -41,7 +41,7 @@ pub async fn run(
             // read a progress line. Show the bin name instead.
             let bin = args.first().map(String::as_str).unwrap_or("<cmd>");
             ctx.info(&format!("Running {bin} as {email}..."));
-            let exit_code = launcher::run(account.uuid, args)
+            let exit_code = launcher::run(account.uuid, &account.email, args)
                 .await
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             std::process::exit(exit_code);
