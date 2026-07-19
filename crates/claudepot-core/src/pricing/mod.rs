@@ -89,7 +89,7 @@ pub struct PriceTable {
 
 /// Bundled rates verified against Anthropic's public pricing page on
 /// this date. Bumped whenever the defaults are edited.
-const RATES_VERIFIED_AT: &str = "2026-01-15";
+const RATES_VERIFIED_AT: &str = "2026-07-19";
 
 /// Cache TTL — how old a cached table can be before we trigger a
 /// background refresh. Anthropic rate changes are infrequent and
@@ -111,7 +111,19 @@ const CACHE_FILENAME: &str = "pricing-cache.json";
 pub fn bundled() -> PriceTable {
     use crate::session_live::pricing as sl;
     let mut models = BTreeMap::new();
-    for id in ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"] {
+    // Keep this list current with every model generation — a model
+    // absent here is priced only if the live scrape succeeds, and shows
+    // as "unpriced" in the cost dashboard otherwise (deliberate: see
+    // `resolve_model_rates`, which surfaces drift rather than guessing).
+    for id in [
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+    ] {
         let Some(r) = sl::rates_for(id) else { continue };
         models.insert(
             id.to_string(),
@@ -165,6 +177,20 @@ fn now_unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// `RATES_VERIFIED_AT` as a unix timestamp (midnight UTC). Used as the
+/// freshness floor for cached tables: a cache fetched *before* the
+/// running build verified its bundled rates predates our current price
+/// knowledge and must not shadow it. Falls back to `0` (no floor) if
+/// the constant ever fails to parse — a malformed date should degrade
+/// to "trust the cache", never panic or reject every cache.
+fn rates_verified_at_unix() -> u64 {
+    chrono::NaiveDate::parse_from_str(RATES_VERIFIED_AT, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .map(|dt| dt.and_utc().timestamp().max(0) as u64)
+        .unwrap_or(0)
+}
+
 /// Read the on-disk cache. Returns `None` when the file is missing,
 /// unreadable, corrupt, or older than the TTL. Parse errors on the
 /// cache are intentionally silent — a bad cache is equivalent to no
@@ -184,6 +210,15 @@ pub fn load_cached() -> Option<PriceTable> {
         // restore); treat as miss.
         PriceSource::Bundled { .. } => return None,
     };
+    // Freshness floor: a cache fetched before this build verified its
+    // bundled rates predates our current price knowledge. Discard it so
+    // a shipped rate correction (e.g. the Opus $15→$5 fix) wins the
+    // instant a user updates, instead of waiting out the 24h TTL or a
+    // manual refresh. A cache fetched *after* the floor is a real live
+    // scrape newer than our bundled snapshot — keep trusting it.
+    if fetched_at < rates_verified_at_unix() {
+        return None;
+    }
     let age_secs = now_unix_secs().saturating_sub(fetched_at);
     if age_secs > CACHE_TTL_HOURS * 3600 {
         return None;
@@ -231,6 +266,21 @@ const ANTHROPIC_PRICING_URL: &str = "https://www.anthropic.com/pricing";
 /// (input × 1.25 and input × 0.1). That derivation is authoritative
 /// per Anthropic's own cache documentation and sidesteps brittle
 /// parsing of the secondary rows.
+/// Overlay scraped rates onto the bundled table as a floor: `bundled()`
+/// provides an entry for every current model, and each scraped rate
+/// overrides its bundled counterpart. The result therefore covers at
+/// least the bundled model set — a partial or stale scrape can only
+/// refresh/extend coverage, never drop a known model to "unpriced".
+fn overlay_scrape_on_bundled(
+    scraped: BTreeMap<String, ModelRates>,
+) -> BTreeMap<String, ModelRates> {
+    let mut models = bundled().models;
+    for (id, rate) in scraped {
+        models.insert(id, rate);
+    }
+    models
+}
+
 pub async fn fetch_live() -> Result<PriceTable, String> {
     let body = reqwest::get(ANTHROPIC_PRICING_URL)
         .await
@@ -239,16 +289,22 @@ pub async fn fetch_live() -> Result<PriceTable, String> {
         .await
         .map_err(|e| format!("read body: {e}"))?;
 
-    let models = parse_pricing_html(&body).map_err(|e| format!("parse: {e}"))?;
-    // Require at least one model from each frontier family. Previous
-    // check hardcoded exact ids (`claude-opus-4-7` etc.) which would
-    // fail forever once Anthropic ships the next point release —
-    // family-level presence is the stable invariant to assert.
-    for family in ["claude-opus-", "claude-sonnet-", "claude-haiku-"] {
-        if !models.keys().any(|id| id.starts_with(family)) {
-            return Err(format!("no {family}* model found in scrape"));
-        }
+    let scraped = parse_pricing_html(&body).map_err(|e| format!("parse: {e}"))?;
+    // A parse that found nothing means the page restructured past what
+    // the heuristic scraper can read. Surface it as an error so the
+    // caller keeps the existing cache / bundled table rather than
+    // caching an empty "live" result.
+    if scraped.is_empty() {
+        return Err("scrape parsed no models (pricing page shape changed?)".to_string());
     }
+    // Overlay the scrape onto the bundled table as a floor. The scraper
+    // is best-effort and lags the model lineup (it can't yet read
+    // `claude-sonnet-5` / `claude-fable-5` — their ids don't match its
+    // `claude-<family>-4-` patterns), so a raw scrape can be missing
+    // current models. Starting from `bundled()` and letting scraped
+    // rates override guarantees a live fetch can only *refresh or
+    // extend* coverage, never regress a known model to "unpriced".
+    let models = overlay_scrape_on_bundled(scraped);
     Ok(PriceTable {
         models,
         source: PriceSource::Live {
@@ -461,5 +517,83 @@ mod tests {
         // copy references "daily" — keep this at 24 unless you also
         // update the UI.
         assert_eq!(CACHE_TTL_HOURS, 24);
+    }
+
+    // ── Freshness floor (RATES_VERIFIED_AT) ────────────────────────
+
+    #[test]
+    fn cache_older_than_rates_floor_is_rejected() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        // A cache stamped one second before this build verified its
+        // bundled rates predates our price knowledge. Even if it were
+        // otherwise TTL-fresh it must be discarded, so a shipped rate
+        // correction wins the instant a user updates.
+        let stale = PriceTable {
+            models: bundled().models,
+            source: PriceSource::Live {
+                url: "https://example.test/pricing".to_string(),
+                fetched_at_unix: rates_verified_at_unix().saturating_sub(1),
+            },
+            last_fetch_error: None,
+        };
+        write_cache(&stale).unwrap();
+        assert!(load_cached().is_none(), "pre-floor cache must be rejected");
+    }
+
+    #[test]
+    fn cache_newer_than_rates_floor_is_kept() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        // A freshly-fetched cache (now ≥ the floor, age within TTL) is a
+        // real live scrape newer than the bundled snapshot — the floor
+        // must not over-reject it.
+        let fresh = PriceTable {
+            models: bundled().models,
+            source: PriceSource::Live {
+                url: "https://example.test/pricing".to_string(),
+                fetched_at_unix: now_unix_secs(),
+            },
+            last_fetch_error: None,
+        };
+        write_cache(&fresh).unwrap();
+        let loaded = load_cached();
+        assert!(loaded.is_some(), "fresh post-floor cache must be kept");
+        assert!(matches!(loaded.unwrap().source, PriceSource::Cached { .. }));
+    }
+
+    // ── Scrape overlay-on-bundled floor ────────────────────────────
+
+    #[test]
+    fn overlay_partial_scrape_keeps_bundled_floor() {
+        // A scrape that yielded only one model must not shrink coverage:
+        // every bundled model survives, and the scraped rate overrides.
+        let mut scraped = BTreeMap::new();
+        scraped.insert(
+            "claude-opus-4-8".to_string(),
+            ModelRates {
+                input_per_mtok: 999.0,
+                output_per_mtok: 999.0,
+                cache_write_per_mtok: 0.0,
+                cache_read_per_mtok: 0.0,
+            },
+        );
+        let merged = overlay_scrape_on_bundled(scraped);
+        // Bundled models the scrape never mentioned are still present —
+        // no regression to "unpriced" for current models.
+        assert!(merged.contains_key("claude-sonnet-5"));
+        assert!(merged.contains_key("claude-fable-5"));
+        assert!(merged.contains_key("claude-haiku-4-5"));
+        // The scraped rate wins for the model it covered.
+        assert_eq!(merged.get("claude-opus-4-8").unwrap().input_per_mtok, 999.0);
+    }
+
+    #[test]
+    fn overlay_empty_scrape_equals_bundled() {
+        // A parse that found nothing collapses to exactly the bundled
+        // table (fetch_live rejects an empty scrape before this, but the
+        // floor property should hold regardless).
+        let merged = overlay_scrape_on_bundled(BTreeMap::new());
+        assert_eq!(merged, bundled().models);
     }
 }
