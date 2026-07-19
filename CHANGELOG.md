@@ -6,6 +6,21 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.7 — beta (released 2026-07-19)
+
+### Changed
+
+- Patched development-tooling advisories flagged by Dependabot —
+  `vite`, `undici`, `esbuild`, `postcss`, `@babel/core` (root) and
+  `tsx` (web). All are build/test-time dependencies; the shipped app
+  is unchanged.
+
+### Fixed
+
+- Corrected a stale doc comment in the toast hook — error toasts are
+  sticky by default (they wait for a manual close), not auto-dismissed
+  after 10 seconds.
+
 ## 0.2.6 — beta (released 2026-07-19)
 
 ### Fixed
