@@ -6,6 +6,29 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.8 — beta (released 2026-07-19)
+
+### Fixed
+
+- **The cost dashboard now prices the current model lineup.** The
+  bundled price table lagged a generation: Claude Opus was billed at
+  the retired $15/$75 tier — three times the current $5/$25 — and
+  Opus 4.8, Sonnet 5, and Fable 5 were missing from the table
+  entirely, so most recent sessions showed as "unpriced" (token
+  counts listed, cost excluded). Rates are corrected and the current
+  models added; existing Opus cost estimates drop to the accurate
+  figure, and the "N of M sessions used a model not in the price
+  table" notice clears for Anthropic models.
+
+### Changed
+
+- Corrected prices now reach you the moment you update. A stale price
+  cache is discarded once the app's verified-rates date moves forward,
+  instead of lingering for up to a day, and a partial or failed fetch
+  of Anthropic's pricing page can no longer drop a known model back to
+  "unpriced" — a live refresh can only update the bundled rates, never
+  shrink coverage.
+
 ## 0.2.7 — beta (released 2026-07-19)
 
 ### Changed
