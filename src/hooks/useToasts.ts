@@ -119,10 +119,12 @@ export function useToasts() {
    *     Undo windows are intentionally short: they are action-commit
    *     timers, not notifications.
    *   - `durationMs` — override the auto-dismiss timer for
-   *     notifications (no `onUndo`). Default 10 000 ms for both info
-   *     and error kinds — long enough to read without locking the UI
-   *     under a persistent banner. Pass `Infinity` for sticky
-   *     notifications that the user must close manually.
+   *     notifications (no `onUndo`). Defaults differ by kind:
+   *     info → 10 000 ms (long enough to read without piling up),
+   *     error → `Infinity` (sticky: the copy is often the diagnostic,
+   *     so it must not vanish before the user acts on it). Pass a
+   *     finite number to make an error auto-dismiss, or `Infinity` to
+   *     make an info toast sticky.
    *   - `onCommit` — a callback fired exactly once when the toast
    *     leaves by any path EXCEPT Undo: auto-dismiss, the manual
    *     close (X) button, or a programmatic dismiss. This is the
