@@ -2,13 +2,25 @@
 //! through a minimal terminal emulator, and parse the rendered grid
 //! into a structured snapshot.
 //!
+//! ## Two output formats
+//!
+//! CC changed `claude doctor` wholesale in the 2.1.x line: the old
+//! Ink/React TUI (bold section headers, `├`/`└` tree entries, an
+//! "Enter to continue" prompt) became a flat plain-text report
+//! (`Running: native (2.1.215)`, `Key: Value` status lines, a
+//! `No installation issues found.` verdict, then exit). We parse
+//! both: [`parse_plaintext_report`] handles the flat form and
+//! [`parse_lines`] the Ink form; [`scrape_doctor`] tries flat first
+//! and falls back. Users mid-upgrade may be on either.
+//!
 //! ## Why a pty
 //!
-//! `claude doctor` is an Ink/React TUI. It detects pipe-mode (no
-//! TTY) and short-circuits without rendering — running it under
-//! `Command::output()` yields zero bytes. We allocate a real pty
-//! via `portable-pty` so Ink renders normally and we capture
-//! everything.
+//! The Ink TUI detects pipe-mode (no TTY) and short-circuits without
+//! rendering — running it under `Command::output()` yields zero
+//! bytes. We allocate a real pty via `portable-pty` so Ink renders
+//! normally. The flat report prints to a plain pipe too, but it lands
+//! in the same pty capture unchanged, so one capture path serves both
+//! formats and older installs keep working.
 //!
 //! ## Why an in-house terminal emulator (and not `vt100`)
 //!
@@ -76,12 +88,14 @@ pub enum DoctorSeverity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DoctorSnapshot {
-    /// e.g. `"2.1.138"`. Extracted from the "Currently running" line
-    /// when present; `None` when the parser couldn't find it (the
-    /// pill should still light up degraded rather than blank).
+    /// e.g. `"2.1.138"`. Extracted from the `Running:` (2.1.x flat
+    /// report) or `Currently running:` (Ink TUI) line when present;
+    /// `None` when the parser couldn't find it (the pill should still
+    /// light up degraded rather than blank).
     pub cc_version: Option<String>,
-    /// e.g. `"native"`, `"npm-global"`. From the "Currently running"
-    /// line's parenthesized-prefix or "Config install method" row.
+    /// e.g. `"native"`, `"npm-global"`. From the `Running:` /
+    /// `Currently running:` line's parenthesized-prefix or the
+    /// `Config install method:` row.
     pub install_type: Option<String>,
     /// Absolute filesystem path to the running claude binary. From
     /// the "Path:" row when present.
@@ -177,7 +191,11 @@ pub fn scrape_doctor() -> DoctorSnapshot {
     let raw_bytes = capture.bytes.len();
     let grid = render(&capture.bytes);
     let lines = grid_to_lines(&grid);
-    let (sections, parse_status) = parse_lines(&lines);
+    // CC 2.1.x prints a flat plain-text report; older CC renders an
+    // Ink TUI. Try the flat parser first and fall back to the Ink
+    // parser so both are handled from the same capture.
+    let (sections, parse_status) =
+        parse_plaintext_report(&lines).unwrap_or_else(|| parse_lines(&lines));
     let (cc_version, install_type, install_path) = extract_install_info(&sections);
 
     // Force-degrade the parse status if the capture didn't run to
@@ -217,11 +235,14 @@ fn downgrade_for_incomplete_capture(status: ParseStatus, cap: &CaptureResult) ->
     if !matches!(status, ParseStatus::Ok) {
         return status;
     }
-    if cap.saw_ready_prompt {
-        // Capture ended cleanly at the ready-prompt; a clean Ok is
-        // honest signal.
-        return status;
-    }
+    // Only the two "we stopped it early" outcomes leave a
+    // partial-but-parseable buffer that can masquerade as a clean Ok.
+    // A clean child exit / pty EOF means we captured everything the
+    // process emitted — true for both the flat print-and-exit report
+    // (no prompt) and the Ink TUI after we dismiss its "Enter to
+    // continue" prompt. Neither warrants a downgrade; if the buffer
+    // was genuinely unparseable, the parser already returned
+    // Failed/Degraded above.
     if cap.timed_out {
         return ParseStatus::Degraded {
             reason: format!(
@@ -237,13 +258,7 @@ fn downgrade_for_incomplete_capture(status: ParseStatus, cap: &CaptureResult) ->
             ),
         };
     }
-    // Child exited / pty EOF'd before the ready prompt — could be a
-    // normal-but-fast exit, but more often means CC bailed early
-    // (e.g., missing config). Mark as degraded so the snapshot
-    // doesn't pretend it had the full picture.
-    ParseStatus::Degraded {
-        reason: "capture ended before ready-prompt marker".to_string(),
-    }
+    status
 }
 
 // ─── Spawn + capture ─────────────────────────────────────────────
@@ -254,15 +269,11 @@ fn downgrade_for_incomplete_capture(status: ParseStatus, cap: &CaptureResult) ->
 #[derive(Debug)]
 struct CaptureResult {
     bytes: Vec<u8>,
-    /// True when the ready-prompt marker appeared in the buffer
-    /// before the capture loop exited. Implies the full doctor
-    /// render landed and we wrote `\r` to dismiss it.
-    saw_ready_prompt: bool,
-    /// True when we hit the wall-clock cap before seeing the
-    /// ready prompt.
+    /// True when we hit the wall-clock cap before the capture
+    /// completed — the buffer may be partial.
     timed_out: bool,
-    /// True when we hit the byte cap before seeing the ready
-    /// prompt.
+    /// True when we hit the byte cap before the capture completed —
+    /// the buffer may be partial.
     truncated: bool,
 }
 
@@ -393,7 +404,6 @@ fn spawn_and_capture(timeout: Duration) -> std::io::Result<CaptureResult> {
 
     Ok(CaptureResult {
         bytes: captured,
-        saw_ready_prompt,
         timed_out,
         truncated,
     })
@@ -678,6 +688,74 @@ const WARNING_FIGURE: char = '\u{26A0}'; // ⚠
 const TREE_BRANCH: char = '\u{251C}'; // ├
 const TREE_LAST: char = '\u{2514}'; // └
 
+/// Parse the flat plain-text `claude doctor` report that CC ships in
+/// the 2.1.x line. Returns `None` when the capture isn't in this
+/// format, so [`scrape_doctor`] falls back to the Ink-TUI parser
+/// ([`parse_lines`]) for older installs.
+///
+/// The flat report is a title, a block of `Key: Value` status lines,
+/// an optional "Remote Control" note, and a one-line verdict
+/// (`No installation issues found.` when healthy). We fold the status
+/// lines into a single synthetic `Diagnostics` section so the Health
+/// pane and [`extract_install_info`] keep working unchanged.
+fn parse_plaintext_report(lines: &[RenderedLine]) -> Option<(Vec<DoctorSection>, ParseStatus)> {
+    let texts: Vec<&str> = lines
+        .iter()
+        .map(|l| l.text.trim())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    // Discriminator: the flat report leads its version line with
+    // "Running:" (the Ink TUI used "Currently running:") under the
+    // "Claude Code doctor" title. Require both so an Ink capture is
+    // never misread as flat.
+    let looks_flat = texts.iter().any(|t| t.starts_with("Running:"))
+        && texts
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("Claude Code doctor"));
+    if !looks_flat {
+        return None;
+    }
+
+    // Verdict → severity. Healthy only on the explicit all-clear line.
+    // An explicit ✘/⚠ escalates; a report whose verdict we can't
+    // recognize is Warning (we parsed it, but can't confirm health).
+    let all_clear = texts
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case("No installation issues found."));
+    let has_error = texts.iter().any(|t| t.starts_with(CROSS_FIGURE));
+    let has_warning = texts.iter().any(|t| t.starts_with(WARNING_FIGURE));
+    let severity = if has_error {
+        DoctorSeverity::Error
+    } else if has_warning {
+        DoctorSeverity::Warning
+    } else if all_clear {
+        DoctorSeverity::Healthy
+    } else {
+        DoctorSeverity::Warning
+    };
+
+    // Fold every status/verdict line into one "Diagnostics" section,
+    // in order, dropping only the redundant title and the trailing
+    // "/doctor" advisory — chrome, not diagnostics.
+    let entries: Vec<SectionEntry> = texts
+        .iter()
+        .filter(|t| !t.eq_ignore_ascii_case("Claude Code doctor"))
+        .filter(|t| !t.starts_with("For a full setup checkup"))
+        .map(|t| SectionEntry {
+            text: t.to_string(),
+            tree_prefix: String::new(),
+        })
+        .collect();
+
+    let section = DoctorSection {
+        title: "Diagnostics".to_string(),
+        severity,
+        entries,
+    };
+    Some((vec![section], ParseStatus::Ok))
+}
+
 fn parse_lines(lines: &[RenderedLine]) -> (Vec<DoctorSection>, ParseStatus) {
     let mut sections: Vec<DoctorSection> = Vec::new();
     let mut saw_diagnostics = false;
@@ -799,7 +877,13 @@ fn extract_install_info(
 
     for e in &diag.entries {
         let t = e.text.trim();
-        if let Some(rest) = t.strip_prefix("Currently running:") {
+        // The Ink TUI labels this row "Currently running:"; the flat
+        // 2.1.x report labels it "Running:". Both carry the same
+        // "<install_type> (<version>)" payload.
+        let running = t
+            .strip_prefix("Currently running:")
+            .or_else(|| t.strip_prefix("Running:"));
+        if let Some(rest) = running {
             let rest = rest.trim();
             // Format: "<install_type> (<version>)" — version may be
             // missing if CC ships a future layout change.
@@ -956,7 +1040,6 @@ mod tests {
     fn downgrade_keeps_ok_when_capture_completed_cleanly() {
         let cap = CaptureResult {
             bytes: vec![],
-            saw_ready_prompt: true,
             timed_out: false,
             truncated: false,
         };
@@ -968,7 +1051,6 @@ mod tests {
     fn downgrade_forces_degraded_on_timeout_without_ready() {
         let cap = CaptureResult {
             bytes: vec![],
-            saw_ready_prompt: false,
             timed_out: true,
             truncated: false,
         };
@@ -985,7 +1067,6 @@ mod tests {
     fn downgrade_forces_degraded_on_truncate_without_ready() {
         let cap = CaptureResult {
             bytes: vec![],
-            saw_ready_prompt: false,
             timed_out: false,
             truncated: true,
         };
@@ -999,30 +1080,25 @@ mod tests {
     }
 
     #[test]
-    fn downgrade_forces_degraded_when_pty_eofs_early() {
+    fn downgrade_keeps_ok_on_clean_eof_without_ready_prompt() {
+        // The flat 2.1.x report prints and exits with no "Enter to
+        // continue" prompt: the pty EOFs cleanly, timed_out and
+        // truncated both false. That is a COMPLETE capture, not a
+        // degrade — the old "ended before ready-prompt" heuristic
+        // would have falsely flagged every healthy flat scrape.
         let cap = CaptureResult {
             bytes: vec![],
-            saw_ready_prompt: false,
             timed_out: false,
             truncated: false,
         };
         let out = downgrade_for_incomplete_capture(ParseStatus::Ok, &cap);
-        match out {
-            ParseStatus::Degraded { reason } => {
-                assert!(
-                    reason.contains("ended before ready-prompt"),
-                    "got: {reason}"
-                );
-            }
-            other => panic!("expected Degraded, got {other:?}"),
-        }
+        assert!(matches!(out, ParseStatus::Ok), "got: {out:?}");
     }
 
     #[test]
     fn downgrade_preserves_non_ok_status_reason() {
         let cap = CaptureResult {
             bytes: vec![],
-            saw_ready_prompt: false,
             timed_out: true,
             truncated: false,
         };
@@ -1085,5 +1161,96 @@ mod tests {
             .find(|s| s.title.to_lowercase().contains("plugin"));
         assert!(plug.is_some(), "expected a Plugin errors section");
         assert_eq!(plug.unwrap().severity, DoctorSeverity::Error);
+    }
+
+    // ── Flat 2.1.x plain-text report ───────────────────────────────
+
+    /// A healthy `claude doctor` capture from CC 2.1.215 — the flat
+    /// plain-text report that replaced the Ink TUI. CRLF line endings
+    /// and the trailing show-cursor escape are verbatim from a real
+    /// capture (the ✓ figure on the update line is elided to keep the
+    /// fixture ASCII; it isn't load-bearing).
+    const FLAT_HEALTHY: &str = concat!(
+        "Claude Code doctor\r\n\r\n",
+        "Running: native (2.1.215)\r\n",
+        "Commit: 316ce99628e8\r\n",
+        "Platform: darwin-arm64\r\n",
+        "Path: /Users/joker/.local/share/claude/versions/2.1.215\r\n",
+        "Config install method: native\r\n",
+        "Search: OK (bundled)\r\n",
+        "Auto-updates: enabled\r\n",
+        "Auto-update channel: latest\r\n",
+        "Last update attempt: success 2.1.215 (2026-07-19)\r\n\r\n",
+        "Remote Control\r\n",
+        "Control this session from claude.ai/code or the Claude mobile app\r\n\r\n",
+        "No installation issues found.\r\n\r\n",
+        "For a full setup checkup that can also fix issues, run /doctor in a Claude Code session.\r\n",
+        "\x1b[?25h",
+    );
+
+    fn lines_of(bytes: &[u8]) -> Vec<RenderedLine> {
+        grid_to_lines(&render(bytes))
+    }
+
+    #[test]
+    fn flat_report_parses_healthy_as_ok() {
+        let (sections, status) = parse_plaintext_report(&lines_of(FLAT_HEALTHY.as_bytes()))
+            .expect("healthy flat capture should be recognized");
+        assert!(matches!(status, ParseStatus::Ok), "got: {status:?}");
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].title, "Diagnostics");
+        assert_eq!(sections[0].severity, DoctorSeverity::Healthy);
+    }
+
+    #[test]
+    fn flat_report_extracts_version_install_and_path() {
+        let (sections, _) = parse_plaintext_report(&lines_of(FLAT_HEALTHY.as_bytes())).unwrap();
+        let (version, install, path) = extract_install_info(&sections);
+        assert_eq!(version.as_deref(), Some("2.1.215"));
+        assert_eq!(install.as_deref(), Some("native"));
+        assert_eq!(
+            path.as_deref(),
+            Some("/Users/joker/.local/share/claude/versions/2.1.215")
+        );
+    }
+
+    #[test]
+    fn flat_dispatch_does_not_fall_through_to_ink_parser() {
+        // Full dispatch order: a flat capture must be handled by the
+        // flat parser, never fall through to parse_lines (which would
+        // return "no sections parsed" — the original bug).
+        let lines = lines_of(FLAT_HEALTHY.as_bytes());
+        let (sections, status) =
+            parse_plaintext_report(&lines).unwrap_or_else(|| parse_lines(&lines));
+        assert!(matches!(status, ParseStatus::Ok), "got: {status:?}");
+        assert_eq!(sections[0].severity, DoctorSeverity::Healthy);
+    }
+
+    #[test]
+    fn ink_fixture_is_not_misread_as_flat() {
+        // The old Ink capture labels its version row "Currently
+        // running:" — the flat discriminator must reject it so
+        // dispatch falls back to the Ink parser.
+        assert!(parse_plaintext_report(&lines_of(REAL_FIXTURE)).is_none());
+    }
+
+    #[test]
+    fn flat_report_without_all_clear_is_warning() {
+        // Parsed as flat, but no explicit "No installation issues
+        // found." verdict — we can't confirm health, so Warning.
+        let src = "Claude Code doctor\r\n\r\nRunning: native (2.1.215)\r\nSearch: OK (bundled)\r\n";
+        let (sections, status) = parse_plaintext_report(&lines_of(src.as_bytes()))
+            .expect("recognized as flat");
+        assert!(matches!(status, ParseStatus::Ok));
+        assert_eq!(sections[0].severity, DoctorSeverity::Warning);
+    }
+
+    #[test]
+    fn flat_report_with_cross_figure_is_error() {
+        let src =
+            "Claude Code doctor\r\n\r\nRunning: native (2.1.215)\r\n\u{2718} Plugin cache is corrupt\r\n";
+        let (sections, _) =
+            parse_plaintext_report(&lines_of(src.as_bytes())).expect("recognized as flat");
+        assert_eq!(sections[0].severity, DoctorSeverity::Error);
     }
 }
