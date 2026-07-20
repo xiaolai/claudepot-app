@@ -6,6 +6,19 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.9 — beta (released 2026-07-20)
+
+### Fixed
+
+- **Settings → Health reads Claude Code 2.1.x again.** Claude Code
+  2.1.215 replaced its interactive `claude doctor` screen with a plain
+  text report, and Claudepot's reader — built for the old screen —
+  couldn't make sense of it, so the pane showed "Parser failed" with a
+  grey dot on every check even though Claude Code itself was fine. The
+  reader now understands both the new report and the old screen, so the
+  Health pane shows the version, install type, and a green dot again.
+  Older Claude Code installs keep working unchanged.
+
 ## 0.2.8 — beta (released 2026-07-19)
 
 ### Fixed
