@@ -283,6 +283,26 @@ Verify an install rather than trusting it: `git config
 core.hooksPath` should print a `.githooks` path, and a dry-run push
 of a throwaway `v*` tag should print the validator banner.
 
+**When a validator host is unreachable, the hook defers to CI** rather
+than failing. CI runs the same two gates on the same commit, so the
+hook asks `gh` whether the `ci.yml` run for that commit is green and
+accepts it in place of the missing host. Note the asymmetry: a host
+that is *reachable and fails* still aborts. Only absence of evidence
+falls back, never contrary evidence.
+
+The lookup dereferences `^{commit}` first — an annotated tag's own
+object sha differs from the commit's, and CI indexes runs by commit,
+so looking up the tag sha would silently never match. It also needs
+an authenticated `gh`; an unauthenticated one reads as "no run" and
+aborts, which is the safe direction.
+
+This exists because `--no-verify` was becoming the reflex — v0.2.10,
+v0.2.11 and v0.2.12 all shipped that way while the validator boxes
+were offline. A bypass used routinely is indistinguishable from no
+gate at all, which is how these validators sat inert for four
+releases. The workflow that keeps the gate real: push the branch,
+let CI finish, then push the tag.
+
 Validator hosts are never committed: the hook reads them from the
 gitignored `.validator-hosts` file at the repo root (shape documented
 in the `scripts/pre-push` header) or from
