@@ -143,6 +143,7 @@ pub mod settings_writer;
 pub mod shared_memory;
 pub mod sync;
 pub mod templates;
+pub mod token_refresh;
 pub mod trash;
 pub mod updates;
 pub mod usage_local;

@@ -145,6 +145,21 @@ async fn run_tick(app: &AppHandle) {
         return;
     }
 
+    // Heal one expired, inactive slot before fetching usage, so an
+    // account refreshed on this tick reports live numbers now rather
+    // than five minutes from now. Nothing to do — and no network — when
+    // every slot is still valid. Never touches the active account; see
+    // `token_refresh_orchestrator::pick`.
+    {
+        let orch = app.state::<Arc<crate::token_refresh_orchestrator::TokenRefreshOrchestrator>>();
+        let orch: Arc<_> = Arc::clone(&orch);
+        guarded(
+            "token_refresh_orchestrator",
+            async move { orch.tick(app).await },
+        )
+        .await;
+    }
+
     let outcomes = {
         let cache_state = app.state::<UsageCache>();
         let cache: &UsageCache = &cache_state;

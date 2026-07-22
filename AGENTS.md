@@ -179,6 +179,40 @@ swap to a chosen alternate.
   rule fire correctly. See `dev-docs/auto-rotation.md` for the
   full design including the policy framing.
 
+## Proactive token refresh (no UI)
+
+Always-on behavior, not a feature: keeps **inactive** accounts' access
+tokens alive so every surface that needs a live token (usage windows,
+Activity strip, tray report) doesn't read "Expired" for every account
+except the one in use. Access tokens last about an hour; before this,
+nothing refreshed a parked slot between an explicit "Verify all" and
+the next account switch.
+
+- Pure selection logic in `claudepot-core::token_refresh` —
+  `is_eligible(facts, now_ms)` and
+  `select_next(candidates, now, min_retry_gap) -> Option<Uuid>`, no
+  I/O, clock injected.
+- Orchestrator at `src-tauri/src/token_refresh_orchestrator.rs`, hooked
+  into `usage_snapshot::run_tick` *before* the usage fetch so an
+  account healed this tick reports live numbers in the same tick.
+- **Does not implement a refresh.** It picks an account and calls
+  `services::identity::verify_account_identity`, whose existing
+  401 → refresh → CAS-write path already refuses to persist a rotated
+  blob when the profile email drifts from the label. Reimplementing
+  the exchange here would fork that protection.
+- **Never the active account** — that token belongs to Claude Code,
+  which rotates it on its own schedule; refreshing it from a
+  background tick is the 0.2.10 sign-out bug. Also skips
+  `drift`/`rejected` slots and any token that has not actually
+  expired (a live token makes `/profile` return 200, so the refresh
+  branch is never reached).
+- **One account per tick**, ordered round-robin by last attempt rather
+  than by staleness — staleness alone starves, because an account that
+  fails every time stays the most stale forever. `reference.md`
+  §III.4.1 records the token endpoint refusing three refreshes from one
+  IP in ten minutes, so the 5-min cadence is the rate limit; there is
+  deliberately no backoff state machine.
+
 ## Test on test-host
 
 > Real `<user>`, `<host>`, and `<password>` values live in
