@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Pre-push hook — release-tag validation across Linux + Windows.
 #
-# Install (per clone):
-#   ln -sf ../../scripts/pre-push .git/hooks/pre-push
-# or run scripts/install-hooks.sh.
+# Install (per clone): run scripts/install-hooks.sh.
+#
+# Do NOT hand-symlink this into .git/hooks — a global `core.hooksPath`
+# (git-lfs and most dotfile setups set one) makes git ignore that
+# directory entirely, so the hook looks installed and never runs. That
+# is how v0.2.7 … v0.2.10 shipped unvalidated. install-hooks.sh points
+# core.hooksPath at a repo-local .githooks/ instead, chaining to the
+# hooks the clone already inherited.
 #
 # Triggers ONLY when the push contains a tag matching `refs/tags/v*`
 # (release tags), not on regular branch pushes. Mirrors CI's gates so
@@ -57,6 +62,9 @@ if [ -f "$repo_root/.validator-hosts" ]; then
   . "$repo_root/.validator-hosts"
 fi
 
+# git's pre-push protocol feeds four positional fields per ref; we only
+# consult two of them, but all four must be named to parse the line.
+# shellcheck disable=SC2034
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/tags/v*) ;;          # tag push — validate
@@ -82,6 +90,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   # Linux validation — mirrors CI's `Format / Clippy (Linux)` job.
   echo "▶ Linux clippy on $CLAUDEPOT_VALIDATOR_LINUX_SSH ..."
+  # $local_sha must expand client-side — the validator checks out the
+  # SHA being pushed, which only this side knows.
+  # shellcheck disable=SC2029
   if ! ssh "$CLAUDEPOT_VALIDATOR_LINUX_SSH" "cd ~/claudepot-app && \
       git fetch --quiet && \
       git checkout --quiet $local_sha && \
@@ -101,6 +112,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   # Windows validation (MSVC toolchain — matches the CI runner).
   echo "▶ Windows test compile on $CLAUDEPOT_VALIDATOR_WINDOWS_SSH ..."
+  # shellcheck disable=SC2029  # same client-side expansion as above
   if ! ssh "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH" "cd claudepot-app && \
       git fetch --quiet && \
       git checkout --quiet $local_sha && \

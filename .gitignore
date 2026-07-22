@@ -139,3 +139,6 @@ CLAUDE.local.md
 !.gemini/skills/
 !.gemini/commands/
 # <<< cc-suite <<<
+
+# Generated per-clone by scripts/install-hooks.sh (core.hooksPath target)
+.githooks/
