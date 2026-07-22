@@ -46,13 +46,29 @@
 # (Windows home) with the origin remote reachable.
 #
 # Exits non-zero on validation failure; the push is aborted and the
-# recovery recipe printed. Bypass with `git push --no-verify` if a
-# validator host is unreachable — but note CI is unforgiving about
-# red main.
+# recovery recipe printed.
+#
+# ## Fallback when a validator is unreachable
+#
+# An UNREACHABLE host is not a failure — it is missing evidence, and
+# there is a second source for it. CI runs the same two gates
+# (`Format / Clippy (Linux)`, `Tests (windows-latest)`) on the same
+# commit, so when a host can't be reached the hook asks GitHub whether
+# CI is already green for the exact commit being tagged and accepts
+# that instead.
+#
+# This exists because `--no-verify` was becoming the reflex: v0.2.10,
+# v0.2.11 and v0.2.12 all shipped that way while the validator boxes
+# were offline. A bypass used routinely is indistinguishable from no
+# gate at all — which is exactly how these validators sat inert and
+# unnoticed for four releases (see scripts/install-hooks.sh).
+#
+# Note the asymmetry: a host that is REACHABLE and FAILS still aborts.
+# Only absence of evidence falls back, never contrary evidence.
 #
 # History: added 2026-05-01 after a four-round CI cascade where each
 # fix on macOS-only commits surfaced the next layer of platform-
-# conditional bugs.
+# conditional bugs. CI fallback added 2026-07-22.
 
 set -euo pipefail
 
@@ -61,6 +77,26 @@ if [ -f "$repo_root/.validator-hosts" ]; then
   # shellcheck source=/dev/null
   . "$repo_root/.validator-hosts"
 fi
+
+# Is this host answering right now? BatchMode so a missing key fails
+# fast instead of prompting into a hook with no usable tty.
+host_reachable() {
+  ssh -o ConnectTimeout=8 -o BatchMode=yes "$1" true >/dev/null 2>&1
+}
+
+# Has CI already gone green for this exact COMMIT?
+#
+# `$1` must be a commit sha, not a tag sha — an annotated tag's own
+# object hashes differently from the commit it points at, so looking up
+# the tag sha would silently never match. Callers dereference with
+# `^{commit}` before calling.
+ci_green_for_commit() {
+  command -v gh >/dev/null 2>&1 || return 1
+  gh run list --commit "$1" --workflow ci.yml --limit 1 \
+    --json status,conclusion \
+    --jq 'first | select(.status == "completed" and .conclusion == "success")' \
+    2>/dev/null | grep -q .
+}
 
 # git's pre-push protocol feeds four positional fields per ref; we only
 # consult two of them, but all four must be named to parse the line.
@@ -85,53 +121,97 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     exit 1
   fi
 
-  echo "Release tag push detected ($remote_ref → $local_sha)"
+  # An annotated tag's own object sha is NOT the commit sha; CI indexes
+  # runs by commit, so dereference before any lookup.
+  commit_sha="$(git rev-parse "${local_sha}^{commit}")"
+
+  echo "Release tag push detected ($remote_ref → $commit_sha)"
   echo "──────────────────────────────────────────────────────"
 
+  skipped=""
+
   # Linux validation — mirrors CI's `Format / Clippy (Linux)` job.
-  echo "▶ Linux clippy on $CLAUDEPOT_VALIDATOR_LINUX_SSH ..."
-  # $local_sha must expand client-side — the validator checks out the
-  # SHA being pushed, which only this side knows.
-  # shellcheck disable=SC2029
-  if ! ssh "$CLAUDEPOT_VALIDATOR_LINUX_SSH" "cd ~/claudepot-app && \
-      git fetch --quiet && \
-      git checkout --quiet $local_sha && \
-      cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings"; then
-    echo
-    echo "✗ Linux clippy failed on $local_sha. Release aborted."
-    echo
-    echo "Recovery:"
-    echo "  1. Fix the lint locally"
-    echo "  2. git tag -d $tag_name"
-    echo "  3. Re-tag the new commit"
-    echo "  4. Re-push"
-    exit 1
+  if host_reachable "$CLAUDEPOT_VALIDATOR_LINUX_SSH"; then
+    echo "▶ Linux clippy on $CLAUDEPOT_VALIDATOR_LINUX_SSH ..."
+    # $local_sha must expand client-side — the validator checks out the
+    # SHA being pushed, which only this side knows.
+    # shellcheck disable=SC2029
+    if ! ssh "$CLAUDEPOT_VALIDATOR_LINUX_SSH" "cd ~/claudepot-app && \
+        git fetch --quiet && \
+        git checkout --quiet $local_sha && \
+        cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings"; then
+      echo
+      echo "✗ Linux clippy failed on $commit_sha. Release aborted."
+      echo
+      echo "Recovery:"
+      echo "  1. Fix the lint locally"
+      echo "  2. git tag -d $tag_name"
+      echo "  3. Re-tag the new commit"
+      echo "  4. Re-push"
+      exit 1
+    fi
+    echo "✓ Linux clippy clean"
+  else
+    echo "• Linux validator unreachable — deferring to CI"
+    skipped="Linux"
   fi
-  echo "✓ Linux clippy clean"
   echo
 
   # Windows validation (MSVC toolchain — matches the CI runner).
-  echo "▶ Windows test compile on $CLAUDEPOT_VALIDATOR_WINDOWS_SSH ..."
-  # shellcheck disable=SC2029  # same client-side expansion as above
-  if ! ssh "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH" "cd claudepot-app && \
-      git fetch --quiet && \
-      git checkout --quiet $local_sha && \
-      cargo test -p claudepot-core -p claudepot-cli --no-run"; then
-    echo
-    echo "✗ Windows test compile failed on $local_sha. Release aborted."
-    echo
-    echo "Recovery:"
-    echo "  1. Fix the build error locally (likely a missing cfg gate)"
-    echo "  2. git tag -d $tag_name"
-    echo "  3. Re-tag the new commit"
-    echo "  4. Re-push"
-    exit 1
+  if host_reachable "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH"; then
+    echo "▶ Windows test compile on $CLAUDEPOT_VALIDATOR_WINDOWS_SSH ..."
+    # shellcheck disable=SC2029  # same client-side expansion as above
+    if ! ssh "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH" "cd claudepot-app && \
+        git fetch --quiet && \
+        git checkout --quiet $local_sha && \
+        cargo test -p claudepot-core -p claudepot-cli --no-run"; then
+      echo
+      echo "✗ Windows test compile failed on $commit_sha. Release aborted."
+      echo
+      echo "Recovery:"
+      echo "  1. Fix the build error locally (likely a missing cfg gate)"
+      echo "  2. git tag -d $tag_name"
+      echo "  3. Re-tag the new commit"
+      echo "  4. Re-push"
+      exit 1
+    fi
+    echo "✓ Windows test compile clean"
+  else
+    echo "• Windows validator unreachable — deferring to CI"
+    skipped="${skipped:+$skipped + }Windows"
   fi
-  echo "✓ Windows test compile clean"
   echo
 
+  # Nothing was skipped → both hosts answered and both passed.
+  if [ -n "$skipped" ]; then
+    echo "▶ $skipped validator(s) unreachable; checking CI for $commit_sha ..."
+    if ci_green_for_commit "$commit_sha"; then
+      echo "✓ CI is green for this commit — accepting in place of $skipped"
+    else
+      echo
+      echo "✗ $skipped validator(s) unreachable AND no green CI run for"
+      echo "  $commit_sha. Nothing has verified this commit on that"
+      echo "  platform, so the release is aborted."
+      echo
+      echo "Recovery — pick one:"
+      echo "  a. Push the branch first and let CI finish, then re-push the tag"
+      echo "  b. Bring the validator host back online and re-push the tag"
+      echo "  c. git push --no-verify   (records NO verification — say so"
+      echo "     in the release notes if you take this route)"
+      echo
+      echo "  If CI did run, check 'gh auth status' — the lookup needs an"
+      echo "  authenticated gh, and treats an unauthenticated one as 'no run'."
+      exit 1
+    fi
+    echo
+  fi
+
   echo "──────────────────────────────────────────────────────"
-  echo "✓ Release validation passed across Linux + Windows."
+  if [ -n "$skipped" ]; then
+    echo "✓ Release validation passed (CI stood in for $skipped)."
+  else
+    echo "✓ Release validation passed across Linux + Windows."
+  fi
 done
 
 exit 0
