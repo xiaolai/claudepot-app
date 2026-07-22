@@ -1239,8 +1239,8 @@ mod tests {
         // Parsed as flat, but no explicit "No installation issues
         // found." verdict — we can't confirm health, so Warning.
         let src = "Claude Code doctor\r\n\r\nRunning: native (2.1.215)\r\nSearch: OK (bundled)\r\n";
-        let (sections, status) = parse_plaintext_report(&lines_of(src.as_bytes()))
-            .expect("recognized as flat");
+        let (sections, status) =
+            parse_plaintext_report(&lines_of(src.as_bytes())).expect("recognized as flat");
         assert!(matches!(status, ParseStatus::Ok));
         assert_eq!(sections[0].severity, DoctorSeverity::Warning);
     }
