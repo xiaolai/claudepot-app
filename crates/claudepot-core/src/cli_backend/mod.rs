@@ -4,6 +4,7 @@ pub mod error;
 pub mod secret_file;
 pub mod storage;
 pub mod swap;
+mod wsl_probe;
 
 #[cfg(target_os = "macos")]
 pub mod keychain;
