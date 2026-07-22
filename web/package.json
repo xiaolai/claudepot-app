@@ -38,7 +38,7 @@
     "@vercel/speed-insights": "^2.0.0",
     "boring-avatars": "^2.0.4",
     "drizzle-orm": "^0.45.2",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^4.3.0",
     "lucide-react": "^1.8.0",
     "marked": "^18.0.2",
     "mcp-handler": "^1.1.0",
