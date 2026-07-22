@@ -6,6 +6,31 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.11 — beta (released 2026-07-22)
+
+### Fixed
+
+- **Windows gets the running-session protection too.** 0.2.10 stopped
+  Claudepot signing out a live Claude Code session, but the underlying
+  "is Claude Code running?" check was implemented only for macOS and
+  Linux — on Windows it always answered "no". So Windows users kept
+  getting signed out by the bug 0.2.10 announced as fixed, and account
+  switching would also swap under a running session. Windows now scans
+  for the real process. Claude Desktop is deliberately not mistaken for
+  the CLI, so leaving the desktop app open doesn't suppress account
+  verification. One gap remains, by nature rather than oversight: a
+  `claude` running inside WSL is invisible to a Windows-native scan,
+  because the two keep separate process namespaces.
+
+### Changed
+
+- Repository tooling only, no effect on the shipped app: the release
+  hook installer now works on machines with a global `core.hooksPath`
+  (set by the git-lfs installer, among others). It previously reported
+  success while installing into a directory git ignores, so the
+  Linux/Windows pre-release validators were silently inert for the
+  0.2.7–0.2.10 tags.
+
 ## 0.2.10 — beta (released 2026-07-22)
 
 ### Fixed
