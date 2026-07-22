@@ -1376,3 +1376,21 @@ async fn test_switch_aborts_and_rolls_back_on_post_switch_identity_mismatch() {
     delete_private(current_id).await.unwrap();
     delete_private(target_id).await.unwrap();
 }
+
+/// Smoke test for the platform live-session detector.
+///
+/// The Windows arm can't be unit-tested properly — `sysinfo` offers no
+/// way to inject a synthetic process table, and the gate logic that
+/// consumes this is already covered through the `LiveSessionProbe` seam
+/// (see `services::identity`). What this DOES catch, on the one CI
+/// runner where it matters, is the Windows arm panicking or misusing the
+/// sysinfo 0.32 API at runtime — a cross-compile check only proves it
+/// typechecks. Cheap insurance on the only automated coverage that
+/// branch will ever get.
+#[tokio::test]
+async fn live_session_detector_runs_without_panicking() {
+    // Whether a `claude` happens to be running on the runner is not the
+    // assertion — completing at all is.
+    let _: bool = is_cc_process_running().await;
+    let _: bool = is_cc_process_running_public().await;
+}
