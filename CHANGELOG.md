@@ -6,6 +6,28 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.10 — beta (released 2026-07-22)
+
+### Fixed
+
+- **A running Claude Code session no longer gets signed out.** 0.2.6
+  stopped Claudepot from spending a token Claude Code had already
+  rotated, but left the mirror-image case open: when the access token
+  had expired and *Claudepot* refreshed first, it consumed the
+  single-use refresh token Claude Code still held in memory. Claude
+  Code's own next refresh then failed and demanded a fresh `/login`.
+  Claudepot now declines to refresh an account's token while a live
+  `claude` process is running — Claude Code refreshes its own token on
+  its next request, so nothing is lost and the session survives. For
+  that one pass the account reads "last verified N ago" instead of
+  showing a false "sign in again" prompt.
+
+  This is likely the re-login you hit most often: the check runs on
+  every GUI window focus, and on `claudepot account list` and
+  `claudepot cli status` — not only when you press "Verify all".
+  Switching accounts already refused to run against a live session;
+  the refresh paths now match it.
+
 ## 0.2.9 — beta (released 2026-07-20)
 
 ### Fixed
