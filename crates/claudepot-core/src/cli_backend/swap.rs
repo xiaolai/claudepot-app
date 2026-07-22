@@ -185,8 +185,9 @@ impl LiveSessionProbe for NoLiveSessionProbe {
 ///   struggles with Mach-O binaries installed via symlink, e.g.
 ///   `~/.local/bin/claude` → a versioned binary.)
 /// - **Windows** — a `sysinfo` process scan for `claude.exe`, excluding
-///   Claude Desktop's install locations. See the inline notes for the
-///   name collision and the WSL gap.
+///   Claude Desktop's install locations (see the inline note on the
+///   name collision), then a WSL probe, since Windows and WSL keep
+///   separate process namespaces. See `wsl_probe`.
 /// - **Anything else** — `false`; no supported platform reaches here.
 pub(crate) async fn is_cc_process_running() -> bool {
     #[cfg(unix)]
@@ -211,6 +212,21 @@ pub(crate) async fn is_cc_process_running() -> bool {
     }
     #[cfg(windows)]
     {
+        // Native processes first — cheap and the common case. Only pay
+        // for the WSL probe when the native scan comes up empty.
+        windows_native_claude_running() || super::wsl_probe::any_claude_in_wsl().await
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
+}
+
+/// Windows-native half of [`is_cc_process_running`]. Sees only
+/// Windows processes; WSL is handled separately by `wsl_probe`.
+#[cfg(windows)]
+fn windows_native_claude_running() -> bool {
+    {
         // Claude Code's CLI ships as `claude.exe`. Claude *Desktop*'s
         // executable is `Claude.exe` and Windows filenames are
         // case-insensitive, so a name-only match collides with it —
@@ -223,11 +239,6 @@ pub(crate) async fn is_cc_process_running() -> bool {
         // false positive costs one skipped refresh and self-heals on the
         // next pass; a false negative signs a live session out, which is
         // the whole bug this gate exists to prevent.
-        //
-        // Known gap: a `claude` running inside WSL is invisible to a
-        // Windows-native process scan — the two have separate process
-        // namespaces (reference.md §I, "Process namespace isolation").
-        // WSL sessions therefore keep the pre-existing exposure.
         use sysinfo::{ProcessRefreshKind, RefreshKind, System, UpdateKind};
 
         let desktop_dirs: Vec<std::path::PathBuf> = [
