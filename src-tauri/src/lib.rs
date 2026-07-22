@@ -53,6 +53,7 @@ mod preferences;
 mod rotation_orchestrator;
 mod service_status_watcher;
 mod state;
+mod token_refresh_orchestrator;
 mod traffic_light;
 mod tray;
 mod tray_icons;
@@ -965,6 +966,12 @@ pub fn run() {
         .manage(notification_log_state)
         .manage(commands::service_status::ServiceStatusState::new())
         .manage(rotation_orchestrator)
+        // Proactive refresh of expired, inactive credential slots.
+        // Carries only the per-account last-attempt map that drives the
+        // round-robin; see `token_refresh_orchestrator`.
+        .manage(std::sync::Arc::new(
+            token_refresh_orchestrator::TokenRefreshOrchestrator::new(),
+        ))
         // Event orchestrator state — a `Mutex<HashSet<AgentId>>` of
         // agent ids the orchestrator has already seen in at least
         // one tick this process (grill X16 replaced the earlier
