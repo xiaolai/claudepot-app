@@ -140,6 +140,46 @@ pub async fn is_cc_process_running_public() -> bool {
     is_cc_process_running().await
 }
 
+/// Abstraction over "is a live `claude` process running right now" —
+/// enables testing without depending on whatever happens to be running
+/// on the developer's machine.
+///
+/// This gates every path that would spend an account's **single-use**
+/// refresh token. CC keeps its refresh token in memory and writes it
+/// back to the keychain, so rotating that token behind CC's back leaves
+/// it holding one the server has already retired — the next CC refresh
+/// fails and the user is forced to re-login.
+#[async_trait::async_trait]
+pub trait LiveSessionProbe: Send + Sync {
+    async fn is_cc_running(&self) -> bool;
+}
+
+/// Production probe — the real `ps` scan.
+pub struct DefaultLiveSessionProbe;
+
+#[async_trait::async_trait]
+impl LiveSessionProbe for DefaultLiveSessionProbe {
+    async fn is_cc_running(&self) -> bool {
+        is_cc_process_running().await
+    }
+}
+
+/// Probe that always reports "no live session". Used by the `*_with`
+/// test seams so the refresh branch stays deterministically reachable,
+/// and by callers that have already established no CC is running.
+///
+/// Production code MUST NOT use this to bypass the gate — spending a
+/// refresh token while CC is live is exactly the re-login bug the gate
+/// exists to prevent.
+pub struct NoLiveSessionProbe;
+
+#[async_trait::async_trait]
+impl LiveSessionProbe for NoLiveSessionProbe {
+    async fn is_cc_running(&self) -> bool {
+        false
+    }
+}
+
 pub(crate) async fn is_cc_process_running() -> bool {
     #[cfg(unix)]
     {

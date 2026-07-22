@@ -34,6 +34,19 @@
 //! resolver (`account_service::resolve_cc_identity`), which reads CC's
 //! keychain, re-checks on 401 before spending a refresh token, and writes
 //! any rotation back to the keychain (healing CC, not orphaning it).
+//!
+//! ## We never spend a refresh token while `claude` is running
+//!
+//! Re-checking on 401 closes the window where CC rotates *first*, but not
+//! the one where **we** rotate first: CC caches its refresh token in
+//! memory and writes it back, so a rotation behind its back leaves it
+//! holding a token the server has retired — its next refresh fails and
+//! the user must re-login. So the resolver refuses to spend the token
+//! whenever a live `claude` process is detected, returning
+//! `RegisterError::CcLiveRefreshSkipped`, which maps to
+//! `VerifyOutcome::NetworkError` here. This mirrors the gate
+//! `swap::switch` already applies. Skipping is self-healing: CC refreshes
+//! on its next request and the following pass verifies normally.
 use crate::account::{AccountStore, VerifyOutcome};
 use crate::blob::CredentialBlob;
 use crate::cli_backend::swap;
@@ -87,17 +100,55 @@ pub async fn verify_account_identity(
     fetcher: &dyn ProfileFetcher,
 ) -> Result<VerifyOutcome, VerifyError> {
     let platform = crate::cli_backend::create_platform();
-    verify_account_identity_with(store, uuid, platform.as_ref(), fetcher, &DefaultRefresher).await
+    verify_account_identity_with_probe(
+        store,
+        uuid,
+        platform.as_ref(),
+        fetcher,
+        &DefaultRefresher,
+        &crate::cli_backend::swap::DefaultLiveSessionProbe,
+    )
+    .await
 }
 
 /// Testable variant: inject a [`TokenRefresher`] so the 401→refresh
 /// branch can be exercised without real HTTP.
+///
+/// Uses [`NoLiveSessionProbe`], so the refresh branch stays
+/// deterministically reachable regardless of what is running on the test
+/// machine. **Production must call [`verify_account_identity`]**, which
+/// supplies the real probe — refreshing the active account while a live
+/// `claude` runs rotates a token CC still holds and forces a re-login.
+///
+/// [`NoLiveSessionProbe`]: crate::cli_backend::swap::NoLiveSessionProbe
 pub async fn verify_account_identity_with(
     store: &AccountStore,
     uuid: Uuid,
     platform: &dyn CliPlatform,
     fetcher: &dyn ProfileFetcher,
     refresher: &dyn TokenRefresher,
+) -> Result<VerifyOutcome, VerifyError> {
+    verify_account_identity_with_probe(
+        store,
+        uuid,
+        platform,
+        fetcher,
+        refresher,
+        &crate::cli_backend::swap::NoLiveSessionProbe,
+    )
+    .await
+}
+
+/// [`verify_account_identity_with`] with an injectable live-session
+/// probe, which gates whether the active account's single-use refresh
+/// token may be spent.
+pub async fn verify_account_identity_with_probe(
+    store: &AccountStore,
+    uuid: Uuid,
+    platform: &dyn CliPlatform,
+    fetcher: &dyn ProfileFetcher,
+    refresher: &dyn TokenRefresher,
+    probe: &dyn crate::cli_backend::swap::LiveSessionProbe,
 ) -> Result<VerifyOutcome, VerifyError> {
     let account = store
         .find_by_uuid(uuid)
@@ -111,7 +162,7 @@ pub async fn verify_account_identity_with(
     // private-slot check below (there is nothing live to protect then).
     if active_cli_matches(store, uuid)? {
         if let Some(outcome) =
-            verify_active_via_keychain(&account.email, platform, fetcher, refresher).await
+            verify_active_via_keychain(&account.email, platform, fetcher, refresher, probe).await
         {
             // TOCTOU guard: a concurrent swap may have changed the active
             // account during the keychain round-trip above (verify holds no
@@ -270,10 +321,11 @@ async fn verify_active_via_keychain(
     platform: &dyn CliPlatform,
     fetcher: &dyn ProfileFetcher,
     refresher: &dyn TokenRefresher,
+    probe: &dyn crate::cli_backend::swap::LiveSessionProbe,
 ) -> Option<VerifyOutcome> {
     use account_service::RegisterError as RE;
     let adapter = KeychainFetcher(fetcher);
-    match account_service::resolve_cc_identity(platform, &adapter, refresher).await {
+    match account_service::resolve_cc_identity(platform, &adapter, refresher, probe).await {
         Ok(Some((_blob, cc_email))) => Some(classify(stored_email, cc_email)),
         // CC has no credentials / unparseable blob — nothing live to
         // verify against. Defer to the private-slot path.
@@ -290,6 +342,17 @@ async fn verify_active_via_keychain(
         }
         Err(e @ RE::CcChangedDuringRefresh) => {
             tracing::debug!("active-account verify: keychain changed mid-refresh: {e}");
+            Some(VerifyOutcome::NetworkError)
+        }
+        // A live `claude` is running, so the resolver declined to spend
+        // the single-use refresh token. Transient by construction: CC
+        // refreshes its own token on its next request and the following
+        // pass verifies normally. Reporting anything terminal here would
+        // resurrect the very re-login prompt the gate prevents;
+        // NetworkError also preserves `verified_email` history so the UI
+        // shows "last verified N ago" rather than a scary unknown.
+        Err(e @ RE::CcLiveRefreshSkipped) => {
+            tracing::debug!("active-account verify: {e}");
             Some(VerifyOutcome::NetworkError)
         }
         // resolve_cc_identity does not emit these today. They are listed
@@ -902,6 +965,128 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome, VerifyOutcome::NetworkError);
+    }
+
+    /// Probe reporting a live `claude` process.
+    struct LiveProbe;
+
+    #[async_trait::async_trait]
+    impl crate::cli_backend::swap::LiveSessionProbe for LiveProbe {
+        async fn is_cc_running(&self) -> bool {
+            true
+        }
+    }
+
+    /// Refresher that fails the test if it is ever called. Proves the
+    /// live-session gate declined to spend the single-use refresh token
+    /// rather than merely discarding the result afterwards.
+    struct NeverRefresher;
+
+    #[async_trait::async_trait]
+    impl TokenRefresher for NeverRefresher {
+        async fn refresh(
+            &self,
+            _refresh_token: &str,
+        ) -> Result<crate::oauth::refresh::TokenResponse, OAuthError> {
+            panic!("refresh must not be attempted while a live claude session is running");
+        }
+    }
+
+    /// THE re-login fix. A live `claude` process is running and the active
+    /// account's access token is rejected. We must NOT spend the single-use
+    /// refresh token: CC keeps its copy in memory and writes it back, so
+    /// rotating here retires the token CC still holds and its next refresh
+    /// fails — forcing exactly the re-login this gate exists to prevent.
+    ///
+    /// Contract: refresher never called, keychain never written, outcome is
+    /// transient, and prior `verified_email` history survives.
+    #[tokio::test]
+    async fn active_account_live_cc_session_does_not_spend_refresh_token() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        // Seed a prior good verification so we can prove history survives.
+        store
+            .update_verification(
+                uuid,
+                &VerifyOutcome::Ok {
+                    email: "alice@example.com".into(),
+                },
+            )
+            .unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = MockFetcher::rejecting(); // /profile → 401
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &platform,
+            &fetcher,
+            &NeverRefresher,
+            &LiveProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::NetworkError,
+            "a live-session skip is transient, never Rejected — a Rejected \
+             here is the re-login prompt we are preventing"
+        );
+        assert!(
+            platform.writes().is_empty(),
+            "keychain must not be rotated while a claude session is live"
+        );
+
+        let row = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(row.verify_status, "network_error");
+        assert_eq!(
+            row.verified_email.as_deref(),
+            Some("alice@example.com"),
+            "transient skip must preserve last-known-good identity"
+        );
+    }
+
+    /// The gate is conditional, not a blanket ban: with NO live session the
+    /// same 401 still refreshes and heals the keychain. Pairs with the test
+    /// above so a regression that disables refreshing entirely is caught.
+    #[tokio::test]
+    async fn active_account_without_live_cc_session_still_heals() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::fresh_blob_json()));
+        let fetcher = MockFetcher {
+            email: Mutex::new(Some("alice@example.com".into())),
+            err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
+        };
+        let refresher = MockRefresher::ok_with("sk-ant-oat01-healed", "sk-ant-ort01-healed");
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &platform,
+            &fetcher,
+            &refresher,
+            &crate::cli_backend::swap::NoLiveSessionProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        let writes = platform.writes();
+        assert_eq!(writes.len(), 1, "no live session → heal proceeds");
+        assert!(writes[0].contains("sk-ant-oat01-healed"));
     }
 
     /// Active account but CC's keychain is EMPTY — nothing live to protect,

@@ -202,11 +202,12 @@ pub async fn register_from_browser_cancellable(
 /// actionable "sign in again" banner.
 pub async fn sync_from_current_cc(store: &AccountStore) -> Result<Option<Uuid>, RegisterError> {
     let platform = cli_backend::create_platform();
-    sync_from_current_cc_with(
+    sync_from_current_cc_with_probe(
         store,
         platform.as_ref(),
         &DefaultProfileFetcher,
         &crate::cli_backend::swap::DefaultRefresher,
+        &crate::cli_backend::swap::DefaultLiveSessionProbe,
     )
     .await
 }
@@ -247,15 +248,18 @@ pub async fn sync_from_current_cc(store: &AccountStore) -> Result<Option<Uuid>, 
 /// keychain-aware resolver for the *active* CLI account, instead of
 /// rotating that account's stale private-slot copy (which orphans CC's
 /// live session → forced re-login). See `verify_active_via_keychain`.
+/// `probe` decides whether we may spend the account's single-use refresh
+/// token — see the gate in [`resolve_cc_identity_locked`].
 pub(crate) async fn resolve_cc_identity(
     platform: &dyn cli_backend::CliPlatform,
     fetch_profile: &dyn ProfileFetcher,
     refresher: &dyn crate::cli_backend::swap::TokenRefresher,
+    probe: &dyn crate::cli_backend::swap::LiveSessionProbe,
 ) -> Result<Option<(String, String)>, RegisterError> {
     let _lock = swap::acquire_swap_lock().map_err(|e| {
         RegisterError::CredentialRead(format!("failed to acquire credential lock: {e}"))
     })?;
-    resolve_cc_identity_locked(platform, fetch_profile, refresher, false, None, None).await
+    resolve_cc_identity_locked(platform, fetch_profile, refresher, false, None, None, probe).await
 }
 
 /// Force-refresh the resolver for callers that already hold `swap`'s
@@ -274,10 +278,14 @@ pub(crate) async fn resolve_cc_identity_force_refresh_locked(
         true,
         Some(expected_email),
         Some(expected_refresh_token),
+        // Never consulted: the live-session gate is skipped entirely on
+        // the forced path (see the gate in `resolve_cc_identity_locked`).
+        &crate::cli_backend::swap::NoLiveSessionProbe,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn resolve_cc_identity_locked(
     platform: &dyn cli_backend::CliPlatform,
     fetch_profile: &dyn ProfileFetcher,
@@ -285,6 +293,7 @@ async fn resolve_cc_identity_locked(
     force_refresh: bool,
     expected_email: Option<&str>,
     expected_refresh_token: Option<&str>,
+    probe: &dyn crate::cli_backend::swap::LiveSessionProbe,
 ) -> Result<Option<(String, String)>, RegisterError> {
     let blob_str_t0 = match platform
         .read_default()
@@ -401,10 +410,38 @@ async fn resolve_cc_identity_locked(
         }
     }
 
-    // Step 3 — refresh. Use the LATEST refresh_token, not the one we
-    // originally snapshot. If a concurrent writer already rotated, our
-    // original refresh_token is dead server-side and calling refresh
-    // with it would produce a false AuthRejected.
+    // Step 3 — refresh.
+    //
+    // Live-session gate. Refresh tokens are single-use, and CC holds its
+    // copy in memory and writes it back to the keychain on its own
+    // schedule. If we rotate while a `claude` process is alive, CC keeps
+    // a token the server has already retired: its next refresh fails and
+    // the user is forced to re-login. That is precisely the "accounts
+    // need re-login too often" bug, reached from the two observational
+    // callers — `verify_active_via_keychain` (Verify all) and
+    // `sync_from_current_cc` (GUI window focus, `account list`,
+    // `cli status`). `swap::switch` already gates on this same condition
+    // for the same reason; this closes the matching hole on the refresh
+    // paths.
+    //
+    // Skipping is self-healing: CC refreshes its own token on its next
+    // request, so the following pass verifies normally. Callers map this
+    // to a transient "couldn't confirm", never to a re-login prompt.
+    //
+    // The forced path (`launcher`, Mode D) is deliberately exempt — it is
+    // a user-initiated launch that needs a fresh token in hand, and it
+    // CAS-guards on `expected_refresh_token`.
+    //
+    // Probed lazily here rather than at entry so the happy path (token
+    // still valid → Step 1 returns early) never pays the subprocess scan.
+    if !force_refresh && probe.is_cc_running().await {
+        return Err(RegisterError::CcLiveRefreshSkipped);
+    }
+
+    // Use the LATEST refresh_token, not the one we originally snapshot.
+    // If a concurrent writer already rotated, our original refresh_token
+    // is dead server-side and calling refresh with it would produce a
+    // false AuthRejected.
     let token_resp = match refresher
         .refresh(&latest_blob.claude_ai_oauth.refresh_token)
         .await
@@ -505,14 +542,43 @@ async fn resolve_cc_identity_locked(
     Ok(Some((live_blob_str, live_email)))
 }
 
+/// Testable seam. Uses [`NoLiveSessionProbe`], so the refresh branch
+/// stays deterministically reachable regardless of what is running on
+/// the test machine.
+///
+/// **Production must call [`sync_from_current_cc`]**, which supplies the
+/// real probe. Reaching the refresh with a live `claude` running rotates
+/// a token CC still holds and forces a re-login — hence `#[cfg(test)]`,
+/// so this probe-less shape can never be wired into production.
+///
+/// [`NoLiveSessionProbe`]: crate::cli_backend::swap::NoLiveSessionProbe
+#[cfg(test)]
 pub(crate) async fn sync_from_current_cc_with(
     store: &AccountStore,
     platform: &dyn cli_backend::CliPlatform,
     fetch_profile: &dyn ProfileFetcher,
     refresher: &dyn crate::cli_backend::swap::TokenRefresher,
 ) -> Result<Option<Uuid>, RegisterError> {
+    sync_from_current_cc_with_probe(
+        store,
+        platform,
+        fetch_profile,
+        refresher,
+        &crate::cli_backend::swap::NoLiveSessionProbe,
+    )
+    .await
+}
+
+/// [`sync_from_current_cc_with`] with an injectable live-session probe.
+pub(crate) async fn sync_from_current_cc_with_probe(
+    store: &AccountStore,
+    platform: &dyn cli_backend::CliPlatform,
+    fetch_profile: &dyn ProfileFetcher,
+    refresher: &dyn crate::cli_backend::swap::TokenRefresher,
+    probe: &dyn crate::cli_backend::swap::LiveSessionProbe,
+) -> Result<Option<Uuid>, RegisterError> {
     let (effective_blob_str, email) =
-        match resolve_cc_identity(platform, fetch_profile, refresher).await? {
+        match resolve_cc_identity(platform, fetch_profile, refresher, probe).await? {
             Some(pair) => pair,
             None => return Ok(None),
         };
@@ -769,6 +835,17 @@ pub enum RegisterError {
     /// stale state.
     #[error("CC credentials changed during refresh — retry sync")]
     CcChangedDuringRefresh,
+    /// A live `claude` process is running, so we declined to spend the
+    /// account's single-use refresh token. CC keeps its refresh token in
+    /// memory and writes it back to the keychain; rotating it here would
+    /// leave CC holding a retired token and force a re-login on its next
+    /// refresh. Strictly **transient** — CC refreshes on its own next
+    /// request, so the following pass succeeds. Callers must map this to
+    /// a "couldn't confirm this pass" state, never to a re-login prompt.
+    #[error(
+        "a live Claude Code session is running — skipped token refresh to avoid signing it out"
+    )]
+    CcLiveRefreshSkipped,
 }
 
 // ---------------------------------------------------------------------------

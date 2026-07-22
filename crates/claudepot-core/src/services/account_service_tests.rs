@@ -721,6 +721,64 @@ async fn test_sync_refreshes_stale_access_token_and_retries_profile() {
     swap::delete_private(account.uuid).await.unwrap();
 }
 
+/// Probe reporting a live `claude` process.
+struct LiveProbe;
+
+#[async_trait::async_trait]
+impl crate::cli_backend::swap::LiveSessionProbe for LiveProbe {
+    async fn is_cc_running(&self) -> bool {
+        true
+    }
+}
+
+/// Refresher that fails the test if it is ever called.
+struct NeverRefresher;
+
+#[async_trait::async_trait]
+impl crate::cli_backend::swap::TokenRefresher for NeverRefresher {
+    async fn refresh(&self, _rt: &str) -> Result<TokenResponse, OAuthError> {
+        panic!("refresh must not be attempted while a live claude session is running");
+    }
+}
+
+/// The window-focus path must not sign Claude Code out.
+/// `sync_from_current_cc` runs on GUI window focus, `account list`, and
+/// `cli status` — by far the most frequent caller of the resolver. With a
+/// live `claude` running and the access token rejected, it must decline to
+/// spend the single-use refresh token: CC holds that token in memory and
+/// writes it back, so rotating it here retires the token CC still relies
+/// on and its next refresh fails → forced re-login.
+///
+/// Note the contrast with
+/// `test_sync_returns_auth_rejected_when_refresh_token_is_dead` below:
+/// identical 401, but a live session must yield the TRANSIENT
+/// `CcLiveRefreshSkipped`, never `AuthRejected` — the latter drives the
+/// UI's "Sign in again" banner.
+#[tokio::test]
+async fn sync_does_not_spend_refresh_token_while_cc_is_live() {
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+
+    insert_account(&store, "alice@example.com");
+    let platform = MockPlatform::new(Some(fresh_blob_json()));
+    let fetcher = MockProfileFetcher::failing("401 Unauthorized");
+
+    let result =
+        sync_from_current_cc_with_probe(&store, &platform, &fetcher, &NeverRefresher, &LiveProbe)
+            .await;
+
+    assert!(
+        matches!(result, Err(RegisterError::CcLiveRefreshSkipped)),
+        "expected the transient live-session skip, got {:?}",
+        result
+    );
+    assert!(
+        platform.last_written().is_none(),
+        "keychain must not be rotated while a claude session is live"
+    );
+}
+
 #[tokio::test]
 async fn test_sync_returns_auth_rejected_when_refresh_token_is_dead() {
     // Terminal case: access_token rejected AND refresh_token
