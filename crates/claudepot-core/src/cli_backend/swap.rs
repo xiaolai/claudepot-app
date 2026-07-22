@@ -125,17 +125,9 @@ pub(crate) async fn verify_blob_identity(
     }
 }
 
-/// Detect whether a Claude Code CLI process is currently running. If
-/// one is, its in-memory refresh token will eventually overwrite
-/// whatever we put in the keychain — making the swap silently revert.
-///
-/// Detection: `pgrep -x claude` on Unix (exact binary match — avoids
-/// false positives on "claude-desktop", grep pipelines, etc.). On
-/// non-Unix platforms: best-effort skip (returns false) since the
-/// primary risk is macOS/Linux where pgrep exists.
 /// Public wrapper around the live-session detector so the CLI's
 /// post-swap warning path can re-check without duplicating the
-/// `ps`/`pgrep` logic. Same cost as the gate check (one subprocess).
+/// platform logic. Same cost as the gate check.
 pub async fn is_cc_process_running_public() -> bool {
     is_cc_process_running().await
 }
@@ -180,6 +172,22 @@ impl LiveSessionProbe for NoLiveSessionProbe {
     }
 }
 
+/// Detect whether a Claude Code CLI process is currently running.
+///
+/// Two callers depend on this, for the same underlying reason — CC keeps
+/// its refresh token in memory and writes it back to the keychain:
+/// [`switch`] refuses to swap under a live session (the swap would
+/// silently revert), and [`DefaultLiveSessionProbe`] refuses to spend the
+/// single-use refresh token (the rotation would sign CC out).
+///
+/// Detection is per-platform:
+/// - **Unix** — `ps -axco comm`, exact match on `claude`. (`pgrep -x`
+///   struggles with Mach-O binaries installed via symlink, e.g.
+///   `~/.local/bin/claude` → a versioned binary.)
+/// - **Windows** — a `sysinfo` process scan for `claude.exe`, excluding
+///   Claude Desktop's install locations. See the inline notes for the
+///   name collision and the WSL gap.
+/// - **Anything else** — `false`; no supported platform reaches here.
 pub(crate) async fn is_cc_process_running() -> bool {
     #[cfg(unix)]
     {
@@ -201,7 +209,63 @@ pub(crate) async fn is_cc_process_running() -> bool {
             Err(_) => false,
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // Claude Code's CLI ships as `claude.exe`. Claude *Desktop*'s
+        // executable is `Claude.exe` and Windows filenames are
+        // case-insensitive, so a name-only match collides with it —
+        // Desktop would permanently suppress CLI verification for
+        // anyone who leaves the app open. Desktop's install locations
+        // are known (mirrors `updates::detect::windows_desktop_running`),
+        // so exclude them.
+        //
+        // Bias, when attribution is uncertain: count it as running. A
+        // false positive costs one skipped refresh and self-heals on the
+        // next pass; a false negative signs a live session out, which is
+        // the whole bug this gate exists to prevent.
+        //
+        // Known gap: a `claude` running inside WSL is invisible to a
+        // Windows-native process scan — the two have separate process
+        // namespaces (reference.md §I, "Process namespace isolation").
+        // WSL sessions therefore keep the pre-existing exposure.
+        use sysinfo::{ProcessRefreshKind, RefreshKind, System, UpdateKind};
+
+        let desktop_dirs: Vec<std::path::PathBuf> = [
+            std::env::var_os("LOCALAPPDATA")
+                .map(std::path::PathBuf::from)
+                .map(|p| p.join("Programs").join("Claude")),
+            std::env::var_os("ProgramFiles")
+                .map(std::path::PathBuf::from)
+                .map(|p| p.join("Claude")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        // sysinfo 0.32 API: `new()` is the empty-refresh constructor;
+        // `nothing()` is the 0.33+ rename. Same spelling as
+        // `updates::detect::windows_desktop_running`.
+        let sys = System::new_with_specifics(
+            RefreshKind::new()
+                .with_processes(ProcessRefreshKind::new().with_exe(UpdateKind::Always)),
+        );
+        sys.processes().values().any(|proc| {
+            if !proc
+                .name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("claude.exe")
+            {
+                return false;
+            }
+            match proc.exe().and_then(|e| e.parent()) {
+                // Claude Desktop — doesn't hold the CLI's token.
+                Some(dir) => !desktop_dirs.iter().any(|d| dir == d.as_path()),
+                // Path unavailable (permissions) — count it, per the bias.
+                None => true,
+            }
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         false
     }
