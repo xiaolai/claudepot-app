@@ -227,12 +227,27 @@ Real host names and the network they sit on live in `CLAUDE.local.md`
 (gitignored).
 
 The hook source is committed at `scripts/pre-push`. Install it
-per clone with `scripts/install-hooks.sh` (which runs
-`ln -sf ../../scripts/pre-push .git/hooks/pre-push`). The hook
-auto-runs both validators against the pushed SHA when — and only
-when — the push contains a `refs/tags/v*` release tag. Branch pushes
-skip validation. Failure aborts the push and prints the recovery
-recipe (delete tag, fix locally, re-tag, re-push).
+per clone with `scripts/install-hooks.sh`. The hook auto-runs both
+validators against the pushed SHA when — and only when — the push
+contains a `refs/tags/v*` release tag. Branch pushes skip
+validation. Failure aborts the push and prints the recovery recipe
+(delete tag, fix locally, re-tag, re-push).
+
+**Never hand-symlink the hook into `.git/hooks/`.** A global
+`core.hooksPath` — set by the git-lfs installer and most dotfile
+setups — makes git ignore `.git/hooks` entirely, so a symlinked hook
+reports "Installed" and then never runs. The v0.2.7 … v0.2.10 tags
+were all pushed with the validators silently inert for exactly this
+reason. `install-hooks.sh` instead points `core.hooksPath` at a
+generated, gitignored `.githooks/` (a `--local` setting, so no other
+repo is affected) whose hooks call `scripts/<hook>` and then chain to
+whatever the clone previously inherited — the global `commit-msg`
+and git-lfs hooks keep working. Re-running is safe; the inherited
+path is recorded once in `claudepot.inheritedHooksPath`.
+
+Verify an install rather than trusting it: `git config
+core.hooksPath` should print a `.githooks` path, and a dry-run push
+of a throwaway `v*` tag should print the validator banner.
 
 Validator hosts are never committed: the hook reads them from the
 gitignored `.validator-hosts` file at the repo root (shape documented
