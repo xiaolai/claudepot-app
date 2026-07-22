@@ -6,6 +6,31 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.12 — beta (released 2026-07-22)
+
+### Added
+
+- **Accounts you aren't using stop going stale.** An access token lasts
+  about an hour, and Claude Code only keeps the account it's signed in
+  as alive — so every *other* account's usage bars, Activity strip
+  entry, and tray line read "Expired" until you happened to run
+  "Verify all" or switch to it. Claudepot now quietly refreshes one
+  expired parked account per background pass, so the numbers are simply
+  there when you look. Nothing to turn on, and it costs nothing when
+  every account is already current. The account Claude Code is signed
+  in as is deliberately left alone — that token is Claude Code's to
+  manage, and touching it is what caused the sign-outs fixed in 0.2.10.
+
+### Fixed
+
+- **Claude Code running inside WSL is now seen as a live session.**
+  Windows and WSL keep separate process lists, so a `claude` started
+  from a WSL shell was invisible to the check added in 0.2.11 — those
+  users kept getting signed out. Claudepot now also looks inside
+  already-running WSL distributions. It will not start a distribution
+  that is stopped just to look, and if WSL can't be reached for any
+  reason it proceeds as before rather than blocking refreshes.
+
 ## 0.2.11 — beta (released 2026-07-22)
 
 ### Fixed
