@@ -37,6 +37,7 @@ pub(crate) mod account_verification;
 pub mod activity;
 pub mod agent;
 pub mod artifact_lifecycle;
+pub mod artifact_toggle;
 pub mod artifact_usage;
 pub mod blob;
 pub mod breaker;
