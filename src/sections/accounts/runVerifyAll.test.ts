@@ -13,6 +13,9 @@ vi.mock("@tauri-apps/api/event", () => ({
       capturedHandler = null;
     };
   }),
+  // runVerifyAll emits `usage::refetch` on successful completion so the
+  // Accounts screen re-pulls usage after a heal.
+  emit: vi.fn(async () => {}),
 }));
 
 vi.mock("../../api", () => ({
@@ -35,6 +38,8 @@ vi.mock("../../api", () => ({
   },
 }));
 
+import { emit } from "@tauri-apps/api/event";
+import { USAGE_REFETCH_EVENT } from "../../lib/events";
 import { runVerifyAll } from "./runVerifyAll";
 
 beforeEach(() => {
@@ -150,5 +155,38 @@ describe("runVerifyAll", () => {
     });
     await promise;
     expect(patches).toHaveLength(0);
+  });
+
+  it("emits usage::refetch on a clean terminal so usage re-pulls", async () => {
+    const promise = runVerifyAll({
+      patchAccount: () => {},
+      setAccounts: () => {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    capturedHandler!({
+      payload: { op_id: "op-fake", phase: "op", status: "complete" },
+    });
+    await promise;
+    expect(vi.mocked(emit)).toHaveBeenCalledWith(USAGE_REFETCH_EVENT);
+  });
+
+  it("does NOT emit usage::refetch when the op terminates with an error", async () => {
+    const promise = runVerifyAll({
+      patchAccount: () => {},
+      setAccounts: () => {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    capturedHandler!({
+      payload: {
+        op_id: "op-fake",
+        phase: "op",
+        status: "error",
+        detail: "boom",
+      },
+    });
+    await expect(promise).rejects.toThrow(/boom/);
+    expect(vi.mocked(emit)).not.toHaveBeenCalled();
   });
 });

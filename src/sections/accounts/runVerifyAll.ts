@@ -1,5 +1,6 @@
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { api } from "../../api";
+import { USAGE_REFETCH_EVENT } from "../../lib/events";
 import type {
   AccountSummary,
   OperationProgressEvent,
@@ -94,6 +95,12 @@ export async function runVerifyAll(
       if (terminalErr) {
         reject(new Error(terminalErr));
       } else {
+        // Verify may have healed expired tokens; nudge usage to
+        // re-pull so parked-account cards repaint with live numbers
+        // rather than sitting on their "token expired" placeholder.
+        // Emitted only on a clean terminal (not on `terminalErr`).
+        // (src-tauri/src/events.rs::USAGE_REFETCH)
+        emit(USAGE_REFETCH_EVENT).catch(() => {});
         resolve(counts);
       }
     };

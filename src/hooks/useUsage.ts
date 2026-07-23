@@ -1,6 +1,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { USAGE_REFETCH_EVENT } from "../lib/events";
 import { useTauriEvent } from "./useTauriEvent";
 import type { UsageMap } from "../types";
 
@@ -54,6 +55,17 @@ export function useUsage() {
   // fresh cache into the webview so the card values match the tray.
   // (useTauriEvent owns the audit-T4-6 late-resolve race internally.)
   useTauriEvent("tray-usage-refreshed", () => {
+    void refreshUsage();
+  });
+
+  // A background token heal (or a UI-driven verify) just rotated an
+  // account's credentials — re-pull so its card flips from "token
+  // expired" to live numbers on its own, instead of waiting for the
+  // user to reach for Refresh. Emitters: the backend
+  // token_refresh_orchestrator, and the frontend verify paths
+  // (runVerifyAll / runVerifyAccount).
+  // Channel mirrors src-tauri/src/events.rs::USAGE_REFETCH.
+  useTauriEvent(USAGE_REFETCH_EVENT, () => {
     void refreshUsage();
   });
 

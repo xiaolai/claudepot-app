@@ -1,5 +1,7 @@
+import { emit } from "@tauri-apps/api/event";
 import { useCallback, useState } from "react";
 import { api } from "../../api";
+import { USAGE_REFETCH_EVENT } from "../../lib/events";
 import { runVerifyAll } from "./runVerifyAll";
 import type { AccountSummary, VerifyOutcomeKind } from "../../types";
 
@@ -91,6 +93,15 @@ export function useAccountHandlers({
             pushToast("info", `Verified ${a.email}`);
         }
         await refresh();
+        // Only a verify that actually healed the account (status now
+        // "ok") should nudge usage to re-pull — that's the case where a
+        // card can flip from "token expired" to live numbers. Drift /
+        // rejected / network_error healed nothing, so emitting there
+        // would fire a needless all-account usage fetch on every failed
+        // verify. (src-tauri/src/events.rs::USAGE_REFETCH)
+        if (updated.verify_status === "ok") {
+          emit(USAGE_REFETCH_EVENT).catch(() => {});
+        }
       } catch (e) {
         pushToast("error", `Verify failed: ${e}`);
       }

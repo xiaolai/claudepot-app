@@ -25,7 +25,7 @@ use claudepot_core::cli_backend::swap;
 use claudepot_core::services::identity;
 use claudepot_core::services::usage_cache::UsageCache;
 use claudepot_core::token_refresh::{is_eligible, select_next, Candidate, Facts};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 /// Don't re-attempt the same account inside this window. The tick is
@@ -72,6 +72,13 @@ impl TokenRefreshOrchestrator {
                 // — but evicting is cheap and lets the dashboard repaint
                 // on this tick rather than after the 60s TTL.
                 app.state::<UsageCache>().invalidate(uuid).await;
+                // Nudge the webview to re-pull usage now that this slot
+                // is live. The healed value otherwise only lands in the
+                // cache + snapshot file, neither of which the GUI reads
+                // reactively, so the card would keep showing the "token
+                // expired" placeholder until the next focus/manual
+                // refresh. Best-effort — a missing window is not fatal.
+                let _ = app.emit(crate::events::USAGE_REFETCH, ());
             }
             Ok(VerifyOutcome::Rejected) => {
                 // Terminal: the refresh token is dead. `verify_status`

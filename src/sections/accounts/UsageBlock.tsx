@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import type { NfIcon } from "../../icons";
 import { NF } from "../../icons";
@@ -13,6 +15,19 @@ interface UsageBlockProps {
    * that case so there's only one signal per surface.
    */
   anomalyShown?: boolean;
+  /**
+   * Re-fetch just this account's usage (retry the /usage call). Shown
+   * as an inline "Refresh" / "Retry" action when usage is unavailable.
+   * Only useful once the token is live, so it's the secondary action
+   * on an expired card and the primary one on a fetch-error card.
+   */
+  onRefresh?: () => void | Promise<void>;
+  /**
+   * Re-verify this account — heals an expired token (401 → refresh),
+   * after which usage re-pulls live. The primary remedy on an
+   * "expired" card; the emitted `usage::refetch` handles the repaint.
+   */
+  onVerify?: () => void | Promise<void>;
 }
 
 /**
@@ -21,7 +36,12 @@ interface UsageBlockProps {
  * inline status message when the entry is expired / rate-limited /
  * error instead of the rows.
  */
-export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
+export function UsageBlock({
+  entry,
+  anomalyShown,
+  onRefresh,
+  onVerify,
+}: UsageBlockProps) {
   if (!entry || entry.status === "no_credentials") {
     if (anomalyShown) return null;
     return (
@@ -32,8 +52,37 @@ export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
   }
   if (entry.status === "expired") {
     if (anomalyShown) return null;
+    // Verify is the actual remedy (it heals the token); Refresh is a
+    // cheap "maybe the background heal already fixed it" retry, so it
+    // rides second.
     return (
-      <StatusLine glyph={NF.info} tone="muted">
+      <StatusLine
+        glyph={NF.info}
+        tone="muted"
+        actions={
+          onVerify || onRefresh ? (
+            <>
+              {onVerify && (
+                <PendingButton
+                  onClick={onVerify}
+                  glyph={NF.shield}
+                  idle="Verify"
+                  busy="Verifying…"
+                />
+              )}
+              {onRefresh && (
+                <PendingButton
+                  onClick={onRefresh}
+                  glyph={NF.refresh}
+                  glyphColor="var(--fg-muted)"
+                  idle="Refresh"
+                  busy="Refreshing…"
+                />
+              )}
+            </>
+          ) : undefined
+        }
+      >
         Usage unavailable — token expired.
       </StatusLine>
     );
@@ -47,8 +96,23 @@ export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
     );
   }
   if (entry.status === "error") {
+    // The token is (probably) live — a retry of the /usage call is the
+    // right move, so Refresh leads and reads as "Retry" here.
     return (
-      <StatusLine glyph={NF.warn} tone="warn">
+      <StatusLine
+        glyph={NF.warn}
+        tone="warn"
+        actions={
+          onRefresh ? (
+            <PendingButton
+              onClick={onRefresh}
+              glyph={NF.refresh}
+              idle="Retry"
+              busy="Retrying…"
+            />
+          ) : undefined
+        }
+      >
         Couldn't fetch usage: {entry.error_detail ?? "unknown error"}
       </StatusLine>
     );
@@ -304,26 +368,100 @@ function StatusLine({
   glyph,
   tone,
   children,
+  actions,
 }: {
   glyph: NfIcon;
   tone: "muted" | "warn";
   children: React.ReactNode;
+  /** Optional inline action buttons rendered on a second row beneath
+   *  the message, indented to align under the text. Omitting this
+   *  keeps the original single-row layout untouched. */
+  actions?: React.ReactNode;
 }) {
   const color = tone === "warn" ? "var(--warn)" : "var(--fg-muted)";
   return (
     <div
       style={{
         padding: "var(--sp-16) var(--sp-18)",
-        color,
-        fontSize: "var(--fs-xs)",
         display: "flex",
-        alignItems: "center",
-        gap: "var(--sp-6)",
+        flexDirection: "column",
+        gap: actions ? "var(--sp-10)" : 0,
       }}
     >
-      <Glyph g={glyph} style={{ fontSize: "var(--fs-xs)" }} />
-      {children}
+      <div
+        style={{
+          color,
+          fontSize: "var(--fs-xs)",
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-6)",
+        }}
+      >
+        <Glyph g={glyph} style={{ fontSize: "var(--fs-xs)" }} />
+        {children}
+      </div>
+      {actions && (
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--sp-8)",
+            // Align the button row under the message text, past the
+            // leading glyph + its gap.
+            paddingLeft: "calc(var(--fs-xs) + var(--sp-6))",
+          }}
+        >
+          {actions}
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * A small labeled action button that tracks its own in-flight state:
+ * while the async `onClick` runs, it disables and swaps its label to
+ * the `busy` text so a slow /profile or /usage round-trip reads as
+ * "working" rather than "did nothing". Labeled (not icon-only) on
+ * purpose — the shield/refresh glyphs are ambiguous solo, and this is
+ * a low-density contextual surface, so per the icon-button rules it
+ * earns a text label.
+ */
+function PendingButton({
+  onClick,
+  glyph,
+  glyphColor,
+  idle,
+  busy,
+}: {
+  onClick: () => void | Promise<void>;
+  glyph: NfIcon;
+  glyphColor?: string;
+  idle: string;
+  busy: string;
+}) {
+  const [pending, setPending] = useState(false);
+  return (
+    <Button
+      variant="subtle"
+      size="sm"
+      glyph={glyph}
+      glyphColor={glyphColor}
+      disabled={pending}
+      onClick={() => {
+        if (pending) return;
+        const r = onClick();
+        // Only show the busy state for genuinely async handlers. Wrap
+        // in Promise.resolve so a thenable without a `.finally` (a bare
+        // PromiseLike) still resets cleanly instead of throwing on the
+        // missing method.
+        if (r != null && typeof (r as PromiseLike<void>).then === "function") {
+          setPending(true);
+          void Promise.resolve(r).finally(() => setPending(false));
+        }
+      }}
+    >
+      {pending ? busy : idle}
+    </Button>
   );
 }
 

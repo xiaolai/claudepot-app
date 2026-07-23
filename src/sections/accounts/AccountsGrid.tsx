@@ -45,6 +45,12 @@ interface Props {
    *  `"verifying"` (pending pulse), the streamed outcome, or undefined
    *  (no run active → card uses its persisted `verify_status`). */
   verifyLiveFor?: (uuid: string) => VerifyLive | undefined;
+  /** Re-fetch one account's usage — inline "Refresh"/"Retry" on the
+   *  usage block when usage is unavailable. */
+  onRefreshUsage?: (a: AccountSummary) => void | Promise<void>;
+  /** Re-verify one account — inline "Verify" on an expired usage
+   *  block; heals the token so usage repaints. */
+  onVerifyAccount?: (a: AccountSummary) => void | Promise<void>;
 }
 
 /**
@@ -70,6 +76,8 @@ export function AccountsGrid({
   tokenCounts,
   onOpenTokens,
   verifyLiveFor,
+  onRefreshUsage,
+  onVerifyAccount,
 }: Props) {
   // Pre-fill adoption when CC is already signed in. `error` null +
   // non-empty email covers the 0- or 1-account case where Claudepot
@@ -156,6 +164,8 @@ export function AccountsGrid({
             tokenCount={tokenCounts?.[a.uuid]}
             onOpenTokens={onOpenTokens}
             verifyLive={verifyLiveFor?.(a.uuid)}
+            onRefreshUsage={onRefreshUsage}
+            onVerifyAccount={onVerifyAccount}
           />
         ))}
         {shown.length === 0 && accounts.length > 0 && (
