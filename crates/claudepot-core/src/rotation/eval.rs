@@ -1176,8 +1176,14 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
-            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
+            (
+                other,
+                snap_account("b@x.com", Some(20.0), Some(10.0), false),
+            ),
         ]);
         let rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
         let future = RotationAuditEntry {
@@ -1217,15 +1223,15 @@ mod tests {
         let other = Uuid::new_v4();
         // Active 5h window has NO resets_at → current cycle marker None.
         let snap = build_snapshot(vec![
+            (active, {
+                let mut a = snap_status("a@x.com", Some(95.0), AccountStatus::Ok, false);
+                a.cli_active = true;
+                a
+            }),
             (
-                active,
-                {
-                    let mut a = snap_status("a@x.com", Some(95.0), AccountStatus::Ok, false);
-                    a.cli_active = true;
-                    a
-                },
+                other,
+                snap_account("b@x.com", Some(20.0), Some(10.0), false),
             ),
-            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
         ]);
         let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
         rule.guards.max_swaps_per_window = 1;
@@ -1271,8 +1277,14 @@ mod tests {
         let active = Uuid::new_v4();
         let other = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
-            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
+            (
+                other,
+                snap_account("b@x.com", Some(20.0), Some(10.0), false),
+            ),
         ]);
         let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
         rule.guards.max_swaps_per_window = 1;
@@ -1312,7 +1324,10 @@ mod tests {
         let active = Uuid::new_v4();
         let target = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
             (
                 target,
                 snap_status("b@x.com", Some(5.0), AccountStatus::Error, true),
@@ -1388,7 +1403,10 @@ mod tests {
         let active = Uuid::new_v4();
         let target = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
             (
                 target,
                 snap_status("overflow@x.com", Some(5.0), AccountStatus::Error, true),
@@ -1426,7 +1444,10 @@ mod tests {
         let active = Uuid::new_v4();
         let target = Uuid::new_v4();
         let snap = build_snapshot(vec![
-            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                active,
+                snap_account("a@x.com", Some(95.0), Some(40.0), true),
+            ),
             (
                 target,
                 snap_status("b@x.com", Some(5.0), AccountStatus::Error, true),
