@@ -426,6 +426,45 @@ pub fn clear_auto_memory_enabled(
     }
 }
 
+/// Generic sibling of [`write_auto_memory_enabled`]: set an arbitrary
+/// top-level boolean `key` at `layer`. Preserves every other key in
+/// the file (read-modify-write). Refuses `Project` (committed to the
+/// repo) for the same reason auto-memory does.
+///
+/// Added for the `enableArtifact` toggle (`artifact_toggle`), which is
+/// a top-level boolean of exactly the same shape as `autoMemoryEnabled`
+/// but a different key — so the write path is shared rather than
+/// copied per key.
+pub fn write_bool_setting(
+    layer: SettingsLayer,
+    project_root: &Path,
+    key: &str,
+    value: bool,
+) -> Result<(), SettingsWriteError> {
+    match layer {
+        SettingsLayer::User | SettingsLayer::LocalProject => {
+            rmw_settings_bool(&layer.settings_file(project_root), key, value)
+        }
+        SettingsLayer::Project => Err(SettingsWriteError::UnsupportedLayer { layer }),
+    }
+}
+
+/// Generic sibling of [`clear_auto_memory_enabled`]: remove an
+/// arbitrary top-level `key` at `layer` (no-op if absent). Refuses
+/// `Project`.
+pub fn clear_bool_setting(
+    layer: SettingsLayer,
+    project_root: &Path,
+    key: &str,
+) -> Result<(), SettingsWriteError> {
+    match layer {
+        SettingsLayer::User | SettingsLayer::LocalProject => {
+            rmw_settings_remove(&layer.settings_file(project_root), key)
+        }
+        SettingsLayer::Project => Err(SettingsWriteError::UnsupportedLayer { layer }),
+    }
+}
+
 /// Whether the project's `.gitignore` covers
 /// `.claude/settings.local.json`. Returns `Ok(true)` if the gitignore
 /// exists and contains a matching pattern; `Ok(false)` if the file
@@ -634,5 +673,44 @@ mod tests {
 
         fs::remove_file(project.join(".gitignore")).unwrap();
         assert!(!local_settings_is_gitignored(&project).unwrap());
+    }
+
+    #[test]
+    fn generic_write_and_clear_round_trips_arbitrary_key() {
+        let (_t, project, _l) = isolated();
+        let file = SettingsLayer::User.settings_file(&project);
+        write_bool_setting(SettingsLayer::User, &project, "enableArtifact", false).unwrap();
+        assert_eq!(
+            read_bool_setting(&file, "enableArtifact").unwrap(),
+            Some(false)
+        );
+        clear_bool_setting(SettingsLayer::User, &project, "enableArtifact").unwrap();
+        assert_eq!(read_bool_setting(&file, "enableArtifact").unwrap(), None);
+    }
+
+    #[test]
+    fn generic_write_bool_setting_refuses_project_layer() {
+        let (_t, project, _l) = isolated();
+        let err = write_bool_setting(SettingsLayer::Project, &project, "enableArtifact", true)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SettingsWriteError::UnsupportedLayer {
+                layer: SettingsLayer::Project
+            }
+        ));
+    }
+
+    #[test]
+    fn generic_clear_bool_setting_refuses_project_layer() {
+        let (_t, project, _l) = isolated();
+        let err =
+            clear_bool_setting(SettingsLayer::Project, &project, "enableArtifact").unwrap_err();
+        assert!(matches!(
+            err,
+            SettingsWriteError::UnsupportedLayer {
+                layer: SettingsLayer::Project
+            }
+        ));
     }
 }

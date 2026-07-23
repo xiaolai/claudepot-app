@@ -27,6 +27,7 @@ pub mod activity;
 pub mod activity_cards;
 pub mod agents;
 pub mod artifact_lifecycle;
+pub mod artifact_tool;
 pub mod artifact_usage;
 pub mod cc_daemon;
 pub mod cc_doctor;

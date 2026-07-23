@@ -1195,6 +1195,8 @@ pub fn run() {
             commands::memory::auto_memory_state,
             commands::memory::auto_memory_state_global,
             commands::memory::auto_memory_set,
+            commands::artifact_tool::artifact_tool_state,
+            commands::artifact_tool::artifact_tool_set,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
             commands::migrate::migrate_inspect,

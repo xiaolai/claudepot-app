@@ -42,6 +42,7 @@ import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { RotationPane } from "./settings/RotationPane";
 import { CleanupPane } from "./sessions/CleanupPane";
 import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
+import { CompanionArtifactToggle } from "./settings/CompanionArtifactToggle";
 import { TrashDrawer } from "./sessions/TrashDrawer";
 import type { AppStatus, CcIdentity } from "../types";
 import { APP_VERSION } from "../version";
@@ -384,6 +385,7 @@ function GeneralPane({
   );
 
   return (
+    <>
     <SettingsGroup
       desc="Behavior that runs when Claudepot starts up, plus the diagnostic overlays you can opt into."
     >
@@ -434,6 +436,10 @@ function GeneralPane({
           confirms the new state since the toggle has no visual
           surface to mirror it. */}
     </SettingsGroup>
+    <SettingsGroup desc="Claude Code behavior. Written to ~/.claude/settings.json and shared by every account that uses Claude Code's config.">
+      <CompanionArtifactToggle pushToast={pushToast} />
+    </SettingsGroup>
+    </>
   );
 }
 

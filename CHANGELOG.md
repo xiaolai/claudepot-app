@@ -6,10 +6,18 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.2.14 — beta (unreleased)
+## 0.2.14 — beta (released 2026-07-23)
 
 ### Added
 
+- **Keep companion output local.** A new Settings → General toggle
+  turns off Claude Code's cloud Artifact tool, so the charts and
+  mini-apps Claude builds land as local files instead of private pages
+  in the signed-in account's claude.ai gallery. Off by default; because
+  those gallery pages are per-account, keeping output local means it
+  belongs to no account and survives account switches. When the
+  `CLAUDE_CODE_DISABLE_ARTIFACT` environment variable is set, the toggle
+  reflects the override and stays read-only.
 - **Fix an account's usage right from its card.** When a usage chart is
   unavailable, the card now offers inline actions — Verify and Refresh
   on an expired account, Retry on a fetch error — so recovering it no

@@ -62,6 +62,18 @@ vi.mock("../../api", () => ({
       local_settings_gitignored: null,
     }),
     autoMemorySet: vi.fn(),
+    // The General tab (default mount before the GitHub nav is clicked)
+    // now hosts the "keep companion output local" toggle, which reads
+    // artifact_tool_state on mount. Stub a default (enabled) shape.
+    artifactToolState: vi.fn().mockResolvedValue({
+      enabled: true,
+      decided_by: "default",
+      user_writable: true,
+      user_enable_value: null,
+      user_disable_value: null,
+      env_disable_set: false,
+    }),
+    artifactToolSet: vi.fn(),
   },
 }));
 
