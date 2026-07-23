@@ -6,6 +6,17 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.15 — beta (released 2026-07-24)
+
+### Fixed
+
+- **Account cards line up again.** An account whose saved login is
+  missing or broken showed a small "No credentials — re-login" caption
+  under its CLI button — a duplicate of the warning banner right below
+  it that also pushed the CLI button out of line with the Desktop
+  button beside it. The caption is gone; the banner and its Re-login
+  button carry the reason.
+
 ## 0.2.14 — beta (released 2026-07-23)
 
 ### Added
