@@ -26,6 +26,11 @@ import { useTauriEvents } from "./useTauriEvent";
  *   rule stops re-firing until the breaker's cooldown probe. Routes
  *   to the `rotationFailed` category (an error-level event) so it
  *   reaches the same toast + bell facade as a plain failure.
+ * - `rotation-stalled` — a rule matched but every candidate is also
+ *   at/above the threshold, so there is no safe target. Emitted once
+ *   per stall episode; routed through `rotationFailed` (same channel
+ *   precedent as breaker-tripped) so the user learns "every account
+ *   is near cap" instead of only seeing an audit-log row.
  *
  * This hook is wired once at the app root next to
  * `useUsageThresholdNotifications`. It reads the emit() dispatcher
@@ -48,6 +53,21 @@ interface AppliedPayload {
   ruleId: string;
   fromEmail: string;
   toEmail: string;
+  /**
+   * Whether a Claude Code process was running when the swap landed.
+   * A swap applied mid-session only takes effect once CC restarts
+   * (CC holds the old credentials in memory), so the toast tells the
+   * user to restart. Absent/false → the swap is already live.
+   */
+  ccRunning?: boolean;
+}
+
+interface StalledPayload {
+  ruleId: string;
+  fromEmail: string;
+  window: string | null;
+  utilizationPct: number;
+  thresholdPct: number;
 }
 
 interface FailedPayload {
@@ -107,11 +127,33 @@ export function useRotationEvents(): void {
 
   const handleApplied = useCallback(
     (p: AppliedPayload) => {
+      // A swap that lands while CC is running doesn't take effect until
+      // CC restarts — surface that so the user isn't surprised the
+      // running session is still on the old account.
+      const restart = p.ccRunning
+        ? " — restart Claude Code to apply"
+        : "";
       void emit({
         category: "rotationApplied",
         title: "Auto-rotation applied",
-        body: `Switched to ${p.toEmail} (rule ${p.ruleId})`,
+        body: `Switched to ${p.toEmail} (rule ${p.ruleId})${restart}`,
         dedupeKey: `rotation:applied:${p.ruleId}`,
+      });
+    },
+    [emit],
+  );
+
+  const handleStalled = useCallback(
+    (p: StalledPayload) => {
+      void emit({
+        category: "rotationFailed",
+        kind: "error",
+        title: "Auto-rotation stalled",
+        body: `Rule "${p.ruleId}" can't rotate — every candidate is at or above ${
+          p.thresholdPct
+        }% on ${p.window ?? "the trigger window"}. No safe target.`,
+        dedupeKey: `rotation:stalled:${p.ruleId}`,
+        target: { kind: "app", route: { section: "settings" } },
       });
     },
     [emit],
@@ -159,6 +201,9 @@ export function useRotationEvents(): void {
     },
     "rotation-breaker-tripped": (ev: TauriEvent<BreakerTrippedPayload>) => {
       if (ev.payload) handleBreakerTripped(ev.payload);
+    },
+    "rotation-stalled": (ev: TauriEvent<StalledPayload>) => {
+      if (ev.payload) handleStalled(ev.payload);
     },
   });
 

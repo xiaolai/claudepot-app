@@ -57,6 +57,12 @@ pub const ROTATION_FAILED: &str = "rotation-failed";
 /// quarantined it.
 pub const ROTATION_BREAKER_TRIPPED: &str = "rotation-breaker-tripped";
 
+/// A rotation rule matched but found no safe target — every alternate
+/// candidate is also at or above the threshold. Emitted once per
+/// transition into the stalled state so the user learns "every account
+/// is near cap" instead of only seeing an audit-log row.
+pub const ROTATION_STALLED: &str = "rotation-stalled";
+
 /// A permission grant was auto-reverted (or skipped because the
 /// user hand-changed the setting).
 pub const PERMISSION_REVERTED: &str = "permission-reverted";
@@ -116,6 +122,7 @@ mod tests {
         assert_eq!(UPDATES_CYCLE_COMPLETE, "updates::cycle-complete");
         assert_eq!(SERVICE_STATUS_UPDATED, "service-status::updated");
         assert_eq!(ROTATION_SUGGESTED, "rotation-suggested");
+        assert_eq!(ROTATION_STALLED, "rotation-stalled");
         assert_eq!(ROTATION_APPLIED, "rotation-applied");
         assert_eq!(ROTATION_FAILED, "rotation-failed");
         assert_eq!(ROTATION_BREAKER_TRIPPED, "rotation-breaker-tripped");

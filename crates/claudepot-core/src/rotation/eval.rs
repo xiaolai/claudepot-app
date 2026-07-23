@@ -65,6 +65,13 @@ pub enum NoCandidateReason {
     /// No listed candidate could be matched to a real account in the
     /// snapshot.
     UnknownEmails,
+    /// The only usable candidate(s) resolved to a registered account
+    /// whose snapshot status is not `Ok` — the slot exists but is
+    /// unverified, erroring, or otherwise not swap-ready this tick.
+    /// Distinct from `UnknownEmails` (no such account at all) so the
+    /// audit log and dry-run can say "your target isn't ready" instead
+    /// of the misleading "no such account".
+    TargetNotReady,
     /// Selector type-specific: round-robin couldn't find the active
     /// account in its candidate list.
     ActiveNotInList,
@@ -341,6 +348,14 @@ fn secs_since_last_applied(audit: &[RotationAuditEntry], now: DateTime<Utc>) -> 
         .iter()
         .filter(|e| matches!(e.outcome, RotationOutcome::Applied))
         .map(|e| (now - e.ts).num_seconds())
+        // Drop future-dated entries (clock skew, DST rollback, or a
+        // hand-edited log). Without this, a single entry with `ts >
+        // now` yields a negative "seconds since" that is smaller than
+        // any `min_interval_secs`, so `min()` would pick it and block
+        // *every* rule on *every* tick until that entry ages out of
+        // the 500-item ring. Ignoring it fails open (rotation still
+        // runs) rather than freezing indefinitely on bad data.
+        .filter(|secs| *secs >= 0)
         .min()
 }
 
@@ -375,6 +390,15 @@ fn count_applied_in_cycle(
             if !matches!(e.outcome, RotationOutcome::Applied) {
                 return false;
             }
+            // Ignore future-dated entries (clock skew / DST rollback /
+            // hand-edited log). Without this, a single bogus `ts > now`
+            // row counts toward `max_swaps_per_window` — via the raw
+            // lookback (`ts >= floor` with no upper bound) OR a matching
+            // cycle marker — and can wrongly block a rule. Mirrors the
+            // same guard in `secs_since_last_applied`.
+            if e.ts > now {
+                return false;
+            }
             match (e.trigger.cycle_resets_at, current_cycle_resets_at) {
                 // Both have a marker — count only when they match.
                 (Some(entry_cycle), Some(now_cycle)) => entry_cycle == now_cycle,
@@ -382,11 +406,17 @@ fn count_applied_in_cycle(
                 // lookback so the guard still bounds blast radius
                 // on data written before this fix.
                 (None, _) => e.ts >= floor,
-                // Current cycle has no marker (server returned
-                // resets_at: null) but entry does — entry's marker
-                // can't match an unknown current cycle, so the
-                // entry can't be in "this cycle" by definition.
-                (Some(_), None) => false,
+                // Current cycle marker is unknown (the server returned
+                // `resets_at: null` this tick) but the entry has one.
+                // We can't compare cycles, so fall back to the raw
+                // `[now - cycle_length, now]` lookback rather than
+                // excluding the entry. Excluding it (the old behavior)
+                // dropped every recent swap from the count whenever the
+                // current window lacked a reset marker, silently
+                // under-counting and letting `max_swaps_per_window`
+                // pass more swaps than configured. Counting via the
+                // lookback keeps the cap conservative on `null` data.
+                (Some(_), None) => e.ts >= floor,
             }
         })
         .count() as u32
@@ -447,25 +477,34 @@ fn select_least_used(
     let mut resolved: Vec<(Uuid, &AccountSnapshot)> = Vec::new();
     let mut any_unknown_count = 0;
     let mut any_active_match = false;
+    let mut any_not_ready = false;
     for c in candidates {
         match resolve_email_to_uuid(snapshot, c) {
             Some(u) if u == active_uuid => {
                 any_active_match = true;
             }
-            Some(u) => {
-                if let Some(s) = snapshot_for(snapshot, u) {
-                    if matches!(s.status, AccountStatus::Ok) {
-                        resolved.push((u, s));
-                    }
-                }
-            }
+            Some(u) => match snapshot_for(snapshot, u) {
+                Some(s) if matches!(s.status, AccountStatus::Ok) => resolved.push((u, s)),
+                // Resolved to a registered account, but its slot is not
+                // swap-ready (status != Ok, or no snapshot row).
+                _ => any_not_ready = true,
+            },
             None => any_unknown_count += 1,
         }
     }
 
     if resolved.is_empty() {
-        if any_active_match && any_unknown_count == 0 {
+        // Order the diagnostics from most-actionable to least. A truly
+        // unknown email is a config typo; a not-ready target is
+        // transient; "only active" means the list is degenerate.
+        if any_unknown_count > 0 {
+            return Err(NoCandidateReason::UnknownEmails);
+        }
+        if any_active_match && !any_not_ready {
             return Err(NoCandidateReason::OnlyActive);
+        }
+        if any_not_ready {
+            return Err(NoCandidateReason::TargetNotReady);
         }
         return Err(NoCandidateReason::UnknownEmails);
     }
@@ -517,17 +556,38 @@ fn select_round_robin(
         return Err(NoCandidateReason::UnknownEmails);
     }
     // Walk forward from active+1, wrap, stop before active again.
+    let mut saw_not_ready = false;
     for i in 1..n {
         let idx = (active_idx + i) % n;
         if let Some(u) = resolved[idx] {
-            if let Some(s) = snapshot_for(snapshot, u) {
-                if matches!(s.status, AccountStatus::Ok) {
-                    return Ok((u, s.email.clone()));
+            // Never rotate to the active account itself. `active_idx`
+            // already skips the active *slot*, but a duplicate email
+            // (case variant, or the same address listed twice) can
+            // resolve a *different* slot to the active uuid — without
+            // this guard the walk would return a self-swap (from ==
+            // to), burning the min-interval / max-swaps budget on a
+            // no-op. `select_explicit`/`select_least_used` carry the
+            // same guard; round-robin must too.
+            if u != active_uuid {
+                match snapshot_for(snapshot, u) {
+                    Some(s) if matches!(s.status, AccountStatus::Ok) => {
+                        return Ok((u, s.email.clone()))
+                    }
+                    // Resolved to a registered account that isn't
+                    // swap-ready (status != Ok, or no snapshot row).
+                    _ => saw_not_ready = true,
                 }
             }
         }
     }
-    Err(NoCandidateReason::OnlyActive)
+    // Distinguish "the only alternate is a real account that isn't
+    // ready" from "the list is degenerate (only the active account)",
+    // matching explicit/least-used so dry-run + audit read the same.
+    if saw_not_ready {
+        Err(NoCandidateReason::TargetNotReady)
+    } else {
+        Err(NoCandidateReason::OnlyActive)
+    }
 }
 
 fn select_explicit(
@@ -539,9 +599,12 @@ fn select_explicit(
     if u == active_uuid {
         return Err(NoCandidateReason::OnlyActive);
     }
-    let s = snapshot_for(snapshot, u).ok_or(NoCandidateReason::UnknownEmails)?;
+    // The account is registered but has no snapshot row, or its slot is
+    // not swap-ready (status != Ok). Report TargetNotReady, not
+    // UnknownEmails — the email *does* match a real account.
+    let s = snapshot_for(snapshot, u).ok_or(NoCandidateReason::TargetNotReady)?;
     if !matches!(s.status, AccountStatus::Ok) {
-        return Err(NoCandidateReason::UnknownEmails);
+        return Err(NoCandidateReason::TargetNotReady);
     }
     Ok((u, s.email.clone()))
 }
@@ -1066,6 +1129,320 @@ mod tests {
                 reason: Some(rec), ..
             } => assert!(matches!(rec.reason, SkipReason::NoActiveSnapshot)),
             _ => panic!("expected skip"),
+        }
+    }
+
+    /// Build an account snapshot with an explicit status and a 5-hour
+    /// window whose `resets_at` may be absent — for the not-ready and
+    /// null-cycle tests below.
+    fn snap_status(
+        email: &str,
+        five_hour_pct: Option<f64>,
+        status: AccountStatus,
+        five_hour_resets: bool,
+    ) -> AccountSnapshot {
+        AccountSnapshot {
+            email: email.into(),
+            subscription_type: Some("max".into()),
+            cli_active: false,
+            desktop_active: false,
+            status,
+            fetched_at: fixed_now(),
+            ttl_secs: 60,
+            usage: Some(UsageWindows {
+                five_hour: five_hour_pct.map(|p| WindowSnapshot {
+                    utilization: p,
+                    resets_at: if five_hour_resets {
+                        Some(resets_at(3))
+                    } else {
+                        None
+                    },
+                }),
+                seven_day: None,
+                seven_day_opus: None,
+                seven_day_sonnet: None,
+            }),
+            retry_after_secs: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn future_dated_applied_entry_does_not_freeze_rotation() {
+        // Regression: a single future-dated `applied` entry (clock
+        // skew) used to make `secs_since_last_applied` return a
+        // negative value smaller than any min_interval, blocking every
+        // rule forever. It must be ignored so rotation still fires.
+        let active = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let snap = build_snapshot(vec![
+            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+        ]);
+        let rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
+        let future = RotationAuditEntry {
+            id: 1,
+            ts: fixed_now() + Duration::hours(1), // in the future
+            rule_id: "any".into(),
+            trigger: RotationTriggerSummary {
+                window: Some(UsageWindowKind::FiveHour),
+                utilization_pct: 91.0,
+                threshold_pct: 90,
+                is_extra_usage: false,
+                cycle_resets_at: None,
+                bg_workers: None,
+            },
+            from_email: "a@x.com".into(),
+            to_email: Some("b@x.com".into()),
+            mode: AuditMode::Auto,
+            outcome: RotationOutcome::Applied,
+            reason: "".into(),
+        };
+        let decisions = evaluate(&[rule], &snap, active, &[future], fixed_now());
+        assert!(
+            matches!(decisions[0], RuleDecision::Fire(_)),
+            "future-dated applied entry must not block rotation"
+        );
+    }
+
+    #[test]
+    fn null_current_cycle_marker_counts_recent_swaps_via_lookback() {
+        // Regression: when the server returns `resets_at: null` for the
+        // active window, the current cycle marker is None. A recent
+        // `applied` entry that DID carry a marker used to be excluded
+        // from the count, so `max_swaps_per_window` silently passed
+        // more swaps than configured. It must now count via the raw
+        // lookback and block once the cap is hit.
+        let active = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        // Active 5h window has NO resets_at → current cycle marker None.
+        let snap = build_snapshot(vec![
+            (
+                active,
+                {
+                    let mut a = snap_status("a@x.com", Some(95.0), AccountStatus::Ok, false);
+                    a.cli_active = true;
+                    a
+                },
+            ),
+            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+        ]);
+        let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
+        rule.guards.max_swaps_per_window = 1;
+        rule.guards.min_interval_secs = 0;
+        // One applied swap 2h ago, tagged with a (now-irrelevant) cycle
+        // marker, inside the 5h raw lookback.
+        let marked = RotationAuditEntry {
+            id: 1,
+            ts: fixed_now() - Duration::hours(2),
+            rule_id: "5h-near-cap".into(),
+            trigger: RotationTriggerSummary {
+                window: Some(UsageWindowKind::FiveHour),
+                utilization_pct: 91.0,
+                threshold_pct: 90,
+                is_extra_usage: false,
+                cycle_resets_at: Some(resets_at(1)),
+                bg_workers: None,
+            },
+            from_email: "a@x.com".into(),
+            to_email: Some("b@x.com".into()),
+            mode: AuditMode::Auto,
+            outcome: RotationOutcome::Applied,
+            reason: "".into(),
+        };
+        let decisions = evaluate(&[rule], &snap, active, &[marked], fixed_now());
+        match &decisions[0] {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => assert!(
+                matches!(rec.reason, SkipReason::MaxSwapsHit { swaps_in_cycle: 1 }),
+                "recent swap must count against the cap even with a null current cycle marker"
+            ),
+            d => panic!("expected MaxSwapsHit skip, got {d:?}"),
+        }
+    }
+
+    #[test]
+    fn future_dated_applied_entry_does_not_inflate_max_swaps() {
+        // Sibling of the min_interval fix: a future-dated `applied`
+        // entry must not count toward `max_swaps_per_window` either.
+        // With cap=1 and only a bogus future entry, the rule must still
+        // fire (the future entry is ignored, count stays 0).
+        let active = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let snap = build_snapshot(vec![
+            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+        ]);
+        let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
+        rule.guards.max_swaps_per_window = 1;
+        rule.guards.min_interval_secs = 0;
+        // Applied entry dated 1h in the FUTURE, tagged with the current
+        // cycle marker so it would match if not for the future guard.
+        let future = RotationAuditEntry {
+            id: 1,
+            ts: fixed_now() + Duration::hours(1),
+            rule_id: "5h-near-cap".into(),
+            trigger: RotationTriggerSummary {
+                window: Some(UsageWindowKind::FiveHour),
+                utilization_pct: 91.0,
+                threshold_pct: 90,
+                is_extra_usage: false,
+                cycle_resets_at: Some(resets_at(3)),
+                bg_workers: None,
+            },
+            from_email: "a@x.com".into(),
+            to_email: Some("b@x.com".into()),
+            mode: AuditMode::Auto,
+            outcome: RotationOutcome::Applied,
+            reason: "".into(),
+        };
+        let decisions = evaluate(&[rule], &snap, active, &[future], fixed_now());
+        assert!(
+            matches!(decisions[0], RuleDecision::Fire(_)),
+            "future-dated applied entry must not count toward max_swaps"
+        );
+    }
+
+    #[test]
+    fn round_robin_only_not_ready_reports_target_not_ready() {
+        // Round-robin should report TargetNotReady (not the misleading
+        // OnlyActive) when the sole alternate is a registered account
+        // whose slot isn't swap-ready — matching explicit/least-used.
+        let active = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let snap = build_snapshot(vec![
+            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                target,
+                snap_status("b@x.com", Some(5.0), AccountStatus::Error, true),
+            ),
+        ]);
+        let rule = RotationRule {
+            id: "rr".into(),
+            enabled: true,
+            trigger: Trigger::UtilizationThreshold {
+                window: UsageWindowKind::FiveHour,
+                pct: 90,
+            },
+            action: Action::RotateTo {
+                selector: Selector::RoundRobin {
+                    candidates: vec!["a@x.com".into(), "b@x.com".into()],
+                },
+            },
+            mode: RotationMode::Auto,
+            guards: RotationGuards::default(),
+        };
+        let decisions = evaluate(&[rule], &snap, active, &[], fixed_now());
+        match &decisions[0] {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => assert!(matches!(
+                rec.reason,
+                SkipReason::NoCandidate(NoCandidateReason::TargetNotReady)
+            )),
+            d => panic!("expected TargetNotReady, got {d:?}"),
+        }
+    }
+
+    #[test]
+    fn round_robin_never_self_swaps_on_duplicate_candidate() {
+        // A candidate list with a case-variant duplicate resolves two
+        // slots to the same (active) account. The round-robin walk must
+        // not return the active account as its own target.
+        let a = Uuid::new_v4();
+        let snap = build_snapshot(vec![(
+            a,
+            snap_account("a@x.com", Some(95.0), Some(40.0), true),
+        )]);
+        let rule = RotationRule {
+            id: "rr-dup".into(),
+            enabled: true,
+            trigger: Trigger::UtilizationThreshold {
+                window: UsageWindowKind::FiveHour,
+                pct: 90,
+            },
+            action: Action::RotateTo {
+                selector: Selector::RoundRobin {
+                    // "A@x.com" resolves case-insensitively to a@x.com.
+                    candidates: vec!["a@x.com".into(), "A@x.com".into()],
+                },
+            },
+            mode: RotationMode::Auto,
+            guards: RotationGuards::default(),
+        };
+        let decisions = evaluate(&[rule], &snap, a, &[], fixed_now());
+        match &decisions[0] {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => assert!(matches!(
+                rec.reason,
+                SkipReason::NoCandidate(NoCandidateReason::OnlyActive)
+            )),
+            d => panic!("expected OnlyActive skip, not a self-swap; got {d:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_target_not_ok_reports_target_not_ready() {
+        let active = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let snap = build_snapshot(vec![
+            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                target,
+                snap_status("overflow@x.com", Some(5.0), AccountStatus::Error, true),
+            ),
+        ]);
+        let rule = RotationRule {
+            id: "exp".into(),
+            enabled: true,
+            trigger: Trigger::UtilizationThreshold {
+                window: UsageWindowKind::FiveHour,
+                pct: 90,
+            },
+            action: Action::RotateTo {
+                selector: Selector::Explicit {
+                    email: "overflow@x.com".into(),
+                },
+            },
+            mode: RotationMode::Confirm,
+            guards: RotationGuards::default(),
+        };
+        let decisions = evaluate(&[rule], &snap, active, &[], fixed_now());
+        match &decisions[0] {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => assert!(matches!(
+                rec.reason,
+                SkipReason::NoCandidate(NoCandidateReason::TargetNotReady)
+            )),
+            d => panic!("expected TargetNotReady, got {d:?}"),
+        }
+    }
+
+    #[test]
+    fn least_used_only_not_ready_reports_target_not_ready() {
+        let active = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let snap = build_snapshot(vec![
+            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (
+                target,
+                snap_status("b@x.com", Some(5.0), AccountStatus::Error, true),
+            ),
+        ]);
+        // Candidate list is only the not-ready account.
+        let rule = rule_5h_least_used(vec!["b@x.com".into()]);
+        let decisions = evaluate(&[rule], &snap, active, &[], fixed_now());
+        match &decisions[0] {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => assert!(matches!(
+                rec.reason,
+                SkipReason::NoCandidate(NoCandidateReason::TargetNotReady)
+            )),
+            d => panic!("expected TargetNotReady, got {d:?}"),
         }
     }
 }

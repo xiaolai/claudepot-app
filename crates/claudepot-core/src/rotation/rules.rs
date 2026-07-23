@@ -11,6 +11,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::services::usage_alerts::UsageWindowKind;
 
+/// Stable wire name for a window kind, used only in validation error
+/// messages. Mirrors the serde `rename_all = "snake_case"` encoding so
+/// the message names the same string a hand-editor sees in the file.
+fn window_wire(w: UsageWindowKind) -> &'static str {
+    match w {
+        UsageWindowKind::FiveHour => "five_hour",
+        UsageWindowKind::SevenDay => "seven_day",
+        UsageWindowKind::SevenDayOpus => "seven_day_opus",
+        UsageWindowKind::SevenDaySonnet => "seven_day_sonnet",
+    }
+}
+
 /// Bumped on schema-breaking changes. The store rejects files with a
 /// version it doesn't recognize.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -185,6 +197,14 @@ pub enum ValidationError {
     EmptyExplicitEmail,
     #[error("max_swaps_per_window must be >= 1, got 0")]
     ZeroMaxSwaps,
+    #[error(
+        "least_used selector window must equal the trigger window \
+         (selector `{selector}`, trigger `{trigger}`)"
+    )]
+    LeastUsedWindowMismatch {
+        selector: &'static str,
+        trigger: &'static str,
+    },
     #[error("schema version {found} is unsupported (expected {expected})")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
 }
@@ -220,6 +240,26 @@ impl RotationRule {
         self.action.validate()?;
         if self.guards.max_swaps_per_window == 0 {
             return Err(ValidationError::ZeroMaxSwaps);
+        }
+        // A `least_used` selector filters candidates by the *trigger's*
+        // threshold on the *selector's* window (see
+        // `eval::select_least_used`). If the two windows differ, that
+        // comparison is meaningless — a 90% threshold meant for the
+        // 5-hour window would be applied against candidates' 7-day
+        // utilization. The GUI keeps them in sync; this rejects
+        // hand-edited files that don't, so a nonsensical rule is caught
+        // at load/save instead of silently mis-selecting.
+        if let Action::RotateTo {
+            selector: Selector::LeastUsed { window: sel_w, .. },
+        } = &self.action
+        {
+            let Trigger::UtilizationThreshold { window: trig_w, .. } = &self.trigger;
+            if sel_w != trig_w {
+                return Err(ValidationError::LeastUsedWindowMismatch {
+                    selector: window_wire(*sel_w),
+                    trigger: window_wire(*trig_w),
+                });
+            }
         }
         Ok(())
     }
@@ -267,7 +307,15 @@ impl Selector {
                 }
                 let mut seen = std::collections::HashSet::new();
                 for c in candidates {
-                    if !seen.insert(c.clone()) {
+                    // Dedupe case-insensitively (and ignoring surrounding
+                    // whitespace) to match `eval::resolve_email_to_uuid`,
+                    // which resolves emails with `eq_ignore_ascii_case`.
+                    // A case-sensitive check here would accept
+                    // `["a@x.com", "A@x.com"]` — two list slots that
+                    // resolve to the *same* account, skewing round-robin
+                    // order and (pre-guard) risking a self-swap.
+                    let key = c.trim().to_ascii_lowercase();
+                    if !seen.insert(key) {
                         return Err(ValidationError::DuplicateCandidate(c.clone()));
                     }
                 }
@@ -446,6 +494,73 @@ mod tests {
         let mut r = rule_least_used();
         r.guards.max_swaps_per_window = 0;
         assert_eq!(r.validate(), Err(ValidationError::ZeroMaxSwaps));
+    }
+
+    #[test]
+    fn validate_rejects_case_insensitive_duplicate_candidates() {
+        // "a@x.com" and "A@x.com" resolve to the same account
+        // (case-insensitive), so the validator must reject the pair
+        // even though the raw strings differ.
+        let mut r = rule_least_used();
+        r.action = Action::RotateTo {
+            selector: Selector::LeastUsed {
+                window: UsageWindowKind::FiveHour,
+                candidates: vec!["a@x.com".into(), "A@x.com".into()],
+            },
+        };
+        assert!(matches!(
+            r.validate(),
+            Err(ValidationError::DuplicateCandidate(_))
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_least_used_window_mismatch() {
+        // Trigger fires on the 5-hour window but the selector picks by
+        // the 7-day window — a nonsensical threshold comparison.
+        let mut r = rule_least_used();
+        r.trigger = Trigger::UtilizationThreshold {
+            window: UsageWindowKind::FiveHour,
+            pct: 90,
+        };
+        r.action = Action::RotateTo {
+            selector: Selector::LeastUsed {
+                window: UsageWindowKind::SevenDay,
+                candidates: vec!["a@x.com".into(), "b@x.com".into()],
+            },
+        };
+        assert!(matches!(
+            r.validate(),
+            Err(ValidationError::LeastUsedWindowMismatch {
+                selector: "seven_day",
+                trigger: "five_hour",
+            })
+        ));
+    }
+
+    #[test]
+    fn validate_accepts_matching_least_used_window() {
+        // The default helper already matches (5h/5h) — assert it passes
+        // so the mismatch check can't over-reject the common case.
+        assert!(rule_least_used().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_ignores_window_for_round_robin_and_explicit() {
+        // The window-match rule only applies to `least_used`. A
+        // round-robin or explicit selector carries no window and must
+        // validate regardless of the trigger window.
+        let mut rr = rule_least_used();
+        rr.trigger = Trigger::UtilizationThreshold {
+            window: UsageWindowKind::SevenDayOpus,
+            pct: 80,
+        };
+        rr.action = Action::RotateTo {
+            selector: Selector::RoundRobin {
+                candidates: vec!["a@x.com".into(), "b@x.com".into()],
+            },
+        };
+        assert!(rr.validate().is_ok());
     }
 
     #[test]
