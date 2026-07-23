@@ -66,10 +66,35 @@ struct Inner {
     /// rule_id; the value is the time we first observed CC running
     /// for this rule. Once set, subsequent ticks see the entry and
     /// suppress the audit-log spam — they don't re-log
-    /// `SkippedCcRunning` every 5 minutes for the same wait. The
-    /// entry is cleared the first time the rule is dispatched OR
-    /// after an idle CC tick where CC isn't running.
+    /// `SkippedCcRunning` every 5 minutes for the same wait. At the
+    /// end of every tick the map is retained down to the rules that
+    /// actually deferred *this* tick (see `retain_cc_deferred`), which
+    /// both prunes deleted rules and clears the flag for a rule that
+    /// stopped deferring — so a later deferral logs a fresh entry
+    /// instead of being suppressed by a stale flag.
     cc_deferred: HashMap<String, chrono::DateTime<Utc>>,
+    /// Rule ids currently in the "no safe target" stalled state
+    /// (every alternate candidate is also above threshold). Emitting
+    /// `rotation-stalled` on *entry* into the set (not every tick)
+    /// keeps the notification to one per stall episode. Retained down
+    /// to the rules still stalled each tick, so a rule that recovers
+    /// and later re-stalls notifies again.
+    stalled_notified: HashSet<String>,
+}
+
+/// What `dispatch_auto` did with one auto-mode `Fire` this tick. The
+/// tick loop reads this to enforce "at most one applied swap per tick"
+/// and to track which rules deferred for `cc_deferred` upkeep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FireOutcome {
+    /// The swap was applied — the active account changed, so every
+    /// later decision this tick is stale and must be superseded.
+    Swapped,
+    /// The swap was deferred because CC is running and the rule set
+    /// `skip_when_cc_running`.
+    Deferred,
+    /// The swap was attempted but failed (active unchanged).
+    Failed,
 }
 
 /// Orchestrator state — `manage()`'d by the Tauri app, reachable via
@@ -125,6 +150,17 @@ impl RotationOrchestrator {
             }
         };
         if rules.rules.iter().all(|r| !r.enabled) {
+            // No enabled rule can defer or stall, so the correct state
+            // is empty maps. Clear them before returning — otherwise a
+            // lingering `cc_deferred` entry would suppress a fresh
+            // deferral audit (and a lingering `stalled_notified` entry a
+            // fresh stalled toast) if the rule is re-enabled later. This
+            // is the same stale-suppression the end-of-tick retain
+            // prevents on the normal path; the early return must not
+            // skip it. (Breaker ledgers are deliberately left intact so
+            // a rule re-enabled while still tripped stays gated.)
+            self.retain_cc_deferred(&HashSet::new());
+            self.retain_stalled(&HashSet::new());
             return;
         }
 
@@ -149,6 +185,25 @@ impl RotationOrchestrator {
         let audit_snapshot = self.audit.snapshot();
         let decisions = evaluate(&active_rules, snapshot, active_uuid, &audit_snapshot, now);
 
+        // At most ONE swap is applied per tick. Once a swap lands, the
+        // active account (and the usage the remaining decisions were
+        // computed against) is stale, so later `Fire`s are superseded
+        // and left for the next tick's fresh evaluation. This is what
+        // makes `min_interval_secs`' "no cascade from a single tick"
+        // guarantee real: within one `evaluate` call every rule sees
+        // the same pre-tick audit, so the interval guard alone cannot
+        // stop two rules from both firing here.
+        let mut swapped_this_tick = false;
+        // Rule ids that deferred (CC running) / stalled this tick, used
+        // to retain the matching orchestrator state below.
+        let mut deferred_ids: HashSet<String> = HashSet::new();
+        let mut stalled_ids: HashSet<String> = HashSet::new();
+        // Confirm-mode fires are stashed, not emitted inline: a confirm
+        // suggestion emitted *before* an auto swap lands later this tick
+        // would be stale (its `from_uuid` is the pre-swap active). We
+        // emit them in a second pass, and only if no swap happened.
+        let mut confirm_fires: Vec<PendingSwap> = Vec::new();
+
         for decision in decisions {
             match decision {
                 RuleDecision::Skip { reason: None, .. } => {}
@@ -157,12 +212,54 @@ impl RotationOrchestrator {
                     reason: Some(rec),
                 } => {
                     self.log_skip(&rule_id, &rec);
+                    if matches!(
+                        rec.reason,
+                        SkipReason::NoCandidate(NoCandidateReason::AllAboveThreshold)
+                    ) {
+                        stalled_ids.insert(rule_id.clone());
+                        self.note_stalled(app, &rule_id, &rec);
+                    }
                 }
+                // Confirm fires are stashed for the second pass so their
+                // freshness can be judged against the whole tick.
+                RuleDecision::Fire(pending) if matches!(pending.mode, AuditMode::Confirm) => {
+                    confirm_fires.push(pending);
+                }
+                // Auto fires apply immediately, at most one per tick.
                 RuleDecision::Fire(pending) => {
-                    self.dispatch(app, pending).await;
+                    if swapped_this_tick {
+                        self.log_superseded(&pending);
+                        continue;
+                    }
+                    let rule_id = pending.rule_id.clone();
+                    match self.dispatch_auto(app, pending).await {
+                        FireOutcome::Swapped => swapped_this_tick = true,
+                        FireOutcome::Deferred => {
+                            deferred_ids.insert(rule_id);
+                        }
+                        FireOutcome::Failed => {}
+                    }
                 }
             }
         }
+
+        // Second pass: a swap this tick makes every confirm suggestion
+        // stale (computed against the pre-swap active account), so
+        // supersede them and let the next tick re-suggest from the new
+        // active. With no swap, the active is unchanged and the
+        // suggestions are valid — queue + emit them.
+        for pending in confirm_fires {
+            if swapped_this_tick {
+                self.log_superseded(&pending);
+            } else {
+                self.queue_confirm(app, pending);
+            }
+        }
+
+        // Retain the per-tick state to only the rules that produced it
+        // this tick — prunes deleted rules and clears stale flags.
+        self.retain_cc_deferred(&deferred_ids);
+        self.retain_stalled(&stalled_ids);
 
         // Prune breaker ledgers for rules the user has since deleted
         // so `rotation-breaker.json` doesn't accumulate stale state
@@ -242,34 +339,29 @@ impl RotationOrchestrator {
         }
     }
 
-    async fn dispatch(&self, app: &AppHandle, pending: PendingSwap) {
-        match pending.mode {
-            AuditMode::Auto => {
-                self.dispatch_auto(app, pending).await;
-            }
-            AuditMode::Confirm => {
-                self.queue_confirm(app, pending);
-            }
-        }
-    }
-
-    async fn dispatch_auto(&self, app: &AppHandle, pending: PendingSwap) {
+    async fn dispatch_auto(&self, app: &AppHandle, pending: PendingSwap) -> FireOutcome {
         // Honor `skip_when_cc_running` — the orchestrator only checks
         // this for auto mode; in confirm mode the user gets the toast
         // and decides whether to wait. To avoid re-logging
         // SkippedCcRunning every tick for the same wait, we record
-        // the first deferral and only audit-log the transition (and
-        // the eventual resolve), not every check.
+        // the first deferral and only audit-log the transition. The
+        // tick's end-of-loop `retain_cc_deferred` clears the flag once
+        // the rule stops deferring, so the next episode logs afresh.
         if pending.skip_when_cc_running && cli_backend::swap::is_cc_process_running_public().await {
-            let mut g = match self.inner.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
+            let was_already_deferred = {
+                let mut g = match self.inner.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                if g.cc_deferred.contains_key(&pending.rule_id) {
+                    true
+                } else {
+                    // Record the first-observed time; the value is only
+                    // read for presence, but keep it truthful.
+                    g.cc_deferred.insert(pending.rule_id.clone(), Utc::now());
+                    false
+                }
             };
-            let was_already_deferred = g.cc_deferred.contains_key(&pending.rule_id);
-            if !was_already_deferred {
-                g.cc_deferred.insert(pending.rule_id.clone(), Utc::now());
-            }
-            drop(g);
             if !was_already_deferred {
                 let entry = entry_for(
                     &pending.rule_id,
@@ -282,18 +374,7 @@ impl RotationOrchestrator {
                 );
                 let _ = self.audit.append(entry);
             }
-            return;
-        }
-        // CC is not running (or the rule didn't ask to defer). Drop
-        // any prior deferral entry for this rule so the next CC-busy
-        // window will log a fresh "deferred" audit entry instead of
-        // staying silent.
-        {
-            let mut g = match self.inner.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
-            };
-            g.cc_deferred.remove(&pending.rule_id);
+            return FireOutcome::Deferred;
         }
 
         match perform_swap(pending.from_uuid, pending.to_uuid).await {
@@ -310,7 +391,9 @@ impl RotationOrchestrator {
                 let _ = self.audit.append(entry);
                 // A successful swap clears any prior failure run.
                 self.record_breaker_outcome(&pending.rule_id, true);
-                emit_applied(app, &pending);
+                let cc_running = cli_backend::swap::is_cc_process_running_public().await;
+                emit_applied(app, &pending, cc_running);
+                FireOutcome::Swapped
             }
             Err(e) => {
                 let entry = entry_for(
@@ -329,8 +412,63 @@ impl RotationOrchestrator {
                 if self.record_breaker_outcome(&pending.rule_id, false) {
                     self.note_breaker_tripped(app, &pending);
                 }
+                FireOutcome::Failed
             }
         }
+    }
+
+    /// Log a `Fire` that was superseded by an earlier swap this tick.
+    /// Reuses the `SkippedGuard` outcome — a tick-level guard (one swap
+    /// per tick) prevented it — with a reason the audit reader can act
+    /// on. The rule is re-evaluated fresh on the next tick.
+    fn log_superseded(&self, pending: &PendingSwap) {
+        let entry = entry_for(
+            &pending.rule_id,
+            pending.trigger.clone(),
+            pending.from_email.clone(),
+            Some(pending.to_email.clone()),
+            pending.mode,
+            RotationOutcome::SkippedGuard,
+            "another rule already swapped this tick; deferred to the next evaluation",
+        );
+        let _ = self.audit.append(entry);
+    }
+
+    /// Emit `rotation-stalled` the first time a rule enters the "no
+    /// safe target" state. `note_stalled` is idempotent within a stall
+    /// episode: `HashSet::insert` returns `true` only on the
+    /// transition, so the event (and its toast) fires once, not every
+    /// tick the stall persists.
+    fn note_stalled(&self, app: &AppHandle, rule_id: &str, rec: &SkipReasonRecord) {
+        let newly = {
+            let mut g = match self.inner.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            g.stalled_notified.insert(rule_id.to_string())
+        };
+        if newly {
+            emit_stalled(app, rule_id, rec);
+        }
+    }
+
+    /// Retain `cc_deferred` down to the rules that deferred this tick.
+    fn retain_cc_deferred(&self, deferred_ids: &HashSet<String>) {
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        g.cc_deferred.retain(|id, _| deferred_ids.contains(id));
+    }
+
+    /// Retain `stalled_notified` down to the rules still stalled this
+    /// tick, so a rule that recovers can notify again if it re-stalls.
+    fn retain_stalled(&self, stalled_ids: &HashSet<String>) {
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        g.stalled_notified.retain(|id| stalled_ids.contains(id));
     }
 
     /// Log the `Quarantined` audit entry and emit the
@@ -428,10 +566,10 @@ impl RotationOrchestrator {
     /// with the same id while the first apply is still running
     /// returns `None` — the peek-then-apply shape this replaces let
     /// two concurrent confirms both observe the entry and run
-    /// `switch_force` twice, interleaving keychain writes. The entry
-    /// itself is NOT removed, so a transient swap failure leaves it
-    /// available for retry once [`Self::finish_apply`] clears the
-    /// in-flight marker.
+    /// `switch_force` twice, interleaving keychain writes. The entry is
+    /// removed by [`Self::finish_apply`] on both outcomes; a failed
+    /// apply is retried via the next tick's fresh re-suggestion, not by
+    /// re-claiming this swap_id.
     pub fn begin_apply(&self, swap_id: &str) -> Option<QueuedSwap> {
         self.evict_stale();
         let mut g = match self.inner.lock() {
@@ -446,18 +584,23 @@ impl RotationOrchestrator {
         Some(queued)
     }
 
-    /// Release a [`Self::begin_apply`] claim. Success also removes
-    /// the pending entry (the suggestion is consumed); failure keeps
-    /// it so the user can retry.
-    fn finish_apply(&self, swap_id: &str, success: bool) {
+    /// Release a [`Self::begin_apply`] claim and consume the pending
+    /// entry, regardless of swap outcome. A *failed* confirm apply is
+    /// re-surfaced by the next tick's fresh suggestion (a new toast
+    /// with a new swap_id), NOT by a lingering stash entry: keeping the
+    /// entry on failure created a dead-zone — the toast was already
+    /// gone (the "Switch" press dismisses it) and `queue_confirm`'s
+    /// dedupe on `(rule_id, from, to)` suppressed the next tick's
+    /// re-suggestion, so there was no retry affordance for up to the
+    /// 30-minute TTL. Consuming the entry lets the rule re-suggest on
+    /// the next tick until it succeeds or the breaker trips.
+    fn finish_apply(&self, swap_id: &str) {
         let mut g = match self.inner.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
         g.in_flight.remove(swap_id);
-        if success {
-            g.pending.remove(swap_id);
-        }
+        g.pending.remove(swap_id);
     }
 
     /// Snapshot of currently queued confirm-mode swaps. Used by the
@@ -479,11 +622,11 @@ impl RotationOrchestrator {
     /// must come from [`Self::begin_apply`] — the in-flight claim is
     /// what makes a concurrent second confirm a no-op.
     ///
-    /// On success: removes the pending entry. On failure: leaves the
-    /// pending entry in the stash so the user can retry — a
-    /// transient error (token refresh hiccup, identity-gate flap)
-    /// shouldn't silently lose the suggestion. Both outcomes release
-    /// the in-flight claim.
+    /// Both outcomes consume the pending entry and release the
+    /// in-flight claim. On failure the rule re-suggests on the next
+    /// tick (a fresh toast) until it succeeds or its breaker trips —
+    /// see [`Self::finish_apply`] for why keeping the entry on failure
+    /// was a dead-zone rather than a retry.
     pub async fn apply_confirmed(&self, app: &AppHandle, queued: QueuedSwap) -> Result<(), String> {
         match perform_swap(queued.pending.from_uuid, queued.pending.to_uuid).await {
             Ok(()) => {
@@ -499,8 +642,9 @@ impl RotationOrchestrator {
                 let _ = self.audit.append(entry);
                 // A successful swap clears any prior failure run.
                 self.record_breaker_outcome(&queued.pending.rule_id, true);
-                emit_applied(app, &queued.pending);
-                self.finish_apply(&queued.swap_id, true);
+                let cc_running = cli_backend::swap::is_cc_process_running_public().await;
+                emit_applied(app, &queued.pending, cc_running);
+                self.finish_apply(&queued.swap_id);
                 Ok(())
             }
             Err(e) => {
@@ -522,9 +666,9 @@ impl RotationOrchestrator {
                 if self.record_breaker_outcome(&queued.pending.rule_id, false) {
                     self.note_breaker_tripped(app, &queued.pending);
                 }
-                // Do NOT remove the pending entry — let the user
-                // retry. The 30-min TTL still bounds blast radius.
-                self.finish_apply(&queued.swap_id, false);
+                // Consume the entry — the next tick re-suggests a fresh
+                // toast; the breaker bounds runaway failures.
+                self.finish_apply(&queued.swap_id);
                 Err(e)
             }
         }
@@ -574,6 +718,9 @@ fn no_candidate_reason_text(r: &NoCandidateReason) -> &'static str {
             "every alternate candidate was also at or above the threshold"
         }
         NoCandidateReason::UnknownEmails => "no candidate email matched a registered account",
+        NoCandidateReason::TargetNotReady => {
+            "the chosen target account is not swap-ready (unverified or erroring)"
+        }
         NoCandidateReason::ActiveNotInList => {
             "active account is not in the round-robin candidate list"
         }
@@ -622,6 +769,24 @@ pub struct RotationAppliedPayload {
     pub rule_id: String,
     pub from_email: String,
     pub to_email: String,
+    /// Whether a CC process was running when the swap landed. A swap
+    /// applied mid-session only takes effect after CC restarts (CC
+    /// holds the old creds in memory), so the toast tells the user to
+    /// restart. `false` → no restart hint (the swap is already live).
+    pub cc_running: bool,
+}
+
+/// `rotation-stalled` payload — a rule matched but every alternate
+/// candidate is also at or above the threshold, so there is no safe
+/// target. Emitted once per stall episode.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotationStalledPayload {
+    pub rule_id: String,
+    pub from_email: String,
+    pub window: Option<String>,
+    pub utilization_pct: f64,
+    pub threshold_pct: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -663,14 +828,28 @@ fn emit_suggested(app: &AppHandle, swap_id: &str, p: &PendingSwap) {
     }
 }
 
-fn emit_applied(app: &AppHandle, p: &PendingSwap) {
+fn emit_applied(app: &AppHandle, p: &PendingSwap, cc_running: bool) {
     let payload = RotationAppliedPayload {
         rule_id: p.rule_id.clone(),
         from_email: p.from_email.clone(),
         to_email: p.to_email.clone(),
+        cc_running,
     };
     if let Err(e) = app.emit(crate::events::ROTATION_APPLIED, payload) {
         tracing::warn!(error = %e, "rotation_orchestrator: emit applied failed");
+    }
+}
+
+fn emit_stalled(app: &AppHandle, rule_id: &str, rec: &SkipReasonRecord) {
+    let payload = RotationStalledPayload {
+        rule_id: rule_id.to_string(),
+        from_email: rec.from_email.clone(),
+        window: rec.trigger.window.map(window_kind_str),
+        utilization_pct: rec.trigger.utilization_pct,
+        threshold_pct: rec.trigger.threshold_pct,
+    };
+    if let Err(e) = app.emit(crate::events::ROTATION_STALLED, payload) {
+        tracing::warn!(error = %e, "rotation_orchestrator: emit stalled failed");
     }
 }
 
@@ -746,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn begin_apply_claims_once_until_finished() {
+    fn begin_apply_claims_once_and_consumes_on_finish() {
         // The double-apply race this closes: two toast presses both
         // peeked the same entry and both ran switch_force. The second
         // claim must be refused while the first is in flight.
@@ -757,18 +936,13 @@ mod tests {
             "concurrent claim must be refused"
         );
 
-        // Failure releases the claim but keeps the entry for retry.
-        orch.finish_apply("s1", false);
-        assert!(
-            orch.begin_apply("s1").is_some(),
-            "retry after failure must re-claim"
-        );
-
-        // Success consumes the entry entirely.
-        orch.finish_apply("s1", true);
+        // `finish_apply` consumes the entry on both outcomes — a failed
+        // confirm apply is retried via the next tick's fresh
+        // suggestion, not by re-claiming this swap_id.
+        orch.finish_apply("s1");
         assert!(
             orch.begin_apply("s1").is_none(),
-            "applied entry must be gone"
+            "consumed entry must be gone after finish"
         );
     }
 

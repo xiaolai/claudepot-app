@@ -172,6 +172,9 @@ fn no_candidate_user_text(r: &NoCandidateReason) -> &'static str {
             "every alternate candidate is also at or above the threshold"
         }
         NoCandidateReason::UnknownEmails => "no candidate email matches a registered account",
+        NoCandidateReason::TargetNotReady => {
+            "the chosen target account is not swap-ready (unverified or erroring)"
+        }
         NoCandidateReason::ActiveNotInList => {
             "active account is not in the round-robin candidate list"
         }
@@ -216,8 +219,9 @@ pub async fn rotation_pending_list(
 /// concurrent click (`begin_apply`'s in-flight claim makes the
 /// no-op guarantee real; a bare peek let both clicks swap).
 ///
-/// The entry is removed only on a successful swap, so a transient
-/// failure leaves it available for the user to retry.
+/// The entry is consumed on both outcomes. A failed swap is retried
+/// via the next tick's fresh re-suggestion (a new toast), not by
+/// re-claiming this `swap_id` — see `RotationOrchestrator::finish_apply`.
 #[tauri::command]
 pub async fn rotation_apply_pending(
     app: AppHandle,
