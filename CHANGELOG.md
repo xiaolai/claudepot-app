@@ -6,7 +6,25 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.2.13 — beta (unreleased)
+## 0.2.14 — beta (unreleased)
+
+### Added
+
+- **Fix an account's usage right from its card.** When a usage chart is
+  unavailable, the card now offers inline actions — Verify and Refresh
+  on an expired account, Retry on a fetch error — so recovering it no
+  longer means opening the ⋯ menu.
+
+### Fixed
+
+- **Usage charts stop coming up empty on launch.** Parked accounts
+  showed "Usage unavailable — token expired" until you manually
+  refreshed: the background token refresh healed the login, but nothing
+  told the Accounts screen to re-pull the numbers. A heal — background
+  refresh or a verify — now re-pulls usage automatically, so the cards
+  fill in on their own a second or two after opening.
+
+## 0.2.13 — beta (released 2026-07-23)
 
 ### Added
 
