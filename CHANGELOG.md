@@ -6,6 +6,40 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.13 — beta (unreleased)
+
+### Added
+
+- **Auto-rotation tells you when every account is capped.** If a
+  rotation rule fires but every candidate account is also at or above
+  its threshold, there is no safe account to switch to — Claudepot now
+  says so instead of silently doing nothing, so you learn you're out of
+  headroom the moment it happens rather than by reading the activity
+  log later.
+- **A swap that lands mid-session says to restart Claude Code.** When
+  auto-rotation switches accounts while Claude Code is running, the old
+  account stays live in that session until it restarts. The
+  notification now spells that out so the switch isn't a surprise.
+
+### Fixed
+
+- **Auto-rotation no longer swaps twice in one pass.** Two rules
+  crossing their thresholds on the same five-minute check could both
+  fire and swap, landing you on an unexpected account. Rotation now
+  applies at most one swap per check and re-evaluates the rest against
+  the new state — including confirm-mode suggestions, which are held
+  back if a swap already happened.
+- **A confirmed-but-failed swap gets offered again.** If you approved a
+  suggested swap and it failed, the suggestion could get stuck for up
+  to half an hour with no way to retry. It now re-offers on the next
+  check until it succeeds.
+- **Rotation guards are steadier.** A clock skew or a momentary gap in
+  Anthropic's reset-time data could either freeze a rule or let it swap
+  more often than its per-cycle cap allowed — both are fixed. Account
+  lists are now matched case-insensitively, a "least used" rule's
+  window is kept consistent with its trigger, and a rule that can't
+  reach a not-yet-verified target says so plainly.
+
 ## 0.2.12 — beta (released 2026-07-22)
 
 ### Added
