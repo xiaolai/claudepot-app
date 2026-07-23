@@ -35,6 +35,12 @@ interface AccountCardProps {
    *  HealthFooter "verifying…" pulse / live outcome flip. Undefined
    *  outside a run (footer shows persisted `verify_status`). */
   verifyLive?: VerifyLive;
+  /** Re-fetch just this account's usage. Surfaces as an inline
+   *  "Refresh"/"Retry" on the usage block when usage is unavailable. */
+  onRefreshUsage?: (a: AccountSummary) => void | Promise<void>;
+  /** Re-verify this account — heals an expired token so usage repaints.
+   *  Surfaces as an inline "Verify" on an expired usage block. */
+  onVerifyAccount?: (a: AccountSummary) => void | Promise<void>;
 }
 
 /**
@@ -60,6 +66,8 @@ export function AccountCard({
   tokenCount,
   onOpenTokens,
   verifyLive,
+  onRefreshUsage,
+  onVerifyAccount,
 }: AccountCardProps) {
   const bound = a.is_cli_active || a.is_desktop_active;
   const severe = isAnomaly(a);
@@ -265,7 +273,12 @@ export function AccountCard({
         />
       )}
 
-      <UsageBlock entry={usageEntry} anomalyShown={severe} />
+      <UsageBlock
+        entry={usageEntry}
+        anomalyShown={severe}
+        onRefresh={onRefreshUsage ? () => onRefreshUsage(a) : undefined}
+        onVerify={onVerifyAccount ? () => onVerifyAccount(a) : undefined}
+      />
       <HealthFooter account={a} verifyLive={verifyLive} />
     </article>
   );

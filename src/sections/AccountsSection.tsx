@@ -464,6 +464,8 @@ export function AccountsSection({
           }
         }}
         verifyLiveFor={(uuid) => verifyLiveFor(verify, uuid)}
+        onRefreshUsage={(a) => refreshUsageFor(a.uuid)}
+        onVerifyAccount={runVerifyAccount}
       />
 
       <AddAccountModal

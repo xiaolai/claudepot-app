@@ -74,6 +74,14 @@ pub const PERMISSION_BREAKER_TRIPPED: &str = "permission-breaker-tripped";
 /// CLI-active account crossed a configured usage threshold.
 pub const USAGE_THRESHOLD_CROSSED: &str = "usage-threshold-crossed";
 
+/// Credentials for some account were just healed — by the background
+/// token-refresh orchestrator or a UI-driven verify — so the webview
+/// should re-pull usage. Without this, a freshly-live token's numbers
+/// only reach the in-memory cache + the snapshot file (neither of
+/// which the GUI reads reactively), and the card keeps showing the
+/// "token expired" placeholder until the next focus/manual refresh.
+pub const USAGE_REFETCH: &str = "usage::refetch";
+
 /// A CLAUDE.md / memory file changed on disk (legacy single-colon
 /// form — frozen; see module doc).
 pub const MEMORY_CHANGED: &str = "memory:changed";
@@ -129,6 +137,7 @@ mod tests {
         assert_eq!(PERMISSION_REVERTED, "permission-reverted");
         assert_eq!(PERMISSION_BREAKER_TRIPPED, "permission-breaker-tripped");
         assert_eq!(USAGE_THRESHOLD_CROSSED, "usage-threshold-crossed");
+        assert_eq!(USAGE_REFETCH, "usage::refetch");
         assert_eq!(MEMORY_CHANGED, "memory:changed");
         assert_eq!(AGENT_EVENT_DISPATCHED, "agent-event-dispatched");
         assert_eq!(AGENT_EVENT_FAILED, "agent-event-failed");
