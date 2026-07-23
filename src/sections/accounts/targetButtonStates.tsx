@@ -54,18 +54,15 @@ export function cliTargetProps(
       ? `Switch CLI to ${a.email}`
       : "Credentials missing — re-login from the menu";
 
-  // Short inline caption shown beneath the button when disabled — the
-  // AnomalyBanner further down the card carries the full explanation.
-  const disabledReason = !healthy
-    ? a.drift
-      ? "Wrong account — re-login"
-      : a.verify_status === "rejected"
-        ? "Rejected — re-login"
-        : a.token_status === "expired"
-          ? "Session expired"
-          : "No credentials — re-login"
-    : undefined;
-
+  // No inline caption under the button. The CLI button is only
+  // `disabled` when `!credentials_healthy`, which is exactly one of the
+  // conditions that make `isAnomaly(a)` true — so the card's
+  // AnomalyBanner is *always* already showing the full reason + a
+  // Re-login button directly below. A second caption here duplicated
+  // that signal (design.md: one signal per surface, no status spray)
+  // and, being a line taller than the sibling Desktop pill, rode the
+  // whole button cluster out of vertical alignment. The banner carries
+  // the reason inline; the button's `primaryTitle` tooltip supplements.
   return {
     icon: NF.terminal,
     label: "CLI",
@@ -73,7 +70,6 @@ export function cliTargetProps(
     onPrimary: state === "available" ? () => h.switchCli(a) : undefined,
     primaryTitle,
     menu,
-    disabledReason,
   };
 }
 
