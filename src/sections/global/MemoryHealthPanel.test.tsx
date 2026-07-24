@@ -17,6 +17,15 @@ const autoMemoryStateGlobalMock = vi.fn().mockResolvedValue({
   local_settings_gitignored: null,
 });
 const autoMemorySetMock = vi.fn();
+// AutoDreamGlobalCard now sits directly below the auto-memory card and
+// loads on mount; stub a default (server-default) shape so the panel
+// renders without toasting an error.
+const autoDreamStateMock = vi.fn().mockResolvedValue({
+  mode: "default",
+  user_settings_value: null,
+  auto_memory_enabled: true,
+});
+const autoDreamSetMock = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
@@ -24,6 +33,8 @@ vi.mock("../../api", () => ({
     autoMemoryStateGlobal: (...args: unknown[]) =>
       autoMemoryStateGlobalMock(...args),
     autoMemorySet: (...args: unknown[]) => autoMemorySetMock(...args),
+    autoDreamState: (...args: unknown[]) => autoDreamStateMock(...args),
+    autoDreamSet: (...args: unknown[]) => autoDreamSetMock(...args),
   },
 }));
 
