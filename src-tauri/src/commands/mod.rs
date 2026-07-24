@@ -29,6 +29,8 @@ pub mod agents;
 pub mod artifact_lifecycle;
 pub mod artifact_tool;
 pub mod artifact_usage;
+pub mod attribution;
+pub mod auto_dream;
 pub mod cc_daemon;
 pub mod cc_doctor;
 pub mod cc_tips;
@@ -58,6 +60,7 @@ pub mod session_prune;
 pub mod session_share;
 pub mod shared_memory;
 pub mod templates;
+pub mod thinking_toggle;
 pub mod updates;
 pub mod usage_local;
 

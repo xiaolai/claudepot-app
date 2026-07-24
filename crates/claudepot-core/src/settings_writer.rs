@@ -465,6 +465,54 @@ pub fn clear_bool_setting(
     }
 }
 
+/// Read-modify-write a settings file through a closure that mutates the
+/// top-level JSON object in place, then persists the result in ONE
+/// atomic write. This is the multi-key sibling of
+/// [`write_bool_setting`] / [`clear_bool_setting`]: a caller that must
+/// change several keys together (e.g. `attribution` +
+/// `includeCoAuthoredBy`) can do so without a crash leaving a half-
+/// applied, mixed-semantics file.
+///
+/// Guarantees, matching the single-key helpers:
+/// - preserves every key the closure doesn't touch;
+/// - refuses the committed `Project` layer;
+/// - errors (never clobbers) on malformed or non-object JSON;
+/// - creates the file (and parent dir) if missing — UNLESS the file
+///   was absent *and* the closure leaves the object empty, in which
+///   case it is a no-op (we don't litter an empty `{}` settings file,
+///   mirroring `rmw_settings_remove`'s no-op-on-missing behavior).
+pub fn mutate_settings(
+    layer: SettingsLayer,
+    project_root: &Path,
+    mutate: impl FnOnce(&mut serde_json::Map<String, JsonValue>),
+) -> Result<(), SettingsWriteError> {
+    if layer == SettingsLayer::Project {
+        return Err(SettingsWriteError::UnsupportedLayer { layer });
+    }
+    let path = layer.settings_file(project_root);
+    let (mut object, existed) = match std::fs::read(&path) {
+        Ok(bytes) if bytes.is_empty() => (serde_json::Map::new(), true),
+        Ok(bytes) => match serde_json::from_slice::<JsonValue>(&bytes)? {
+            JsonValue::Object(map) => (map, true),
+            _ => return Err(SettingsWriteError::NotAJsonObject(path.clone())),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (serde_json::Map::new(), false),
+        Err(e) => return Err(e.into()),
+    };
+    mutate(&mut object);
+    if !existed && object.is_empty() {
+        return Ok(());
+    }
+    let body = serde_json::to_string_pretty(&JsonValue::Object(object))?;
+    let mut bytes = body.into_bytes();
+    bytes.push(b'\n');
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    atomic_write(&path, &bytes)?;
+    Ok(())
+}
+
 /// Whether the project's `.gitignore` covers
 /// `.claude/settings.local.json`. Returns `Ok(true)` if the gitignore
 /// exists and contains a matching pattern; `Ok(false)` if the file
@@ -712,5 +760,57 @@ mod tests {
                 layer: SettingsLayer::Project
             }
         ));
+    }
+
+    #[test]
+    fn mutate_settings_applies_multi_key_edit_and_preserves_rest() {
+        let (_t, project, _l) = isolated();
+        let path = SettingsLayer::User.settings_file(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, br#"{"keep":1}"#).unwrap();
+
+        mutate_settings(SettingsLayer::User, &project, |m| {
+            m.insert("a".into(), JsonValue::Bool(true));
+            m.insert("b".into(), JsonValue::String("x".into()));
+        })
+        .unwrap();
+
+        let after: JsonValue = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(after["keep"], JsonValue::from(1));
+        assert_eq!(after["a"], JsonValue::Bool(true));
+        assert_eq!(after["b"], JsonValue::from("x"));
+    }
+
+    #[test]
+    fn mutate_settings_noop_when_file_missing_and_result_empty() {
+        let (_t, project, _l) = isolated();
+        // Closure removes keys that aren't there → empty object → the
+        // helper must NOT create an empty settings file.
+        mutate_settings(SettingsLayer::User, &project, |m| {
+            m.remove("attribution");
+            m.remove("includeCoAuthoredBy");
+        })
+        .unwrap();
+        assert!(!SettingsLayer::User.settings_file(&project).exists());
+    }
+
+    #[test]
+    fn mutate_settings_refuses_project_layer_and_errors_on_malformed() {
+        let (_t, project, _l) = isolated();
+        let err = mutate_settings(SettingsLayer::Project, &project, |_| {}).unwrap_err();
+        assert!(matches!(
+            err,
+            SettingsWriteError::UnsupportedLayer {
+                layer: SettingsLayer::Project
+            }
+        ));
+
+        let path = SettingsLayer::User.settings_file(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"{ not json").unwrap();
+        let err = mutate_settings(SettingsLayer::User, &project, |_| {}).unwrap_err();
+        assert!(matches!(err, SettingsWriteError::JsonParse(_)));
+        // Untouched on parse failure.
+        assert_eq!(fs::read(&path).unwrap(), b"{ not json");
     }
 }

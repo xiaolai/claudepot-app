@@ -43,6 +43,8 @@ import { RotationPane } from "./settings/RotationPane";
 import { CleanupPane } from "./sessions/CleanupPane";
 import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
 import { CompanionArtifactToggle } from "./settings/CompanionArtifactToggle";
+import { ExtendedThinkingToggle } from "./settings/ExtendedThinkingToggle";
+import { AttributionControl } from "./settings/AttributionControl";
 import { TrashDrawer } from "./sessions/TrashDrawer";
 import type { AppStatus, CcIdentity } from "../types";
 import { APP_VERSION } from "../version";
@@ -438,6 +440,8 @@ function GeneralPane({
     </SettingsGroup>
     <SettingsGroup desc="Claude Code behavior. Written to ~/.claude/settings.json and shared by every account that uses Claude Code's config.">
       <CompanionArtifactToggle pushToast={pushToast} />
+      <ExtendedThinkingToggle pushToast={pushToast} />
+      <AttributionControl pushToast={pushToast} />
     </SettingsGroup>
     </>
   );

@@ -15,6 +15,9 @@ import { pricingApi } from "./pricing";
 import { artifactUsageApi } from "./artifact-usage";
 import { artifactLifecycleApi } from "./artifact-lifecycle";
 import { artifactToolApi } from "./artifact-tool";
+import { thinkingApi } from "./thinking";
+import { autoDreamApi } from "./auto-dream";
+import { attributionApi } from "./attribution";
 import { memoryHealthApi } from "./memory-health";
 import { memoryApi } from "./memory";
 import { migrateApi } from "./migrate";
@@ -48,6 +51,9 @@ export const api = {
   ...artifactUsageApi,
   ...artifactLifecycleApi,
   ...artifactToolApi,
+  ...thinkingApi,
+  ...autoDreamApi,
+  ...attributionApi,
   ...memoryHealthApi,
   ...memoryApi,
   ...routeApi,

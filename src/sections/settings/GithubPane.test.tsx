@@ -74,6 +74,24 @@ vi.mock("../../api", () => ({
       env_disable_set: false,
     }),
     artifactToolSet: vi.fn(),
+    // The General tab also hosts the extended-thinking toggle and the
+    // commit/PR attribution control, both of which load on mount. Stub
+    // default shapes so they render without toasting an error.
+    thinkingState: vi.fn().mockResolvedValue({
+      effective: true,
+      decided_by: "default",
+      user_writable: true,
+      user_settings_value: null,
+      env_max_thinking_tokens_set: false,
+    }),
+    thinkingSet: vi.fn(),
+    attributionState: vi.fn().mockResolvedValue({
+      mode: "default",
+      commit: null,
+      pr: null,
+      include_co_authored_by: null,
+    }),
+    attributionSet: vi.fn(),
   },
 }));
 

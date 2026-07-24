@@ -17,6 +17,7 @@ import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import type { FileHealth, MemoryHealthReport } from "../../types";
 import { AutoMemoryGlobalCard } from "./AutoMemoryGlobalCard";
+import { AutoDreamGlobalCard } from "./AutoDreamGlobalCard";
 
 export function MemoryHealthPanel() {
   const [report, setReport] = useState<MemoryHealthReport | null>(null);
@@ -53,6 +54,7 @@ export function MemoryHealthPanel() {
       }}
     >
       <AutoMemoryGlobalCard />
+      <AutoDreamGlobalCard />
       <div
         style={{
           display: "flex",
