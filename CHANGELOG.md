@@ -6,6 +6,21 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.2.16 — beta (released 2026-07-24)
+
+### Added
+
+- **Three Claude Code behavior toggles, written straight to
+  `~/.claude/settings.json`.** Settings → "Claude Code behavior" gains
+  an **Extended thinking by default** switch and a **Commit & PR
+  attribution** control — keep Claude Code's default trailer, turn
+  attribution off entirely, or write your own commit-trailer and
+  PR-body text. Global → Memory gains a **Background memory
+  consolidation** control (follow Claude Code's own rollout, or force
+  it on/off). Each control states its reason inline when an environment
+  variable or a missing dependency locks it, and every write preserves
+  the rest of the settings file.
+
 ## 0.2.15 — beta (released 2026-07-24)
 
 ### Fixed
