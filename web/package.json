@@ -73,6 +73,7 @@
       "sharp"
     ],
     "overrides": {
+      "body-parser": "2.3.0",
       "dompurify": "3.4.12",
       "fast-uri": "3.1.4",
       "hono": "4.12.27",
