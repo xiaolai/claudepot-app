@@ -6,7 +6,20 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.3.0 — beta (unreleased)
+## 0.3.1 — beta (unreleased)
+
+### Fixed
+
+- **The knowledge distiller no longer loses a whole harvest to one bad
+  claim.** Running "harvest lessons" by hand asked Claude for JSON
+  without sending the schema that the scheduled Knowledge Distiller
+  agent sends, and a single unreadable claim in the reply discarded
+  every good claim beside it — silently, so it looked like the sessions
+  had taught nothing. The manual run now uses the same schema as the
+  scheduled agent, claims are read one at a time, and anything
+  unreadable is reported instead of swallowed.
+
+## 0.3.0 — beta (released 2026-07-25)
 
 ### Added
 
