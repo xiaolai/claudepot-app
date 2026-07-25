@@ -6,6 +6,65 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.3.0 — beta (unreleased)
+
+### Added
+
+- **Claude Opus 5.** Claudepot knows the new default Opus model —
+  costs, model badges, and the rate table all recognise
+  `claude-opus-5`. Claude Code made it the default in 2.1.219.
+- **Cost figures now use the rate that was in force when the work
+  happened.** Rates are dated: a session from Anthropic's Sonnet 5
+  introductory window is priced at the introductory rate, and a
+  session after it at the standard rate. Previously every figure was
+  re-scored at today's price, so a price change silently rewrote your
+  whole history. Retired Opus 4.1 also keeps its own higher rate
+  instead of being flattened into the current Opus tier.
+- **Observed price changes are recorded, not overwritten.** When the
+  daily rate refresh spots a price that differs from what Claudepot
+  believed, it appends the new rate with the day it was seen to
+  `~/.claudepot/pricing-history.json`. Past costs stay put.
+- **Fast mode toggle** (Settings → Claude Code behavior). Writes Claude
+  Code's `fastMode`, with a companion switch for
+  `fastModePerSessionOptIn`. The hint states what it costs — fast mode
+  bills Opus at a higher rate and draws from usage credits rather than
+  your plan's included usage — and the switch locks with the reason
+  shown inline when `CLAUDE_CODE_DISABLE_FAST_MODE` is set.
+- **Model allowlist editor** (Settings → Claude Code behavior). Edits
+  Claude Code's `availableModels` and `enforceAvailableModels`
+  together in one write. Order is preserved and never sorted, because
+  with enforcement on, Claude Code's "Default" option resolves to the
+  first entry. The pane says plainly when enforcement is set but inert
+  — Claude Code ignores it while the list is empty.
+
+### Changed
+
+- **Estimated costs are marked, everywhere.** When a model isn't in
+  the rate table yet, its cost is estimated from its model family's
+  rate and now renders with a leading `≈` (`~` in the CLI) plus a
+  tooltip. The Cost tab, project rows, session headers, the Activities
+  dashboard, top prompts, and `claudepot usage report` all mark them.
+  An estimate never reads as a quote.
+- **"Manual" is the permission mode's name.** Claude Code 2.1.200
+  renamed the `default` permission mode to "Manual" and started
+  accepting `manual` on disk. Claudepot follows the label, and a
+  project whose settings use the new spelling is managed normally
+  instead of showing as unrecognised.
+
+### Fixed
+
+- **Opus 5 sessions showed as unpriced in the Cost dashboard** while
+  the Activities strip priced the same session correctly.
+- **Session costs were dated by file modification time.** Moving,
+  re-indexing, or slimming a transcript changed the date its cost was
+  priced at. Costs now follow the transcript's own event time, which
+  is also what decides which day and month a session counts toward.
+- **Model names render consistently.** `claude-opus-5` showed as
+  `opus-5` in the Sessions tab and `Opus 5` on the dashboard; both now
+  agree, including for ids carrying a snapshot date and an alias.
+- Zero-token rows no longer print `0 tokens` in the Activities
+  dashboard.
+
 ## 0.2.16 — beta (released 2026-07-24)
 
 ### Added
