@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import type { ModelRatesDto, PriceTableDto } from "./types";
+import type {
+  ModelRatesDto,
+  PriceBookSnapshotDto,
+  PriceTableDto,
+  RatePeriodDto,
+} from "./types";
 
 /**
  * Token usage sufficient for cost estimation. Same shape as the
@@ -15,49 +20,155 @@ export interface TokenUsage {
   cache_creation?: number;
 }
 
+/** A calendar day as `[year, month, day]`, matching the Rust `Ymd`. */
+export type Ymd = [number, number, number];
+
+/** How well a resolved rate matches the model it was asked about. */
+export type RateConfidence = "exact" | "family_estimate";
+
+export interface ResolvedRates {
+  rates: ModelRatesDto;
+  confidence: RateConfidence;
+}
+
+/** A cost figure plus how much to trust the rate behind it. */
+export interface PricedCost {
+  usd: number;
+  confidence: RateConfidence;
+}
+
 /**
- * Resolve a model id against a price table. Mirrors the backend's
- * `resolve_model_rates` rules:
- *
- *   1. Exact id match.
- *   2. Strip a trailing `-YYYYMMDD` suffix and retry.
- *
- * Returns `null` for unknown models so callers can render "rate
- * unknown" instead of silently substituting another model's rate.
+ * Canonicalize a CC-reported model id. Mirrors
+ * `session_live::pricing::canonicalize_model_id`: lowercase, drop a
+ * trailing `-YYYYMMDD` snapshot stamp, drop an alias marker.
  */
-export function resolveRates(
-  table: PriceTableDto | null,
-  modelId: string,
+export function canonicalizeModelId(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/-\d{8}$/, "")
+    .replace(/-(preview|latest|experimental)$/, "");
+}
+
+/**
+ * `claude-opus-5` → `claude-opus-`. `null` for anything not shaped
+ * like `claude-<family>-…`.
+ */
+function familyPrefix(id: string): string | null {
+  const CLAUDE = "claude-";
+  if (!id.startsWith(CLAUDE)) return null;
+  const rest = id.slice(CLAUDE.length);
+  const dash = rest.indexOf("-");
+  if (dash < 0) return null;
+  return id.slice(0, CLAUDE.length + dash + 1);
+}
+
+/** Chronological compare of two `Ymd`s. */
+function ymdLte(a: Ymd, b: Ymd): boolean {
+  if (a[0] !== b[0]) return a[0] < b[0];
+  if (a[1] !== b[1]) return a[1] < b[1];
+  return a[2] <= b[2];
+}
+
+/**
+ * The last period that had begun on or before `on`. Mirrors
+ * `session_live::pricing::rate_on`; requires periods oldest-first,
+ * which the backend snapshot guarantees.
+ */
+function rateOn(
+  periods: readonly RatePeriodDto[],
+  on: Ymd,
 ): ModelRatesDto | null {
-  if (!table) return null;
-  const hit = table.models[modelId];
-  if (hit) return hit;
-  const m = modelId.match(/^(.+)-(\d{8})$/);
-  if (m) {
-    const stem = m[1];
-    return table.models[stem] ?? null;
+  for (let i = periods.length - 1; i >= 0; i--) {
+    const p = periods[i];
+    if (p.starts === null || ymdLte(p.starts as Ymd, on)) {
+      return {
+        input_per_mtok: p.input_per_mtok,
+        output_per_mtok: p.output_per_mtok,
+        cache_write_per_mtok: p.cache_write_per_mtok,
+        cache_read_per_mtok: p.cache_read_per_mtok,
+      };
+    }
   }
   return null;
 }
 
+/** Today in UTC, matching the backend's `today_utc`. */
+export function todayUtc(): Ymd {
+  const d = new Date();
+  return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()];
+}
+
+/** Epoch milliseconds → UTC calendar day. */
+export function ymdFromMs(ms: number): Ymd | null {
+  if (!Number.isFinite(ms)) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()];
+}
+
 /**
- * Compute hypothetical API cost for the given usage. Returns `null`
- * when the model id can't be resolved — the UI should render "rate
- * unknown" rather than $0.00.
+ * Resolve a model id against the dated rate book as it stood on `on`.
+ *
+ * This mirrors `claudepot_core::pricing::PriceBook::resolve`, and the
+ * two are locked together by
+ * `crates/claudepot-core/testdata/rate-resolution-vectors.json` — both
+ * run those vectors. **Change one, change the other.**
+ *
+ * 1. Exact — the canonicalized id is in the book.
+ * 2. Family estimate — the id isn't listed but its family is, so
+ *    borrow the family's current model's rate for that same day. The
+ *    returned `confidence` says so; the UI must mark it.
+ * 3. `null` — no family match, rendered `—` rather than `$0.00`.
+ */
+export function resolveRatesOn(
+  book: PriceBookSnapshotDto | null | undefined,
+  modelId: string,
+  on: Ymd,
+): ResolvedRates | null {
+  if (!book) return null;
+  const key = canonicalizeModelId(modelId.trim());
+
+  const exact = book.models[key];
+  if (exact) {
+    const rates = rateOn(exact, on);
+    if (rates) return { rates, confidence: "exact" };
+  }
+
+  const family = familyPrefix(key);
+  if (!family) return null;
+  const current = book.family_current[family];
+  if (!current) return null;
+  const periods = book.models[current];
+  if (!periods) return null;
+  const rates = rateOn(periods, on);
+  return rates ? { rates, confidence: "family_estimate" } : null;
+}
+
+/**
+ * Compute hypothetical API cost for the given usage at the rate in
+ * force on `on`. Returns `null` when the model belongs to no priced
+ * family — the UI should render "rate unknown" rather than $0.00.
+ *
+ * `on` defaults to today, which is correct for live sessions. Anything
+ * scoring historical usage must pass that usage's own day, or a
+ * session from before a price change is re-scored at today's rate.
  */
 export function costFromUsage(
   table: PriceTableDto | null,
   modelId: string,
   usage: TokenUsage,
-): number | null {
-  const rates = resolveRates(table, modelId);
-  if (!rates) return null;
+  on: Ymd = todayUtc(),
+): PricedCost | null {
+  const resolved = resolveRatesOn(table?.book, modelId, on);
+  if (!resolved) return null;
+  const { rates } = resolved;
   const toMtok = (n: number | undefined) => (n ?? 0) / 1_000_000;
-  const input = toMtok(usage.input) * rates.input_per_mtok;
-  const output = toMtok(usage.output) * rates.output_per_mtok;
-  const cacheRead = toMtok(usage.cache_read) * rates.cache_read_per_mtok;
-  const cacheWrite = toMtok(usage.cache_creation) * rates.cache_write_per_mtok;
-  return input + output + cacheRead + cacheWrite;
+  const usd =
+    toMtok(usage.input) * rates.input_per_mtok +
+    toMtok(usage.output) * rates.output_per_mtok +
+    toMtok(usage.cache_read) * rates.cache_read_per_mtok +
+    toMtok(usage.cache_creation) * rates.cache_write_per_mtok;
+  return { usd, confidence: resolved.confidence };
 }
 
 /**
@@ -67,19 +178,24 @@ export function costFromUsage(
  * is necessarily approximate — the exact per-message breakdown
  * isn't summed at the session level today; this matches what the
  * dashboard needs for at-a-glance display, not line-item billing.
+ *
+ * `atMs` is the session's timestamp; pass it so a session that ran
+ * before a rate change keeps its original cost.
  */
 export function sessionCostEstimate(
   table: PriceTableDto | null,
   models: string[],
   usage: TokenUsage,
-): number | null {
+  atMs?: number | null,
+): PricedCost | null {
   if (models.length === 0) return null;
   // Prefer the first model as the basis. Over-estimates slightly
   // when a session starts on Opus and switches to Haiku mid-way
   // (Haiku is 15× cheaper input); under-estimates in the reverse.
   // Acceptable for a dashboard figure — anyone who cares about a
   // precise bill goes to Anthropic's dashboard, not ours.
-  return costFromUsage(table, models[0], usage);
+  const on = (atMs != null ? ymdFromMs(atMs) : null) ?? todayUtc();
+  return costFromUsage(table, models[0], usage, on);
 }
 
 /**
@@ -94,6 +210,20 @@ export function formatUsd(amount: number): string {
   // Sub-penny — show four decimals so users aren't confused by $0.00.
   return `$${amount.toFixed(4)}`;
 }
+
+/**
+ * Prefix an estimated figure with `≈`. Colour never carries the
+ * distinction on its own (design.md's accessibility floor), so the
+ * marker is in the text and the caller pairs it with a `title`.
+ */
+export function formatCost(cost: PricedCost): string {
+  const s = formatUsd(cost.usd);
+  return cost.confidence === "family_estimate" ? `≈ ${s}` : s;
+}
+
+/** Tooltip copy explaining why a figure is marked estimated. */
+export const ESTIMATED_RATE_HINT =
+  "Estimated: this model isn't in the rate table yet, so its family's current rate was used.";
 
 /**
  * React hook: loads the price table once per mount and caches it.

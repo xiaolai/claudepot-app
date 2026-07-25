@@ -34,7 +34,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
 
-use super::{bundled, load, write_cache, PriceSource, PriceTable};
+use super::{bundled, history, load, write_cache, PriceSource, PriceTable};
 
 /// How a `PricingCacheService` actually performs a network refresh.
 /// Production wires this to the live HTML scraper in
@@ -171,6 +171,7 @@ impl PricingCacheService {
             .get_or_init(|| async move {
                 match fetcher.fetch().await {
                     Ok(fresh) => {
+                        record_observed_rates(&fresh);
                         if let Err(e) = write_cache(&fresh) {
                             // Cache-write failure is non-fatal — the
                             // in-memory table is still usable, we
@@ -217,6 +218,40 @@ impl PricingCacheService {
         }
 
         result
+    }
+}
+
+/// Append any rate in `fresh` that differs from what we already
+/// believe to the price-history log.
+///
+/// This is what keeps a rate change from silently rewriting the past:
+/// the cache file still holds only current rates, but the history log
+/// remembers the day each rate was first seen, so a session from
+/// before the change keeps scoring at the old rate.
+///
+/// Best-effort throughout — a scrape that can't be recorded still
+/// updates the cache. The alternative, failing the refresh because a
+/// log append failed, would trade a live price table for a bookkeeping
+/// error.
+fn record_observed_rates(fresh: &PriceTable) {
+    let mut log = match history::load() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(error = %e, "pricing history unreadable; not recording this scrape");
+            return;
+        }
+    };
+    let believed = bundled().models;
+    let changed = history::record_scrape(&mut log, &fresh.models, &believed, super::today_utc());
+    if changed.is_empty() {
+        return;
+    }
+    tracing::info!(
+        models = ?changed,
+        "observed a pricing change; appending to pricing-history.json"
+    );
+    if let Err(e) = history::save(&log) {
+        tracing::warn!(error = %e, "pricing history write failed");
     }
 }
 
@@ -332,6 +367,99 @@ mod tests {
         for r in &results {
             assert!(Arc::ptr_eq(first, r));
         }
+    }
+
+    /// Returns a table whose Opus 5 rate differs from the bundled one.
+    struct ChangedRateFetcher;
+
+    #[async_trait]
+    impl Fetcher for ChangedRateFetcher {
+        async fn fetch(&self) -> Result<PriceTable, String> {
+            let mut models = BTreeMap::new();
+            models.insert(
+                "claude-opus-5".to_string(),
+                super::super::ModelRates {
+                    input_per_mtok: 7.0,
+                    output_per_mtok: 35.0,
+                    cache_write_per_mtok: 8.75,
+                    cache_read_per_mtok: 0.7,
+                },
+            );
+            Ok(PriceTable {
+                models,
+                source: PriceSource::Live {
+                    url: "https://test.invalid/pricing".into(),
+                    fetched_at_unix: 1_700_000_001,
+                },
+                last_fetch_error: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_scrape_that_moves_a_rate_is_appended_to_the_history_log() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let svc = PricingCacheService::with_fetcher(Arc::new(ChangedRateFetcher));
+        svc.refresh_now().await;
+
+        let log = history::load().expect("history should be readable");
+        let opus: Vec<_> = log
+            .observations
+            .iter()
+            .filter(|o| o.model_id == "claude-opus-5")
+            .collect();
+        assert_eq!(opus.len(), 1, "the moved rate should be recorded once");
+        assert_eq!(opus[0].rates.input_per_mtok, 7.0);
+    }
+
+    #[tokio::test]
+    async fn repeated_scrapes_of_the_same_rate_do_not_grow_the_log() {
+        // The refresh runs daily. Without the "only on change" guard
+        // the log would gain a row per run and bury the real changes.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let svc = PricingCacheService::with_fetcher(Arc::new(ChangedRateFetcher));
+        svc.refresh_now().await;
+        svc.refresh_now().await;
+        svc.refresh_now().await;
+
+        let log = history::load().expect("history should be readable");
+        assert_eq!(
+            log.observations
+                .iter()
+                .filter(|o| o.model_id == "claude-opus-5")
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scrape_matching_the_bundled_rate_records_nothing() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        struct SameAsBundled;
+        #[async_trait]
+        impl Fetcher for SameAsBundled {
+            async fn fetch(&self) -> Result<PriceTable, String> {
+                Ok(PriceTable {
+                    models: bundled().models,
+                    source: PriceSource::Live {
+                        url: "https://test.invalid/pricing".into(),
+                        fetched_at_unix: 1_700_000_003,
+                    },
+                    last_fetch_error: None,
+                })
+            }
+        }
+        let svc = PricingCacheService::with_fetcher(Arc::new(SameAsBundled));
+        svc.refresh_now().await;
+
+        let log = history::load().expect("history should be readable");
+        assert!(
+            log.observations.is_empty(),
+            "an unchanged scrape must not record anything"
+        );
     }
 
     #[tokio::test]

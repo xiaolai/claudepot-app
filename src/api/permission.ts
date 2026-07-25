@@ -6,9 +6,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /** CC's `permissions.defaultMode` wire values. Unknown strings (e.g.
- *  a feature-flagged `auto`) pass through verbatim. */
+ *  a feature-flagged `auto`) pass through verbatim.
+ *
+ *  `manual` is CC v2.1.200+'s alias for `default` — same mode, and
+ *  the spelling CC's own UI now uses. Both are preserved verbatim so
+ *  a revert never rewrites one spelling into the other. */
 export type PermissionModeId =
   | "default"
+  | "manual"
   | "acceptEdits"
   | "plan"
   | "dontAsk"
@@ -101,9 +106,15 @@ export const permissionApi = {
     }),
 };
 
-/** Human label for a permission mode. Unknown modes render verbatim. */
+/** Human label for a permission mode. Unknown modes render verbatim.
+ *
+ *  `default` and `manual` are one mode with two on-disk spellings, so
+ *  they share a label. It reads "Manual" rather than "Default" to match
+ *  what CC v2.1.200+ shows in its own UI — a control center that named
+ *  the same state differently would look like it disagreed with CC. */
 export const PERMISSION_MODE_LABEL: Record<string, string> = {
-  default: "Default",
+  default: "Manual",
+  manual: "Manual",
   acceptEdits: "Accept edits",
   plan: "Plan",
   dontAsk: "Don't ask",

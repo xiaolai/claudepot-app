@@ -45,6 +45,8 @@ import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
 import { CompanionArtifactToggle } from "./settings/CompanionArtifactToggle";
 import { ExtendedThinkingToggle } from "./settings/ExtendedThinkingToggle";
 import { AttributionControl } from "./settings/AttributionControl";
+import { AvailableModelsPane } from "./settings/AvailableModelsPane";
+import { FastModeToggle } from "./settings/FastModeToggle";
 import { TrashDrawer } from "./sessions/TrashDrawer";
 import type { AppStatus, CcIdentity } from "../types";
 import { APP_VERSION } from "../version";
@@ -441,6 +443,8 @@ function GeneralPane({
     <SettingsGroup desc="Claude Code behavior. Written to ~/.claude/settings.json and shared by every account that uses Claude Code's config.">
       <CompanionArtifactToggle pushToast={pushToast} />
       <ExtendedThinkingToggle pushToast={pushToast} />
+      <FastModeToggle pushToast={pushToast} />
+      <AvailableModelsPane pushToast={pushToast} />
       <AttributionControl pushToast={pushToast} />
     </SettingsGroup>
     </>

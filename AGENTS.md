@@ -87,9 +87,9 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   `preferences.json`, `usage-snapshot.json`, `usage_alert_state.json`,
   `agent-events.json`, … — again, the data-dir joins in source are
   authoritative). Stores backed by `claudepot-core::json_store` (the
-  five below plus `agent-events.json`) move a corrupt file aside to a
+  six below plus `agent-events.json`) move a corrupt file aside to a
   timestamped `<name>.corrupt.<unix-ts>` and start empty — never
-  fatal at boot. Five carry behavior worth documenting here:
+  fatal at boot. Six carry behavior worth documenting here:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -118,6 +118,44 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     Owned by `claudepot-core::permission::store`. The orchestrator
     reverts expired grants each `usage_snapshot::run_tick`. Empty
     file or no grants = feature off. See "## Permission grants".
+  - `pricing-history.json` — observed model-rate changes.
+    `{schema_version, observations: [...]}`, appended (never
+    overwritten) when a live pricing scrape reports a rate that
+    differs from what we already believe. Owned by
+    `claudepot-core::pricing::history`. Empty file = no change ever
+    observed, and the bundled rate history stands alone. See
+    "## Pricing".
+
+## Pricing (Activities → Cost, and every "on API" figure)
+
+Cost figures answer "what would pay-per-call have cost me". Rates are
+**dated**, because a rate change must not silently re-score the past.
+
+- `claudepot-core::session_live::pricing` — `RATE_TIERS` is the single
+  source of truth: each model carries a list of `RatePeriod`s
+  (`starts: Option<Ymd>` + rates), oldest first. `FAMILY_CURRENT` maps
+  `claude-<family>-` to the model an unlisted member falls back to;
+  it is explicit because a family can span tiers (current Opus at
+  $5/$25 vs retired Opus 4.1 at $15/$75).
+- `claudepot-core::pricing::PriceBook` — **the** resolution surface.
+  `resolve(model, day)` returns rates plus a `RateConfidence`
+  (`Exact` | `FamilyEstimate`). Nothing else should resolve rates.
+- `claudepot-core::pricing::history` — observed rate changes
+  (`pricing-history.json`), merged over the bundled periods. An
+  observation dated `D` means "first seen on `D`", an upper bound on
+  when the change landed, so observations never override a bundled
+  period that already covers that day.
+- `src/costs.ts` mirrors `PriceBook::resolve` for client-side
+  aggregation. **The two are locked together by
+  `crates/claudepot-core/testdata/rate-resolution-vectors.json`** —
+  both run those vectors. Change one, change the other, add a vector.
+- Family estimates are always marked in the UI (a leading `≈` plus a
+  `title`), never presented as a quote. `ProjectUsageRow` carries
+  `estimated_sessions` for the same reason.
+
+Known gap: fast mode bills Opus 5 / 4.8 at $10/$50 rather than
+$5/$25, and CC's transcripts carry no fast-mode marker, so a
+fast-mode session is under-reported.
 
 ## Permission grants (ProjectDetail → Permissions)
 

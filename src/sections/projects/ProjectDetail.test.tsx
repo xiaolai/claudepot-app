@@ -415,6 +415,22 @@ describe("ProjectDetail", () => {
         },
         source: { kind: "bundled", timestamp: "2026-01-01", url: "" },
         last_fetch_error: null,
+        // Client-side cost math resolves against the dated book, not
+        // the flat `models` map above (which only feeds the rates chip).
+        book: {
+          models: {
+            "claude-sonnet-4-6": [
+              {
+                starts: null,
+                input_per_mtok: 3,
+                output_per_mtok: 15,
+                cache_write_per_mtok: 3.75,
+                cache_read_per_mtok: 0.3,
+              },
+            ],
+          },
+          family_current: { "claude-sonnet-": "claude-sonnet-4-6" },
+        },
       }),
     );
     sessionListImpl.fn = vi.fn(() =>
@@ -522,6 +538,23 @@ describe("ProjectDetail", () => {
         },
         source: { kind: "bundled", timestamp: "2026-01-01", url: "" },
         last_fetch_error: null,
+        // Deliberately carries no Sonnet entry AND no Sonnet family
+        // fallback, so the session's model resolves to nothing at all
+        // — the case the UI must render as "no cost", not "$0.00".
+        book: {
+          models: {
+            "claude-opus-4-7": [
+              {
+                starts: null,
+                input_per_mtok: 15,
+                output_per_mtok: 75,
+                cache_write_per_mtok: 18.75,
+                cache_read_per_mtok: 1.5,
+              },
+            ],
+          },
+          family_current: { "claude-opus-": "claude-opus-4-7" },
+        },
       }),
     );
     sessionListImpl.fn = vi.fn(() =>

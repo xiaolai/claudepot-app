@@ -20,10 +20,18 @@ import type {
 import { classifyProject } from "./projectStatus";
 import { formatRelativeTime, formatSize } from "./format";
 import { basename } from "../../lib/paths";
+import { sessionEventMs } from "../../lib/sessionTime";
 import { MoveSessionModal } from "./MoveSessionModal";
 import { PermissionPanel } from "./PermissionPanel";
 import { ProjectEnvPanel } from "./ProjectEnvPanel";
-import { sessionCostEstimate, formatUsd, usePriceTable } from "../../costs";
+import {
+  ESTIMATED_RATE_HINT,
+  formatCost,
+  formatUsd,
+  sessionCostEstimate,
+  usePriceTable,
+  type PricedCost,
+} from "../../costs";
 
 /**
  * Build the on-disk path of a session transcript given the containing
@@ -189,24 +197,40 @@ export function ProjectDetail({
   // Per-session cost map keyed by session_id, plus a project total.
   // `null` cost = priced model unknown for that session — render
   // nothing rather than $0.00. `null` total = no priceable sessions.
-  const { costBySessionId, sessionTotal } = useMemo(() => {
-    const map = new Map<string, number | null>();
+  const { costBySessionId, sessionTotal, totalEstimated } = useMemo(() => {
+    const map = new Map<string, PricedCost | null>();
     if (!sessionRows) {
-      return { costBySessionId: map, sessionTotal: null as number | null };
+      return {
+        costBySessionId: map,
+        sessionTotal: null as number | null,
+        totalEstimated: false,
+      };
     }
     let sum = 0;
     let priced = 0;
+    let estimated = false;
     for (const r of sessionRows) {
-      const c = sessionCostEstimate(priceTable, r.models, r.tokens);
+      // Price each session on the day its work actually happened. File
+      // mtime moves when a transcript is moved, re-indexed, or slimmed,
+      // which would silently re-price old sessions now that rates are
+      // dated — see `lib/sessionTime`.
+      const c = sessionCostEstimate(
+        priceTable,
+        r.models,
+        r.tokens,
+        sessionEventMs(r.last_ts, r.last_modified_ms),
+      );
       map.set(r.session_id, c);
       if (c != null) {
-        sum += c;
+        sum += c.usd;
         priced += 1;
+        if (c.confidence === "family_estimate") estimated = true;
       }
     }
     return {
       costBySessionId: map,
       sessionTotal: priced > 0 ? sum : null,
+      totalEstimated: estimated,
     };
   }, [sessionRows, priceTable]);
 
@@ -445,6 +469,7 @@ export function ProjectDetail({
         <SessionListPane
           sessions={sessions}
           costBySessionId={costBySessionId}
+          totalEstimated={totalEstimated}
           sessionMeta={sessionMeta}
           totalCost={sessionTotal}
           onOpen={
@@ -579,6 +604,7 @@ function SessionListPane({
   costBySessionId,
   sessionMeta,
   totalCost,
+  totalEstimated,
   onOpen,
   onContextMenu,
   onMenuButton,
@@ -591,7 +617,7 @@ function SessionListPane({
    * session's models couldn't be priced → row also shows no cost
    * rather than $0.00.
    */
-  costBySessionId?: Map<string, number | null>;
+  costBySessionId?: Map<string, PricedCost | null>;
   /**
    * Prompt + search haystack per session, from the index rows. Missing
    * key = index hasn't reached this transcript (or the fetch is still
@@ -602,6 +628,9 @@ function SessionListPane({
   /** Sum of all priceable sessions in this project. `null` when no
    *  session was priceable; render nothing rather than $0.00. */
   totalCost?: number | null;
+  /** At least one session in `totalCost` was priced from a family
+   *  estimate, so the sum is marked rather than quoted flat. */
+  totalEstimated?: boolean;
   /**
    * Click-to-open: fires when the user picks a session row to view
    * its transcript inline. `null` disables the primary click (row
@@ -662,8 +691,13 @@ function SessionListPane({
               {" · "}
               <span
                 className="muted"
-                title="Sum of hypothetical Anthropic API cost across every session in this project. Real billing depends on your plan."
+                title={
+                  totalEstimated
+                    ? `Sum of hypothetical Anthropic API cost across every session in this project. Real billing depends on your plan. ${ESTIMATED_RATE_HINT}`
+                    : "Sum of hypothetical Anthropic API cost across every session in this project. Real billing depends on your plan."
+                }
               >
+                {totalEstimated ? "≈ " : ""}
                 {formatUsd(totalCost)} at API rates
               </span>
             </>
@@ -752,8 +786,19 @@ function SessionListPane({
                   {s.last_modified_ms != null && (
                     <>{" · "}{formatRelativeTime(s.last_modified_ms)}</>
                   )}
-                  {typeof cost === "number" && cost > 0 && (
-                    <>{" · "}{formatUsd(cost)}</>
+                  {cost != null && cost.usd > 0 && (
+                    <>
+                      {" · "}
+                      <span
+                        title={
+                          cost.confidence === "family_estimate"
+                            ? ESTIMATED_RATE_HINT
+                            : undefined
+                        }
+                      >
+                        {formatCost(cost)}
+                      </span>
+                    </>
                   )}
                 </span>
               </div>

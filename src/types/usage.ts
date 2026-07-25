@@ -29,6 +29,11 @@ export interface ProjectUsageRow {
   /** Sessions whose models couldn't be priced. Drives the row's
    *  warning glyph + the footer note. */
   unpriced_sessions: number;
+  /** Sessions priced from their model *family's* rate because the
+   *  exact model isn't in the rate table. Their dollars ARE included
+   *  in `cost_usd`, so a non-zero count means the figure is partly an
+   *  estimate and must render marked (`≈`), not as a flat quote. */
+  estimated_sessions: number;
   /** Session-count breakdown by model id. A session that mixed
    *  Opus + Sonnet contributes 1 to each bucket, so the sum of
    *  values is ≥ `session_count`. Sessions with no recorded models
@@ -47,6 +52,8 @@ export interface UsageTotals {
   tokens_cache_read: number;
   cost_usd: number | null;
   unpriced_sessions: number;
+  /** Install-wide count of sessions priced from a family estimate. */
+  estimated_sessions: number;
   /** Install-wide model-mix; mirrors `ProjectUsageRow.models_by_session`. */
   models_by_session: Record<string, number>;
 }
@@ -92,6 +99,9 @@ export interface CostlyTurn {
   /** Always populated — the backend filters out unresolved-model
    *  rows so the UI doesn't have to null-guard each cell. */
   cost_usd: number;
+  /** True when `cost_usd` used the model's *family* rate rather than
+   *  a rate recorded for that exact model. Renders marked (`≈`). */
+  cost_is_estimated: boolean;
 }
 
 export interface TopCostlyPrompts {

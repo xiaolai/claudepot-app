@@ -11,6 +11,7 @@ import { sessionCostEstimate, usePriceTable } from "../../../costs";
 import { deriveSessionTitle } from "../format";
 import { exportSession } from "../sessionExport";
 import { maybeRedact } from "../../../lib/redactSecrets";
+import { sessionEventMs } from "../../../lib/sessionTime";
 import { SessionDetailHeaderFull } from "./SessionDetailHeaderFull";
 import { SessionDetailHeaderCompact } from "./SessionDetailHeaderCompact";
 
@@ -73,12 +74,19 @@ export function SessionDetailHeader({
   // full layout would re-issue `pricingGet` every time the user
   // scrolls back to the top and re-mounts the full view.
   const { table: priceTable } = usePriceTable();
-  const costUsd = sessionCostEstimate(priceTable, row.models, {
-    input: row.tokens.input,
-    output: row.tokens.output,
-    cache_read: row.tokens.cache_read,
-    cache_creation: row.tokens.cache_creation,
-  });
+  const cost = sessionCostEstimate(
+    priceTable,
+    row.models,
+    {
+      input: row.tokens.input,
+      output: row.tokens.output,
+      cache_read: row.tokens.cache_read,
+      cache_creation: row.tokens.cache_creation,
+    },
+    // Event time, not file mtime — mtime moves when a transcript is
+    // moved or rewritten, which would re-price it. See `lib/sessionTime`.
+    sessionEventMs(row.last_ts, row.last_modified_ms),
+  );
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -172,7 +180,7 @@ export function SessionDetailHeader({
     <SessionDetailHeaderFull
       row={row}
       title={title}
-      costUsd={costUsd}
+      cost={cost}
       onBack={onBack}
       revealNode={revealNode}
       kebabNode={kebabNode}

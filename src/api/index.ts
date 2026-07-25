@@ -15,6 +15,8 @@ import { pricingApi } from "./pricing";
 import { artifactUsageApi } from "./artifact-usage";
 import { artifactLifecycleApi } from "./artifact-lifecycle";
 import { artifactToolApi } from "./artifact-tool";
+import { availableModelsApi } from "./availableModels";
+import { fastModeApi } from "./fastMode";
 import { thinkingApi } from "./thinking";
 import { autoDreamApi } from "./auto-dream";
 import { attributionApi } from "./attribution";
@@ -51,6 +53,8 @@ export const api = {
   ...artifactUsageApi,
   ...artifactLifecycleApi,
   ...artifactToolApi,
+  ...availableModelsApi,
+  ...fastModeApi,
   ...thinkingApi,
   ...autoDreamApi,
   ...attributionApi,

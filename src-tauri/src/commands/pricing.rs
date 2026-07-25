@@ -46,6 +46,14 @@ pub struct PriceTableDto {
     /// Short user-safe message when the last refresh attempt failed.
     /// `None` = last refresh succeeded or was never attempted.
     pub last_fetch_error: Option<String>,
+    /// The dated rate book the renderer resolves against.
+    ///
+    /// `models` above is a flat "what does this cost today" map, kept
+    /// for the rates chip. It cannot answer "what did this cost in
+    /// March", and a renderer that resolves against it disagrees with
+    /// the backend rollups. Client-side cost math must go through
+    /// this snapshot — see `src/costs.ts`.
+    pub book: claudepot_core::pricing::book::PriceBookSnapshot,
 }
 
 impl From<ModelRates> for ModelRatesDto {
@@ -132,10 +140,23 @@ fn to_table_dto(table: &PriceTable) -> PriceTableDto {
         .iter()
         .map(|(k, v)| (k.clone(), v.clone().into()))
         .collect();
+    // `models` and `book` are two views of one thing: `models` is
+    // "what does this cost today" for the rates chip, `book` is the
+    // dated history the renderer resolves costs against.
+    //
+    // They must not disagree, or the chip advertises one rate while the
+    // dashboard prices at another. Recording a scrape into
+    // `pricing-history.json` is best-effort, so `with_current_rates`
+    // folds this table in directly — the returned DTO is then
+    // self-consistent whether or not that write landed.
+    let book = claudepot_core::pricing::PriceBook::load()
+        .with_current_rates(&table.models, claudepot_core::pricing::today_utc())
+        .snapshot();
     PriceTableDto {
         models,
         source: to_source_dto(table.source.clone()),
         last_fetch_error: table.last_fetch_error.clone(),
+        book,
     }
 }
 

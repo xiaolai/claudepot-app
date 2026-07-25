@@ -410,14 +410,20 @@ function SummaryTiles({
         label="Total cost"
         value={
           t && t.cost_usd != null
-            ? `$${t.cost_usd.toFixed(2)}`
+            ? `${t.estimated_sessions > 0 ? "≈ " : ""}$${t.cost_usd.toFixed(2)}`
             : loading
               ? dash
               : t
                 ? "n/a"
                 : dash
         }
-        sub="install-wide"
+        // A family-estimated session's dollars are inside this total,
+        // so the total is not a clean quote and must not read as one.
+        sub={
+          t && t.estimated_sessions > 0
+            ? `install-wide · ${t.estimated_sessions} estimated`
+            : "install-wide"
+        }
       />
       <Tile
         label="Tokens in"
@@ -619,8 +625,15 @@ function CostTable({
 }
 
 function Row({ row }: { row: ProjectUsageRow }) {
+  // Mark a row whose total includes family-estimated sessions. The
+  // dollars are real enough to sum, but the rate behind some of them
+  // was inferred from the model's family, so `≈` keeps it from
+  // reading as a quote.
+  const estimated = row.estimated_sessions > 0;
   const cost =
-    row.cost_usd == null ? "n/a" : `$${row.cost_usd.toFixed(2)}`;
+    row.cost_usd == null
+      ? "n/a"
+      : `${estimated ? "≈ " : ""}$${row.cost_usd.toFixed(2)}`;
   const last =
     row.last_active_ms != null
       ? formatRelative(row.last_active_ms, { ago: false })

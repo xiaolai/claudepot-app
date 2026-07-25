@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import { useDaemonStatus } from "../../hooks/useDaemonStatus";
 import { useSessionLive } from "../../hooks/useSessionLive";
+import { compactModelLabel } from "../../lib/modelLabel";
+import { sessionEventMs } from "../../lib/sessionTime";
 import type { PriceTableDto, SessionRow } from "../../types";
 import {
-  costFromUsage,
+  ESTIMATED_RATE_HINT,
   formatUsd,
+  sessionCostEstimate,
   usePriceTable,
 } from "../../costs";
 
@@ -144,9 +147,18 @@ export function DashboardStrip() {
               suffix={`session${rollups.today.sessions === 1 ? "" : "s"}`}
             />
             <Subline>
-              {formatTokensHuman(rollups.today.tokens)} tokens
+              {rollups.today.tokens > 0 && (
+                <>{formatTokensHuman(rollups.today.tokens)} tokens</>
+              )}
               {rollups.today.costUsd != null && (
-                <> · {formatUsd(rollups.today.costUsd)} on API</>
+                <>
+                  {rollups.today.tokens > 0 ? " · " : ""}
+                  <span title={rollups.today.costEstimated ? ESTIMATED_RATE_HINT : undefined}>
+                    {rollups.today.costEstimated ? "≈ " : ""}
+                    {formatUsd(rollups.today.costUsd)}
+                  </span>{" "}
+                  on API
+                </>
               )}
             </Subline>
           </>
@@ -175,9 +187,18 @@ export function DashboardStrip() {
               suffix={`session${rollups.month.sessions === 1 ? "" : "s"}`}
             />
             <Subline>
-              {formatTokensHuman(rollups.month.tokens)} tokens
+              {rollups.month.tokens > 0 && (
+                <>{formatTokensHuman(rollups.month.tokens)} tokens</>
+              )}
               {rollups.month.costUsd != null && (
-                <> · {formatUsd(rollups.month.costUsd)} on API</>
+                <>
+                  {rollups.month.tokens > 0 ? " · " : ""}
+                  <span title={rollups.month.costEstimated ? ESTIMATED_RATE_HINT : undefined}>
+                    {rollups.month.costEstimated ? "≈ " : ""}
+                    {formatUsd(rollups.month.costUsd)}
+                  </span>{" "}
+                  on API
+                </>
               )}
             </Subline>
           </>
@@ -206,7 +227,7 @@ function deriveLiveStats(
   );
   const byModel = new Map<string, number>();
   for (const s of active) {
-    const m = compactModelLabel(s.model);
+    const m = liveModelLabel(s.model);
     if (!m) continue;
     byModel.set(m, (byModel.get(m) ?? 0) + 1);
   }
@@ -222,6 +243,9 @@ interface Rollup {
   sessions: number;
   tokens: number;
   costUsd: number | null;
+  /** At least one contributing session was priced from a family
+   *  estimate, so `costUsd` is not a clean quote. */
+  costEstimated: boolean;
 }
 
 interface DayMonthRollups {
@@ -230,10 +254,15 @@ interface DayMonthRollups {
 }
 
 /**
- * Client-side rollup. Sessions with unknown model ids contribute
- * tokens to both rollups but don't contribute to cost — we intentionally
- * leave `costUsd` as-is (unknown models would produce a lowball
- * estimate if we substituted a rate).
+ * Client-side rollup. Each session is priced at the rate in force on
+ * its own day, so a month spanning a price change totals what those
+ * sessions actually cost rather than re-scoring them all at today's
+ * rate.
+ *
+ * Sessions from a model family we don't price contribute tokens but
+ * not cost. Sessions whose exact model isn't listed are priced from
+ * their family's rate and flip `costEstimated`, which the card renders
+ * as a leading `≈` — an unmarked guess would read as a quote.
  */
 function deriveDayMonthRollups(
   rows: SessionRow[],
@@ -243,20 +272,36 @@ function deriveDayMonthRollups(
   const startOfDay = startOfLocalDayMs(now);
   const startOfMonth = startOfLocalMonthMs(now);
 
-  const today: Rollup = { sessions: 0, tokens: 0, costUsd: null };
-  const month: Rollup = { sessions: 0, tokens: 0, costUsd: null };
+  const today: Rollup = {
+    sessions: 0,
+    tokens: 0,
+    costUsd: null,
+    costEstimated: false,
+  };
+  const month: Rollup = {
+    sessions: 0,
+    tokens: 0,
+    costUsd: null,
+    costEstimated: false,
+  };
   let todayCostSum = 0;
   let monthCostSum = 0;
   let todayHadKnownCost = false;
   let monthHadKnownCost = false;
 
   for (const row of rows) {
-    const ts = row.last_modified_ms;
-    if (ts == null) continue;
-    if (ts < startOfMonth) continue;
+    // The transcript's own event time, not the file's mtime. A move,
+    // re-index, or `slim` rewrite changes mtime without any work
+    // happening — bucketing by it would move a session between months
+    // and, now that rates are dated, re-price it at a rate that wasn't
+    // in force when the tokens were spent. `usage_local` buckets on
+    // `last_ts` for the same reason; this keeps the two agreeing.
+    const eventMs = sessionEventMs(row.last_ts, row.last_modified_ms);
+    if (eventMs == null) continue;
+    if (eventMs < startOfMonth) continue;
 
-    const inMonth = ts >= startOfMonth;
-    const inToday = ts >= startOfDay;
+    const inMonth = eventMs >= startOfMonth;
+    const inToday = eventMs >= startOfDay;
     const total = row.tokens.total ?? 0;
 
     if (inToday) {
@@ -267,24 +312,21 @@ function deriveDayMonthRollups(
       month.sessions += 1;
       month.tokens += total;
     }
-    // Cost — pick first model. See `sessionCostEstimate` for the same
-    // approximation used in the transcript header.
-    const primaryModel = row.models[0];
-    if (!primaryModel) continue;
-    const c = costFromUsage(table, primaryModel, {
-      input: row.tokens.input,
-      output: row.tokens.output,
-      cache_read: row.tokens.cache_read,
-      cache_creation: row.tokens.cache_creation,
-    });
+    // One cost path for the whole app: `sessionCostEstimate` owns the
+    // dominant-model choice and the token shaping, and prices at the
+    // rate in force on the session's own day. Re-deriving either here
+    // is how this rollup and the transcript header drifted apart.
+    const c = sessionCostEstimate(table, row.models, row.tokens, eventMs);
     if (c == null) continue;
     if (inToday) {
-      todayCostSum += c;
+      todayCostSum += c.usd;
       todayHadKnownCost = true;
+      if (c.confidence === "family_estimate") today.costEstimated = true;
     }
     if (inMonth) {
-      monthCostSum += c;
+      monthCostSum += c.usd;
       monthHadKnownCost = true;
+      if (c.confidence === "family_estimate") month.costEstimated = true;
     }
   }
   today.costUsd = todayHadKnownCost ? todayCostSum : null;
@@ -302,19 +344,12 @@ function startOfLocalMonthMs(d: Date): number {
   return x.getTime();
 }
 
-/** Compact model label for the Live card. `claude-opus-4-7` →
- *  `Opus 4.7`. Keeps the chip short enough to fit several side-by-side. */
-function compactModelLabel(raw: string | null): string | null {
+/** Compact model label for the Live card, tolerating the `null` model a
+ *  session carries before its first assistant event. The shortening
+ *  itself lives in `lib/modelLabel`. */
+function liveModelLabel(raw: string | null): string | null {
   if (!raw) return null;
-  const stripped = raw
-    .replace(/^claude-/, "")
-    .replace(/-\d{8,}$/, "")
-    .replace(/-(preview|latest|experimental)$/, "");
-  const parts = stripped.split("-");
-  if (parts.length === 0) return null;
-  const family = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-  const version = parts.slice(1).join(".");
-  return version ? `${family} ${version}` : family;
+  return compactModelLabel(raw) || null;
 }
 
 function formatTokensHuman(n: number): string {

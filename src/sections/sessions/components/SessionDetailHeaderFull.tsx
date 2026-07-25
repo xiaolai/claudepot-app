@@ -5,7 +5,12 @@ import { Glyph } from "../../../components/primitives/Glyph";
 import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { SessionRow } from "../../../types";
-import { formatUsd } from "../../../costs";
+import {
+  ESTIMATED_RATE_HINT,
+  formatCost,
+  formatUsd,
+  type PricedCost,
+} from "../../../costs";
 import { maybeRedact } from "../../../lib/redactSecrets";
 import { formatRelativeTime, formatSize } from "../../projects/format";
 import {
@@ -30,7 +35,7 @@ import {
 export function SessionDetailHeaderFull({
   row,
   title,
-  costUsd,
+  cost,
   onBack,
   revealNode,
   kebabNode,
@@ -41,7 +46,7 @@ export function SessionDetailHeaderFull({
    * table is still loading or has no entries for the row's models.
    * Computed once in the orchestrator so it survives the compact↔
    * full layout transitions without re-fetching pricing. */
-  costUsd: number | null;
+  cost: PricedCost | null;
   onBack?: () => void;
   revealNode: ReactNode;
   kebabNode: ReactNode;
@@ -147,12 +152,16 @@ export function SessionDetailHeaderFull({
             {formatTokens(row.tokens.total)} tok
           </Tag>
         )}
-        {costUsd !== null && costUsd > 0 && (
+        {cost !== null && cost.usd > 0 && (
           <Tag
             tone="neutral"
-            title={`On pay-per-call API: ${formatUsd(costUsd)}. Subscription users don't pay this — it's what the same tokens would have cost at Anthropic's standard API rates.`}
+            title={
+              `On pay-per-call API: ${formatUsd(cost.usd)}. Subscription users don't pay this — ` +
+              `it's what the same tokens would have cost at Anthropic's standard API rates.` +
+              (cost.confidence === "family_estimate" ? ` ${ESTIMATED_RATE_HINT}` : "")
+            }
           >
-            {formatUsd(costUsd)} on API
+            {formatCost(cost)} on API
           </Tag>
         )}
         {row.message_count > 0 && (

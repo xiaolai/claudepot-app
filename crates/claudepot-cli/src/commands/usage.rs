@@ -58,10 +58,11 @@ pub async fn report(ctx: &AppContext, window: &str) -> Result<()> {
         .list_all(&config_dir)
         .with_context(|| "failed to read CC session index")?;
 
-    // Pricing comes from the bundled defaults. The cache-and-refresh
-    // service exists for the GUI; CLI is one-shot, so paying the
-    // bundled-rate path is the right tradeoff.
-    let prices = pricing::load();
+    // Pricing comes from the bundled rate history plus whatever rate
+    // changes this install has already observed. The cache-and-refresh
+    // service exists for the GUI; CLI is one-shot, so we read the
+    // recorded history rather than triggering a scrape.
+    let prices = pricing::PriceBook::load();
 
     let report = aggregate_from_rows(sessions, &prices, tw);
 
@@ -101,6 +102,14 @@ fn print_human(r: &LocalUsageReport) {
             r.totals.unpriced_sessions
         );
     }
+    if r.totals.estimated_sessions > 0 {
+        println!();
+        println!(
+            "note: {} session(s) used a model that isn't in the rate table; their cost was \
+             estimated from the model family's rate and is marked `~`.",
+            r.totals.estimated_sessions
+        );
+    }
 }
 
 fn window_header(r: &LocalUsageReport) -> String {
@@ -129,10 +138,7 @@ fn print_row(row: &ProjectUsageRow) {
         .last_active_ms
         .map(format_ms_short)
         .unwrap_or_else(|| "—".to_string());
-    let cost = row
-        .cost_usd
-        .map(|c| format!("${c:.2}"))
-        .unwrap_or_else(|| "n/a".to_string());
+    let cost = format_cost(row.cost_usd, row.estimated_sessions);
     println!(
         "{:<10}  {:>5}  {:>13}  {:>13}  {:>13}  {:>15}  {:>11}  {}",
         last,
@@ -146,12 +152,21 @@ fn print_row(row: &ProjectUsageRow) {
     );
 }
 
+/// Format a cost cell, marking a figure that includes sessions priced
+/// from a model's *family* rate rather than its own.
+///
+/// The GUI marks these with `≈`; the CLI has to as well, or the same
+/// number reads as a quote in one surface and an estimate in the other.
+fn format_cost(cost_usd: Option<f64>, estimated_sessions: usize) -> String {
+    match cost_usd {
+        None => "n/a".to_string(),
+        Some(c) if estimated_sessions > 0 => format!("~${c:.2}"),
+        Some(c) => format!("${c:.2}"),
+    }
+}
+
 fn print_totals(r: &LocalUsageReport) {
-    let cost = r
-        .totals
-        .cost_usd
-        .map(|c| format!("${c:.2}"))
-        .unwrap_or_else(|| "n/a".to_string());
+    let cost = format_cost(r.totals.cost_usd, r.totals.estimated_sessions);
     let n_rows = r.rows.len();
     let plural = if n_rows == 1 { "" } else { "s" };
     println!(

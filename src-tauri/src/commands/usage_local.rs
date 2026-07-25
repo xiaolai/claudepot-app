@@ -112,6 +112,10 @@ pub struct ProjectUsageRowDto {
     pub tokens_cache_read: u64,
     pub cost_usd: Option<f64>,
     pub unpriced_sessions: usize,
+    /// Sessions priced from their family's rate rather than an exact
+    /// match. Non-zero means `cost_usd` is partly an estimate and the
+    /// UI must say so.
+    pub estimated_sessions: usize,
     /// Session-count breakdown by model id. Order is deterministic
     /// (BTreeMap → sorted by key) so snapshot tests stay stable.
     pub models_by_session: std::collections::BTreeMap<String, usize>,
@@ -130,6 +134,7 @@ impl From<ProjectUsageRow> for ProjectUsageRowDto {
             tokens_cache_read: r.tokens_cache_read,
             cost_usd: r.cost_usd,
             unpriced_sessions: r.unpriced_sessions,
+            estimated_sessions: r.estimated_sessions,
             models_by_session: r.models_by_session,
         }
     }
@@ -146,6 +151,10 @@ pub struct UsageTotalsDto {
     pub tokens_cache_read: u64,
     pub cost_usd: Option<f64>,
     pub unpriced_sessions: usize,
+    /// Sessions priced from their family's rate rather than an exact
+    /// match. Non-zero means `cost_usd` is partly an estimate and the
+    /// UI must say so.
+    pub estimated_sessions: usize,
     /// Install-wide session-count breakdown by model id.
     pub models_by_session: std::collections::BTreeMap<String, usize>,
 }
@@ -162,6 +171,7 @@ impl From<UsageTotals> for UsageTotalsDto {
             tokens_cache_read: t.tokens_cache_read,
             cost_usd: t.cost_usd,
             unpriced_sessions: t.unpriced_sessions,
+            estimated_sessions: t.estimated_sessions,
             models_by_session: t.models_by_session,
         }
     }
@@ -255,7 +265,11 @@ pub async fn local_usage_aggregate(
         let table = bundled.with_tier(tier);
         let pricing_source = format_pricing_source(&table);
         let pricing_error = table.last_fetch_error.clone();
-        let report = aggregate_from_rows(sessions, &table, window);
+        // The table drives the "rates as of …" chip; the book drives
+        // the arithmetic, because only it knows what a rate was on the
+        // day a given session ran.
+        let book = pricing::PriceBook::load().with_tier(tier);
+        let report = aggregate_from_rows(sessions, &book, window);
         Ok(report_to_dto(
             report,
             tier_str,
@@ -338,6 +352,9 @@ pub struct CostlyTurnDto {
     /// unresolved cost. Kept as `f64` (not Option<f64>) on the wire
     /// so the UI can render `$X.XX` without a null guard per cell.
     pub cost_usd: f64,
+    /// True when `cost_usd` used the model's family rate rather than a
+    /// rate recorded for that exact model.
+    pub cost_is_estimated: bool,
 }
 
 impl From<CostlyTurn> for CostlyTurnDto {
@@ -354,6 +371,7 @@ impl From<CostlyTurn> for CostlyTurnDto {
             tokens_cache_read: t.tokens_cache_read,
             user_prompt_preview: t.user_prompt_preview,
             cost_usd: t.cost_usd.unwrap_or(0.0),
+            cost_is_estimated: t.cost_is_estimated,
         }
     }
 }
@@ -401,8 +419,7 @@ pub async fn top_costly_prompts(
     let pricing_tier = tier.as_str().to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let bundled = pricing::load();
-        let table = bundled.with_tier(tier);
+        let book = pricing::PriceBook::load().with_tier(tier);
         let config_dir = claudepot_core::paths::claude_config_dir();
         let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
         let index = SessionIndex::open(&db_path).map_err(|e| format!("session index open: {e}"))?;
@@ -411,7 +428,7 @@ pub async fn top_costly_prompts(
                 .refresh(&config_dir)
                 .map_err(|e| format!("session index refresh: {e}"))?;
         }
-        let turns = top_costly_turns(&index, &table, window, n)
+        let turns = top_costly_turns(&index, &book, window, n)
             .map_err(|e| format!("top_costly_turns: {e}"))?;
         Ok(TopCostlyPromptsDto {
             turns: turns.into_iter().map(Into::into).collect(),
@@ -509,6 +526,7 @@ mod tests {
                 tokens_cache_read: 1000,
                 cost_usd: Some(1.23),
                 unpriced_sessions: 1,
+                estimated_sessions: 0,
                 models_by_session: BTreeMap::new(),
             }],
             totals: CoreTotals {
@@ -521,6 +539,7 @@ mod tests {
                 tokens_cache_read: 1000,
                 cost_usd: Some(1.23),
                 unpriced_sessions: 1,
+                estimated_sessions: 0,
                 models_by_session: BTreeMap::new(),
             },
         };
@@ -587,6 +606,7 @@ mod tests {
                 tokens_cache_read: 0,
                 cost_usd: None,
                 unpriced_sessions: 1,
+                estimated_sessions: 0,
                 models_by_session: BTreeMap::new(),
             }],
             totals: CoreTotals {
@@ -599,6 +619,7 @@ mod tests {
                 tokens_cache_read: 0,
                 cost_usd: None,
                 unpriced_sessions: 1,
+                estimated_sessions: 0,
                 models_by_session: BTreeMap::new(),
             },
         };

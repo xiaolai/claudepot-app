@@ -23,10 +23,32 @@ export interface PriceSourceDto {
   url: string;
 }
 
+/** One rate period from the dated book. `starts: null` is the opening
+ *  period; otherwise `[year, month, day]`, the first day it applied. */
+export interface RatePeriodDto {
+  starts: [number, number, number] | null;
+  input_per_mtok: number;
+  output_per_mtok: number;
+  cache_write_per_mtok: number;
+  cache_read_per_mtok: number;
+}
+
+/** The dated rate book: every priced model's periods plus the family
+ *  fallback map. Mirrors `claudepot_core::pricing::book::PriceBookSnapshot`. */
+export interface PriceBookSnapshotDto {
+  /** Model id → periods, oldest first. */
+  models: Record<string, RatePeriodDto[]>;
+  /** `claude-<family>-` → the model id an unlisted member falls back to. */
+  family_current: Record<string, string>;
+}
+
 export interface PriceTableDto {
-  /** Keyed by canonical model id (e.g. `claude-opus-4-7`). */
+  /** Keyed by canonical model id (e.g. `claude-opus-4-7`). Current
+   *  rates only — use `book` for anything date-sensitive. */
   models: Record<string, ModelRatesDto>;
   source: PriceSourceDto;
   /** Short user-safe message when the last refresh attempt failed. */
   last_fetch_error: string | null;
+  /** The dated rate book all client-side cost math resolves against. */
+  book: PriceBookSnapshotDto;
 }

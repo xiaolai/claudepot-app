@@ -35,10 +35,11 @@
 //! render: claudepot's CLI renders `n/a` for the cost column and the
 //! token columns still tell the truth.
 
-use crate::pricing::{resolve_model_rates, ModelRates, PriceTable};
+use crate::pricing::{PriceBook, PricedCost};
 use crate::session::SessionRow;
 use crate::session_index::error::SessionIndexError;
 use crate::session_index::{SessionIndex, TurnCandidate};
+use crate::session_live::pricing::RateConfidence;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -121,6 +122,11 @@ pub struct ProjectUsageRow {
     /// Sessions whose models couldn't be priced. Never zero when
     /// `cost_usd` is None and tokens are non-zero.
     pub unpriced_sessions: usize,
+    /// Sessions priced from their *family's* rate because the exact
+    /// model isn't in the rate table. Their dollars are included in
+    /// `cost_usd`; this count is what lets the UI mark the figure as
+    /// partly estimated instead of quoting it flat.
+    pub estimated_sessions: usize,
     /// Session-count breakdown by model. Each session contributes
     /// once per *distinct* model it used, so a session that mixed
     /// Opus and Sonnet adds 1 to both buckets — the sum of values is
@@ -144,6 +150,8 @@ pub struct UsageTotals {
     pub tokens_cache_read: u64,
     pub cost_usd: Option<f64>,
     pub unpriced_sessions: usize,
+    /// Install-wide count of sessions priced from a family estimate.
+    pub estimated_sessions: usize,
     /// Install-wide session-count breakdown by model — mirrors
     /// `ProjectUsageRow.models_by_session` aggregated across every
     /// row in the report.
@@ -191,7 +199,7 @@ impl From<TimeWindow> for ReportWindow {
 pub fn aggregate_local_usage(
     index: &SessionIndex,
     config_dir: &Path,
-    prices: &PriceTable,
+    prices: &PriceBook,
     window: TimeWindow,
 ) -> Result<LocalUsageReport, SessionIndexError> {
     let sessions = index.list_all(config_dir)?;
@@ -204,7 +212,7 @@ pub fn aggregate_local_usage(
 /// the rows in memory) can avoid a second `list_all`.
 pub fn aggregate_from_rows(
     sessions: Vec<SessionRow>,
-    prices: &PriceTable,
+    prices: &PriceBook,
     window: TimeWindow,
 ) -> LocalUsageReport {
     let mut by_project: BTreeMap<String, ProjectAccumulator> = BTreeMap::new();
@@ -216,7 +224,7 @@ pub fn aggregate_from_rows(
             continue;
         }
 
-        let session_cost = compute_session_cost(&s, prices);
+        let session_cost = compute_session_cost(&s, prices, last_ms);
 
         let acc = by_project.entry(s.project_path.clone()).or_default();
         acc.session_count += 1;
@@ -227,7 +235,12 @@ pub fn aggregate_from_rows(
         merge_min(&mut acc.first_active_ms, last_ms);
         merge_max(&mut acc.last_active_ms, last_ms);
         match session_cost {
-            Some(c) => *acc.cost_usd.get_or_insert(0.0) += c,
+            Some(c) => {
+                *acc.cost_usd.get_or_insert(0.0) += c.usd;
+                if c.confidence == RateConfidence::FamilyEstimate {
+                    acc.estimated_sessions += 1;
+                }
+            }
             None => acc.unpriced_sessions += 1,
         }
         // Distinct-models-per-session: dedupe at the session boundary
@@ -250,7 +263,12 @@ pub fn aggregate_from_rows(
         merge_min(&mut totals.first_active_ms, last_ms);
         merge_max(&mut totals.last_active_ms, last_ms);
         match session_cost {
-            Some(c) => *totals.cost_usd.get_or_insert(0.0) += c,
+            Some(c) => {
+                *totals.cost_usd.get_or_insert(0.0) += c.usd;
+                if c.confidence == RateConfidence::FamilyEstimate {
+                    totals.estimated_sessions += 1;
+                }
+            }
             None => totals.unpriced_sessions += 1,
         }
     }
@@ -268,6 +286,7 @@ pub fn aggregate_from_rows(
             tokens_cache_read: acc.tokens_cache_read,
             cost_usd: acc.cost_usd,
             unpriced_sessions: acc.unpriced_sessions,
+            estimated_sessions: acc.estimated_sessions,
             models_by_session: acc.models_by_session,
         })
         .collect();
@@ -298,6 +317,7 @@ struct ProjectAccumulator {
     tokens_cache_read: u64,
     cost_usd: Option<f64>,
     unpriced_sessions: usize,
+    estimated_sessions: usize,
     models_by_session: BTreeMap<String, usize>,
 }
 
@@ -328,11 +348,16 @@ pub struct CostlyTurn {
     /// Truncated copy of the user prompt that drove this turn.
     /// Already `sk-ant-`-redacted at write time.
     pub user_prompt_preview: Option<String>,
-    /// Dollar cost of this turn against the supplied price table.
-    /// `None` when the turn's model isn't resolvable in the table —
-    /// the row is then dropped from the consumer's ranking but
-    /// would survive a verbose mode.
+    /// Dollar cost of this turn at the rate in force on its own
+    /// timestamp. `None` when the turn's model belongs to no family
+    /// the book prices — the row is then dropped from the consumer's
+    /// ranking but would survive a verbose mode.
     pub cost_usd: Option<f64>,
+    /// True when `cost_usd` came from the model's *family* rate rather
+    /// than a rate recorded for that exact model. The UI marks these
+    /// so an estimate is never read as a quote.
+    #[serde(default)]
+    pub cost_is_estimated: bool,
 }
 
 /// Return the install's `final_n` costliest turns within `window`,
@@ -356,7 +381,7 @@ pub struct CostlyTurn {
 /// table). Errors only on underlying SQL paths.
 pub fn top_costly_turns(
     index: &SessionIndex,
-    prices: &PriceTable,
+    prices: &PriceBook,
     window: TimeWindow,
     final_n: usize,
 ) -> Result<Vec<CostlyTurn>, SessionIndexError> {
@@ -374,7 +399,7 @@ pub fn top_costly_turns(
 /// pre-filters by `file_path`).
 pub fn rank_candidates(
     candidates: Vec<TurnCandidate>,
-    prices: &PriceTable,
+    prices: &PriceBook,
     final_n: usize,
 ) -> Vec<CostlyTurn> {
     if final_n == 0 {
@@ -383,11 +408,11 @@ pub fn rank_candidates(
     let mut scored: Vec<CostlyTurn> = candidates
         .into_iter()
         .filter_map(|c| {
-            let cost = resolve_model_rates(prices, &c.model).map(|r| apply_rates(&c.tokens, r));
-            // Drop rows whose model can't be resolved — a top-N
-            // ranking with `None` costs at the top would be
-            // misleading. Verbose surfaces can re-add them.
-            cost.as_ref()?;
+            // Each turn is priced at the rate in force on its own day,
+            // so a ranking that spans a price change compares what the
+            // turns actually cost rather than re-scoring them all at
+            // today's rate.
+            let cost = prices.cost_at_ms(&c.model, c.ts_ms, &c.tokens)?;
             Some(CostlyTurn {
                 file_path: c.file_path,
                 project_path: c.project_path,
@@ -399,7 +424,8 @@ pub fn rank_candidates(
                 tokens_cache_creation: c.tokens.cache_creation,
                 tokens_cache_read: c.tokens.cache_read,
                 user_prompt_preview: c.user_prompt_preview,
-                cost_usd: cost,
+                cost_usd: Some(cost.usd),
+                cost_is_estimated: cost.confidence == RateConfidence::FamilyEstimate,
             })
         })
         .collect();
@@ -421,13 +447,21 @@ pub fn rank_candidates(
 }
 
 /// Compute USD cost for one session's aggregate token totals using its
-/// dominant model. Returns `None` when:
+/// dominant model, at the rate in force when the session was last
+/// active. Returns `None` when:
 ///   - the session has no models recorded (zero assistant turns), or
-///   - the dominant model can't be resolved against the price table.
-fn compute_session_cost(s: &SessionRow, prices: &PriceTable) -> Option<f64> {
+///   - the dominant model belongs to no family the book prices.
+///
+/// A session that spans a rate change is scored entirely at its
+/// last-active rate. Splitting it would need per-turn attribution the
+/// session row doesn't carry; `top_costly_turns` does score per turn.
+fn compute_session_cost(
+    s: &SessionRow,
+    prices: &PriceBook,
+    last_ms: Option<i64>,
+) -> Option<PricedCost> {
     let model = dominant_model(&s.models)?;
-    let rates = resolve_model_rates(prices, model)?;
-    Some(apply_rates(&s.tokens, rates))
+    prices.cost_at_ms(model, last_ms, &s.tokens)
 }
 
 /// Pick the dominant model from a session's recorded model list. CC
@@ -438,14 +472,6 @@ fn compute_session_cost(s: &SessionRow, prices: &PriceTable) -> Option<f64> {
 /// tiebreak is as good as another. Empty list → None.
 fn dominant_model(models: &[String]) -> Option<&str> {
     models.iter().min().map(|s| s.as_str())
-}
-
-fn apply_rates(tokens: &crate::session::TokenUsage, r: &ModelRates) -> f64 {
-    let m = 1_000_000.0;
-    (tokens.input as f64 / m) * r.input_per_mtok
-        + (tokens.output as f64 / m) * r.output_per_mtok
-        + (tokens.cache_creation as f64 / m) * r.cache_write_per_mtok
-        + (tokens.cache_read as f64 / m) * r.cache_read_per_mtok
 }
 
 fn merge_min(slot: &mut Option<i64>, candidate: Option<i64>) {
@@ -461,38 +487,19 @@ fn merge_max(slot: &mut Option<i64>, candidate: Option<i64>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pricing::{ModelRates, PriceSource, PriceTable};
     use crate::session::{SessionRow, TokenUsage};
     use chrono::TimeZone;
     use std::path::PathBuf;
 
-    fn rates_for_test() -> PriceTable {
-        let mut models = std::collections::BTreeMap::new();
-        models.insert(
-            "claude-opus-4-7".to_string(),
-            ModelRates {
-                input_per_mtok: 15.0,
-                output_per_mtok: 75.0,
-                cache_write_per_mtok: 18.75,
-                cache_read_per_mtok: 1.5,
-            },
-        );
-        models.insert(
-            "claude-sonnet-4-6".to_string(),
-            ModelRates {
-                input_per_mtok: 3.0,
-                output_per_mtok: 15.0,
-                cache_write_per_mtok: 3.75,
-                cache_read_per_mtok: 0.3,
-            },
-        );
-        PriceTable {
-            models,
-            source: PriceSource::Bundled {
-                verified_at: "test".into(),
-            },
-            last_fetch_error: None,
-        }
+    /// The real bundled rate history, with no observed changes.
+    ///
+    /// These tests used to build a synthetic `PriceTable`, which meant
+    /// they passed while the shipped table said something else — the
+    /// Opus row in that fixture was still the retired $15/$75 long
+    /// after the bundled rates moved to $5/$25. Driving them off the
+    /// real book keeps the fixtures honest.
+    fn rates_for_test() -> PriceBook {
+        PriceBook::bundled_only()
     }
 
     fn row(project: &str, last_ts_ms: i64, models: Vec<&str>, tokens: TokenUsage) -> SessionRow {
@@ -680,6 +687,139 @@ mod tests {
         assert!((cost - 3.0).abs() < 1e-9);
     }
 
+    /// Epoch-ms for a UTC date, so date-sensitive tests read as dates.
+    fn ms_on(date: &str) -> i64 {
+        format!("{date}T12:00:00Z")
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap()
+            .timestamp_millis()
+    }
+
+    #[test]
+    fn a_session_is_priced_at_the_rate_in_force_when_it_ran() {
+        // Same tokens, same model, two sides of Sonnet 5's
+        // introductory-window boundary. Before the dated book both
+        // scored identically, which silently rewrote the older figure
+        // every time a price moved.
+        let prices = rates_for_test();
+        let tokens = TokenUsage {
+            input: 1_000_000,
+            output: 0,
+            cache_creation: 0,
+            cache_read: 0,
+        };
+        let during = aggregate_from_rows(
+            vec![row(
+                "/p",
+                ms_on("2026-08-15"),
+                vec!["claude-sonnet-5"],
+                tokens.clone(),
+            )],
+            &prices,
+            TimeWindow::open(),
+        );
+        let after = aggregate_from_rows(
+            vec![row(
+                "/p",
+                ms_on("2026-09-15"),
+                vec!["claude-sonnet-5"],
+                tokens,
+            )],
+            &prices,
+            TimeWindow::open(),
+        );
+        assert!((during.rows[0].cost_usd.unwrap() - 2.0).abs() < 1e-9);
+        assert!((after.rows[0].cost_usd.unwrap() - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_family_estimated_session_is_counted_but_still_priced() {
+        // An unreleased Opus point release resolves through the family
+        // fallback: its dollars count toward the total, and the row
+        // reports how many sessions were estimated so the UI can mark
+        // the figure.
+        let prices = rates_for_test();
+        let r = aggregate_from_rows(
+            vec![row(
+                "/p",
+                1_000,
+                vec!["claude-opus-9"],
+                TokenUsage {
+                    input: 1_000_000,
+                    output: 0,
+                    cache_creation: 0,
+                    cache_read: 0,
+                },
+            )],
+            &prices,
+            TimeWindow::open(),
+        );
+        assert_eq!(r.rows[0].unpriced_sessions, 0);
+        assert_eq!(r.rows[0].estimated_sessions, 1);
+        assert!((r.rows[0].cost_usd.unwrap() - 5.0).abs() < 1e-9);
+        assert_eq!(r.totals.estimated_sessions, 1);
+    }
+
+    #[test]
+    fn an_exactly_priced_session_is_not_counted_as_estimated() {
+        let prices = rates_for_test();
+        let r = aggregate_from_rows(
+            vec![row(
+                "/p",
+                1_000,
+                vec!["claude-opus-5"],
+                TokenUsage {
+                    input: 1_000_000,
+                    output: 0,
+                    cache_creation: 0,
+                    cache_read: 0,
+                },
+            )],
+            &prices,
+            TimeWindow::open(),
+        );
+        assert_eq!(r.rows[0].estimated_sessions, 0);
+        assert_eq!(r.totals.estimated_sessions, 0);
+    }
+
+    #[test]
+    fn a_turn_carries_its_own_estimated_flag() {
+        let prices = rates_for_test();
+        let top = rank_candidates(
+            vec![
+                make_candidate(
+                    "/p",
+                    0,
+                    "claude-opus-9",
+                    TokenUsage {
+                        input: 1_000_000,
+                        output: 0,
+                        cache_creation: 0,
+                        cache_read: 0,
+                    },
+                ),
+                make_candidate(
+                    "/p",
+                    1,
+                    "claude-opus-5",
+                    TokenUsage {
+                        input: 900_000,
+                        output: 0,
+                        cache_creation: 0,
+                        cache_read: 0,
+                    },
+                ),
+            ],
+            &prices,
+            2,
+        );
+        assert!(
+            top[0].cost_is_estimated,
+            "claude-opus-9 is a family estimate"
+        );
+        assert!(!top[1].cost_is_estimated, "claude-opus-5 is priced exactly");
+    }
+
     #[test]
     fn fully_unpriced_project_returns_none_cost() {
         let prices = rates_for_test();
@@ -862,17 +1002,17 @@ mod tests {
     #[test]
     fn rank_candidates_returns_top_n_by_cost() {
         let prices = rates_for_test();
-        // Costs (Opus $15/$75, Sonnet $3/$15):
-        //   c1 Opus 1M in/0 out → $15
-        //   c2 Sonnet 5M in/0 out → $15
-        //   c3 Opus 0.5M in/0 out → $7.5
+        // Costs (Opus $5/$25, Sonnet $3/$15):
+        //   c0 Opus   3M in/0 out → $15
+        //   c1 Sonnet 5M in/0 out → $15   (deliberate tie with c0)
+        //   c2 Opus 0.5M in/0 out → $2.50
         let candidates = vec![
             make_candidate(
                 "/p",
                 0,
                 "claude-opus-4-7",
                 TokenUsage {
-                    input: 1_000_000,
+                    input: 3_000_000,
                     output: 0,
                     cache_creation: 0,
                     cache_read: 0,
@@ -1030,8 +1170,8 @@ mod tests {
             TimeWindow::open(),
         );
         assert_eq!(r1.rows[0].cost_usd, r2.rows[0].cost_usd);
-        // And it picked Opus (alphabetically before Sonnet) → 1M × $15/M = $15.
+        // And it picked Opus (alphabetically before Sonnet) → 1M × $5/M = $5.
         let cost = r1.rows[0].cost_usd.unwrap();
-        assert!((cost - 15.0).abs() < 1e-9);
+        assert!((cost - 5.0).abs() < 1e-9, "expected $5, got {cost}");
     }
 }

@@ -92,6 +92,35 @@ vi.mock("../../api", () => ({
       include_co_authored_by: null,
     }),
     attributionSet: vi.fn(),
+    // The General tab also hosts the fast-mode toggle and the model
+    // allowlist editor, both of which load on mount. Stub default
+    // shapes so they render without toasting an error — an unstubbed
+    // load here surfaces as a toast and displaces the assertion the
+    // test is actually making.
+    fastModeState: vi.fn().mockResolvedValue({
+      effective: false,
+      decided_by: "default",
+      user_writable: true,
+      user_settings_value: null,
+      per_session_opt_in: false,
+      env_disabled: false,
+      facts: {
+        models: ["claude-opus-5", "claude-opus-4-8"],
+        input_per_mtok: 10,
+        output_per_mtok: 50,
+      },
+    }),
+    fastModeSet: vi.fn(),
+    fastModeSetPerSession: vi.fn(),
+    availableModelsState: vi.fn().mockResolvedValue({
+      entries: [],
+      enforce: null,
+      key_present: false,
+      restricts_models: false,
+      enforce_is_effective: false,
+      enforce_min_cc_version: "2.1.175",
+    }),
+    availableModelsSet: vi.fn(),
   },
 }));
 

@@ -138,8 +138,15 @@ function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
           textAlign: "right",
           minWidth: "var(--sp-60)",
         }}
+        // This turn's model isn't in the rate table, so its cost came
+        // from the family's rate. Marked rather than quoted flat.
+        title={
+          turn.cost_is_estimated
+            ? "Estimated: this model isn't in the rate table yet, so its family's current rate was used."
+            : undefined
+        }
       >
-        ${turn.cost_usd.toFixed(2)}
+        {turn.cost_is_estimated ? "≈ " : ""}${turn.cost_usd.toFixed(2)}
       </div>
     </li>
   );

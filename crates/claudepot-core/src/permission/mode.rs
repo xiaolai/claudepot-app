@@ -6,6 +6,11 @@
 //! internal and never written to disk by CC, so an on-disk file
 //! carrying one is treated as [`PermissionMode::Unknown`] rather
 //! than rejected — forward-compat with a newer CC.
+//!
+//! The `manual` alias is verified against CC's published permissions
+//! reference (`code.claude.com/docs/en/permissions`) rather than that
+//! source checkout, which predates v2.1.200. Re-verify against source
+//! once the checkout is refreshed.
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +22,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionMode {
     /// `default` — prompt for every non-allowlisted operation.
+    ///
+    /// CC v2.1.200+ labels this mode "Manual" in its own UI and
+    /// accepts `manual` on disk as an alias; that spelling parses to
+    /// [`PermissionMode::Manual`], which behaves identically.
     Default,
+    /// `manual` — CC v2.1.200+ alias for [`PermissionMode::Default`],
+    /// matching the label CC now shows in its own UI.
+    ///
+    /// Kept as its own variant rather than folded into `Default` so a
+    /// settings file written with `manual` is never silently rewritten
+    /// to `default` when Claudepot reverts a grant.
+    ///
+    /// Semantically the two are one mode: any check for "the mode that
+    /// prompts" must accept both, so `== PermissionMode::Default` is a
+    /// bug waiting to happen — match `Default | Manual`. Nothing in
+    /// Claudepot makes that comparison today; every code path compares
+    /// against the *granted* mode instead.
+    ///
+    /// Writing `manual` to a machine running a pre-2.1.200 CC would be
+    /// an unrecognized value, so Claudepot only preserves the spelling
+    /// it reads; it never introduces it.
+    Manual,
     /// `acceptEdits` — auto-accept file edits, still prompt for the rest.
     AcceptEdits,
     /// `plan` — read-only planning mode.
@@ -38,6 +64,7 @@ impl PermissionMode {
     pub fn as_wire_str(&self) -> &str {
         match self {
             Self::Default => "default",
+            Self::Manual => "manual",
             Self::AcceptEdits => "acceptEdits",
             Self::Plan => "plan",
             Self::DontAsk => "dontAsk",
@@ -51,6 +78,7 @@ impl PermissionMode {
     pub fn from_wire_str(s: &str) -> Self {
         match s {
             "default" => Self::Default,
+            "manual" => Self::Manual,
             "acceptEdits" => Self::AcceptEdits,
             "plan" => Self::Plan,
             "dontAsk" => Self::DontAsk,
@@ -99,6 +127,7 @@ mod tests {
     fn known_modes_round_trip_through_wire_str() {
         for m in [
             PermissionMode::Default,
+            PermissionMode::Manual,
             PermissionMode::AcceptEdits,
             PermissionMode::Plan,
             PermissionMode::DontAsk,
@@ -107,6 +136,39 @@ mod tests {
             let wire = m.as_wire_str().to_string();
             assert_eq!(PermissionMode::from_wire_str(&wire), m);
         }
+    }
+
+    #[test]
+    fn manual_is_a_known_mode_not_an_unknown_string() {
+        // CC v2.1.200+ writes `manual` for what older versions wrote as
+        // `default`. Treating it as Unknown made the Permissions pane
+        // show such a project as unmanageable.
+        let m = PermissionMode::from_wire_str("manual");
+        assert_eq!(m, PermissionMode::Manual);
+        assert!(m.is_known());
+        assert!(!m.is_elevated());
+    }
+
+    #[test]
+    fn manual_spelling_survives_a_round_trip() {
+        // Revert writes `previous_mode` back verbatim. Collapsing
+        // `manual` into `Default` would silently rewrite the user's
+        // settings file to the other spelling.
+        assert_eq!(PermissionMode::Manual.as_wire_str(), "manual");
+        let json = serde_json::to_string(&PermissionMode::Manual).unwrap();
+        assert_eq!(json, r#""manual""#);
+        assert_eq!(
+            serde_json::from_str::<PermissionMode>(&json).unwrap(),
+            PermissionMode::Manual
+        );
+    }
+
+    #[test]
+    fn manual_and_default_stay_distinct_values() {
+        // They mean the same thing to CC, but they are different
+        // strings on disk and must not compare equal — equality is what
+        // the revert path uses to decide whether the user took over.
+        assert_ne!(PermissionMode::Manual, PermissionMode::Default);
     }
 
     #[test]
@@ -122,6 +184,7 @@ mod tests {
         assert!(PermissionMode::BypassPermissions.is_elevated());
         for m in [
             PermissionMode::Default,
+            PermissionMode::Manual,
             PermissionMode::AcceptEdits,
             PermissionMode::Plan,
             PermissionMode::DontAsk,

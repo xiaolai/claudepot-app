@@ -41,6 +41,7 @@ function emptyReport(): LocalUsageReport {
       tokens_cache_read: 0,
       cost_usd: null,
       unpriced_sessions: 0,
+      estimated_sessions: 0,
       models_by_session: {},
     },
     pricing_source: "bundled · verified 2026-01-15",
@@ -64,6 +65,7 @@ function reportWithRows(): LocalUsageReport {
         tokens_cache_read: 8_000_000,
         cost_usd: 42.5,
         unpriced_sessions: 0,
+        estimated_sessions: 0,
         models_by_session: {
           "claude-opus-4-7": 10,
           "claude-sonnet-4-6": 3,
@@ -80,6 +82,7 @@ function reportWithRows(): LocalUsageReport {
         tokens_cache_read: 200_000,
         cost_usd: null,
         unpriced_sessions: 3,
+        estimated_sessions: 0,
         models_by_session: {},
       },
     ],
@@ -93,6 +96,7 @@ function reportWithRows(): LocalUsageReport {
       tokens_cache_read: 8_200_000,
       cost_usd: 42.5,
       unpriced_sessions: 3,
+      estimated_sessions: 0,
       models_by_session: {
         "claude-opus-4-7": 10,
         "claude-sonnet-4-6": 3,
@@ -164,6 +168,38 @@ describe("CostTab", () => {
     expect(screen.getByText("n/a")).toBeInTheDocument();
     // Format check: 1.5M renders as "1.50M"
     expect(screen.getAllByText(/^1\.5(0)?M$/).length).toBeGreaterThan(0);
+  });
+
+  it("marks a total that includes family-estimated sessions", async () => {
+    // Estimated dollars ARE inside `cost_usd`, so a bare "$42.50"
+    // would present an inferred rate as a quote.
+    const report = reportWithRows();
+    report.totals.estimated_sessions = 2;
+    localUsageAggregateMock.mockResolvedValue(report);
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(screen.getByText(/≈ \$42\.50/)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/2 estimated/)).toBeInTheDocument();
+  });
+
+  it("leaves an exactly-priced total unmarked", async () => {
+    localUsageAggregateMock.mockResolvedValue(reportWithRows());
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(screen.getAllByText(/\$42\.50/).length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
+  });
+
+  it("marks a project row whose cost is partly estimated", async () => {
+    const report = reportWithRows();
+    report.rows[0].estimated_sessions = 1;
+    localUsageAggregateMock.mockResolvedValue(report);
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(screen.getAllByText(/≈ \$42\.50/).length).toBeGreaterThan(0),
+    );
   });
 
   it("shows the unpriced footer + Refresh prices button when count > 0", async () => {

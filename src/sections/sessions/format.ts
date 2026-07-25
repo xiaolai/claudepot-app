@@ -5,7 +5,9 @@
  * "0 tokens" in the UI.
  */
 
+import { compactModelLabel } from "../../lib/modelLabel";
 import { basename } from "../../lib/paths";
+import { sessionEventMs } from "../../lib/sessionTime";
 
 export function formatTokens(n: number): string {
   if (n <= 0) return "";
@@ -15,29 +17,18 @@ export function formatTokens(n: number): string {
 }
 
 /**
- * Humanize the full set of models a session used. Collapses the
- * `claude-<family>-<N>-<variant>` prefix (we keep the family and the
- * dotted version). Keeps the UI calm when a session bounced between
- * Opus 4.7 and Haiku 4.5.
+ * Humanize the full set of models a session used. Keeps the UI calm
+ * when a session bounced between Opus 5 and Haiku 4.5. The per-id
+ * shortening lives in `lib/modelLabel` so this and the Activities
+ * dashboard can't drift apart on what a model is called.
  */
 export function modelBadge(models: string[]): string {
   if (models.length === 0) return "";
-  const compact = models.map(compactModel);
+  const compact = models.map(compactModelLabel);
   if (compact.length === 1) return compact[0];
   const unique = Array.from(new Set(compact));
   if (unique.length === 1) return unique[0];
   return unique.join(" · ");
-}
-
-function compactModel(id: string): string {
-  const trimmed = id.replace(/^claude-/, "").replace(/-\d{8,}$/, "");
-  const parts = trimmed.split("-");
-  if (parts.length >= 3) {
-    // opus-4-7 → opus 4.7
-    const [family, major, minor] = parts;
-    return `${family} ${major}.${minor}`;
-  }
-  return trimmed;
 }
 
 /**
@@ -56,17 +47,12 @@ export function shortSessionId(id: string): string {
 /**
  * Prefer the live-event `last_ts` timestamp; fall back to file mtime
  * when CC hasn't written a dated event (new empty session).
+ *
+ * Re-exported from `lib/sessionTime` — the cost surfaces outside this
+ * section need the same rule, and dated pricing makes "which timestamp"
+ * a correctness question rather than a display preference.
  */
-export function bestTimestampMs(
-  lastTs: string | null,
-  lastModifiedMs: number | null,
-): number | null {
-  if (lastTs) {
-    const t = Date.parse(lastTs);
-    if (!Number.isNaN(t)) return t;
-  }
-  return lastModifiedMs;
-}
+export const bestTimestampMs = sessionEventMs;
 
 /**
  * CC's reference-placeholder regex — kept byte-compatible with the
