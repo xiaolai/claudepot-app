@@ -268,6 +268,7 @@ mod tests {
                 evidence: "bar panicked when foo hadn't run.".into(),
                 confidence: 90,
             }],
+            ..Default::default()
         };
         ingest_proposals(
             &idx,
@@ -353,6 +354,7 @@ mod tests {
                 evidence: "".into(),
                 confidence: 90,
             }],
+            ..Default::default()
         };
         ingest_proposals(
             &idx,

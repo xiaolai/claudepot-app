@@ -243,6 +243,7 @@ pub fn harvest_cmd(ctx: &AppContext, args: HarvestArgs) -> Result<()> {
                 total.skipped_too_long += r.skipped_too_long;
                 total.skipped_empty += r.skipped_empty;
                 total.recurrences_detected += r.recurrences_detected;
+                total.malformed_claims += r.malformed_claims;
             }
             Err(e) => {
                 // One bad transcript must not abort a 100-session
@@ -260,6 +261,7 @@ pub fn harvest_cmd(ctx: &AppContext, args: HarvestArgs) -> Result<()> {
             "proposed": total.proposed,
             "skipped": total.total_skipped(),
             "recurrences_detected": total.recurrences_detected,
+            "malformed_claims": total.malformed_claims,
         }));
     }
     println!("\n{} lesson(s) filed for review.", total.proposed);
@@ -273,6 +275,17 @@ pub fn harvest_cmd(ctx: &AppContext, args: HarvestArgs) -> Result<()> {
             total.skipped_low_confidence,
             total.skipped_too_long,
             total.skipped_empty
+        );
+    }
+    if total.malformed_claims > 0 {
+        // Not a skip line: those are claims we understood and declined.
+        // This means the model returned something we could not read at
+        // all, which is a defect in the schema contract or the prompt —
+        // and it must not look like "the sessions taught us nothing".
+        println!(
+            "  ⚠ {} claim(s) were unparseable and dropped — the distiller's \
+             output did not match its schema.",
+            total.malformed_claims
         );
     }
     if total.recurrences_detected > 0 {

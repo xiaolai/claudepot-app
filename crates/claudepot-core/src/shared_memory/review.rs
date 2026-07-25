@@ -445,6 +445,7 @@ mod tests {
                 evidence: "CI went red after a clean local run.".into(),
                 confidence: 90,
             }],
+            ..Default::default()
         };
         ingest_proposals(
             &idx,
@@ -571,6 +572,7 @@ mod tests {
                 evidence: "because it burned us".into(),
                 confidence: 90,
             }],
+            ..Default::default()
         };
         ingest_proposals(
             idx,

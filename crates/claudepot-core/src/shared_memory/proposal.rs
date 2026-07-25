@@ -7,12 +7,24 @@
 //! module parses it and writes rows. The model never calls a write
 //! tool, and therefore never *forgets* to.
 //!
-//! That is not a stylistic preference. The MCP memory server has
-//! shipped a `claudepot_remember` tool for months, the instruction
-//! snippet tells agents to call it, and the `memories` table on a real
-//! machine with 7,798 indexed exchanges contains **zero rows**. An
-//! agent that *may* persist knowledge does not persist knowledge. So
-//! the model's only job is to return a value; persistence is Rust's.
+//! That is not a stylistic preference. The MCP memory server shipped a
+//! `claudepot_remember` tool, and the instruction snippet has told
+//! agents to call it since v2 — yet for months the `memories` table on
+//! a real machine sat at **zero rows** while thousands of exchanges
+//! piled up. That is what motivated this module.
+//!
+//! The ratio since has stayed lopsided the same way. On that machine at
+//! 9,670 indexed exchanges: 8 of 10 memories came from this
+//! deterministic path (`cli:lesson-harvest` and
+//! `agent:knowledge-distiller`), 2 from an agent electing to call
+//! `claudepot_remember`. An agent that *may* persist knowledge
+//! sometimes does — but far too rarely to build on. So the model's only
+//! job is to return a value; persistence is Rust's.
+//!
+//! (Figures are a dated observation, not an invariant. They are here to
+//! show the shape of the gap, and re-measuring is a `sqlite3` query
+//! against `~/.claudepot/sessions.db` — not a reason to rewrite this
+//! doc on every harvest.)
 //!
 //! # Proposals, not facts
 //!
@@ -56,6 +68,15 @@ pub const MAX_CLAIM_CHARS: usize = 600;
 pub struct DistilledClaims {
     #[serde(default)]
     pub claims: Vec<DistilledClaim>,
+    /// Elements of the `claims` array that could not be parsed into a
+    /// [`DistilledClaim`] and were dropped individually.
+    ///
+    /// A parse artifact, not part of the model's schema — hence
+    /// `#[serde(skip)]`. It exists so that "the model returned garbage"
+    /// and "the session taught us nothing" stop looking identical to the
+    /// caller. Both used to surface as an empty harvest.
+    #[serde(skip)]
+    pub malformed: u32,
 }
 
 /// One distilled lesson.
@@ -68,22 +89,102 @@ pub struct DistilledClaims {
 /// hard parse failure that took the other claims in the batch down with
 /// it. Being strict about a field we can default is choosing to lose
 /// data.
+///
+/// The optional fields additionally deserialize **leniently** — a model
+/// that returns `files` as a bare string, `confidence` as `"85"`, or
+/// `evidence` as an object gets coerced rather than rejected. `claim`
+/// and `directive` stay strict, because they are the two fields whose
+/// meaning cannot survive coercion: stringifying an object into a
+/// "lesson" manufactures a claim a human is then asked to approve.
+/// A claim that fails here is dropped alone and counted in
+/// [`DistilledClaims::malformed`]; its siblings still land.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DistilledClaim {
     pub claim: String,
     pub directive: String,
     /// `pattern` when absent — the least load-bearing kind.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub kind: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string_list")]
     pub files: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub evidence: String,
     /// Absent confidence is treated as "did not meet the bar" rather
     /// than "maximally sure". Fail closed: an unrated claim should not
     /// outrank one the model actually vouched for.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_i64")]
     pub confidence: i64,
+}
+
+/// Render a scalar as a string; anything structural becomes empty.
+///
+/// Deliberately narrower than goose's equivalent
+/// (`context_mgmt::structured::stringify_lenient`, which flattens
+/// objects into `"k: v; k: v"`). That is right for a compaction summary,
+/// where degraded prose still helps the model continue. It is wrong
+/// here: these values feed a durable row a human reviews, and a
+/// flattened object reads like a sentence the distiller never wrote.
+fn scalar_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn lenient_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(scalar_to_string(&value))
+}
+
+/// `files` as a bare string is the shape a model produces when it
+/// over-applies "one path per lesson". Treat it as a one-element list
+/// rather than losing the anchor — the anchor is what makes
+/// invalidation possible later.
+fn lenient_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(scalar_to_string)
+            .filter(|s| !s.trim().is_empty())
+            .collect(),
+        serde_json::Value::Null => Vec::new(),
+        other => {
+            let s = scalar_to_string(&other);
+            if s.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![s]
+            }
+        }
+    })
+}
+
+/// `confidence` as `"85"` or `85.0`. An unparseable value falls to 0,
+/// which fails closed against [`MIN_CONFIDENCE`].
+fn lenient_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        serde_json::Value::String(s) => s
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .or_else(|| s.trim().parse::<f64>().ok().map(|f| f as i64)),
+        _ => None,
+    }
+    .unwrap_or(0))
 }
 
 /// Where a batch of claims came from. Provenance is denormalized onto
@@ -112,6 +213,14 @@ pub struct IngestReport {
     /// counts *detections*, independent of whether the claim was also filed
     /// as a fresh proposal or skipped as a duplicate.
     pub recurrences_detected: u32,
+    /// Elements of the `claims` array the parser could not read.
+    ///
+    /// Deliberately NOT part of [`total_skipped`](Self::total_skipped):
+    /// the other counters are claims we understood and declined by
+    /// policy, which is the harvester working. This one is the model or
+    /// the schema misbehaving, and it should read as a defect signal,
+    /// not as routine filtering.
+    pub malformed_claims: u32,
 }
 
 impl IngestReport {
@@ -135,72 +244,142 @@ impl IngestReport {
 /// `--output-format json` + a `json_schema` it should not, but "should
 /// not" is not a guarantee, and the cost of being wrong is a feature
 /// that quietly does nothing.
+/// The `Result` is retained for source compatibility with callers that
+/// already `?` it. Nothing in this path errors any more: a body we
+/// cannot recognize is an empty harvest, and an individual claim we
+/// cannot parse is counted in [`DistilledClaims::malformed`] rather than
+/// taking its siblings down with it.
 pub fn parse_claims(raw: &str) -> Result<DistilledClaims, serde_json::Error> {
-    let cleaned = strip_markdown_fence(raw.trim());
+    Ok(best_payload(strip_markdown_fence(raw.trim()), 0).unwrap_or_default())
+}
 
-    // The strict path: the whole body is JSON.
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(cleaned) {
-        if let Some(found) = from_value_shapes(&v)? {
-            return Ok(found);
+/// How deep to follow `result`-in-`result` nesting before giving up.
+/// Real envelopes nest once; the bound only exists so a pathological
+/// self-similar body cannot recurse without end.
+const MAX_ENVELOPE_DEPTH: u8 = 4;
+
+/// The best claims payload reachable from `text`, or `None` if no
+/// candidate is a claims document at all.
+///
+/// Every balanced top-level `{…}` is a candidate, and we keep the one
+/// with the MOST claims, tie-broken by the LAST occurrence. Taking the
+/// *first* parseable object — the previous behavior — lets a schema
+/// example echoed in the model's preamble ("I'll return
+/// `{\"claims\": []}`…") shadow the real answer that follows it. Goose
+/// hits the same hazard in `context_mgmt::structured::json_candidates`
+/// and solves it by trying the last fence first; ranking by claim count
+/// additionally survives the reverse ordering, where the answer comes
+/// first and an illustration trails it.
+///
+/// Scanning for braces rather than parsing the whole body strictly also
+/// means a JSON *array* of CC events is handled for free: each element
+/// is its own candidate, so the `result` event is found among them.
+fn best_payload(text: &str, depth: u8) -> Option<DistilledClaims> {
+    let mut best: Option<DistilledClaims> = None;
+    for candidate in balanced_objects(text) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(candidate) else {
+            continue;
+        };
+        let Some(found) = payload_from_value(&v, depth) else {
+            continue;
+        };
+        if best
+            .as_ref()
+            .is_none_or(|b| found.claims.len() >= b.claims.len())
+        {
+            best = Some(found);
         }
     }
-
-    // The forgiving path: the model wrapped its JSON in prose ("Based on
-    // my examination of the transcript, here are the lessons: {…}").
-    // Observed on a real run. Refusing to parse that is choosing to
-    // throw away a correct answer because of its packaging.
-    if let Some(obj) = first_json_object(cleaned) {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(obj) {
-            if let Some(found) = from_value_shapes(&v)? {
-                return Ok(found);
-            }
-        }
-    }
-
-    // Nothing recognizable: an empty harvest, not an error. A distiller
-    // that found no lessons is doing its job, and most sessions teach
-    // nothing.
-    Ok(DistilledClaims::default())
+    best
 }
 
 /// Recognize the payload in any of the shapes the harness produces.
-/// `Ok(None)` = "this value isn't one of them", not "it's empty".
-fn from_value_shapes(v: &serde_json::Value) -> Result<Option<DistilledClaims>, serde_json::Error> {
+/// `None` = "this value isn't one of them", not "it's empty".
+fn payload_from_value(v: &serde_json::Value, depth: u8) -> Option<DistilledClaims> {
     // Shape 1: already the payload.
-    if v.get("claims").is_some() {
-        return serde_json::from_value(v.clone()).map(Some);
+    if let Some(arr) = v.get("claims") {
+        return Some(claims_from_array(arr));
+    }
+    if depth >= MAX_ENVELOPE_DEPTH {
+        return None;
+    }
+    // Shape 1b: CC's `result` event carries `structured_output` — the
+    // payload already parsed for us — whenever the run passed
+    // `--json-schema`, which `distill::distiller_flags` now does.
+    // Preferred over `result` below: same content, one less string
+    // re-parse, and it is the field CC validated against the schema.
+    // Verified against CC 2.1.220 output (see `real_run`).
+    if let Some(structured) = v.get("structured_output") {
+        if structured.get("claims").is_some() {
+            return payload_from_value(structured, depth + 1);
+        }
     }
     // Shape 2: an envelope with a `result` field.
     if let Some(inner) = v.get("result") {
         // 2a: result is the object itself.
         if inner.get("claims").is_some() {
-            return serde_json::from_value(inner.clone()).map(Some);
+            return payload_from_value(inner, depth + 1);
         }
         // 2b: result is a JSON *string* holding the object — possibly
         // fenced, possibly wrapped in prose of its own.
         if let Some(s) = inner.as_str() {
-            let s = strip_markdown_fence(s.trim());
-            if let Ok(inner_v) = serde_json::from_str::<serde_json::Value>(s) {
-                if inner_v.get("claims").is_some() {
-                    return serde_json::from_value(inner_v).map(Some);
-                }
-            }
-            if let Some(obj) = first_json_object(s) {
-                let inner_v: serde_json::Value = serde_json::from_str(obj)?;
-                if inner_v.get("claims").is_some() {
-                    return serde_json::from_value(inner_v).map(Some);
-                }
-            }
+            return best_payload(strip_markdown_fence(s.trim()), depth + 1);
         }
     }
-    Ok(None)
+    None
 }
 
-/// The first balanced `{…}` in `s`, brace-counting outside of string
+/// Parse the `claims` array one element at a time.
+///
+/// The whole point of this function: `serde_json::from_value` over the
+/// *array* rejects the entire batch when a single element is malformed.
+/// That is the failure class behind the defaults on [`DistilledClaim`] —
+/// a real Haiku run omitted `kind` and took every sibling claim with it.
+/// Defaulting one field fixed one symptom; parsing per element fixes the
+/// class.
+fn claims_from_array(arr: &serde_json::Value) -> DistilledClaims {
+    let mut out = DistilledClaims::default();
+    let Some(items) = arr.as_array() else {
+        // `claims` present but not an array. Still a claims document —
+        // just an unusable one, so the caller stops looking.
+        return out;
+    };
+    for item in items {
+        match serde_json::from_value::<DistilledClaim>(item.clone()) {
+            Ok(c) => out.claims.push(c),
+            Err(_) => out.malformed += 1,
+        }
+    }
+    out
+}
+
+/// Every balanced `{…}` in `s`, brace-counting outside of string
 /// literals (so a `}` inside a claim's text doesn't end the object).
-fn first_json_object(s: &str) -> Option<&str> {
+/// Nested objects are not returned separately — after a match, scanning
+/// resumes past its close.
+fn balanced_objects(s: &str) -> Vec<&str> {
     let bytes = s.as_bytes();
-    let start = s.find('{')?;
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'{' {
+            i += 1;
+            continue;
+        }
+        // Unterminated from here means nothing later can balance either.
+        let Some(end) = balanced_end(bytes, i) else {
+            break;
+        };
+        if let Some(slice) = s.get(i..=end) {
+            out.push(slice);
+        }
+        i = end + 1;
+    }
+    out
+}
+
+/// Index of the `}` closing the `{` at `start`, or `None` if unbalanced.
+fn balanced_end(bytes: &[u8], start: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut in_str = false;
     let mut escaped = false;
@@ -221,7 +400,7 @@ fn first_json_object(s: &str) -> Option<&str> {
             b'}' => {
                 depth -= 1;
                 if depth == 0 {
-                    return s.get(start..=i);
+                    return Some(i);
                 }
             }
             _ => {}
@@ -255,7 +434,10 @@ pub fn ingest_proposals(
     origin: &ProposalOrigin<'_>,
     now_ms: i64,
 ) -> Result<IngestReport, DurableError> {
-    let mut report = IngestReport::default();
+    let mut report = IngestReport {
+        malformed_claims: claims.malformed,
+        ..IngestReport::default()
+    };
     let policy = RedactionPolicy::default();
 
     // The lessons a new claim can recur against: this project's committed
@@ -457,6 +639,7 @@ mod tests {
         let (_t, idx) = idx();
         let claims = DistilledClaims {
             claims: vec![claim("preflight runs guards cargo test does not", 90)],
+            ..Default::default()
         };
         let r = ingest_proposals(&idx, &claims, &origin(), 1_000).unwrap();
         assert_eq!(r.proposed, 1);
@@ -482,6 +665,7 @@ mod tests {
         let (_t, idx) = idx();
         let claims = DistilledClaims {
             claims: vec![claim("some lesson", 90)],
+            ..Default::default()
         };
         ingest_proposals(&idx, &claims, &origin(), 1_000).unwrap();
         idx.db()
@@ -504,6 +688,7 @@ mod tests {
         let (_t, idx) = idx();
         let claims = DistilledClaims {
             claims: vec![claim("a lesson", 90)],
+            ..Default::default()
         };
         ingest_proposals(&idx, &claims, &origin(), 1_000).unwrap();
         let r = ingest_proposals(&idx, &claims, &origin(), 1_001).unwrap();
@@ -516,6 +701,7 @@ mod tests {
         let (_t, idx) = idx();
         let claims = DistilledClaims {
             claims: vec![claim("shaky", MIN_CONFIDENCE - 1)],
+            ..Default::default()
         };
         let r = ingest_proposals(&idx, &claims, &origin(), 1).unwrap();
         assert_eq!(r.proposed, 0);
@@ -529,6 +715,7 @@ mod tests {
         let (_t, idx) = idx();
         let claims = DistilledClaims {
             claims: vec![claim(&"x".repeat(MAX_CLAIM_CHARS + 1), 95)],
+            ..Default::default()
         };
         let r = ingest_proposals(&idx, &claims, &origin(), 1).unwrap();
         assert_eq!(r.proposed, 0);
@@ -543,7 +730,10 @@ mod tests {
         let (_t, idx) = idx();
         let mut c = claim("the key sk-ant-oat01-AAAABBBBCCCCDDDD unblocked it", 95);
         c.directive = "export TOKEN=sk-ant-oat01-AAAABBBBCCCCDDDD".to_string();
-        let claims = DistilledClaims { claims: vec![c] };
+        let claims = DistilledClaims {
+            claims: vec![c],
+            ..Default::default()
+        };
 
         ingest_proposals(&idx, &claims, &origin(), 1).unwrap();
         let (content, directive): (String, String) = idx
@@ -624,6 +814,146 @@ mod tests {
     fn an_unfenced_payload_is_untouched() {
         assert_eq!(strip_markdown_fence(r#"{"claims":[]}"#), r#"{"claims":[]}"#);
     }
+
+    // ─── one bad claim must not sink the batch ──────────────────
+
+    /// The regression this whole change exists for. Previously
+    /// `serde_json::from_value` ran over the *array*, so a single
+    /// unreadable element discarded every good claim beside it — and
+    /// the caller could not tell that from "this session taught us
+    /// nothing".
+    #[test]
+    fn a_malformed_claim_is_dropped_alone_not_with_its_siblings() {
+        let raw = r#"{"claims":[
+            {"claim":"a","directive":"d","kind":"fact","evidence":"e","confidence":90},
+            {"claim":{"nested":"object"},"directive":"d","confidence":90},
+            {"claim":"b","directive":"d","kind":"fact","evidence":"e","confidence":90}
+        ]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 2, "both good claims survive");
+        assert_eq!(p.claims[0].claim, "a");
+        assert_eq!(p.claims[1].claim, "b");
+        assert_eq!(p.malformed, 1);
+    }
+
+    #[test]
+    fn a_claim_missing_a_required_field_is_counted_not_fatal() {
+        // `directive` absent: not a lesson, but its siblings are.
+        let raw = r#"{"claims":[
+            {"claim":"only a statement","kind":"fact","confidence":90},
+            {"claim":"a","directive":"d","kind":"fact","evidence":"e","confidence":90}
+        ]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 1);
+        assert_eq!(p.malformed, 1);
+    }
+
+    #[test]
+    fn the_malformed_count_reaches_the_ingest_report() {
+        // The counter is worthless if it dies at the parse boundary.
+        let (_t, idx) = idx();
+        let claims = DistilledClaims {
+            claims: vec![claim("a real lesson worth filing", 90)],
+            malformed: 3,
+        };
+        let r = ingest_proposals(&idx, &claims, &origin(), 1).unwrap();
+        assert_eq!(r.proposed, 1);
+        assert_eq!(r.malformed_claims, 3);
+        // A parse defect is not a policy skip — keep them distinct.
+        assert_eq!(r.total_skipped(), 0);
+    }
+
+    // ─── lenient optional fields ────────────────────────────────
+
+    #[test]
+    fn files_given_as_a_bare_string_becomes_a_one_element_anchor() {
+        // Losing this silently would cost the lesson its invalidation
+        // anchor, which is the thing that makes it expire correctly.
+        let raw = r#"{"claims":[{"claim":"a","directive":"d","kind":"fact",
+                     "evidence":"e","confidence":90,"files":"src/parser.rs"}]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims[0].files, vec!["src/parser.rs"]);
+        assert_eq!(p.malformed, 0);
+    }
+
+    #[test]
+    fn confidence_given_as_a_string_is_coerced() {
+        let raw = r#"{"claims":[{"claim":"a","directive":"d","kind":"fact",
+                     "evidence":"e","confidence":"85"}]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims[0].confidence, 85);
+    }
+
+    #[test]
+    fn an_unreadable_confidence_fails_closed_below_the_bar() {
+        let raw = r#"{"claims":[{"claim":"a","directive":"d","kind":"fact",
+                     "evidence":"e","confidence":"very sure"}]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims[0].confidence, 0);
+        assert!(p.claims[0].confidence < MIN_CONFIDENCE);
+    }
+
+    #[test]
+    fn a_structural_evidence_value_does_not_sink_the_claim() {
+        // Coerced to empty rather than flattened into a fake sentence —
+        // `evidence` is shown to a human deciding whether to accept.
+        let raw = r#"{"claims":[{"claim":"a","directive":"d","kind":"fact",
+                     "evidence":{"was":"a nested object"},"confidence":90}]}"#;
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 1);
+        assert_eq!(p.claims[0].evidence, "");
+        assert_eq!(p.malformed, 0);
+    }
+
+    // ─── candidate selection ────────────────────────────────────
+
+    #[test]
+    fn an_echoed_schema_example_does_not_shadow_the_real_answer() {
+        // Taking the FIRST balanced object — the old behavior — returned
+        // the empty example and reported a silent empty harvest.
+        let raw = "I'll return {\"claims\": []} if nothing is found. Here is the result:\n\
+                   {\"claims\":[{\"claim\":\"a\",\"directive\":\"d\",\"kind\":\"fact\",\
+                   \"evidence\":\"e\",\"confidence\":90}]}";
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 1);
+        assert_eq!(p.claims[0].claim, "a");
+    }
+
+    #[test]
+    fn a_trailing_illustration_does_not_beat_the_real_answer() {
+        // The reverse ordering: ranking by claim count (not just "last")
+        // is what survives this one.
+        let raw = "{\"claims\":[{\"claim\":\"a\",\"directive\":\"d\",\"kind\":\"fact\",\
+                   \"evidence\":\"e\",\"confidence\":90}]}\n\
+                   For reference the empty shape is {\"claims\": []}.";
+        let p = parse_claims(raw).unwrap();
+        assert_eq!(p.claims.len(), 1);
+        assert_eq!(p.claims[0].claim, "a");
+    }
+
+    #[test]
+    fn a_result_event_inside_a_json_array_of_events_is_found() {
+        // `claude -p --output-format json` is now used by the manual
+        // distill path too; an array-of-events envelope must not read as
+        // an empty harvest.
+        let inner = r#"{"claims":[{"claim":"a","directive":"d","kind":"fact","evidence":"e","confidence":90}]}"#;
+        let raw = serde_json::json!([
+            {"type": "system", "subtype": "init"},
+            {"type": "result", "result": inner},
+        ])
+        .to_string();
+        let p = parse_claims(&raw).unwrap();
+        assert_eq!(p.claims.len(), 1);
+    }
+
+    #[test]
+    fn an_unterminated_object_is_not_repaired() {
+        // Output cut off mid-JSON. Guessing at the missing tail would
+        // file half a lesson as if it were whole.
+        let p = parse_claims(r#"{"claims":[{"claim":"a","directive":"d"#).unwrap();
+        assert!(p.claims.is_empty());
+        assert_eq!(p.malformed, 0);
+    }
 }
 
 /// End-to-end against the **actual output of a real Haiku run**.
@@ -690,6 +1020,48 @@ mod real_run {
         // Anchored to a file, so Phase 3 can invalidate it when that
         // file changes.
         assert!(anchor.contains("crypto.rs"));
+    }
+
+    /// The envelope `claude -p --output-format json --json-schema …`
+    /// really produces, captured verbatim from CC **2.1.220** on
+    /// 2026-07-25 — the flags `distill::distiller_flags` now sends.
+    ///
+    /// Trimmed to two of the fifteen events (a `system`/`status` and the
+    /// terminal `result`); both are byte-for-byte as CC emitted them.
+    /// The dropped events are `system`/`init`, the assistant turns, and
+    /// a `rate_limit_event` — none of which the parser looks at, and one
+    /// of which carries a multi-kilobyte thinking signature.
+    ///
+    /// Three properties of the real shape this locks down, none of which
+    /// the pre-existing fixtures covered:
+    ///   1. stdout is a JSON **array** of events, not one object;
+    ///   2. the payload arrives as a *string* in `result`;
+    ///   3. it also arrives pre-parsed in `structured_output`.
+    const REAL_SCHEMA_ENVELOPE: &str = r#"[{"type":"system","subtype":"status","status":null,"permissionMode":"default","uuid":"71e0813a-792f-4432-abd2-c8c99aa0e348","session_id":"b5121469-85f5-4eae-8342-675212ad0f3f"},{"is_error":false,"duration_api_ms":6242,"num_turns":2,"stop_reason":"tool_use","session_id":"b5121469-85f5-4eae-8342-675212ad0f3f","total_cost_usd":0.064632,"subtype":"success","api_error_status":null,"result":"{\"claims\":[{\"claim\":\"the sky is blue\",\"directive\":\"Assume daylight.\",\"kind\":\"fact\",\"evidence\":\"observed\",\"confidence\":90}]}","structured_output":{"claims":[{"claim":"the sky is blue","directive":"Assume daylight.","kind":"fact","evidence":"observed","confidence":90}]},"type":"result","duration_ms":8320,"uuid":"4d50fd08-60f0-4d66-928f-717a101dd9e5"}]"#;
+
+    #[test]
+    fn the_real_schema_envelope_parses() {
+        let p = parse_claims(REAL_SCHEMA_ENVELOPE).expect("real CC output must parse");
+        assert_eq!(p.claims.len(), 1);
+        assert_eq!(p.claims[0].claim, "the sky is blue");
+        assert_eq!(p.claims[0].kind, "fact");
+        assert_eq!(p.claims[0].confidence, 90);
+        assert_eq!(p.malformed, 0);
+    }
+
+    /// `structured_output` must be what we read — not the `result`
+    /// string that sits beside it. Poison the string: if the assertion
+    /// still sees the good claim, the preferred field won.
+    #[test]
+    fn structured_output_is_preferred_over_the_result_string() {
+        let poisoned = REAL_SCHEMA_ENVELOPE.replace(
+            r#"\"claim\":\"the sky is blue\""#,
+            r#"\"claim\":\"STALE STRING COPY\""#,
+        );
+        assert!(poisoned.contains("STALE STRING COPY"), "fixture edited");
+        let p = parse_claims(&poisoned).expect("must parse");
+        assert_eq!(p.claims.len(), 1);
+        assert_eq!(p.claims[0].claim, "the sky is blue");
     }
 }
 

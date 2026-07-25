@@ -9,7 +9,9 @@
 //! CLI handlers), so this is a synchronous subprocess on purpose —
 //! same rationale as [`super::git`].
 
-use crate::agent::templates::{KNOWLEDGE_DISTILLER_MODEL, KNOWLEDGE_DISTILLER_PROMPT};
+use crate::agent::templates::{
+    KNOWLEDGE_DISTILLER_JSON_SCHEMA, KNOWLEDGE_DISTILLER_MODEL, KNOWLEDGE_DISTILLER_PROMPT,
+};
 use crate::session_index::SessionIndex;
 use crate::shared_memory::durable::DurableError;
 use crate::shared_memory::proposal::{self, IngestReport, ProposalOrigin};
@@ -30,6 +32,30 @@ pub enum DistillError {
 
     #[error(transparent)]
     Ingest(#[from] DurableError),
+}
+
+/// Flags shared with the scheduled Distiller agent.
+///
+/// `agent::templates::knowledge_distiller` sets `output_format: Json`
+/// plus `json_schema`, which `agent::shim::build_cli_flags` renders into
+/// `--output-format json --json-schema <schema>`. This path shipped
+/// without either: it asked for JSON in prose and hoped. That made it
+/// the one caller where `proposal::parse_claims`'s tolerance was
+/// load-bearing rather than defense in depth.
+///
+/// Extracted so the two paths can be asserted equal — see
+/// `tests::the_manual_path_uses_the_same_contract_as_the_agent`.
+fn distiller_flags() -> Vec<String> {
+    vec![
+        "--model".into(),
+        KNOWLEDGE_DISTILLER_MODEL.into(),
+        "--output-format".into(),
+        "json".into(),
+        "--json-schema".into(),
+        KNOWLEDGE_DISTILLER_JSON_SCHEMA.into(),
+        "--allowedTools".into(),
+        "Read,Grep".into(),
+    ]
 }
 
 /// Run the distiller over one transcript and file whatever it finds.
@@ -53,8 +79,7 @@ pub fn distill_transcript(
             "{KNOWLEDGE_DISTILLER_PROMPT}\n\nThe transcript is at: {transcript}\n\n\
              Output ONLY a JSON object of the form {{\"claims\":[...]}}. No prose."
         ))
-        .args(["--model", KNOWLEDGE_DISTILLER_MODEL])
-        .args(["--allowedTools", "Read,Grep"])
+        .args(distiller_flags())
         .env("CLAUDEPOT_EVENT_SESSION_PATH", transcript)
         .stdin(std::process::Stdio::null())
         .output()
@@ -76,4 +101,50 @@ pub fn distill_transcript(
     };
     let now_ms = chrono::Utc::now().timestamp_millis();
     Ok(proposal::ingest_proposals(idx, &claims, &origin, now_ms)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::templates::knowledge_distiller;
+
+    fn flag_value<'a>(flags: &'a [String], name: &str) -> Option<&'a str> {
+        let i = flags.iter().position(|f| f == name)?;
+        flags.get(i + 1).map(String::as_str)
+    }
+
+    /// The two ways a distiller run can happen — the scheduled agent and
+    /// this manual path — must ask the model for the same thing. They
+    /// had drifted: the agent template set `output_format: Json` and a
+    /// `json_schema`, and this path set neither, so the harvest most
+    /// likely to be run by hand was the one with no schema enforcing its
+    /// shape.
+    #[test]
+    fn the_manual_path_uses_the_same_contract_as_the_agent() {
+        let flags = distiller_flags();
+        let agent = knowledge_distiller("/tmp", chrono::Utc::now());
+
+        assert_eq!(
+            flag_value(&flags, "--output-format"),
+            Some(agent.output_format.as_cli_flag()),
+        );
+        assert_eq!(
+            flag_value(&flags, "--json-schema"),
+            agent.json_schema.as_deref(),
+        );
+        assert_eq!(flag_value(&flags, "--model"), agent.model.as_deref());
+        assert_eq!(
+            flag_value(&flags, "--allowedTools"),
+            Some(agent.allowed_tools.join(",").as_str()),
+        );
+    }
+
+    /// The schema is sent to CC verbatim; a typo in it would be rejected
+    /// at run time, far from here.
+    #[test]
+    fn the_shipped_schema_is_valid_json() {
+        let schema: serde_json::Value =
+            serde_json::from_str(KNOWLEDGE_DISTILLER_JSON_SCHEMA).expect("schema parses");
+        assert!(schema.pointer("/properties/claims").is_some());
+    }
 }

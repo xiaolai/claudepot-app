@@ -494,6 +494,7 @@ mod tests {
                 evidence: "it burned us".into(),
                 confidence: 90,
             }],
+            ..Default::default()
         };
         ingest_proposals(
             idx,
@@ -538,6 +539,7 @@ mod tests {
                 evidence: "same wall again".into(),
                 confidence: 88,
             }],
+            ..Default::default()
         };
         let report = ingest_proposals(
             &idx,
@@ -575,6 +577,7 @@ mod tests {
                 evidence: "e".into(),
                 confidence: 88,
             }],
+            ..Default::default()
         };
         let report = ingest_proposals(
             &idx,
@@ -608,6 +611,7 @@ mod tests {
                 evidence: "e".into(),
                 confidence: 88,
             }],
+            ..Default::default()
         };
         let report = ingest_proposals(
             &idx,
