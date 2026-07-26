@@ -83,8 +83,12 @@ export function redact(input: string): string {
 const SELF_TEST_CASES: Array<[string, string]> = [
   // [input, must-not-contain]
   [
-    'NEON_DATABASE_URL="postgresql://neondb_owner:npg_3FGAx8zbSMsr@ep-foo.aws.neon.tech/neondb?sslmode=require"',
-    "npg_3FGAx8zbSMsr",
+    // Synthetic. Never paste a real credential into a fixture — the
+    // value that used to sit here was the live `neondb_owner`
+    // password, and it stayed readable on the public default branch
+    // for ~83 days before anyone noticed.
+    'NEON_DATABASE_URL="postgresql://neondb_owner:npg_EXAMPLEonly01@ep-foo.aws.neon.tech/neondb?sslmode=require"',
+    "npg_EXAMPLEonly01",
   ],
   [
     "Connection string: postgresql://admin:hunter2@db.example.com:5432/app",
