@@ -265,8 +265,8 @@ mod tests {
     #[test]
     fn normalize_gateway_strips_trailing_v1() {
         assert_eq!(
-            normalize_gateway_base_url("http://100.100.1.6:11434/v1").unwrap(),
-            "http://100.100.1.6:11434",
+            normalize_gateway_base_url("http://192.0.2.6:11434/v1").unwrap(),
+            "http://192.0.2.6:11434",
         );
         // Trailing slash variant.
         assert_eq!(
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn normalize_gateway_leaves_other_urls_untouched() {
         for unchanged in [
-            "http://100.100.1.6:11434",
+            "http://192.0.2.6:11434",
             "https://api.example.com",
             // Only the *bare* `/v1` segment is stripped.
             "http://host:11434/v1/messages",
