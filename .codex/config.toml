@@ -9,7 +9,7 @@
 # >>> cc-suite-mcp >>>
 [mcp_servers.tauri]
 command = "npx"
-args = ["@hypothesi/tauri-mcp-server"]
+args = ["-y", "@hypothesi/tauri-mcp-server"]
 # <<< cc-suite-mcp <<<
 
 # >>> cc-suite-claude-mcp >>>
