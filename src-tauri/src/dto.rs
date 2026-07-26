@@ -40,7 +40,7 @@ pub(crate) fn system_time_to_ms(t: Option<SystemTime>) -> Option<i64> {
 pub use crate::{
     dto_account::{
         summary_for_account, AccountSummary, AccountSummaryBasic, AppStatus, CcIdentity,
-        ReconcileReportDto, RegisterOutcome, RemoveOutcome,
+        ReconcileReportDto, RegisterOutcome, RemoveOutcome, WakeReceiptDto,
     },
     dto_activity::{ActivityTrendsDto, LiveDeltaDto, LiveDeltaKindDto, LiveSessionSummaryDto},
     dto_activity_cards::{

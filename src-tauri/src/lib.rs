@@ -1050,6 +1050,7 @@ pub fn run() {
             commands::account::account_login_status,
             commands::account::account_login_cancel,
             commands::account::account_remove,
+            commands::account::account_wake,
             commands::account::fetch_all_usage,
             commands::account::refresh_usage_for,
             commands::account::verify_all_accounts,

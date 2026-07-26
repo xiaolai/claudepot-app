@@ -6,7 +6,7 @@
 //! mutating / async-heavy verbs live here.
 
 use super::open_store;
-use crate::dto::{AccountSummary, RegisterOutcome, RemoveOutcome, UsageEntryDto};
+use crate::dto::{AccountSummary, RegisterOutcome, RemoveOutcome, UsageEntryDto, WakeReceiptDto};
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOpInfo, RunningOps,
     TauriLoginProgressSink, TauriVerifyProgressSink, VerifyResultSummary,
@@ -571,6 +571,39 @@ pub async fn verify_all_accounts_status(
     ops: State<'_, RunningOps>,
 ) -> Result<Option<RunningOpInfo>, String> {
     Ok(ops.get(&op_id))
+}
+
+/// Start an account's rate-limit windows by sending the smallest
+/// billable request that exists (~9 tokens on Haiku).
+///
+/// This is the one command in this file that deliberately **spends the
+/// user's quota**, so it is only ever reached from an explicit menu
+/// click — never from a poller. See `claudepot_core::oauth::wake` for
+/// why automatic waking was rejected.
+///
+/// Thin by construction: the eligibility rule (notably the identity
+/// gate that keeps a drifted slot from being billed) and the
+/// orchestration live in `services::wake_service`, shared with the CLI
+/// verb. This function parses a uuid and maps a DTO.
+///
+/// Returns the measured token cost so the toast can state what was
+/// spent rather than asserting "negligible".
+#[tauri::command]
+pub async fn account_wake(uuid: String) -> Result<WakeReceiptDto, String> {
+    use claudepot_core::services::wake_service;
+
+    let store = open_store()?;
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let receipt = wake_service::wake_account(&store, id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(WakeReceiptDto {
+        email: receipt.email,
+        input_tokens: receipt.cost.input_tokens,
+        output_tokens: receipt.cost.output_tokens,
+        model: receipt.model.to_string(),
+    })
 }
 
 // Suppress `unused`: the `*_start` paths build a default summary at

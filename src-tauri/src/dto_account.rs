@@ -292,6 +292,21 @@ pub struct RemoveOutcome {
     pub had_desktop_profile: bool,
     pub warnings: Vec<String>,
 }
+
+/// What a "Wake windows" action actually spent.
+///
+/// The token counts come back from the API, not from our estimate, so
+/// the toast can state the real cost. That matters here more than
+/// elsewhere: this is the one user-facing action in Claudepot that
+/// deliberately consumes plan quota, and "negligible" is a claim the
+/// user is entitled to see evidence for.
+#[derive(Serialize)]
+pub struct WakeReceiptDto {
+    pub email: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub model: String,
+}
 /// Ground-truth "what is CC actually authenticated as right now".
 ///
 /// Produced by the `current_cc_identity` Tauri command: reads CC's

@@ -141,6 +141,29 @@ export interface RemoveOutcome {
   warnings: string[];
 }
 
+/**
+ * Tokens a wake is disclosed as costing, quoted in the menu label
+ * before the user commits.
+ *
+ * Mirrors `claudepot_core::oauth::wake::ESTIMATED_TOKENS`. The Rust
+ * side is authoritative and has a test asserting the measured cost
+ * never exceeds it; this copy exists because the label is rendered
+ * before any IPC call, so there is nothing to read the real number
+ * from yet. Change one, change the other.
+ */
+export const WAKE_ESTIMATED_TOKENS = 9;
+
+/**
+ * Receipt from "Wake windows" — the measured cost of the minimal
+ * billable request that starts an account's rate-limit windows.
+ */
+export interface WakeReceipt {
+  email: string;
+  input_tokens: number;
+  output_tokens: number;
+  model: string;
+}
+
 export interface UsageWindow {
   utilization: number; // 0–100
   /** RFC3339, or null when the window has no reset timestamp yet. */

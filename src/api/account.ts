@@ -15,6 +15,7 @@ import type {
   DesktopSyncOutcome,
   RegisterOutcome,
   RemoveOutcome,
+  WakeReceipt,
   RunningOpInfo,
   UsageEntry,
   UsageMap,
@@ -178,6 +179,12 @@ export const accountApi = {
   /// delete) plus a DB write.
   accountRemove: (uuid: string) =>
     invokeWithTimeout<RemoveOutcome>("account_remove", { uuid }, 15_000),
+  /// Start this account's rate-limit windows so their resets report.
+  /// Spends ~9 tokens of plan quota — only ever called from an explicit
+  /// menu click, never a poller. Bounded at 20s: one keychain read plus
+  /// one small `/v1/messages` call.
+  accountWake: (uuid: string) =>
+    invokeWithTimeout<WakeReceipt>("account_wake", { uuid }, 20_000),
   /// Bounded at 60s: N × `load_access_token` (each a keychain read,
   /// 5s ceiling) plus N × usage HTTP calls (each ~5-10s). For up to
   /// ~6 accounts the worst case lands well under 60s.

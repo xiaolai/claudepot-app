@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import type { AccountSummary, AppStatus } from "../../types";
+import { WAKE_ESTIMATED_TOKENS } from "../../types";
 
 interface Args {
   account: AccountSummary;
@@ -16,6 +17,19 @@ interface Args {
   onRemove: (a: AccountSummary) => void;
   /** "Bind current Desktop session to this account" — Phase 3+. */
   onAdoptDesktop?: (a: AccountSummary) => void;
+  /**
+   * Spend ~9 tokens to start this account's rate-limit windows so their
+   * resets become reportable. Omit to hide the item entirely.
+   */
+  onWake?: (a: AccountSummary) => void;
+  /**
+   * True when at least one window has no reset to report. Computed by
+   * the caller, which holds the `UsageMap`; passing the boolean rather
+   * than the map keeps this hook free of usage-shape knowledge.
+   */
+  needsWake?: boolean;
+  /** A wake is already in flight for this account. */
+  wakeBusy?: boolean;
 }
 
 /**
@@ -37,6 +51,9 @@ export function useAccountContextMenu({
   onLogin,
   onRemove,
   onAdoptDesktop,
+  onWake,
+  needsWake = false,
+  wakeBusy = false,
 }: Args): ContextMenuItem[] {
   return useMemo(() => {
     // `desktop_profile_on_disk` is the disk truth; we prefer it over
@@ -115,6 +132,25 @@ export function useAccountContextMenu({
         onClick: () =>
           a.credentials_healthy ? onRefreshUsageFor(a) : onRefreshUsageAll(),
       },
+      // Only offered when a window actually has no reset to report.
+      // On an account already in use this is a no-op that costs quota,
+      // so it stays hidden rather than sitting there enabled-but-useless.
+      ...(onWake && needsWake
+        ? [
+            {
+              // The cost is in the label because the GUI has no confirm
+              // step — this label IS the pre-spend disclosure.
+              label: `Wake windows (~${WAKE_ESTIMATED_TOKENS} tokens)`,
+              disabled: !a.credentials_healthy || wakeBusy,
+              disabledReason: !a.credentials_healthy
+                ? "no credentials"
+                : wakeBusy
+                  ? "wake in progress"
+                  : undefined,
+              onClick: () => onWake(a),
+            } satisfies ContextMenuItem,
+          ]
+        : []),
       { label: "", separator: true, onClick: () => {} },
       // Launch-CC-as needs a new-terminal spawn that varies per OS.
       // Stub behind dev-mode until that Tauri surface lands; devs can
@@ -153,6 +189,9 @@ export function useAccountContextMenu({
     onLogin,
     onRemove,
     onAdoptDesktop,
+    onWake,
+    needsWake,
+    wakeBusy,
   ]);
 }
 
@@ -175,6 +214,9 @@ export function CtxMenuForAccount({
   onLogin,
   onRemove,
   onAdoptDesktop,
+  onWake,
+  needsWake,
+  wakeBusy,
   onClose,
 }: {
   menu: { x: number; y: number; account: AccountSummary };
@@ -189,6 +231,9 @@ export function CtxMenuForAccount({
   onLogin: (a: AccountSummary) => void;
   onRemove: (a: AccountSummary) => void;
   onAdoptDesktop?: (a: AccountSummary) => void;
+  onWake?: (a: AccountSummary) => void;
+  needsWake?: boolean;
+  wakeBusy?: boolean;
   onClose: () => void;
 }) {
   const items = useAccountContextMenu({
@@ -204,6 +249,9 @@ export function CtxMenuForAccount({
     onLogin,
     onRemove,
     onAdoptDesktop,
+    onWake,
+    needsWake,
+    wakeBusy,
   });
   return (
     <ContextMenu x={menu.x} y={menu.y} items={items} onClose={onClose} />

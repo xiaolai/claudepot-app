@@ -878,6 +878,15 @@ enum AccountAction {
         /// Account email (prefix match). Omit to verify every account.
         email: Option<String>,
     },
+    /// Start an account's rate-limit windows so `/usage` reports their
+    /// reset times. A window with no activity has no reset to report,
+    /// which the UI shows as "—"; only a billable request starts one.
+    /// Sends the smallest request that exists (~9 tokens on Haiku).
+    /// Deliberately one account at a time — this spends real quota.
+    Wake {
+        /// Account email (prefix match)
+        email: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1118,6 +1127,7 @@ async fn main() -> Result<()> {
             AccountAction::Verify { email } => {
                 commands::account::verify(&ctx, email.as_deref()).await?
             }
+            AccountAction::Wake { email } => commands::account::wake(&ctx, &email).await?,
         },
         Commands::Cli { action } => match action {
             CliAction::Status => commands::cli_ops::status(&ctx).await?,

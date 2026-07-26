@@ -1,3 +1,5 @@
+import type { UsageWindow } from "../../types";
+
 /**
  * "just now" / "3m ago" / "in 2h" / "5d ago"-style relative time.
  * Accepts an ISO 8601 timestamp; returns an em-dash for null/empty.
@@ -13,6 +15,51 @@ export function relTime(iso: string | null | undefined): string {
   if (hrs < 24) return future ? `in ${hrs}h` : `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return future ? `in ${days}d` : `${days}d ago`;
+}
+
+/**
+ * The windows `UsageBlock` renders, in display order.
+ *
+ * Exported so the "Wake windows" eligibility check scans exactly the
+ * rows the user can see. Keeping a second hand-written list next to
+ * the renderer is how the gate silently drifted from the UI once
+ * already — it checked two windows while six were rendered, hiding the
+ * action on an account that visibly showed a "—".
+ */
+export const RENDERED_USAGE_WINDOWS = [
+  "five_hour",
+  "seven_day",
+  "seven_day_sonnet",
+  "seven_day_opus",
+  "seven_day_oauth_apps",
+  "seven_day_cowork",
+] as const;
+
+type RenderedWindows = Partial<
+  Record<(typeof RENDERED_USAGE_WINDOWS)[number], UsageWindow | null>
+>;
+
+/**
+ * Does this account have a visible window whose reset the server won't
+ * report?
+ *
+ * A rate-limit window only exists once something has been billed inside
+ * it, so an idle account returns `resets_at: null` and the card shows
+ * "—". That is honest, not broken — but it's the precondition for the
+ * "Wake windows" action, which spends real quota to start the window.
+ *
+ * A window that is absent entirely (the plan doesn't have it) is not
+ * unreported — `UsageBlock` filters those rows out, so there is no "—"
+ * on screen and nothing a wake could change.
+ */
+export function hasUnreportedWindow(
+  usage: RenderedWindows | null | undefined,
+): boolean {
+  if (!usage) return false;
+  return RENDERED_USAGE_WINDOWS.some((k) => {
+    const w = usage[k];
+    return !!w && !w.resets_at;
+  });
 }
 
 /**

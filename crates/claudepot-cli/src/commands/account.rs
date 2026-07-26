@@ -6,6 +6,7 @@
 //! - **remove** — delete a registered account (with confirmation)
 //! - **inspect** — detailed account view incl. token health + usage
 //! - **verify** — per-account blob identity check against /profile
+//! - **wake** — start the rate-limit windows so their resets report
 //!
 //! Per the commands.md rule for nouns with ≥3 verbs, each verb lives
 //! one-per-file under `commands/account/<verb>.rs`. This entry point
@@ -37,6 +38,7 @@ mod inspect;
 mod list;
 mod remove;
 mod verify;
+mod wake;
 
 // Re-exports — main.rs's match block dispatches on these names.
 pub use add::add;
@@ -44,3 +46,4 @@ pub use inspect::inspect;
 pub use list::list;
 pub use remove::remove;
 pub use verify::verify;
+pub use wake::wake;

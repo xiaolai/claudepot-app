@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AccountSummary } from "../types";
 import { api } from "../api";
 import { useUsage } from "../hooks/useUsage";
@@ -19,6 +19,41 @@ import { AccountsGrid } from "./accounts/AccountsGrid";
 import { AddAccountModal } from "./accounts/AddAccountModal";
 import { HealthChips } from "./accounts/HealthChips";
 import { CtxMenuForAccount } from "./accounts/useAccountContextMenu";
+import { hasUnreportedWindow } from "./accounts/format";
+
+/**
+ * How long to wait after a wake before refetching usage.
+ *
+ * Measured against the live API on 2026-07-25: `resets_at` was still
+ * null immediately after the wake call and populated by t+20s. Refetch
+ * any sooner and the card repaints the same "—", which reads as the
+ * action having failed. 25s buys margin over the observed lag.
+ */
+const WAKE_REFRESH_DELAY_MS = 25_000;
+
+/**
+ * Readable text for an unknown thrown value.
+ *
+ * `${err}` yields "[object Object]" for a plain object, and so does a
+ * bare `String(err)` — which is why the first attempt at this helper
+ * did not actually fix anything. Tauri rejects with a string for our
+ * `Result<_, String>` commands, but a thrown object can still reach
+ * here from the JS side, so the object case is handled explicitly.
+ */
+function errorText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === "string" && msg) return msg;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return "unknown error"; // circular / non-serializable
+    }
+  }
+  return String(err);
+}
 import {
   useAccountHandlers,
   verifyLiveFor,
@@ -66,6 +101,75 @@ export function AccountsSection({
   const usageAgeLabel = useMemo(
     () => formatUsageAge(lastFetchedAt),
     [lastFetchedAt],
+  );
+
+  // "Wake windows" — the one action here that spends plan quota, so it
+  // is click-only and never batched.
+  //
+  // `waking` is a Set, not a single uuid: with one slot, two wakes in
+  // flight would let the first one's completion clear the busy flag for
+  // the second, re-enabling the menu item and inviting another spend.
+  // The uuid stays in the Set through the delayed refresh, not just the
+  // request, because `needsWake` keeps returning true until usage
+  // repaints — so a single-uuid guard released at request-end would
+  // still allow repeat clicks for the next ~25 seconds.
+  const [waking, setWaking] = useState<ReadonlySet<string>>(new Set());
+  const wakeTimers = useRef<number[]>([]);
+  // `api.accountWake` can still be in flight when the section unmounts,
+  // and its continuation would otherwise schedule a timer *after*
+  // cleanup already ran — leaking exactly the timer cleanup exists to
+  // prevent. The ref lets the continuation notice it is orphaned.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // `useUsage` is owned by this section, so a timer that outlives it
+      // would call into a dead hook — a wasted IPC round-trip whose
+      // result nothing can render.
+      wakeTimers.current.forEach(window.clearTimeout);
+      wakeTimers.current = [];
+    };
+  }, []);
+
+  const handleWake = useCallback(
+    async (a: AccountSummary) => {
+      let started = false;
+      setWaking((prev) => {
+        if (prev.has(a.uuid)) return prev; // already in flight — no double spend
+        started = true;
+        return new Set(prev).add(a.uuid);
+      });
+      if (!started) return;
+
+      const release = () =>
+        setWaking((prev) => {
+          const next = new Set(prev);
+          next.delete(a.uuid);
+          return next;
+        });
+
+      try {
+        const receipt = await api.accountWake(a.uuid);
+        pushToast(
+          "info",
+          `Woke ${receipt.email} — spent ${receipt.input_tokens}+${receipt.output_tokens} tokens. Reset times appear shortly.`,
+        );
+        if (!mounted.current) return; // orphaned — nothing to refresh into
+        const timer = window.setTimeout(() => {
+          // Release only once usage has actually repainted. Releasing
+          // when the refresh *starts* leaves a gap where `needsWake` is
+          // still true and the menu item is live again — another click,
+          // another spend.
+          void refreshUsageFor(a.uuid).finally(release);
+        }, WAKE_REFRESH_DELAY_MS);
+        wakeTimers.current.push(timer);
+      } catch (err) {
+        pushToast("error", `Wake failed: ${errorText(err)}`);
+        release();
+      }
+    },
+    [pushToast, refreshUsageFor],
   );
 
   // Token counts per account — one fetch on mount. Keys section owns
@@ -501,6 +605,11 @@ export function AccountsSection({
             if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
             else void actions.adoptDesktop(a);
           }}
+          onWake={(a) => void handleWake(a)}
+          needsWake={hasUnreportedWindow(
+            usage[ctxMenu.account.uuid]?.usage ?? null,
+          )}
+          wakeBusy={waking.has(ctxMenu.account.uuid)}
           onClose={closeCtxMenu}
         />
       )}

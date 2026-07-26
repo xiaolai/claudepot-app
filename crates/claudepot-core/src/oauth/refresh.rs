@@ -59,14 +59,12 @@ pub async fn refresh(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
 
     let status = resp.status();
     if status == 429 {
-        let retry_after = resp
-            .headers()
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(60);
+        // Now clamped to 300s like every other OAuth call site. This one
+        // was uncapped, so a token endpoint returning a huge
+        // `Retry-After` could dictate an unbounded wait — the exact DoS
+        // the sibling call sites' comments warned about.
         return Err(OAuthError::RateLimited {
-            retry_after_secs: retry_after,
+            retry_after_secs: crate::oauth::retry_after_secs(resp.headers()),
         });
     }
     if status == 400 || status == 401 {
