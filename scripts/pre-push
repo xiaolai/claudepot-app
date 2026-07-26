@@ -206,8 +206,13 @@ if [ -n "$guard_patterns" ]; then
       *)      range="$local_sha --not --remotes=origin" ;;
     esac
 
+    # Only ADDED lines count. Scanning the whole diff would also match the
+    # deletion of a leaked value, which would block the very commit that
+    # removes it — and `+++ b/path` headers, which are not content.
     # shellcheck disable=SC2086  # $range is intentionally word-split
-    if git log -p --no-color $range 2>/dev/null | grep -nEi -- "$guard_re" >/dev/null; then
+    if git log -p --no-color $range 2>/dev/null \
+         | grep -E '^\+' | grep -vE '^\+\+\+' \
+         | grep -nEi -- "$guard_re" >/dev/null; then
       echo "✗ Push blocked: a pushed commit's CONTENT matches a local secret pattern."
       guard_hit=1
     fi
@@ -228,7 +233,7 @@ EOF
     echo "  both gitignored. Nothing is printed here on purpose: echoing"
     echo "  the match into a terminal log would defeat the point."
     echo
-    echo "  Find it with:   git log -p @{u}..HEAD | grep -nEi -f .secret-patterns"
+    echo "  Find it with:   git log -p @{u}..HEAD | grep -E '^\\+' | grep -nEi -f .secret-patterns"
     echo "  Then replace the value with a placeholder and amend/rebase."
     echo
     echo "  Bypass with --no-verify ONLY if you are certain the match is"
