@@ -96,10 +96,10 @@ pub use scheduler::{
 pub use shim::{render_unix, render_windows, ShimInputs};
 pub use slug::validate_name;
 pub use store::{
-    agent_dir, agent_runs_dir, agents_file_path, reconcile_installed_agents,
-    reconcile_orphan_artifacts, reconcile_orphan_artifacts_now, reconcile_orphan_artifacts_using,
-    reconcile_with_scheduler, reconcile_with_scheduler_using, AgentPatch, AgentStore,
-    OrphanArtifact, OrphanInstalled,
+    agent_dir, agent_runs_dir, agents_file_path, orphan_installed_in, orphan_installed_in_using,
+    reconcile_installed_agents, reconcile_orphan_artifacts, reconcile_orphan_artifacts_now,
+    reconcile_orphan_artifacts_using, reconcile_with_scheduler, reconcile_with_scheduler_using,
+    AgentPatch, AgentStore, OrphanArtifact, OrphanInstalled,
 };
 pub use templates::session_narrator;
 pub use types::{

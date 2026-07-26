@@ -101,6 +101,12 @@ pub(super) fn agent_to_json(agent: &Agent) -> serde_json::Value {
         "trigger_summary": trigger_summary(agent),
         "created_at": agent.created_at.to_rfc3339(),
         "updated_at": agent.updated_at.to_rfc3339(),
+        // Always present so the wire shape is identical across
+        // `draft` / `list` / `show`. `draft` leaves the default —
+        // a just-drafted agent is inert and has no artifact to miss.
+        // `list` / `show` overwrite it via `with_artifact_status`
+        // after reconciling against the scheduler.
+        "scheduler_artifact_missing": false,
     })
 }
 

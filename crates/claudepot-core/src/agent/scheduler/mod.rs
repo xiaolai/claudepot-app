@@ -102,6 +102,27 @@ pub trait Scheduler {
 
     /// Surface the capability matrix.
     fn capabilities(&self) -> SchedulerCapabilities;
+
+    /// Whether [`list_managed`](Self::list_managed) reflects real
+    /// host state.
+    ///
+    /// `false` for an adapter that registers nothing: its
+    /// `list_managed` is empty *by construction*, so a reconciler
+    /// comparing against it would report every OS-scheduled agent as
+    /// missing its artifact. Callers must treat `false` as "cannot
+    /// determine", not as "nothing is registered".
+    ///
+    /// Defaults to `true`: an adapter that registers artifacts can
+    /// enumerate them. [`noop::NoopScheduler`] overrides it to
+    /// `false`, and is the only implementation that does.
+    ///
+    /// Deliberately NOT derived from `capabilities().native_label` —
+    /// that field is a display string for the UI, and keying
+    /// behavior off it would silently break the moment a label is
+    /// reworded.
+    fn can_enumerate_artifacts(&self) -> bool {
+        true
+    }
 }
 
 /// Construct the active scheduler for the current host.

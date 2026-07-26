@@ -41,6 +41,13 @@ impl Scheduler for NoopScheduler {
         Ok(Vec::new())
     }
 
+    /// This adapter registers nothing, so its empty `list_managed`
+    /// means "cannot tell", not "nothing is registered". Reconcilers
+    /// must not read it as evidence.
+    fn can_enumerate_artifacts(&self) -> bool {
+        false
+    }
+
     fn expected_identifier(&self, id: &AgentId) -> String {
         // The Noop adapter registers nothing; a stable synthetic
         // identifier keeps the trait total without implying an
@@ -88,6 +95,14 @@ mod tests {
     fn list_managed_empty() {
         let s = NoopScheduler;
         assert!(s.list_managed().unwrap().is_empty());
+    }
+
+    #[test]
+    fn cannot_enumerate_artifacts() {
+        // The pair matters: an empty `list_managed` is only safe to
+        // reconcile against when the adapter can actually enumerate.
+        let s = NoopScheduler;
+        assert!(!s.can_enumerate_artifacts());
     }
 
     #[test]

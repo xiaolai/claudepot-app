@@ -888,6 +888,62 @@ pub fn reconcile_installed_agents(
         .collect()
 }
 
+/// Reconcile an **already-loaded** agent list against the active
+/// scheduler, returning the `Installed` agents with no live
+/// artifact.
+///
+/// Use this — not [`reconcile_with_scheduler`] — from any caller
+/// that already holds an open [`AgentStore`]. The store's advisory
+/// lock is exclusive and held for the handle's whole lifetime, so
+/// re-opening the store from under a live handle blocks the
+/// calling process against itself.
+pub fn orphan_installed_in(agents: &[Agent]) -> Vec<OrphanInstalled> {
+    let scheduler = super::scheduler::active_scheduler();
+    orphan_installed_in_using(agents, scheduler.as_ref())
+}
+
+/// Scheduler-injected variant of [`orphan_installed_in`], for tests
+/// and for callers driving a non-active scheduler.
+pub fn orphan_installed_in_using(
+    agents: &[Agent],
+    scheduler: &dyn super::scheduler::Scheduler,
+) -> Vec<OrphanInstalled> {
+    // Nothing to reconcile against — skip the host query entirely
+    // rather than pay a directory scan to compare against an empty
+    // set.
+    if agents.is_empty() {
+        return Vec::new();
+    }
+    // An adapter that registers nothing cannot answer the question:
+    // `list_managed` is empty by construction, so *every*
+    // OS-scheduled agent would come back flagged. Reporting no
+    // findings is the honest answer — "we cannot tell" must not
+    // render as "all of them are broken".
+    if !scheduler.can_enumerate_artifacts() {
+        return Vec::new();
+    }
+    let registered: std::collections::HashSet<String> = match scheduler.list_managed() {
+        Ok(entries) => entries
+            .into_iter()
+            // Only OUR artifacts count as proof an agent is armed.
+            // A foreign file that happens to match the identifier
+            // shape would otherwise mask a genuinely missing
+            // Claudepot artifact. The reverse direction already
+            // filters on this flag; both sides must agree.
+            .filter(|e| e.claudepot_managed)
+            .map(|e| e.identifier)
+            .collect(),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "agent reconciliation: scheduler list_managed failed; skipping"
+            );
+            return Vec::new();
+        }
+    };
+    reconcile_installed_agents(agents, &registered, |id| scheduler.expected_identifier(id))
+}
+
 /// Boot-time reconciliation of the store against the OS scheduler
 /// (grill finding F15).
 ///
@@ -939,19 +995,7 @@ pub fn reconcile_with_scheduler_using(
             return Vec::new();
         }
     };
-    let registered: std::collections::HashSet<String> = match scheduler.list_managed() {
-        Ok(entries) => entries.into_iter().map(|e| e.identifier).collect(),
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "agent reconciliation: scheduler list_managed failed; skipping"
-            );
-            return Vec::new();
-        }
-    };
-    let orphans = reconcile_installed_agents(store.list(), &registered, |id| {
-        scheduler.expected_identifier(id)
-    });
+    let orphans = orphan_installed_in_using(store.list(), scheduler);
     for orphan in &orphans {
         tracing::error!(
             agent_id = %orphan.agent_id,
@@ -1062,6 +1106,14 @@ pub fn reconcile_orphan_artifacts_using(
         // host's report and would always look like an orphan from
         // the artifact side too. Filter both sides identically.
         .filter(|a| !a.trigger.has_no_os_schedule())
+        // Same enabled guard as the other direction. Disabling an
+        // agent unregisters its artifact, but only best-effort —
+        // `install_gate::apply_lifecycle_change` logs an unregister
+        // failure and moves on. Counting a disabled record as a
+        // legitimate owner would hide exactly that leftover: an
+        // artifact still firing `claude -p` for an agent the user
+        // switched off.
+        .filter(|a| a.enabled)
         .map(|a| scheduler.expected_identifier(&a.id))
         .collect();
     let orphans = reconcile_orphan_artifacts(&installed, &registered);
@@ -1968,6 +2020,88 @@ mod tests {
         );
     }
 
+    // ---- injected-agents reconciliation (the CLI's read path) ----
+    //
+    // These exercise the store-free seam `agent list` / `agent show`
+    // use. They deliberately never open an `AgentStore`: the store's
+    // advisory lock is exclusive and held for the handle's lifetime,
+    // so a caller that already holds one would deadlock against
+    // itself if this path re-opened it.
+
+    #[test]
+    fn orphan_installed_in_using_flags_orphan_through_the_trait() {
+        let a = sample("ghost-agent"); // Installed + Cron + enabled
+        let sched = ScriptedScheduler::with(Vec::new()); // reports nothing
+        let orphans = orphan_installed_in_using(std::slice::from_ref(&a), &sched);
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].name, "ghost-agent");
+    }
+
+    #[test]
+    fn orphan_installed_in_using_clears_agent_with_live_artifact() {
+        let a = sample("healthy-agent");
+        let sched = ScriptedScheduler::with(vec![super::super::scheduler::RegisteredEntry {
+            identifier: format!("scripted.agent.{}", a.id),
+            claudepot_managed: true,
+        }]);
+        let orphans = orphan_installed_in_using(std::slice::from_ref(&a), &sched);
+        assert!(orphans.is_empty());
+    }
+
+    #[test]
+    fn orphan_installed_in_using_reports_nothing_on_unsupported_host() {
+        // The Noop adapter registers nothing, so its `list_managed`
+        // is empty by construction. Without the capability guard
+        // every OS-scheduled agent on an unsupported host would be
+        // reported broken — "we cannot tell" must not render as
+        // "all of them are broken".
+        let a = sample("cannot-tell");
+        let sched = super::super::scheduler::noop::NoopScheduler;
+        let orphans = orphan_installed_in_using(std::slice::from_ref(&a), &sched);
+        assert!(
+            orphans.is_empty(),
+            "an adapter that schedules nothing cannot accuse anything"
+        );
+    }
+
+    #[test]
+    fn orphan_installed_in_using_ignores_an_unmanaged_lookalike_artifact() {
+        // A foreign artifact whose identifier happens to match ours
+        // must NOT count as proof the agent is armed — otherwise it
+        // masks a genuinely missing Claudepot artifact.
+        let a = sample("masked-agent");
+        let sched = ScriptedScheduler::with(vec![super::super::scheduler::RegisteredEntry {
+            identifier: format!("scripted.agent.{}", a.id),
+            claudepot_managed: false,
+        }]);
+        let orphans = orphan_installed_in_using(std::slice::from_ref(&a), &sched);
+        assert_eq!(
+            orphans.len(),
+            1,
+            "an unmanaged lookalike must not vouch for a Claudepot agent"
+        );
+    }
+
+    #[test]
+    fn orphan_installed_in_using_skips_the_host_query_for_an_empty_list() {
+        // An empty store has no possible orphan; the scheduler must
+        // not be consulted at all. `list_managed_errors` would
+        // surface as a warn log if it were.
+        let sched = ScriptedScheduler::list_managed_errors();
+        assert!(orphan_installed_in_using(&[], &sched).is_empty());
+    }
+
+    #[test]
+    fn orphan_installed_in_using_swallows_scheduler_query_failure() {
+        let a = sample("transient");
+        let sched = ScriptedScheduler::list_managed_errors();
+        let orphans = orphan_installed_in_using(std::slice::from_ref(&a), &sched);
+        assert!(
+            orphans.is_empty(),
+            "a failed scheduler query must not be reported as a finding"
+        );
+    }
+
     // ---- grill X9: reverse-direction reconciliation ----
 
     fn registered(identifier: &str, managed: bool) -> super::super::scheduler::RegisteredEntry {
@@ -2084,11 +2218,19 @@ mod tests {
     // temp `CLAUDEPOT_DATA_DIR`.
 
     use std::cell::RefCell;
-    use std::sync::Mutex;
 
     /// Tests that set `CLAUDEPOT_DATA_DIR` share process env state;
     /// serialize them so they don't see each other's stores.
-    static RECONCILE_ENV_GUARD: Mutex<()> = Mutex::new(());
+    ///
+    /// This MUST be the crate-wide [`crate::testing::lock_data_dir`]
+    /// guard, not a module-private mutex. `CLAUDEPOT_DATA_DIR` is
+    /// process-global, so two different mutexes guarding it exclude
+    /// nothing from each other — a private guard here raced tests in
+    /// other modules that read the data dir (e.g. the §11.2 migrate
+    /// FS goldens), producing intermittent failures.
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        crate::testing::lock_data_dir()
+    }
 
     /// Scheduler stub for the X29 wiring tests. Returns the
     /// `list_managed` payload the test asks for, and synthesizes
@@ -2159,6 +2301,12 @@ mod tests {
     /// Seed an `Installed` cron agent at the given data dir. Returns
     /// the agent id so callers can build the scheduler payload.
     fn seed_installed_cron_agent(data_dir: &Path, name: &str) -> AgentId {
+        seed_cron_agent(data_dir, name, true)
+    }
+
+    /// [`seed_installed_cron_agent`] with the `enabled` flag under
+    /// the caller's control.
+    fn seed_cron_agent(data_dir: &Path, name: &str, enabled: bool) -> AgentId {
         // The data dir override is set by the caller; build the
         // store at the canonical path inside it so `AgentStore::open`
         // (called by `_using`) finds it.
@@ -2166,6 +2314,7 @@ mod tests {
         let mut store = AgentStore::open_at(store_path).unwrap();
         let mut a = sample(name);
         a.lifecycle = Lifecycle::Installed;
+        a.enabled = enabled;
         let id = a.id;
         store.add(a).unwrap();
         store.save().unwrap();
@@ -2174,10 +2323,36 @@ mod tests {
     }
 
     #[test]
+    fn reverse_reconcile_flags_a_leftover_artifact_for_a_disabled_agent() {
+        // Disabling unregisters, but only best-effort — a failed
+        // unregister leaves an artifact that still fires `claude -p`
+        // for an agent the user switched off. Counting the disabled
+        // record as a legitimate owner would hide it. The forward
+        // direction already excludes disabled agents; both sides
+        // must agree.
+        let _lock = lock_env();
+        let dir = tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
+
+        let id = seed_cron_agent(dir.path(), "switched-off", false);
+        let sched = ScriptedScheduler::with(vec![super::super::scheduler::RegisteredEntry {
+            identifier: format!("scripted.agent.{id}"),
+            claudepot_managed: true,
+        }]);
+
+        let orphans = reconcile_orphan_artifacts_using(&sched);
+        assert_eq!(
+            orphans.len(),
+            1,
+            "a managed artifact outliving its disabled agent is an orphan"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    #[test]
     fn reconcile_with_scheduler_using_flags_an_installed_agent_with_no_artifact() {
-        let _lock = RECONCILE_ENV_GUARD
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_env();
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 
@@ -2195,9 +2370,7 @@ mod tests {
 
     #[test]
     fn reconcile_with_scheduler_using_silent_when_artifact_present() {
-        let _lock = RECONCILE_ENV_GUARD
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_env();
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 
@@ -2220,9 +2393,7 @@ mod tests {
 
     #[test]
     fn reconcile_with_scheduler_using_returns_empty_on_list_managed_error() {
-        let _lock = RECONCILE_ENV_GUARD
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_env();
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 
@@ -2244,9 +2415,7 @@ mod tests {
 
     #[test]
     fn reconcile_orphan_artifacts_using_flags_unmatched_managed_artifact() {
-        let _lock = RECONCILE_ENV_GUARD
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_env();
         let dir = tempdir().unwrap();
         std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
 
