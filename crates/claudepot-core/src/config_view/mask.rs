@@ -264,7 +264,7 @@ mod tests {
             format!("npm_{}", "A".repeat(40)),
             format!("hf_{}", "A".repeat(40)),
             format!("dop_v1_{}", "a".repeat(64)),
-            "dapi12345678901234567890123456789012".to_string(),
+            format!("dapi{}", "a".repeat(32)),
             format!("pul-{}", "a".repeat(40)),
             format!("sk-{}", "a".repeat(40)),
             format!("sk_live_{}", "A".repeat(40)),
