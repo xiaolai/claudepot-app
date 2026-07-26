@@ -142,3 +142,6 @@ CLAUDE.local.md
 
 # Generated per-clone by scripts/install-hooks.sh (core.hooksPath target)
 .githooks/
+
+# Local secret patterns consumed by scripts/pre-push (never committed)
+.secret-patterns

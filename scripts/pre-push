@@ -154,6 +154,90 @@ validate_on() {
   return 0
 }
 
+# git feeds the ref list on stdin, and stdin can only be drained once.
+# Both the secret guard and the release validator below need it, so
+# buffer it here and feed each from the buffer.
+push_payload="$(cat)"
+
+# ─── Secret guard — runs on EVERY push, not just release tags ────────
+#
+# On 2026-07-26 two validator hostnames reached the public repo inside
+# a generated config, and sat in 18 commit MESSAGES as well as in file
+# contents. Scrubbing them cost a full history rewrite and a force-push
+# across 44 tags. This blocks the next one at the last moment it is
+# still cheap.
+#
+# The blocklist is NEVER hardcoded here — this file is public. It is
+# derived from the gitignored files that legitimately hold the real
+# values:
+#
+#   .secret-patterns   one extended-regex per line, `#` comments ok
+#   .validator-hosts   fallback: the host part of each user@host
+#
+# No patterns configured means no check. That is deliberate: a fresh
+# clone with no local secrets has nothing to leak, and a hook that
+# fails closed on absent config would just teach --no-verify.
+secret_patterns_file="$repo_root/.secret-patterns"
+guard_patterns=""
+
+if [ -f "$secret_patterns_file" ]; then
+  guard_patterns="$(grep -vE '^\s*(#|$)' "$secret_patterns_file" || true)"
+elif [ -n "${CLAUDEPOT_VALIDATOR_LINUX_SSH:-}${CLAUDEPOT_VALIDATOR_WINDOWS_SSH:-}" ]; then
+  guard_patterns="$(
+    for _h in "${CLAUDEPOT_VALIDATOR_LINUX_SSH:-}" "${CLAUDEPOT_VALIDATOR_WINDOWS_SSH:-}"; do
+      [ -n "$_h" ] && printf '%s\n' "${_h#*@}"
+    done | sort -u
+  )"
+fi
+
+if [ -n "$guard_patterns" ]; then
+  guard_re="$(printf '%s' "$guard_patterns" | paste -sd'|' -)"
+  guard_hit=0
+
+  while read -r _lref local_sha _rref remote_sha; do
+    [ -z "${local_sha:-}" ] && continue
+    # Deleting a ref pushes no content.
+    case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+
+    # New ref on the remote: bound the scan by what the remote already
+    # has, so creating a branch doesn't rescan all of history.
+    case "$remote_sha" in
+      *[!0]*) range="$remote_sha..$local_sha" ;;
+      *)      range="$local_sha --not --remotes=origin" ;;
+    esac
+
+    # shellcheck disable=SC2086  # $range is intentionally word-split
+    if git log -p --no-color $range 2>/dev/null | grep -nEi -- "$guard_re" >/dev/null; then
+      echo "✗ Push blocked: a pushed commit's CONTENT matches a local secret pattern."
+      guard_hit=1
+    fi
+    # shellcheck disable=SC2086
+    if git log --format='%B' --no-color $range 2>/dev/null | grep -nEi -- "$guard_re" >/dev/null; then
+      echo "✗ Push blocked: a pushed commit MESSAGE matches a local secret pattern."
+      echo "  Message text cannot be fixed by editing a file — it needs a rebase"
+      echo "  (git rebase -i --exec 'git commit --amend') or filter-repo."
+      guard_hit=1
+    fi
+  done <<EOF
+$push_payload
+EOF
+
+  if [ "$guard_hit" -ne 0 ]; then
+    echo
+    echo "  Patterns come from .secret-patterns (or .validator-hosts) —"
+    echo "  both gitignored. Nothing is printed here on purpose: echoing"
+    echo "  the match into a terminal log would defeat the point."
+    echo
+    echo "  Find it with:   git log -p @{u}..HEAD | grep -nEi -f .secret-patterns"
+    echo "  Then replace the value with a placeholder and amend/rebase."
+    echo
+    echo "  Bypass with --no-verify ONLY if you are certain the match is"
+    echo "  a false positive. This repo is PUBLIC; a bad push is not"
+    echo "  retractable — forks keep whatever they cloned."
+    exit 1
+  fi
+fi
+
 # git's pre-push protocol feeds four positional fields per ref; we only
 # consult two of them, but all four must be named to parse the line.
 # shellcheck disable=SC2034
@@ -277,6 +361,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   else
     echo "✓ Release validation passed across Linux + Windows."
   fi
-done
+done <<EOF
+$push_payload
+EOF
 
 exit 0
