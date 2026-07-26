@@ -63,12 +63,34 @@
 # gate at all — which is exactly how these validators sat inert and
 # unnoticed for four releases (see scripts/install-hooks.sh).
 #
-# Note the asymmetry: a host that is REACHABLE and FAILS still aborts.
-# Only absence of evidence falls back, never contrary evidence.
+# Note the asymmetry: a host that RUNS THE GATE and fails still aborts.
+# Only absence of evidence falls back, never contrary evidence. "Could
+# not run the gate" — offline, or online but unable to fetch the commit
+# — is absence, and `validate_on` distinguishes the two by exit code.
 #
 # History: added 2026-05-01 after a four-round CI cascade where each
 # fix on macOS-only commits surfaced the next layer of platform-
 # conditional bugs. CI fallback added 2026-07-22.
+#
+# 2026-07-26: fixed two bugs that between them meant this hook had
+# never once validated an annotated tag.
+#
+#   1. It checked out `local_sha`, which for an annotated tag is the
+#      TAG OBJECT sha, not the commit. The validator has no copy of
+#      that object (the tag is not on origin yet — we are in pre-push),
+#      so checkout died with "reference is not a tree". Verified by
+#      hand against a validator on 2026-07-26. The hook already
+#      dereferenced `^{commit}` for the CI lookup and documented why;
+#      it just never used that value for the checkout.
+#   2. Sync and gate shared one ssh command, so a host that could not
+#      reach GitHub reported "clippy failed" — contrary evidence the
+#      hook had not actually gathered. That aborted the v0.3.1 and
+#      v0.3.2 tag pushes; both then shipped under `--no-verify`.
+#
+# Bug 1 made the gate unpassable and bug 2 made its failure look real,
+# so the bypass looked like the only way through. Treat a run of
+# `--no-verify` releases as evidence this hook is broken, not as
+# evidence the validators are merely offline.
 
 set -euo pipefail
 
@@ -96,6 +118,40 @@ ci_green_for_commit() {
     --json status,conclusion \
     --jq 'first | select(.status == "completed" and .conclusion == "success")' \
     2>/dev/null | grep -q .
+}
+
+# Run one platform gate on a validator host.
+#
+#   $1 host   $2 remote workdir   $3 COMMIT sha   $4 gate command
+#
+# Exit codes are the whole point — they encode the asymmetry this hook
+# depends on:
+#
+#   0 — the gate ran and passed
+#   1 — the gate ran and FAILED (contrary evidence: abort the release)
+#   2 — the host could not be used at all (absence of evidence: defer)
+#
+# Sync is a SEPARATE ssh call from the gate, deliberately. Folded into
+# one `git fetch && git checkout && cargo ...` command, a host with no
+# route to GitHub fails at `fetch` and the hook reports it as "clippy
+# failed" — contrary evidence that was never gathered. That misreport
+# aborted the v0.3.1 and v0.3.2 tag pushes and sent both out under
+# `--no-verify`, which is exactly the reflex this hook exists to stop.
+validate_on() {
+  _host="$1"; _dir="$2"; _commit="$3"; _gate="$4"
+  host_reachable "$_host" || return 2
+  # `$_commit` must be the COMMIT sha, never the pushed `local_sha`: for
+  # an annotated tag those differ, the validator has no copy of the tag
+  # object (the tag is not on origin yet — we are in pre-push), and
+  # `git checkout <tag-object-sha>` fails with "reference is not a
+  # tree". That made every annotated-tag validation abort regardless of
+  # the code being pushed.
+  # shellcheck disable=SC2029  # $_commit must expand client-side
+  ssh "$_host" "cd $_dir && git fetch --quiet && git checkout --quiet --detach $_commit" \
+    >/dev/null 2>&1 || return 2
+  # shellcheck disable=SC2029  # $_gate must expand client-side
+  ssh "$_host" "cd $_dir && $_gate" || return 1
+  return 0
 }
 
 # git's pre-push protocol feeds four positional fields per ref; we only
@@ -131,17 +187,26 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   skipped=""
 
   # Linux validation — mirrors CI's `Format / Clippy (Linux)` job.
-  if host_reachable "$CLAUDEPOT_VALIDATOR_LINUX_SSH"; then
-    echo "▶ Linux clippy on $CLAUDEPOT_VALIDATOR_LINUX_SSH ..."
-    # $local_sha must expand client-side — the validator checks out the
-    # SHA being pushed, which only this side knows.
-    # shellcheck disable=SC2029
-    if ! ssh "$CLAUDEPOT_VALIDATOR_LINUX_SSH" "cd ~/claudepot-app && \
-        git fetch --quiet && \
-        git checkout --quiet $local_sha && \
-        cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings"; then
+  echo "▶ Linux clippy on $CLAUDEPOT_VALIDATOR_LINUX_SSH ..."
+  # Relative path: ssh lands in $HOME, so this resolves to
+  # ~/claudepot-app without a tilde that shellcheck (rightly) flags as
+  # non-expanding in quotes. Matches the Windows call below.
+  validate_on "$CLAUDEPOT_VALIDATOR_LINUX_SSH" "claudepot-app" "$commit_sha" \
+    "cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings" \
+    && linux_rc=0 || linux_rc=$?
+  case "$linux_rc" in
+    0) echo "✓ Linux clippy clean" ;;
+    2)
+      echo "• Linux validator unusable (offline, or cannot reach GitHub to"
+      echo "  sync $commit_sha) — deferring to CI"
+      skipped="Linux"
+      ;;
+    *)
       echo
       echo "✗ Linux clippy failed on $commit_sha. Release aborted."
+      echo
+      echo "  The gate ran and reported a real lint failure — this is not"
+      echo "  a connectivity problem (that path defers to CI instead)."
       echo
       echo "Recovery:"
       echo "  1. Fix the lint locally"
@@ -149,24 +214,28 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       echo "  3. Re-tag the new commit"
       echo "  4. Re-push"
       exit 1
-    fi
-    echo "✓ Linux clippy clean"
-  else
-    echo "• Linux validator unreachable — deferring to CI"
-    skipped="Linux"
-  fi
+      ;;
+  esac
   echo
 
   # Windows validation (MSVC toolchain — matches the CI runner).
-  if host_reachable "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH"; then
-    echo "▶ Windows test compile on $CLAUDEPOT_VALIDATOR_WINDOWS_SSH ..."
-    # shellcheck disable=SC2029  # same client-side expansion as above
-    if ! ssh "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH" "cd claudepot-app && \
-        git fetch --quiet && \
-        git checkout --quiet $local_sha && \
-        cargo test -p claudepot-core -p claudepot-cli --no-run"; then
+  echo "▶ Windows test compile on $CLAUDEPOT_VALIDATOR_WINDOWS_SSH ..."
+  validate_on "$CLAUDEPOT_VALIDATOR_WINDOWS_SSH" "claudepot-app" "$commit_sha" \
+    "cargo test -p claudepot-core -p claudepot-cli --no-run" \
+    && win_rc=0 || win_rc=$?
+  case "$win_rc" in
+    0) echo "✓ Windows test compile clean" ;;
+    2)
+      echo "• Windows validator unusable (offline, or cannot reach GitHub"
+      echo "  to sync $commit_sha) — deferring to CI"
+      skipped="${skipped:+$skipped + }Windows"
+      ;;
+    *)
       echo
       echo "✗ Windows test compile failed on $commit_sha. Release aborted."
+      echo
+      echo "  The gate ran and reported a real build failure — this is not"
+      echo "  a connectivity problem (that path defers to CI instead)."
       echo
       echo "Recovery:"
       echo "  1. Fix the build error locally (likely a missing cfg gate)"
@@ -174,12 +243,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       echo "  3. Re-tag the new commit"
       echo "  4. Re-push"
       exit 1
-    fi
-    echo "✓ Windows test compile clean"
-  else
-    echo "• Windows validator unreachable — deferring to CI"
-    skipped="${skipped:+$skipped + }Windows"
-  fi
+      ;;
+  esac
   echo
 
   # Nothing was skipped → both hosts answered and both passed.
