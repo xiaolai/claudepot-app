@@ -6,7 +6,30 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.3.1 — beta (unreleased)
+## 0.3.2 — beta (unreleased)
+
+### Added
+
+- **Wake windows** (account card ⋮ → "Wake windows", or
+  `claudepot account wake <email>`). An account you haven't used has no
+  rate-limit window yet, so Anthropic reports no reset time and the card
+  shows "—". This starts the window by sending the smallest possible
+  request — about 9 tokens, which registers as 0.0% of your quota — so
+  the reset times appear. Only offered when a window actually has
+  nothing to report, always asks first, and never runs on its own.
+
+### Fixed
+
+- **A stale account slot can no longer be billed by mistake.** If an
+  account's stored login turns out to authenticate as someone else,
+  Claudepot already refused to read its usage; it now refuses to spend
+  anything on it too, and tells you to run `account verify` instead.
+- **Rate-limit waits are now capped everywhere.** One of the four places
+  Claudepot honors a server's "retry after" instruction had no upper
+  bound, so a misbehaving or hostile server could have made a token
+  refresh wait indefinitely. All four now cap at five minutes.
+
+## 0.3.1 — beta (released 2026-07-25)
 
 ### Fixed
 
