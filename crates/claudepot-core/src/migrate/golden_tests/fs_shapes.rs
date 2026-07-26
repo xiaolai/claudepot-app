@@ -98,6 +98,12 @@ fn row14_long_path_emits_dual_hashable_slug() {
 // here as a contract reminder.
 #[test]
 fn row15_staging_dir_lives_under_claudepot_data_dir() {
+    // Both calls below resolve `CLAUDEPOT_DATA_DIR`, which is
+    // process-global. Without the shared guard another test can
+    // re-point it between them, so `starts_with` compares a staging
+    // path from one data dir against a different one — an
+    // intermittent failure with nothing wrong in the code under test.
+    let _lock = crate::testing::lock_data_dir();
     let id = "abc";
     let staging = crate::migrate::apply::staging_dir(id);
     let data_dir = crate::paths::claudepot_data_dir();
