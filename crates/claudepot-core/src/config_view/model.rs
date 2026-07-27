@@ -88,6 +88,41 @@ pub enum Kind {
     Other,
 }
 
+impl Kind {
+    /// Wire string for this kind — byte-identical to the serde
+    /// `snake_case` rename, so callers crossing the IPC boundary and
+    /// callers matching in Rust agree.
+    ///
+    /// Exists so `artifact_usage::unused` can classify a `FileNode`
+    /// without round-tripping through serde_json.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Kind::ClaudeMd => "claude_md",
+            Kind::Settings => "settings",
+            Kind::SettingsLocal => "settings_local",
+            Kind::ManagedSettings => "managed_settings",
+            Kind::RedactedUserConfig => "redacted_user_config",
+            Kind::McpJson => "mcp_json",
+            Kind::ManagedMcpJson => "managed_mcp_json",
+            Kind::Agent => "agent",
+            Kind::Skill => "skill",
+            Kind::Command => "command",
+            Kind::OutputStyle => "output_style",
+            Kind::Workflow => "workflow",
+            Kind::Rule => "rule",
+            Kind::Hook => "hook",
+            Kind::Memory => "memory",
+            Kind::MemoryIndex => "memory_index",
+            Kind::Plugin => "plugin",
+            Kind::Keybindings => "keybindings",
+            Kind::Statusline => "statusline",
+            Kind::EffectiveSettings => "effective_settings",
+            Kind::EffectiveMcp => "effective_mcp",
+            Kind::Other => "other",
+        }
+    }
+}
+
 // ---------- Tree ------------------------------------------------------
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

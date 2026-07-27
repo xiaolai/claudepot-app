@@ -1,0 +1,176 @@
+{
+  "_comment": [
+    "Shared vectors locking `artifact_usage::identity::artifact_key_for_path`",
+    "(Rust) and `src/sections/config/artifactKey.ts` (TS) to the same",
+    "behaviour. BOTH sides run this file. Change one, change the other, add",
+    "a vector — same contract as testdata/rate-resolution-vectors.json.",
+    "",
+    "`expected: null` means the path is not a trackable artifact.",
+    "`project_root: null` means no project anchor (global-only scan).",
+    "Paths use native separators; Windows shapes are covered explicitly",
+    "per .claude/rules/paths.md."
+  ],
+  "vectors": [
+    {
+      "name": "plugin skill, dir form",
+      "kind": "skill",
+      "path": "/Users/u/.claude/plugins/cache/owner/bureau/1.0.0/skills/distill/SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "plugin:bureau:distill", "plugin_id": "bureau" }
+    },
+    {
+      "name": "plugin skill, version dir differs but key is version-free",
+      "kind": "skill",
+      "path": "/Users/u/.claude/plugins/cache/owner/bureau/2.9.9/skills/distill/SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "plugin:bureau:distill", "plugin_id": "bureau" }
+    },
+    {
+      "name": "user skill, dir form",
+      "kind": "skill",
+      "path": "/Users/u/.claude/skills/mine/SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "userSettings:mine", "plugin_id": null }
+    },
+    {
+      "name": "user skill stays user-scope when project_root is the home dir (global scan)",
+      "kind": "skill",
+      "path": "/Users/u/.claude/skills/mine/SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "userSettings:mine", "plugin_id": null }
+    },
+    {
+      "name": "project skill, dir form",
+      "kind": "skill",
+      "path": "/repo/.claude/skills/local-thing/SKILL.md",
+      "project_root": "/repo",
+      "expected": { "kind": "skill", "artifact_key": "projectSettings:local-thing", "plugin_id": null }
+    },
+    {
+      "name": "user skill is NOT project-scoped when anchored elsewhere",
+      "kind": "skill",
+      "path": "/Users/u/.claude/skills/mine/SKILL.md",
+      "project_root": "/repo",
+      "expected": { "kind": "skill", "artifact_key": "userSettings:mine", "plugin_id": null }
+    },
+    {
+      "name": "skill, bare file form",
+      "kind": "skill",
+      "path": "/Users/u/.claude/skills/flat.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "userSettings:flat", "plugin_id": null }
+    },
+    {
+      "name": "agent with plugin",
+      "kind": "agent",
+      "path": "/Users/u/.claude/plugins/cache/owner/grill/1.0.0/agents/security.md",
+      "project_root": null,
+      "expected": { "kind": "agent", "artifact_key": "grill:security", "plugin_id": "grill" }
+    },
+    {
+      "name": "agent without plugin is a bare name",
+      "kind": "agent",
+      "path": "/Users/u/.claude/agents/reviewer.md",
+      "project_root": null,
+      "expected": { "kind": "agent", "artifact_key": "reviewer", "plugin_id": null }
+    },
+    {
+      "name": "command with plugin gets a leading slash",
+      "kind": "command",
+      "path": "/Users/u/.claude/plugins/cache/owner/nlpm/0.1.0/commands/score.md",
+      "project_root": null,
+      "expected": { "kind": "command", "artifact_key": "/nlpm:score", "plugin_id": "nlpm" }
+    },
+    {
+      "name": "command without plugin",
+      "kind": "command",
+      "path": "/Users/u/.claude/commands/deploy.md",
+      "project_root": null,
+      "expected": { "kind": "command", "artifact_key": "/deploy", "plugin_id": null }
+    },
+    {
+      "name": "windows plugin skill, backslash separators",
+      "kind": "skill",
+      "path": "C:\\Users\\u\\.claude\\plugins\\cache\\owner\\bureau\\1.0.0\\skills\\distill\\SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "plugin:bureau:distill", "plugin_id": "bureau" }
+    },
+    {
+      "name": "windows project skill, backslash separators",
+      "kind": "skill",
+      "path": "C:\\repo\\.claude\\skills\\local-thing\\SKILL.md",
+      "project_root": "C:\\repo",
+      "expected": { "kind": "skill", "artifact_key": "projectSettings:local-thing", "plugin_id": null }
+    },
+    {
+      "name": "windows UNC project skill",
+      "kind": "skill",
+      "path": "\\\\server\\share\\repo\\.claude\\skills\\unc-thing\\SKILL.md",
+      "project_root": "\\\\server\\share\\repo",
+      "expected": { "kind": "skill", "artifact_key": "projectSettings:unc-thing", "plugin_id": null }
+    },
+    {
+      "name": "windows agent with plugin",
+      "kind": "agent",
+      "path": "C:\\Users\\u\\.claude\\plugins\\cache\\owner\\grill\\1.0.0\\agents\\security.md",
+      "project_root": null,
+      "expected": { "kind": "agent", "artifact_key": "grill:security", "plugin_id": "grill" }
+    },
+    {
+      "name": "hooks are not trackable per-file",
+      "kind": "hook",
+      "path": "/Users/u/.claude/hooks/thing.json",
+      "project_root": null,
+      "expected": null
+    },
+    {
+      "name": "settings files are not artifacts",
+      "kind": "settings",
+      "path": "/Users/u/.claude/settings.json",
+      "project_root": null,
+      "expected": null
+    },
+    {
+      "name": "non-md agent path yields nothing",
+      "kind": "agent",
+      "path": "/Users/u/.claude/agents/notes.txt",
+      "project_root": null,
+      "expected": null
+    },
+    {
+      "name": "plugin cache path ends before naming a plugin",
+      "kind": "agent",
+      "path": "/x/plugins/cache/owner.md",
+      "project_root": null,
+      "expected": { "kind": "agent", "artifact_key": "owner", "plugin_id": null }
+    },
+    {
+      "name": "bare SKILL.md with no parent segment falls back to the stem",
+      "kind": "skill",
+      "path": "SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "userSettings:SKILL", "plugin_id": null }
+    },
+    {
+      "name": "single-leading-slash SKILL.md still resolves",
+      "kind": "skill",
+      "path": "/SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "userSettings:SKILL", "plugin_id": null }
+    },
+    {
+      "name": "SKILL.md one directory deep uses the parent as the name",
+      "kind": "skill",
+      "path": "skills/SKILL.md",
+      "project_root": null,
+      "expected": { "kind": "skill", "artifact_key": "userSettings:skills", "plugin_id": null }
+    },
+    {
+      "name": "empty project_root does not make a path project-scoped",
+      "kind": "skill",
+      "path": "/Users/u/.claude/skills/mine/SKILL.md",
+      "project_root": "",
+      "expected": { "kind": "skill", "artifact_key": "userSettings:mine", "plugin_id": null }
+    }
+  ]
+}
