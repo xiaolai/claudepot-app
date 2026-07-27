@@ -652,15 +652,20 @@ fn load_enabled_plugin_specs(home: &Path) -> std::collections::HashSet<String> {
     let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
         return out;
     };
-    let Some(plugins) = v.get("plugins").and_then(|x| x.as_object()) else {
+    let Some(plugins) = v.get(ENABLED_PLUGINS_KEY).and_then(|x| x.as_object()) else {
         return out;
     };
     for (spec, val) in plugins {
         let enabled = match val {
             serde_json::Value::Bool(b) => *b,
+            // Version-constraint form — present means enabled.
+            serde_json::Value::Array(a) => !a.is_empty(),
+            // Object form isn't in CC's schema, but tolerate
+            // `{enabled: bool}` rather than guessing `true`.
             serde_json::Value::Object(o) => {
                 o.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true)
             }
+            serde_json::Value::Null => false,
             _ => true,
         };
         if enabled {
@@ -1278,6 +1283,58 @@ fn find_file_in_nodes<'a>(nodes: &'a [Node], id: &str) -> Option<&'a FileNode> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    // ── enabledPlugins parsing ────────────────────────────────────
+    //
+    // Regression suite for the 2026-07-27 key bug: this read
+    // `settings.json :: plugins`, which CC never writes, so every
+    // marketplace plugin reported disabled and the plugin_base
+    // settings cascade contributed nothing.
+
+    fn specs_from(settings_json: &str) -> std::collections::HashSet<String> {
+        let td = TempDir::new().unwrap();
+        std::fs::write(td.path().join("settings.json"), settings_json).unwrap();
+        load_enabled_plugin_specs(td.path())
+    }
+
+    #[test]
+    fn enabled_plugins_key_is_read_not_the_nonexistent_plugins_key() {
+        let specs = specs_from(r#"{"enabledPlugins":{"a@mk":true}}"#);
+        assert!(specs.contains("a@mk"));
+        // The old key must NOT be honored — a settings file using it
+        // would be a Claudepot-only invention CC ignores.
+        let legacy = specs_from(r#"{"plugins":{"a@mk":true}}"#);
+        assert!(legacy.is_empty(), "settings.plugins is not a CC key");
+    }
+
+    #[test]
+    fn enabled_plugins_false_is_disabled() {
+        let specs = specs_from(r#"{"enabledPlugins":{"on@mk":true,"off@mk":false}}"#);
+        assert!(specs.contains("on@mk"));
+        assert!(!specs.contains("off@mk"));
+    }
+
+    #[test]
+    fn enabled_plugins_version_constraint_array_counts_as_enabled() {
+        // CC schema: Record<string, string[] | boolean | undefined>.
+        // The array form pins versions; presence means enabled.
+        let specs = specs_from(r#"{"enabledPlugins":{"pinned@mk":["1.2.0"]}}"#);
+        assert!(specs.contains("pinned@mk"));
+    }
+
+    #[test]
+    fn enabled_plugins_empty_array_and_null_are_disabled() {
+        let specs = specs_from(r#"{"enabledPlugins":{"empty@mk":[],"nil@mk":null}}"#);
+        assert!(specs.is_empty());
+    }
+
+    #[test]
+    fn enabled_plugins_missing_file_or_key_yields_empty_set() {
+        let td = TempDir::new().unwrap();
+        assert!(load_enabled_plugin_specs(td.path()).is_empty());
+        assert!(specs_from(r#"{"model":"opus"}"#).is_empty());
+        assert!(specs_from("not json at all").is_empty());
+    }
 
     #[test]
     fn deny_names_catches_known_junk() {
