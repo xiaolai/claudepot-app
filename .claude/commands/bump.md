@@ -1,5 +1,5 @@
 ---
-description: Bump Claudepot version numbers in lock-step across Cargo.toml, package.json, src-tauri/tauri.conf.json, README.md, the web install page, and stub a CHANGELOG section. Does not commit — leaves changes for review.
+description: Bump Claudepot version numbers in lock-step across Cargo.toml, Cargo.lock, package.json, src-tauri/tauri.conf.json, README.md, the web install page, and stub a CHANGELOG section. Runs a quality gate first. Does not commit — leaves changes for review, and documents the tag/push path that follows.
 ---
 
 # Bump version
@@ -19,6 +19,17 @@ All five MUST match byte-for-byte. A mismatch produces a release with
 a wrong "About" dialog, bundles that refuse to install over previous
 versions, a README that lies about the current stage, or a website
 that quotes a version 10 releases old.
+
+Two more files ride along in the same commit:
+
+| File | Why |
+|---|---|
+| `CHANGELOG.md` | Stubbed in Step 4 |
+| `Cargo.lock` | **Derived, but committed.** It stamps each workspace crate's own version, so a bump changes it (8 lines at v0.3.2 — four crates × two fields). Nothing edits it by hand; `cargo check` regenerates it. It is still part of the release commit — verify with `git show --stat v0.3.2`. |
+
+**Seven files total.** Leaving `Cargo.lock` out is the easy miss: the
+bump appears complete, then the next `cargo` command rewrites it and
+leaves `main` dirty for whoever pulls next.
 
 ## Inputs
 
@@ -57,6 +68,25 @@ only users who picked the Beta channel in Settings → About.
   release the pipeline can't classify.
 
 ## Procedure
+
+### Step 0 — Quality gate, BEFORE touching any version file
+
+```bash
+cargo check --workspace
+pnpm test
+```
+
+Abort the bump on any failure. This runs first, not last, for a
+specific reason: a bump that stops halfway on a broken build leaves
+seven files in a partially-rewritten state that the next command
+happily builds on. Worse, the version bump is the last step before a
+tag, and a tag naming a broken commit is public the moment it is
+pushed — `release.yml` then fails on it, and the tag stays until
+someone deletes it by hand.
+
+Step 5 re-runs the gate after the edits. Both passes are wanted: this
+one proves the tree was sound before, that one proves the edits didn't
+break it.
 
 ### Step 1 — Read the current version
 
@@ -157,9 +187,18 @@ Edit exactly these five locations:
    across the version and trailing period). Edit by matching the
    `X.Y.Z` token plus its backticks, not the surrounding markdown.
 
-Do NOT rewrite `Cargo.lock` manually — `cargo check --workspace` will
-regenerate it on the next build. Run `cargo check -p claudepot-cli`
-to confirm the lockfile absorbs the change cleanly.
+Then sync the lockfile. It is derived, so never hand-edit it — but it
+**must** land in the same commit:
+
+```bash
+cargo check --workspace          # rewrites Cargo.lock in place
+git diff --stat Cargo.lock       # expect ~8 changed lines (4 crates)
+```
+
+If `git diff --stat Cargo.lock` shows nothing, the bump did not take —
+stop and re-check Step 3's `Cargo.toml` edit. If it shows far more than
+the workspace crates, a dependency moved too; that is a separate change
+and does not belong in a bump commit.
 
 ### Step 4 — Stub CHANGELOG
 
@@ -205,9 +244,14 @@ pnpm build
 Show the final diff:
 
 ```bash
-git diff --stat
-git diff Cargo.toml package.json src-tauri/tauri.conf.json CHANGELOG.md README.md 'web/src/app/(reader)/app/install/page.mdx'
+git diff --stat            # expect 7 files, Cargo.lock among them
+git diff Cargo.toml package.json src-tauri/tauri.conf.json CHANGELOG.md \
+         README.md 'web/src/app/(reader)/app/install/page.mdx'
 ```
+
+If `git diff --stat` lists six files, `Cargo.lock` did not regenerate —
+go back to Step 3's lockfile sync. That is the miss this command exists
+to prevent.
 
 ### Step 6 — Do NOT commit
 
@@ -218,8 +262,61 @@ maybe `dev-docs/`. The user drives that final edit pass.
 End with a one-line summary:
 
 ```
-Bumped CURRENT → NEXT. 6 files changed. Review + commit when ready.
+Bumped CURRENT → NEXT. 7 files changed (incl. Cargo.lock). Review + commit when ready.
 ```
+
+## After the bump — the release path
+
+**This command does not run any of the following.** It stops at Step 6.
+The steps are documented here because the bump is the only surface that
+leads into them and the hazards below were previously written down
+nowhere in this repo.
+
+`main` is **not** branch-protected here, so the bump commit goes
+straight to `main` — no PR dance. (If that ever changes, the tag must
+name a commit already merged, since required checks cannot have run on
+a commit the remote has never seen.)
+
+```bash
+git add Cargo.toml Cargo.lock package.json src-tauri/tauri.conf.json \
+        CHANGELOG.md README.md 'web/src/app/(reader)/app/install/page.mdx'
+git commit -m "Release {NEXT}: {one-line theme}"
+git push origin main            # let CI go green BEFORE tagging
+git tag v{NEXT}
+git push origin v{NEXT}         # the SINGLE new tag, never --tags
+```
+
+### Never `git push --tags`
+
+`release.yml`'s cleanup step runs
+`gh release delete --cleanup-tag` (line ~957), which **deletes the tag
+from origin** as it prunes old releases past the keep-count. Those tags
+survive in every local clone. `git push --tags` re-pushes the whole
+stale set, and each resurrected `v*` tag re-triggers a full release
+run — matrix builds, signing, the lot.
+
+Push the one new tag by name. Always.
+
+### A tag push runs the validators, and holds SSH open
+
+Per AGENTS.md, the `pre-push` hook fires the Linux + Windows validators
+**only** when the push contains a `refs/tags/v*` ref. That is two SSH
+round-trips running clippy and a Windows compile — minutes — while git
+keeps the connection open.
+
+If the push dies with **exit 141 (SIGPIPE)** after the gate reports
+green, that is the SSH connection timing out, not a quality failure.
+Retry with:
+
+```bash
+GIT_SSH_COMMAND='ssh -o ServerAliveInterval=20' git push origin v{NEXT}
+```
+
+`--no-verify` is **not** the fix. AGENTS.md records v0.2.10 through
+v0.2.12 all shipping that way while the validators sat inert, and notes
+that a bypass used routinely is indistinguishable from no gate at all.
+Push the branch first, let CI finish, then push the tag — that is the
+workflow that keeps the gate real.
 
 ## Rules
 
@@ -234,13 +331,15 @@ Bumped CURRENT → NEXT. 6 files changed. Review + commit when ready.
   must exceed `CURRENT` (whether `CURRENT` is a plain release or an
   earlier `-beta`). If the user really wants a backwards bump, they
   can edit the files directly.
-- Refuse if the working tree is dirty in any of the six touched
-  files (Cargo.toml, package.json, src-tauri/tauri.conf.json,
-  CHANGELOG.md, README.md,
+- Refuse if the working tree is dirty in any of the seven touched
+  files (Cargo.toml, Cargo.lock, package.json,
+  src-tauri/tauri.conf.json, CHANGELOG.md, README.md,
   web/src/app/(reader)/app/install/page.mdx) — let the user commit
-  or stash first so the bump diff is isolated.
+  or stash first so the bump diff is isolated. `Cargo.lock` counts:
+  a pre-existing lock change would ride along invisibly inside what
+  looks like a pure version bump.
 - Do not touch any other file, and do not touch other parts of the
-  six files. Specifically: in README.md only the status banner
+  seven files. Specifically: in README.md only the status banner
   line is in scope; do not retouch install snippets, version
   strings in code blocks, or anything else. Version strings in doc
   examples (e.g. `dev-docs/*.md`) are intentionally pinned and must
