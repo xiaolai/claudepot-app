@@ -6,7 +6,42 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.3.2 — beta (unreleased)
+## 0.3.3 — beta (unreleased)
+
+### Added
+
+- **Unused artifacts view** (Activities → Usage → "Unused"). Lists
+  installed skills, agents, and commands that have no recorded
+  invocation, so you can see what's earning its keep and what isn't.
+  Artifacts modified in the last week are held back — too new to judge —
+  and artifacts belonging to plugins that aren't enabled are excluded,
+  since a disabled plugin can't fire. Each row links straight to the
+  artifact in Config.
+- **MCP tool calls are now tracked** alongside skills, hooks, agents,
+  and commands. Previously a plugin whose whole value was a bundled MCP
+  server looked completely unused. Calls now appear in the Hot, Noisy,
+  and All views, attributed to the plugin that ships the server, so a
+  server failing half its calls is finally visible.
+
+### Changed
+
+- **Usage history now survives a session cleanup.** Pruning old
+  transcripts used to erase the record of what had run, which made
+  regularly-used skills read as never-used. A durable ledger now keeps
+  "this fired at least once" independently of which transcripts remain
+  on disk.
+
+### Fixed
+
+- **Plugin settings were being silently dropped.** Claudepot read the
+  wrong key when working out which plugins are enabled, so every
+  marketplace plugin looked disabled and the settings they contribute
+  never reached the merged configuration.
+- **The push guard no longer passes a scan it couldn't run.** If the
+  pre-push secret check was unable to examine a push, it reported
+  "clean" rather than saying so. It now blocks and explains.
+
+## 0.3.2 — beta (released 2026-07-26)
 
 ### Added
 
