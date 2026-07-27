@@ -636,13 +636,105 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
     (files, plugins)
 }
 
-/// Read enabled plugin specs from user settings. CC's discovery enables
-/// plugins only when the user's `settings.json` has a truthy entry
-/// under `plugins.<spec>`; entries absent from the map are disabled.
-/// Returns the set of truthy specs; absent / missing files yield an
-/// empty set, which correctly disables every discovered marketplace
-/// plugin.
-fn load_enabled_plugin_specs(home: &Path) -> std::collections::HashSet<String> {
+/// Map every MCP **server name** declared by an installed plugin to the
+/// owning **plugin name**.
+///
+/// Why this exists: `artifact_usage` records MCP calls keyed by their
+/// wire name (`mcp__<server>__<tool>`) with no plugin attribution — the
+/// extractor is pure JSONL and cannot read the filesystem. Without this
+/// map, a plugin whose entire value is a bundled MCP server looks
+/// completely unused.
+///
+/// Two on-disk shapes are both real and both handled:
+///
+/// ```json
+/// { "mcpServers": { "codex-cli": { … } } }   // nlpm, ui-tokenize, vercel
+/// { "context7":   { … } }                    // context7 — bare map
+/// ```
+///
+/// Scans every cached version directory; later versions overwrite
+/// earlier ones, which is harmless because the mapping is
+/// server → plugin and a plugin doesn't rename its server across
+/// versions in practice.
+///
+/// A server configured outside a plugin (user `.mcp.json`) simply won't
+/// appear — callers must treat a missing entry as "unattributed", not
+/// as "no plugin".
+pub fn mcp_server_to_plugin() -> std::collections::HashMap<String, String> {
+    use std::collections::HashMap;
+    let mut out = HashMap::new();
+    let root = claude_config_dir().join("plugins").join("cache");
+    let Ok(marketplaces) = std::fs::read_dir(&root) else {
+        return out;
+    };
+    for mk in marketplaces.flatten() {
+        let Ok(plugins) = std::fs::read_dir(mk.path()) else {
+            continue;
+        };
+        for plug in plugins.flatten() {
+            let plug_name = plug.file_name().to_string_lossy().into_owned();
+            let Ok(versions) = std::fs::read_dir(plug.path()) else {
+                continue;
+            };
+            for ver in versions.flatten() {
+                let manifest = ver.path().join(".mcp.json");
+                let Ok(bytes) = std::fs::read(&manifest) else {
+                    continue;
+                };
+                let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                    continue;
+                };
+                // Prefer the wrapped form; fall back to treating the
+                // whole object as the server map.
+                let servers = v
+                    .get("mcpServers")
+                    .and_then(|x| x.as_object())
+                    .or_else(|| v.as_object());
+                let Some(servers) = servers else { continue };
+                for name in servers.keys() {
+                    // Guard the bare-map fallback: a stray scalar key
+                    // (e.g. `"$schema": "…"`) is not a server.
+                    if servers.get(name).and_then(|x| x.as_object()).is_none() {
+                        continue;
+                    }
+                    out.insert(name.clone(), plug_name.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The settings key CC stores plugin enablement under.
+///
+/// **Not `plugins`.** Claudepot read `plugins` until 2026-07-27; that
+/// key does not exist in any CC settings file, so this function
+/// returned an empty set for every real user and every marketplace
+/// plugin was reported disabled. Verified against CC source:
+/// `utils/settings/types.ts:559` declares the field, and
+/// `utils/plugins/installedPluginsManager.ts:827-830` reads it —
+/// *"Plugins are loaded from settings.enabledPlugins"*.
+const ENABLED_PLUGINS_KEY: &str = "enabledPlugins";
+
+/// Read enabled plugin specs from user settings.
+///
+/// CC's schema (`types.ts:559`) is
+/// `Record<string, string[] | boolean | undefined>` keyed by
+/// `<plugin>@<marketplace>`:
+///
+/// - `true`      → enabled
+/// - `false`     → disabled
+/// - `["1.2.0"]` → enabled, pinned to version constraints. Presence
+///   with constraints means enabled; we don't evaluate the constraint
+///   here because this function answers "is it on?", not "which
+///   version?".
+/// - absent      → disabled (for marketplace plugins; builtins default
+///   to on, but this function only classifies the marketplace cache)
+///
+/// A missing file, unparseable JSON, or a missing key yields an empty
+/// set — every discovered marketplace plugin then reads as disabled,
+/// which is the safe direction.
+pub fn load_enabled_plugin_specs(home: &Path) -> std::collections::HashSet<String> {
     use std::collections::HashSet;
     let mut out = HashSet::new();
     let p = home.join("settings.json");

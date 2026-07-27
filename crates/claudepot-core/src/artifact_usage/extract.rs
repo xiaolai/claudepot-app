@@ -47,6 +47,7 @@ use crate::artifact_usage::extract_helpers::{
     extract_slash_commands, hook_artifact_key, parse_colon_plugin_id, parse_command_plugin_id,
     parse_hook_plugin_id, parse_skill_plugin_id,
 };
+use crate::artifact_usage::identity::mcp_artifact_key;
 use crate::artifact_usage::model::{ArtifactKind, Outcome, UsageEvent};
 use chrono::DateTime;
 use serde_json::Value;
@@ -198,7 +199,37 @@ pub fn extract_assistant_with_ids(
             if block.get("type").and_then(Value::as_str) != Some("tool_use") {
                 return None;
             }
-            if block.get("name").and_then(Value::as_str) != Some("Agent") {
+            let tool_name = block.get("name").and_then(Value::as_str)?;
+
+            // MCP tool call — same block shape as Agent, so it rides the
+            // same `tool_use_id` → `tool_result.is_error` pairing and
+            // gets accurate outcomes for free.
+            //
+            // The key is the full wire name. Server names can contain
+            // underscores and hyphens, so re-parsing into (server, tool)
+            // and re-joining would not round-trip.
+            if let Some(key) = mcp_artifact_key(tool_name) {
+                let tool_use_id = block.get("id").and_then(Value::as_str).map(str::to_string);
+                return Some((
+                    UsageEvent {
+                        ts_ms,
+                        session_id: session_id.to_string(),
+                        kind: ArtifactKind::Mcp,
+                        artifact_key: key,
+                        // Attribution to an owning plugin needs the
+                        // filesystem (a plugin's `.mcp.json`), and this
+                        // extractor is deliberately pure JSONL. The
+                        // rollup layer fills it in.
+                        plugin_id: None,
+                        outcome: Outcome::Ok,
+                        duration_ms: None,
+                        extra_json: None,
+                    },
+                    tool_use_id,
+                ));
+            }
+
+            if tool_name != "Agent" {
                 return None;
             }
             let input = block.get("input")?;
@@ -454,6 +485,90 @@ mod tests {
         );
         let events = extract_from_line(&line, "S1");
         assert_eq!(events[0].plugin_id, None);
+    }
+
+    // ── MCP tool calls (ArtifactKind::Mcp) ────────────────────────
+
+    #[test]
+    fn mcp_tool_use_yields_event_keyed_by_full_wire_name() {
+        let v: Value = serde_json::from_str(
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:00Z","message":{"content":[
+                {"type":"tool_use","id":"toolu_M","name":"mcp__mermaider__validate_syntax","input":{}}
+            ]}}"#,
+        )
+        .unwrap();
+        let evs = extract_from_line(&v, "S1");
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].kind, ArtifactKind::Mcp);
+        assert_eq!(evs[0].artifact_key, "mcp__mermaider__validate_syntax");
+        assert_eq!(evs[0].outcome, Outcome::Ok);
+    }
+
+    #[test]
+    fn mcp_server_name_with_leading_underscore_and_hyphens_round_trips() {
+        // Real name observed in this repo's own transcripts. The prefix
+        // is followed by THREE underscores, so any naive split breaks.
+        let name = "mcp___hypothesi_tauri-mcp-server__webview_execute_js";
+        let v: Value = serde_json::from_str(&format!(
+            r#"{{"type":"assistant","timestamp":"2026-01-01T00:00:00Z","message":{{"content":[
+                {{"type":"tool_use","id":"toolu_M","name":"{name}","input":{{}}}}
+            ]}}}}"#
+        ))
+        .unwrap();
+        let evs = extract_from_line(&v, "S1");
+        assert_eq!(evs.len(), 1);
+        assert_eq!(
+            evs[0].artifact_key, name,
+            "key must be the verbatim wire name, not a lossy re-join"
+        );
+        assert_eq!(
+            crate::artifact_usage::identity::mcp_server_from_tool_name(name).as_deref(),
+            Some("_hypothesi_tauri-mcp-server")
+        );
+    }
+
+    #[test]
+    fn mcp_tool_use_pairs_its_id_for_outcome_flipping() {
+        // Without the id, the Noisy view can't attribute failures —
+        // mcp__mermaider__validate_syntax fails >50% of the time.
+        let v: Value = serde_json::from_str(
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:00Z","message":{"content":[
+                {"type":"tool_use","id":"toolu_M","name":"mcp__x__y","input":{}}
+            ]}}"#,
+        )
+        .unwrap();
+        let pairs = extract_assistant_with_ids(&v, 0, "S1");
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].1.as_deref(), Some("toolu_M"));
+    }
+
+    #[test]
+    fn bare_server_prefix_without_a_tool_is_not_an_event() {
+        // `mcp__server` names a server (used by permission rules), not
+        // a call. Recording it would invent invocations.
+        let v: Value = serde_json::from_str(
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:00Z","message":{"content":[
+                {"type":"tool_use","id":"t","name":"mcp__lonely","input":{}}
+            ]}}"#,
+        )
+        .unwrap();
+        assert!(extract_from_line(&v, "S1").is_empty());
+    }
+
+    #[test]
+    fn mcp_and_agent_blocks_coexist_in_one_message() {
+        let v: Value = serde_json::from_str(
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:00Z","message":{"content":[
+                {"type":"tool_use","id":"a","name":"Agent","input":{"subagent_type":"Explore"}},
+                {"type":"tool_use","id":"m","name":"mcp__srv__tool","input":{}},
+                {"type":"tool_use","id":"b","name":"Bash","input":{"command":"ls"}}
+            ]}}"#,
+        )
+        .unwrap();
+        let evs = extract_from_line(&v, "S1");
+        assert_eq!(evs.len(), 2, "Bash is not an artifact");
+        assert_eq!(evs[0].kind, ArtifactKind::Agent);
+        assert_eq!(evs[1].kind, ArtifactKind::Mcp);
     }
 
     // ----------- agent -------------------------------------------------

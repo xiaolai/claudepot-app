@@ -26,6 +26,23 @@ pub enum ArtifactKind {
     /// Slash command — extracted from `<command-name>/foo` markers in
     /// user message content.
     Command,
+    /// MCP tool call — `tool_use.name` starting with `mcp__`. Outcome
+    /// closes on the matching `tool_result` exactly like [`Self::Agent`].
+    ///
+    /// The artifact key is the **full** wire name
+    /// (`mcp__<server>__<tool>`), not a re-parsed pair: server names may
+    /// contain underscores and hyphens (`_hypothesi_tauri-mcp-server` is
+    /// a real one), so storing the canonical string avoids a lossy
+    /// round-trip. Use [`crate::artifact_usage::identity::mcp_server_from_tool_name`]
+    /// when the server alone is needed.
+    ///
+    /// **Renaming a server splits its history**, because the key is the
+    /// wire name. This repo's own `.mcp.json` rename
+    /// (`@hypothesi/tauri-mcp-server` → `tauri`, commit da350ba1) shows
+    /// up as two keys for one server. That is the same behavior a
+    /// renamed skill or agent gets, and it is the honest one: we record
+    /// what actually fired, not what we guess it was previously called.
+    Mcp,
 }
 
 impl ArtifactKind {
@@ -35,6 +52,7 @@ impl ArtifactKind {
             Self::Hook => "hook",
             Self::Agent => "agent",
             Self::Command => "command",
+            Self::Mcp => "mcp",
         }
     }
 
@@ -44,6 +62,7 @@ impl ArtifactKind {
             "hook" => Self::Hook,
             "agent" => Self::Agent,
             "command" => Self::Command,
+            "mcp" => Self::Mcp,
             _ => return None,
         })
     }
