@@ -104,6 +104,34 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
+      # Refuse to move the tap backwards.
+      #
+      # Nothing here is ordered: a late-finishing release job, a re-run,
+      # or a manual `workflow_dispatch` backfill all write the tap
+      # unconditionally, and last-writer-wins. On 2026-07-26 three runs
+      # landed inside 40 seconds — 0.1.42, then 0.3.2, then 0.3.1 — and
+      # the tap was left advertising 0.3.1 with 0.3.2 already released.
+      # Linux `brew install claudepot` served the older CLI until someone
+      # noticed.
+      #
+      # `sort -V` gives the version ordering; equal is allowed so a
+      # re-run of the current version is still idempotent.
+      - name: Refuse to downgrade the tap
+        run: |
+          set -eu
+          CURRENT=$(grep -m1 -oE 'version "[0-9]+\.[0-9]+\.[0-9]+"' \
+                      homebrew-tap/Casks/claudepot.rb | grep -oE '[0-9.]+' || echo "0.0.0")
+          echo "tap currently advertises: $CURRENT"
+          echo "this run would write:     $VERSION"
+          NEWEST=$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)
+          if [ "$NEWEST" != "$VERSION" ]; then
+            echo "::error::Refusing to downgrade the tap from $CURRENT to $VERSION."
+            echo "::error::A newer release already reached the tap. If this is a"
+            echo "::error::deliberate rollback, edit xiaolai/homebrew-tap directly."
+            exit 1
+          fi
+          echo "OK: $VERSION >= $CURRENT"
+
       # The formula is Linux-only: macOS users get the CLI bundled
       # inside the GUI cask (see below), so `brew install claudepot`
       # is the right install on Linux and `brew install --cask claudepot`
@@ -120,17 +148,26 @@ jobs:
             version "${VERSION}"
             license "MIT"
 
-            depends_on :linux
-
-            on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/${REPO}/releases/download/v#{version}/claudepot-aarch64-linux.tar.gz"
-                sha256 "${CLI_LINUX_ARM}"
-              else
-                url "https://github.com/${REPO}/releases/download/v#{version}/claudepot-x86_64-linux.tar.gz"
-                sha256 "${CLI_LINUX_INTEL}"
-              end
+            # url/sha256 MUST be set at the top level, not inside an
+            # \`on_linux do\` block. Homebrew evaluates the formula DSL at
+            # LOAD time on every platform and requires a url
+            # unconditionally — with the stanzas nested in \`on_linux\`,
+            # loading on macOS raised
+            #   "claudepot: formula requires at least a URL"
+            # and every \`brew\` command touching the bare name
+            # \`claudepot\` printed that error before falling through to
+            # the cask. \`Hardware::CPU.arm?\` evaluates fine on macOS, so
+            # the conditional is safe here; \`depends_on :linux\` is what
+            # actually prevents installing it on a Mac.
+            if Hardware::CPU.arm?
+              url "https://github.com/${REPO}/releases/download/v#{version}/claudepot-aarch64-linux.tar.gz"
+              sha256 "${CLI_LINUX_ARM}"
+            else
+              url "https://github.com/${REPO}/releases/download/v#{version}/claudepot-x86_64-linux.tar.gz"
+              sha256 "${CLI_LINUX_INTEL}"
             end
+
+            depends_on :linux
 
             def install
               bin.install "claudepot"
@@ -194,7 +231,11 @@ jobs:
               strategy :github_latest
             end
 
-            depends_on macos: ">= :catalina"
+            # Symbol form, not the string ">= :catalina". Homebrew
+            # deprecated string comparison for \`depends_on macos:\` and
+            # warns on every command that loads the cask; the bare symbol
+            # already means "this version or newer".
+            depends_on macos: :catalina
 
             app "Claudepot.app"
 
