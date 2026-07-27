@@ -502,6 +502,22 @@ impl SessionIndex {
         crate::artifact_usage::list_all_known(&db).map_err(SessionIndexError::Sql)
     }
 
+    /// Every artifact Claudepot has ever observed fire, with first and
+    /// last sighting. Backs the Unused view: the caller subtracts this
+    /// set from its installed inventory.
+    ///
+    /// Sourced from the durable `artifact_first_last` ledger, NOT from
+    /// `usage_daily` — the latter is decremented when a transcript is
+    /// pruned, which would make regularly-used artifacts read as
+    /// never-fired.
+    pub fn usage_ever_fired(
+        &self,
+    ) -> Result<Vec<(crate::artifact_usage::ArtifactKind, String, i64, i64)>, SessionIndexError>
+    {
+        let db = self.db();
+        crate::artifact_usage::store::list_ever_fired(&db).map_err(SessionIndexError::Sql)
+    }
+
     /// Truncate the cache. Intended as the escape hatch for cases the
     /// `(size, mtime)` guard can't see — filesystems with coarse
     /// mtime resolution, clock skew, a JSONL edited in-place with

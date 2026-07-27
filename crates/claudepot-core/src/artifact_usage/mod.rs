@@ -15,9 +15,11 @@
 
 pub mod extract;
 mod extract_helpers;
+pub mod identity;
 pub mod model;
 pub mod schema;
 pub mod store;
+pub mod unused;
 
 pub use extract_helpers::hook_artifact_key;
 
@@ -103,18 +105,52 @@ pub fn list_top_used(
     rows
 }
 
-/// Discover every (kind, key) pair the index has *ever* recorded
-/// usage for. Used by the "Unused" filter — the caller intersects
-/// this with the set of installed artifacts (from `config_view`)
-/// to find the difference.
+/// Fill in `plugin_id` for MCP rows using a server→plugin map.
 ///
-/// This deliberately ignores the rolling window — an artifact that
-/// fired once a year ago and was then forgotten still shows up here.
-/// Callers that want "unused in last N days" should compare against
-/// `last_seen_ms` from `usage_for_artifact`.
+/// Pure — the map is built by
+/// `config_view::discover::mcp_server_to_plugin` (which does the
+/// filesystem work) and injected here, keeping the extractor and this
+/// rollup free of I/O.
+///
+/// Only touches rows whose `plugin_id` is `None`; an already-attributed
+/// row is left alone. Servers with no owning plugin (configured in a
+/// user `.mcp.json`) stay `None` — "unattributed", not "no plugin".
+pub fn attribute_mcp_plugins(
+    rows: &mut [UsageListRow],
+    server_to_plugin: &std::collections::HashMap<String, String>,
+) {
+    for row in rows.iter_mut() {
+        if row.kind != ArtifactKind::Mcp || row.plugin_id.is_some() {
+            continue;
+        }
+        if let Some(server) = identity::mcp_server_from_tool_name(&row.artifact_key) {
+            if let Some(plugin) = server_to_plugin.get(&server) {
+                row.plugin_id = Some(plugin.clone());
+            }
+        }
+    }
+}
+
+/// Every (kind, key) pair `usage_daily` currently retains a non-zero
+/// count for.
+///
+/// Scoped to what the rollup still holds — for durable "ever observed"
+/// semantics use [`store::list_ever_fired`], which reads the
+/// `artifact_first_last` ledger and survives a session prune.
 pub fn list_all_known(db: &Connection) -> SqlResult<Vec<(ArtifactKind, String)>> {
+    // `HAVING SUM(fire_count) > 0` is load-bearing, not cosmetic.
+    // `subtract_daily_for_file` zeroes a row's counters rather than
+    // deleting it, so a plain `SELECT DISTINCT` reports artifacts whose
+    // entire contribution has been backed out as still "known" —
+    // silently hiding them from any unused/never-fired computation.
+    //
+    // For durable "ever observed" semantics prefer
+    // `store::list_ever_fired`; this function is scoped to what
+    // `usage_daily` currently retains.
     let mut stmt = db.prepare(
-        "SELECT DISTINCT kind, artifact_key FROM usage_daily ORDER BY kind, artifact_key",
+        "SELECT kind, artifact_key FROM usage_daily \
+         GROUP BY kind, artifact_key HAVING SUM(fire_count) > 0 \
+         ORDER BY kind, artifact_key",
     )?;
     let rows: Vec<(ArtifactKind, String)> = stmt
         .query_map([], |r| {
@@ -158,6 +194,182 @@ mod tests {
             duration_ms: dur,
             extra_json: None,
         }
+    }
+
+    // ── Durable ledger (schema v6) ────────────────────────────────
+    //
+    // These lock down the whole reason `artifact_first_last` exists:
+    // `usage_daily` is decremented when a transcript is pruned or
+    // re-scanned, so it cannot answer "did this ever fire?".
+
+    #[test]
+    fn ledger_records_first_and_last_sighting() {
+        let db = open_in_memory();
+        let base = 1_700_000_000_000_i64;
+        for offset in [5_000_i64, 0, 9_000] {
+            let e = ev(
+                ArtifactKind::Skill,
+                "plugin:p:a",
+                base + offset,
+                Outcome::Ok,
+                None,
+            );
+            store::insert_event(&db, &e, "/s.jsonl", "/proj").unwrap();
+        }
+        let rows = store::list_ever_fired(&db).unwrap();
+        assert_eq!(rows.len(), 1);
+        let (kind, key, first, last) = &rows[0];
+        assert_eq!(*kind, ArtifactKind::Skill);
+        assert_eq!(key, "plugin:p:a");
+        assert_eq!(*first, base, "first_seen must move earlier, never later");
+        assert_eq!(
+            *last,
+            base + 9_000,
+            "last_seen must move later, never earlier"
+        );
+    }
+
+    #[test]
+    fn ledger_survives_transcript_prune_but_daily_does_not() {
+        // The load-bearing case. A user prunes old sessions via
+        // Settings -> Cleanup; usage_daily is decremented to zero,
+        // but the artifact demonstrably DID fire.
+        let db = open_in_memory();
+        let now = 1_700_000_000_000_i64;
+        let e = ev(ArtifactKind::Command, "/deploy", now, Outcome::Ok, None);
+        store::insert_event(&db, &e, "/gone.jsonl", "/proj").unwrap();
+
+        store::subtract_daily_for_file(&db, "/gone.jsonl").unwrap();
+        store::delete_events_for_file(&db, "/gone.jsonl").unwrap();
+
+        // usage_daily has been zeroed out...
+        assert!(
+            list_all_known(&db).unwrap().is_empty(),
+            "zeroed daily rows must not report as known"
+        );
+        // ...but the durable ledger still knows.
+        let rows = store::list_ever_fired(&db).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "/deploy");
+    }
+
+    #[test]
+    fn ledger_survives_full_rebuild() {
+        let db = open_in_memory();
+        let now = 1_700_000_000_000_i64;
+        let e = ev(ArtifactKind::Agent, "explore", now, Outcome::Ok, None);
+        store::insert_event(&db, &e, "/s.jsonl", "/proj").unwrap();
+
+        store::truncate_all(&db).unwrap();
+
+        assert!(list_all_known(&db).unwrap().is_empty());
+        assert_eq!(
+            store::list_ever_fired(&db).unwrap().len(),
+            1,
+            "truncate_all must not clear artifact_first_last"
+        );
+    }
+
+    #[test]
+    fn ledger_rescan_of_same_transcript_is_idempotent() {
+        let db = open_in_memory();
+        let now = 1_700_000_000_000_i64;
+        let e = ev(ArtifactKind::Skill, "plugin:p:b", now, Outcome::Ok, None);
+        for _ in 0..3 {
+            store::insert_event(&db, &e, "/s.jsonl", "/proj").unwrap();
+        }
+        let rows = store::list_ever_fired(&db).unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "one row per (kind, key) regardless of rescans"
+        );
+        assert_eq!(rows[0].2, now);
+        assert_eq!(rows[0].3, now);
+    }
+
+    #[test]
+    fn ledger_separates_same_key_across_kinds() {
+        let db = open_in_memory();
+        let now = 1_700_000_000_000_i64;
+        for kind in [ArtifactKind::Skill, ArtifactKind::Command] {
+            let e = ev(kind, "shared-name", now, Outcome::Ok, None);
+            store::insert_event(&db, &e, "/s.jsonl", "/proj").unwrap();
+        }
+        assert_eq!(
+            store::list_ever_fired(&db).unwrap().len(),
+            2,
+            "a command must not mark a same-named skill as used"
+        );
+    }
+
+    #[test]
+    fn zeroed_daily_row_is_not_reported_as_known() {
+        // Regression: list_all_known used SELECT DISTINCT with no
+        // HAVING, so a fully-subtracted row still read as "known".
+        let db = open_in_memory();
+        let now = 1_700_000_000_000_i64;
+        let used = ev(ArtifactKind::Skill, "kept", now, Outcome::Ok, None);
+        let gone = ev(ArtifactKind::Skill, "zeroed", now, Outcome::Ok, None);
+        store::insert_event(&db, &used, "/keep.jsonl", "/proj").unwrap();
+        store::insert_event(&db, &gone, "/drop.jsonl", "/proj").unwrap();
+
+        store::subtract_daily_for_file(&db, "/drop.jsonl").unwrap();
+
+        let known: Vec<String> = list_all_known(&db)
+            .unwrap()
+            .into_iter()
+            .map(|(_, k)| k)
+            .collect();
+        assert_eq!(known, vec!["kept".to_string()]);
+    }
+
+    // ── MCP plugin attribution ────────────────────────────────────
+
+    fn row(kind: ArtifactKind, key: &str, plugin: Option<&str>) -> UsageListRow {
+        UsageListRow {
+            kind,
+            artifact_key: key.into(),
+            plugin_id: plugin.map(str::to_string),
+            stats: UsageStats::default(),
+        }
+    }
+
+    #[test]
+    fn mcp_rows_are_attributed_to_the_plugin_that_bundles_the_server() {
+        let map = std::collections::HashMap::from([("codex-cli".to_string(), "nlpm".to_string())]);
+        let mut rows = vec![row(ArtifactKind::Mcp, "mcp__codex-cli__codex", None)];
+        attribute_mcp_plugins(&mut rows, &map);
+        assert_eq!(rows[0].plugin_id.as_deref(), Some("nlpm"));
+    }
+
+    #[test]
+    fn unattributed_servers_stay_none_rather_than_guessing() {
+        // A server configured in a user .mcp.json has no owning plugin.
+        // Inventing one would misattribute usage.
+        let map = std::collections::HashMap::new();
+        let mut rows = vec![row(
+            ArtifactKind::Mcp,
+            "mcp__mermaider__validate_syntax",
+            None,
+        )];
+        attribute_mcp_plugins(&mut rows, &map);
+        assert_eq!(rows[0].plugin_id, None);
+    }
+
+    #[test]
+    fn attribution_leaves_non_mcp_and_already_attributed_rows_alone() {
+        let map = std::collections::HashMap::from([
+            ("codex-cli".to_string(), "nlpm".to_string()),
+            ("srv".to_string(), "wrong".to_string()),
+        ]);
+        let mut rows = vec![
+            row(ArtifactKind::Skill, "plugin:bureau:distill", Some("bureau")),
+            row(ArtifactKind::Mcp, "mcp__srv__tool", Some("already")),
+        ];
+        attribute_mcp_plugins(&mut rows, &map);
+        assert_eq!(rows[0].plugin_id.as_deref(), Some("bureau"));
+        assert_eq!(rows[1].plugin_id.as_deref(), Some("already"));
     }
 
     #[test]

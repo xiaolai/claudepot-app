@@ -54,7 +54,25 @@
 ///     so existing rows are rewritten in the new format. memory_links
 ///     and tool_calls FKs cascade-clear via the existing v4
 ///     migration's `DELETE FROM sessions`/`session_turns` path.
-pub const SCHEMA_VERSION: &str = "5";
+///   - v6: added `artifact_first_last` — the durable "ever observed"
+///     ledger. `usage_daily` cannot answer that question:
+///     `subtract_daily_for_file` backs out a transcript's contribution
+///     on every re-scan *or vanish*, and `truncate_all` clears it, so
+///     its true semantic is "fires from transcripts currently on disk".
+///     Pruning sessions (Settings → Cleanup) would therefore make
+///     regularly-used artifacts read as never-fired. The ledger is
+///     monotonic (MIN/MAX upsert), is never subtracted, and is
+///     deliberately NOT cleared by `truncate_all`. The bump forces a
+///     re-scan so retained transcripts backfill it — note this is a
+///     backfill from transcripts, not from `usage_daily` row
+///     existence, which would import zeroed-out false positives.
+///   - v7: `ArtifactKind::Mcp` — MCP tool calls are now extracted as
+///     usage events (`mcp__<server>__<tool>`). The bump forces a
+///     re-scan so historical MCP calls populate `usage_event`,
+///     `usage_daily` AND `artifact_first_last`; without it, MCP usage
+///     would only start accruing from the next session and every
+///     bundled-MCP plugin would keep reading as never-used.
+pub const SCHEMA_VERSION: &str = "7";
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS usage_event (
@@ -96,6 +114,40 @@ CREATE INDEX IF NOT EXISTS idx_usage_daily_kind_key
     ON usage_daily(kind, artifact_key);
 CREATE INDEX IF NOT EXISTS idx_usage_daily_plugin
     ON usage_daily(plugin_id);
+
+-- Durable "ever observed" ledger (schema v6).
+--
+-- One row per (kind, artifact_key), written monotonically: first_seen
+-- only ever moves earlier, last_seen only ever moves later. NEVER
+-- subtracted (unlike usage_daily) and NEVER cleared by
+-- `store::truncate_all`, so it survives both a session prune and a
+-- full index rebuild.
+--
+-- This is the ONLY sound source for "has this artifact ever fired?".
+-- Do not answer that question from usage_daily — see the v6 note on
+-- SCHEMA_VERSION for why.
+--
+-- Coverage boundary: "ever observed **by Claudepot**". Usage that
+-- predates this table, or that happened in transcripts deleted before
+-- the v6 backfill re-scan, is not represented. The UI must say
+-- "no invocation on record", never "never used".
+--
+-- Growth: one row per DISTINCT (kind, artifact_key) ever observed —
+-- not per invocation — and there is deliberately no GC. The bound is
+-- the number of distinct artifacts a machine ever runs (hundreds,
+-- low thousands for a heavy plugin user) at ~60 bytes/row, so even a
+-- 10k-artifact history is well under 1 MB. Adding a retention sweep
+-- would reintroduce the exact false-negative this table prevents.
+CREATE TABLE IF NOT EXISTS artifact_first_last (
+    kind          TEXT    NOT NULL,
+    artifact_key  TEXT    NOT NULL,
+    first_seen_ms INTEGER NOT NULL,
+    last_seen_ms  INTEGER NOT NULL,
+    PRIMARY KEY (kind, artifact_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_first_last_kind
+    ON artifact_first_last(kind);
 "#;
 
 /// 86400 seconds per day. Floor a ms timestamp to its UTC day.

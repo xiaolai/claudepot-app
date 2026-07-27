@@ -39,7 +39,68 @@ pub fn insert_event(
         ],
     )?;
     bump_daily(db, event)?;
+    bump_first_last(db, event)?;
     Ok(())
+}
+
+/// Record the event in the durable `artifact_first_last` ledger.
+///
+/// Monotonic by construction: `first_seen_ms` only moves earlier,
+/// `last_seen_ms` only moves later. There is deliberately **no**
+/// subtract counterpart — that is the whole point of the table.
+/// `subtract_daily_for_file` exists for `usage_daily` because those
+/// counters must track the live event set; "was this ever observed"
+/// is not a counter and must survive transcript deletion.
+///
+/// Re-scanning the same transcript re-inserts the same timestamps, so
+/// the MIN/MAX upsert is idempotent — no double-count risk.
+fn bump_first_last(db: &Connection, event: &UsageEvent) -> SqlResult<()> {
+    db.execute(
+        "INSERT INTO artifact_first_last (
+            kind, artifact_key, first_seen_ms, last_seen_ms
+         ) VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT (kind, artifact_key) DO UPDATE SET
+            first_seen_ms = MIN(first_seen_ms, excluded.first_seen_ms),
+            last_seen_ms  = MAX(last_seen_ms,  excluded.last_seen_ms)",
+        params![event.kind.as_str(), event.artifact_key, event.ts_ms],
+    )?;
+    Ok(())
+}
+
+/// Every `(kind, artifact_key)` Claudepot has ever observed fire,
+/// with its first and last sighting.
+///
+/// This is the sound answer to "has this artifact ever run?" — see
+/// [`bump_first_last`]. Callers computing an "unused" set should
+/// subtract this from their installed inventory.
+///
+/// One query, no per-key round-trip: `usage_for_artifact` issues six
+/// statements per artifact, which is fine for a badge but not for a
+/// 900-row sweep.
+pub fn list_ever_fired(db: &Connection) -> SqlResult<Vec<(ArtifactKind, String, i64, i64)>> {
+    let mut stmt = db.prepare(
+        "SELECT kind, artifact_key, first_seen_ms, last_seen_ms
+           FROM artifact_first_last
+          ORDER BY kind, artifact_key",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            let kind_s: String = r.get(0)?;
+            Ok((
+                ArtifactKind::parse(&kind_s),
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+    // Drop rows whose `kind` no longer parses rather than silently
+    // remapping them to Skill — a bad remap would make a real skill
+    // look "used" because some future kind shared its key.
+    Ok(rows
+        .into_iter()
+        .filter_map(|(k, key, f, l)| k.map(|k| (k, key, f, l)))
+        .collect())
 }
 
 fn bump_daily(db: &Connection, event: &UsageEvent) -> SqlResult<()> {
@@ -133,6 +194,14 @@ pub fn gc_events_older_than(db: &Connection, cutoff_ms: i64) -> SqlResult<usize>
 }
 
 /// Truncate both tables. Only used by `rebuild()`.
+/// Clear the rebuildable usage tables.
+///
+/// **`artifact_first_last` is deliberately NOT cleared.** It is the
+/// durable "ever observed" ledger; wiping it on rebuild would
+/// reintroduce exactly the failure it exists to prevent (an artifact
+/// that fired only in since-deleted transcripts reading as never-run).
+/// It is monotonic, so a rebuild's re-scan can only re-confirm rows,
+/// never inflate them.
 pub fn truncate_all(db: &Connection) -> SqlResult<()> {
     db.execute_batch(
         "DELETE FROM usage_event;
