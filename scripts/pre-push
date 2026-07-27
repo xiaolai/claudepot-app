@@ -206,18 +206,43 @@ if [ -n "$guard_patterns" ]; then
       *)      range="$local_sha --not --remotes=origin" ;;
     esac
 
+    # The scan MUST be able to run. `git log <range>` failing — an
+    # unresolvable range, a shallow clone, a remote_sha this repo has
+    # never seen — writes nothing to stdout, so grep finds nothing and
+    # the pipeline exits "no secret found". That is indistinguishable
+    # from a clean scan and would wave the push through unexamined.
+    #
+    # This is the one place the file's asymmetry inverts. For the
+    # release validator, absence of evidence defers to CI. For a secret
+    # guard, absence of evidence is NOT absence of secrets: a scan that
+    # could not run must block, because the cost of a wrong "allow" on a
+    # PUBLIC repo is unretractable.
+    # shellcheck disable=SC2086  # $range is intentionally word-split
+    if ! git log --oneline -1 $range >/dev/null 2>&1; then
+      echo "✗ Push blocked: cannot scan $range for secrets."
+      echo "  'git log $range' failed, so the guard could not examine this"
+      echo "  push at all. Refusing to treat an unrunnable scan as a clean"
+      echo "  one. Fetch the remote ref (git fetch origin) and retry."
+      guard_hit=1
+      continue
+    fi
+
     # Only ADDED lines count. Scanning the whole diff would also match the
     # deletion of a leaked value, which would block the very commit that
     # removes it — and `+++ b/path` headers, which are not content.
-    # shellcheck disable=SC2086  # $range is intentionally word-split
+    #
+    # `|| true` on the tail: with `set -o pipefail` (line 95) a grep that
+    # matches nothing exits 1 and would abort the hook mid-scan, skipping
+    # the commit-message check below.
+    # shellcheck disable=SC2086
     if git log -p --no-color $range 2>/dev/null \
          | grep -E '^\+' | grep -vE '^\+\+\+' \
-         | grep -nEi -- "$guard_re" >/dev/null; then
+         | grep -qEi -- "$guard_re"; then
       echo "✗ Push blocked: a pushed commit's CONTENT matches a local secret pattern."
       guard_hit=1
     fi
     # shellcheck disable=SC2086
-    if git log --format='%B' --no-color $range 2>/dev/null | grep -nEi -- "$guard_re" >/dev/null; then
+    if git log --format='%B' --no-color $range 2>/dev/null | grep -qEi -- "$guard_re"; then
       echo "✗ Push blocked: a pushed commit MESSAGE matches a local secret pattern."
       echo "  Message text cannot be fixed by editing a file — it needs a rebase"
       echo "  (git rebase -i --exec 'git commit --amend') or filter-repo."
