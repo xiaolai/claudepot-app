@@ -68,6 +68,73 @@ pub struct ArtifactUsageBatchEntryDto {
     pub stats: ArtifactUsageStatsDto,
 }
 
+/// One row of the durable "ever observed" ledger — the set the Unused
+/// view subtracts from the installed inventory.
+///
+/// Deliberately carries no counts. The question this answers is
+/// binary ("has this ever fired?"); adding a count would invite the
+/// caller to re-derive a windowed answer from a table that does not
+/// support one.
+#[derive(Debug, Clone, Serialize)]
+pub struct ArtifactEverFiredDto {
+    pub kind: String,
+    pub artifact_key: String,
+    pub first_seen_ms: i64,
+    pub last_seen_ms: i64,
+}
+
+/// One row of the Unused view.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnusedArtifactDto {
+    pub kind: String,
+    /// Config-tree node id — the UI navigates to Global → Config with
+    /// `subRoute = "node:<node_id>"`.
+    pub node_id: String,
+    pub artifact_key: String,
+    pub plugin_id: Option<String>,
+    pub label: String,
+    pub abs_path: String,
+    /// Filesystem **modification** time in ms — not install time.
+    pub modified_ms: i64,
+}
+
+/// Unused-view payload. Carries the suppression counts so the pane's
+/// summary line reconciles instead of silently dropping rows.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnusedReportDto {
+    pub rows: Vec<UnusedArtifactDto>,
+    pub installed_count: usize,
+    pub suppressed_recent: usize,
+    pub suppressed_disabled: usize,
+    /// Grace window in days, so the UI states the same number core used
+    /// rather than hard-coding a second copy.
+    pub grace_days: i64,
+}
+
+impl From<claudepot_core::artifact_usage::unused::UnusedReport> for UnusedReportDto {
+    fn from(r: claudepot_core::artifact_usage::unused::UnusedReport) -> Self {
+        Self {
+            rows: r
+                .rows
+                .into_iter()
+                .map(|a| UnusedArtifactDto {
+                    kind: a.kind,
+                    node_id: a.node_id,
+                    artifact_key: a.artifact_key,
+                    plugin_id: a.plugin_id,
+                    label: a.label,
+                    abs_path: a.abs_path,
+                    modified_ms: a.modified_ms,
+                })
+                .collect(),
+            installed_count: r.installed_count,
+            suppressed_recent: r.suppressed_recent,
+            suppressed_disabled: r.suppressed_disabled,
+            grace_days: claudepot_core::artifact_usage::unused::RECENTLY_MODIFIED_GRACE_DAYS,
+        }
+    }
+}
+
 /// Parse a wire `kind` string into the core enum. Returns a Tauri
 /// command-friendly `Result` so handlers can short-circuit invalid
 /// inputs without a panic.

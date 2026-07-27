@@ -111,7 +111,7 @@ export const sections: readonly SectionDef[] = [
     label: "Activities",
     glyph: NF.dashboard,
     loader: importEvents,
-    render: () => <EventsSection />,
+    render: (p) => <EventsSection onNavigate={p.onNavigate} />,
   },
   {
     id: "projects",

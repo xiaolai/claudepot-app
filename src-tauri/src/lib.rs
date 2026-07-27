@@ -1103,6 +1103,8 @@ pub fn run() {
             commands::artifact_usage::artifact_usage_for,
             commands::artifact_usage::artifact_usage_batch,
             commands::artifact_usage::artifact_usage_top,
+            commands::artifact_usage::artifact_usage_ever_fired,
+            commands::artifact_usage::artifact_usage_unused,
             commands::artifact_lifecycle::artifact_classify_path,
             commands::artifact_lifecycle::artifact_disable,
             commands::artifact_lifecycle::artifact_enable,

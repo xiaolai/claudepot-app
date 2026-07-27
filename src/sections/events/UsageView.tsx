@@ -10,23 +10,31 @@
 // fallback so newly-fired events surface without a manual refresh.
 //
 // Filters:
-//   Kind chips      — All / Skill / Hook / Agent / Command
+//   Kind chips      — All / Skill / Hook / Agent / Command / MCP
 //   Plugin dropdown — populated from the data
-//   View chips      — Hot (top 20 by 7d) / Noisy (≥10% errors) / All
+//   View chips      — Hot (top 20 by 7d) / Noisy (≥10% errors)
+//                     / Unused (installed, no invocation on record) / All
 //
-// An "Unused" view (joining installed artifacts from `config_view`
-// against recorded keys) is a future follow-up; the corresponding
-// data API has been removed for now to keep the IPC surface honest
-// about what the UI actually consumes.
+// The "Unused" view is the follow-up this file's header previously
+// deferred. It does NOT share the `artifactUsageTop` rollup: it needs
+// the installed inventory (Config tree) minus the durable ever-fired
+// ledger, which is a different query pair. That lives in
+// `useUnusedArtifacts`, gated on the chip being active so the
+// filesystem scan isn't paid for by the other three views.
+//
+// Hooks are absent from Unused by construction — `artifactKeyForFile`
+// documents that hooks are 1:N with files and have no per-file key, so
+// they can't be missed against the ledger.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
 import type { ArtifactUsageRowDto } from "../../types";
 import { UsageTable, type SortKey } from "./UsageTable";
+import { UnusedPane } from "./UnusedPane";
 
-type KindFilter = "all" | "skill" | "hook" | "agent" | "command";
-type ViewMode = "hot" | "noisy" | "all";
+type KindFilter = "all" | "skill" | "hook" | "agent" | "command" | "mcp";
+type ViewMode = "hot" | "noisy" | "unused" | "all";
 
 const POLL_MS = 5000;
 // Min interval between live-driven refetches — coalesces a burst of
@@ -35,6 +43,8 @@ const POLL_MS = 5000;
 const LIVE_REFRESH_DEBOUNCE_MS = 2000;
 
 interface UsageViewProps {
+  /** Shell navigation — forwarded to the Unused view's Reveal action. */
+  onNavigate?: (id: string, subRoute?: string | null) => void;
   /**
    * Optional callback the parent invokes to register UsageView's
    * refresh function. Lets the EventsSection header refresh button
@@ -45,7 +55,7 @@ interface UsageViewProps {
   registerRefresh?: (refresh: (() => void) | null) => void;
 }
 
-export function UsageView({ registerRefresh }: UsageViewProps = {}) {
+export function UsageView({ registerRefresh, onNavigate }: UsageViewProps = {}) {
   const [rows, setRows] = useState<ArtifactUsageRowDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,11 +111,29 @@ export function UsageView({ registerRefresh }: UsageViewProps = {}) {
     return () => registerRefresh(null);
   }, [registerRefresh, refresh]);
 
+  // Plugins owning UNUSED artifacts, reported up by UnusedPane. Kept
+  // separate from the usage rollup because the two sets are
+  // complements: an artifact is in one or the other, never both. The
+  // dropdown unions them so a plugin whose artifacts have all gone
+  // unused is still selectable.
+  const [unusedPlugins, setUnusedPlugins] = useState<string[]>([]);
+  const handleUnusedPlugins = useCallback((next: string[]) => {
+    // Replace only on a real change — UnusedPane reports on every
+    // fetch, and an unconditional setState would re-render the parent
+    // (and thus remount nothing, but churn) each poll.
+    setUnusedPlugins((prev) =>
+      prev.length === next.length && prev.every((p, i) => p === next[i])
+        ? prev
+        : next,
+    );
+  }, []);
+
   const plugins = useMemo(() => {
     const seen = new Set<string>();
     for (const r of rows) if (r.plugin_id) seen.add(r.plugin_id);
+    for (const p of unusedPlugins) seen.add(p);
     return Array.from(seen).sort();
-  }, [rows]);
+  }, [rows, unusedPlugins]);
 
   const visible = useMemo(() => {
     let out = rows;
@@ -161,9 +189,11 @@ export function UsageView({ registerRefresh }: UsageViewProps = {}) {
         <KindChip current={kind} onPick={setKind} value="hook" label="Hooks" />
         <KindChip current={kind} onPick={setKind} value="agent" label="Agents" />
         <KindChip current={kind} onPick={setKind} value="command" label="Commands" />
+        <KindChip current={kind} onPick={setKind} value="mcp" label="MCP" />
         <span style={{ flex: 1 }} />
         <ViewChip current={view} onPick={setView} value="hot" label="Hot" />
         <ViewChip current={view} onPick={setView} value="noisy" label="Noisy" />
+        <ViewChip current={view} onPick={setView} value="unused" label="Unused" />
         <ViewChip current={view} onPick={setView} value="all" label="All" />
         <select
           aria-label="Filter by plugin"
@@ -188,7 +218,14 @@ export function UsageView({ registerRefresh }: UsageViewProps = {}) {
       </div>
 
       <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        {loading && rows.length === 0 ? (
+        {view === "unused" ? (
+          <UnusedPane
+            kind={kind}
+            plugin={plugin}
+            onNavigate={onNavigate ?? (() => {})}
+            onPluginsDiscovered={handleUnusedPlugins}
+          />
+        ) : loading && rows.length === 0 ? (
           <EmptyHint>Loading usage data…</EmptyHint>
         ) : error ? (
           <EmptyHint danger>Failed to load: {error}</EmptyHint>

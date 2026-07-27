@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ConfigSection } from "./ConfigSection";
 import { UpdatesPanel } from "./global/UpdatesPanel";
 import { MemoryHealthPanel } from "./global/MemoryHealthPanel";
@@ -57,6 +57,17 @@ export function GlobalSection({
   onSubRouteChange: (next: string | null) => void;
 }) {
   const [tab, setTab] = useState<GlobalTab>(loadTab);
+
+  // A `node:<id>` subRoute is a deep-link into the Config tree (e.g.
+  // "Reveal in Config" from Activities -> Usage -> Unused). The tab
+  // otherwise restores from localStorage, so without this the link
+  // would land on whichever tab was last open and silently do nothing.
+  useEffect(() => {
+    if (subRoute?.startsWith("node:") && tab !== "config") {
+      setTab("config");
+      saveTab("config");
+    }
+  }, [subRoute, tab]);
 
   const switchTab = (next: GlobalTab) => {
     setTab(next);

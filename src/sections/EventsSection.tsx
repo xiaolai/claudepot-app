@@ -122,7 +122,13 @@ const AGG_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 // refetch so the 10k-row aggregate query can't be hammered.
 const LIVE_REFRESH_DEBOUNCE_MS = 2_000;
 
-export function EventsSection() {
+export function EventsSection({
+  onNavigate,
+}: {
+  /** Shell navigation. Forwarded to UsageView so the Unused view's
+   *  "Reveal in Config" row action can deep-link to Global -> Config. */
+  onNavigate?: (id: string, subRoute?: string | null) => void;
+} = {}) {
   const [cards, setCards] = useState<ActivityCard[]>([]);
   const [counts, setCounts] = useState<CardsCount | null>(null);
   const [aggCards, setAggCards] = useState<ActivityCard[]>([]);
@@ -391,6 +397,7 @@ export function EventsSection() {
             style={{ flex: 1, minHeight: 0, display: "flex" }}
           >
             <UsageView
+              onNavigate={onNavigate}
               registerRefresh={(fn) => {
                 usageRefreshRef.current = fn;
               }}
