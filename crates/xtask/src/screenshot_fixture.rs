@@ -135,6 +135,44 @@ fn default_root() -> PathBuf {
     }
 }
 
+/// Refuse to build a fixture anywhere that deleting would be a disaster.
+///
+/// `build` opens with `remove_dir_all(root)` — correct for a derived
+/// fixture, catastrophic for anything else — and `--out` accepts an
+/// arbitrary path.
+///
+/// `repo-invariants.sh` flags this module's `join(".claudepot")` and
+/// tells you to resolve through `paths::claudepot_data_dir()`. That
+/// advice is right for the app and **wrong here**: that function
+/// returns the developer's REAL data root, which is the single
+/// directory this generator must never touch. So the protection the
+/// invariant is really asking for lives here, next to the delete,
+/// rather than being borrowed from a resolver with the opposite job.
+fn guard_root(root: &Path) -> Result<()> {
+    if !root.is_absolute() {
+        anyhow::bail!(
+            "fixture root must be absolute, got {} — refusing to delete a relative path",
+            root.display()
+        );
+    }
+    if root.parent().is_none() {
+        anyhow::bail!("refusing to build a fixture at the filesystem root");
+    }
+    // `home.starts_with(root)` covers root == home and every ancestor of
+    // it ("/", "/Users", "/Users/<you>"), which are the paths whose
+    // deletion would be unrecoverable.
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        if home.starts_with(root) {
+            anyhow::bail!(
+                "refusing to build a fixture at {} — it is your home directory or an \
+                 ancestor of it, and the first thing this does is delete it",
+                root.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Lessons a human already reviewed and kept — `review_state =
 /// 'accepted'`. Without them Knowledge screenshots as "No lessons yet",
 /// which documents the empty state rather than the feature.
@@ -228,6 +266,7 @@ const PROPOSALS: &[(&str, &str, i64)] = &[
 /// addresses, paths and project names returns zero hits.
 pub fn build(_repo: &Path, out: Option<&str>) -> Result<()> {
     let root = out.map(PathBuf::from).unwrap_or_else(default_root);
+    guard_root(&root)?;
     let claude = root.join(".claude");
     let claudepot = root.join(".claudepot");
 

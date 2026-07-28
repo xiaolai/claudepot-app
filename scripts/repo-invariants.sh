@@ -96,15 +96,38 @@ fi
 # code reached the real data root without passing the one guarded door.
 # Resolve through `paths::claudepot_data_dir()`. Temp-rooted joins in
 # tests (`tmp.path().join(".claudepot")`) are legitimate and excluded.
+#
+# `screenshot_fixture.rs` is excluded for the opposite reason to the
+# tests: it AUTHORS a synthetic home rather than resolving the real
+# one, so `claudepot_data_dir()` is not merely unnecessary there — it
+# would return the developer's actual data root, which is the one
+# directory that generator (whose first act is `remove_dir_all`) must
+# never touch. The protection this rule exists to enforce is provided
+# instead by `guard_root()` in that file, which refuses any root that
+# is `$HOME` or an ancestor of it. If that guard is ever removed, drop
+# this exclusion with it.
 violators=$(grep -rn 'join("\.claudepot")' crates src-tauri --include='*.rs' 2>/dev/null \
   | grep -v '/paths\.rs:' \
   | grep -v 'tmp\.path()\.join' \
+  | grep -v '/screenshot_fixture\.rs:' \
   || true)
 if [ -n "$violators" ]; then
   echo "::error::Hand-built \$HOME/.claudepot outside paths.rs:"
   echo "$violators"
   echo "  Resolve the data root via claudepot_core::paths::claudepot_data_dir()."
   echo "  A hardcoded path bypasses CLAUDEPOT_DATA_DIR and the test-isolation guard."
+  echo
+  fail=1
+fi
+
+# The screenshot-fixture exclusion above is only sound while that file's
+# own guard exists. Enforce the coupling rather than trusting a comment:
+# deleting `guard_root` would otherwise silently leave an unguarded
+# `remove_dir_all` on a user-supplied path, exempted from rule 4.
+fixture=crates/xtask/src/screenshot_fixture.rs
+if [ -f "$fixture" ] && ! grep -q 'fn guard_root' "$fixture"; then
+  echo "::error::$fixture is exempt from the .claudepot rule but has no guard_root():"
+  echo "  Either restore guard_root() or remove the exclusion in rule 4."
   echo
   fail=1
 fi
