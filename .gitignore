@@ -149,4 +149,9 @@ CLAUDE.local.md
 # Generated screenshot fixture — rebuild with `cargo xtask screenshot-fixture`.
 # Not committed: it is derived, and a committed copy would drift from the
 # generator that produces it.
+#
+# The default location is now /tmp/claudepot-demo-home, OUTSIDE the repo,
+# because the app displays the paths it reads and an in-repo fixture put
+# the author's home directory on screen. This entry stays as a net for
+# anyone who passes `--out fixtures/…` explicitly.
 /fixtures/screenshot-profile/

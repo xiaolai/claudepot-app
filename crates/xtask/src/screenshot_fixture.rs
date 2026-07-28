@@ -31,8 +31,16 @@
 //! One lever: the fixture is a **fake home directory**.
 //!
 //! ```text
-//! HOME=<fixture> pnpm tauri dev
+//! pnpm dev &                                    # vite, real HOME
+//! cargo build -p claudepot-tauri                # real HOME
+//! HOME=<fixture> ./target/debug/claudepot-tauri # app only
 //! ```
+//!
+//! The fake home goes to the **app**, not the build. `HOME=<fixture>
+//! pnpm tauri dev` looks tidier and fails: rustup reads its default
+//! toolchain from `$HOME/.rustup`, so the override takes the toolchain
+//! with it and `cargo metadata` dies before the app is ever compiled.
+//! (Corepack's cache moves too, prompting a pnpm re-download.)
 //!
 //! The obvious wiring — `CLAUDE_CONFIG_DIR` + `CLAUDEPOT_DATA_DIR` —
 //! was tried first and leaks. Those cover two of the three places the
@@ -73,6 +81,10 @@
 //! publishing the author's addresses.
 
 use anyhow::{Context, Result};
+use claudepot_core::session_index::SessionIndex;
+use claudepot_core::shared_memory::durable::{
+    self, CreatedByKind, MemoryKind, NewMemory, NewProposal, Scope,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -96,6 +108,113 @@ const PROJECTS: &[(&str, u32)] = &[
     ("analytics", 3),
 ];
 
+/// Where the fake home lives — **outside the repo, on purpose**.
+///
+/// The first version put it at `<repo>/fixtures/screenshot-profile`,
+/// which leaks: the app legitimately displays the paths it reads, so
+/// Global → Config rendered
+/// `Config home /Users/<you>/…/claudepot-app/fixtures/…/.claude` in
+/// full, and Global → Memory rendered the same prefix truncated. A
+/// fixture whose own path embeds the author's home cannot produce a
+/// leak-free screenshot no matter what data is inside it.
+///
+/// `/tmp/claudepot-demo-home` contains no username, no repo name, and no
+/// directory structure of the author's — and it reads honestly to a
+/// documentation reader as what it is: a demo profile.
+fn default_root() -> PathBuf {
+    #[cfg(unix)]
+    {
+        // Not `env::temp_dir()`: on macOS that is the opaque per-user
+        // `/var/folders/<hash>/T/`, which looks like debris in a
+        // screenshot even though it leaks nothing.
+        PathBuf::from("/tmp/claudepot-demo-home")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir().join("claudepot-demo-home")
+    }
+}
+
+/// Lessons a human already reviewed and kept — `review_state =
+/// 'accepted'`. Without them Knowledge screenshots as "No lessons yet",
+/// which documents the empty state rather than the feature.
+///
+/// The text is written to read like real engineering knowledge, because
+/// a screenshot of lorem ipsum teaches a reader nothing about what the
+/// pane is for. It describes the synthetic projects only.
+const LESSONS: &[(&str, MemoryKind, &str)] = &[
+    (
+        "api-gateway",
+        MemoryKind::Constraint,
+        "Rate-limit headers must be written before the response body starts \
+         streaming. Setting them from the after-response hook compiles and \
+         passes tests, then silently drops them under HTTP/2.",
+    ),
+    (
+        "api-gateway",
+        MemoryKind::Pattern,
+        "Every upstream call goes through the retry wrapper, never through \
+         the bare client. The wrapper is where the circuit breaker and the \
+         request-id propagation live.",
+    ),
+    (
+        "auth-service",
+        MemoryKind::Fact,
+        "Refresh tokens rotate on every use. A 401 from /profile means the \
+         stored blob is one generation behind — not that the account was \
+         signed out. Re-exchange before surfacing an error to the user.",
+    ),
+    (
+        "data-pipeline",
+        MemoryKind::Pattern,
+        "Batch jobs are idempotent by partition key: a retried run overwrites \
+         its partition rather than appending. A job that appends without a \
+         dedupe key will double-count on any retry.",
+    ),
+    (
+        "design-system",
+        MemoryKind::Preference,
+        "Design tokens are declared in exactly one file. A component that \
+         hardcodes a colour or a radius is a review finding, not a style \
+         choice — add the semantic token first, then reference it.",
+    ),
+    (
+        "infra-tools",
+        MemoryKind::Constraint,
+        "Never run the schema push command against production: it diffs the \
+         database against the schema files and drops anything it cannot see, \
+         including generated columns and triggers.",
+    ),
+];
+
+/// Distiller output awaiting human review — `review_state = 'proposed'`.
+/// Gives Knowledge → Review a non-empty queue, which is the whole point
+/// of that tab: claims arrive proposed and a human accepts or rejects.
+///
+/// `(project, content, directive, confidence)`
+const PROPOSALS: &[(&str, &str, i64)] = &[
+    (
+        "web-client",
+        "Suspense boundaries belong at the route level, not around individual \
+         data hooks. Wrapping each hook produced a cascade of spinners on \
+         first paint.",
+        72,
+    ),
+    (
+        "data-pipeline",
+        "The nightly export appears to assume UTC while the ingest timestamps \
+         are local, which would shift one hour of rows across the day \
+         boundary twice a year.",
+        58,
+    ),
+    (
+        "docs-site",
+        "Code samples in the guide drifted from the API after the v3 rename; \
+         the samples are not covered by any test that would have caught it.",
+        64,
+    ),
+];
+
 /// The fixture is a **fake home directory**, not a pair of env
 /// overrides.
 ///
@@ -107,10 +226,8 @@ const PROJECTS: &[(&str, u32)] = &[
 /// once, including ones not yet catalogued, and needs no production
 /// change. Verified: with `HOME` pointed here, a full-DOM scan for real
 /// addresses, paths and project names returns zero hits.
-pub fn build(repo: &Path, out: Option<&str>) -> Result<()> {
-    let root = out
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo.join("fixtures/screenshot-profile"));
+pub fn build(_repo: &Path, out: Option<&str>) -> Result<()> {
+    let root = out.map(PathBuf::from).unwrap_or_else(default_root);
     let claude = root.join(".claude");
     let claudepot = root.join(".claudepot");
 
@@ -130,6 +247,7 @@ pub fn build(repo: &Path, out: Option<&str>) -> Result<()> {
     let transcripts = write_transcripts(&claude)?;
     write_accounts(&claudepot)?;
     write_preferences(&claudepot)?;
+    let (accepted, proposed) = seed_knowledge(&claudepot)?;
 
     println!("screenshot fixture written to {}", root.display());
     println!(
@@ -138,13 +256,86 @@ pub fn build(repo: &Path, out: Option<&str>) -> Result<()> {
         transcripts,
         ACCOUNTS.len()
     );
+    println!("  {accepted} accepted lesson(s), {proposed} awaiting review");
     println!();
     println!("Launch the app against it with:");
-    println!("  HOME={} pnpm tauri dev", root.display());
+    println!("  pnpm dev &                                     # vite, real HOME");
+    println!("  cargo build -p claudepot-tauri                 # real HOME");
+    println!("  HOME={} ./target/debug/claudepot-tauri", root.display());
+    println!();
+    println!("The fake home goes to the APP, not the build: rustup reads its");
+    println!("default toolchain from $HOME/.rustup, so `HOME=… pnpm tauri dev`");
+    println!("kills cargo before the app compiles.");
     println!();
     println!("HOME — not CLAUDE_CONFIG_DIR/CLAUDEPOT_DATA_DIR — because");
     println!("Claude Desktop's directory has no override and leaked through.");
     Ok(())
+}
+
+/// Seed the Knowledge pane's lessons into `sessions.db`.
+///
+/// Written through `claudepot-core`'s own writers — `create_memory` for
+/// accepted rows, `create_proposal` for the review queue — rather than
+/// hand-rolled SQL. That is not a style preference: `create_proposal`
+/// inserts `review_state = 'proposed'` in a single statement precisely
+/// so no crash window can leave an agent-authored claim ACCEPTED. A
+/// fixture that INSERTed directly would be free to produce a row shape
+/// production can never reach, and the screenshot would document a state
+/// that does not exist.
+///
+/// Memories are keyed by `project_path` text and carry no FK to the
+/// session rows, so the app's first index refresh — which reaps rows for
+/// files it cannot find — leaves them alone.
+fn seed_knowledge(claudepot: &Path) -> Result<(usize, usize)> {
+    let idx = SessionIndex::open(&claudepot.join("sessions.db"))
+        .map_err(|e| anyhow::anyhow!("open sessions.db: {e}"))?;
+
+    for (project, kind, content) in LESSONS {
+        let path = project_path(project);
+        durable::create_memory(
+            &idx,
+            &NewMemory {
+                scope: Scope::Project,
+                project_path: Some(&path),
+                kind: *kind,
+                content,
+                created_by_kind: CreatedByKind::User,
+                created_by: "fixture",
+                confidence: None,
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("seed lesson for {project}: {e}"))?;
+    }
+
+    for (project, content, confidence) in PROPOSALS {
+        let path = project_path(project);
+        durable::create_proposal(
+            &idx,
+            &NewProposal {
+                project_path: &path,
+                kind: MemoryKind::Pattern,
+                content,
+                // The one-line instruction a future session would act on;
+                // the Review queue renders it beside the claim.
+                directive: "Review this claim before relying on it.",
+                confidence: *confidence,
+                anchor_json: None,
+                origin_exchange_id: None,
+                origin_file_path: None,
+                created_by: "fixture-distiller",
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("seed proposal for {project}: {e}"))?;
+    }
+
+    Ok((LESSONS.len(), PROPOSALS.len()))
+}
+
+/// The cwd `write_transcripts` records for a project. One helper so the
+/// lesson rows and the transcripts agree — a mismatch would render
+/// lessons attached to projects the Projects pane does not list.
+fn project_path(project: &str) -> String {
+    format!("/Users/dev/code/{project}")
 }
 
 /// Preferences that keep first-run chrome out of the screenshots.
@@ -189,7 +380,7 @@ fn write_cc_settings(claude: &Path) -> Result<()> {
 fn write_transcripts(claude: &Path) -> Result<usize> {
     let mut count = 0;
     for (i, (name, turns)) in PROJECTS.iter().enumerate() {
-        let cwd = format!("/Users/dev/code/{name}");
+        let cwd = project_path(name);
         let slug = cwd.replace(['/', '.'], "-");
         let dir = claude.join("projects").join(&slug);
         fs::create_dir_all(&dir)?;

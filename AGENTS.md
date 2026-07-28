@@ -554,12 +554,15 @@ Full post-mortem of the v0.1.13–0.1.19 Dock-blur arc is in
 
 ## Documentation screenshots
 
-Three commands, no manual capture, no PII scrubbing:
+No manual capture, no PII scrubbing:
 
 ```bash
-cargo xtask screenshot-fixture                       # synthetic profile
-HOME=$PWD/fixtures/screenshot-profile pnpm tauri dev # app, in another shell
-pnpm screenshots                                     # capture all 8
+cargo xtask screenshot-fixture                  # synthetic profile
+pnpm dev &                                      # vite, REAL home
+cargo build -p claudepot-tauri                  # REAL home
+HOME=/tmp/claudepot-demo-home \
+  ./target/debug/claudepot-tauri &              # app only
+pnpm screenshots                                # capture all 9
 ```
 
 The fixture is a **fake `HOME`**, not a pair of env overrides.
@@ -567,6 +570,17 @@ The fixture is a **fake `HOME`**, not a pair of env overrides.
 places the app reads — Claude Desktop's directory resolves through
 `dirs::data_dir()` with no override and leaked a real account through
 the header. `HOME` closes every home-relative path at once.
+
+Two things that look like fussiness and are not:
+
+- **The fake home goes to the app, not the build.** `HOME=… pnpm tauri
+  dev` reads better and fails — rustup keeps its default toolchain in
+  `$HOME/.rustup`, so the override takes the toolchain with it and
+  `cargo metadata` dies before anything compiles.
+- **The fixture lives outside the repo** (`/tmp/claudepot-demo-home`).
+  The app displays the paths it reads, so an in-repo fixture put
+  `/Users/<you>/…/claudepot-app/fixtures/…` on screen in Global →
+  Config. No amount of synthetic *data* fixes a leaking *path*.
 
 **Never mask real data to take a screenshot.** It was tried and it is
 architecturally wrong: the vocabulary is unbounded and only visible as

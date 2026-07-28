@@ -51,6 +51,13 @@ const SCREENSHOTS: &[(&str, &[&str])] = &[
         &["src/sections/ProjectsSection.tsx", "src/sections/projects"],
     ),
     (
+        "memory.png",
+        &[
+            "src/sections/SharedMemorySection.tsx",
+            "src/sections/knowledge",
+        ],
+    ),
+    (
         "keys.png",
         &["src/sections/KeysSection.tsx", "src/sections/keys"],
     ),

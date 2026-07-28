@@ -115,6 +115,8 @@ transcripts. The same data is exposed to agents through
 `claudepot mcp memory-server`; the registry id remains `shared-memory` for
 localStorage compatibility.
 
+![Knowledge tab](assets/screenshots/memory.png)
+
 **Keys** — All your API keys and OAuth tokens, in one inventory. Stored in the OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Copy with self-clearing clipboard — the value wipes itself after 30 seconds.
 
 ![Keys tab](assets/screenshots/keys.png)
