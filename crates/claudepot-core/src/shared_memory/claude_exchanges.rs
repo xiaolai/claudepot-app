@@ -402,26 +402,29 @@ fn upsert_claude_exchanges(
 // ─── pairing ─────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
-struct ClaudeExchange {
-    id: String,
-    turn_index: u32,
-    user_text: String,
-    assistant_text: String,
-    timestamp_ms: Option<i64>,
-    tool_calls: Vec<ClaudeToolCall>,
+pub(crate) struct ClaudeExchange {
+    pub(crate) id: String,
+    pub(crate) turn_index: u32,
+    pub(crate) user_text: String,
+    pub(crate) assistant_text: String,
+    pub(crate) timestamp_ms: Option<i64>,
+    pub(crate) tool_calls: Vec<ClaudeToolCall>,
 }
 
 #[derive(Debug, Default)]
-struct ClaudeToolCall {
-    tool_use_id: String,
-    tool_name: String,
-    tool_input_json: String,
-    tool_result_text: Option<String>,
-    is_error: bool,
-    timestamp_ms: Option<i64>,
+pub(crate) struct ClaudeToolCall {
+    pub(crate) tool_use_id: String,
+    pub(crate) tool_name: String,
+    pub(crate) tool_input_json: String,
+    pub(crate) tool_result_text: Option<String>,
+    pub(crate) is_error: bool,
+    pub(crate) timestamp_ms: Option<i64>,
 }
 
-fn pair_events_into_exchanges(session_id: &str, events: &[SessionEvent]) -> Vec<ClaudeExchange> {
+pub(crate) fn pair_events_into_exchanges(
+    session_id: &str,
+    events: &[SessionEvent],
+) -> Vec<ClaudeExchange> {
     let mut out: Vec<ClaudeExchange> = Vec::new();
     let mut current: Option<ClaudeExchange> = None;
 

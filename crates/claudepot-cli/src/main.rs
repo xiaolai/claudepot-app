@@ -151,6 +151,17 @@ enum Commands {
         #[arg(long, short = 'f')]
         tail: bool,
     },
+    /// Build and inspect the analysis corpus — every transcript from
+    /// every machine, deduped, in `~/.claudepot/corpus.db`.
+    ///
+    /// Separate from `sessions.db` on purpose: that file is a cache of
+    /// this machine's live `~/.claude`, and its refresh deletes rows
+    /// whose file is gone. Importing another host's archive into it
+    /// would be mutually destructive with the normal refresh.
+    Corpus {
+        #[command(subcommand)]
+        action: CorpusAction,
+    },
     /// Ground-truth authentication status.
     ///
     /// Reads CC's shared credential slot, calls `/api/oauth/profile`,
@@ -537,6 +548,26 @@ enum LessonAction {
     Status {
         #[arg(long)]
         project: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CorpusAction {
+    /// Walk the live `~/.claude/projects` plus every host under the
+    /// archive root and fold them in. Incremental; safe to re-run.
+    Index {
+        /// Archive root. Defaults to `~/claude-corpus-archive`.
+        #[arg(long)]
+        archive_root: Option<String>,
+    },
+    /// Per-host coverage and staleness.
+    Status,
+    /// Run the deterministic detectors and report candidates. No model
+    /// calls, no spend — this is the preview before any distillation.
+    Detect {
+        /// Cap per detector.
+        #[arg(long, default_value_t = 5000)]
+        limit: usize,
     },
 }
 
@@ -1252,6 +1283,13 @@ async fn main() -> Result<()> {
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
         Commands::Logs { open, tail } => commands::logs::run(&ctx, open, tail).await?,
+        Commands::Corpus { action } => match action {
+            CorpusAction::Index { archive_root } => {
+                commands::corpus::index_cmd(&ctx, archive_root)?
+            }
+            CorpusAction::Status => commands::corpus::status_cmd(&ctx)?,
+            CorpusAction::Detect { limit } => commands::corpus_detect::detect_cmd(&ctx, limit)?,
+        },
         Commands::Status => commands::status::run(&ctx).await?,
         Commands::Usage { action } => match action {
             UsageAction::Report { window } => commands::usage::report(&ctx, &window).await?,
