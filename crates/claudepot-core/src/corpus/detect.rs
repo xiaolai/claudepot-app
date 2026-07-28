@@ -33,6 +33,7 @@ use super::normalize::{
     command_family, error_signature, fingerprint, is_harness_synthetic, jaccard, normalize_prompt,
 };
 use super::{CorpusError, CorpusIndex};
+use crate::session_live::redact::redact_secrets;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -96,7 +97,15 @@ impl Incident {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepetitionCluster {
     pub normalized: String,
-    /// An unmodified example, for display. Never the normalized form.
+    /// A representative example, for display — the original wording
+    /// rather than the normalized form, but **redacted**.
+    ///
+    /// This crosses an emission boundary: `claudepot corpus detect`
+    /// prints it to stdout and serializes it under `--json`. A prompt
+    /// that repeats often enough to cluster is exactly the kind a user
+    /// pastes a token into, so it is redacted at construction rather
+    /// than trusted to every future caller (invariant R9,
+    /// `scripts/repo-invariants.sh`).
     pub sample: String,
     pub count: usize,
     pub projects: usize,
@@ -109,6 +118,8 @@ pub struct Correction {
     pub session_id: String,
     pub project_path: String,
     pub turn_index: i64,
+    /// The correction as written, **redacted** — same emission-boundary
+    /// reasoning as [`RepetitionCluster::sample`].
     pub text: String,
     /// Why this survived the marker filter.
     pub corroboration: Corroboration,
@@ -279,7 +290,10 @@ pub fn detect_repetitions(
         let key = fingerprint(&norm);
         norms.entry(key).or_insert_with(|| norm.clone());
         let e = acc.entry(key).or_insert_with(|| Acc {
-            sample: text.clone(),
+            // Redacted here, not at print time: this string reaches
+            // stdout and `--json`, and a prompt repeated often enough
+            // to cluster is exactly where a pasted token would sit.
+            sample: redact_secrets(&text),
             count: 0,
             projects: Default::default(),
             sessions: Default::default(),
@@ -405,7 +419,7 @@ pub fn detect_corrections(idx: &CorpusIndex, limit: usize) -> Result<Vec<Correct
                 session_id: t.session_id.clone(),
                 project_path: t.project_path.clone(),
                 turn_index: t.turn_index,
-                text: t.text.clone(),
+                text: redact_secrets(&t.text),
                 corroboration: why,
             });
             if out.len() >= limit {
@@ -682,6 +696,48 @@ mod tests {
             r.iter().any(|x| x.sample.contains("commit and push")),
             "but real repeated requests still must"
         );
+    }
+
+    /// Regression: `corpus detect` prints these to stdout and
+    /// serializes them under `--json`, so a token pasted into a prompt
+    /// that repeats would have landed on the terminal. CI's R9 tripwire
+    /// caught this on the feature's first run.
+    #[test]
+    fn emitted_samples_and_corrections_are_redacted() {
+        let secret = "sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let (c, _t) = indexed(&[
+            user(
+                &format!("use token {secret} please"),
+                "2026-04-10T10:00:00Z",
+            ),
+            user(
+                &format!("use token {secret} please"),
+                "2026-04-10T10:01:00Z",
+            ),
+            tool_use("t1", "Bash", "cargo test", "2026-04-10T10:02:00Z"),
+            tool_res("t1", "Exit code 1", true, "2026-04-10T10:03:00Z"),
+            user(&format!("no, not {secret}"), "2026-04-10T10:04:00Z"),
+        ]);
+
+        for r in detect_repetitions(&c, 2, 1).unwrap() {
+            assert!(
+                !r.sample.contains(secret),
+                "repetition sample leaked a secret: {}",
+                r.sample
+            );
+        }
+        let corrections = detect_corrections(&c, 100).unwrap();
+        assert!(
+            !corrections.is_empty(),
+            "precondition: a correction is found"
+        );
+        for corr in corrections {
+            assert!(
+                !corr.text.contains(secret),
+                "correction text leaked a secret: {}",
+                corr.text
+            );
+        }
     }
 
     #[test]
