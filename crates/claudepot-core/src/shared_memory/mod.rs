@@ -39,6 +39,7 @@ pub mod distill;
 pub mod durable;
 pub mod git;
 pub mod guard;
+pub mod harvest_ledger;
 pub mod indexer;
 pub mod invalidate;
 pub mod proposal;

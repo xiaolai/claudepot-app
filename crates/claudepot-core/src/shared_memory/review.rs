@@ -367,36 +367,29 @@ pub fn counts_by_project(idx: &SessionIndex) -> Result<Vec<(String, ReviewCounts
     Ok(map.into_iter().collect())
 }
 
-/// Sessions in `project_path` that have never produced a proposal.
+/// Sessions in `project_path` still needing a harvest.
 ///
-/// `origin_file_path` is our record of what has already been mined. It
-/// is denormalized onto the memory row (rather than living in
-/// `memory_links`) precisely so it survives an index rebuild — otherwise
-/// a rebuild would make the next harvest re-distill, and re-pay for,
-/// every transcript already processed.
+/// **Superseded — delegates to
+/// [`super::harvest_ledger::unharvested_sessions`].** This used to
+/// select "sessions with no memory carrying my `origin_file_path`",
+/// which conflated provenance with a job ledger. The two disagree
+/// exactly where it costs money: a transcript the distiller read
+/// correctly and which honestly held no durable lesson produces no
+/// memory row, so it looked unmined forever and was re-distilled — and
+/// re-paid for — on every harvest.
+///
+/// `origin_file_path` remains the right *provenance* record (it
+/// survives a rebuild, which is why it is denormalized onto the memory
+/// row). It is simply not a record of work done.
+///
+/// Kept as a thin forwarder so existing call sites and their tests keep
+/// working; new code should call the ledger directly.
 pub fn undistilled_sessions(
     idx: &SessionIndex,
     project_path: &str,
     limit: u32,
 ) -> Result<Vec<String>, DurableError> {
-    let limit = if limit == 0 { 20 } else { limit.min(500) };
-    let db = idx.db();
-    let mut stmt = db.prepare(
-        "SELECT s.file_path FROM sessions s \
-         WHERE s.project_path = ?1 \
-           AND s.file_path NOT IN \
-               (SELECT origin_file_path FROM memories WHERE origin_file_path IS NOT NULL) \
-         ORDER BY s.last_ts_ms DESC NULLS LAST \
-         LIMIT ?2",
-    )?;
-    let rows = stmt.query_map(rusqlite::params![project_path, limit as i64], |r| {
-        r.get::<_, String>(0)
-    })?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r?);
-    }
-    Ok(out)
+    super::harvest_ledger::unharvested_sessions(idx, project_path, limit)
 }
 
 /// Merge `{"commit": sha}` into the row's existing anchor object,

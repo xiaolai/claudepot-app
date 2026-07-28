@@ -22,7 +22,7 @@ use claudepot_core::agent::templates::KNOWLEDGE_DISTILLER_MODEL;
 use claudepot_core::paths;
 use claudepot_core::session_index::SessionIndex;
 use claudepot_core::shared_memory::review::{self, ReviewState};
-use claudepot_core::shared_memory::{compile, distill, git, proposal};
+use claudepot_core::shared_memory::{compile, distill, git, harvest_ledger, proposal};
 
 use crate::output::print_json;
 use crate::AppContext;
@@ -233,9 +233,47 @@ pub fn harvest_cmd(ctx: &AppContext, args: HarvestArgs) -> Result<()> {
         if !ctx.quiet {
             eprintln!("[{}/{}] {}", i + 1, targets.len(), short(path));
         }
-        match distill::distill_transcript(&idx, "claude", &project, path, "cli:lesson-harvest")
-            .map_err(anyhow::Error::from)
-        {
+        let outcome =
+            distill::distill_transcript(&idx, "claude", &project, path, "cli:lesson-harvest")
+                .map_err(anyhow::Error::from);
+
+        // Record the attempt whichever way it went. A success with zero
+        // claims is the case the old scheme could not represent, and is
+        // exactly why this harvest used to re-pay for the same verdict
+        // every run — see `shared_memory::harvest_ledger`.
+        // Hoisted so the `Attempt` borrows a named binding rather than a
+        // temporary whose lifetime a reader has to reason about.
+        let err_text = outcome.as_ref().err().map(|e| format!("{e:#}"));
+        let ledger_entry = match &outcome {
+            Ok(r) => harvest_ledger::Attempt {
+                file_path: path,
+                outcome: harvest_ledger::Outcome::Succeeded,
+                claims_produced: r.proposed,
+                model: Some(KNOWLEDGE_DISTILLER_MODEL),
+                cost_usd: Some(EST_COST_PER_SESSION_USD),
+                error: None,
+                attempted_at_ms: chrono::Utc::now().timestamp_millis(),
+            },
+            Err(_) => harvest_ledger::Attempt {
+                file_path: path,
+                outcome: harvest_ledger::Outcome::Failed,
+                claims_produced: 0,
+                model: Some(KNOWLEDGE_DISTILLER_MODEL),
+                // Cost is unknown on failure — the spawn may never have
+                // billed. Recording a guess would corrupt the running
+                // total the stats query reports.
+                cost_usd: None,
+                error: err_text.as_deref(),
+                attempted_at_ms: chrono::Utc::now().timestamp_millis(),
+            },
+        };
+        if let Err(e) = harvest_ledger::record(&idx, &ledger_entry) {
+            // A ledger write failure must not lose the harvest itself;
+            // the cost is that this transcript is re-selected next run.
+            eprintln!("      warning: harvest ledger write failed: {e}");
+        }
+
+        match outcome {
             Ok(r) => {
                 total.proposed += r.proposed;
                 total.skipped_duplicate += r.skipped_duplicate;
