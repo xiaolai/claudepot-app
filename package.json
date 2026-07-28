@@ -15,7 +15,8 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",

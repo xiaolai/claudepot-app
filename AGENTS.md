@@ -552,6 +552,46 @@ Full post-mortem of the v0.1.13–0.1.19 Dock-blur arc is in
 - **`pnpm tauri icon`'s output paths are `.gitignore`'d** so a
   stray invocation can't re-stage MSIX/iOS/Android dead bytes.
 
+## Documentation screenshots
+
+Three commands, no manual capture, no PII scrubbing:
+
+```bash
+cargo xtask screenshot-fixture                       # synthetic profile
+HOME=$PWD/fixtures/screenshot-profile pnpm tauri dev # app, in another shell
+pnpm screenshots                                     # capture all 8
+```
+
+The fixture is a **fake `HOME`**, not a pair of env overrides.
+`CLAUDE_CONFIG_DIR` + `CLAUDEPOT_DATA_DIR` cover only two of the three
+places the app reads — Claude Desktop's directory resolves through
+`dirs::data_dir()` with no override and leaked a real account through
+the header. `HOME` closes every home-relative path at once.
+
+**Never mask real data to take a screenshot.** It was tried and it is
+architecturally wrong: the vocabulary is unbounded and only visible as
+you navigate (1 project name found on one surface, 79 across four), and
+substring replacement corrupts legitimate UI — a harvested `claude`
+turned `.claude/settings.json` into `vector-store/settings.json` and the
+`CLAUDE-F…` model badge into `SEARCH-INDEX-F…`. Free text defeats it
+entirely. Full reasoning in `crates/xtask/src/screenshot_fixture.rs`.
+
+`scripts/capture-screenshots.mjs` drives the app over the MCP bridge's
+WebSocket (plain JSON, no auth) and writes both `assets/screenshots/`
+and `web/public/screenshots/`. Node, not xtask, so it needs no new
+dependency. Each shot waits for a `settle` string rather than sleeping,
+and a pane that never settles is **skipped, never captured blank**.
+
+Adding a screenshot means two edits: a `SHOTS` row in the capture
+script, and a `SCREENSHOTS` row in `crates/xtask/src/verify_docs.rs` so
+`verify-docs` fails when the UI moves ahead of the image. That check
+compares **commit dates, not mtimes** — `git checkout` rewrites mtimes,
+which is how eight screenshots sat three months stale unnoticed.
+
+Known limitation: `HOME` does not redirect the macOS keychain, so the
+Accounts pane's live credential probe finds nothing and each card shows
+"Saved login is missing or broken".
+
 ## Conventions
 
 - Grill reports go in `dev-docs/reports/`. Never drop them at the repo root.
