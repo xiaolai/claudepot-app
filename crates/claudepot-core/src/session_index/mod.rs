@@ -676,6 +676,12 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     // nothing on disk can rebuild. See the note in schema.rs.
     crate::shared_memory::schema::apply_memories_compiler_columns(&tx)?;
 
+    // Seed the harvest ledger from the provenance scheme it replaces.
+    // Strictly after the ALTERs above: `origin_file_path` is one of the
+    // columns they add, so this cannot live in the v4 DDL block.
+    // Idempotent, so running it on every open costs one no-op INSERT.
+    crate::shared_memory::harvest_ledger::backfill_from_provenance(&tx)?;
+
     // Read the `_pending_rescan` marker. Set by the Settings →
     // Cleanup actions and cleared inside this transaction.
     let pending_rescan: bool = tx

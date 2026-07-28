@@ -19,6 +19,7 @@ import { availableModelsApi } from "./availableModels";
 import { fastModeApi } from "./fastMode";
 import { thinkingApi } from "./thinking";
 import { autoDreamApi } from "./auto-dream";
+import { ccRetentionApi } from "./cc-retention";
 import { attributionApi } from "./attribution";
 import { memoryHealthApi } from "./memory-health";
 import { memoryApi } from "./memory";
@@ -57,6 +58,7 @@ export const api = {
   ...fastModeApi,
   ...thinkingApi,
   ...autoDreamApi,
+  ...ccRetentionApi,
   ...attributionApi,
   ...memoryHealthApi,
   ...memoryApi,

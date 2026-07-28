@@ -2,9 +2,12 @@
 //!
 //! ```text
 //!   cargo xtask verify-cc-parity
+//!   cargo xtask verify-docs
 //! ```
 //!
 //! See `parity-harness/README.md` for the full design.
+
+mod verify_docs;
 
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
@@ -16,6 +19,7 @@ fn main() -> Result<()> {
 
     match cmd.as_str() {
         "verify-cc-parity" => verify_cc_parity(&rest),
+        "verify-docs" => verify_docs::verify_docs(&workspace_root()?),
         "" | "-h" | "--help" | "help" => {
             eprintln!("{}", USAGE);
             Ok(())
@@ -30,6 +34,11 @@ fn main() -> Result<()> {
 const USAGE: &str = "usage: cargo xtask <subcommand>
 
 subcommands:
+  verify-docs                         fail when README / AGENTS.md / the
+                                      web docs drift from the code they
+                                      describe (CLI verbs, Settings
+                                      panes, data-dir databases).
+
   verify-cc-parity [--only <name>]    diff Rust merge output against
                                       parity-harness/fixtures/*/expected.json.
                                       Fails loudly on mismatch.

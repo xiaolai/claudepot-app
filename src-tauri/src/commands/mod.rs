@@ -34,6 +34,7 @@ pub mod auto_dream;
 pub mod available_models;
 pub mod cc_daemon;
 pub mod cc_doctor;
+pub mod cc_retention;
 pub mod cc_tips;
 pub mod cli;
 pub mod config;

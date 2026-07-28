@@ -1,7 +1,7 @@
 export const metadata = {
   title: "Settings",
   description:
-    "Thirteen sub-panes covering preferences, appearance, notifications, network, auto-rotation, health, MCP installer, cleanup, protected paths, GitHub PAT, lock-recovery, diagnostics, and About.",
+    "Fourteen sub-panes covering preferences, appearance, notifications, network, auto-rotation, transcript retention, health, MCP installer, cleanup, protected paths, GitHub PAT, lock-recovery, diagnostics, and About.",
 };
 
 # Settings
@@ -9,7 +9,7 @@ export const metadata = {
 ![ClauDepot — settings tab](/screenshots/settings.png)
 
 ClauDepot's preference surface and the operational controls that
-don't belong to any single tab. Thirteen sub-panes, grouped into
+don't belong to any single tab. Fourteen sub-panes, grouped into
 *Core* (everyday prefs) and *Advanced* (less-touched, ending at
 About).
 
@@ -73,6 +73,41 @@ evaluator in `claudepot-core::rotation::eval` is fully unit-tested,
 including cycle-boundary regressions. See
 [`dev-docs/auto-rotation.md`](https://github.com/xiaolai/claudepot-app/blob/main/dev-docs/auto-rotation.md)
 for the design.
+
+## Retention
+
+Claude Code deletes your saved conversations. Not once — on **every
+launch**, anything older than thirty days. It counts exactly what it
+removed, then throws the number away, and nothing anywhere in its
+interface mentions the setting that controls it.
+
+This pane is the only place you find out.
+
+It opens with the consequence on *your* machine, not the policy:
+
+> **Retention — 30 days**, Claude Code's default, not a choice you made
+> 1,247 transcripts will be deleted the next time Claude Code starts.
+> Oldest surviving conversation: 2026-06-06.
+
+Pick a longer window — 90 days, a year, ten years — and that line goes
+quiet on its own.
+
+**Why the folder size never warned you.** Cleanup removes the small,
+valuable session transcripts and never touches the nested subagent
+files underneath them. Those are the bulk. So the directory keeps
+growing while the conversations inside it disappear, and no amount of
+watching disk usage would ever have told you.
+
+**Zero is not "off".** It is the most destructive value the setting
+has: *write no transcripts at all, and delete the existing ones at
+startup*. So it isn't on the duration scale. Reaching it takes a
+separate, clearly-labelled action behind a type-to-confirm prompt,
+worded as what it does rather than what it disables.
+
+**A longer window buys time; it is not a backup.** Those files still
+live in Claude Code's cache directory under Claude Code's rules. If
+what you want is a durable archive, that is
+[`claudepot corpus`](/app/features/memory).
 
 ## Health
 

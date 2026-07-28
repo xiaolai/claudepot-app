@@ -3,6 +3,8 @@ pub mod activity;
 pub mod agent;
 pub mod cli_ops;
 pub mod codex;
+pub mod corpus;
+pub mod corpus_detect;
 pub mod desktop_ops;
 pub mod doctor;
 pub mod lesson;

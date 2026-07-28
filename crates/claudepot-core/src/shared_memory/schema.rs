@@ -266,6 +266,52 @@ CREATE INDEX IF NOT EXISTS idx_recurrence_matched ON recurrence_events(matched_m
 -- so no existing row set violates it.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_recurrence_dedup
     ON recurrence_events(matched_memory_id, new_content);
+
+-- Harvest bookkeeping: one row per (transcript, extractor version).
+--
+-- Before this table, "already mined" was inferred from a memory row
+-- carrying the transcript's `origin_file_path`. That conflated
+-- provenance with a job ledger, and the two disagree in the one case
+-- that matters: a transcript the distiller read correctly and which
+-- honestly yielded **zero** claims produced no memory, so it looked
+-- unmined forever and was re-distilled — and re-paid for — on every
+-- subsequent harvest.
+--
+-- Durable, like `memories`: NOT cascade-cleared by a rebuild. That is
+-- the whole point — a rebuild must not make the next harvest re-pay
+-- for work already done, which is the same reasoning that put
+-- `origin_file_path` on the memory row.
+--
+-- Freshness is guarded by `(file_size_bytes, file_mtime_ns)` rather
+-- than a content hash. Same guard `sessions` already uses as its
+-- re-parse trigger, so a changed transcript re-harvests for free by
+-- joining two columns we already store. A hash would be strictly
+-- stronger but would mean reading every transcript to decide whether
+-- to read it.
+CREATE TABLE IF NOT EXISTS harvest_ledger (
+    file_path         TEXT    NOT NULL,
+    -- Bumping this re-harvests the corpus on purpose: a changed prompt
+    -- or output schema is a different extractor, and its verdict on a
+    -- transcript is not interchangeable with the old one's.
+    extractor_version TEXT    NOT NULL,
+    file_size_bytes   INTEGER NOT NULL,
+    file_mtime_ns     INTEGER NOT NULL,
+    attempted_at_ms   INTEGER NOT NULL,
+    outcome           TEXT    NOT NULL CHECK (outcome IN ('succeeded','failed')),
+    -- Cumulative across retries of the same (file, extractor). Caps
+    -- retry of a permanently-unparseable transcript.
+    attempts          INTEGER NOT NULL DEFAULT 1,
+    -- 0 is a legitimate, recorded success — the case the old scheme
+    -- could not represent.
+    claims_produced   INTEGER NOT NULL DEFAULT 0,
+    model             TEXT,
+    cost_usd          REAL,
+    error             TEXT,
+    PRIMARY KEY (file_path, extractor_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harvest_ledger_outcome
+    ON harvest_ledger(outcome);
 "#;
 
 /// Names of the tables created by the v4 DDL block. Used by the
@@ -284,6 +330,7 @@ pub const V4_TABLE_NAMES: &[&str] = &[
     "evidence_records",
     "memory_links",
     "recurrence_events",
+    "harvest_ledger",
 ];
 
 /// Names of the FTS5 maintenance triggers on `exchanges`. The

@@ -43,7 +43,18 @@ violators=$(grep -rlE "$patterns" crates/ --include='*.rs' || true)
 # snippet goes through redact_secrets — the same redactor the file's
 # search_rows JSONL path already uses — and the snippet_text fallback is
 # pre-redacted at rest.
+# corpus.rs writes these columns into corpus.db and never emits them:
+# storage is unredacted at rest, exactly as `exchanges` in sessions.db
+# is (see shared_memory/schema.rs). corpus/detect.rs reads them and DOES
+# emit — `claudepot corpus detect` prints to stdout and serializes under
+# --json — so it redacts at construction: `RepetitionCluster::sample`
+# and `Correction::text` are built with redact_secrets, and
+# `error_signature` redacts plus takes only the first line, because tool
+# output is arbitrary stdout. This tripwire caught that leak on the
+# first CI run of the corpus feature; it was doing its job.
 unexpected=$(echo "$violators" \
+  | grep -v 'crates/claudepot-core/src/corpus.rs' \
+  | grep -v 'crates/claudepot-core/src/corpus/detect.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/search.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/read.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/indexer.rs' \

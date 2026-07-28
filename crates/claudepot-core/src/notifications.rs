@@ -83,6 +83,11 @@ pub enum Category {
     ConfigTreePatched,
     ServiceStatusChanged,
     UpdateAvailable,
+    /// Claude Code is about to delete saved conversations under its
+    /// `cleanupPeriodDays` window. P1 rather than P0: it needs
+    /// attention before the next CC launch, but it does not block the
+    /// work in front of the user. See `crate::cc_retention`.
+    TranscriptsExpiring,
 }
 
 /// Notification urgency. Drives the default surface set in [`route`];
@@ -211,7 +216,9 @@ impl Category {
 
             // P1 — Stalled
             SessionWaiting | SessionStuck | SessionErrorBurst | OpDoneUnfocused
-            | RotationSuggested | UsageThreshold | UpdateInstallReady => P1Stalled,
+            | RotationSuggested | UsageThreshold | UpdateInstallReady | TranscriptsExpiring => {
+                P1Stalled
+            }
 
             // P2 — Acknowledge
             AccountVerified
@@ -255,6 +262,7 @@ impl Category {
             RotationSuggested => ("Account rotation suggested", "Live work", true),
             UsageThreshold => ("Usage near limit", "Live work", true),
             UpdateInstallReady => ("Update ready to install", "Live work", true),
+            TranscriptsExpiring => ("Saved conversations expiring", "Live work", true),
 
             AccountVerified => ("Account verified", "Actions", true),
             AccountSwitched => ("Account switched", "Actions", true),
@@ -323,6 +331,7 @@ impl Category {
             ConfigTreePatched,
             ServiceStatusChanged,
             UpdateAvailable,
+            TranscriptsExpiring,
         ]
     }
 }
@@ -433,7 +442,7 @@ mod tests {
         // Synthetic exhaustive match: this fails to compile if a new
         // variant is added without updating `all()`. Update the
         // counter and the match arms in lockstep with the enum.
-        const EXPECTED: usize = 31;
+        const EXPECTED: usize = 32;
         let actual = Category::all().len();
         assert_eq!(
             actual, EXPECTED,

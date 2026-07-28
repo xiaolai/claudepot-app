@@ -114,8 +114,14 @@ pub struct SessionRow {
     /// CC's internal display slug (`message.slug` on any line). Lets us
     /// offer a stable human name in the list.
     pub display_slug: Option<String>,
-    /// True iff any assistant event included `is_error: true` or
+    /// True iff the transcript contains a failed tool call — a
+    /// `tool_result` block with `is_error: true` under
+    /// `message.content[]` — or an assistant turn with
     /// `stop_reason == "error"`. Surfaces a badge in the list.
+    ///
+    /// The `tool_result` clause is the one that fires in practice; see
+    /// [`content_has_tool_error`] for why the original top-level
+    /// `isError` check never did.
     pub has_error: bool,
     /// True iff ANY event had `isSidechain: true` — pure-agent
     /// subsession (e.g. subagent transcripts bundled alongside the
@@ -472,6 +478,34 @@ pub struct SessionScan {
     pub turns: Vec<TurnRecord>,
 }
 
+/// Did this transcript line carry a failed tool result?
+///
+/// CC records a tool failure as a `tool_result` content block with
+/// `is_error: true`, nested under `message.content[]` — normally on the
+/// *user*-role line that carries the result back. It is not a top-level
+/// line field and it is not `stop_reason`, which is why the two older
+/// checks in [`scan_session`] never fired.
+///
+/// Kept in step with `shared_memory::claude_exchanges`, which reads the
+/// same shape to populate `tool_calls.is_error`. If CC ever changes it,
+/// both move together or `has_error` silently dies again.
+fn content_has_tool_error(line: &Value) -> bool {
+    let Some(content) = line
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    content.iter().any(|block| {
+        block.get("type").and_then(Value::as_str) == Some("tool_result")
+            && block
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+    })
+}
+
 /// Single streaming scan that folds every field we care about into a
 /// `SessionRow`, and at the same time extracts artifact usage events.
 /// Malformed lines are counted toward `event_count` but contribute
@@ -679,6 +713,17 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
         }
 
         if v.get("isError").and_then(Value::as_bool).unwrap_or(false) {
+            has_error = true;
+        }
+        // The shape CC actually writes for a failed tool call. The two
+        // checks above look in places CC does not use for this:
+        // `isError` is never a top-level line field, and `stop_reason`
+        // is an assistant-turn condition, not a tool failure. So
+        // `has_error` read `false` for every session on a real machine
+        // — 154 of 460 of which contained a failing tool call, as
+        // `tool_calls.is_error` (populated from this same nested shape
+        // by `shared_memory::claude_exchanges`) shows.
+        if !has_error && content_has_tool_error(&v) {
             has_error = true;
         }
     }
