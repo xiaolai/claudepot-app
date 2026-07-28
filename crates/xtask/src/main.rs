@@ -7,6 +7,7 @@
 //!
 //! See `parity-harness/README.md` for the full design.
 
+mod screenshot_fixture;
 mod verify_docs;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -20,6 +21,13 @@ fn main() -> Result<()> {
     match cmd.as_str() {
         "verify-cc-parity" => verify_cc_parity(&rest),
         "verify-docs" => verify_docs::verify_docs(&workspace_root()?),
+        "screenshot-fixture" => {
+            let out = rest
+                .iter()
+                .position(|a| a == "--out")
+                .and_then(|i| rest.get(i + 1));
+            screenshot_fixture::build(&workspace_root()?, out.map(String::as_str))
+        }
         "" | "-h" | "--help" | "help" => {
             eprintln!("{}", USAGE);
             Ok(())
@@ -34,6 +42,11 @@ fn main() -> Result<()> {
 const USAGE: &str = "usage: cargo xtask <subcommand>
 
 subcommands:
+  screenshot-fixture [--out <dir>]    seed a synthetic profile for
+                                      documentation screenshots. Nothing
+                                      real is rendered, so nothing needs
+                                      masking.
+
   verify-docs                         fail when README / AGENTS.md / the
                                       web docs drift from the code they
                                       describe (CLI verbs, Settings

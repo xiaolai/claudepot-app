@@ -32,12 +32,56 @@ use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+/// Screenshots, and the source whose UI they depict.
+///
+/// Kept here rather than in a separate manifest file because the check
+/// is the only consumer; a second file would be one more thing to
+/// forget. Add a row when a screenshot joins the docs.
+const SCREENSHOTS: &[(&str, &[&str])] = &[
+    (
+        "accounts.png",
+        &["src/sections/AccountsSection.tsx", "src/sections/accounts"],
+    ),
+    (
+        "activities.png",
+        &["src/sections/EventsSection.tsx", "src/sections/activities"],
+    ),
+    (
+        "projects.png",
+        &["src/sections/ProjectsSection.tsx", "src/sections/projects"],
+    ),
+    (
+        "keys.png",
+        &["src/sections/KeysSection.tsx", "src/sections/keys"],
+    ),
+    (
+        "global.png",
+        &["src/sections/GlobalSection.tsx", "src/sections/global"],
+    ),
+    (
+        "settings.png",
+        &["src/sections/SettingsSection.tsx", "src/sections/settings"],
+    ),
+    (
+        "third-parties.png",
+        &[
+            "src/sections/ThirdPartySection.tsx",
+            "src/sections/third-party",
+        ],
+    ),
+    (
+        "automations.png",
+        &["src/sections/AgentsSection.tsx", "src/sections/agents"],
+    ),
+];
+
 pub fn verify_docs(repo: &Path) -> Result<()> {
     let mut problems: Vec<String> = Vec::new();
 
     check_cli_verbs(repo, &mut problems)?;
     check_settings_panes(repo, &mut problems)?;
     check_data_dir_databases(repo, &mut problems)?;
+    check_screenshot_freshness(repo, &mut problems)?;
 
     if problems.is_empty() {
         println!("verify-docs: ok — CLI verbs, Settings panes and databases all documented");
@@ -249,6 +293,69 @@ fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<(
             problems.push(format!(
                 "`{db}` lives under the Claudepot data dir but AGENTS.md never names it \
                  — an agent reading AGENTS.md will not know it exists"
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ─── 4. Screenshot freshness ─────────────────────────────────────────
+
+/// Last commit date touching `paths`, as `YYYY-MM-DD`.
+///
+/// Commit dates, not mtimes: `git checkout` rewrites mtimes, so a fresh
+/// clone reports every screenshot as newer than its source and the check
+/// silently passes. That is exactly how eight screenshots sat three
+/// months stale without anyone noticing.
+fn last_commit_date(repo: &Path, paths: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["log", "-1", "--format=%ad", "--date=short", "--"])
+        .args(paths)
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+fn check_screenshot_freshness(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    // Only meaningful inside a git checkout.
+    if !repo.join(".git").exists() {
+        return Ok(());
+    }
+    for (shot, sources) in SCREENSHOTS {
+        let asset = format!("assets/screenshots/{shot}");
+        let web = format!("web/public/screenshots/{shot}");
+        if !repo.join(&asset).exists() {
+            problems.push(format!("{asset} is referenced by the docs but missing"));
+            continue;
+        }
+        // The two copies are duplicated by hand today; a drifted pair
+        // means one surface shows a different app than the other.
+        if repo.join(&web).exists() {
+            let a = std::fs::read(repo.join(&asset)).ok();
+            let b = std::fs::read(repo.join(&web)).ok();
+            if a.is_some() && a != b {
+                problems.push(format!(
+                    "{shot} differs between assets/screenshots and web/public/screenshots"
+                ));
+            }
+        }
+        let (Some(shot_at), Some(src_at)) = (
+            last_commit_date(repo, &[&asset]),
+            last_commit_date(repo, sources),
+        ) else {
+            continue;
+        };
+        if src_at > shot_at {
+            problems.push(format!(
+                "{shot} was last captured {shot_at} but its UI changed {src_at} \
+                 — re-capture with `cargo xtask screenshot-fixture` (see its docs)"
             ));
         }
     }

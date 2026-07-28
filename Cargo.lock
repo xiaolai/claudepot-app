@@ -8187,9 +8187,11 @@ name = "xtask"
 version = "0.3.3"
 dependencies = [
  "anyhow",
+ "chrono",
  "claudepot-core",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

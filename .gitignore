@@ -145,3 +145,8 @@ CLAUDE.local.md
 
 # Local secret patterns consumed by scripts/pre-push (never committed)
 .secret-patterns
+
+# Generated screenshot fixture — rebuild with `cargo xtask screenshot-fixture`.
+# Not committed: it is derived, and a committed copy would drift from the
+# generator that produces it.
+/fixtures/screenshot-profile/
