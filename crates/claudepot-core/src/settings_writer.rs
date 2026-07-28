@@ -146,6 +146,34 @@ pub fn read_bool_setting(path: &Path, key: &str) -> Result<Option<bool>, Setting
         .and_then(JsonValue::as_bool))
 }
 
+/// Integer sibling of [`read_bool_setting`]. Missing file / missing key
+/// / non-integer value → `None`.
+///
+/// Added for `cleanupPeriodDays` ([`crate::cc_retention`]), the one CC
+/// setting whose value is a count rather than a flag. The wrong-type
+/// case deliberately reads as "not set" for the same reason the bool
+/// reader does: CC coerces rather than erroring, and a Claudepot that
+/// errored where CC shrugs would report a problem the user cannot see
+/// in the product it describes.
+///
+/// Note `as_i64` rejects a JSON float (`30.5`), which is correct here —
+/// CC's schema declares the key `z.number().int()`, so a float is
+/// already invalid upstream and must not be echoed back as if honored.
+pub fn read_i64_setting(path: &Path, key: &str) -> Result<Option<i64>, SettingsWriteError> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let v: JsonValue = serde_json::from_slice(&bytes)?;
+    Ok(v.as_object()
+        .and_then(|o| o.get(key))
+        .and_then(JsonValue::as_i64))
+}
+
 /// Resolve `autoMemoryEnabled` for the global scope only. Reads env
 /// vars + `~/.claude/settings.json` and ignores the project-scoped
 /// layers entirely. Use this when the caller has no real project

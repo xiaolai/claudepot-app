@@ -186,6 +186,12 @@
       "group": "Background",
       "id": "updateAvailable",
       "priority": "p3Ambient"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Live work",
+      "id": "transcriptsExpiring",
+      "priority": "p1Stalled"
     }
   ]
 }

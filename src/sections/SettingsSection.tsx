@@ -40,6 +40,7 @@ import { McpInstallerPane } from "./settings/McpInstallerPane";
 import { NetworkPane } from "./settings/NetworkPane";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { RotationPane } from "./settings/RotationPane";
+import { RetentionPane } from "./settings/RetentionPane";
 import { CleanupPane } from "./sessions/CleanupPane";
 import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
 import { CompanionArtifactToggle } from "./settings/CompanionArtifactToggle";
@@ -62,6 +63,7 @@ type Tab =
   | "notifications"
   | "network"
   | "rotation"
+  | "retention"
   | "health"
   | "mcp"
   | "cleanup"
@@ -88,6 +90,11 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "notifications", label: "Notifications", glyph: NF.bell,     group: "core" },
   { id: "network",     label: "Network",        glyph: NF.globe,    group: "core" },
   { id: "rotation",    label: "Rotation",       glyph: NF.refresh,  group: "core" },
+  // Retention = CC's `cleanupPeriodDays`, the only CC setting that
+  // destroys user data. "core", not "advanced": a control that exists
+  // to prevent silent data loss is worthless if the user has to go
+  // looking for it, and CC's own UI never mentions the setting at all.
+  { id: "retention",   label: "Retention",      glyph: NF.archive,  group: "core" },
   // Health = CC self-diagnostic (scrapes `claude doctor`). Sits in
   // "core" because the pill in WindowChrome points here directly;
   // hiding it under Advanced would make the deep-link surface
@@ -175,6 +182,7 @@ export function SettingsSection() {
           {tab === "notifications" && <NotificationsPane pushToast={pushToast} />}
           {tab === "network" && <NetworkPane pushToast={pushToast} />}
           {tab === "rotation" && <RotationPane pushToast={pushToast} />}
+          {tab === "retention" && <RetentionPane pushToast={pushToast} />}
           {tab === "health" && <HealthPane pushToast={pushToast} />}
           {tab === "mcp" && <McpInstallerPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupTabPane pushToast={pushToast} />}

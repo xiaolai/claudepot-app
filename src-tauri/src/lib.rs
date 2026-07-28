@@ -50,6 +50,7 @@ mod permission_orchestrator;
 mod poller;
 mod pr_orchestrator;
 mod preferences;
+mod retention_boot_check;
 mod rotation_orchestrator;
 mod service_status_watcher;
 mod state;
@@ -801,6 +802,14 @@ pub fn run() {
                 claudepot_core::agent::reconcile_orphan_artifacts_now();
             });
 
+            // One-shot check for transcripts Claude Code is about to
+            // delete under its `cleanupPeriodDays` window. CC does this
+            // silently on every launch and reports nothing, so this is
+            // the only place a user finds out. Emits at most one bell
+            // entry, and only when deletion is actually scheduled — see
+            // `src-tauri/src/retention_boot_check.rs`.
+            retention_boot_check::spawn(app.handle().clone());
+
             // Background poller for CC CLI + Claude Desktop updates.
             // Probes upstream every `poll_interval_minutes` (default
             // 4 h), updates the tray badge, and runs the auto-install
@@ -1209,6 +1218,10 @@ pub fn run() {
             commands::available_models::available_models_set,
             commands::auto_dream::auto_dream_state,
             commands::auto_dream::auto_dream_set,
+            commands::cc_retention::retention_report,
+            commands::cc_retention::retention_set,
+            commands::cc_retention::retention_clear,
+            commands::cc_retention::retention_disable_persistence,
             commands::attribution::attribution_state,
             commands::attribution::attribution_set,
             config_watch::config_watch_start,
