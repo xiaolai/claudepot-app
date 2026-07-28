@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.3.3 — beta (unreleased)
+## 0.3.4 — beta (unreleased)
 
 ### Added
 
@@ -50,6 +50,37 @@ Versioning scheme:
   importing another machine's archive mutually destructive with the
   normal refresh.
 
+### Fixed
+
+- **Homebrew served a broken formula, and could move backwards.** Any
+  `brew` command naming `claudepot` failed to load the formula before
+  falling through to the cask, and the cask warned on every load.
+  Separately, nothing ordered the tap-update runs, so a re-run or a
+  late release job could publish an older version over a newer one —
+  which happened, leaving `brew install claudepot` on Linux serving the
+  previous CLI. The formula now loads cleanly and the tap refuses to go
+  backwards.
+
+- **Harvesting a session that found nothing charged you for it again,
+  every time.** "Already harvested" was inferred from a session having
+  produced a lesson — so a transcript the distiller read correctly, and
+  which honestly contained nothing worth keeping, looked unharvested
+  forever and was re-distilled on every run. A real ledger now records
+  each attempt and its outcome, including "found nothing", which is a
+  result rather than an absence. Work already done under the old scheme
+  is carried over, so upgrading does not re-bill it.
+
+- **Sessions containing a failed tool call didn't show as errored.**
+  The error flag was looking in the wrong place — for a field Claude
+  Code doesn't write on transcript lines — so it read "no errors" for
+  every session ever recorded. On a typical machine that hid failures
+  in a third of them. Sessions re-show the flag as they are re-scanned;
+  Settings → Cleanup → Rebuild index applies it immediately.
+
+## 0.3.3 — beta (released 2026-07-27)
+
+### Added
+
 - **Unused artifacts view** (Activities → Usage → "Unused"). Lists
   installed skills, agents, and commands that have no recorded
   invocation, so you can see what's earning its keep and what isn't.
@@ -72,22 +103,6 @@ Versioning scheme:
   on disk.
 
 ### Fixed
-
-- **Harvesting a session that found nothing charged you for it again,
-  every time.** "Already harvested" was inferred from a session having
-  produced a lesson — so a transcript the distiller read correctly, and
-  which honestly contained nothing worth keeping, looked unharvested
-  forever and was re-distilled on every run. A real ledger now records
-  each attempt and its outcome, including "found nothing", which is a
-  result rather than an absence. Work already done under the old scheme
-  is carried over, so upgrading does not re-bill it.
-
-- **Sessions containing a failed tool call didn't show as errored.**
-  The error flag was looking in the wrong place — for a field Claude
-  Code doesn't write on transcript lines — so it read "no errors" for
-  every session ever recorded. On a typical machine that hid failures
-  in a third of them. Sessions re-show the flag as they are re-scanned;
-  Settings → Cleanup → Rebuild index applies it immediately.
 
 - **Plugin settings were being silently dropped.** Claudepot read the
   wrong key when working out which plugins are enabled, so every
