@@ -57,6 +57,57 @@ fn single_session_scan_captures_everything() {
     assert!(!r.has_error);
 }
 
+/// Regression: `has_error` was dead. It only checked a top-level
+/// `isError` (a field CC never writes on a transcript line) and
+/// `stop_reason == "error"` (an assistant-turn condition, not a tool
+/// failure), so on a real machine 154 of 460 sessions contained a
+/// failing tool call and every one of them reported `has_error = false`.
+///
+/// The shape below is what CC actually writes, and is the same one
+/// `shared_memory::claude_exchanges` reads to populate
+/// `tool_calls.is_error` — which is why that column was right while
+/// this one was wrong.
+#[test]
+fn has_error_is_set_by_a_failed_tool_result() {
+    let tmp = TempDir::new().unwrap();
+    let user = r#"{"type":"user","message":{"role":"user","content":"run it"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/repo/foo","sessionId":"ERR"}"#;
+    let failed = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Exit code 1","is_error":true}]},"timestamp":"2026-04-10T10:00:10Z","cwd":"/repo/foo","sessionId":"ERR"}"#;
+    write_session(tmp.path(), "-repo-foo", "ERR", &[user, failed]);
+
+    let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0].has_error,
+        "a tool_result with is_error:true must set has_error"
+    );
+}
+
+/// The mirror of the above: a successful tool result must not trip it,
+/// or the column becomes uniformly `true` and just as useless.
+#[test]
+fn has_error_stays_false_for_a_successful_tool_result() {
+    let tmp = TempDir::new().unwrap();
+    let user = r#"{"type":"user","message":{"role":"user","content":"run it"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/repo/foo","sessionId":"OK1"}"#;
+    let ok = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"done","is_error":false}]},"timestamp":"2026-04-10T10:00:10Z","cwd":"/repo/foo","sessionId":"OK1"}"#;
+    write_session(tmp.path(), "-repo-foo", "OK1", &[user, ok]);
+
+    let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
+    assert!(!rows[0].has_error);
+}
+
+/// A `tool_result` block with the key absent must read as success —
+/// CC omits `is_error` on the happy path.
+#[test]
+fn has_error_stays_false_when_is_error_is_absent() {
+    let tmp = TempDir::new().unwrap();
+    let user = r#"{"type":"user","message":{"role":"user","content":"run it"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/repo/foo","sessionId":"OK2"}"#;
+    let ok = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"done"}]},"timestamp":"2026-04-10T10:00:10Z","cwd":"/repo/foo","sessionId":"OK2"}"#;
+    write_session(tmp.path(), "-repo-foo", "OK2", &[user, ok]);
+
+    let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
+    assert!(!rows[0].has_error);
+}
+
 #[test]
 fn turn_record_user_prompt_carry_over_clears_when_intervening_user_line_has_no_text() {
     // Regression: a user line without extractable text (tool-result-only,
