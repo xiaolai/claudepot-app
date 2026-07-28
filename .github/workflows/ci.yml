@@ -63,6 +63,16 @@ jobs:
       - name: CC-parity fixtures (cargo xtask verify-cc-parity)
         run: cargo xtask verify-cc-parity
 
+      # Documentation drift. Three surfaces (README, AGENTS.md, the web
+      # product docs) restate facts that live in source, and nothing
+      # noticed when the source moved: a 2026-07-28 audit found six
+      # stale facts, most of which had been wrong for releases. The one
+      # that matters is AGENTS.md — agents read it before writing code,
+      # so a wrong fact there produces wrong code rather than a confused
+      # reader. Checks only source-derivable facts; prose is not judged.
+      - name: Docs match the code (cargo xtask verify-docs)
+        run: cargo xtask verify-docs
+
       # ─── Architectural invariants ─────────────────────────────
       # Grep-based tripwires for rules the type system can't enforce
       # (Codex parser leaf, raw-text-SELECT redaction confinement, no

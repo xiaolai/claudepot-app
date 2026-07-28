@@ -63,9 +63,10 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   `notification`, `activity`, etc., merged in `index.ts`) + `src/types/`
   (sliced by domain, merged in `index.ts`) — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
-- Six SQLite files live in `~/.claudepot/` (override with
+- Seven SQLite files live in `~/.claudepot/` (override with
   `CLAUDEPOT_DATA_DIR`; the authoritative list is whatever joins onto
-  `claudepot_core::paths::claudepot_data_dir()`):
+  `claudepot_core::paths::claudepot_data_dir()`, and
+  `cargo xtask verify-docs` fails when this list drifts from it):
   - `accounts.db` — authoritative account + verification state, linked to Keychain.
   - `sessions.db` — persistent cache for the Sessions tab. One row per
     `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
@@ -82,6 +83,32 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   - `activity_metrics.db` — one row per session per tick for the
     Activity Trends view. Owned by
     `claudepot-core::session_live::metrics_store`.
+  - `corpus.db` — the **analysis corpus**: every transcript from every
+    machine, deduped. Owned by `claudepot-core::corpus`. Built by
+    `claudepot corpus index`, which walks the live `~/.claude/projects`
+    plus each `~/claude-corpus-archive/<host>/projects/`.
+
+    **Why this is not in `sessions.db`, which is the whole point.**
+    `sessions.db` is a *cache of one machine's live `~/.claude`*:
+    `SessionIndex::refresh` diffs every row against one `config_dir`
+    and deletes the remainder (`codec::delete_row`, cascading turns
+    and — via the v4 FK — exchanges / tool_calls / FTS). Correct for a
+    cache, fatal for an archive. Point `refresh` at an imported corpus
+    and it deletes the live rows; run it again on the live directory
+    and it deletes the imported ones. A separate file sits outside that
+    loop, so `host_id` costs a column rather than a migration, and the
+    file is rebuildable by definition.
+
+    Tables: `corpus_sessions` (deduped by CC session UUID, most
+    complete copy wins), `corpus_files` (every physical copy, per
+    host), `corpus_exchanges` + `corpus_tool_calls` (turn-level; the
+    substrate the detectors read). Derived data — safe to delete, one
+    ~5-minute pass to rebuild. Reference machine: 8,249 sessions /
+    173,572 tool calls / 848 MB.
+
+    **Outputs do not live here.** Distilled claims go to `memories` in
+    `sessions.db`, which carries no foreign key to `sessions` and is
+    never cascaded — that asymmetry is what makes the split work.
 - A dozen-plus JSON state files also live in `~/.claudepot/`
   (`agents.json`, `routes.json`, `routing-rules.json`, `updates.json`,
   `preferences.json`, `usage-snapshot.json`, `usage_alert_state.json`,
@@ -216,6 +243,83 @@ swap to a chosen alternate.
 - Confirm is the default mode; promote to auto after watching the
   rule fire correctly. See `dev-docs/auto-rotation.md` for the
   full design including the policy framing.
+
+## Transcript retention (Settings → Retention)
+
+Reads and writes CC's `cleanupPeriodDays` — **the only Claude Code
+setting that destroys user data**, and one CC's own UI never mentions.
+Pure logic in `claudepot-core::cc_retention`; commands in
+`src-tauri/src/commands/cc_retention.rs`; pane at
+`src/sections/settings/RetentionPane.tsx`.
+
+Not named `retention` in core — `claudepot-core::retention` already owns
+an unrelated concept (Claudepot's own `activity_cards` / `metrics_tick`
+pruning horizon). `cc_` matches `cc_daemon` / `cc_doctor` / `cc_tips`.
+
+Four properties drive the whole design; changing any of them invalidates
+the pane:
+
+- **Sliding, not one-shot.** `getCutoffDate()` recomputes
+  `now - cleanupPeriodDays` on *every* run, so loss is continuous.
+- **`0` is the most destructive value, not "off".** It means *write no
+  transcripts and delete the existing ones at startup*. It is therefore
+  **not on the duration scale** — `set_retention_days` rejects it and
+  `disable_persistence()` is a separately-named call behind a
+  type-to-confirm gate. Do not "simplify" these into one setter.
+- **A negative value suppresses cleanup entirely.**
+  `cleanupOldMessageFilesInBackground` bails when settings fail
+  validation *and* the raw key is present, so an invalid value
+  accidentally **protects** transcripts (`RetentionMode::Invalid` /
+  `cleanup_suppressed`). The UI must say "fix the value", never
+  "restore the default" — restoring clears the error and re-arms
+  deletion.
+- **Invisible on disk.** Cleanup unlinks top-level session transcripts
+  and never walks `subagents/`, so the folder grows while history is
+  destroyed. `TranscriptRisk::nested_immortal` exists to say so.
+
+`TranscriptRisk::scan_incomplete` is load-bearing: a scan that failed
+must never render as "nothing is scheduled for deletion". Boot check at
+`src-tauri/src/retention_boot_check.rs` emits one bell entry via
+`Category::TranscriptsExpiring`; there is deliberately **no dismissal
+flag** — gating on the condition means raising retention silences it,
+while dismissing without fixing does not.
+
+## Corpus + detectors (`claudepot corpus`)
+
+`claudepot-core::corpus` builds `corpus.db` (see the data-dir list
+above for why it is a separate file). `corpus::normalize` is Tier 0,
+`corpus::detect` is Tiers 1–3. No model calls anywhere in this path —
+`claudepot corpus detect` is the free preview before any distillation.
+
+Precision, not scale, is the problem: the naive "error then any later
+success of the same tool" join yields ~358k useless pairs. The
+constraints that make it usable are same-file, same **command family**,
+first success only, and a bounded turn gap.
+
+Two normalizers on purpose — `normalize_prompt` flattens numbers
+wholesale; `error_signature` keeps small integers, because merging
+`Exit code 1` with `Exit code 143` merges "failed" with "timed out".
+Signatures take the **first line only**, redacted and capped: tool
+output is arbitrary stdout and on a real machine contains financial
+records.
+
+Two filters exist because the real corpus demanded them, and removing
+either re-floods the output:
+
+- `is_harness_synthetic` — CC injects `<local-command-caveat>`,
+  `<command-name>`, `<bash-stdout>`, `[Request interrupted by user]`.
+  Before filtering, the largest "repeated request" in the corpus was
+  harness plumbing at 1,258 occurrences.
+- `command_family` skips segment-consuming shell words (`cd`, `source`)
+  and comments. Real commands open `cd "/path"; …`, so a naive first
+  token returns `cd`'s *argument*; and `#` produced a phantom `bash:#`
+  family with 266 "verified recoveries".
+
+**Vocabulary.** Nothing here is a *recurrence* — that word has a
+precise, human-confirmed meaning in `shared_memory::recurrence` and
+diluting it breaks the one honest signal the knowledge base has.
+Repetition is a *repetition cluster*; a failure with no observed
+success is `unresolved`, never "abandoned".
 
 ## Proactive token refresh (no UI)
 

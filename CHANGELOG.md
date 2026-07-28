@@ -10,6 +10,46 @@ Versioning scheme:
 
 ### Added
 
+- **Retention** (Settings → Retention). Claude Code deletes saved
+  conversations older than `cleanupPeriodDays` — 30 days by default —
+  every time it launches, and tells you nothing: the cleanup routine
+  counts exactly what it removed and discards the number. Nothing in
+  Claude Code's own interface mentions the setting. This pane is the
+  only place you can find out your history is on a timer.
+
+  It leads with the consequence on *your* machine ("1,247 transcripts
+  will be deleted the next time Claude Code starts"), not the policy.
+  `0` is never offered on the duration scale, because it does not mean
+  "off" — it means *stop saving transcripts and delete the existing
+  ones*, so it sits behind a separate, type-to-confirm action worded as
+  what it does. A boot check raises one bell entry when deletion is
+  actually scheduled, and stops on its own once you raise the window.
+
+  It also explains why disk usage can never reveal the loss: cleanup
+  removes the small, valuable session transcripts and never touches
+  nested subagent files, so the folder keeps growing while
+  conversations disappear.
+
+- **`claudepot corpus`** — build and search an analysis corpus spanning
+  every machine you use Claude Code on, not just this one.
+
+  `corpus index` walks the live `~/.claude/projects` plus any archived
+  per-host trees under `~/claude-corpus-archive/`, deduplicating
+  conversations that exist on several machines and keeping the most
+  complete copy of each. `corpus status` reports per-host coverage and
+  staleness. Incremental: unchanged files are skipped without being
+  re-read.
+
+  `corpus detect` runs deterministic detectors over it — repeated
+  requests, corroborated corrections, and failure-then-recovery
+  incidents — and reports what it found. **No model calls, no spend.**
+  It is the preview before any distillation, not a replacement for it.
+
+  Kept in its own database on purpose: the session index is a cache of
+  *this* machine and prunes rows whose file is gone, which would make
+  importing another machine's archive mutually destructive with the
+  normal refresh.
+
 - **Unused artifacts view** (Activities → Usage → "Unused"). Lists
   installed skills, agents, and commands that have no recorded
   invocation, so you can see what's earning its keep and what isn't.
@@ -32,6 +72,22 @@ Versioning scheme:
   on disk.
 
 ### Fixed
+
+- **Harvesting a session that found nothing charged you for it again,
+  every time.** "Already harvested" was inferred from a session having
+  produced a lesson — so a transcript the distiller read correctly, and
+  which honestly contained nothing worth keeping, looked unharvested
+  forever and was re-distilled on every run. A real ledger now records
+  each attempt and its outcome, including "found nothing", which is a
+  result rather than an absence. Work already done under the old scheme
+  is carried over, so upgrading does not re-bill it.
+
+- **Sessions containing a failed tool call didn't show as errored.**
+  The error flag was looking in the wrong place — for a field Claude
+  Code doesn't write on transcript lines — so it read "no errors" for
+  every session ever recorded. On a typical machine that hid failures
+  in a third of them. Sessions re-show the flag as they are re-scanned;
+  Settings → Cleanup → Rebuild index applies it immediately.
 
 - **Plugin settings were being silently dropped.** Claudepot read the
   wrong key when working out which plugins are enabled, so every

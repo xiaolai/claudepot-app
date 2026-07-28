@@ -1,7 +1,7 @@
 export const metadata = {
   title: "Memory",
   description:
-    "Cross-harness shared memory and indexed transcript search across Claude Code and Codex, with an MCP server so the harness itself can query the same store.",
+    "Cross-harness shared memory and indexed transcript search across Claude Code and Codex, a cross-machine corpus with free deterministic candidate detection, and an MCP server so the harness itself can query the same store.",
 };
 
 # Memory
@@ -19,7 +19,54 @@ harness that wrote the transcripts can read them back.
 The result: ask Claude "what did I decide about authentication last
 week?" and it can answer, because it can search.
 
-## Three tabs
+## Beyond this machine
+
+Your conversations are not all in one place. If you use Claude Code on
+a laptop and a desktop, each holds a different slice — and Claude Code
+prunes each of them independently, on its own thirty-day clock.
+
+`claudepot corpus index` builds a single searchable corpus across all
+of them: the live `~/.claude/projects` plus any archived per-machine
+trees you have collected. Conversations that exist on several machines
+are recognised as one conversation, and the most complete copy wins —
+a machine that synced mid-session holds a truncated version, and taking
+that one would quietly shorten the record.
+
+```bash
+claudepot corpus index     # incremental; unchanged files are skipped
+claudepot corpus status    # per-machine coverage and staleness
+claudepot corpus detect    # candidates, free — see below
+```
+
+It lives in its own database on purpose. The session index is a
+*cache* of this machine and removes rows whose file is gone, so
+importing another machine's archive into it would be mutually
+destructive with the ordinary refresh.
+
+## Finding what's worth keeping
+
+A decade of conversations is not a knowledge base. Somewhere in it are
+the things you learned, buried in the things you typed.
+
+`claudepot corpus detect` looks for three shapes, and **calls no model
+and costs nothing**:
+
+- **Failure, then recovery** — something broke and a later attempt of
+  the same command worked. The one shape strong enough to justify a
+  rule, because the fix was observed rather than inferred.
+- **Corrections you made** — a marker like "no, do it this way", but
+  only when something corroborates it: a failure just before, or the
+  same request asked again. A marker on its own is noise; "no errors"
+  is not a correction.
+- **Requests you repeat** — the same ask, across days and projects.
+  Not a lesson. A sign that something wants automating.
+
+It reports what it found so you can decide whether distilling is worth
+paying for. A failure with no observed fix is reported as *unresolved*,
+never as "abandoned" — a conversation that simply ends tells you
+nothing about why.
+
+## The four tabs
 
 ### Search
 
@@ -105,10 +152,17 @@ gets smarter and you want every old rollout re-read.
 
 - `~/.claudepot/sessions.db` &mdash; SQLite store, FTS5-indexed.
   Schema v4 (atomic migration on first launch; older databases are
-  upgraded in place).
+  upgraded in place). This is the index of *this* machine, plus the
+  durable memories and decisions you accept.
+- `~/.claudepot/corpus.db` &mdash; the cross-machine analysis corpus,
+  built by `claudepot corpus index`. Derived data: safe to delete, one
+  pass to rebuild. Kept separate from the session index because that
+  one prunes to match this machine's disk, which would make importing
+  another machine's history destructive.
 - Pure-Rust pipeline; no remote service, no telemetry, no upload.
   The MCP server is a local subprocess that Claude / Codex talk to
-  over stdio.
+  over stdio. Detection is local too &mdash; `corpus detect` is
+  arithmetic over your own files.
 
 ## Common patterns
 
