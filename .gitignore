@@ -52,6 +52,10 @@ typescript
 # invoked by .github/workflows/ci.yml, so it MUST be committed.
 !/scripts/preflight.sh
 !/scripts/repo-invariants.sh
+# Producer of crates/claudepot-core/data/cc-env-spec.json, which the core
+# crate embeds with include_str!. `cargo xtask verify-docs` re-runs it with
+# --check, so an uncommitted producer would make that gate unrunnable.
+!/scripts/build-cc-env-spec.py
 dev-docs/
 
 # Per-clone validator hosts for scripts/pre-push (internal hostnames —

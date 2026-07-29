@@ -24,6 +24,31 @@ pub fn claude_json_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude.json"))
 }
 
+/// The global user config CC actually reads, mirroring its
+/// `getGlobalClaudeFile` (`utils/env.ts:14-26`): the legacy
+/// `<claude_config_dir>/.config.json` wins when present, otherwise
+/// `$CLAUDE_CONFIG_DIR/.claude.json`, otherwise `~/.claude.json`.
+///
+/// Distinct from [`claude_json_path`], which always names the home-directory
+/// sibling. That is the right answer for callers that mean "the file at
+/// `$HOME/.claude.json`" and the wrong one for callers that mean "the file CC
+/// will read" — with `CLAUDE_CONFIG_DIR` set, those are different files, and
+/// a reader that consults the wrong one reports "nothing set here" about a
+/// file CC is actively applying.
+///
+/// Returns the first candidate that exists; `None` when neither does.
+pub fn resolved_global_claude_json() -> Option<PathBuf> {
+    let legacy = claude_config_dir().join(".config.json");
+    if legacy.is_file() {
+        return Some(legacy);
+    }
+    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)?;
+    let primary = base.join(".claude.json");
+    primary.is_file().then_some(primary)
+}
+
 /// Claude Desktop data directory (macOS / Windows). Returns None on Linux.
 pub fn claude_desktop_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]

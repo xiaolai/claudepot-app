@@ -89,9 +89,13 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_settings_panes(repo, &mut problems)?;
     check_data_dir_databases(repo, &mut problems)?;
     check_screenshot_freshness(repo, &mut problems)?;
+    check_cc_env_spec(repo, &mut problems)?;
 
     if problems.is_empty() {
-        println!("verify-docs: ok — CLI verbs, Settings panes and databases all documented");
+        println!(
+            "verify-docs: ok — CLI verbs, Settings panes, databases and the \
+             cc-env spec all in sync"
+        );
         return Ok(());
     }
     let mut msg = format!("verify-docs found {} drift(s):", problems.len());
@@ -365,6 +369,59 @@ fn check_screenshot_freshness(repo: &Path, problems: &mut Vec<String>) -> Result
                  — re-capture with `cargo xtask screenshot-fixture` (see its docs)"
             ));
         }
+    }
+    Ok(())
+}
+
+// ─── 5. The embedded Claude Code env-var spec ────────────────────────
+
+/// Re-run `scripts/build-cc-env-spec.py --check`.
+///
+/// The script regenerates `crates/claudepot-core/data/cc-env-spec.json` from
+/// the committed evidence and compares byte-for-byte, then runs the
+/// hand-authored golden vectors. Both halves are offline and hermetic: a
+/// committed script reading gitignored inputs would not be reproducible, and
+/// a checksum sitting next to its own artifact would only prove the two were
+/// edited together.
+///
+/// What this deliberately does **not** check is the *user's* Claude Code
+/// version. That is a runtime concern — the snapshot is valid only on an
+/// exact match, decided by `cc_env::spec::CrosscheckValidity` when the pane
+/// renders — not a build one.
+fn check_cc_env_spec(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let script = repo.join("scripts/build-cc-env-spec.py");
+    if !script.exists() {
+        problems.push(format!(
+            "{} is missing — the embedded cc-env spec would have no committed producer",
+            script.display()
+        ));
+        return Ok(());
+    }
+    let out = match std::process::Command::new("python3")
+        .arg(&script)
+        .arg("--check")
+        .current_dir(repo)
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            // No python3 is an environment gap, not doc drift. Say so rather
+            // than reporting a green check we did not run.
+            problems.push(format!(
+                "could not run {} --check: {e} (install python3 to gate the cc-env spec)",
+                script.display()
+            ));
+            return Ok(());
+        }
+    };
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .chain(String::from_utf8_lossy(&out.stdout).lines())
+            .filter(|l| !l.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" / ");
+        problems.push(format!("cc-env spec check failed: {detail}"));
     }
     Ok(())
 }

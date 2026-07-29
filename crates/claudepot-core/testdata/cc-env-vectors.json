@@ -1,0 +1,286 @@
+{
+  "_comment": [
+    "Golden vectors for the Claude Code env-var spec (dev-docs/env-vars-pane-plan.md WI-1).",
+    "HAND-AUTHORED expectations, never generator output — a generated vector would only",
+    "lock in whatever the classifier already says. Both scripts/build-cc-env-spec.py and",
+    "claudepot-core::cc_env::spec run these, so the Python producer and the Rust consumer",
+    "cannot drift apart silently.",
+    "",
+    "Coverage: every control class; all 18 variables the previous generator classified as",
+    "tri-state toggles, each re-adjudicated by hand against its official prose; the two",
+    "SAFE_ENV_VARS-and-secret overlaps; each hazard class with a documented row; both",
+    "blocked reasons; the enum superset fix; the value set that must NOT be closed.",
+    "",
+    "Assert only the fields a vector is about. Every listed field must match exactly."
+  ],
+  "vectors": [
+    {
+      "name": "MAX_THINKING_TOKENS",
+      "why": "Re-adjudicated tri-state #1. A token budget whose doc names a ceiling (the model's max output tokens minus one). 'Set to 0 to disable thinking' is prose for a number whose zero is special, not a switch. A toggle here would write 1 into a budget.",
+      "control": "number",
+      "unit": "tokens",
+      "numeric_evidence": "name-suffix",
+      "safety": { "secret": false, "pretrust_safe": true, "hazards": [] }
+    },
+    {
+      "name": "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",
+      "why": "Re-adjudicated tri-state #2. Doc states 'default: 120000, or 2 minutes' — a duration, not a flag.",
+      "control": "number",
+      "unit": "ms",
+      "default": "120000",
+      "numeric_evidence": "name-suffix"
+    },
+    {
+      "name": "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT",
+      "why": "Re-adjudicated tri-state #3. 'Idle timeout in milliseconds'. The name has no numeric suffix (_TIMEOUT is not one), so the millisecond prose is the load-bearing evidence — this vector guards that branch.",
+      "control": "number",
+      "unit": "ms",
+      "numeric_evidence": "prose-milliseconds"
+    },
+    {
+      "name": "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS",
+      "why": "Re-adjudicated tri-state #4. 'Default: 600000, or 10 minutes'.",
+      "control": "number",
+      "unit": "ms",
+      "default": "600000",
+      "numeric_evidence": "name-suffix"
+    },
+    {
+      "name": "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP",
+      "why": "Re-adjudicated tri-state #5. 'Maximum number of consecutive times ... (default: 8)'. A count.",
+      "control": "number",
+      "default": "8",
+      "unit": "",
+      "numeric_evidence": "name-suffix"
+    },
+
+    {
+      "name": "CLAUDE_ENABLE_STREAM_WATCHDOG",
+      "why": "Survivor #1, and the case rev 2 got wrong by calling it a number. Its doc defines all three states: unset ('on by default'), 0 ('force-disable'), 1 ('force-enable'). A genuine tri-state.",
+      "control": "toggle",
+      "on": "1",
+      "off": "0",
+      "values": ["0", "1"],
+      "numeric_evidence": ""
+    },
+    {
+      "name": "API_FORCE_IDLE_TIMEOUT",
+      "why": "Survivor #2. Reads like a duration but is not: 0 disables the timeout, 1 forces it on for every provider, unset is provider-dependent. The value is never a number of anything.",
+      "control": "toggle",
+      "off": "0",
+      "values": ["0", "1"]
+    },
+    {
+      "name": "CLAUDE_AX_SCREEN_READER",
+      "why": "Survivor #3. 1 renders screen-reader output, 0 forces it off even when axScreenReader is true.",
+      "control": "toggle",
+      "off": "0"
+    },
+    {
+      "name": "CLAUDE_CODE_ARTIFACT_AUTO_OPEN",
+      "why": "Survivor #4. Only '0' is documented; unset means auto-open. Still tri-state as a control, because 'off' must be written as 0 rather than by removing the key.",
+      "control": "toggle",
+      "off": "0"
+    },
+    {
+      "name": "CLAUDE_CODE_ATTRIBUTION_HEADER",
+      "why": "Survivor #5. 0 omits the attribution block; unset keeps it.",
+      "control": "toggle",
+      "off": "0"
+    },
+    {
+      "name": "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+      "why": "Survivor #6. 1 disables auto memory, 0 forces it on even when --bare or autoMemoryEnabled:false would disable it.",
+      "control": "toggle",
+      "off": "0"
+    },
+    {
+      "name": "CLAUDE_CODE_ENABLE_AWAY_SUMMARY",
+      "why": "Survivor #7. 0 forces recaps off, 1 forces them on over the setting.",
+      "control": "toggle",
+      "off": "0"
+    },
+    {
+      "name": "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
+      "why": "Survivor #8. 0 opts out, 1 forces on when routing through a proxy.",
+      "control": "toggle",
+      "off": "0"
+    },
+    {
+      "name": "CLAUDE_CODE_ENABLE_TASKS",
+      "why": "Survivor #9. 0 reverts to TodoWrite; the version number in the prose is not a default.",
+      "control": "toggle",
+      "off": "0",
+      "default": ""
+    },
+    {
+      "name": "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
+      "why": "Survivor #10. 1 shortens the system prompt; 0/false/no/off opts out.",
+      "control": "toggle",
+      "off": "0"
+    },
+    {
+      "name": "MCP_CONNECTION_NONBLOCKING",
+      "why": "Survivor #11. 0 restores the blocking connection wait. The '5-second' in the prose belongs to that wait, not to this variable, and must not be read as a default.",
+      "control": "toggle",
+      "off": "0",
+      "default": ""
+    },
+    {
+      "name": "OTEL_LOG_ASSISTANT_RESPONSES",
+      "why": "Survivor #12. 1 includes response text, 0 keeps it redacted, unset inherits OTEL_LOG_USER_PROMPTS.",
+      "control": "toggle",
+      "off": "0",
+      "safety": { "pretrust_safe": false }
+    },
+    {
+      "name": "USE_BUILTIN_RIPGREP",
+      "why": "Survivor #13. 0 uses the system rg.",
+      "control": "toggle",
+      "off": "0",
+      "safety": { "pretrust_safe": true }
+    },
+
+    {
+      "name": "ENABLE_PROMPT_CACHING_1H",
+      "why": "Two-state toggle: only 'Set to 1' is documented, so off is unset. Also the reason the numeric-default extractor requires a connector or backticks — 'instead of the default 5 minutes' describes the prompt cache, not this variable, and used to be reported as default '5'.",
+      "control": "toggle",
+      "on": "1",
+      "off": "unset",
+      "values": ["1"],
+      "default": ""
+    },
+    {
+      "name": "DISABLE_AUTOUPDATER",
+      "why": "Two-state toggle carrying Claudepot's own disable_updates hazard while sitting in CC's pre-trust-safe allowlist — attributes are orthogonal, not tiers.",
+      "control": "toggle",
+      "off": "unset",
+      "safety": { "pretrust_safe": true, "hazards": ["disable_updates"] }
+    },
+
+    {
+      "name": "CLAUDE_CODE_AUTO_CONNECT_IDE",
+      "why": "The second toggle vocabulary. Its doc states both `false` (prevent) and `true` (force), so it is a tri-state — and it shipped as free text, a boolean rendered as an open box. The offered literals are the ones its own doc uses: writing `1` where the doc says `true` would be guessing at a value.",
+      "control": "toggle",
+      "on": "true",
+      "off": "false",
+      "values": ["false", "true"]
+    },
+    {
+      "name": "OTEL_METRICS_INCLUDE_VERSION",
+      "why": "Two-state in the true/false vocabulary: only `true` is documented and the default is excluded, so off means removing the key rather than writing `false`.",
+      "control": "toggle",
+      "on": "true",
+      "off": "unset",
+      "values": ["true"]
+    },
+    {
+      "name": "OTEL_METRICS_INCLUDE_SESSION_ID",
+      "why": "The mirror image — only `false` is documented, default included — so off IS a value and unset is a third state.",
+      "control": "toggle",
+      "on": "true",
+      "off": "false",
+      "values": ["false", "true"],
+      "safety": { "pretrust_safe": true }
+    },
+    {
+      "name": "CLAUDE_CODE_EFFORT_LEVEL",
+      "why": "The enum-drift case. Its own prose lists six values; ENUM_OVERRIDES carried four, so the docs never 'deferred to another page' here and the override was silently dropping max and auto. Derived from prose now, and the superset assertion fails loudly if an override ever undercuts prose again.",
+      "control": "enum",
+      "values": ["low", "medium", "high", "xhigh", "max", "auto"]
+    },
+    {
+      "name": "CLAUDE_CODE_DEBUG_LOG_LEVEL",
+      "why": "A closed 'Values:' set the old parenthetical-only extractor missed, so it shipped as a free-text field.",
+      "control": "enum",
+      "values": ["verbose", "debug", "info", "warn", "error"]
+    },
+    {
+      "name": "ANTHROPIC_BEDROCK_SERVICE_TIER",
+      "why": "Enum via the parenthetical fallback rather than a 'Values:' clause — both paths stay covered.",
+      "control": "enum",
+      "values": ["default", "flex", "priority"]
+    },
+    {
+      "name": "ENABLE_TOOL_SEARCH",
+      "why": "Must NOT become an enum. Its documented values include the parametric auto:N (example auto:5); closing the set to true/auto/false would reject a legal value — the same sin as inventing numeric bounds.",
+      "control": "text",
+      "values": null,
+      "format": "text"
+    },
+
+    {
+      "name": "ANTHROPIC_CUSTOM_HEADERS",
+      "why": "Overlap case 1, and the proof that CC's SAFE_ENV_VARS cannot double as a disclosure judgement: pre-trust-safe AND able to carry 'Authorization: Bearer ...' in its documented Name: Value format.",
+      "control": "text",
+      "format": "secret",
+      "safety": { "secret": true, "pretrust_safe": true, "hazards": [] }
+    },
+    {
+      "name": "ANTHROPIC_FOUNDRY_API_KEY",
+      "why": "Overlap case 2: pre-trust-safe, provider-managed, and a credential.",
+      "control": "text",
+      "format": "secret",
+      "safety": { "secret": true, "pretrust_safe": true, "provider_managed": true, "hazards": [] }
+    },
+    {
+      "name": "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+      "why": "The regex false positive the old sensitive rule produced. It is a refresh interval, and CC lists it as pre-trust-safe — a value the pane must be able to show.",
+      "control": "number",
+      "unit": "ms",
+      "safety": { "secret": false, "pretrust_safe": true, "hazards": [] }
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "why": "Secret plus a hazard from CC's own taxonomy (switch to attacker-controlled project).",
+      "control": "text",
+      "format": "secret",
+      "safety": { "secret": true, "pretrust_safe": false, "hazards": ["switch_project"] }
+    },
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "why": "CC's redirect-to-attacker-controlled-server class.",
+      "control": "text",
+      "format": "url",
+      "safety": { "secret": false, "hazards": ["redirect"], "provider_managed": true }
+    },
+    {
+      "name": "CLAUDE_ENV_FILE",
+      "why": "Claudepot's execute-arbitrary-code class, which CC's comment does not enumerate. Read per Bash command rather than at bootstrap, so it stays editable — unlike CLAUDE_CONFIG_DIR.",
+      "control": "text",
+      "safety": { "hazards": ["execute_code"], "blocked_reason": null }
+    },
+    {
+      "name": "CLAUDE_CONFIG_DIR",
+      "why": "Blocked. CC resolves its config directory from process.env before settings load and memoizes it, then applies settings.env over it — some paths resolve against the old directory, later ones against the new. Read-only with 'set this in your shell'.",
+      "control": "text",
+      "safety": { "blocked_reason": "bootstrap_split_brain" }
+    },
+    {
+      "name": "CLAUDE_CODE_SESSION_ID",
+      "why": "Blocked for the other reason: host-injected per run, never user-set. Still rendered, read-only, so a hand-set key is never invisible.",
+      "safety": { "blocked_reason": "host_injected" }
+    },
+    {
+      "name": "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+      "why": "An ordinary number with no zero-is-special prose — the control class must not depend on that prose existing.",
+      "control": "number",
+      "unit": "tokens",
+      "safety": { "pretrust_safe": true }
+    },
+    {
+      "name": "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+      "why": "Why `format` is a hint and never validation: this is prose, and the MODEL-in-name rule labels it model-id. Validating against the hint would reject legitimate values.",
+      "control": "text",
+      "format": "model-id",
+      "safety": { "pretrust_safe": true, "provider_managed": true }
+    },
+    {
+      "name": "CLAUDE_AFK_COUNTDOWN_MS",
+      "why": "The docs' bare-backtick default form, 'Default `20000` (20 seconds)' — distinct from the parenthetical and colon forms, and the one the stricter extractor almost dropped.",
+      "control": "number",
+      "default": "20000",
+      "unit": "ms"
+    }
+  ]
+}
