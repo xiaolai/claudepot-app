@@ -5,11 +5,10 @@
 
 /* ---------- command palette (P1.1) ---------- */
 
-/* Layout container only — no fill, no interaction. The dismissable
-   scrim is a SIBLING of the dialog below, not its ancestor: making
-   the backdrop itself a <button> wrapped the dialog's own option
-   buttons in a button, which is invalid DOM and warned on every
-   render. */
+/* Layout container only — no fill, no interaction. The scrim below is
+   a SIBLING of the dialog, not its ancestor: a <button> backdrop
+   wrapped the dialog's own controls in a button, which is invalid DOM
+   and warned on every render. */
 .palette-backdrop {
   position: fixed;
   inset: 0;
@@ -19,9 +18,8 @@
   z-index: var(--z-modal);
 }
 
-/* Click-to-dismiss target. A <button> so activation is keyboard-
-   reachable out of the box; it sits behind the dialog in paint order
-   because both are positioned and it comes first in the DOM. */
+/* Click-to-dismiss target. Sits behind the dialog in paint order:
+   both are positioned and this comes first in the DOM. */
 .palette-scrim {
   position: absolute;
   inset: 0;
@@ -94,9 +92,15 @@
   flex-shrink: 0;
 }
 
+/* <ul role="listbox">; rows are <li role="option">, not buttons.
+   Keeping them out of the tab order is what stops a tabbed-to row and
+   the arrow cursor disagreeing about what Enter runs — see the
+   PaletteItem comment. */
 .palette-list {
   overflow-y: auto;
   padding: var(--sp-4);
+  margin: 0;
+  list-style: none;
 }
 
 .palette-empty {
@@ -104,6 +108,7 @@
   text-align: center;
   color: var(--muted);
   font-size: var(--fs-sm);
+  list-style: none;
 }
 
 .palette-group-label {
@@ -113,12 +118,13 @@
   letter-spacing: var(--ls-wide);
   color: var(--muted);
   padding: var(--sp-8) var(--sp-10) var(--sp-4);
+  list-style: none;
 }
 
 .palette-group-loading {
   color: var(--fg-faint);
   text-transform: none;
-  letter-spacing: normal;
+  letter-spacing: var(--ls-normal);
 }
 
 .palette-item {
@@ -135,6 +141,9 @@
   font-size: var(--fs-sm);
   height: auto;
   box-shadow: none;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
 }
 
 .palette-item-glyph {
@@ -153,7 +162,7 @@
 /* Hover fill — `--bg-hover-soft` derives from `--fg`, so it tracks
    `[data-theme]` instead of the OS preference. The earlier
    `prefers-color-scheme` override for dark mode is no longer needed. */
-.palette-item:hover:not(:disabled):not(.selected) {
+.palette-item:hover:not(.selected) {
   background: var(--bg-hover-soft);
 }
 

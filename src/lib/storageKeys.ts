@@ -61,3 +61,4 @@ export const DEEPLINK_OPEN_ADD_ROUTE_KEY = "claudepot.deepLink.openAddRoute";
 export const DEEPLINK_FROM_NETWORK_PANEL_KEY =
   "claudepot.deepLink.fromNetworkPanel";
 export const DEEPLINK_SETTINGS_TAB_KEY = "claudepot.deepLink.settingsTab";
+export const DEEPLINK_GLOBAL_TAB_KEY = "claudepot.deepLink.globalTab";

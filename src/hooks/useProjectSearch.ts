@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { scoreFields } from "../lib/paletteScore";
+import { basename } from "../lib/paths";
+import { MIN_SEARCH_QUERY, scoreFields } from "../lib/paletteScore";
 import type { ProjectInfo } from "../types";
 
 /**
@@ -18,15 +19,21 @@ import type { ProjectInfo } from "../types";
  * Enter on "Open Projects" must not pay for a filesystem walk.
  */
 const CACHE_TTL_MS = 30_000;
-const MIN_QUERY = 2;
+
+interface CacheLoad {
+  projects: ProjectInfo[];
+  /** Generation this result was requested under. */
+  generation: number;
+}
 
 let cache: { at: number; projects: ProjectInfo[] } | null = null;
-let inFlight: Promise<ProjectInfo[]> | null = null;
+let inFlight: Promise<CacheLoad> | null = null;
 /**
  * Bumped by every invalidation. A request that was already in flight
- * when the cache was dropped must not write its result back — without
- * this, a deliberately-invalidated cache gets resurrected by a
- * response for the state that was thrown away.
+ * when the cache was dropped must not write its result back — neither
+ * into the module cache nor into a mounted hook's state. The
+ * generation travels with the result so both checks read the same
+ * value rather than each guessing.
  */
 let generation = 0;
 
@@ -37,20 +44,20 @@ export function __resetProjectCache(): void {
   generation++;
 }
 
-function loadProjects(now: number): Promise<ProjectInfo[]> {
+function loadProjects(now: number): Promise<CacheLoad> {
+  const myGeneration = generation;
   if (cache && now - cache.at < CACHE_TTL_MS) {
-    return Promise.resolve(cache.projects);
+    return Promise.resolve({ projects: cache.projects, generation: myGeneration });
   }
   // Collapse concurrent callers onto one request; a palette that
   // remounts mid-flight must not start a second filesystem walk.
-  const myGeneration = generation;
   inFlight ??= api
     .projectList()
     .then((projects) => {
       if (myGeneration === generation) {
         cache = { at: Date.now(), projects };
       }
-      return projects;
+      return { projects, generation: myGeneration };
     })
     .finally(() => {
       if (myGeneration === generation) inFlight = null;
@@ -64,6 +71,8 @@ export function useProjectSearch(
 ): { hits: ProjectInfo[]; loading: boolean } {
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Bumped to re-run the load effect after a disowned result. */
+  const [attempt, setAttempt] = useState(0);
   const aliveRef = useRef(true);
 
   useEffect(() => {
@@ -74,15 +83,27 @@ export function useProjectSearch(
   }, []);
 
   const trimmed = query.trim();
-  const wanted = trimmed.length >= MIN_QUERY;
+  const wanted = trimmed.length >= MIN_SEARCH_QUERY;
 
   useEffect(() => {
     if (!wanted || projects !== null) return;
     setLoading(true);
     loadProjects(Date.now())
-      .then((list) => {
+      .then((load) => {
         if (!aliveRef.current) return;
-        setProjects(list);
+        // Drop a result the cache already disowned — otherwise an
+        // invalidated request still lands in component state, which
+        // is the same staleness the module-level guard exists to stop.
+        // `projects` stays null and `attempt` bumps, so the effect
+        // re-runs and refetches under the current generation. Without
+        // the bump nothing in the dep list changes and the hook sits
+        // at "…searching" forever.
+        if (load.generation !== generation) {
+          setLoading(false);
+          setAttempt((a) => a + 1);
+          return;
+        }
+        setProjects(load.projects);
         setLoading(false);
       })
       .catch(() => {
@@ -93,7 +114,7 @@ export function useProjectSearch(
         setProjects([]);
         setLoading(false);
       });
-  }, [wanted, projects]);
+  }, [wanted, projects, attempt]);
 
   if (!wanted) return { hits: [], loading: false };
   if (projects === null) return { hits: [], loading };
@@ -109,10 +130,4 @@ export function useProjectSearch(
   }
   scored.sort((a, b) => b.score - a.score);
   return { hits: scored.slice(0, limit).map((s) => s.project), loading: false };
-}
-
-/** Last path segment, separator-agnostic (CC stores native paths). */
-export function basename(path: string): string {
-  const parts = path.split(/[/\\]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
 }

@@ -4,8 +4,11 @@ import { NF } from "../icons";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { usePaletteActions } from "../hooks/usePaletteActions";
 import { useSessionSearch } from "../hooks/useSessionSearch";
-import { useProjectSearch, basename } from "../hooks/useProjectSearch";
+import { useProjectSearch } from "../hooks/useProjectSearch";
+import { basename } from "../lib/paths";
+import { shortSessionId } from "../sections/sessions/format";
 import { buildPaletteRows, type SelectableRow } from "./palette/rows";
+import { usePaletteSelection } from "./palette/usePaletteSelection";
 import type { AccountSummary, AppStatus } from "../types";
 
 export function CommandPalette({
@@ -33,9 +36,7 @@ export function CommandPalette({
   onToggleTheme?: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const trapRef = useFocusTrap<HTMLDivElement>();
   const listboxId = useId();
   const optionIdPrefix = useId();
@@ -63,29 +64,14 @@ export function CommandPalette({
     query,
   });
 
-  // Snap back to the top whenever the result set changes, so the
-  // cursor can't sit past the end of a shorter list.
-  useEffect(() => { setSelectedIndex(0); }, [query]);
-  useEffect(() => {
-    if (selectedIndex >= selectable.length) setSelectedIndex(0);
-  }, [selectable.length, selectedIndex]);
-
-  useEffect(() => {
-    // Query `.palette-item` specifically — the list also contains
-    // `.palette-group-label` dividers. Indexing against every child
-    // would scroll a heading into view instead of the selected row.
-    const el = listRef.current
-      ?.querySelectorAll<HTMLElement>(".palette-item")[selectedIndex];
-    el?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   /**
-   * The single activation path. Both Enter and click route through
-   * this with the row they are acting on, so the two can never
-   * disagree about what a row does.
+   * What running a row means. Both Enter and click reach it through
+   * `activate` below, so the two can never disagree about what a row
+   * does.
    */
-  const activate = useCallback((row: SelectableRow) => {
+  const runRow = useCallback((row: SelectableRow) => {
     if (row.kind === "action") {
       row.action.onSelect();
     } else if (row.kind === "session") {
@@ -101,32 +87,10 @@ export function CommandPalette({
         }),
       );
     }
-    onClose();
-  }, [onClose]);
+  }, []);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (selectable.length === 0) return;
-      setSelectedIndex((i) => Math.min(i + 1, selectable.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      setSelectedIndex(0);
-    } else if (e.key === "End") {
-      e.preventDefault();
-      if (selectable.length > 0) setSelectedIndex(selectable.length - 1);
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const row = selectable[selectedIndex];
-      if (row) activate(row);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
-    }
-  }, [selectable, selectedIndex, activate, onClose]);
+  const { selectedIndex, setSelectedIndex, activate, handleKeyDown, listRef } =
+    usePaletteSelection({ selectable, resetKey: query, onClose, onRun: runRow });
 
   const optionId = (index: number) => `${optionIdPrefix}-opt-${index}`;
   const activeId =
@@ -167,22 +131,24 @@ export function CommandPalette({
             autoComplete="off" />
           <kbd className="palette-kbd">esc</kbd>
         </div>
-        <div className="palette-list" ref={listRef} id={listboxId} role="listbox"
+        <ul className="palette-list" ref={listRef} id={listboxId} role="listbox"
           aria-label="Commands">
           {rows.map((row) => {
             if (row.kind === "heading") {
               return (
-                <div key={row.key} className="palette-group-label" role="presentation">
+                <li key={row.key} className="palette-group-label" role="presentation">
                   {row.label}{" "}
                   {row.loading && (
                     <span className="palette-group-loading">…searching</span>
                   )}
-                </div>
+                </li>
               );
             }
             if (row.kind === "empty") {
               return (
-                <div key={row.key} className="palette-empty">{row.text}</div>
+                <li key={row.key} className="palette-empty" role="presentation">
+                  {row.text}
+                </li>
               );
             }
             return (
@@ -196,12 +162,31 @@ export function CommandPalette({
               />
             );
           })}
-        </div>
+        </ul>
       </div>
     </div>
   );
 }
 
+/**
+ * A row is an `<li role="option">`, deliberately NOT a focusable
+ * control.
+ *
+ * These were `<button>`s, which put every row in the tab order. Tab to
+ * a row and press Enter and two things fired: the row's own click
+ * (right row) and the dialog's keydown handler resolving
+ * `selectable[selectedIndex]` (whatever the arrow-key cursor last
+ * pointed at). That is the same "activates a command you weren't
+ * looking at" bug this component was rewritten to eliminate, reached
+ * by a different key.
+ *
+ * The combobox pattern owns keyboard input in one place: focus stays
+ * in the input, `aria-activedescendant` names the active row, and the
+ * rows are pointer targets only. Note this is the ARIA *combobox*
+ * pattern, not the standalone listbox in `.claude/rules/design.md`,
+ * whose `tabIndex={0}` options are correct only when focus moves into
+ * the list itself.
+ */
 function PaletteItem({
   id, row, selected, onSelect, onHover,
 }: {
@@ -210,7 +195,8 @@ function PaletteItem({
 }) {
   const { glyph, label, detail, title } = describeRow(row);
   return (
-    <button
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+    <li
       id={id}
       className={`palette-item ${selected ? "selected" : ""}`}
       role="option"
@@ -222,7 +208,7 @@ function PaletteItem({
       <Glyph g={glyph} size={14} className="palette-item-glyph" />
       <span className="palette-item-label">{label}</span>
       {detail && <span className="palette-item-detail">{detail}</span>}
-    </button>
+    </li>
   );
 }
 
@@ -254,8 +240,4 @@ function describeRow(row: SelectableRow) {
     detail: `${row.project.session_count} sessions`,
     title: row.project.original_path,
   };
-}
-
-function shortSessionId(id: string): string {
-  return id.length >= 8 ? id.slice(0, 8) : id;
 }

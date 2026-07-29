@@ -14,6 +14,16 @@
  * pin; the exact constants are free to move.
  */
 
+/**
+ * Minimum query length before the palette runs a *search* (projects,
+ * sessions) as opposed to filtering the static action list.
+ *
+ * One constant, because three copies of "2" — one per search hook plus
+ * one in the row builder — let the group headings disagree with
+ * whether a search actually ran.
+ */
+export const MIN_SEARCH_QUERY = 2;
+
 const TIER_EXACT = 1000;
 const TIER_PREFIX = 900;
 const TIER_WORD_START = 800;
@@ -39,24 +49,55 @@ function spanPenalty(span: number, queryLen: number): number {
 }
 
 /**
- * Greedy forward subsequence match. Returns the span (distance from
- * first to last matched character) or null when `q` is not a
- * subsequence of `t`. Greedy-forward is not guaranteed minimal, but it
- * is O(n) and the ranking only needs a monotone "how scattered" proxy.
+ * Span of the tightest window of `t` containing `q` in order, or null
+ * when `q` is not a subsequence of `t` at all.
+ *
+ * Two passes, because membership and tightness have different costs.
+ *
+ * 1. One greedy forward pass, **never bounded**, answers "is this a
+ *    subsequence". It has to see the whole string: project rows match
+ *    against full paths, and capping this pass turns a genuine match
+ *    late in a long path into a silent non-match.
+ * 2. A bounded scan of later start positions refines the span for
+ *    ranking. Greedy alone reports the span of the *first* match, so
+ *    "a…………abc" would score by the leading stray `a` and rank a
+ *    tightly-packed label as scattered. This pass is quadratic, hence
+ *    the window — and it only ever improves a span that step 1 has
+ *    already established, so bounding it costs ranking precision on
+ *    very long strings and nothing else.
  */
+const MAX_SPAN_SCAN = 200;
+
 function subsequenceSpan(q: string, t: string): number | null {
   let qi = 0;
-  let first = -1;
-  let last = -1;
+  let firstStart = -1;
+  let greedyEnd = -1;
   for (let ti = 0; ti < t.length && qi < q.length; ti++) {
     if (t[ti] === q[qi]) {
-      if (first === -1) first = ti;
-      last = ti;
+      if (qi === 0) firstStart = ti;
+      greedyEnd = ti;
       qi++;
     }
   }
   if (qi !== q.length) return null;
-  return last - first + 1;
+
+  let best = greedyEnd - firstStart + 1;
+  if (best === q.length) return best; // already contiguous
+
+  const limit = Math.min(t.length, firstStart + MAX_SPAN_SCAN);
+  for (let start = firstStart + 1; start < limit; start++) {
+    if (t[start] !== q[0]) continue;
+    let qj = 0;
+    let ti = start;
+    for (; ti < t.length && qj < q.length; ti++) {
+      if (t[ti] === q[qj]) qj++;
+    }
+    if (qj !== q.length) break; // no later start can succeed either
+    const span = ti - start;
+    if (span < best) best = span;
+    if (best === q.length) break; // contiguous — cannot do better
+  }
+  return best;
 }
 
 /**

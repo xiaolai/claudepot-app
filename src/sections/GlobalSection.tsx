@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConfigSection } from "./ConfigSection";
 import { UpdatesPanel } from "./global/UpdatesPanel";
 import { MemoryHealthPanel } from "./global/MemoryHealthPanel";
@@ -27,11 +27,20 @@ import { Button } from "../components/primitives/Button";
  */
 
 import { GLOBAL_TAB_KEY as TAB_STORAGE_KEY } from "../lib/storageKeys";
-import { isGlobalTabId, type GlobalTabId } from "./global/tabs";
+import {
+  EVENT_GLOBAL_TAB,
+  consumeGlobalTabHint,
+  type GlobalTabEventDetail,
+} from "../lib/networkPanelDeepLink";
+import { GLOBAL_TABS, isGlobalTabId, type GlobalTabId } from "./global/tabs";
 
 type GlobalTab = GlobalTabId;
 
 function loadTab(): GlobalTab {
+  // A ⌘K deep link wins over the saved tab on a cold mount; it is a
+  // one-shot hint, so reading it also clears it.
+  const hint = consumeGlobalTabHint();
+  if (hint && isGlobalTabId(hint)) return hint;
   try {
     const raw = localStorage.getItem(TAB_STORAGE_KEY);
     if (raw && isGlobalTabId(raw)) return raw;
@@ -62,31 +71,45 @@ export function GlobalSection({
   // "Reveal in Config" from Activities -> Usage -> Unused). The tab
   // otherwise restores from localStorage, so without this the link
   // would land on whichever tab was last open and silently do nothing.
+  //
+  // It fires only when the route ACTUALLY CHANGES, not whenever a
+  // `node:` value is present. `node:<id>` doubles as the Config tree's
+  // persisted selection (ConfigSection writes it on every node click),
+  // so `setSection("global")` restores one from localStorage on any
+  // later visit. Forcing Config on that restore made the ⌘K "Open
+  // Global → Updates" link land on Config for anyone who had ever
+  // selected a Config node.
+  const prevSubRoute = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (subRoute?.startsWith("node:") && tab !== "config") {
+    const changed =
+      prevSubRoute.current !== undefined && prevSubRoute.current !== subRoute;
+    prevSubRoute.current = subRoute;
+    if (changed && subRoute?.startsWith("node:") && tab !== "config") {
       setTab("config");
       saveTab("config");
     }
   }, [subRoute, tab]);
 
-  // A `tab:<id>` subRoute is the ⌘K palette's deep link ("Open Global
-  // → Updates"). It is one-shot: consumed and cleared immediately, so
-  // it selects the tab without pinning it — the user's own tab clicks
-  // still persist through `saveTab` and win on the next visit.
-  useEffect(() => {
-    if (!subRoute?.startsWith("tab:")) return;
-    const wanted = subRoute.slice("tab:".length);
-    if (isGlobalTabId(wanted)) {
-      setTab(wanted);
-      saveTab(wanted);
-    }
-    onSubRouteChange(null);
-  }, [subRoute, onSubRouteChange]);
-
   const switchTab = (next: GlobalTab) => {
     setTab(next);
     saveTab(next);
   };
+
+  // Hot-mount half of the ⌘K tab deep link ("Open Global → Updates").
+  // `setSection` is a no-op when Global is already the active section,
+  // so the cold-mount hint in `loadTab` never re-fires; the event
+  // reaches us either way. Mirrors SettingsSection's pane deep link.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const next = (e as CustomEvent<GlobalTabEventDetail>).detail?.tab;
+      if (next && isGlobalTabId(next)) {
+        setTab(next);
+        saveTab(next);
+      }
+    };
+    window.addEventListener(EVENT_GLOBAL_TAB, handler);
+    return () => window.removeEventListener(EVENT_GLOBAL_TAB, handler);
+  }, []);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -100,54 +123,24 @@ export function GlobalSection({
           borderBottom: "var(--bw-hair) solid var(--line)",
         }}
       >
-        <Button
-          id="global-tab-config"
-          role="tab"
-          aria-selected={tab === "config"}
-          aria-controls="global-panel-config"
-          size="sm"
-          variant={tab === "config" ? "subtle" : "ghost"}
-          active={tab === "config"}
-          onClick={() => switchTab("config")}
-        >
-          Config
-        </Button>
-        <Button
-          id="global-tab-memory"
-          role="tab"
-          aria-selected={tab === "memory"}
-          aria-controls="global-panel-memory"
-          size="sm"
-          variant={tab === "memory" ? "subtle" : "ghost"}
-          active={tab === "memory"}
-          onClick={() => switchTab("memory")}
-        >
-          Memory
-        </Button>
-        <Button
-          id="global-tab-tips"
-          role="tab"
-          aria-selected={tab === "tips"}
-          aria-controls="global-panel-tips"
-          size="sm"
-          variant={tab === "tips" ? "subtle" : "ghost"}
-          active={tab === "tips"}
-          onClick={() => switchTab("tips")}
-        >
-          Tips
-        </Button>
-        <Button
-          id="global-tab-updates"
-          role="tab"
-          aria-selected={tab === "updates"}
-          aria-controls="global-panel-updates"
-          size="sm"
-          variant={tab === "updates" ? "subtle" : "ghost"}
-          active={tab === "updates"}
-          onClick={() => switchTab("updates")}
-        >
-          Updates
-        </Button>
+        {/* Rendered from GLOBAL_TABS so the tab bar and the ⌘K deep
+            links can't disagree about which tabs exist or their
+            order — they already had, with Tips and Updates swapped. */}
+        {GLOBAL_TABS.map((t) => (
+          <Button
+            key={t.id}
+            id={`global-tab-${t.id}`}
+            role="tab"
+            aria-selected={tab === t.id}
+            aria-controls={`global-panel-${t.id}`}
+            size="sm"
+            variant={tab === t.id ? "subtle" : "ghost"}
+            active={tab === t.id}
+            onClick={() => switchTab(t.id)}
+          >
+            {t.label}
+          </Button>
+        ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {tab === "config" && (

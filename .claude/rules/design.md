@@ -124,6 +124,22 @@ section keeps the design pass cheap and the a11y story simple.
 
 ## Shortcuts
 
-⌘K palette, ⌘R refresh, ⌘N add, ⌘, settings, ⌘1..⌘4 section, ⌘F
-focus search, Esc close modal. Never fire while a modal is open or
-an input is focused.
+⌘K palette, ⌘R refresh, ⌘N add, ⌘, settings, ⌘1..⌘9 section (bound by
+position in `src/sections/registry.tsx`), ⌘/ shortcut reference,
+⌘⇧L focus the live strip, Esc close modal.
+
+**Never fire while a modal is open or an input is focused.** The one
+predicate for that is `isShortcutContextBlocked()` in
+`src/hooks/useGlobalShortcuts.ts` — use it rather than re-deriving the
+check. Every hook here used to carry its own weaker copy, which is how
+⌘K ended up able to open the palette on top of an open dialog.
+
+Sole exception: **⌃⌥⌘L** (toggle developer mode) is ungated on
+purpose. It has no visible control anywhere, and its value is being
+reachable precisely when the UI is misbehaving — including from a
+modal that won't dismiss. Its four-modifier combo makes accidental
+firing while typing a non-issue. Any *further* exception needs the
+same treatment: written here, not just commented at the call site.
+
+There is no ⌘F. It was listed here and in the shortcuts modal for a
+long time while no section ever wired it.

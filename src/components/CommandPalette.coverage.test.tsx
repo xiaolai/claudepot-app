@@ -16,7 +16,10 @@ import { sections } from "../sections/registry";
 import { SETTINGS_PANES } from "../sections/settings/panes";
 import { GLOBAL_TABS } from "../sections/global/tabs";
 import { __resetProjectCache } from "../hooks/useProjectSearch";
-import { DEEPLINK_SETTINGS_TAB_KEY } from "../lib/storageKeys";
+import {
+  DEEPLINK_GLOBAL_TAB_KEY,
+  DEEPLINK_SETTINGS_TAB_KEY,
+} from "../lib/storageKeys";
 
 function renderPalette(over: Record<string, unknown> = {}) {
   const h = {
@@ -119,7 +122,7 @@ describe("CommandPalette — deep targets", () => {
     ).toBe(true);
   });
 
-  it("reaches a Global tab via a one-shot tab: sub-route", async () => {
+  it("reaches a Global tab via the transient tab hint", async () => {
     const h = renderPalette();
     const user = userEvent.setup();
     await user.type(input(), "updates");
@@ -129,7 +132,8 @@ describe("CommandPalette — deep targets", () => {
       .find((r) => r.textContent?.includes("Global → Updates"));
     expect(row).toBeTruthy();
     fireEvent.click(row!);
-    expect(h.onNavigate).toHaveBeenCalledWith("global", "tab:updates");
+    expect(h.onNavigate).toHaveBeenCalledWith("global");
+    expect(sessionStorage.getItem(DEEPLINK_GLOBAL_TAB_KEY)).toBe("updates");
   });
 
   it("exposes every Settings pane and Global tab as a target", async () => {

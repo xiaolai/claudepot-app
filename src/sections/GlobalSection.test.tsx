@@ -55,6 +55,11 @@ vi.mock("../providers/AppStateProvider", () => ({
 }));
 
 import { GlobalSection } from "./GlobalSection";
+import { GLOBAL_TABS } from "./global/tabs";
+import {
+  consumeGlobalTabHint,
+  triggerGlobalTab,
+} from "../lib/networkPanelDeepLink";
 
 describe("GlobalSection — env-vars deep link", () => {
   it("forces the Config tab and opens the pane for node:virtual:env-vars", async () => {
@@ -83,13 +88,88 @@ describe("GlobalSection — env-vars deep link", () => {
   });
 });
 
+/**
+ * The ⌘K tab deep link rides a transient sessionStorage hint plus a
+ * window event — NOT the section `subRoute`. `subRoute` is persisted
+ * per section, so writing a tab id there both clobbered the stored
+ * `node:<id>` Config route and outlived the single navigation it was
+ * describing.
+ */
 describe("GlobalSection — ⌘K tab deep link", () => {
-  it("selects the tab named by a tab: sub-route", async () => {
+  it("selects the hinted tab on a cold mount", async () => {
     window.localStorage.setItem("claudepot.global.tab", "config");
+    triggerGlobalTab("updates");
+
+    render(<GlobalSection subRoute={null} onSubRouteChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /updates/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
+
+  it("selects the tab when Global is already mounted", async () => {
+    window.localStorage.setItem("claudepot.global.tab", "config");
+    render(<GlobalSection subRoute={null} onSubRouteChange={vi.fn()} />);
+
+    // setSection is a no-op when Global is already active, so only the
+    // event path can reach a mounted section.
+    triggerGlobalTab("memory");
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /memory/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
+
+  it("consumes the hint so it fires exactly once", () => {
+    triggerGlobalTab("tips");
+    expect(consumeGlobalTabHint()).toBe("tips");
+    expect(consumeGlobalTabHint()).toBeNull();
+  });
+
+  it("never touches the section sub-route", async () => {
     const onSubRouteChange = vi.fn();
+    triggerGlobalTab("updates");
+    render(
+      <GlobalSection subRoute="node:virtual:env-vars" onSubRouteChange={onSubRouteChange} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /config/i })).toBeInTheDocument();
+    });
+    // A node: route must survive a tab deep link untouched.
+    expect(onSubRouteChange).not.toHaveBeenCalledWith(null);
+  });
+
+  it("ignores a hint naming a tab that does not exist", async () => {
+    window.localStorage.setItem("claudepot.global.tab", "config");
+    triggerGlobalTab("nonsense");
+    render(<GlobalSection subRoute={null} onSubRouteChange={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /config/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
+
+  it("wins over a Config node route restored from localStorage", async () => {
+    // `node:<id>` doubles as the Config tree's PERSISTED selection, so
+    // setSection("global") restores one on any later visit. Forcing
+    // the Config tab on that restore made "Open Global → Updates" land
+    // on Config for anyone who had ever clicked a Config node.
+    window.localStorage.setItem("claudepot.global.tab", "config");
+    triggerGlobalTab("updates");
 
     render(
-      <GlobalSection subRoute="tab:updates" onSubRouteChange={onSubRouteChange} />,
+      <GlobalSection
+        subRoute="node:virtual:env-vars"
+        onSubRouteChange={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -100,28 +180,12 @@ describe("GlobalSection — ⌘K tab deep link", () => {
     });
   });
 
-  it("clears the sub-route so the deep link is one-shot", async () => {
-    // Left in place, `tab:` would pin the section's sub-route and
-    // override the user's own tab clicks on every later visit.
-    const onSubRouteChange = vi.fn();
-    render(
-      <GlobalSection subRoute="tab:memory" onSubRouteChange={onSubRouteChange} />,
-    );
-    await waitFor(() => {
-      expect(onSubRouteChange).toHaveBeenCalledWith(null);
-    });
-  });
-
-  it("ignores a tab: sub-route naming a tab that does not exist", async () => {
-    window.localStorage.setItem("claudepot.global.tab", "config");
-    render(
-      <GlobalSection subRoute="tab:nonsense" onSubRouteChange={vi.fn()} />,
-    );
-    await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /config/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+  it("renders one tab per GLOBAL_TABS entry, in that order", () => {
+    render(<GlobalSection subRoute={null} onSubRouteChange={vi.fn()} />);
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(GLOBAL_TABS.length);
+    GLOBAL_TABS.forEach((t, i) => {
+      expect(tabs[i]!.textContent).toContain(t.label);
     });
   });
 });

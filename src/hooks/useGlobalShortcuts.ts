@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * Shared shortcut gates (design.md → Shortcuts: "Never fire while a
@@ -38,27 +38,36 @@ export function useGlobalShortcuts(handlers: {
   onRefresh?: () => void;
   onAdd?: () => void;
 }): void {
+  // Callers pass an object literal, so depending on `handlers` itself
+  // tore down and reinstalled the window listener on every render of
+  // every section using this hook. The latest callbacks live in a ref
+  // behind one stable listener instead.
+  const latest = useRef(handlers);
+  useEffect(() => {
+    latest.current = handlers;
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.shiftKey || e.altKey) return;
-      // Don't hijack typing (⌘A / ⌘F inside an input), and don't act
-      // on the section behind an open modal — a ⌘R refresh or ⌘N add
-      // fired from under a dialog leaves the user staring at a stale
-      // modal over changed content.
+      // Don't hijack typing, and don't act on the section behind an
+      // open modal — a ⌘R refresh or ⌘N add fired from under a dialog
+      // leaves the user staring at a stale modal over changed content.
       if (isShortcutContextBlocked()) return;
-      if (e.key === "r" && handlers.onRefresh) {
+      const { onRefresh, onAdd } = latest.current;
+      if (e.key === "r" && onRefresh) {
         e.preventDefault();
-        handlers.onRefresh();
+        onRefresh();
         return;
       }
-      if (e.key === "n" && handlers.onAdd) {
+      if (e.key === "n" && onAdd) {
         e.preventDefault();
-        handlers.onAdd();
+        onAdd();
       }
     };
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handlers]);
+  }, []);
 }

@@ -3,6 +3,7 @@ import {
   PALETTE_CATEGORY_LABELS,
   type PaletteAction,
 } from "../../hooks/usePaletteActions";
+import { MIN_SEARCH_QUERY } from "../../lib/paletteScore";
 import type { ProjectInfo, SearchHit } from "../../types";
 
 /**
@@ -32,9 +33,6 @@ export interface PaletteRowModel {
   rows: PaletteRow[];
   selectable: SelectableRow[];
 }
-
-/** Queries shorter than this don't reach the search-backed groups. */
-export const MIN_SEARCH_QUERY = 2;
 
 export function buildPaletteRows(args: {
   /** Already in display order — see `usePaletteActions.filter`. */
@@ -73,45 +71,40 @@ export function buildPaletteRows(args: {
 
   const searching = args.query.trim().length >= MIN_SEARCH_QUERY;
 
-  // Search-backed groups render their heading only when they have
-  // something to show or are still loading. A bare heading over an
-  // empty group reads as a broken pane; the whole-palette empty state
-  // below covers "nothing matched anywhere".
-  if (searching && (args.projectsLoading || args.projects.length > 0)) {
-    rows.push({
-      kind: "heading",
-      key: "h-projects",
-      label: "Projects",
-      loading: args.projectsLoading,
-    });
-    args.projects.forEach((project) => {
-      push({
-        kind: "project",
-        key: `p-${project.original_path}`,
-        index: selectable.length,
-        project,
-      });
-    });
-  }
+  /**
+   * Search-backed groups render their heading only when they have
+   * something to show or are still loading. A bare heading over an
+   * empty group reads as a broken pane; the whole-palette empty state
+   * below covers "nothing matched anywhere".
+   */
+  const pushSearchGroup = <T>(
+    label: string,
+    loading: boolean,
+    items: readonly T[],
+    toRow: (item: T, i: number, index: number) => SelectableRow,
+  ) => {
+    if (!searching || (!loading && items.length === 0)) return;
+    rows.push({ kind: "heading", key: `h-${label}`, label, loading });
+    items.forEach((item, i) => push(toRow(item, i, selectable.length)));
+  };
 
-  if (searching && (args.sessionsLoading || args.sessions.length > 0)) {
-    rows.push({
-      kind: "heading",
-      key: "h-sessions",
-      label: "Sessions",
-      loading: args.sessionsLoading,
-    });
-    args.sessions.forEach((hit, i) => {
-      push({
-        kind: "session",
-        // file_path repeats across hits from the same transcript, so
-        // the ordinal is part of the key.
-        key: `s-${hit.file_path}-${i}`,
-        index: selectable.length,
-        hit,
-      });
-    });
-  }
+  pushSearchGroup("Projects", args.projectsLoading, args.projects,
+    (project, _i, index) => ({
+      kind: "project",
+      key: `p-${project.original_path}`,
+      index,
+      project,
+    }));
+
+  pushSearchGroup("Sessions", args.sessionsLoading, args.sessions,
+    (hit, i, index) => ({
+      kind: "session",
+      // file_path repeats across hits from the same transcript, so
+      // the ordinal is part of the key.
+      key: `s-${hit.file_path}-${i}`,
+      index,
+      hit,
+    }));
 
   if (selectable.length === 0 && !args.projectsLoading && !args.sessionsLoading) {
     rows.push({ kind: "empty", key: "empty", text: "No matches" });

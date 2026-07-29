@@ -57,6 +57,15 @@ describe("scoreMatch", () => {
     expect(tight).toBeGreaterThan(loose);
   });
 
+  it("scores by the tightest subsequence, not the first one found", () => {
+    // A greedy forward pass anchors on the leading stray "a" and
+    // reports a span covering the whole string, ranking this as
+    // scattered when a tight "abc" sits at the end.
+    const tightLater = scoreMatch("abc", "a zzzzzzzzzzzz abc")!;
+    const genuinelyLoose = scoreMatch("abc", "a zzzz b zzzz c zz")!;
+    expect(tightLater).toBeGreaterThan(genuinelyLoose);
+  });
+
   it("never lets a weaker tier outrank a stronger one, however long", () => {
     // A 120-char substring match must still beat the best possible
     // subsequence match. This is the invariant that keeps the penalty
@@ -64,6 +73,21 @@ describe("scoreMatch", () => {
     const longSubstring = scoreMatch("needle", `${"a".repeat(114)}needle`)!;
     const bestSubsequence = scoreMatch("needle", "needIe-n-e-e-d-l-e")!;
     expect(longSubstring).toBeGreaterThan(bestSubsequence ?? -Infinity);
+  });
+
+  it("still matches when the first candidate start is far into the string", () => {
+    // Real project rows are matched against full paths, which can run
+    // well past any bounded scan window. Capping the membership pass
+    // turned a genuine match near the end of a long path into a
+    // silent non-match.
+    const longPath = `/Users/j/${"nested/".repeat(60)}widget`;
+    expect(longPath.indexOf("w")).toBeGreaterThan(200);
+    expect(scoreMatch("wdgt", longPath)).not.toBeNull();
+  });
+
+  it("matches a subsequence spanning the very end of a long string", () => {
+    const t = `${"z".repeat(400)}abc`;
+    expect(scoreMatch("abc", t)).not.toBeNull();
   });
 
   it("treats punctuation as a word boundary", () => {

@@ -92,6 +92,28 @@ describe("CommandPalette — keyboard activation targets the visible row", () =>
     }
   });
 
+  it("keeps rows out of the tab order so focus can't desync from the cursor", () => {
+    // Rows were <button>s. Tabbing to one and pressing Enter fired
+    // BOTH the row's own click and the dialog's keydown handler
+    // resolving selectable[selectedIndex] — two activations, one of
+    // them a command the user never pointed at. The combobox pattern
+    // keeps focus in the input; rows are pointer targets only.
+    renderPalette();
+    for (const row of screen.getAllByRole("option")) {
+      expect(row.tagName).toBe("LI");
+      expect(row).not.toHaveAttribute("tabindex");
+    }
+    // The input is the only tab stop inside the dialog.
+    const focusable = document
+      .querySelector('[role="dialog"]')!
+      .querySelectorAll('a[href], button, input, select, textarea, [tabindex]');
+    const tabbable = Array.from(focusable).filter(
+      (el) => el.getAttribute("tabindex") !== "-1",
+    );
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.tagName).toBe("INPUT");
+  });
+
   it("every visible row activates the same handler by Enter as by click", () => {
     // Walk the whole list with ArrowDown; at each stop, the keyboard
     // path and the click path must agree. This is the invariant the

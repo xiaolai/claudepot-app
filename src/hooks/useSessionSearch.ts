@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { MIN_SEARCH_QUERY } from "../lib/paletteScore";
 import type { SearchHit } from "../types";
 
 /**
@@ -31,7 +32,7 @@ export function useSessionSearch(
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    if (trimmed.length < MIN_SEARCH_QUERY) {
       // Reset immediately on short queries so stale hits from a longer
       // previous query don't flash on screen.
       setHits([]);

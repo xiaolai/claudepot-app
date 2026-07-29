@@ -23,6 +23,7 @@ const GOLDEN: Record<string, string> = {
   DEEPLINK_OPEN_ADD_ROUTE_KEY: "claudepot.deepLink.openAddRoute",
   DEEPLINK_FROM_NETWORK_PANEL_KEY: "claudepot.deepLink.fromNetworkPanel",
   DEEPLINK_SETTINGS_TAB_KEY: "claudepot.deepLink.settingsTab",
+  DEEPLINK_GLOBAL_TAB_KEY: "claudepot.deepLink.globalTab",
 };
 
 describe("storageKeys — byte-for-byte compat contract", () => {
