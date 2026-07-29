@@ -604,7 +604,12 @@ mod tests {
     #[test]
     fn lock_key_preserves_the_tail_for_every_depth() {
         let tmp = TempDir::new().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        // Build the expectation the way `lock_key` builds its anchor: bare
+        // `canonicalize` returns the verbatim `\\?\C:\...` form on Windows,
+        // which `normalize_anchor` strips (rules/paths.md — a verbatim path
+        // never matches CC's on-disk form). Comparing a simplified key
+        // against a verbatim expectation failed on Windows only.
+        let root = normalize_anchor(&std::fs::canonicalize(tmp.path()).unwrap());
         for tail in [
             "settings.json",
             "a/settings.json",
