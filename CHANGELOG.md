@@ -6,7 +6,49 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.3.4 — beta (unreleased)
+## 0.3.5 — beta (unreleased)
+
+### Added
+
+- **Command palette reaches the whole app.** ⌘K listed three
+  navigation targets out of nine sections. It now derives them from
+  the section registry, so every section is reachable, and adds the
+  fourteen Settings panes and four Global tabs as deep targets — they
+  stay hidden until you type, so the short list doesn't get buried.
+  Projects are searchable by name for the first time; sessions
+  already were.
+
+- Results are ranked by match quality instead of listed in whatever
+  order they were built. Searching "set" used to be able to put "Sign
+  Desktop out" above "Open Settings".
+
+### Changed
+
+- The palette's rows are announced properly to screen readers
+  (combobox + `aria-activedescendant`), and Home/End jump to the ends
+  of the list.
+
+### Fixed
+
+- **⌘K could run a command you weren't looking at.** The palette
+  rendered rows grouped by category but resolved the keyboard cursor
+  against a differently-ordered list, so pressing Enter on a
+  highlighted "Open Projects" signed Claude Desktop out. Clicking was
+  always correct; only the keyboard — the whole point of ⌘K — was
+  wrong.
+
+- ⌘K and ⌘, fired on top of an open dialog, stacking the palette over
+  a modal or navigating the section out from under one. ⌘, also fired
+  while you were typing.
+
+- The keyboard-shortcuts reference (⌘/) documented bindings the app
+  hasn't had for a long time — ⌘3 as "Sessions", ⌘4 as "Config",
+  Settings on ⌘6 when it is ⌘9 — and never mentioned ⌘7–⌘9.
+
+- Settings → General's "Open on launch" offered a "Sessions" option
+  that silently did nothing, and was missing four real sections.
+
+## 0.3.4 — beta (released 2026-07-28)
 
 ### Added
 
