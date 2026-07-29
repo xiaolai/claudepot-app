@@ -60,6 +60,13 @@ export function UnrecognizedBucket({
  * so a nearest-version match would be a confident-sounding lie rather
  * than an approximation. On a mismatch the section shell stays and says
  * so; no stale name is ever shown.
+ *
+ * Only the *name list* collapses (see the `<details>` below). The heading,
+ * the explanation, and — critically — the mismatch branch are always
+ * visible. AGENTS.md requires that a version mismatch render "unavailable
+ * for this version"; a disclosure wrapped around that branch would bury the
+ * one message the user needs to see, behind a control they have no reason
+ * to open.
  */
 export function UndocumentedSection({ data }: { data: EnvOverview }) {
   const u = data.undocumented;
@@ -87,13 +94,25 @@ export function UndocumentedSection({ data }: { data: EnvOverview }) {
             worse than offering nothing. To set one anyway, edit{" "}
             <code className="selectable">{data.settings_path}</code> by hand.
           </p>
-          <ul className="envvar-undocumented">
-            {u.names.map((n) => (
-              <li key={n}>
-                <code className="selectable">{n}</code>
-              </li>
-            ))}
-          </ul>
+          {/* The names collapse; the heading and the paragraph above do not.
+              This list is the largest thing in the pane by a wide margin —
+              293 entries on a current binary — and it is the one part the
+              pane explicitly offers no control over. Open by default it
+              outranked the 308 variables the user can actually change.
+
+              A native <details> gets keyboard operation, the disclosure
+              role, and the platform's own reduced-motion behaviour without
+              re-implementing any of it. */}
+          <details className="envvar-undocumented-disclosure">
+            <summary>Show {u.names.length} names</summary>
+            <ul className="envvar-undocumented">
+              {u.names.map((n) => (
+                <li key={n}>
+                  <code className="selectable">{n}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
         </>
       ) : (
         <>

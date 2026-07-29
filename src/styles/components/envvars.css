@@ -2,19 +2,34 @@
    Surface-scoped shard; see App.css for the import-order contract.
    Tokens only — no literals (rules/design.md). */
 
+/* Does NOT scroll. `.envvar-list` is the pane's only scroll container.
+   This carried `overflow-y: auto` alongside the list's own, which nests two
+   scrollers in one pane and chains their scroll unpredictably. Everything
+   long lives inside the list; the toolbar, chips and counts above it are
+   fixed chrome. */
 .envvar-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
   gap: var(--sp-8);
   padding: var(--sp-12) var(--sp-16);
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .envvar-empty {
   padding: var(--sp-20);
   font-size: var(--fs-sm);
   color: var(--fg-faint);
+}
+
+/* Filtered to zero. Distinct from `.envvar-empty` (load / error), which
+   replaces the whole pane; this sits inside the scroll container where the
+   rows would have been. */
+.envvar-no-match {
+  margin: 0;
+  padding: var(--sp-16) var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--fg-muted);
 }
 
 /* ── toolbar + filters ──────────────────────────────────────────── */
@@ -31,6 +46,35 @@
   gap: var(--sp-4);
 }
 
+/* Two labelled facets. The chips look identical but combine differently —
+   Type is an OR, Attributes an AND — so the grouping and the rule text are
+   the only signal the user gets. */
+.envvar-facets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8) var(--sp-20);
+}
+
+.envvar-facet {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.envvar-facet-label {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-wide);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.envvar-facet-rule {
+  text-transform: none;
+  letter-spacing: var(--ls-normal);
+  color: var(--fg-faint);
+}
+
 .envvar-count,
 .envvar-status {
   margin: 0;
@@ -45,10 +89,25 @@
 
 /* ── the list ───────────────────────────────────────────────────── */
 
+/* The pane's only scroll container. `flex: 1` is `flex: 1 1 0%` — base size
+   zero — so it only ever gets height from POSITIVE free space in the column.
+   Any inflexible sibling tall enough to consume that space pins this at 0px
+   and hides every row. The appendix buckets are therefore children of this
+   element, not siblings of it (see EnvVarsPane.tsx), and nothing tall may be
+   added beside it. `scripts/check-envvar-layout.mjs` measures this. */
 .envvar-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* It is focusable so keyboard users can scroll it; that focus must be
+   visible (rules/design.md — every interactive element shows a
+   :focus-visible ring). */
+.envvar-list:focus-visible {
+  outline: var(--bw-hair) solid var(--accent);
+  outline-offset: calc(-1 * var(--sp-2));
+  border-radius: var(--r-2);
 }
 
 /* Category heading inside the result list. A grouping, not a filter —
@@ -284,75 +343,4 @@
 .envvar-tristate-seg:focus-visible {
   outline: var(--bw-focus) solid var(--accent);
   outline-offset: calc(-1 * var(--bw-focus));
-}
-
-/* ── disclosure + appendix buckets ──────────────────────────────── */
-
-.envvar-disclosure {
-  border: var(--bw-hair) solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--bg-sunken);
-  padding: var(--sp-12);
-  font-size: var(--fs-xs);
-  color: var(--fg-muted);
-  line-height: 1.6;
-}
-
-.envvar-disclosure h4 {
-  margin: var(--sp-10) 0 var(--sp-2);
-  font-size: var(--fs-xs);
-  color: var(--fg);
-}
-
-.envvar-disclosure h4:first-child {
-  margin-top: 0;
-}
-
-.envvar-disclosure p,
-.envvar-disclosure ul {
-  margin: 0 0 var(--sp-4);
-}
-
-.envvar-disclosure ul {
-  padding-left: var(--sp-16);
-}
-
-.envvar-bucket {
-  border-top: var(--bw-hair) solid var(--line);
-  padding-top: var(--sp-12);
-  margin-top: var(--sp-8);
-}
-
-.envvar-bucket h3 {
-  margin: 0 0 var(--sp-4);
-  font-size: var(--fs-sm);
-}
-
-.envvar-bucket-note {
-  margin: 0 0 var(--sp-8);
-  font-size: var(--fs-xs);
-  color: var(--fg-faint);
-  line-height: 1.5;
-}
-
-.envvar-unrecognized,
-.envvar-undocumented {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  font-size: var(--fs-xs);
-}
-
-.envvar-unrecognized li {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  padding: var(--sp-2) 0;
-}
-
-.envvar-undocumented {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--input-width-md), 1fr));
-  gap: var(--sp-2) var(--sp-12);
-  color: var(--fg-muted);
 }

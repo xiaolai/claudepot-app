@@ -433,6 +433,124 @@ describe("EnvVarsPane read-only surfaces", () => {
 });
 
 describe("EnvVarsPane buckets", () => {
+  /**
+   * Structural regression sentinel — NOT a layout guard.
+   *
+   * jsdom has no layout engine, so nothing here can observe that an element
+   * is zero pixels tall. This assertion can pass while the pane is visually
+   * broken, and it is only meaningful alongside
+   * `scripts/check-envvar-layout.mjs`, which measures real geometry in a
+   * browser. What it pins is the one structural fact that browser check
+   * cannot: where the appendix sits in the DOM.
+   *
+   * The pane shipped with both buckets as siblings of `.envvar-list`. That
+   * put inflexible 3000px boxes next to a `flex: 1 1 0%` scroll container,
+   * which pinned the list at 0px — every documented row was in the DOM and
+   * none was on screen. Moving them back out reintroduces exactly that.
+   */
+  it("keeps both appendix buckets inside the scroll container", async () => {
+    ccEnvListSpy.mockResolvedValue(
+      overview({
+        unrecognized: [
+          { name: "SOME_HAND_SET_KEY", value: { state: "withheld", kind: "string" } },
+        ],
+        undocumented: {
+          state: "available",
+          snapshot_version: "2.1.220",
+          names: ["ANTHROPIC_CONFIG_DIR"],
+        },
+      }),
+    );
+    const { container } = render(<EnvVarsPane />);
+    await screen.findByText("ANTHROPIC_CONFIG_DIR");
+
+    const list = container.querySelector(".envvar-list");
+    expect(list, ".envvar-list must exist — it is the pane's scroll container")
+      .toBeTruthy();
+
+    const buckets = container.querySelectorAll(".envvar-bucket");
+    expect(buckets.length).toBeGreaterThan(0);
+    for (const bucket of buckets) {
+      expect(
+        list!.contains(bucket),
+        `an appendix bucket is outside .envvar-list — this is the shipped ` +
+          `bug that pinned the list to 0px; see scripts/check-envvar-layout.mjs`,
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * The chips look identical but combine differently — Type is an OR (a
+   * variable is exactly one type), Attributes an AND (a variable can be
+   * several at once). They shipped as one undifferentiated row of eight,
+   * which gave the user no way to know that. The grouping and the rule text
+   * ARE the signal, so flattening them back is a regression even though the
+   * filtering behaviour would be unchanged.
+   */
+  it("returns the scroll container to the top when the filters change", async () => {
+    // The appendix buckets share this scroller and dwarf the results, so a
+    // stale offset can leave every match rendered above the viewport while
+    // the count says matches exist.
+    ccEnvListSpy.mockResolvedValue(
+      overview({ documented: [row(TOGGLE2), row(SECRET)] }),
+    );
+    const { container } = render(<EnvVarsPane />);
+    await screen.findByText("DISABLE_COST_WARNINGS");
+
+    const list = container.querySelector(".envvar-list") as HTMLElement;
+    list.scrollTop = 400;
+
+    const search = screen.getByLabelText("Search environment variables");
+    await userEvent.type(search, "SECRET");
+
+    await waitFor(() => expect(list.scrollTop).toBe(0));
+  });
+
+  it("separates the two filter facets and states how each combines", async () => {
+    ccEnvListSpy.mockResolvedValue(overview({ documented: [row(TOGGLE2)] }));
+    render(<EnvVarsPane />);
+    await screen.findByText("DISABLE_COST_WARNINGS");
+
+    const type = screen.getByRole("group", { name: /Type/ });
+    const attrs = screen.getByRole("group", { name: /Attributes/ });
+    expect(type).not.toBe(attrs);
+
+    // Each facet holds only its own chips.
+    expect(within(type).getByRole("switch", { name: "toggle" })).toBeTruthy();
+    expect(within(type).queryByRole("switch", { name: "secret" })).toBeNull();
+    expect(within(attrs).getByRole("switch", { name: "secret" })).toBeTruthy();
+    expect(within(attrs).queryByRole("switch", { name: "toggle" })).toBeNull();
+
+    // The combination rule is stated, not left to be inferred.
+    expect(type.getAttribute("aria-labelledby")).toBeTruthy();
+    expect(screen.getByText(/— any/)).toBeVisible();
+    expect(screen.getByText(/— all/)).toBeVisible();
+  });
+
+  it("exposes the scroll container as a named, keyboard-reachable region", async () => {
+    ccEnvListSpy.mockResolvedValue(overview({ documented: [row(TOGGLE2)] }));
+    render(<EnvVarsPane />);
+    await screen.findByText("DISABLE_COST_WARNINGS");
+
+    const region = screen.getByRole("region", {
+      name: "Environment variable results",
+    });
+    // A scrollable box that cannot take focus cannot be scrolled by keyboard.
+    expect(region).toHaveAttribute("tabindex", "0");
+  });
+
+  it("says so when a filter matches nothing, rather than going blank", async () => {
+    ccEnvListSpy.mockResolvedValue(overview({ documented: [row(TOGGLE2)] }));
+    render(<EnvVarsPane />);
+    const search = await screen.findByLabelText("Search environment variables");
+    await userEvent.type(search, "zzzznotathing");
+
+    expect(
+      await screen.findByText(/No documented variable matches these filters/i),
+    ).toBeTruthy();
+    expect(screen.getByText("0 of 1 documented variables")).toBeTruthy();
+  });
+
   it("the undocumented bucket renders names but zero inputs on an exact match", async () => {
     ccEnvListSpy.mockResolvedValue(
       overview({
@@ -449,6 +567,59 @@ describe("EnvVarsPane buckets", () => {
     expect(container.querySelectorAll("input")).toHaveLength(1);
     expect(container.querySelectorAll("select")).toHaveLength(0);
     expect(screen.getByText(/edit/i).textContent).toBeTruthy();
+  });
+
+  it("collapses the undocumented names but never the explanation", async () => {
+    ccEnvListSpy.mockResolvedValue(
+      overview({
+        undocumented: {
+          state: "available",
+          snapshot_version: "2.1.220",
+          names: ["ANTHROPIC_CONFIG_DIR", "CLAUDE_CODE_SECRET_SAUCE"],
+        },
+      }),
+    );
+    render(<EnvVarsPane />);
+
+    // Heading and explanation are always on screen — they carry the warning.
+    expect(
+      await screen.findByText(/Documented nowhere — found in Claude Code/),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/Claudepot deliberately\s+offers no control for them/),
+    ).toBeVisible();
+
+    // The 293-name dump does not lead. It sits behind a disclosure.
+    const summary = screen.getByText(/Show 2 names/);
+    expect(summary).toBeVisible();
+    expect(screen.getByText("ANTHROPIC_CONFIG_DIR")).not.toBeVisible();
+
+    await userEvent.click(summary);
+    expect(screen.getByText("ANTHROPIC_CONFIG_DIR")).toBeVisible();
+  });
+
+  /**
+   * AGENTS.md: on a snapshot/binary mismatch the section must render
+   * "unavailable for this version". The disclosure added for the name list
+   * must never wrap this branch — it is the one message the user needs, and
+   * they have no reason to open a control to find it.
+   */
+  it("never hides the version-mismatch notice behind a disclosure", async () => {
+    ccEnvListSpy.mockResolvedValue(
+      overview({
+        crosscheck_is_exact: false,
+        installed_version: "2.2.0",
+        undocumented: {
+          state: "unavailable",
+          snapshot_version: "2.1.220",
+          installed_version: "2.2.0",
+        },
+      }),
+    );
+    const { container } = render(<EnvVarsPane />);
+
+    expect(await screen.findByText(/Unavailable/)).toBeVisible();
+    expect(container.querySelector("details")).toBeNull();
   });
 
   it("renders the unavailable state on a version mismatch, never stale names", async () => {

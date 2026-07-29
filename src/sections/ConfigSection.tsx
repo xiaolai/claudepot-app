@@ -998,9 +998,13 @@ function SearchBar({
           gap: "var(--sp-4)",
         }}
       >
+        {/* Placeholder is short on purpose. The field shares a narrow row
+            with a clear button and the regex chip, so "Search contents…"
+            clipped to "Search con" — a truncated placeholder reads as a
+            rendering fault. The full scope stays on `aria-label`. */}
         <Input
           glyph={NF.search}
-          placeholder="Search contents…"
+          placeholder="Search…"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {

@@ -1,0 +1,98 @@
+/* Global → Config → Env Variables — the appendix half.
+   Split out of envvars.css to stay under the 350-LOC shard limit
+   (rules/design.md). Covers the info disclosure and the two read-mostly
+   buckets below the documented list: keys set by hand that match nothing,
+   and names found in the Claude Code binary that Anthropic documents
+   nowhere. Tokens only — no literals.
+   Imported directly after envvars.css; see App.css for the order contract. */
+
+/* ── disclosure + appendix buckets ──────────────────────────────── */
+
+.envvar-disclosure {
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--bg-sunken);
+  padding: var(--sp-12);
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+
+.envvar-disclosure h4 {
+  margin: var(--sp-10) 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--fg);
+}
+
+.envvar-disclosure h4:first-child {
+  margin-top: 0;
+}
+
+.envvar-disclosure p,
+.envvar-disclosure ul {
+  margin: 0 0 var(--sp-4);
+}
+
+.envvar-disclosure ul {
+  padding-left: var(--sp-16);
+}
+
+.envvar-bucket {
+  border-top: var(--bw-hair) solid var(--line);
+  padding-top: var(--sp-12);
+  margin-top: var(--sp-8);
+}
+
+.envvar-bucket h3 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-sm);
+}
+
+.envvar-bucket-note {
+  margin: 0 0 var(--sp-8);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  line-height: 1.5;
+}
+
+.envvar-unrecognized,
+.envvar-undocumented {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-xs);
+}
+
+.envvar-unrecognized li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-2) 0;
+}
+
+.envvar-undocumented {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--input-width-md), 1fr));
+  gap: var(--sp-2) var(--sp-12);
+  color: var(--fg-muted);
+}
+
+/* Collapses the name list only — never the heading, the explanation, or the
+   version-mismatch text. */
+.envvar-undocumented-disclosure > summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  padding: var(--sp-4) 0;
+  width: fit-content;
+}
+
+.envvar-undocumented-disclosure > summary:focus-visible {
+  outline: var(--bw-hair) solid var(--accent);
+  outline-offset: var(--sp-2);
+  border-radius: var(--r-1);
+}
+
+.envvar-undocumented-disclosure[open] > summary {
+  margin-bottom: var(--sp-6);
+}

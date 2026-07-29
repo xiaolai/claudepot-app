@@ -10,21 +10,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api } from "../../../api";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
-import {
-  IconButton,
-  Input,
-  FilterChip,
-} from "../../../components/primitives";
-import { NF } from "../../../icons";
 import type { EnvOverview } from "../../../types/ccEnv";
 import { commitModeFor, type SecretHandle } from "./choosers";
 import { confirmBody } from "./hazards";
-import {
-  CONTROLS,
-  SAFETY_FILTERS,
-  useEnvVarFilter,
-} from "./useEnvVarFilter";
+import { useEnvVarFilter } from "./useEnvVarFilter";
 import { EnvVarsDisclosure } from "./EnvVarsDisclosure";
+import { EnvVarsToolbar } from "./EnvVarsToolbar";
 import { groupByCategory, itemKey, ItemView } from "./grouping";
 import { UndocumentedSection, UnrecognizedBucket } from "./EnvVarsBuckets";
 
@@ -194,6 +185,18 @@ export function EnvVarsPane() {
     [rows, data],
   );
 
+  // Send the scroll container back to the top whenever the filters change.
+  // The appendix buckets now live inside this same scroller and are far
+  // taller than the results, so a user reading the undocumented names who
+  // then types a query would keep their old offset — the matching rows
+  // render above the viewport while the count insists there are matches.
+  // `scrollTop = 0` rather than `scrollTo({top: 0})`: jsdom implements the
+  // property but not the method, so the method form throws in every test
+  // that changes a filter.
+  useEffect(() => {
+    if (parentRef.current) parentRef.current.scrollTop = 0;
+  }, [query, controls, safety]);
+
   // Virtualize only once the list is long enough to be worth it. Below
   // the threshold, absolute positioning and re-measurement are pure
   // overhead — and they cost the user native find-in-page over a result
@@ -216,50 +219,17 @@ export function EnvVarsPane() {
 
   return (
     <div className="envvar-pane">
-      <div className="envvar-toolbar">
-        <Input
-          glyph={NF.search}
-          value={query}
-          placeholder="Search name or description…"
-          aria-label="Search environment variables"
-          onChange={(e) => setQuery(e.target.value)}
-          style={{ flex: 1 }}
-        />
-        <IconButton
-          glyph={NF.info}
-          title="About environment variables"
-          aria-label="About environment variables"
-          aria-expanded={showInfo}
-          onClick={() => setShowInfo((v) => !v)}
-        />
-        <IconButton
-          glyph={NF.refresh}
-          title="Reload from disk"
-          aria-label="Reload from disk"
-          onClick={() => void load()}
-        />
-      </div>
-
-      <div className="envvar-chips">
-        {CONTROLS.map((c) => (
-          <FilterChip
-            key={c}
-            active={controls.has(c)}
-            onToggle={() => toggleControl(c)}
-          >
-            {c}
-          </FilterChip>
-        ))}
-        {SAFETY_FILTERS.map((f) => (
-          <FilterChip
-            key={f.key}
-            active={safety.has(f.key)}
-            onToggle={() => toggleSafety(f.key)}
-          >
-            {f.label}
-          </FilterChip>
-        ))}
-      </div>
+      <EnvVarsToolbar
+        query={query}
+        onQueryChange={setQuery}
+        controls={controls}
+        safety={safety}
+        onToggleControl={toggleControl}
+        onToggleSafety={toggleSafety}
+        showInfo={showInfo}
+        onToggleInfo={() => setShowInfo((v) => !v)}
+        onReload={() => void load()}
+      />
 
       {showInfo ? <EnvVarsDisclosure data={data} /> : null}
 
@@ -273,7 +243,28 @@ export function EnvVarsPane() {
         {rows.length} of {data.documented.length} documented variables
       </p>
 
-      <div className="envvar-list" ref={parentRef}>
+      {/* The ONE scroll container in this pane. `.envvar-pane` deliberately
+          does not scroll — see envvars.css.
+
+          Both appendix buckets live INSIDE this element, as siblings of the
+          virtualized wrapper below. That placement is load-bearing twice
+          over. As siblings of the *list* they were inflexible boxes beside a
+          `flex: 1 1 0%` scroller, which pinned the list at 0px and put every
+          row off screen (see scripts/check-envvar-layout.mjs). And they must
+          stay OUTSIDE the wrapper, whose children are absolutely positioned
+          against a `getTotalSize()` height — nested there they would overlay
+          rows or fall outside the measured height entirely. */}
+      {/* role="region" + a name, not role="list": this holds documented rows
+          AND the two appendix sections, so list semantics would misdescribe
+          it. `tabIndex={0}` is required, not decorative — a scrollable box
+          that never receives focus cannot be scrolled by keyboard at all. */}
+      <div
+        className="envvar-list"
+        ref={parentRef}
+        role="region"
+        aria-label="Environment variable results"
+        tabIndex={0}
+      >
         {virtualize ? (
           <div
             style={{ position: "relative", height: `${virt.getTotalSize()}px` }}
@@ -309,10 +300,19 @@ export function EnvVarsPane() {
             />
           ))
         )}
-      </div>
 
-      <UnrecognizedBucket data={data} busy={busy} onClear={onClear} />
-      <UndocumentedSection data={data} />
+        {/* A filter that matches nothing rendered the count and then blank
+            space, which reads as a broken pane rather than an answer. The
+            count alone ("0 of 308") is a number, not a statement. */}
+        {rows.length === 0 ? (
+          <p className="envvar-no-match">
+            No documented variable matches these filters.
+          </p>
+        ) : null}
+
+        <UnrecognizedBucket data={data} busy={busy} onClear={onClear} />
+        <UndocumentedSection data={data} />
+      </div>
 
       {pending ? (
         <ConfirmDialog
