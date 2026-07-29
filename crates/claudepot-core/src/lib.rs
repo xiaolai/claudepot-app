@@ -146,6 +146,7 @@ pub use session::slim as session_slim;
 pub use session::subagents as session_subagents;
 pub use session::tool_link as session_tool_link;
 pub use session::worktree as session_worktree;
+pub mod settings_mutex;
 pub mod settings_writer;
 pub mod shared_memory;
 pub mod sync;
