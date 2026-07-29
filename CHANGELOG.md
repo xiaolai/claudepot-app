@@ -6,7 +6,40 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.3.5 — beta (unreleased)
+## 0.3.6 — beta (unreleased)
+
+### Fixed
+
+- **Global → Config → Env Variables showed no variables at all.** The
+  list of 308 editable environment variables rendered at zero height:
+  every row was there, none was on screen, in every state of the pane.
+  The 293-name "Documented nowhere" appendix sat beside the list and
+  squeezed it out of existence. The appendix now lives inside the
+  scrolling list, and the pane no longer nests two scrollbars.
+
+- Filtering while scrolled into the appendix left the matches above
+  the visible area. The list now returns to the top when you change a
+  filter.
+
+- A filter that matched nothing showed a count and empty space. It now
+  says nothing matched.
+
+- The results list can be scrolled by keyboard, and is announced to
+  screen readers as a named region.
+
+### Changed
+
+- The 293 undocumented variable names collapse behind a "Show N names"
+  toggle. They were the largest thing on the screen and the one part
+  of the pane you cannot act on. The heading, the explanation, and the
+  version-mismatch warning stay visible.
+
+- The filter chips are grouped into **Type** and **Attributes** with
+  their combination rules shown. Picking two types widens the results;
+  picking two attributes narrows them — the same-looking chips behaved
+  differently with nothing to say so. Filtering itself is unchanged.
+
+## 0.3.5 — beta (released 2026-07-29)
 
 ### Added
 
