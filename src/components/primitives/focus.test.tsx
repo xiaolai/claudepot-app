@@ -14,10 +14,22 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Button } from "./Button";
 import { IconButton } from "./IconButton";
+import { Input } from "./Input";
 import { SidebarItem } from "./SidebarItem";
 import { NF } from "../../icons";
 
 describe("paper-mono focus ring", () => {
+  /// `Input` sets `outline: none` on the inner element, so without the
+  /// class there is no keyboard-focus ring at all — only the accent border,
+  /// which fires on mouse focus too and is therefore chrome rather than a
+  /// focus indicator.
+  it("Input carries pm-focus on the underlying element", () => {
+    const { container } = render(<Input value="" onChange={() => {}} />);
+    const input = container.querySelector("input");
+    expect(input).not.toBeNull();
+    expect(input!.className).toContain("pm-focus");
+  });
+
   it("Button carries pm-focus on the underlying element", () => {
     const { container } = render(<Button>Label</Button>);
     const btn = container.querySelector("button");
