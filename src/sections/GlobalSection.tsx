@@ -156,7 +156,12 @@ export function GlobalSection({
             id="global-panel-updates"
             aria-labelledby="global-tab-updates"
           >
-            <UpdatesPanel />
+            <UpdatesPanel
+              // Setting the sub-route is enough to land on the pane:
+              // the effect above already forces the Config tab for any
+              // `node:*` route, so this needs no tab plumbing of its own.
+              onEditEnvVars={() => onSubRouteChange("node:virtual:env-vars")}
+            />
           </div>
         )}
         {tab === "memory" && (

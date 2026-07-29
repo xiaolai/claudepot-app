@@ -83,6 +83,32 @@ function StatusBadge({ comparison }: { comparison: Comparison }) {
   }
 }
 
+/**
+ * The only affordance Updates offers for the two update flags: a way to
+ * reach the surface that owns them. A blocker the user is told about and
+ * cannot act on is a dead end, which is what this pane was before.
+ */
+function EditEnvVarsLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        marginLeft: "var(--sp-6)",
+        color: "var(--accent)",
+        textDecoration: "underline",
+        cursor: "pointer",
+        font: "inherit",
+      }}
+    >
+      Edit in Env variables
+    </button>
+  );
+}
+
 function CliCard({
   status,
   busy,
@@ -90,6 +116,7 @@ function CliCard({
   onInstall,
   onChannelSet,
   onAutoToggle,
+  onEditEnvVars,
 }: {
   status: UpdatesStatusDto;
   busy: boolean;
@@ -97,6 +124,11 @@ function CliCard({
   onInstall: () => void;
   onChannelSet: (channel: "latest" | "stable") => void;
   onAutoToggle: (v: boolean) => void;
+  /** Deep-link to Config → Env Variables, which owns these two flags.
+   *  Updates only *reports* them — nothing here has ever written them,
+   *  so duplicating a control would manufacture an ownership conflict
+   *  rather than resolve one. */
+  onEditEnvVars: () => void;
 }) {
   const cli = status.cli;
   const active = cli.installs.find((i) => i.is_active);
@@ -153,12 +185,14 @@ function CliCard({
         <Warning>
           <Glyph g={NF.warn} />
           DISABLE_AUTOUPDATER=1 set — background auto-updates are off
+          <EditEnvVarsLink onClick={onEditEnvVars} />
         </Warning>
       )}
       {cli.cc_settings.disable_updates && (
         <Warning>
           <Glyph g={NF.warn} />
           DISABLE_UPDATES=1 set — manual updates are blocked too
+          <EditEnvVarsLink onClick={onEditEnvVars} />
         </Warning>
       )}
       {cli.running_count > 0 && (
@@ -744,7 +778,12 @@ function Actions({
 
 // ─── The panel itself ─────────────────────────────────────────────────
 
-export function UpdatesPanel() {
+export function UpdatesPanel({
+  onEditEnvVars,
+}: {
+  /** Optional so the panel still renders standalone (and in tests). */
+  onEditEnvVars?: () => void;
+} = {}) {
   const [status, setStatus] = useState<UpdatesStatusDto | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -951,6 +990,7 @@ export function UpdatesPanel() {
         onInstall={onCliInstall}
         onChannelSet={onChannelSet}
         onAutoToggle={onCliAutoToggle}
+        onEditEnvVars={onEditEnvVars ?? (() => {})}
       />
       <DesktopCard
         status={status}
