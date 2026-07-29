@@ -52,6 +52,10 @@ typescript
 # invoked by .github/workflows/ci.yml, so it MUST be committed.
 !/scripts/preflight.sh
 !/scripts/repo-invariants.sh
+# Real-app layout check for Global → Config → Env Variables. Referenced by
+# preflight.sh and by the `check:envvar-layout` package script, so leaving it
+# out would point a committed gate at a file a fresh clone does not have.
+!/scripts/check-envvar-layout.mjs
 # Producer of crates/claudepot-core/data/cc-env-spec.json, which the core
 # crate embeds with include_str!. `cargo xtask verify-docs` re-runs it with
 # --check, so an uncommitted producer would make that gate unrunnable.

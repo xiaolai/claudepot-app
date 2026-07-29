@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "check:envvar-layout": "node scripts/check-envvar-layout.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {

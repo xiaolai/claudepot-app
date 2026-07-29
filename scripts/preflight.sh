@@ -77,6 +77,21 @@ if [ "$rust_only" -eq 0 ]; then
   step "frontend tests (vitest)"
   pnpm test
   ok "frontend tests"
+
+  # Real-app geometry for Global → Config → Env Variables, measured over the
+  # dev MCP bridge. vitest runs on jsdom, which has no layout engine, so
+  # nothing above this line can observe that an element renders at zero
+  # pixels — which is exactly how that pane shipped with its entire editable
+  # list invisible. Needs `pnpm tauri dev` running; skipped, not failed, when
+  # it isn't (exit 2 means "could not run").
+  step "env-vars pane layout (live app)"
+  layout_rc=0
+  node scripts/check-envvar-layout.mjs || layout_rc=$?
+  case "$layout_rc" in
+    0) ok "envvar layout" ;;
+    2) printf '\033[1;33m• skipped — app not running (pnpm tauri dev)\033[0m\n' ;;
+    *) exit 1 ;;
+  esac
 fi
 
 printf '\n\033[1;32m✓ preflight clean — safe to push\033[0m\n'
