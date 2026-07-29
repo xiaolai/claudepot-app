@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value as JsonValue;
 
-use crate::fs_utils::atomic_write;
 use crate::permission::mode::PermissionMode;
 use crate::settings_writer::SettingsLayer;
 
@@ -35,6 +34,25 @@ pub enum PermissionSettingsError {
     PermissionsNotAnObject(PathBuf),
     #[error("write to {layer:?} is not supported (commit-bound or admin-managed)")]
     UnsupportedLayer { layer: SettingsLayer },
+    /// Another writer — Claude Code, or a text editor — kept moving the file
+    /// while we were rebasing onto it. See [`crate::settings_mutex`].
+    #[error("{path} is being written by something else; try again")]
+    Contended { path: PathBuf },
+}
+
+/// Grants land in the same `settings.local.json` that `settings_writer`
+/// edits, so this module writes through the shared mutation boundary too;
+/// map its failures onto the shape callers already match on.
+impl From<crate::settings_mutex::SettingsMutexError> for PermissionSettingsError {
+    fn from(e: crate::settings_mutex::SettingsMutexError) -> Self {
+        use crate::settings_mutex::SettingsMutexError as S;
+        match e {
+            S::Io(e) => Self::Io(e),
+            S::JsonParse(e) => Self::JsonParse(e),
+            S::NotAJsonObject(p) => Self::NotAJsonObject(p),
+            S::Contended { path, .. } => Self::Contended { path },
+        }
+    }
 }
 
 /// Where the effective `permissions.defaultMode` came from.
@@ -131,13 +149,15 @@ pub fn resolve_default_mode(
 /// other top-level key and every sibling key inside `permissions`.
 /// A malformed file errors rather than being clobbered.
 fn rmw_set_default_mode(path: &Path, mode: &PermissionMode) -> Result<(), PermissionSettingsError> {
-    let mut object = read_root_object(path)?;
-    let permissions = upsert_permissions_object(&mut object, path)?;
-    permissions.insert(
-        DEFAULT_MODE_KEY.to_string(),
-        JsonValue::String(mode.as_wire_str().to_string()),
-    );
-    write_root_object(path, object)
+    crate::settings_mutex::mutate_settings_file(path, |object, _| {
+        let permissions = upsert_permissions_object(object, path)?;
+        permissions.insert(
+            DEFAULT_MODE_KEY.to_string(),
+            JsonValue::String(mode.as_wire_str().to_string()),
+        );
+        Ok::<_, PermissionSettingsError>(crate::settings_mutex::Change::Write(()))
+    })
+    .map(|_| ())
 }
 
 /// Read-modify-write removing `permissions.defaultMode` at `path`.
@@ -145,37 +165,31 @@ fn rmw_set_default_mode(path: &Path, mode: &PermissionMode) -> Result<(), Permis
 /// object is left in place (an empty `{}` is harmless and avoids
 /// guessing whether CC put it there).
 fn rmw_remove_default_mode(path: &Path) -> Result<(), PermissionSettingsError> {
-    let mut object = match std::fs::read(path) {
-        Ok(bytes) if bytes.is_empty() => return Ok(()),
-        Ok(bytes) => match serde_json::from_slice::<JsonValue>(&bytes)? {
-            JsonValue::Object(map) => map,
-            _ => return Err(PermissionSettingsError::NotAJsonObject(path.to_path_buf())),
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    let permissions = match object.get_mut(PERMISSIONS_KEY) {
-        Some(JsonValue::Object(p)) => p,
-        _ => return Ok(()),
-    };
-    if permissions.remove(DEFAULT_MODE_KEY).is_none() {
-        return Ok(());
-    }
-    write_root_object(path, object)
-}
-
-fn read_root_object(
-    path: &Path,
-) -> Result<serde_json::Map<String, JsonValue>, PermissionSettingsError> {
-    match std::fs::read(path) {
-        Ok(bytes) if bytes.is_empty() => Ok(serde_json::Map::new()),
-        Ok(bytes) => match serde_json::from_slice::<JsonValue>(&bytes)? {
-            JsonValue::Object(map) => Ok(map),
-            _ => Err(PermissionSettingsError::NotAJsonObject(path.to_path_buf())),
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::Map::new()),
-        Err(e) => Err(e.into()),
-    }
+    crate::settings_mutex::mutate_settings_file(path, |object, was| {
+        if !was.is_present() {
+            return Ok(crate::settings_mutex::Change::Skip(()));
+        }
+        let permissions = match object.get_mut(PERMISSIONS_KEY) {
+            Some(JsonValue::Object(p)) => p,
+            // Genuinely nothing to remove.
+            None | Some(JsonValue::Null) => return Ok(crate::settings_mutex::Change::Skip(())),
+            // `permissions` exists but is not an object. Reporting success
+            // here would tell the orchestrator the grant was reverted and
+            // let it drop the grant record, leaving the project elevated
+            // with nothing left that knows to revert it. `read_default_mode`
+            // already errors on this shape; the clear path has to agree.
+            Some(_) => {
+                return Err(PermissionSettingsError::PermissionsNotAnObject(
+                    path.to_path_buf(),
+                ))
+            }
+        };
+        if permissions.remove(DEFAULT_MODE_KEY).is_none() {
+            return Ok(crate::settings_mutex::Change::Skip(()));
+        }
+        Ok::<_, PermissionSettingsError>(crate::settings_mutex::Change::Write(()))
+    })
+    .map(|_| ())
 }
 
 fn upsert_permissions_object<'a>(
@@ -199,20 +213,6 @@ fn upsert_permissions_object<'a>(
             path.to_path_buf(),
         )),
     }
-}
-
-fn write_root_object(
-    path: &Path,
-    object: serde_json::Map<String, JsonValue>,
-) -> Result<(), PermissionSettingsError> {
-    let body = serde_json::to_string_pretty(&JsonValue::Object(object))?;
-    let mut bytes = body.into_bytes();
-    bytes.push(b'\n');
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    atomic_write(path, &bytes)?;
-    Ok(())
 }
 
 /// Set `permissions.defaultMode` at `layer` for `project_root`.
@@ -436,6 +436,32 @@ mod tests {
             write_err,
             PermissionSettingsError::PermissionsNotAnObject(_)
         ));
+        // Clear has to agree. Reporting success would tell the orchestrator
+        // the grant was reverted, and it would drop the grant record —
+        // leaving the project elevated with nothing left that knows to
+        // revert it.
+        let clear_err = clear_default_mode(SettingsLayer::LocalProject, &project).unwrap_err();
+        assert!(
+            matches!(
+                clear_err,
+                PermissionSettingsError::PermissionsNotAnObject(_)
+            ),
+            "got {clear_err:?}"
+        );
+        // The malformed file is left exactly as it was.
+        assert_eq!(fs::read(&path).unwrap(), br#"{"permissions":"oops"}"#);
+    }
+
+    #[test]
+    fn clear_is_still_a_noop_when_permissions_is_absent_or_null() {
+        let (_t, project, _l) = isolated();
+        let path = SettingsLayer::LocalProject.settings_file(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        for body in [&br#"{"other":1}"#[..], &br#"{"permissions":null}"#[..]] {
+            fs::write(&path, body).unwrap();
+            clear_default_mode(SettingsLayer::LocalProject, &project).unwrap();
+            assert_eq!(fs::read(&path).unwrap(), body);
+        }
     }
 
     #[test]
