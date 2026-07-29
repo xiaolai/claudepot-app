@@ -27,8 +27,8 @@
 //! preserves keys we don't know about, then `fs_utils::atomic_write`
 //! lands the result.
 
-use crate::fs_utils::atomic_write;
 use crate::paths::claude_config_dir;
+use crate::settings_mutex::{mutate_settings_file, Change, FileWas, SettingsMutexError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::path::{Path, PathBuf};
@@ -97,6 +97,16 @@ pub struct AutoMemoryState {
     /// Whether the disabling env vars are detected. Surfaced for UX.
     pub env_disable_set: bool,
     pub env_simple_set: bool,
+    /// A settings layer could not be read — unreadable file, bad permissions,
+    /// malformed JSON.
+    ///
+    /// The resolver used to swallow those with `.unwrap_or(None)`, which
+    /// turned "we could not tell" into the positive claim "no layer sets
+    /// this, so auto-memory is on". `rules/design.md` will not let a status
+    /// surface present an unverified claim as fact, so the flag travels with
+    /// the state and the UI qualifies what it says. The env vars are still
+    /// readable and still decide, so this is a caveat rather than a failure.
+    pub read_incomplete: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -109,6 +119,23 @@ pub enum SettingsWriteError {
     NotAJsonObject(PathBuf),
     #[error("write to {layer:?} is not supported (commit-bound or admin-managed)")]
     UnsupportedLayer { layer: SettingsLayer },
+    /// Another writer — Claude Code, or a text editor — kept moving the file
+    /// while we were rebasing onto it. See [`crate::settings_mutex`].
+    #[error("{path} is being written by something else; try again")]
+    Contended { path: PathBuf },
+}
+
+/// Map the shared boundary's failures onto this module's existing shape, so
+/// callers (and their tests) keep matching on the variants they already know.
+impl From<SettingsMutexError> for SettingsWriteError {
+    fn from(e: SettingsMutexError) -> Self {
+        match e {
+            SettingsMutexError::Io(e) => Self::Io(e),
+            SettingsMutexError::JsonParse(e) => Self::JsonParse(e),
+            SettingsMutexError::NotAJsonObject(p) => Self::NotAJsonObject(p),
+            SettingsMutexError::Contended { path, .. } => Self::Contended { path },
+        }
+    }
 }
 
 /// Truthy/falsy parser matching CC's `isEnvTruthy` / `isEnvDefinedFalsy`
@@ -128,50 +155,156 @@ fn env_is_falsy(raw: Option<&str>) -> bool {
     )
 }
 
+/// What a settings file actually says about one key.
+///
+/// The third arm is the reason this is not an `Option`. "Key absent" and
+/// "key present holding something of the wrong type" look identical through
+/// an `Option`, and for `cleanupPeriodDays` they mean opposite things: absent
+/// means CC applies its 30-day default and deletes transcripts, while present
+/// -but-invalid means CC's own validation fails and cleanup is **suppressed**
+/// (`utils/cleanup.ts:579`). Collapsing the two told the user their history
+/// was on a 30-day timer when it was in fact safe — and offered them
+/// "restore the default", which is the one action that re-arms the deletion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingValue<T> {
+    /// No file, no key, or an empty file.
+    Absent,
+    /// Present and of the expected type.
+    Present(T),
+    /// Present, but not something CC's schema accepts for this key.
+    Invalid,
+}
+
+impl<T> SettingValue<T> {
+    /// Collapse to the legacy `Option` shape: both `Absent` and `Invalid`
+    /// read as "not set". Correct for the boolean toggles, where CC coerces
+    /// rather than erroring; wrong for anything whose invalid case changes
+    /// CC's behavior.
+    pub fn ok(self) -> Option<T> {
+        match self {
+            Self::Present(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn is_invalid(self) -> bool {
+        matches!(self, Self::Invalid)
+    }
+}
+
+/// Read one key out of a settings file through `extract`.
+///
+/// The single reader the typed helpers below delegate to — they used to be
+/// byte-for-byte copies differing only in the `as_*` call.
+fn read_setting_with<T>(
+    path: &Path,
+    key: &str,
+    extract: impl Fn(&JsonValue) -> Option<T>,
+) -> Result<SettingValue<T>, SettingsWriteError> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SettingValue::Absent),
+        Err(e) => return Err(e.into()),
+    };
+    if bytes.is_empty() {
+        return Ok(SettingValue::Absent);
+    }
+    let v: JsonValue = serde_json::from_slice(&bytes)?;
+    match v.as_object().and_then(|o| o.get(key)) {
+        None => Ok(SettingValue::Absent),
+        Some(raw) => Ok(match extract(raw) {
+            Some(v) => SettingValue::Present(v),
+            None => SettingValue::Invalid,
+        }),
+    }
+}
+
 /// Read one setting from a JSON file. Missing file → `None`. Missing
 /// key → `None`. Wrong type for the key → `None` (treated as "not
 /// set" rather than erroring; CC does the same coercion).
 pub fn read_bool_setting(path: &Path, key: &str) -> Result<Option<bool>, SettingsWriteError> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
-    };
-    if bytes.is_empty() {
-        return Ok(None);
-    }
-    let v: JsonValue = serde_json::from_slice(&bytes)?;
-    Ok(v.as_object()
-        .and_then(|o| o.get(key))
-        .and_then(JsonValue::as_bool))
+    read_setting_with(path, key, JsonValue::as_bool).map(SettingValue::ok)
 }
 
-/// Integer sibling of [`read_bool_setting`]. Missing file / missing key
-/// / non-integer value → `None`.
+/// Integer sibling of [`read_bool_setting`], with the present-but-invalid
+/// case preserved.
 ///
 /// Added for `cleanupPeriodDays` ([`crate::cc_retention`]), the one CC
-/// setting whose value is a count rather than a flag. The wrong-type
-/// case deliberately reads as "not set" for the same reason the bool
-/// reader does: CC coerces rather than erroring, and a Claudepot that
-/// errored where CC shrugs would report a problem the user cannot see
-/// in the product it describes.
+/// setting whose value is a count rather than a flag — and the one where
+/// wrong-type is not a shrug: CC skips cleanup entirely when its settings
+/// fail validation while that key is present, so an invalid value silently
+/// *protects* transcripts.
 ///
 /// Note `as_i64` rejects a JSON float (`30.5`), which is correct here —
 /// CC's schema declares the key `z.number().int()`, so a float is
 /// already invalid upstream and must not be echoed back as if honored.
-pub fn read_i64_setting(path: &Path, key: &str) -> Result<Option<i64>, SettingsWriteError> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
-    };
-    if bytes.is_empty() {
-        return Ok(None);
+pub fn read_i64_setting(path: &Path, key: &str) -> Result<SettingValue<i64>, SettingsWriteError> {
+    read_setting_with(path, key, JsonValue::as_i64)
+}
+
+/// Resolve `autoMemoryEnabled` for the global scope only. Reads env
+/// vars + `~/.claude/settings.json` and ignores the project-scoped
+/// layers entirely. Use this when the caller has no real project
+/// anchor (Settings → General global toggle); the per-project
+/// resolver feeds the home dir as project_root, which then collapses
+/// `userSettings` and `projectSettings` onto the same file (audit
+/// 2026-05 #3).
+/// One layer's value plus whether reading it failed.
+fn read_layer(path: &Path) -> (Option<bool>, bool) {
+    match read_bool_setting(path, AUTO_MEMORY_KEY) {
+        Ok(v) => (v, false),
+        Err(_) => (None, true),
     }
-    let v: JsonValue = serde_json::from_slice(&bytes)?;
-    Ok(v.as_object()
-        .and_then(|o| o.get(key))
-        .and_then(JsonValue::as_i64))
+}
+
+/// The whole resolution, over values already read. Both entry points call
+/// this; they used to be two copies of the same five-branch chain with the
+/// same eight-field literal repeated at every return, which is how the two
+/// drifted in the first place.
+fn resolve_auto_memory(
+    user_settings_value: Option<bool>,
+    project_settings_value: Option<bool>,
+    local_project_settings_value: Option<bool>,
+    read_incomplete: bool,
+) -> AutoMemoryState {
+    let env_disable_raw = std::env::var("CLAUDE_CODE_DISABLE_AUTO_MEMORY").ok();
+    let env_simple_raw = std::env::var("CLAUDE_CODE_SIMPLE").ok();
+    let env_disable_set = env_is_truthy(env_disable_raw.as_deref());
+    let env_simple_set = env_is_truthy(env_simple_raw.as_deref());
+    let env_disable_explicit_off = env_is_falsy(env_disable_raw.as_deref());
+
+    // Exactly CC's order, first match wins. Env vars beat every settings
+    // layer, and an explicit falsy CLAUDE_CODE_DISABLE_AUTO_MEMORY
+    // short-circuits SIMPLE and the rest of the chain too.
+    let (effective, decided_by, user_writable) = if env_disable_set {
+        (false, AutoMemoryDecisionSource::EnvDisable, false)
+    } else if env_disable_explicit_off {
+        (true, AutoMemoryDecisionSource::EnvDisable, false)
+    } else if env_simple_set {
+        (false, AutoMemoryDecisionSource::EnvSimple, false)
+    } else if let Some(v) = local_project_settings_value {
+        (v, AutoMemoryDecisionSource::LocalProjectSettings, true)
+    } else if let Some(v) = project_settings_value {
+        // Project settings are committed to the repo, so a Claudepot toggle
+        // still writes — to LocalProject — it just overrides this value.
+        (v, AutoMemoryDecisionSource::ProjectSettings, true)
+    } else if let Some(v) = user_settings_value {
+        (v, AutoMemoryDecisionSource::UserSettings, true)
+    } else {
+        (true, AutoMemoryDecisionSource::Default, true)
+    };
+
+    AutoMemoryState {
+        effective,
+        decided_by,
+        user_writable,
+        user_settings_value,
+        project_settings_value,
+        local_project_settings_value,
+        env_disable_set,
+        env_simple_set,
+        read_incomplete,
+    }
 }
 
 /// Resolve `autoMemoryEnabled` for the global scope only. Reads env
@@ -182,190 +315,17 @@ pub fn read_i64_setting(path: &Path, key: &str) -> Result<Option<i64>, SettingsW
 /// `userSettings` and `projectSettings` onto the same file (audit
 /// 2026-05 #3).
 pub fn resolve_auto_memory_enabled_global() -> AutoMemoryState {
-    let env_disable_raw = std::env::var("CLAUDE_CODE_DISABLE_AUTO_MEMORY").ok();
-    let env_simple_raw = std::env::var("CLAUDE_CODE_SIMPLE").ok();
-    let env_disable_set = env_is_truthy(env_disable_raw.as_deref());
-    let env_simple_set = env_is_truthy(env_simple_raw.as_deref());
-    let env_disable_explicit_off = env_is_falsy(env_disable_raw.as_deref());
-
-    let user_value = read_bool_setting(&claude_config_dir().join("settings.json"), AUTO_MEMORY_KEY)
-        .unwrap_or(None);
-
-    if env_disable_set {
-        return AutoMemoryState {
-            effective: false,
-            decided_by: AutoMemoryDecisionSource::EnvDisable,
-            user_writable: false,
-            user_settings_value: user_value,
-            project_settings_value: None,
-            local_project_settings_value: None,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    if env_disable_explicit_off {
-        return AutoMemoryState {
-            effective: true,
-            decided_by: AutoMemoryDecisionSource::EnvDisable,
-            user_writable: false,
-            user_settings_value: user_value,
-            project_settings_value: None,
-            local_project_settings_value: None,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    if env_simple_set {
-        return AutoMemoryState {
-            effective: false,
-            decided_by: AutoMemoryDecisionSource::EnvSimple,
-            user_writable: false,
-            user_settings_value: user_value,
-            project_settings_value: None,
-            local_project_settings_value: None,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    if let Some(v) = user_value {
-        return AutoMemoryState {
-            effective: v,
-            decided_by: AutoMemoryDecisionSource::UserSettings,
-            user_writable: true,
-            user_settings_value: user_value,
-            project_settings_value: None,
-            local_project_settings_value: None,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    AutoMemoryState {
-        effective: true,
-        decided_by: AutoMemoryDecisionSource::Default,
-        user_writable: true,
-        user_settings_value: user_value,
-        project_settings_value: None,
-        local_project_settings_value: None,
-        env_disable_set,
-        env_simple_set,
-    }
+    let (user_value, failed) = read_layer(&claude_config_dir().join("settings.json"));
+    resolve_auto_memory(user_value, None, None, failed)
 }
 
 /// Read the full `autoMemoryEnabled` resolution for `project_root`.
 /// Pure function over env + filesystem state — no side effects.
 pub fn resolve_auto_memory_enabled(project_root: &Path) -> AutoMemoryState {
-    let env_disable_raw = std::env::var("CLAUDE_CODE_DISABLE_AUTO_MEMORY").ok();
-    let env_simple_raw = std::env::var("CLAUDE_CODE_SIMPLE").ok();
-    let env_disable_set = env_is_truthy(env_disable_raw.as_deref());
-    let env_simple_set = env_is_truthy(env_simple_raw.as_deref());
-    let env_disable_explicit_off = env_is_falsy(env_disable_raw.as_deref());
-
-    let user_value = read_bool_setting(
-        &SettingsLayer::User.settings_file(project_root),
-        AUTO_MEMORY_KEY,
-    )
-    .unwrap_or(None);
-    let project_value = read_bool_setting(
-        &SettingsLayer::Project.settings_file(project_root),
-        AUTO_MEMORY_KEY,
-    )
-    .unwrap_or(None);
-    let local_project_value = read_bool_setting(
-        &SettingsLayer::LocalProject.settings_file(project_root),
-        AUTO_MEMORY_KEY,
-    )
-    .unwrap_or(None);
-
-    // Env priority — exactly as CC.
-    if env_disable_set {
-        return AutoMemoryState {
-            effective: false,
-            decided_by: AutoMemoryDecisionSource::EnvDisable,
-            user_writable: false,
-            user_settings_value: user_value,
-            project_settings_value: project_value,
-            local_project_settings_value: local_project_value,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    // CC: "If isEnvDefinedFalsy(CLAUDE_CODE_DISABLE_AUTO_MEMORY) → return true"
-    // — this short-circuits SIMPLE + the rest of the chain too.
-    if env_disable_explicit_off {
-        return AutoMemoryState {
-            effective: true,
-            decided_by: AutoMemoryDecisionSource::EnvDisable,
-            user_writable: false,
-            user_settings_value: user_value,
-            project_settings_value: project_value,
-            local_project_settings_value: local_project_value,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    if env_simple_set {
-        return AutoMemoryState {
-            effective: false,
-            decided_by: AutoMemoryDecisionSource::EnvSimple,
-            user_writable: false,
-            user_settings_value: user_value,
-            project_settings_value: project_value,
-            local_project_settings_value: local_project_value,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-
-    // Settings layering (most-specific wins).
-    if let Some(v) = local_project_value {
-        return AutoMemoryState {
-            effective: v,
-            decided_by: AutoMemoryDecisionSource::LocalProjectSettings,
-            user_writable: true,
-            user_settings_value: user_value,
-            project_settings_value: project_value,
-            local_project_settings_value: local_project_value,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    if let Some(v) = project_value {
-        return AutoMemoryState {
-            effective: v,
-            decided_by: AutoMemoryDecisionSource::ProjectSettings,
-            // Project settings exist but are committed to the repo —
-            // a Claudepot toggle still writes (to LocalProject), it
-            // just overrides the project value.
-            user_writable: true,
-            user_settings_value: user_value,
-            project_settings_value: project_value,
-            local_project_settings_value: local_project_value,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    if let Some(v) = user_value {
-        return AutoMemoryState {
-            effective: v,
-            decided_by: AutoMemoryDecisionSource::UserSettings,
-            user_writable: true,
-            user_settings_value: user_value,
-            project_settings_value: project_value,
-            local_project_settings_value: local_project_value,
-            env_disable_set,
-            env_simple_set,
-        };
-    }
-    AutoMemoryState {
-        effective: true,
-        decided_by: AutoMemoryDecisionSource::Default,
-        user_writable: true,
-        user_settings_value: user_value,
-        project_settings_value: project_value,
-        local_project_settings_value: local_project_value,
-        env_disable_set,
-        env_simple_set,
-    }
+    let (user, e1) = read_layer(&SettingsLayer::User.settings_file(project_root));
+    let (project, e2) = read_layer(&SettingsLayer::Project.settings_file(project_root));
+    let (local, e3) = read_layer(&SettingsLayer::LocalProject.settings_file(project_root));
+    resolve_auto_memory(user, project, local, e1 || e2 || e3)
 }
 
 /// Read-modify-write a settings file, setting `key` to `value`.
@@ -373,53 +333,27 @@ pub fn resolve_auto_memory_enabled(project_root: &Path) -> AutoMemoryState {
 /// with just `{ key: value }`. If the file is malformed JSON, the
 /// caller gets `SettingsWriteError::JsonParse` — we never silently
 /// overwrite a file we couldn't parse.
+///
+/// Serialized through [`crate::settings_mutex`]: atomic rename alone would
+/// let a concurrent read-modify-write of the same file discard this edit.
 fn rmw_settings_bool(path: &Path, key: &str, value: bool) -> Result<(), SettingsWriteError> {
-    let mut object = match std::fs::read(path) {
-        Ok(bytes) if bytes.is_empty() => serde_json::Map::new(),
-        Ok(bytes) => {
-            let v: JsonValue = serde_json::from_slice(&bytes)?;
-            match v {
-                JsonValue::Object(map) => map,
-                _ => return Err(SettingsWriteError::NotAJsonObject(path.to_path_buf())),
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
-        Err(e) => return Err(e.into()),
-    };
-    object.insert(key.to_string(), JsonValue::Bool(value));
-    let body = serde_json::to_string_pretty(&JsonValue::Object(object))?;
-    let mut bytes = body.into_bytes();
-    bytes.push(b'\n');
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    atomic_write(path, &bytes)?;
-    Ok(())
+    mutate_settings_file(path, |object, _| {
+        object.insert(key.to_string(), JsonValue::Bool(value));
+        Ok::<_, SettingsWriteError>(Change::Write(()))
+    })
+    .map(|_| ())
 }
 
 /// Remove `key` from the settings file. If the file is missing or the
 /// key is absent, this is a no-op. Used to clear an override.
 fn rmw_settings_remove(path: &Path, key: &str) -> Result<(), SettingsWriteError> {
-    let mut object = match std::fs::read(path) {
-        Ok(bytes) if bytes.is_empty() => return Ok(()),
-        Ok(bytes) => {
-            let v: JsonValue = serde_json::from_slice(&bytes)?;
-            match v {
-                JsonValue::Object(map) => map,
-                _ => return Err(SettingsWriteError::NotAJsonObject(path.to_path_buf())),
-            }
+    mutate_settings_file(path, |object, was| {
+        if !was.is_present() || object.remove(key).is_none() {
+            return Ok::<_, SettingsWriteError>(Change::Skip(()));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    if object.remove(key).is_none() {
-        return Ok(());
-    }
-    let body = serde_json::to_string_pretty(&JsonValue::Object(object))?;
-    let mut bytes = body.into_bytes();
-    bytes.push(b'\n');
-    atomic_write(path, &bytes)?;
-    Ok(())
+        Ok(Change::Write(()))
+    })
+    .map(|_| ())
 }
 
 /// Set `autoMemoryEnabled` at the given layer. Refuses to write to
@@ -429,13 +363,7 @@ pub fn write_auto_memory_enabled(
     project_root: &Path,
     value: bool,
 ) -> Result<(), SettingsWriteError> {
-    match layer {
-        SettingsLayer::User | SettingsLayer::LocalProject => {
-            let path = layer.settings_file(project_root);
-            rmw_settings_bool(&path, AUTO_MEMORY_KEY, value)
-        }
-        SettingsLayer::Project => Err(SettingsWriteError::UnsupportedLayer { layer }),
-    }
+    write_bool_setting(layer, project_root, AUTO_MEMORY_KEY, value)
 }
 
 /// Clear `autoMemoryEnabled` at the given layer (the key is removed,
@@ -445,13 +373,7 @@ pub fn clear_auto_memory_enabled(
     layer: SettingsLayer,
     project_root: &Path,
 ) -> Result<(), SettingsWriteError> {
-    match layer {
-        SettingsLayer::User | SettingsLayer::LocalProject => {
-            let path = layer.settings_file(project_root);
-            rmw_settings_remove(&path, AUTO_MEMORY_KEY)
-        }
-        SettingsLayer::Project => Err(SettingsWriteError::UnsupportedLayer { layer }),
-    }
+    clear_bool_setting(layer, project_root, AUTO_MEMORY_KEY)
 }
 
 /// Generic sibling of [`write_auto_memory_enabled`]: set an arbitrary
@@ -509,36 +431,27 @@ pub fn clear_bool_setting(
 ///   was absent *and* the closure leaves the object empty, in which
 ///   case it is a no-op (we don't litter an empty `{}` settings file,
 ///   mirroring `rmw_settings_remove`'s no-op-on-missing behavior).
+///
+/// The closure is `FnMut` rather than `FnOnce` because the mutation boundary
+/// re-runs it when an external writer moves the file mid-edit; it must
+/// therefore be free of side effects outside the object it is handed.
 pub fn mutate_settings(
     layer: SettingsLayer,
     project_root: &Path,
-    mutate: impl FnOnce(&mut serde_json::Map<String, JsonValue>),
+    mut mutate: impl FnMut(&mut serde_json::Map<String, JsonValue>),
 ) -> Result<(), SettingsWriteError> {
     if layer == SettingsLayer::Project {
         return Err(SettingsWriteError::UnsupportedLayer { layer });
     }
     let path = layer.settings_file(project_root);
-    let (mut object, existed) = match std::fs::read(&path) {
-        Ok(bytes) if bytes.is_empty() => (serde_json::Map::new(), true),
-        Ok(bytes) => match serde_json::from_slice::<JsonValue>(&bytes)? {
-            JsonValue::Object(map) => (map, true),
-            _ => return Err(SettingsWriteError::NotAJsonObject(path.clone())),
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (serde_json::Map::new(), false),
-        Err(e) => return Err(e.into()),
-    };
-    mutate(&mut object);
-    if !existed && object.is_empty() {
-        return Ok(());
-    }
-    let body = serde_json::to_string_pretty(&JsonValue::Object(object))?;
-    let mut bytes = body.into_bytes();
-    bytes.push(b'\n');
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    atomic_write(&path, &bytes)?;
-    Ok(())
+    mutate_settings_file(&path, |object, was| {
+        mutate(object);
+        if was == FileWas::Absent && object.is_empty() {
+            return Ok::<_, SettingsWriteError>(Change::Skip(()));
+        }
+        Ok(Change::Write(()))
+    })
+    .map(|_| ())
 }
 
 /// Whether the project's `.gitignore` covers
@@ -655,6 +568,52 @@ mod tests {
         let s = resolve_auto_memory_enabled(&project);
         assert!(!s.effective);
         assert_eq!(s.decided_by, AutoMemoryDecisionSource::LocalProjectSettings);
+    }
+
+    /// An unreadable layer must not become the positive claim "no layer sets
+    /// this". The env vars are still readable and still decide, so the state
+    /// is usable — it just has to say it is incomplete.
+    #[test]
+    fn an_unreadable_layer_is_reported_rather_than_read_as_absent() {
+        let (_t, project, _l) = isolated();
+        std::env::remove_var("CLAUDE_CODE_DISABLE_AUTO_MEMORY");
+        std::env::remove_var("CLAUDE_CODE_SIMPLE");
+
+        let clean = resolve_auto_memory_enabled(&project);
+        assert!(!clean.read_incomplete);
+
+        let path = SettingsLayer::User.settings_file(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"{ not json").unwrap();
+
+        let s = resolve_auto_memory_enabled(&project);
+        assert!(s.read_incomplete, "a malformed layer must be surfaced");
+        assert_eq!(s.user_settings_value, None);
+        // Still decides — the env chain is intact — but the caller now knows
+        // the settings half of that decision is unverified.
+        assert_eq!(s.decided_by, AutoMemoryDecisionSource::Default);
+
+        let g = resolve_auto_memory_enabled_global();
+        assert!(g.read_incomplete);
+    }
+
+    /// The two resolvers share one chain now; this pins them to the same
+    /// answer for the same user-layer input, which is what drifted before.
+    #[test]
+    fn the_global_and_per_project_resolvers_agree_on_the_user_layer() {
+        let (_t, project, _l) = isolated();
+        std::env::remove_var("CLAUDE_CODE_DISABLE_AUTO_MEMORY");
+        std::env::remove_var("CLAUDE_CODE_SIMPLE");
+
+        for value in [true, false] {
+            write_auto_memory_enabled(SettingsLayer::User, &project, value).unwrap();
+            let per_project = resolve_auto_memory_enabled(&project);
+            let global = resolve_auto_memory_enabled_global();
+            assert_eq!(global.effective, value);
+            assert_eq!(per_project.effective, value);
+            assert_eq!(global.decided_by, per_project.decided_by);
+            assert_eq!(global.user_settings_value, per_project.user_settings_value);
+        }
     }
 
     #[test]
@@ -820,6 +779,58 @@ mod tests {
         })
         .unwrap();
         assert!(!SettingsLayer::User.settings_file(&project).exists());
+    }
+
+    /// Two *different modules* writing `~/.claude/settings.json` at the same
+    /// time must both land. This is the case the shared boundary exists for:
+    /// before it, `settings_writer` and `updates::settings_bridge` each did
+    /// their own read-modify-write, so whichever renamed last silently
+    /// discarded the other's key. A lock only one participant holds is not a
+    /// lock, which is why the migration was not deferred.
+    #[test]
+    fn settings_writer_and_the_updates_bridge_do_not_clobber_each_other() {
+        let (_t, project, _l) = isolated();
+        let path = SettingsLayer::User.settings_file(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"{}").unwrap();
+
+        // Both modules resolve this file from CLAUDE_CONFIG_DIR, which the
+        // isolated() guard has already pointed at the tempdir.
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                for i in 0..40 {
+                    write_bool_setting(
+                        SettingsLayer::User,
+                        &project,
+                        &format!("writerKey{i}"),
+                        i % 2 == 0,
+                    )
+                    .unwrap();
+                }
+            });
+            s.spawn(|| {
+                for i in 0..40 {
+                    crate::updates::settings_bridge::write_minimum_version(Some(&format!(
+                        "2.1.{i}"
+                    )))
+                    .unwrap();
+                }
+            });
+        });
+
+        let after: JsonValue = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let object = after.as_object().unwrap();
+        for i in 0..40 {
+            assert!(
+                object.contains_key(&format!("writerKey{i}")),
+                "settings_writer's key {i} was clobbered by the updates bridge"
+            );
+        }
+        assert_eq!(
+            object["minimumVersion"],
+            JsonValue::from("2.1.39"),
+            "the updates bridge's last write was clobbered by settings_writer"
+        );
     }
 
     #[test]

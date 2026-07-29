@@ -171,9 +171,17 @@ pub fn set_available_models(
         if to_write.is_empty() {
             map.remove(AVAILABLE_MODELS_KEY);
         } else {
+            // Cloned per call, not consumed: `mutate_settings` re-runs its
+            // closure when an external writer moves the file mid-edit.
             map.insert(
                 AVAILABLE_MODELS_KEY.to_string(),
-                JsonValue::Array(to_write.into_iter().map(JsonValue::String).collect()),
+                JsonValue::Array(
+                    to_write
+                        .iter()
+                        .cloned()
+                        .map(JsonValue::String)
+                        .collect::<Vec<_>>(),
+                ),
             );
         }
         // Only write enforce alongside a list that gives it something

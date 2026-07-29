@@ -182,7 +182,9 @@ pub fn resolve_attribution() -> AttributionState {
 /// `~/.claude/settings.json`. Preserves every unrelated key.
 pub fn set_attribution(mode: AttributionMode) -> Result<(), SettingsWriteError> {
     let anchor = Path::new("");
-    mutate_settings(SettingsLayer::User, anchor, move |map| match mode {
+    // Borrow rather than move: `mutate_settings` re-runs its closure when an
+    // external writer moves the file mid-edit, so it cannot consume `mode`.
+    mutate_settings(SettingsLayer::User, anchor, move |map| match &mode {
         AttributionMode::Default => {
             map.remove(ATTRIBUTION_KEY);
             map.remove(INCLUDE_CO_AUTHORED_BY_KEY);
@@ -196,10 +198,7 @@ pub fn set_attribution(mode: AttributionMode) -> Result<(), SettingsWriteError> 
         }
         AttributionMode::Custom { commit, pr } => {
             let pr_empty = pr.is_empty();
-            map.insert(
-                ATTRIBUTION_KEY.to_string(),
-                attribution_object(&commit, &pr),
-            );
+            map.insert(ATTRIBUTION_KEY.to_string(), attribution_object(commit, pr));
             if pr_empty {
                 map.insert(
                     INCLUDE_CO_AUTHORED_BY_KEY.to_string(),

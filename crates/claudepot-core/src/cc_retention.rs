@@ -58,7 +58,8 @@
 
 use crate::paths::claude_config_dir;
 use crate::settings_writer::{
-    clear_bool_setting, mutate_settings, read_i64_setting, SettingsLayer, SettingsWriteError,
+    clear_bool_setting, mutate_settings, read_i64_setting, SettingValue, SettingsLayer,
+    SettingsWriteError,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -95,11 +96,19 @@ pub enum RetentionMode {
     /// `cleanupPeriodDays: 0` — CC writes no transcripts at all and
     /// deletes existing ones at startup. Never an "off" position.
     PersistenceDisabled,
-    /// A negative value. CC's schema declares the key
-    /// `z.number().nonnegative().int()`, so this invalidates the whole
-    /// settings file — which makes CC skip cleanup entirely. See
-    /// [`RetentionState::cleanup_suppressed`]: the transcripts are safe,
-    /// but only by accident, and "restore the default" would undo it.
+    /// A value CC's schema rejects: a negative number, or anything that is
+    /// not an integer at all (a string, a float, a bool, `null`). The key
+    /// is declared `z.number().nonnegative().int()`, so any of these
+    /// invalidates the whole settings file — which makes CC skip cleanup
+    /// entirely. See [`RetentionState::cleanup_suppressed`]: the transcripts
+    /// are safe, but only by accident, and "restore the default" would undo
+    /// it.
+    ///
+    /// The non-integer half of this used to read as `CcDefault`, because the
+    /// reader collapsed "absent" and "present but wrong type" into one
+    /// `None`. That told the user a 30-day timer was running on history that
+    /// was in fact protected, and pointed them at the one button that would
+    /// start the timer for real.
     Invalid,
 }
 
@@ -107,7 +116,9 @@ pub enum RetentionMode {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetentionState {
     pub mode: RetentionMode,
-    /// Raw value found in settings, if the key is present at all.
+    /// Raw value found in settings, if the key is present *and* an integer.
+    /// `None` covers both "absent" and "present but not a number" — read
+    /// [`Self::mode`] to tell those apart.
     pub configured_days: Option<i64>,
     /// The window CC would enforce if it were running cleanup at all.
     /// Meaningless when [`Self::cleanup_suppressed`] is set — check that
@@ -123,7 +134,17 @@ pub struct RetentionState {
     /// settings explicitly contain `cleanupPeriodDays`
     /// (`utils/cleanup.ts:576-586`). A negative value triggers exactly
     /// that: `z.number().nonnegative()` rejects it, and the key is by
-    /// definition present.
+    /// definition present. So does a non-integer value, for the same
+    /// reason — `z.number().int()` rejects `"thirty"`, `30.5`, and `true`
+    /// alike.
+    ///
+    /// Known limit: CC suppresses cleanup when the settings file has *any*
+    /// validation error while this key is present, including an error in an
+    /// unrelated key. Claudepot does not model CC's whole settings schema,
+    /// so it detects only errors in this key. A file that is invalid
+    /// elsewhere therefore reads here as "cleanup armed" when CC has in
+    /// fact suppressed it — an error in the safe direction (we warn about
+    /// deletion that is not happening) but not a complete one.
     ///
     /// So an invalid value accidentally *protects* transcripts. That
     /// changes the advice completely — "restore the default" would
@@ -325,23 +346,32 @@ fn projects_dir() -> PathBuf {
 
 /// Resolve retention from `~/.claude/settings.json`. Pure read.
 pub fn resolve_retention() -> RetentionState {
-    let configured_days = read_i64_setting(&user_settings_path(), CLEANUP_PERIOD_DAYS_KEY)
-        .ok()
-        .flatten();
-    state_from_configured(configured_days)
+    // A read failure is not "no key". An unreadable or unparseable settings
+    // file tells us nothing about what CC will do, and the conservative
+    // reading is the one that does not promise the user a deletion window we
+    // could not verify: treat it as invalid, which is also what CC does with
+    // a file it cannot validate.
+    let configured = read_i64_setting(&user_settings_path(), CLEANUP_PERIOD_DAYS_KEY)
+        .unwrap_or(SettingValue::Invalid);
+    state_from_configured(configured)
 }
 
 /// Split out so the resolution table is testable without a filesystem.
-fn state_from_configured(configured_days: Option<i64>) -> RetentionState {
-    let (mode, effective_days) = match configured_days {
-        None => (RetentionMode::CcDefault, CC_DEFAULT_CLEANUP_PERIOD_DAYS),
-        Some(0) => (RetentionMode::PersistenceDisabled, 0),
-        Some(d) if d < 0 => (RetentionMode::Invalid, CC_DEFAULT_CLEANUP_PERIOD_DAYS),
-        Some(d) => (RetentionMode::Explicit, d),
+fn state_from_configured(configured: SettingValue<i64>) -> RetentionState {
+    let (mode, effective_days) = match configured {
+        SettingValue::Absent => (RetentionMode::CcDefault, CC_DEFAULT_CLEANUP_PERIOD_DAYS),
+        // Present but not an integer — CC's schema rejects it and, with the
+        // key present, skips cleanup entirely.
+        SettingValue::Invalid => (RetentionMode::Invalid, CC_DEFAULT_CLEANUP_PERIOD_DAYS),
+        SettingValue::Present(0) => (RetentionMode::PersistenceDisabled, 0),
+        SettingValue::Present(d) if d < 0 => {
+            (RetentionMode::Invalid, CC_DEFAULT_CLEANUP_PERIOD_DAYS)
+        }
+        SettingValue::Present(d) => (RetentionMode::Explicit, d),
     };
     RetentionState {
         mode,
-        configured_days,
+        configured_days: configured.ok(),
         effective_days,
         is_cc_default: mode == RetentionMode::CcDefault,
         cleanup_suppressed: mode == RetentionMode::Invalid,
@@ -585,7 +615,7 @@ mod tests {
 
     #[test]
     fn absent_key_is_cc_default_thirty() {
-        let s = state_from_configured(None);
+        let s = state_from_configured(SettingValue::Absent);
         assert_eq!(s.mode, RetentionMode::CcDefault);
         assert_eq!(s.effective_days, CC_DEFAULT_CLEANUP_PERIOD_DAYS);
         assert!(s.is_cc_default);
@@ -593,7 +623,7 @@ mod tests {
 
     #[test]
     fn zero_is_persistence_disabled_not_off() {
-        let s = state_from_configured(Some(0));
+        let s = state_from_configured(SettingValue::Present(0));
         assert_eq!(s.mode, RetentionMode::PersistenceDisabled);
         assert_eq!(s.effective_days, 0);
         assert!(!s.is_cc_default);
@@ -606,7 +636,7 @@ mod tests {
     /// transcripts.
     #[test]
     fn negative_suppresses_cleanup_entirely() {
-        let s = state_from_configured(Some(-1));
+        let s = state_from_configured(SettingValue::Present(-1));
         assert_eq!(s.mode, RetentionMode::Invalid);
         assert!(s.cleanup_suppressed);
         assert!(!s.is_cc_default);
@@ -614,12 +644,56 @@ mod tests {
 
     #[test]
     fn valid_modes_do_not_suppress_cleanup() {
-        for cfg in [None, Some(0), Some(30), Some(3650)] {
+        for cfg in [
+            SettingValue::Absent,
+            SettingValue::Present(0),
+            SettingValue::Present(30),
+            SettingValue::Present(3650),
+        ] {
             assert!(
                 !state_from_configured(cfg).cleanup_suppressed,
                 "cfg {cfg:?} must not read as cleanup-suppressed"
             );
         }
+    }
+
+    /// A value that is present but not an integer fails CC's schema exactly
+    /// as a negative one does, so cleanup is suppressed — and this case used
+    /// to read as `CcDefault`, telling the user a 30-day timer was running
+    /// on history CC was in fact leaving alone.
+    #[test]
+    fn a_non_integer_value_suppresses_cleanup_and_is_not_the_cc_default() {
+        let s = state_from_configured(SettingValue::Invalid);
+        assert_eq!(s.mode, RetentionMode::Invalid);
+        assert!(s.cleanup_suppressed);
+        assert!(!s.is_cc_default, "must never advise restoring the default");
+        assert_eq!(s.configured_days, None);
+    }
+
+    /// End to end through the reader, because the collapse that caused the
+    /// bug lived there rather than in the resolution table.
+    #[test]
+    fn non_integer_values_on_disk_read_as_invalid_not_absent() {
+        let (_t, _l) = isolated();
+        for body in [
+            r#"{"cleanupPeriodDays":"thirty"}"#,
+            r#"{"cleanupPeriodDays":30.5}"#,
+            r#"{"cleanupPeriodDays":true}"#,
+            r#"{"cleanupPeriodDays":null}"#,
+        ] {
+            write_user_settings(body);
+            let s = resolve_retention();
+            assert_eq!(
+                s.mode,
+                RetentionMode::Invalid,
+                "{body} should suppress cleanup"
+            );
+            assert!(s.cleanup_suppressed);
+        }
+
+        // …and the genuinely absent case still reads as the CC default.
+        write_user_settings(r#"{"other":1}"#);
+        assert_eq!(resolve_retention().mode, RetentionMode::CcDefault);
     }
 
     /// The dangerous consequence of the above: with cleanup suppressed,
@@ -632,7 +706,12 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[400, 800], &[], now);
-        let r = scan_transcript_risk_in(&root, &state_from_configured(Some(-1)), now, 7);
+        let r = scan_transcript_risk_in(
+            &root,
+            &state_from_configured(SettingValue::Present(-1)),
+            now,
+            7,
+        );
         assert_eq!(r.total_transcripts, 2);
         assert_eq!(r.already_deletable, 0);
         assert_eq!(r.at_risk_within_horizon, 0);
@@ -640,7 +719,7 @@ mod tests {
 
     #[test]
     fn positive_is_explicit() {
-        let s = state_from_configured(Some(3650));
+        let s = state_from_configured(SettingValue::Present(3650));
         assert_eq!(s.mode, RetentionMode::Explicit);
         assert_eq!(s.effective_days, 3650);
         assert!(!s.is_cc_default);
@@ -690,11 +769,21 @@ mod tests {
         assert_eq!(s.mode, RetentionMode::PersistenceDisabled);
     }
 
+    /// This test used to assert the opposite — that a non-integer value
+    /// "reads as unset" — and in doing so locked in the bug. CC skips
+    /// cleanup when its settings fail validation and this key is present
+    /// (`utils/cleanup.ts:579`), and `z.number().int()` rejects `"thirty"`
+    /// exactly as it rejects `-1`. Reporting `CcDefault` told the user a
+    /// 30-day timer was running on history CC was leaving alone, and pointed
+    /// them at "restore the default" — the one action that starts it.
     #[test]
-    fn non_integer_value_reads_as_unset() {
+    fn a_non_integer_value_suppresses_cleanup_rather_than_reading_as_unset() {
         let (_t, _l) = isolated();
         write_user_settings(r#"{"cleanupPeriodDays":"thirty"}"#);
-        assert_eq!(resolve_retention().mode, RetentionMode::CcDefault);
+        let s = resolve_retention();
+        assert_eq!(s.mode, RetentionMode::Invalid);
+        assert!(s.cleanup_suppressed);
+        assert!(!s.is_cc_default);
     }
 
     // ─── risk scan ──────────────────────────────────────────────────
@@ -731,7 +820,7 @@ mod tests {
         // two nested at 400d — cleanup never walks these
         seed_projects(&root, &[60, 27, 1], &[400, 400], now);
 
-        let state = state_from_configured(None); // 30-day default
+        let state = state_from_configured(SettingValue::Absent); // 30-day default
         let r = scan_transcript_risk_in(&root, &state, now, 7);
 
         assert_eq!(
@@ -754,7 +843,8 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[400], &[400; 20], now);
-        let r = scan_transcript_risk_in(&root, &state_from_configured(None), now, 7);
+        let r =
+            scan_transcript_risk_in(&root, &state_from_configured(SettingValue::Absent), now, 7);
         assert_eq!(r.already_deletable, 1);
         assert_eq!(r.nested_immortal, 20);
     }
@@ -765,7 +855,12 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
-        let r = scan_transcript_risk_in(&root, &state_from_configured(Some(3650)), now, 7);
+        let r = scan_transcript_risk_in(
+            &root,
+            &state_from_configured(SettingValue::Present(3650)),
+            now,
+            7,
+        );
         assert_eq!(r.already_deletable, 0);
         assert_eq!(r.at_risk_within_horizon, 0);
         assert_eq!(r.total_transcripts, 3);
@@ -777,7 +872,12 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
-        let r = scan_transcript_risk_in(&root, &state_from_configured(Some(0)), now, 7);
+        let r = scan_transcript_risk_in(
+            &root,
+            &state_from_configured(SettingValue::Present(0)),
+            now,
+            7,
+        );
         assert_eq!(
             r.already_deletable, 3,
             "cutoff is now, so every file is past it"
@@ -790,7 +890,8 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
-        let r = scan_transcript_risk_in(&root, &state_from_configured(None), now, 7);
+        let r =
+            scan_transcript_risk_in(&root, &state_from_configured(SettingValue::Absent), now, 7);
         assert_eq!(r.oldest_ms, Some(now - 60 * MS_PER_DAY));
     }
 
@@ -807,7 +908,12 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).unwrap();
 
-        let r = scan_transcript_risk_in(&root, &state_from_configured(None), 1_800_000_000_000, 7);
+        let r = scan_transcript_risk_in(
+            &root,
+            &state_from_configured(SettingValue::Absent),
+            1_800_000_000_000,
+            7,
+        );
 
         // Restore before assertions so a failure doesn't leave an
         // unremovable temp dir behind.
@@ -825,7 +931,7 @@ mod tests {
     #[test]
     fn incomplete_scan_still_warns() {
         let r = RetentionReport {
-            state: state_from_configured(None),
+            state: state_from_configured(SettingValue::Absent),
             risk: TranscriptRisk {
                 scan_incomplete: true,
                 horizon_days: 7,
@@ -845,7 +951,7 @@ mod tests {
     #[test]
     fn suppressed_cleanup_never_warns_even_on_an_incomplete_scan() {
         let r = RetentionReport {
-            state: state_from_configured(Some(-1)),
+            state: state_from_configured(SettingValue::Present(-1)),
             risk: TranscriptRisk {
                 scan_incomplete: true,
                 horizon_days: 7,
@@ -862,7 +968,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("projects");
         fs::create_dir_all(&root).unwrap();
-        let r = scan_transcript_risk_in(&root, &state_from_configured(None), 1_800_000_000_000, 7);
+        let r = scan_transcript_risk_in(
+            &root,
+            &state_from_configured(SettingValue::Absent),
+            1_800_000_000_000,
+            7,
+        );
         assert!(!r.scan_incomplete);
     }
 
@@ -884,7 +995,7 @@ mod tests {
             (1, 7, i64::MIN),
             (i64::MAX, i64::MAX, i64::MAX),
         ] {
-            let st = state_from_configured(Some(days));
+            let st = state_from_configured(SettingValue::Present(days));
             // Must not panic in debug (where overflow aborts).
             let _ = scan_transcript_risk_in(&root, &st, now_ms, horizon);
         }
@@ -895,7 +1006,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let r = scan_transcript_risk_in(
             &tmp.path().join("nope"),
-            &state_from_configured(None),
+            &state_from_configured(SettingValue::Absent),
             1_800_000_000_000,
             7,
         );
@@ -921,7 +1032,7 @@ mod tests {
     #[test]
     fn no_warning_when_nothing_is_at_risk() {
         let r = rep(
-            state_from_configured(None),
+            state_from_configured(SettingValue::Absent),
             TranscriptRisk {
                 total_transcripts: 460,
                 horizon_days: 7,
@@ -935,14 +1046,17 @@ mod tests {
     /// scheduled deletion is.
     #[test]
     fn cc_default_alone_does_not_warn() {
-        let r = rep(state_from_configured(None), TranscriptRisk::default());
+        let r = rep(
+            state_from_configured(SettingValue::Absent),
+            TranscriptRisk::default(),
+        );
         assert!(warning(&r).is_none());
     }
 
     #[test]
     fn warns_when_transcripts_are_already_past_the_cutoff() {
         let r = rep(
-            state_from_configured(None),
+            state_from_configured(SettingValue::Absent),
             TranscriptRisk {
                 already_deletable: 1247,
                 horizon_days: 7,
@@ -958,7 +1072,7 @@ mod tests {
     #[test]
     fn warns_on_upcoming_risk_even_when_none_are_past_yet() {
         let r = rep(
-            state_from_configured(Some(30)),
+            state_from_configured(SettingValue::Present(30)),
             TranscriptRisk {
                 at_risk_within_horizon: 3,
                 horizon_days: 7,
@@ -982,14 +1096,14 @@ mod tests {
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
 
-        let before = state_from_configured(None);
+        let before = state_from_configured(SettingValue::Absent);
         let r_before = rep(
             before.clone(),
             scan_transcript_risk_in(&root, &before, now, 7),
         );
         assert!(warning(&r_before).is_some());
 
-        let after = state_from_configured(Some(3650));
+        let after = state_from_configured(SettingValue::Present(3650));
         let r_after = rep(
             after.clone(),
             scan_transcript_risk_in(&root, &after, now, 7),
@@ -1000,7 +1114,7 @@ mod tests {
     #[test]
     fn singular_plural_reads_correctly() {
         let one = rep(
-            state_from_configured(Some(30)),
+            state_from_configured(SettingValue::Present(30)),
             TranscriptRisk {
                 already_deletable: 1,
                 horizon_days: 7,
@@ -1028,7 +1142,8 @@ mod tests {
         fs::write(&other, b"x").unwrap();
         set_mtime(&other, now - 60 * MS_PER_DAY);
 
-        let r = scan_transcript_risk_in(&root, &state_from_configured(None), now, 7);
+        let r =
+            scan_transcript_risk_in(&root, &state_from_configured(SettingValue::Absent), now, 7);
         assert_eq!(r.total_transcripts, 1, "only .jsonl/.cast are cleaned");
         assert_eq!(r.already_deletable, 1);
     }
