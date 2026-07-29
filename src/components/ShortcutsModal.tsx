@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { Modal, ModalHeader, ModalBody } from "./primitives/Modal";
 import { Kbd } from "./primitives/Kbd";
+import { sections } from "../sections/registry";
 
 interface ShortcutBinding {
   keys: string[];
@@ -13,18 +14,25 @@ interface ShortcutGroup {
   items: ShortcutBinding[];
 }
 
+/**
+ * ⌘1..⌘9 is bound in `useSection` by *position* in the section
+ * registry, so the only correct way to document it is to read the
+ * same list. The hand-written version drifted badly — it claimed ⌘3
+ * was Sessions and ⌘4 was Config (neither is a section any more), put
+ * Settings on ⌘6 when it is ⌘9, and never mentioned ⌘7..⌘9 at all.
+ */
+const NAVIGATION_ITEMS: ShortcutBinding[] = [
+  ...sections.slice(0, 9).map((s, i) => ({
+    keys: ["⌘", String(i + 1)],
+    label: s.label,
+  })),
+  { keys: ["⌘", ","], label: "Settings (standard shortcut)" },
+];
+
 const GROUPS: ShortcutGroup[] = [
   {
     title: "Navigation",
-    items: [
-      { keys: ["⌘", "1"], label: "Accounts" },
-      { keys: ["⌘", "2"], label: "Projects" },
-      { keys: ["⌘", "3"], label: "Sessions" },
-      { keys: ["⌘", "4"], label: "Config" },
-      { keys: ["⌘", "5"], label: "Keys" },
-      { keys: ["⌘", "6"], label: "Settings" },
-      { keys: ["⌘", ","], label: "Settings (standard shortcut)" },
-    ],
+    items: NAVIGATION_ITEMS,
   },
   {
     title: "Global actions",
@@ -33,7 +41,10 @@ const GROUPS: ShortcutGroup[] = [
       { keys: ["⌘", "/"], label: "Show keyboard shortcuts" },
       { keys: ["⌘", "R"], label: "Refresh this section" },
       { keys: ["⌘", "N"], label: "Add account", scope: "Accounts" },
-      { keys: ["⌘", "F"], label: "Focus filter (where exposed)" },
+      // ⌘F was listed here as "Focus filter (where exposed)" but no
+      // section ever wired it — the hook option existed and nothing
+      // passed it. Documenting a shortcut that does nothing is worse
+      // than not documenting it.
       { keys: ["⌘", "⇧", "C"], label: "Copy first matching email", scope: "Accounts" },
       { keys: ["⌘", "⇧", "L"], label: "Focus Live sessions strip" },
     ],
@@ -49,6 +60,8 @@ const GROUPS: ShortcutGroup[] = [
     title: "Command palette",
     items: [
       { keys: ["↑", "↓"], label: "Move selection" },
+      { keys: ["Home"], label: "First result" },
+      { keys: ["End"], label: "Last result" },
       { keys: ["Enter"], label: "Run selected" },
       { keys: ["Esc"], label: "Close palette" },
     ],
@@ -156,7 +169,8 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
             color: "var(--fg-faint)",
           }}
         >
-          Shortcuts are suppressed while typing in a text field.
+          Shortcuts are suppressed while typing in a text field or while
+          a dialog is open.
         </p>
       </ModalBody>
     </Modal>
