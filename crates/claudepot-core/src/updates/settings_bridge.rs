@@ -35,16 +35,25 @@ pub struct CcUpdateSettings {
     pub disable_updates: bool,
 }
 
+/// The two keys this module owns, named once so the reader, the writers and
+/// the transition planner cannot disagree about them.
+const CHANNEL_KEY: &str = "autoUpdatesChannel";
+const MINIMUM_VERSION_KEY: &str = "minimumVersion";
+
 fn settings_path() -> PathBuf {
     paths::claude_config_dir().join("settings.json")
 }
 
 fn read_root() -> Result<Map<String, Value>> {
     let p = settings_path();
-    if !p.exists() {
-        return Ok(Map::new());
-    }
-    let body = std::fs::read_to_string(&p)?;
+    // Match on the read rather than `exists()` then read: between those two
+    // the file can disappear, and the second call would surface as an I/O
+    // error where "missing" is the answer we already have a branch for.
+    let body = match std::fs::read_to_string(&p) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(e) => return Err(e.into()),
+    };
     if body.trim().is_empty() {
         return Ok(Map::new());
     }
@@ -59,23 +68,27 @@ fn read_root() -> Result<Map<String, Value>> {
     }
 }
 
-fn write_root(root: &Map<String, Value>) -> Result<()> {
-    let p = settings_path();
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let body = serde_json::to_string_pretty(root)?;
-    let parent = p.parent().unwrap_or(std::path::Path::new("."));
-    let tmp = tempfile::NamedTempFile::new_in(parent)?;
-    std::fs::write(tmp.path(), body)?;
-    tmp.persist(&p).map_err(|e| {
-        UpdateError::Io(std::io::Error::other(format!(
-            "settings_bridge: persist {}: {}",
-            p.display(),
-            e
-        )))
-    })?;
-    Ok(())
+/// Apply `edit` to `~/.claude/settings.json` through the shared mutation
+/// boundary.
+///
+/// This module used to read the whole root, mutate it, and persist a temp
+/// file over the top. That is crash-safe and not concurrency-safe: an
+/// overlapping read-modify-write from `settings_writer` or the env pane read
+/// the same old bytes, and whichever renamed last silently discarded the
+/// other's edit. `settings.json` is the file all three write, so a lock only
+/// one of them held would not be a lock at all.
+///
+/// Two incidental changes come with the move, both toward what every other
+/// writer of this file already did: the output is newline-terminated, and it
+/// lands via `fs_utils::atomic_write`, which chmods 0600 on Unix.
+///
+/// The closure may run more than once (see [`crate::settings_mutex`]).
+fn edit_root(mut edit: impl FnMut(&mut Map<String, Value>)) -> Result<()> {
+    crate::settings_mutex::mutate_settings_file(&settings_path(), |root, _| {
+        edit(root);
+        Ok::<_, UpdateError>(crate::settings_mutex::Change::Write(()))
+    })
+    .map(|_| ())
 }
 
 fn type_name(v: &Value) -> &'static str {
@@ -101,11 +114,11 @@ fn env_truthy(v: &Value) -> bool {
 pub fn read() -> Result<CcUpdateSettings> {
     let root = read_root()?;
     let auto_updates_channel = root
-        .get("autoUpdatesChannel")
+        .get(CHANNEL_KEY)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let minimum_version = root
-        .get("minimumVersion")
+        .get(MINIMUM_VERSION_KEY)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let env = root.get("env").and_then(|v| v.as_object());
@@ -134,19 +147,23 @@ pub fn read() -> Result<CcUpdateSettings> {
 /// "user has unparseable settings.json" — silently overwriting that
 /// would destroy their other settings.
 pub fn write_channel(channel: Option<&str>) -> Result<()> {
-    let mut root = read_root()?;
-    match channel {
-        Some(c) => {
-            root.insert(
-                "autoUpdatesChannel".to_string(),
-                Value::String(c.to_string()),
-            );
+    edit_root(|root| set_optional_string(root, CHANNEL_KEY, channel))
+}
+
+/// Set a top-level optional string key, or remove it when `value` is `None`.
+///
+/// `write_channel` and `write_minimum_version` were byte-for-byte copies of
+/// this differing only in the key name; `change_channel` needs the same
+/// operation a third time, inside its own closure.
+fn set_optional_string(root: &mut Map<String, Value>, key: &str, value: Option<&str>) {
+    match value {
+        Some(v) => {
+            root.insert(key.to_string(), Value::String(v.to_string()));
         }
         None => {
-            root.remove("autoUpdatesChannel");
+            root.remove(key);
         }
     }
-    write_root(&root)
 }
 
 /// Write `minimumVersion`. Pass `None` to clear the floor.
@@ -154,16 +171,7 @@ pub fn write_channel(channel: Option<&str>) -> Result<()> {
 /// Same failure-mode contract as [`write_channel`]: malformed file →
 /// error, never destructive overwrite.
 pub fn write_minimum_version(version: Option<&str>) -> Result<()> {
-    let mut root = read_root()?;
-    match version {
-        Some(v) => {
-            root.insert("minimumVersion".to_string(), Value::String(v.to_string()));
-        }
-        None => {
-            root.remove("minimumVersion");
-        }
-    }
-    write_root(&root)
+    edit_root(|root| set_optional_string(root, MINIMUM_VERSION_KEY, version))
 }
 
 /// Switch CC's release channel with the same `minimumVersion`
@@ -200,42 +208,56 @@ pub fn change_channel(
             "unknown channel: {new_channel:?} (expected 'latest' or 'stable')"
         )));
     }
-    let current = read()?;
-    let prev_channel = current
-        .auto_updates_channel
-        .clone()
-        .unwrap_or_else(|| "latest".to_string());
+    // The whole transition happens inside ONE mutation: the previous channel
+    // is read from the root the boundary hands us, both keys move together,
+    // and the result lands in a single atomic write.
+    //
+    // It used to read through `read()` and then call two independent
+    // read-modify-writes. That is two bugs. The decision came from a snapshot
+    // nothing held a lock on, so a concurrent write could make the branch
+    // wrong; and a failure between the two writes could leave
+    // `minimumVersion` cleared with the channel unchanged — a half-applied
+    // state, from a function whose own docs call this an "atomic user
+    // choice".
+    let outcome = crate::settings_mutex::mutate_settings_file(&settings_path(), |root, _| {
+        let prev_channel = root
+            .get(CHANNEL_KEY)
+            .and_then(Value::as_str)
+            .unwrap_or("latest")
+            .to_string();
 
-    if prev_channel == new_channel {
-        return Ok(prev_channel);
-    }
+        if prev_channel == new_channel {
+            return Ok::<_, UpdateError>(crate::settings_mutex::Change::Skip(prev_channel));
+        }
 
-    match (prev_channel.as_str(), new_channel) {
-        ("latest", "stable") => {
-            if allow_downgrade {
-                // User explicitly accepted downgrade — clear any
-                // pre-existing floor so stable can land at whatever
-                // it is right now.
-                write_minimum_version(None)?;
-            } else if let Some(v) = installed_version {
-                // Default: pin to current to avoid an involuntary
-                // downgrade.
-                write_minimum_version(Some(v))?;
+        match (prev_channel.as_str(), new_channel) {
+            ("latest", "stable") => {
+                if allow_downgrade {
+                    // User explicitly accepted downgrade — clear any
+                    // pre-existing floor so stable can land at whatever
+                    // it is right now.
+                    set_optional_string(root, MINIMUM_VERSION_KEY, None);
+                } else if let Some(v) = installed_version {
+                    // Default: pin to current to avoid an involuntary
+                    // downgrade.
+                    set_optional_string(root, MINIMUM_VERSION_KEY, Some(v));
+                }
+                set_optional_string(root, CHANNEL_KEY, Some("stable"));
             }
-            write_channel(Some("stable"))?;
+            ("stable", "latest") => {
+                set_optional_string(root, MINIMUM_VERSION_KEY, None);
+                set_optional_string(root, CHANNEL_KEY, Some("latest"));
+            }
+            // Anything we didn't enumerate (e.g., a future channel name
+            // already in settings.json) gets the simple write — no
+            // minimumVersion gymnastics, since we don't know the rules.
+            _ => {
+                set_optional_string(root, CHANNEL_KEY, Some(new_channel));
+            }
         }
-        ("stable", "latest") => {
-            write_minimum_version(None)?;
-            write_channel(Some("latest"))?;
-        }
-        // Anything we didn't enumerate (e.g., a future channel name
-        // already in settings.json) gets the simple write — no
-        // minimumVersion gymnastics, since we don't know the rules.
-        _ => {
-            write_channel(Some(new_channel))?;
-        }
-    }
-    Ok(prev_channel)
+        Ok(crate::settings_mutex::Change::Write(prev_channel))
+    })?;
+    Ok(outcome.value)
 }
 
 #[cfg(test)]
@@ -344,6 +366,140 @@ mod tests {
             std::fs::write(&path, "[1,2,3]").unwrap();
             let r = read();
             assert!(matches!(r, Err(UpdateError::Parse(_))));
+        });
+    }
+    // ─── change_channel transitions ─────────────────────────────────
+    //
+    // These did not exist. `change_channel` is the one function here that
+    // decides policy AND writes, and every branch of it was untested — which
+    // is how it kept a stale-snapshot read and two separate writes while its
+    // own doc comment promised an atomic choice.
+
+    fn settings_json() -> Value {
+        serde_json::from_str(&std::fs::read_to_string(settings_path()).unwrap()).unwrap()
+    }
+
+    fn seed(body: &str) {
+        let p = settings_path();
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, body).unwrap();
+    }
+
+    #[test]
+    fn latest_to_stable_pins_the_floor_by_default() {
+        with_temp_config(|| {
+            seed(r#"{"autoUpdatesChannel":"latest","keep":1}"#);
+            let prev = change_channel("stable", Some("2.1.220"), false).unwrap();
+            assert_eq!(prev, "latest");
+            let v = settings_json();
+            assert_eq!(v[CHANNEL_KEY], "stable");
+            assert_eq!(v[MINIMUM_VERSION_KEY], "2.1.220");
+            assert_eq!(v["keep"], 1, "unrelated keys must survive");
+        });
+    }
+
+    #[test]
+    fn latest_to_stable_with_allow_downgrade_clears_the_floor() {
+        with_temp_config(|| {
+            seed(r#"{"autoUpdatesChannel":"latest","minimumVersion":"2.1.100"}"#);
+            change_channel("stable", Some("2.1.220"), true).unwrap();
+            let v = settings_json();
+            assert_eq!(v[CHANNEL_KEY], "stable");
+            assert!(v.get(MINIMUM_VERSION_KEY).is_none());
+        });
+    }
+
+    /// CC skips the pin when its version probe fails, so we do too — pinning
+    /// to an unknown version would be inventing a floor.
+    #[test]
+    fn latest_to_stable_without_a_known_version_skips_the_pin() {
+        with_temp_config(|| {
+            seed(r#"{"autoUpdatesChannel":"latest"}"#);
+            change_channel("stable", None, false).unwrap();
+            let v = settings_json();
+            assert_eq!(v[CHANNEL_KEY], "stable");
+            assert!(v.get(MINIMUM_VERSION_KEY).is_none());
+        });
+    }
+
+    #[test]
+    fn stable_to_latest_clears_the_floor_so_it_cannot_block_forward_motion() {
+        with_temp_config(|| {
+            seed(r#"{"autoUpdatesChannel":"stable","minimumVersion":"2.1.100"}"#);
+            let prev = change_channel("latest", Some("2.1.220"), false).unwrap();
+            assert_eq!(prev, "stable");
+            let v = settings_json();
+            assert_eq!(v[CHANNEL_KEY], "latest");
+            assert!(v.get(MINIMUM_VERSION_KEY).is_none());
+        });
+    }
+
+    /// An unset channel reads as `latest`, so "switch to latest" is a no-op —
+    /// and a no-op must not rewrite the file.
+    #[test]
+    fn switching_to_the_channel_already_in_effect_writes_nothing() {
+        with_temp_config(|| {
+            seed(r#"{"minimumVersion":"2.1.100"}"#);
+            let before = std::fs::read(settings_path()).unwrap();
+            let prev = change_channel("latest", Some("2.1.220"), false).unwrap();
+            assert_eq!(prev, "latest");
+            assert_eq!(
+                std::fs::read(settings_path()).unwrap(),
+                before,
+                "a no-op transition must leave the file byte-identical"
+            );
+        });
+    }
+
+    #[test]
+    fn an_unknown_channel_is_refused_before_anything_is_written() {
+        with_temp_config(|| {
+            seed(r#"{"autoUpdatesChannel":"latest"}"#);
+            let before = std::fs::read(settings_path()).unwrap();
+            assert!(change_channel("nightly", Some("2.1.220"), false).is_err());
+            assert_eq!(std::fs::read(settings_path()).unwrap(), before);
+        });
+    }
+
+    /// A channel name we do not have rules for gets the plain write and no
+    /// minimumVersion gymnastics — we should not guess at a policy.
+    #[test]
+    fn a_channel_we_do_not_recognize_in_settings_gets_the_simple_write() {
+        with_temp_config(|| {
+            seed(r#"{"autoUpdatesChannel":"nightly","minimumVersion":"2.1.100"}"#);
+            let prev = change_channel("stable", Some("2.1.220"), false).unwrap();
+            assert_eq!(prev, "nightly");
+            let v = settings_json();
+            assert_eq!(v[CHANNEL_KEY], "stable");
+            assert_eq!(
+                v[MINIMUM_VERSION_KEY], "2.1.100",
+                "an unrecognized source channel must not move the floor"
+            );
+        });
+    }
+
+    /// Both keys move in ONE write. Asserted by watching the file: a
+    /// two-write implementation leaves an observable intermediate state.
+    #[test]
+    fn a_transition_moves_both_keys_in_a_single_write() {
+        with_temp_config(|| {
+            seed(r#"{"autoUpdatesChannel":"stable","minimumVersion":"2.1.100"}"#);
+            change_channel("latest", Some("2.1.220"), false).unwrap();
+            let v = settings_json();
+            // If the channel landed while the floor was still set, or the
+            // floor cleared while the channel was still stable, this is the
+            // half-applied state the single mutation exists to prevent.
+            assert_eq!(v[CHANNEL_KEY], "latest");
+            assert!(v.get(MINIMUM_VERSION_KEY).is_none());
+        });
+    }
+
+    #[test]
+    fn a_malformed_settings_file_errors_rather_than_being_clobbered() {
+        with_temp_config(|| {
+            seed("{ not json");
+            assert!(change_channel("stable", Some("2.1.220"), false).is_err());
+            assert_eq!(std::fs::read(settings_path()).unwrap(), b"{ not json");
         });
     }
 }

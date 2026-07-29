@@ -76,4 +76,24 @@ pub enum UpdateError {
     },
 }
 
+/// `settings_bridge` writes `~/.claude/settings.json` through the shared
+/// mutation boundary, which has its own error type. Map it onto the variants
+/// this module already surfaces rather than adding a parallel one — every
+/// failure here is still an I/O failure, a parse failure, or a refusal to
+/// clobber a file we could not read.
+impl From<crate::settings_mutex::SettingsMutexError> for UpdateError {
+    fn from(e: crate::settings_mutex::SettingsMutexError) -> Self {
+        use crate::settings_mutex::SettingsMutexError as S;
+        match e {
+            S::Io(e) => Self::Io(e),
+            S::JsonParse(e) => Self::Json(e),
+            S::NotAJsonObject(p) => Self::Parse(format!("{} root is not an object", p.display())),
+            S::Contended { path, attempts } => Self::Refused(format!(
+                "{} is being written by something else (gave up after {attempts} attempts)",
+                path.display()
+            )),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, UpdateError>;
