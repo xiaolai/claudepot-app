@@ -5,30 +5,45 @@
 
 /* ---------- command palette (P1.1) ---------- */
 
-/* Rendered as a <button> so click-to-dismiss is keyboard-reachable
-   without a parallel onKeyDown handler on a bare <div>. The button
-   defaults (border, padding, font) need explicit neutralizing so it
-   reads as a plain scrim. */
+/* Layout container only — no fill, no interaction. The dismissable
+   scrim is a SIBLING of the dialog below, not its ancestor: making
+   the backdrop itself a <button> wrapped the dialog's own option
+   buttons in a button, which is invalid DOM and warned on every
+   render. */
 .palette-backdrop {
   position: fixed;
   inset: 0;
-  background: var(--scrim);
   display: flex;
   justify-content: center;
   padding-top: var(--sp-80);
   z-index: var(--z-modal);
+}
+
+/* Click-to-dismiss target. A <button> so activation is keyboard-
+   reachable out of the box; it sits behind the dialog in paint order
+   because both are positioned and it comes first in the DOM. */
+.palette-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
   border: 0;
+  padding: 0;
+  margin: 0;
   font: inherit;
   color: inherit;
   cursor: default;
+  border-radius: 0;
+  box-shadow: none;
+  height: auto;
 }
-.palette-backdrop:focus-visible {
-  /* The backdrop has tabIndex={-1} (skipped in tab order), but
-     programmatic focus shouldn't paint a stray ring. */
+.palette-scrim:focus-visible {
+  /* tabIndex={-1} keeps it out of the tab order, but programmatic
+     focus shouldn't paint a stray ring. */
   outline: none;
 }
 
 .palette {
+  position: relative;
   width: var(--modal-width-md);
   max-width: calc(100vw - var(--sp-48));
   max-height: var(--popover-max-height);
@@ -53,10 +68,6 @@
 .palette-search-icon {
   color: var(--muted);
   flex-shrink: 0;
-}
-
-.palette-search-icon.icon {
-  margin-right: 0;
 }
 
 .palette-input {
@@ -104,6 +115,12 @@
   padding: var(--sp-8) var(--sp-10) var(--sp-4);
 }
 
+.palette-group-loading {
+  color: var(--fg-faint);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .palette-item {
   display: flex;
   align-items: center;
@@ -120,9 +137,7 @@
   box-shadow: none;
 }
 
-.palette-item .icon {
-  margin-right: 0;
-  flex-shrink: 0;
+.palette-item-glyph {
   color: var(--muted);
 }
 
@@ -131,7 +146,7 @@
   color: var(--on-color);
 }
 
-.palette-item.selected .icon {
+.palette-item.selected .palette-item-glyph {
   color: var(--on-color);
 }
 

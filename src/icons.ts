@@ -44,6 +44,7 @@ import {
   GitBranch,
   Globe,
   Grip,
+  HelpCircle,
   Home,
   Hourglass,
   Inbox,
@@ -215,6 +216,7 @@ export const NF = {
   wrench:     Wrench,
   shield:     Shield,
   userPlus:   UserPlus,
+  help:       HelpCircle,
 } as const satisfies Record<string, LucideIcon>;
 
 /** Component reference for a single icon (e.g. the return of `NF.user`). */

@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 vi.mock("../api", () => ({
   api: {
     sessionSearch: vi.fn().mockResolvedValue([]),
+    projectList: vi.fn().mockResolvedValue([]),
   },
 }));
 

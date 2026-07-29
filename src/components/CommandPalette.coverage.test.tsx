@@ -1,0 +1,268 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+// `vi.mock` factories are hoisted above the module body, so the spies
+// have to be created inside `vi.hoisted` to exist by then.
+const { sessionSearch, projectList } = vi.hoisted(() => ({
+  sessionSearch: vi.fn(),
+  projectList: vi.fn(),
+}));
+vi.mock("../api", () => ({ api: { sessionSearch, projectList } }));
+
+import { CommandPalette } from "./CommandPalette";
+import { sampleStatus } from "../test/fixtures";
+import { sections } from "../sections/registry";
+import { SETTINGS_PANES } from "../sections/settings/panes";
+import { GLOBAL_TABS } from "../sections/global/tabs";
+import { __resetProjectCache } from "../hooks/useProjectSearch";
+import { DEEPLINK_SETTINGS_TAB_KEY } from "../lib/storageKeys";
+
+function renderPalette(over: Record<string, unknown> = {}) {
+  const h = {
+    onClose: vi.fn(),
+    onSwitchCli: vi.fn(),
+    onSwitchDesktop: vi.fn(),
+    onAdd: vi.fn(),
+    onRefresh: vi.fn(),
+    onRemove: vi.fn(),
+    onNavigate: vi.fn(),
+    onShowShortcuts: vi.fn(),
+    onToggleTheme: vi.fn(),
+  };
+  render(
+    <CommandPalette
+      accounts={[]}
+      status={sampleStatus()}
+      {...h}
+      {...over}
+    />,
+  );
+  return h;
+}
+
+const input = () => screen.getByRole("combobox");
+const rowTexts = () =>
+  screen.queryAllByRole("option").map((r) => r.textContent ?? "");
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  sessionSearch.mockResolvedValue([]);
+  projectList.mockResolvedValue([]);
+  __resetProjectCache();
+});
+
+describe("CommandPalette — section coverage", () => {
+  it("can reach every section in the registry", async () => {
+    // Six of nine sections used to be unreachable: the nav entries
+    // were three hardcoded strings rather than the registry.
+    for (const section of sections) {
+      const h = renderPalette();
+      const user = userEvent.setup();
+      await user.type(input(), section.label);
+      const row = screen
+        .getAllByRole("option")
+        .find((r) => r.textContent?.startsWith(`Open ${section.label}`));
+      expect(row, `no palette row opens "${section.label}"`).toBeTruthy();
+      fireEvent.click(row!);
+      expect(h.onNavigate).toHaveBeenCalledWith(section.id);
+      cleanup();
+    }
+  });
+
+  it("ranks the exact section above a scattered subsequence match", async () => {
+    renderPalette();
+    const user = userEvent.setup();
+    await user.type(input(), "keys");
+    const first = rowTexts()[0] ?? "";
+    expect(first).toContain("Keys");
+  });
+});
+
+describe("CommandPalette — deep targets", () => {
+  it("hides Settings panes and Global tabs until the user types", () => {
+    renderPalette();
+    const texts = rowTexts();
+    expect(texts.some((t) => t.startsWith("Open Settings →"))).toBe(false);
+    expect(texts.some((t) => t.startsWith("Open Global →"))).toBe(false);
+    // Top-level sections are still there on an empty query.
+    expect(texts.some((t) => t === "Open Settings")).toBe(true);
+  });
+
+  it("reaches a Settings pane and lands on the right tab", async () => {
+    const h = renderPalette();
+    const user = userEvent.setup();
+    await user.type(input(), "retention");
+
+    const row = screen
+      .getAllByRole("option")
+      .find((r) => r.textContent?.includes("Settings → Retention"));
+    expect(row).toBeTruthy();
+    fireEvent.click(row!);
+
+    expect(h.onNavigate).toHaveBeenCalledWith("settings");
+    // The pane hint must be set for both the cold-mount and hot-mount
+    // consumers in SettingsSection.
+    expect(sessionStorage.getItem(DEEPLINK_SETTINGS_TAB_KEY)).toBe(
+      "retention",
+    );
+  });
+
+  it("finds a pane by keyword, not just by its label", async () => {
+    renderPalette();
+    const user = userEvent.setup();
+    // "cleanupPeriodDays" is the CC setting Retention edits; the label
+    // alone would never match what a user searching for it types.
+    await user.type(input(), "cleanupPeriod");
+    expect(
+      rowTexts().some((t) => t.includes("Settings → Retention")),
+    ).toBe(true);
+  });
+
+  it("reaches a Global tab via a one-shot tab: sub-route", async () => {
+    const h = renderPalette();
+    const user = userEvent.setup();
+    await user.type(input(), "updates");
+
+    const row = screen
+      .getAllByRole("option")
+      .find((r) => r.textContent?.includes("Global → Updates"));
+    expect(row).toBeTruthy();
+    fireEvent.click(row!);
+    expect(h.onNavigate).toHaveBeenCalledWith("global", "tab:updates");
+  });
+
+  it("exposes every Settings pane and Global tab as a target", async () => {
+    for (const pane of SETTINGS_PANES) {
+      const h = renderPalette();
+      const user = userEvent.setup();
+      await user.type(input(), `Settings ${pane.label}`);
+      const row = screen
+        .queryAllByRole("option")
+        .find((r) => r.textContent?.includes(`Settings → ${pane.label}`));
+      expect(row, `pane "${pane.label}" unreachable`).toBeTruthy();
+      cleanup();
+      void h;
+    }
+    for (const tab of GLOBAL_TABS) {
+      renderPalette();
+      const user = userEvent.setup();
+      await user.type(input(), `Global ${tab.label}`);
+      const row = screen
+        .queryAllByRole("option")
+        .find((r) => r.textContent?.includes(`Global → ${tab.label}`));
+      expect(row, `tab "${tab.label}" unreachable`).toBeTruthy();
+      cleanup();
+    }
+  });
+});
+
+describe("CommandPalette — project search", () => {
+  const project = {
+    sanitized_name: "-Users-joker-github-claudepot",
+    original_path: "/Users/joker/github/claudepot",
+    session_count: 12,
+    memory_file_count: 1,
+    total_size_bytes: 1024,
+    last_modified_ms: 1,
+    is_orphan: false,
+    is_reachable: true,
+    is_empty: false,
+  };
+
+  it("does not touch the filesystem until the user types", () => {
+    renderPalette();
+    expect(projectList).not.toHaveBeenCalled();
+  });
+
+  it("finds a project by basename and opens it", async () => {
+    projectList.mockResolvedValue([project]);
+    renderPalette();
+    const user = userEvent.setup();
+
+    const dispatched: CustomEvent[] = [];
+    const listener = (e: Event) => dispatched.push(e as CustomEvent);
+    window.addEventListener("claudepot:navigate-section", listener);
+
+    await user.type(input(), "claudepot");
+    const row = await screen.findByRole("option", { name: /claudepot/ });
+    fireEvent.click(row);
+
+    window.removeEventListener("claudepot:navigate-section", listener);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]!.detail).toEqual({
+      id: "projects",
+      projectPath: "/Users/joker/github/claudepot",
+    });
+  });
+
+  it("shows the full path on hover — the row only has room for the basename", async () => {
+    projectList.mockResolvedValue([project]);
+    renderPalette();
+    const user = userEvent.setup();
+    await user.type(input(), "claudepot");
+    const row = await screen.findByRole("option", { name: /claudepot/ });
+    expect(row.getAttribute("title")).toBe("/Users/joker/github/claudepot");
+  });
+
+  it("degrades to an empty state when the project list fails", async () => {
+    projectList.mockRejectedValue(new Error("boom"));
+    renderPalette();
+    const user = userEvent.setup();
+    await user.type(input(), "claudepot");
+    // A failed project list must not blank the palette or throw — it
+    // resolves to "no matches", the same as a query nothing matched.
+    await waitFor(() => {
+      expect(screen.getByText("No matches")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/…searching/)).not.toBeInTheDocument();
+  });
+});
+
+describe("CommandPalette — accessibility", () => {
+  it("gives the input combobox semantics pointing at the listbox", () => {
+    renderPalette();
+    const box = input();
+    expect(box).toHaveAttribute("aria-autocomplete", "list");
+    const listboxId = box.getAttribute("aria-controls");
+    expect(listboxId).toBeTruthy();
+    expect(document.getElementById(listboxId!)).toHaveAttribute(
+      "role",
+      "listbox",
+    );
+  });
+
+  it("moves aria-activedescendant to the selected row as the user arrows", () => {
+    renderPalette();
+    const box = input();
+    const rows = screen.getAllByRole("option");
+
+    expect(box.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect(box.getAttribute("aria-activedescendant")).toBe(rows[1]!.id);
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  });
+
+  it("Home and End jump to the ends of the list", () => {
+    renderPalette();
+    const box = input();
+    const rows = screen.getAllByRole("option");
+
+    fireEvent.keyDown(box, { key: "End" });
+    expect(box.getAttribute("aria-activedescendant")).toBe(
+      rows[rows.length - 1]!.id,
+    );
+    fireEvent.keyDown(box, { key: "Home" });
+    expect(box.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  });
+
+  it("renders no nested interactive elements", () => {
+    renderPalette();
+    // The dismiss scrim used to be an ancestor <button> wrapping the
+    // dialog, which nests every option button inside a button.
+    for (const btn of Array.from(document.querySelectorAll("button"))) {
+      expect(btn.querySelector("button")).toBeNull();
+    }
+  });
+});

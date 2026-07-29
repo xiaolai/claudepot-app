@@ -436,6 +436,7 @@ function AppShell() {
         onClose={() => setShowPalette(false)}
         onNavigate={setSection}
         onShowShortcuts={openShortcuts}
+        onToggleTheme={toggleTheme}
       />
 
       {showShortcuts && (

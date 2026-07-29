@@ -18,8 +18,11 @@ import { useAppState } from "../providers/AppStateProvider";
 export function ShellCommandPalette(props: {
   open: boolean;
   onClose: () => void;
-  onNavigate: (id: string) => void;
+  /** Second argument is load-bearing — palette entries deep-link into
+   *  a section's sub-route (Projects → Maintenance, Global → tab). */
+  onNavigate: (id: string, subRoute?: string | null) => void;
   onShowShortcuts: () => void;
+  onToggleTheme: () => void;
 }) {
   const {
     accounts,
@@ -61,6 +64,7 @@ export function ShellCommandPalette(props: {
         }}
         onNavigate={props.onNavigate}
         onShowShortcuts={props.onShowShortcuts}
+        onToggleTheme={props.onToggleTheme}
       />
     </ErrorBoundary>
   );
