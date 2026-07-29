@@ -353,6 +353,43 @@ All writes go through `claudepot-core::settings_mutex`, the one
 serialized read-modify-write boundary for CC's settings files — see
 below.
 
+## Command palette (⌘K)
+
+`src/components/CommandPalette.tsx` + `usePaletteActions` +
+`components/palette/rows.ts`. Three properties hold it together:
+
+- **One ordering, not two.** `buildPaletteRows` emits a single
+  `rows` array (what renders) and `selectable` (the same list minus
+  headings). A row's cursor index is assigned where the row is
+  created, so `selectable[i]` *is* the i-th visible row. The
+  original bug was two orderings: rows rendered grouped by category
+  while Enter indexed the ungrouped production order, so Enter on a
+  highlighted "Open Projects" ran "Sign Desktop out". Keyboard and
+  mouse now share one `activate(row)` — if you add a row kind, add
+  it there, not at a second call site.
+- **Deep targets are hidden until you type.** Settings panes and
+  Global tabs carry `deep: true`. They are real palette entries but
+  listing all 28 on an empty query buries the nine sections.
+- **Pane metadata lives outside the lazy sections.**
+  `sections/settings/panes.ts` and `sections/global/tabs.ts` hold
+  no JSX precisely so the palette can import them without dragging
+  the Settings / Global chunks into the main bundle. Deep links
+  reach Settings through `triggerSettingsTab` (cold-mount
+  sessionStorage hint + hot-mount event) and Global through a
+  one-shot `tab:<id>` sub-route that the section consumes and
+  clears.
+
+Matching is scored (`lib/paletteScore.ts`), not boolean: tiers are
+spaced 100 apart and every within-tier penalty sums to under 100, so
+a scattered subsequence can never outrank a real substring hit —
+which is what let "Sign Desktop out" answer a search for "set".
+
+Shortcut gating is shared: `isShortcutContextBlocked()` in
+`useGlobalShortcuts` is the one predicate for "modal open or input
+focused", and `useShellShortcuts` / `useGlobalShortcuts` / the
+palette all defer to it. Forking a weaker check is how ⌘K ended up
+able to open over an already-open dialog.
+
 ## Settings-file mutation boundary
 
 `claudepot-core::settings_mutex::mutate_settings_file` is the **only**
@@ -582,6 +619,17 @@ See `dev-docs/implementation-plan.md` for the full plan.
   compatibility), Agents (id `automations`, ditto), Global,
   Settings. Nine top-level tabs total.
   Cleanup (session prune + trash) lives at Settings → Cleanup.
+- Everything that enumerates the sections reads
+  `sections` from the registry — the ⌘K palette
+  (`usePaletteActions`), the ⌘1..⌘9 bindings (`useSection`), the
+  shortcuts reference (`ShortcutsModal`), and Settings → General's
+  "Open on launch" picker. Each of those four used to carry its own
+  hand-written copy, and three of the four had drifted: the modal
+  documented ⌘3 as "Sessions" and ⌘4 as "Config" (neither is a
+  section), the launch picker offered a `sessions` id that
+  `useSection` silently rejected back to Accounts, and the palette
+  reached three of the nine sections. A new section is one registry
+  entry; a new *list* of sections is a review finding.
 - Long-running ops (project rename, repair resume/rollback) flow
   through a single op-progress pipeline:
   `Tauri *_start` cmd → spawns task → emits events on
