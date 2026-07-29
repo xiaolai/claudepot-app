@@ -67,6 +67,49 @@ describe("useShellShortcuts", () => {
     expect(args.openPalette).not.toHaveBeenCalled();
   });
 
+  // design.md → Shortcuts: "Never fire while a modal is open or an
+  // input is focused." ⌘K used to check only the second half, so it
+  // stacked the palette on top of an open dialog — two focus traps
+  // fighting over the same tab order.
+  it("none of ⌘K / ⌘, / ⌘/ fires while a modal is open", () => {
+    const { args } = renderShortcuts();
+    document.body.innerHTML = `
+      <div role="dialog" aria-modal="true">
+        <button id="ok">ok</button>
+      </div>`;
+    document.getElementById("ok")?.focus();
+
+    press("k", { metaKey: true });
+    press(",", { metaKey: true });
+    press("/", { metaKey: true });
+
+    expect(args.openPalette).not.toHaveBeenCalled();
+    expect(args.setSection).not.toHaveBeenCalled();
+    expect(args.openShortcuts).not.toHaveBeenCalled();
+  });
+
+  it("⌘, is ignored while an input is focused", () => {
+    const { args } = renderShortcuts();
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    press(",", { metaKey: true });
+    expect(args.setSection).not.toHaveBeenCalled();
+  });
+
+  it("⌘⇧L is ignored while a modal is open", () => {
+    renderShortcuts();
+    document.body.innerHTML = `
+      <div role="dialog" aria-modal="true"><button id="ok">ok</button></div>
+      <div aria-label="Live Claude sessions">
+        <button role="option" id="row-1">one</button>
+      </div>`;
+    const ok = document.getElementById("ok")!;
+    ok.focus();
+    press("l", { metaKey: true, shiftKey: true });
+    expect(document.activeElement?.id).toBe("ok");
+  });
+
   it("⌃⌥⌘L toggles developer mode and toasts the new state", () => {
     const { args } = renderShortcuts();
     press("l", { metaKey: true, ctrlKey: true, altKey: true });

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { readDevMode, writeDevMode } from "./useDevMode";
+import { isShortcutContextBlocked } from "./useGlobalShortcuts";
 
 /**
  * Shell-level keyboard shortcuts, extracted from AppShell:
@@ -10,9 +11,22 @@ import { readDevMode, writeDevMode } from "./useDevMode";
  *   - ⌃⌥⌘L — toggle developer mode (hidden deep-system toggle)
  *   - ⌘⇧L — focus the first SidebarLiveStrip row
  *
- * All skip editable focus so typing inside an input doesn't hijack
- * them (per `.claude/rules/design.md` → Shortcuts). ⌘1..⌘9 section
- * switching lives in `useSection`, not here.
+ * All except ⌃⌥⌘L go through `isShortcutContextBlocked()` — the
+ * shared gate from `useGlobalShortcuts` — so they don't fire while an
+ * input has focus OR while a modal is open, per
+ * `.claude/rules/design.md` → Shortcuts. Each hook used to fork its
+ * own weaker predicate: ⌘K checked only for editable focus, so it
+ * opened the palette on top of an already-open dialog (two live focus
+ * traps), and ⌘, checked nothing at all, so it navigated the section
+ * out from under an open modal and fired mid-typing.
+ *
+ * ⌃⌥⌘L is deliberately ungated. It is a hidden diagnostic toggle with
+ * no visible control anywhere, and its whole value is being reachable
+ * when something is wrong — including from a stuck modal. Its
+ * four-modifier combo makes accidental firing while typing a
+ * non-issue.
+ *
+ * ⌘1..⌘9 section switching lives in `useSection`, not here.
  */
 export function useShellShortcuts(args: {
   setSection: (id: string) => void;
@@ -26,25 +40,20 @@ export function useShellShortcuts(args: {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      if (!mod || e.altKey) return;
-      const el = document.activeElement as HTMLElement | null;
-      const tag = el?.tagName?.toLowerCase();
-      const editable =
-        tag === "input" || tag === "textarea" || el?.isContentEditable;
+      if (!mod || e.altKey || e.shiftKey) return;
+      if (isShortcutContextBlocked()) return;
 
-      if (e.key === "," && !e.shiftKey) {
+      if (e.key === ",") {
         e.preventDefault();
         setSection("settings");
         return;
       }
-      if ((e.key === "k" || e.key === "K") && !e.shiftKey) {
-        if (editable) return;
+      if (e.key === "k" || e.key === "K") {
         e.preventDefault();
         openPalette();
         return;
       }
-      if (e.key === "/" && !e.shiftKey) {
-        if (editable) return;
+      if (e.key === "/") {
         e.preventDefault();
         openShortcuts();
       }
@@ -82,11 +91,7 @@ export function useShellShortcuts(args: {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || !e.shiftKey || e.altKey) return;
       if (e.key !== "l" && e.key !== "L") return;
-      const el = document.activeElement as HTMLElement | null;
-      const tag = el?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || el?.isContentEditable) {
-        return;
-      }
+      if (isShortcutContextBlocked()) return;
       e.preventDefault();
       // The strip renders with role=listbox; focus the first option.
       const firstRow = document.querySelector<HTMLButtonElement>(

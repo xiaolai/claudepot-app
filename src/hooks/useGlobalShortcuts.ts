@@ -20,33 +20,33 @@ export function isShortcutContextBlocked(): boolean {
 }
 
 /**
- * App-scoped keyboard shortcuts. Each handler is optional so the
- * consumer can opt out (e.g. ⌘N is Accounts-specific today but ⌘R
- * refreshes any section that provides a handler).
+ * Section-scoped keyboard shortcuts. Each handler is optional so the
+ * consumer can opt out (⌘N is Accounts-specific today; ⌘R refreshes
+ * any section that provides a handler).
  *
- * Respects the "don't fire while user is typing" rule by checking
- * `document.activeElement` — shortcuts bail if the focus is on an
- * editable surface (input, textarea, contenteditable).
+ * Gated by `isShortcutContextBlocked` — nothing fires while the user
+ * is typing or while a modal is open.
+ *
+ * This hook used to accept `onPalette` and `onFilter` as well. No
+ * caller ever passed either. `onPalette` was the more dangerous of
+ * the two: ⌘K belongs to `useShellShortcuts`, so wiring it here would
+ * have given one shortcut two owners — and this one predates the
+ * modal gate, so the palette could still have opened over a dialog
+ * through the second path.
  */
 export function useGlobalShortcuts(handlers: {
   onRefresh?: () => void;
   onAdd?: () => void;
-  onPalette?: () => void;
-  onFilter?: () => void;
 }): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.shiftKey || e.altKey) return;
-      // Don't hijack typing — especially ⌘A / ⌘F inside an input.
-      if (isEditable(document.activeElement)) {
-        // ...except ⌘F which we still forward so the user can jump
-        // to the app's own filter from an input (e.g. re-focus the
-        // sidebar filter while typing in the command palette would
-        // be surprising — keep this rule). We skip all editable-focus
-        // events for now.
-        return;
-      }
+      // Don't hijack typing (⌘A / ⌘F inside an input), and don't act
+      // on the section behind an open modal — a ⌘R refresh or ⌘N add
+      // fired from under a dialog leaves the user staring at a stale
+      // modal over changed content.
+      if (isShortcutContextBlocked()) return;
       if (e.key === "r" && handlers.onRefresh) {
         e.preventDefault();
         handlers.onRefresh();
@@ -55,17 +55,6 @@ export function useGlobalShortcuts(handlers: {
       if (e.key === "n" && handlers.onAdd) {
         e.preventDefault();
         handlers.onAdd();
-        return;
-      }
-      if (e.key === "k" && handlers.onPalette) {
-        e.preventDefault();
-        handlers.onPalette();
-        return;
-      }
-      if (e.key === "f" && handlers.onFilter) {
-        e.preventDefault();
-        handlers.onFilter();
-        return;
       }
     };
 
