@@ -26,15 +26,15 @@ import { Button } from "../components/primitives/Button";
  * untouched.
  */
 
-type GlobalTab = "config" | "updates" | "memory" | "tips";
 import { GLOBAL_TAB_KEY as TAB_STORAGE_KEY } from "../lib/storageKeys";
+import { isGlobalTabId, type GlobalTabId } from "./global/tabs";
+
+type GlobalTab = GlobalTabId;
 
 function loadTab(): GlobalTab {
   try {
     const raw = localStorage.getItem(TAB_STORAGE_KEY);
-    if (raw === "updates") return "updates";
-    if (raw === "memory") return "memory";
-    if (raw === "tips") return "tips";
+    if (raw && isGlobalTabId(raw)) return raw;
     return "config";
   } catch {
     return "config";
@@ -68,6 +68,20 @@ export function GlobalSection({
       saveTab("config");
     }
   }, [subRoute, tab]);
+
+  // A `tab:<id>` subRoute is the ⌘K palette's deep link ("Open Global
+  // → Updates"). It is one-shot: consumed and cleared immediately, so
+  // it selects the tab without pinning it — the user's own tab clicks
+  // still persist through `saveTab` and win on the next visit.
+  useEffect(() => {
+    if (!subRoute?.startsWith("tab:")) return;
+    const wanted = subRoute.slice("tab:".length);
+    if (isGlobalTabId(wanted)) {
+      setTab(wanted);
+      saveTab(wanted);
+    }
+    onSubRouteChange(null);
+  }, [subRoute, onSubRouteChange]);
 
   const switchTab = (next: GlobalTab) => {
     setTab(next);

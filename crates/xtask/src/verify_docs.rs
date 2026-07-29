@@ -213,11 +213,20 @@ fn spelled(n: usize) -> Option<&'static str> {
     })
 }
 
+/// The pane table moved out of `SettingsSection.tsx` into its own
+/// JSX-free module so the ⌘K palette could import it without pulling
+/// the lazy Settings chunk into the main bundle. The list is still the
+/// single source of truth — only its address changed.
+const SETTINGS_PANES_SRC: &str = "src/sections/settings/panes.ts";
+
 fn check_settings_panes(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
-    let src = read(repo, "src/sections/SettingsSection.tsx")?;
+    let src = read(repo, SETTINGS_PANES_SRC)?;
     let panes = shipped_settings_panes(&src);
     if panes.is_empty() {
-        bail!("could not parse any Settings panes — the TAB_DEFS shape changed, fix this check");
+        bail!(
+            "could not parse any Settings panes from {SETTINGS_PANES_SRC} — \
+             the SETTINGS_PANES shape changed, fix this check"
+        );
     }
 
     let web_rel = "web/src/app/(reader)/app/features/settings/page.mdx";

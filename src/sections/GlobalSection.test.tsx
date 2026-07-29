@@ -82,3 +82,46 @@ describe("GlobalSection — env-vars deep link", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("GlobalSection — ⌘K tab deep link", () => {
+  it("selects the tab named by a tab: sub-route", async () => {
+    window.localStorage.setItem("claudepot.global.tab", "config");
+    const onSubRouteChange = vi.fn();
+
+    render(
+      <GlobalSection subRoute="tab:updates" onSubRouteChange={onSubRouteChange} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /updates/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
+
+  it("clears the sub-route so the deep link is one-shot", async () => {
+    // Left in place, `tab:` would pin the section's sub-route and
+    // override the user's own tab clicks on every later visit.
+    const onSubRouteChange = vi.fn();
+    render(
+      <GlobalSection subRoute="tab:memory" onSubRouteChange={onSubRouteChange} />,
+    );
+    await waitFor(() => {
+      expect(onSubRouteChange).toHaveBeenCalledWith(null);
+    });
+  });
+
+  it("ignores a tab: sub-route naming a tab that does not exist", async () => {
+    window.localStorage.setItem("claudepot.global.tab", "config");
+    render(
+      <GlobalSection subRoute="tab:nonsense" onSubRouteChange={vi.fn()} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /config/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
+});

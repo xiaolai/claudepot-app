@@ -34,6 +34,12 @@ import {
   type PermissionStatus,
 } from "../lib/notify";
 import { NF } from "../icons";
+import { sections } from "./registry";
+import {
+  SETTINGS_PANES,
+  type SettingsPane,
+  type SettingsPaneId,
+} from "./settings/panes";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { HealthPane } from "./settings/HealthPane";
 import { McpInstallerPane } from "./settings/McpInstallerPane";
@@ -57,66 +63,28 @@ import {
   type SettingsTabEventDetail,
 } from "../lib/networkPanelDeepLink";
 
-type Tab =
-  | "general"
-  | "appearance"
-  | "notifications"
-  | "network"
-  | "rotation"
-  | "retention"
-  | "health"
-  | "mcp"
-  | "cleanup"
-  | "protected"
-  | "github"
-  | "locks"
-  | "diagnostics"
-  | "about";
-
+// Pane table + the `Tab` union both live in `settings/panes.ts`. The
+// ⌘K palette needs the same list to build "Open Settings → Retention"
+// targets, and importing this module for it would pull the whole lazy
+// Settings chunk into the main bundle.
+//
 // Cleanup re-landed here from the (now-removed) Sessions section's
 // Cleanup sub-tab when the cross-project Sessions firehose was
 // folded back into per-project browsing under `Projects`. Hosts the
 // session prune flow + the trash drawer + the session-index rebuild
 // utility — global maintenance operations on the on-disk transcript
 // store. GC of stale projects still lives in Projects → Maintenance.
-const TAB_DEFS: ReadonlyArray<{
-  id: Tab;
-  label: string;
-  glyph: NfIcon;
-  group: "core" | "prefs" | "advanced";
-}> = [
-  { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
-  { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
-  { id: "notifications", label: "Notifications", glyph: NF.bell,     group: "core" },
-  { id: "network",     label: "Network",        glyph: NF.globe,    group: "core" },
-  { id: "rotation",    label: "Rotation",       glyph: NF.refresh,  group: "core" },
-  // Retention = CC's `cleanupPeriodDays`, the only CC setting that
-  // destroys user data. "core", not "advanced": a control that exists
-  // to prevent silent data loss is worthless if the user has to go
-  // looking for it, and CC's own UI never mentions the setting at all.
-  { id: "retention",   label: "Retention",      glyph: NF.archive,  group: "core" },
-  // Health = CC self-diagnostic (scrapes `claude doctor`). Sits in
-  // "core" because the pill in WindowChrome points here directly;
-  // hiding it under Advanced would make the deep-link surface
-  // inconsistent. Distinct from "Diagnostics" below, which is
-  // Claudepot's own self-check (platform, accounts, data dir).
-  { id: "health",      label: "Health",         glyph: NF.shield,   group: "core" },
-  { id: "mcp",         label: "MCP",            glyph: NF.server,   group: "core" },
-  { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
-  { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
-  { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
-  { id: "locks",       label: "Locks",          glyph: NF.lock,     group: "advanced" },
-  { id: "diagnostics", label: "Diagnostics",    glyph: NF.wrench,   group: "advanced" },
-  { id: "about",       label: "About",          glyph: NF.info,     group: "advanced" },
-];
+type Tab = SettingsPaneId;
+const TAB_DEFS = SETTINGS_PANES;
 
-const SECTION_OPTIONS = [
-  { value: "accounts", label: "Accounts" },
-  { value: "projects", label: "Projects" },
-  { value: "sessions", label: "Sessions" },
-  { value: "keys",     label: "Keys"     },
-  { value: "settings", label: "Settings" },
-] as const;
+// "Open on launch" targets. Derived from the section registry rather
+// than hand-listed: the hand-listed version offered a "Sessions"
+// option whose id no longer existed, so picking it silently landed
+// the user on Accounts, and it was missing four real sections.
+const SECTION_OPTIONS = sections.map((s) => ({
+  value: s.id,
+  label: s.label,
+}));
 
 export function SettingsSection() {
   const { pushToast } = useAppState();
@@ -208,7 +176,7 @@ function SettingsNav({
   active: Tab;
   onSelect: (t: Tab) => void;
 }) {
-  const groups: { label: string; items: typeof TAB_DEFS }[] = useMemo(
+  const groups: { label: string; items: readonly SettingsPane[] }[] = useMemo(
     () => [
       { label: "", items: TAB_DEFS.filter((t) => t.group === "core") },
       {
