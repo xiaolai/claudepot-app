@@ -56,6 +56,12 @@ typescript
 # preflight.sh and by the `check:envvar-layout` package script, so leaving it
 # out would point a committed gate at a file a fresh clone does not have.
 !/scripts/check-envvar-layout.mjs
+# Producer of assets/screenshots/ and web/public/screenshots/, both committed.
+# `pnpm screenshots` runs it, and `cargo xtask verify-docs` fails when a
+# SCREENSHOTS row there has no matching SHOTS row here — a two-file contract
+# whose other half is committed. Same rule as the two entries above: nothing
+# a committed file points at may be missing from a fresh clone.
+!/scripts/capture-screenshots.mjs
 # Producer of crates/claudepot-core/data/cc-env-spec.json, which the core
 # crate embeds with include_str!. `cargo xtask verify-docs` re-runs it with
 # --check, so an uncommitted producer would make that gate unrunnable.
