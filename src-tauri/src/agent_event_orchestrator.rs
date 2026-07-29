@@ -719,6 +719,11 @@ mod tests {
     use super::*;
     use chrono::{Duration as ChronoDuration, TimeZone};
 
+    /// Process-wide guard for tests that set `CLAUDEPOT_DATA_DIR`, which is
+    /// global to the process and therefore shared by every test thread in
+    /// this binary.
+    static DATA_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn ts(min: i64) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 5, 22, 12, 0, 0).unwrap() + ChronoDuration::minutes(min)
     }
@@ -1494,9 +1499,15 @@ mod tests {
     /// error string in `result.errors`).
     #[test]
     fn test_dispatch_failed_breadcrumb_writes_synthetic_result_json() {
+        // Serialize against every other test in this binary that touches
+        // DATA_DIR. The previous guard was `std::sync::Mutex::new(())` — a
+        // mutex created fresh on each call, so it excluded nothing, and this
+        // test intermittently read a `runs` directory another test had
+        // already pointed elsewhere. `claudepot_core::testing` is
+        // `#[cfg(test)]`-gated inside that crate, so this binary needs its
+        // own static.
+        let _guard = DATA_DIR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        // Serialize against any other test that also sets DATA_DIR.
-        let _guard = std::sync::Mutex::new(()); // local guard — best-effort.
         let prev = std::env::var_os("CLAUDEPOT_DATA_DIR");
         std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path());
 
