@@ -1,0 +1,358 @@
+/* Global → Config → Env Variables.
+   Surface-scoped shard; see App.css for the import-order contract.
+   Tokens only — no literals (rules/design.md). */
+
+.envvar-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--sp-8);
+  padding: var(--sp-12) var(--sp-16);
+  overflow-y: auto;
+}
+
+.envvar-empty {
+  padding: var(--sp-20);
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+}
+
+/* ── toolbar + filters ──────────────────────────────────────────── */
+
+.envvar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.envvar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+.envvar-count,
+.envvar-status {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  min-height: var(--sp-16);
+}
+
+.envvar-status {
+  color: var(--fg-muted);
+}
+
+/* ── the list ───────────────────────────────────────────────────── */
+
+.envvar-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Category heading inside the result list. A grouping, not a filter —
+   see the CATEGORY_LABELS comment for why chips would not work here. */
+.envvar-group {
+  margin: var(--sp-12) 0 var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-6);
+}
+
+.envvar-group span {
+  color: var(--fg-faint);
+  font-size: var(--fs-3xs);
+}
+
+.envvar-row {
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--bg-raised);
+  padding: var(--sp-10) var(--sp-12);
+  margin-bottom: var(--sp-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.envvar-row[data-set="true"] {
+  border-color: var(--accent-border);
+}
+
+.envvar-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+
+.envvar-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.envvar-tags {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.envvar-control {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.envvar-doc {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+
+/* Required disclosure — inline next to the control, never a tooltip. */
+.envvar-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  line-height: 1.5;
+}
+
+.envvar-note[data-tone="warn"] {
+  color: var(--warn);
+}
+
+.envvar-note[data-tone="muted"] {
+  color: var(--fg-faint);
+}
+
+.envvar-readonly {
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+
+.envvar-custom-raw {
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  max-width: var(--input-width-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── badges ─────────────────────────────────────────────────────── */
+
+.envvar-badge {
+  font-size: var(--fs-3xs);
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-pill);
+  border: var(--bw-hair) solid var(--line);
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.envvar-badge[data-tone="set"] {
+  color: var(--accent-text);
+  border-color: var(--accent-border);
+}
+
+.envvar-badge[data-tone="secret"] {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.envvar-badge[data-tone="unset"] {
+  color: var(--fg-ghost);
+}
+
+/* ── choosers ───────────────────────────────────────────────────── */
+
+.envvar-scalar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.envvar-unit {
+  font-size: var(--fs-3xs);
+  color: var(--fg-faint);
+}
+
+.envvar-select {
+  background: var(--bg-sunken);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: var(--sp-2) var(--sp-4);
+}
+
+.envvar-select:focus-visible {
+  outline: var(--bw-focus) solid var(--accent);
+  outline-offset: var(--bw-hair);
+}
+
+.envvar-switch {
+  position: relative;
+  width: var(--sp-38);
+  height: var(--sp-20);
+  border-radius: var(--r-pill);
+  border: var(--bw-hair) solid var(--line);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+
+.envvar-switch[data-on="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.envvar-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.envvar-switch:focus-visible {
+  outline: var(--bw-focus) solid var(--accent);
+  outline-offset: var(--bw-hair);
+}
+
+.envvar-switch-knob {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  width: var(--sp-14);
+  height: var(--sp-14);
+  border-radius: 50%;
+  background: var(--fg);
+  transition: left var(--dur-fast) ease;
+}
+
+.envvar-switch[data-on="true"] .envvar-switch-knob {
+  left: var(--sp-20);
+  background: var(--accent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .envvar-switch-knob {
+    transition: none;
+  }
+}
+
+.envvar-tristate {
+  display: inline-flex;
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  overflow: hidden;
+}
+
+.envvar-tristate-seg {
+  background: var(--bg-sunken);
+  border: none;
+  border-right: var(--bw-hair) solid var(--line);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-3xs);
+  padding: var(--sp-2) var(--sp-8);
+  cursor: pointer;
+}
+
+.envvar-tristate-seg:last-child {
+  border-right: none;
+}
+
+.envvar-tristate-seg[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.envvar-tristate-seg:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.envvar-tristate-seg:focus-visible {
+  outline: var(--bw-focus) solid var(--accent);
+  outline-offset: calc(-1 * var(--bw-focus));
+}
+
+/* ── disclosure + appendix buckets ──────────────────────────────── */
+
+.envvar-disclosure {
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--bg-sunken);
+  padding: var(--sp-12);
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+
+.envvar-disclosure h4 {
+  margin: var(--sp-10) 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--fg);
+}
+
+.envvar-disclosure h4:first-child {
+  margin-top: 0;
+}
+
+.envvar-disclosure p,
+.envvar-disclosure ul {
+  margin: 0 0 var(--sp-4);
+}
+
+.envvar-disclosure ul {
+  padding-left: var(--sp-16);
+}
+
+.envvar-bucket {
+  border-top: var(--bw-hair) solid var(--line);
+  padding-top: var(--sp-12);
+  margin-top: var(--sp-8);
+}
+
+.envvar-bucket h3 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-sm);
+}
+
+.envvar-bucket-note {
+  margin: 0 0 var(--sp-8);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  line-height: 1.5;
+}
+
+.envvar-unrecognized,
+.envvar-undocumented {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-xs);
+}
+
+.envvar-unrecognized li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-2) 0;
+}
+
+.envvar-undocumented {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--input-width-md), 1fr));
+  gap: var(--sp-2) var(--sp-12);
+  color: var(--fg-muted);
+}

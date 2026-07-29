@@ -20,3 +20,4 @@ export * from "./template";
 export * from "./usage";
 export * from "./updates";
 export * from "./memory-health";
+export * from "./ccEnv";

@@ -51,6 +51,20 @@ vi.mock("../api", () => ({
     // Disabled-list fetcher runs once per tree identity to size the
     // optional "Disabled" tree row.
     artifactListDisabled: vi.fn().mockResolvedValue([]),
+    // The Env Variables pane loads on mount when its route is selected.
+    ccEnvList: vi.fn().mockResolvedValue({
+      documented: [],
+      undocumented: { state: "available", snapshot_version: "2.1.220", names: [] },
+      unrecognized: [],
+      docs_fetched_at: "2026-07-28",
+      docs_sha256: "a".repeat(64),
+      binary_crosscheck_version: "2.1.220",
+      installed_version: "2.1.220",
+      installed_path: "/opt/claude",
+      settings_path: "/home/u/.claude/settings.json",
+      categories: [{ key: "misc", label: "Other" }],
+      crosscheck_is_exact: true,
+    }),
   },
 }));
 
@@ -422,5 +436,78 @@ describe("ConfigSection — P0 smoke", () => {
     });
     fireEvent.click(backBtn);
     expect(onSubRouteChange).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("ConfigSection — Env Variables route (F4)", () => {
+  /**
+   * A fresh install has no `~/.claude`, so `configScan` returns zero
+   * scopes — and that is exactly the user who most needs the env pane.
+   * The tree used to bail on `scopes.length === 0` before any virtual
+   * row rendered, which made the route unreachable for them.
+   */
+  it("keeps the tree — not the empty-state bail — with zero config scopes", async () => {
+    resetSpies();
+    configScanSpy.mockResolvedValue({
+      scopes: [],
+      cwd: null,
+      project_root: null,
+      config_home_dir: null,
+      memory_slug: "",
+      memory_slug_lossy: false,
+    });
+    configListEditorsSpy.mockResolvedValue([]);
+    configGetEditorDefaultsSpy.mockResolvedValue({ by_kind: {}, fallback: "system" });
+
+    render(
+      <ConfigSection
+        subRoute={null}
+        onSubRouteChange={() => {}}
+        forcedAnchor={{ kind: "global" }}
+      />,
+    );
+
+    // The tree container renders instead of "No Claude config found",
+    // which is the whole fix: virtual rows now get a chance to exist.
+    //
+    // The row's own text is not asserted here on purpose. The tree
+    // virtualizes, and jsdom drives neither ResizeObserver nor scroll
+    // measurement, so no virtual item is produced regardless of how
+    // many rows the tree built. Reachability is covered by the next
+    // test, which renders the route directly.
+    await waitFor(() => {
+      expect(screen.getByRole("tree")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/No Claude config found/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("selecting the row opens the pane", async () => {
+    resetSpies();
+    configScanSpy.mockResolvedValue({
+      scopes: [],
+      cwd: null,
+      project_root: null,
+      config_home_dir: null,
+      memory_slug: "",
+      memory_slug_lossy: false,
+    });
+    configListEditorsSpy.mockResolvedValue([]);
+    configGetEditorDefaultsSpy.mockResolvedValue({ by_kind: {}, fallback: "system" });
+
+    render(
+      <ConfigSection
+        subRoute="node:virtual:env-vars"
+        onSubRouteChange={() => {}}
+        forcedAnchor={{ kind: "global" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("Search environment variables"),
+      ).toBeInTheDocument();
+    });
   });
 });

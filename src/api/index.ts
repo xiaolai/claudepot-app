@@ -20,6 +20,7 @@ import { fastModeApi } from "./fastMode";
 import { thinkingApi } from "./thinking";
 import { autoDreamApi } from "./auto-dream";
 import { ccRetentionApi } from "./cc-retention";
+import { ccEnvApi } from "./ccEnv";
 import { attributionApi } from "./attribution";
 import { memoryHealthApi } from "./memory-health";
 import { memoryApi } from "./memory";
@@ -59,6 +60,7 @@ export const api = {
   ...thinkingApi,
   ...autoDreamApi,
   ...ccRetentionApi,
+  ...ccEnvApi,
   ...attributionApi,
   ...memoryHealthApi,
   ...memoryApi,

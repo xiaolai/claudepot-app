@@ -38,6 +38,7 @@ import { UsageMicroBadge, UsageStrip } from "./config/UsageBadge";
 import { LifecycleActions } from "./config/LifecycleActions";
 import { useLifecycleClassification } from "../hooks/useLifecycleClassification";
 import { DisabledScopeView } from "./config/DisabledScopeView";
+import { EnvVarsPane } from "./config/envvars/EnvVarsPane";
 import { useAppState } from "../providers/AppStateProvider";
 
 import {
@@ -99,6 +100,7 @@ const PLUGINS_GROUP_ID = "grp:plugins";
 const FILES_GROUP_ID = "grp:files";
 const HOOKS_ROUTE = "virtual:hooks";
 const DISABLED_ROUTE = "virtual:disabled";
+const ENV_VARS_ROUTE = "virtual:env-vars";
 
 interface ConfigSectionProps {
   subRoute: string | null;
@@ -298,12 +300,13 @@ export function ConfigSection({
   }, [subRoute]);
 
   const virtualRoute = useMemo<
-    null | "effective-settings" | "effective-mcp" | "hooks" | "disabled"
+    null | "effective-settings" | "effective-mcp" | "hooks" | "disabled" | "env-vars"
   >(() => {
     if (selectedId === EFFECTIVE_SETTINGS_ROUTE) return "effective-settings";
     if (selectedId === EFFECTIVE_MCP_ROUTE) return "effective-mcp";
     if (selectedId === HOOKS_ROUTE) return "hooks";
     if (selectedId === DISABLED_ROUTE) return "disabled";
+    if (selectedId === ENV_VARS_ROUTE) return "env-vars";
     return null;
   }, [selectedId]);
 
@@ -881,6 +884,15 @@ export function ConfigSection({
             >
               <HooksRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
+          ) : virtualRoute === "env-vars" ? (
+            <EffectiveShell
+              title="Env variables"
+              subtitle="Claude Code's officially documented environment variables, backed by the env block of ~/.claude/settings.json."
+              scopeLabel="user"
+              onClose={() => onSubRouteChange(null)}
+            >
+              <EnvVarsPane />
+            </EffectiveShell>
           ) : virtualRoute === "disabled" ? (
             <DisabledScopeView
               projectRoot={
@@ -977,7 +989,15 @@ function SearchBar({
         flexShrink: 0,
       }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-4)",
+        }}
+      >
         <Input
           glyph={NF.search}
           placeholder="Search contents…"
@@ -989,18 +1009,20 @@ function SearchBar({
           }}
           aria-label="Search contents"
           inputRef={inputRef}
-          suffix={
-            value || active ? (
-              <IconButton
-                glyph={NF.x}
-                onClick={onClear}
-                size="sm"
-                title="Clear search"
-                aria-label="Clear search"
-              />
-            ) : undefined
-          }
+          style={{ flex: 1, minWidth: 0 }}
         />
+        {/* Beside the field, not in its `suffix`. The trailing slot sits
+            inside the input's own click target, so a button there competes
+            with the field for clicks and focus. */}
+        {value || active ? (
+          <IconButton
+            glyph={NF.x}
+            onClick={onClear}
+            size="sm"
+            title="Clear search"
+            aria-label="Clear search"
+          />
+        ) : null}
       </div>
       <FilterChip
         active={regex}
@@ -1152,6 +1174,20 @@ function ConfigTreePane({
           depth: 0,
         });
       }
+    }
+    // Env variables — v1 is user scope only, which is exactly the
+    // Global → Config tree. Keeping project scope out is not only scope
+    // control: CC applies just the SAFE_ENV_VARS allowlist from
+    // project-scoped settings pre-trust, because those files live inside
+    // the repo and could be committed by someone else, so a project-scope
+    // editor is a different security design rather than a layer selector.
+    if (globalOnly) {
+      out.push({
+        kind: "virtual-row",
+        id: ENV_VARS_ROUTE,
+        label: "Env variables",
+        depth: 0,
+      });
     }
     // Disabled scope — visible at the top regardless of global vs
     // project mode (user-scope disabled artifacts surface in both).
@@ -1324,7 +1360,12 @@ function ConfigTreePane({
       </div>
     );
   }
-  if (tree.scopes.length === 0) {
+  // Zero scopes means no config FILES were found — it does not mean
+  // there is nothing to show. Virtual rows (Env variables in
+  // particular) are exactly what a fresh install with no ~/.claude
+  // needs, and bailing here made the pane unreachable for the users who
+  // most need it. Bail only when there is genuinely nothing to render.
+  if (tree.scopes.length === 0 && rows.length === 0) {
     return (
       <div
         style={{
