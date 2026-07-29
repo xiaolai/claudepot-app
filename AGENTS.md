@@ -266,13 +266,25 @@ the pane:
   **not on the duration scale** — `set_retention_days` rejects it and
   `disable_persistence()` is a separately-named call behind a
   type-to-confirm gate. Do not "simplify" these into one setter.
-- **A negative value suppresses cleanup entirely.**
+- **Any value CC's schema rejects suppresses cleanup entirely.**
   `cleanupOldMessageFilesInBackground` bails when settings fail
   validation *and* the raw key is present, so an invalid value
   accidentally **protects** transcripts (`RetentionMode::Invalid` /
   `cleanup_suppressed`). The UI must say "fix the value", never
   "restore the default" — restoring clears the error and re-arms
   deletion.
+
+  That is a negative number **and** anything that is not an integer:
+  `z.number().nonnegative().int()` rejects `"thirty"`, `30.5` and `true`
+  alike. This is why `settings_writer::read_i64_setting` returns a
+  three-state `SettingValue` rather than an `Option` — collapsing
+  "absent" and "present but wrong type" reported a 30-day timer on
+  history CC was in fact leaving alone, and pointed the user at the one
+  button that starts it. Known limit: CC suppresses cleanup on a
+  validation error **anywhere** in the file while this key is present;
+  Claudepot models only this key, so a file invalid elsewhere reads as
+  "cleanup armed". That errs toward warning about deletion that is not
+  happening, which is the safe direction, but it is not complete.
 - **Invisible on disk.** Cleanup unlinks top-level session transcripts
   and never walks `subagents/`, so the folder grows while history is
   destroyed. `TranscriptRisk::nested_immortal` exists to say so.
@@ -283,6 +295,92 @@ must never render as "nothing is scheduled for deletion". Boot check at
 `Category::TranscriptsExpiring`; there is deliberately **no dismissal
 flag** — gating on the condition means raising retention silences it,
 while dismissing without fixing does not.
+
+## CC env variables (Global → Config → Env Variables)
+
+Reads and writes the `env` block of `~/.claude/settings.json` — CC's
+**officially documented** environment variables only, backed by a
+generated spec. Pure logic in `claudepot-core::cc_env` (`spec` /
+`settings` / `state` / `errors`); commands in
+`src-tauri/src/commands/cc_env.rs`; pane at
+`src/sections/config/envvars/`.
+
+The artifact is `crates/claudepot-core/data/cc-env-spec.json`, embedded
+with `include_str!` and produced by `scripts/build-cc-env-spec.py` from
+committed evidence (`cc-env-evidence.json`). `cargo xtask verify-docs`
+re-runs the script with `--check`, which regenerates byte-for-byte and
+runs the hand-authored goldens in
+`crates/claudepot-core/testdata/cc-env-vectors.json`.
+
+Four properties drive the design; changing any of them invalidates the
+pane:
+
+- **Re-apply is additive-only.** CC re-applies `settings.env` to a
+  running session with `Object.assign` and nothing else — its own
+  comment on `state/onChangeAppState.ts:163` says *"additive-only: new
+  vars are added, existing may be overwritten, nothing is deleted."*
+  Setting a value is usually live; **clearing one never is**. Every
+  clear/restore confirmation says the old value survives until relaunch.
+- **Unset ≠ `0`, and neither is `""`.** CC's default for nearly every
+  variable is the key being absent. Restore-default therefore *removes
+  the key*; writing the documented default would pin today's number into
+  settings and override whatever CC changes it to later. An explicit
+  empty string is a third state again, so clearing is always its own
+  action, never "blank the field".
+- **Snapshot ≠ runtime.** `undocumented_in_build` and every
+  `present_in_build` flag describe **one** binary and are valid only on
+  an exact version match (`spec::CrosscheckValidity`). Undocumented names
+  are non-monotonic — CC can rename or delete one in any release — so a
+  nearest-version match would be unsound, not approximate. On a
+  mismatch the section renders "unavailable for this version" and no
+  documented row is hidden or tagged `not in build`.
+- **Safety attributes are orthogonal, not tiers.** CC's `SAFE_ENV_VARS`
+  answers "safe to apply from an untrusted source"; this pane needs
+  "safe to display". `ANTHROPIC_CUSTOM_HEADERS` is both pre-trust-safe
+  **and** able to carry `Authorization: Bearer …`. Collapsing the two
+  axes leaks it.
+
+`~/.claude.json` carries its own `env` block that CC applies *first*
+(`utils/managedEnv.ts:136,188`), so a row with no settings entry reads
+"No settings.json override", never "CC default" — the user's shell is a
+source we cannot see. v1 is **user scope only**: CC applies just the
+`SAFE_ENV_VARS` allowlist from project-scoped settings pre-trust, so a
+project-scope editor is a different security design rather than a layer
+selector. `CLAUDE_CONFIG_DIR` is read-only here (CC resolves it before
+settings load, so writing it splits its own bootstrap).
+
+All writes go through `claudepot-core::settings_mutex`, the one
+serialized read-modify-write boundary for CC's settings files — see
+below.
+
+## Settings-file mutation boundary
+
+`claudepot-core::settings_mutex::mutate_settings_file` is the **only**
+sanctioned way to read-modify-write a CC settings JSON file. Every
+same-process writer is on it: `settings_writer` (and therefore
+retention, models, attribution, fast mode, artifact and memory),
+`updates::settings_bridge`, `permission::settings`, and `cc_env`.
+
+Atomic rename gives crash-safety, not concurrency-safety — two
+overlapping RMWs both read the old bytes and the later rename silently
+discards the earlier mutation. The boundary adds a per-path mutex plus a
+re-read-and-rebase retry.
+
+Be exact about the limit: **same-process writes are serialized; external
+ones cannot be.** CC itself and a user's text editor do not honor
+Claudepot's mutex, so those get change-detection and a rebase retry, not
+mutual exclusion. A new writer of these files that does its own
+read-modify-write is a review finding: a lock only one participant holds
+is not a lock.
+
+The same rule covers *multi-key* edits. A transition that changes two
+keys together belongs in **one** closure, not two `write_*` calls —
+`settings_bridge::change_channel` moves `autoUpdatesChannel` and
+`minimumVersion` together for exactly this reason, since a failure
+between two writes leaves a half-applied state from a function whose own
+contract calls the choice atomic. Reading current state to *decide* what
+to write belongs inside the closure too; deciding from a snapshot taken
+outside it is a race by construction.
 
 ## Corpus + detectors (`claudepot corpus`)
 
