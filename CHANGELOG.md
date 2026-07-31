@@ -6,6 +6,40 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.3.7 — beta (unreleased)
+
+### Added
+
+- **Boards — durable surfaces an agent writes into.** A named grid of
+  widgets bound to typed data series, living in Claudepot and
+  outliving the session that created it. A scheduled `claude -p` run
+  appends at 03:00; you open Claudepot at 09:00 and see the shape of
+  it without reading a log. Four widget kinds (line, bar, table, KPI).
+
+  **Off by default.** Boards is on trial, so it does not install
+  itself into the navigation until you ask. Toggle with **⌃⌥⌘B** or
+  Settings → General → Show Boards.
+
+  Writers reach it three ways: `claudepot experimental board …`, three
+  `claudepot_board_*` MCP tools, or any script. Provenance is shown as
+  **"Reported by …"** and never as verified identity — Claudepot does
+  not authenticate writers, and says so rather than implying trust it
+  cannot back.
+
+  Boards are user data: nothing prunes them automatically, and export
+  (re-importable JSON, or CSV per series) ships in the same release as
+  the store.
+
+- **`claudepot corpus interaction-demand`** — counts how often the
+  text channel between a human and an agent visibly strained:
+  clarification chains, hand-typed tables, gestures at a position in a
+  visual. Useful on its own for "how often does an agent actually need
+  me, and for what".
+
+### Changed
+
+- `~/.claudepot/boards.db` is a new store. User data, not a cache.
+
 ## 0.3.6 — beta (unreleased)
 
 ### Fixed
