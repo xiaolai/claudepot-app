@@ -1,0 +1,139 @@
+{
+  "comment": [
+    "Golden vectors for board series ingest validation.",
+    "",
+    "A series' column types are fixed at creation, and every push is",
+    "checked against them. That check is the contract between an agent",
+    "writing a board and everything that later renders it, so it is",
+    "pinned here rather than living only in inline unit tests.",
+    "",
+    "Run by:",
+    "  - crates/claudepot-core/src/board/ingest.rs :: shared_vectors_match_this_implementation",
+    "",
+    "Two rules drive most of these and are easy to regress:",
+    "",
+    "  1. NULL IS A GAP, NOT A ZERO. Null is legal in every column. A",
+    "     board that renders a missing sample as 0 reports an outage",
+    "     that did not happen.",
+    "",
+    "  2. MISMATCH IS AN ERROR, NEVER A COERCION. A string '12' in a",
+    "     number column, or 3.5 in an integer column, fails the push.",
+    "     Coercing hides a writer bug until the chart is unreadable.",
+    "",
+    "expect: 'ok' | 'type_mismatch' | 'column_count' | 'bad_timestamp' | 'cap'"
+  ],
+  "columns": [
+    { "name": "at", "type": "timestamp" },
+    { "name": "cost", "type": "number" },
+    { "name": "runs", "type": "integer" },
+    { "name": "model", "type": "string" },
+    { "name": "ok", "type": "bool" }
+  ],
+  "vectors": [
+    {
+      "name": "fully populated row",
+      "row": ["2026-07-31T03:00:00+00:00", 1.25, 4, "claude-opus-5", true],
+      "expect": "ok"
+    },
+    {
+      "name": "every column accepts null as a gap",
+      "row": [null, null, null, null, null],
+      "expect": "ok"
+    },
+    {
+      "name": "a null number is a gap, not zero",
+      "row": ["2026-07-31T03:00:00+00:00", null, 4, "claude-opus-5", true],
+      "expect": "ok"
+    },
+    {
+      "name": "negative and zero numbers are ordinary values",
+      "row": ["2026-07-31T03:00:00+00:00", -0.5, 0, "", false],
+      "expect": "ok"
+    },
+    {
+      "name": "integer column accepts a large i64",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 9007199254740993, "m", true],
+      "expect": "ok"
+    },
+    {
+      "name": "number column accepts an integer literal",
+      "row": ["2026-07-31T03:00:00+00:00", 2, 1, "m", true],
+      "expect": "ok"
+    },
+    {
+      "name": "timestamp with a non-UTC offset is accepted and normalized",
+      "row": ["2026-07-31T05:00:00+02:00", 1.0, 1, "m", true],
+      "expect": "ok"
+    },
+    {
+      "name": "string column keeps unicode verbatim",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 1, "模型-α", true],
+      "expect": "ok"
+    },
+    {
+      "name": "string in a number column is not coerced",
+      "row": ["2026-07-31T03:00:00+00:00", "1.25", 4, "m", true],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "float in an integer column is not truncated",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 3.5, "m", true],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "number in a string column is not stringified",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 4, 12, true],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "integer 1 is not a bool",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 4, "m", 1],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "bool is not a number",
+      "row": ["2026-07-31T03:00:00+00:00", true, 4, "m", true],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "nested object is rejected",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 4, { "v": "m" }, true],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "array cell is rejected",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 4, ["m"], true],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "timestamp without an offset is rejected",
+      "row": ["2026-07-31T03:00:00", 1.0, 4, "m", true],
+      "expect": "bad_timestamp"
+    },
+    {
+      "name": "date-only timestamp is rejected",
+      "row": ["2026-07-31", 1.0, 4, "m", true],
+      "expect": "bad_timestamp"
+    },
+    {
+      "name": "epoch seconds are not a timestamp",
+      "row": [1785000000, 1.0, 4, "m", true],
+      "expect": "type_mismatch"
+    },
+    {
+      "name": "short row is a column-count mismatch",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 4],
+      "expect": "column_count"
+    },
+    {
+      "name": "long row is a column-count mismatch",
+      "row": ["2026-07-31T03:00:00+00:00", 1.0, 4, "m", true, "extra"],
+      "expect": "column_count"
+    },
+    {
+      "name": "empty row is a column-count mismatch",
+      "row": [],
+      "expect": "column_count"
+    }
+  ]
+}

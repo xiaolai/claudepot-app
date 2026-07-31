@@ -32,6 +32,7 @@ pub mod artifact_usage;
 pub mod attribution;
 pub mod auto_dream;
 pub mod available_models;
+pub mod board;
 pub mod cc_daemon;
 pub mod cc_doctor;
 pub mod cc_env;

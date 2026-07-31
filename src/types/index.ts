@@ -9,6 +9,7 @@ export * from "./ops";
 export * from "./session";
 export * from "./key";
 export * from "./activity";
+export * from "./board";
 export * from "./session-ops";
 export * from "./config";
 export * from "./pricing";

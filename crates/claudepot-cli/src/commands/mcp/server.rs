@@ -76,6 +76,24 @@ struct MemoryServer {
 
 impl MemoryServer {
     /// Render a [`ScopeDenied`] as the standard MCP error envelope.
+    /// Boards carry no project dimension, so a project-confined server
+    /// cannot filter them — it can only expose all of them or none.
+    ///
+    /// Exposing them would leak *which boards exist on this machine*
+    /// from a server the user deliberately confined to one project,
+    /// which is the same disclosure `claudepot_list_projects` refuses
+    /// for directory names. Until boards gain an ownership model, a
+    /// confined server declines.
+    fn board_scope_denied(&self) -> Option<String> {
+        self.scope.root().map(|root| {
+            let msg = format!(
+                "board tools are unavailable on a server confined to `{root}` — \
+                 boards are machine-wide and carry no project scope"
+            );
+            to_json(&error_with(error_code::SCOPE_DENIED, &msg, &self.policy))
+        })
+    }
+
     fn denied(&self, e: ScopeDenied) -> String {
         tracing::warn!(root = %e.root, "cross-project access denied");
         to_json(&error_with(error_code::SCOPE_DENIED, &e, &self.policy))
@@ -896,6 +914,154 @@ impl MemoryServer {
     }
 
     #[tool(
+        description = "Create a durable board an agent can stream structured output into. Boards live in Claudepot and outlive the conversation, so a scheduled run at 03:00 can append to one and a human can open it at 09:00. Returns the board_id — the stable identity; the name is a mutable label. Use claudepot_board_push to add rows."
+    )]
+    fn claudepot_board_open(&self, Parameters(req): Parameters<BoardOpenRequest>) -> String {
+        use claudepot_core::board::{BoardSpec, BoardStore, SeriesDef};
+
+        if let Some(e) = self.board_scope_denied() {
+            return e;
+        }
+        for (field, raw) in [
+            ("series_json", Some(&req.series_json)),
+            ("spec_json", req.spec_json.as_ref()),
+        ] {
+            if let Some(raw) = raw {
+                if let Some(msg) = board_arg_too_large(field, raw) {
+                    return to_json(&error_with(error_code::INVALID_KIND, &msg, &self.policy));
+                }
+            }
+        }
+
+        let series: Vec<SeriesDef> = match serde_json::from_str(&req.series_json) {
+            Ok(v) => v,
+            Err(e) => return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy)),
+        };
+        let spec: BoardSpec = match req.spec_json.as_deref() {
+            Some(raw) => match serde_json::from_str(raw) {
+                Ok(v) => v,
+                Err(e) => return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy)),
+            },
+            None => BoardSpec::empty(),
+        };
+
+        let store = match BoardStore::open(&claudepot_core::board::boards_db_path()) {
+            Ok(s) => s,
+            Err(e) => return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy)),
+        };
+        match store.create_board(&req.name, &spec, &series) {
+            Ok(b) => to_json(&BoardOut {
+                board_id: b.board_id,
+                name: b.name,
+                series: series.iter().map(|s| s.name.clone()).collect(),
+                updated_at: b.updated_at.to_rfc3339(),
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_board_open: create failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
+    #[tool(
+        description = "Append (or replace) rows on a board series. Cells must match the series' declared column types exactly — a mismatch is an error, never a coercion. Use null for a missing value: it renders as a gap, never as zero. Pass idem_key so a retried run does not double-append."
+    )]
+    fn claudepot_board_push(&self, Parameters(req): Parameters<BoardPushRequest>) -> String {
+        use claudepot_core::board::{BoardStore, PushMode, PushRequest, WriterId, WriterKind};
+
+        if let Some(e) = self.board_scope_denied() {
+            return e;
+        }
+        if let Some(msg) = board_arg_too_large("rows_json", &req.rows_json) {
+            return to_json(&error_with(error_code::INVALID_KIND, &msg, &self.policy));
+        }
+
+        let rows: Vec<serde_json::Value> = match serde_json::from_str(&req.rows_json) {
+            Ok(v) => v,
+            Err(e) => return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy)),
+        };
+        // A typo in "replace" used to fall through to append — the
+        // opposite of the requested semantics, silently.
+        let raw_mode = req.mode.as_deref().unwrap_or("append");
+        let Some(mode) = PushMode::parse(raw_mode) else {
+            let msg = format!("unknown mode `{raw_mode}` (append or replace)");
+            return to_json(&error_with(error_code::INVALID_KIND, &msg, &self.policy));
+        };
+        let store = match BoardStore::open(&claudepot_core::board::boards_db_path()) {
+            Ok(s) => s,
+            Err(e) => return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy)),
+        };
+
+        // WriterKind::CcSession, because an MCP call comes from an
+        // interactive session. Self-declared like every other writer —
+        // core records the claim and cannot verify it.
+        let writer = WriterId::new(
+            WriterKind::CcSession,
+            req.writer
+                .unwrap_or_else(|| "Claude Code session".to_string()),
+        );
+        match store.push(&PushRequest {
+            board_id: req.board_id,
+            series: req.series,
+            rows,
+            mode,
+            writer,
+            idem_key: req.idem_key,
+            writer_seq: None,
+        }) {
+            Ok(out) => to_json(&serde_json::json!({
+                "schema_version": SCHEMA_VERSION,
+                "rows_added": out.rows_added,
+                "deduplicated": out.deduplicated,
+                "sequence_gap": out.sequence_gap.map(|(a, b)| [a, b]),
+            })),
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_board_push: push failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
+    #[tool(
+        description = "List the boards on this machine with their series names and last-update time. Call this to find an existing board's id before pushing to it, instead of creating a duplicate."
+    )]
+    fn claudepot_board_list(&self, Parameters(_req): Parameters<BoardListRequest>) -> String {
+        use claudepot_core::board::BoardStore;
+
+        if let Some(e) = self.board_scope_denied() {
+            return e;
+        }
+        let store = match BoardStore::open(&claudepot_core::board::boards_db_path()) {
+            Ok(s) => s,
+            Err(e) => return to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy)),
+        };
+        // `list_summaries` batches the series lookup, so a failure is
+        // a real failure — the previous per-board `unwrap_or_default()`
+        // rendered an empty series list as fact on a read error.
+        match store.list_summaries() {
+            Ok(boards) => {
+                let out: Vec<BoardOut> = boards
+                    .into_iter()
+                    .map(|s| BoardOut {
+                        board_id: s.board.board_id,
+                        name: s.board.name,
+                        series: s.series,
+                        updated_at: s.board.updated_at.to_rfc3339(),
+                    })
+                    .collect();
+                to_json(&serde_json::json!({
+                    "schema_version": SCHEMA_VERSION,
+                    "boards": out,
+                }))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "claudepot_board_list: query failed");
+                to_json(&error_with(error_code::LIST_FAILED, &e, &self.policy))
+            }
+        }
+    }
+
+    #[tool(
         description = "List distinct project paths in the cache with per-project session count and most-recent-activity stamp. Use this to discover which projects have indexed transcripts before drilling in with claudepot_list_sessions(project_path=...)."
     )]
     fn claudepot_list_projects(&self, Parameters(req): Parameters<ListProjectsRequest>) -> String {
@@ -1235,6 +1401,83 @@ struct SessionSummaryOut {
 struct ListSessionsPayload {
     schema_version: u32,
     sessions: Vec<SessionSummaryOut>,
+}
+
+/// Largest raw JSON argument a board tool will parse.
+///
+/// Core caps rows, cells, and series — but only *after* `serde_json`
+/// has parsed the string. A client that sends 200 MB of JSON makes the
+/// server do all that allocation before any semantic limit applies, so
+/// the byte length is checked first.
+const MAX_BOARD_ARG_BYTES: usize = 4 * 1024 * 1024;
+
+fn board_arg_too_large(field: &'static str, raw: &str) -> Option<String> {
+    if raw.len() > MAX_BOARD_ARG_BYTES {
+        return Some(format!(
+            "{field} is {} bytes; the limit is {MAX_BOARD_ARG_BYTES}",
+            raw.len()
+        ));
+    }
+    None
+}
+
+// ─── Board tools (plan §14 step 8) ───────────────────────────────────
+//
+// Boards are a durable place for an agent to put structured output
+// (`claudepot-core::board`). These three tools are the write surface;
+// reading happens in Claudepot's UI, which is the whole point — an MCP
+// App would live inside the conversation and die with it.
+//
+// Nested structures cross as JSON strings rather than typed schemas
+// because the alternative is mirroring the entire series/spec AST into
+// `schemars` derives that would then drift from core's. Core validates
+// them either way, and a malformed string fails there with the same
+// error the CLI reports.
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct BoardOpenRequest {
+    /// Display label. Not an identity — the returned board_id is.
+    name: String,
+    /// JSON array of series definitions:
+    /// `[{"name":"runs","columns":[{"name":"at","type":"timestamp"}]}]`
+    /// Types: timestamp | number | integer | string | bool.
+    series_json: String,
+    /// Optional widget grid:
+    /// `{"widgets":[{"id":"c","kind":"line","series":"runs","title":"Cost",
+    ///   "x_column":"at","y_column":"cost"}]}`. Kinds: line | bar | table | kpi.
+    #[serde(default)]
+    spec_json: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct BoardPushRequest {
+    board_id: String,
+    series: String,
+    /// JSON array of rows; each row is an array of cells matching the
+    /// series' column order. `null` is a gap, never zero.
+    rows_json: String,
+    /// `append` (default) or `replace`.
+    #[serde(default)]
+    mode: Option<String>,
+    /// Self-declared writer label. Shown to the user as "Reported by",
+    /// never as verified identity — Claudepot cannot authenticate it.
+    #[serde(default)]
+    writer: Option<String>,
+    /// Dedup key. Re-pushing the same key is a no-op, so a retried run
+    /// cannot double-append.
+    #[serde(default)]
+    idem_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct BoardListRequest {}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct BoardOut {
+    board_id: String,
+    name: String,
+    series: Vec<String>,
+    updated_at: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

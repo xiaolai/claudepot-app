@@ -63,11 +63,21 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   `notification`, `activity`, etc., merged in `index.ts`) + `src/types/`
   (sliced by domain, merged in `index.ts`) — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
-- Seven SQLite files live in `~/.claudepot/` (override with
+- Eight SQLite files live in `~/.claudepot/` (override with
   `CLAUDEPOT_DATA_DIR`; the authoritative list is whatever joins onto
   `claudepot_core::paths::claudepot_data_dir()`, and
   `cargo xtask verify-docs` fails when this list drifts from it):
   - `accounts.db` — authoritative account + verification state, linked to Keychain.
+  - `boards.db` — durable agent-written boards (grid spec, typed
+    series, rows). Owned by `claudepot-core::board::store`. **User
+    data, not a cache**: a board's contents exist nowhere else once
+    the writing session ends, so migrations preserve rows and there is
+    no automatic pruning. Opened *directly* by every writer — GUI,
+    CLI, and the MCP server subprocess — with no IPC channel between
+    them, following `sessions.db`'s access pattern. That is a
+    deliberate trade whose cost is that `writer_id` is self-reported:
+    every surface renders provenance as "Reported by …", never as
+    verified identity. See `dev-docs/agent-boards-plan.md` §11.
   - `sessions.db` — persistent cache for the Sessions tab. One row per
     `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
     re-parse guard. Owned by `claudepot-core::session_index`. Rebuild
@@ -617,7 +627,19 @@ See `dev-docs/implementation-plan.md` for the full plan.
   transcripts, memories,
   decisions), Keys, Providers (id `third-party`, localStorage
   compatibility), Agents (id `automations`, ditto), Global,
-  Settings. Nine top-level tabs total.
+  Boards (id `boards` — durable agent-written surfaces; see
+  `claudepot-core::board`), Settings.
+  **Ten** top-level tabs, one of which (Boards) is **off by default**
+  and toggled with ⌃⌥⌘B or Settings → General. The enabled list lives
+  in `src/lib/optionalSections.ts`, and every consumer — sidebar,
+  palette, ⌘ bindings, shortcuts modal, launch picker, deep-link
+  bridges — derives from it. Filtering only the sidebar would leave a
+  hidden section still reachable by ⌘9 and ⌘K, which is worse than
+  either state.
+  Boards sits ninth on purpose: `useSection`
+  binds ⌘1..⌘9 to the first nine, so that position gives it ⌘9 and
+  pushes Settings to tenth, which costs nothing because Settings has
+  its own ⌘, in `useShellShortcuts`.
   Cleanup (session prune + trash) lives at Settings → Cleanup.
 - Everything that enumerates the sections reads
   `sections` from the registry — the ⌘K palette

@@ -12,7 +12,10 @@ vi.mock("../api", () => ({ api: { sessionSearch, projectList } }));
 
 import { CommandPalette } from "./CommandPalette";
 import { sampleStatus } from "../test/fixtures";
-import { sections } from "../sections/registry";
+import {
+  enabledSections,
+  setSectionEnabled,
+} from "../lib/optionalSections";
 import { SETTINGS_PANES } from "../sections/settings/panes";
 import { GLOBAL_TABS } from "../sections/global/tabs";
 import { __resetProjectCache } from "../hooks/useProjectSearch";
@@ -56,10 +59,10 @@ beforeEach(() => {
 });
 
 describe("CommandPalette — section coverage", () => {
-  it("can reach every section in the registry", async () => {
+  it("can reach every ENABLED section", async () => {
     // Six of nine sections used to be unreachable: the nav entries
     // were three hardcoded strings rather than the registry.
-    for (const section of sections) {
+    for (const section of enabledSections()) {
       const h = renderPalette();
       const user = userEvent.setup();
       await user.type(input(), section.label);
@@ -71,6 +74,20 @@ describe("CommandPalette — section coverage", () => {
       expect(h.onNavigate).toHaveBeenCalledWith(section.id);
       cleanup();
     }
+  });
+
+  it("cannot reach a section the user has switched off", async () => {
+    // The whole point of one filtered list: a hidden section must be
+    // unreachable, not merely absent from the sidebar. Offering it here
+    // would make it invisible AND navigable, which is worse than either.
+    setSectionEnabled("boards", false);
+    renderPalette();
+    const user = userEvent.setup();
+    await user.type(input(), "Boards");
+    const row = screen
+      .queryAllByRole("option")
+      .find((r) => r.textContent?.startsWith("Open Boards"));
+    expect(row, "a disabled section is reachable from ⌘K").toBeFalsy();
   });
 
   it("ranks the exact section above a scattered subsequence match", async () => {

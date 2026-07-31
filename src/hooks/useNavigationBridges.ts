@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { sectionIds } from "../sections/registry";
+import { enabledSectionIds } from "../lib/optionalSections";
 
 /**
  * Window-event navigation bridges, extracted from AppShell:
@@ -39,7 +39,7 @@ export function useNavigationBridges(args: {
         }>
       ).detail;
       const id = detail?.id;
-      if (id && sectionIds.includes(id)) {
+      if (id && enabledSectionIds().includes(id)) {
         if (detail.sessionPath) {
           setPendingSessionPath(detail.sessionPath);
         }

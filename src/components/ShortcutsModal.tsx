@@ -1,7 +1,7 @@
 import { useId } from "react";
 import { Modal, ModalHeader, ModalBody } from "./primitives/Modal";
 import { Kbd } from "./primitives/Kbd";
-import { sections } from "../sections/registry";
+import { useEnabledSections } from "../hooks/useEnabledSections";
 
 interface ShortcutBinding {
   keys: string[];
@@ -21,19 +21,30 @@ interface ShortcutGroup {
  * was Sessions and ⌘4 was Config (neither is a section any more), put
  * Settings on ⌘6 when it is ⌘9, and never mentioned ⌘7..⌘9 at all.
  */
-const NAVIGATION_ITEMS: ShortcutBinding[] = [
-  ...sections.slice(0, 9).map((s, i) => ({
-    keys: ["⌘", String(i + 1)],
-    label: s.label,
-  })),
-  { keys: ["⌘", ","], label: "Settings (standard shortcut)" },
-];
+/**
+ * Built per render, NOT at module load.
+ *
+ * A module-level `const` captured the enabled sections once at import,
+ * so toggling an optional section never updated this modal until a
+ * reload — the documentation silently disagreed with the bindings,
+ * which is the exact drift this file was written to stop, one level up.
+ */
+function navigationItems(
+  enabled: readonly { label: string }[],
+): ShortcutBinding[] {
+  return [
+    // Enabled list: a switched-off section has no ⌘ number, so listing
+    // one would document a binding that does not exist.
+    ...enabled.slice(0, 9).map((s, i) => ({
+      keys: ["⌘", String(i + 1)],
+      label: s.label,
+    })),
+    { keys: ["⌘", ","], label: "Settings (standard shortcut)" },
+    { keys: ["⌃", "⌥", "⌘", "B"], label: "Show / hide Boards" },
+  ];
+}
 
-const GROUPS: ShortcutGroup[] = [
-  {
-    title: "Navigation",
-    items: NAVIGATION_ITEMS,
-  },
+const OTHER_GROUPS: ShortcutGroup[] = [
   {
     title: "Global actions",
     items: [
@@ -85,6 +96,12 @@ const GROUPS: ShortcutGroup[] = [
  */
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
   const titleId = useId();
+  // Live, not captured at import — see `navigationItems`.
+  const enabled = useEnabledSections();
+  const groups: ShortcutGroup[] = [
+    { title: "Navigation", items: navigationItems(enabled) },
+    ...OTHER_GROUPS,
+  ];
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={titleId}>
       <ModalHeader title="Keyboard shortcuts" id={titleId} onClose={onClose} />
@@ -96,7 +113,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
             gap: "var(--sp-24) var(--sp-32)",
           }}
         >
-          {GROUPS.map((g) => (
+          {groups.map((g) => (
             <section key={g.title}>
               <h3
                 className="mono-cap"

@@ -21,12 +21,12 @@ import { ConsentLiveModal } from "./components/ConsentLiveModal";
 // (the default landing tab, eager in the registry); everything else
 // loads on first navigation or via the idle preload below.
 import {
-  sections,
   sectionIds,
   preloadSavedSection,
   preloadAllSections,
   type SectionHostProps,
 } from "./sections/registry";
+import { useEnabledSections } from "./hooks/useEnabledSections";
 import { ErrorBoundary } from "./ErrorBoundary";
 import {
   SESSION_MOVE_PHASES,
@@ -77,9 +77,16 @@ function labelFor(op: RunningOpInfo): string {
  * the state those concerns share and the layout that renders them.
  */
 function AppShell() {
+  // The ENABLED sections, not the whole registry: a switched-off
+  // section must not be reachable by ⌘ number, by a saved launch
+  // preference, or by a deep link. Filtering only the sidebar would
+  // leave it invisible but navigable, which is worse than either.
+  const enabled = useEnabledSections();
+  const enabledIds = useMemo(() => enabled.map((s) => s.id), [enabled]);
+
   const { section, subRoute, setSection, setSubRoute } = useSection(
     sectionIds[0],
-    sectionIds,
+    enabledIds,
   );
   /**
    * Transcript file to open when ProjectsSection next mounts. Written
@@ -235,8 +242,10 @@ function AppShell() {
   // Registry entry for the active section — drives both the breadcrumb
   // tail and the section render switch.
   const activeSection = useMemo(
-    () => sections.find((s) => s.id === section),
-    [section],
+    // Enabled list, not the registry: resolving a hidden section here
+    // would keep rendering it after it left the navigation.
+    () => enabled.find((s) => s.id === section),
+    [enabled, section],
   );
 
   // Breadcrumb tail mirrors the active section.
@@ -303,7 +312,7 @@ function AppShell() {
         }}
       >
         <AppSidebar
-          sections={sections}
+          sections={enabled}
           active={section}
           onSelect={(id) => setSection(id)}
           accounts={accounts}

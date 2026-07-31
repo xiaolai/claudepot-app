@@ -1,4 +1,4 @@
-import { sectionIds } from "../sections/registry";
+import { enabledSectionIds } from "../lib/optionalSections";
 import { api } from "../api";
 import { toastError } from "../lib/toastError";
 import { triggerSettingsTab } from "../lib/networkPanelDeepLink";
@@ -33,7 +33,7 @@ export function useAppMenuRouter(args: {
       // entry uses this form to land on Settings → Health.
       const parts = cmd.substring("app-menu:nav:".length).split(":");
       const section = parts[0];
-      if (section && sectionIds.includes(section)) {
+      if (section && enabledSectionIds().includes(section)) {
         setSection(section);
         const subtab = parts[1];
         if (section === "settings" && subtab) {

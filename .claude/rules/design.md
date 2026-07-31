@@ -126,13 +126,18 @@ section keeps the design pass cheap and the a11y story simple.
 
 ⌘K palette, ⌘R refresh, ⌘N add, ⌘, settings, ⌘1..⌘9 section (bound by
 position in `src/sections/registry.tsx`), ⌘/ shortcut reference,
-⌘⇧L focus the live strip, Esc close modal.
+⌘⇧L focus the live strip, ⌃⌥⌘B show/hide Boards, Esc close modal.
 
 **Never fire while a modal is open or an input is focused.** The one
 predicate for that is `isShortcutContextBlocked()` in
 `src/hooks/useGlobalShortcuts.ts` — use it rather than re-deriving the
 check. Every hook here used to carry its own weaker copy, which is how
 ⌘K ended up able to open the palette on top of an open dialog.
+
+**⌃⌥⌘B** (show/hide Boards) uses the same four-modifier shape but is
+**gated normally**. The exception below is earned by having no visible
+control; Boards has one in Settings → General, so it takes the ordinary
+rule. Copying the modifier shape does not copy the exemption.
 
 Sole exception: **⌃⌥⌘L** (toggle developer mode) is ungated on
 purpose. It has no visible control anywhere, and its value is being

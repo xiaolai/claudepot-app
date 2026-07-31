@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { readDevMode, writeDevMode } from "./useDevMode";
 import { isShortcutContextBlocked } from "./useGlobalShortcuts";
+import { toggleSection } from "../lib/optionalSections";
 
 /**
  * Shell-level keyboard shortcuts, extracted from AppShell:
@@ -9,6 +10,7 @@ import { isShortcutContextBlocked } from "./useGlobalShortcuts";
  *   - ⌘K  — open the command palette
  *   - ⌘/  — open the shortcuts reference
  *   - ⌃⌥⌘L — toggle developer mode (hidden deep-system toggle)
+ *   - ⌃⌥⌘B — show/hide the Boards section
  *   - ⌘⇧L — focus the first SidebarLiveStrip row
  *
  * All except ⌃⌥⌘L go through `isShortcutContextBlocked()` — the
@@ -81,6 +83,35 @@ export function useShellShortcuts(args: {
     window.addEventListener("keydown", onDevKey);
     return () => window.removeEventListener("keydown", onDevKey);
   }, [pushToast]);
+
+  // ⌃⌥⌘B — show or hide the Boards section.
+  //
+  // Boards is on trial, so it ships off and this is the fast way to
+  // flip it while evaluating. Unlike ⌃⌥⌘L this is NOT a hidden
+  // toggle — Settings → General carries the same switch — so it is
+  // gated by `isShortcutContextBlocked()` like every ordinary
+  // shortcut. `design.md` requires a written justification for each
+  // ungated exception, and this one does not need the exception.
+  //
+  // Hiding the active section is reconciled centrally by `useSection`.
+  useEffect(() => {
+    const onBoardsKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || !e.ctrlKey || !e.altKey) return;
+      if (e.key !== "b" && e.key !== "B") return;
+      if (isShortcutContextBlocked()) return;
+      e.preventDefault();
+      const next = toggleSection("boards");
+      // Only the ENABLE direction navigates. Hiding is reconciled by
+      // `useSection`, which falls back whenever the active id leaves
+      // the enabled list — reading the active section from
+      // localStorage here duplicated that logic and could disagree
+      // with React's actual state.
+      if (next) setSection("boards");
+      pushToast("info", next ? "Boards shown" : "Boards hidden");
+    };
+    window.addEventListener("keydown", onBoardsKey);
+    return () => window.removeEventListener("keydown", onBoardsKey);
+  }, [pushToast, setSection]);
 
   // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
   // fallback until the Activity section lands (M4) and claims this

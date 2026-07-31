@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useEnabledSections } from "./useEnabledSections";
 import { type NfIcon } from "../icons";
 import { scoreFields } from "../lib/paletteScore";
 import {
@@ -94,6 +95,11 @@ export function usePaletteActions(opts: {
     onToggleTheme,
   } = opts;
 
+  // Re-derived when optional sections change: an open palette
+  // memoized before a toggle kept offering a section that had just
+  // been hidden.
+  const enabled = useEnabledSections();
+
   const actions = useMemo(
     () => [
       ...buildSwitchActions({ accounts, status, onSwitchCli, onSwitchDesktop }),
@@ -118,6 +124,9 @@ export function usePaletteActions(opts: {
     onNavigate,
     onShowShortcuts,
     onToggleTheme,
+    // Optional-section state: an open palette memoized before a toggle
+    // kept offering a section that had just been hidden.
+    enabled,
   ],
   );
 

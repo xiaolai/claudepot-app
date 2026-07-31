@@ -78,3 +78,71 @@ pub fn detect_cmd(ctx: &AppContext, limit: usize) -> Result<()> {
     }
     Ok(())
 }
+
+/// `claudepot corpus interaction-demand` — plan §10.2.
+///
+/// Answers "how often does a human need to tell an agent something text
+/// cannot carry?" by counting the *residue* of the text channel being
+/// strained, not by counting rich questions agents never had a way to
+/// ask. See `corpus::interaction_demand` for why that distinction is
+/// the whole point of the detector.
+pub fn interaction_demand_cmd(ctx: &AppContext, limit: usize) -> Result<()> {
+    use claudepot_core::corpus::interaction_demand::{self, Signal};
+
+    let idx = open()?;
+    let report = interaction_demand::detect_demand(&idx, limit)?;
+
+    let all = [
+        Signal::ClarificationChain,
+        Signal::PastedStructure,
+        Signal::SpatialGesture,
+        Signal::AmbiguousAnswer,
+    ];
+
+    if ctx.json {
+        return print_json(&serde_json::json!({
+            "examined": report.examined,
+            "total": report.total(),
+            "rate_per_1k": report.rate_per_1k(),
+            "counts": all.iter().map(|s| (s.as_str(), report.count(*s)))
+                .collect::<std::collections::BTreeMap<_, _>>(),
+            "samples": report.signals.iter().take(20).map(|s| serde_json::json!({
+                "signal": s.signal.as_str(),
+                "session_id": s.session_id,
+                "project_path": s.project_path,
+                "turn_index": s.turn_index,
+                "turns": s.turns,
+                "sample": s.sample,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+
+    if report.examined == 0 {
+        // Render-if-nonzero: an empty corpus says so once rather than
+        // printing a table of zeros that looks like a finding.
+        eprintln!("corpus is empty — run `claudepot corpus index` first");
+        return Ok(());
+    }
+
+    println!(
+        "{} exchange(s) examined (harness plumbing excluded).",
+        report.examined
+    );
+    for s in all {
+        let n = report.count(s);
+        if n == 0 {
+            continue;
+        }
+        println!("  {:<22} {:>6}  — {}", s.as_str(), n, s.implication());
+    }
+    println!(
+        "\n{:.2} signal(s) per 1,000 exchanges.",
+        report.rate_per_1k()
+    );
+    println!(
+        "\nThis is a LOWER bound: it only fires where someone pushed through\n\
+         the limitation rather than abandoning the question. It does not\n\
+         count rich questions agents never had a channel to ask."
+    );
+    Ok(())
+}
