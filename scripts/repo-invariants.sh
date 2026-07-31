@@ -52,9 +52,18 @@ violators=$(grep -rlE "$patterns" crates/ --include='*.rs' || true)
 # `error_signature` redacts plus takes only the first line, because tool
 # output is arbitrary stdout. This tripwire caught that leak on the
 # first CI run of the corpus feature; it was doing its job.
+# corpus/interaction_demand.rs reads user_text to CLASSIFY it — the
+# text is measured (terse? tabular? a spatial gesture?) and the verdict
+# is a counter, not the text. The one place a fragment escapes is
+# `DemandSignal.sample`, which is built with redact_secrets at
+# construction for the same reason detect.rs does: `claudepot corpus
+# interaction-demand` prints to stdout and serializes under --json.
+# Same tripwire, same verdict, second feature — it fired again on this
+# one's first CI run.
 unexpected=$(echo "$violators" \
   | grep -v 'crates/claudepot-core/src/corpus.rs' \
   | grep -v 'crates/claudepot-core/src/corpus/detect.rs' \
+  | grep -v 'crates/claudepot-core/src/corpus/interaction_demand.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/search.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/read.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/indexer.rs' \
