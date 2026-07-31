@@ -34,7 +34,12 @@ import {
   type PermissionStatus,
 } from "../lib/notify";
 import { NF } from "../icons";
-import { sections } from "./registry";
+import {
+  enabledSections,
+  isSectionEnabled,
+  OPTIONAL_SECTIONS_EVENT,
+  setSectionEnabled,
+} from "../lib/optionalSections";
 import {
   SETTINGS_PANES,
   type SettingsPane,
@@ -81,12 +86,13 @@ const TAB_DEFS = SETTINGS_PANES;
 // than hand-listed: the hand-listed version offered a "Sessions"
 // option whose id no longer existed, so picking it silently landed
 // the user on Accounts, and it was missing four real sections.
-const SECTION_OPTIONS = sections.map((s) => ({
-  value: s.id,
-  label: s.label,
-}));
+// Computed per render rather than at module load: a disabled
+// section must not remain selectable after it is switched off.
+const sectionOptions = () =>
+  enabledSections().map((s) => ({ value: s.id, label: s.label }));
 
 export function SettingsSection() {
+
   const { pushToast } = useAppState();
   // Cold-mount path: read the sessionStorage hint set by the
   // NetworkUnreachablePanel before this section mounted.
@@ -275,6 +281,29 @@ function GeneralPane({
   >(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [isMac, setIsMac] = useState<boolean>(false);
+  // Mirrors `optionalSections`, and re-reads on its event so the
+  // switch stays correct when ⌃⌥⌘B is pressed while this pane is open.
+  const [boardsOn, setBoardsOn] = useState(() => isSectionEnabled("boards"));
+  useEffect(() => {
+    const sync = () => setBoardsOn(isSectionEnabled("boards"));
+    window.addEventListener(OPTIONAL_SECTIONS_EVENT, sync);
+    return () => window.removeEventListener(OPTIONAL_SECTIONS_EVENT, sync);
+  }, []);
+
+  // Reconcile a saved launch target that points at a section the user
+  // has since switched off. Without this the <select> holds a value
+  // absent from its own options — a controlled input showing nothing —
+  // and the app would try to launch into a section that is gone.
+  useEffect(() => {
+    const ids = enabledSections().map((s) => s.id);
+    if (ids.includes(startSection)) return;
+    setStartSection("accounts");
+    try {
+      localStorage.setItem("claudepot.startSection", "accounts");
+    } catch {
+      /* storage unavailable — the in-memory value still reconciles */
+    }
+  }, [startSection, boardsOn]);
 
   useEffect(() => {
     let cancelled = false;
@@ -375,12 +404,27 @@ function GeneralPane({
           onChange={(e) => changeStart(e.target.value)}
           style={selectStyle}
         >
-          {SECTION_OPTIONS.map((o) => (
+          {sectionOptions().map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
         </select>
+      </Row>
+      <Row
+        label="Show Boards"
+        hint="Durable surfaces agents write into. On trial and off by default — toggle any time with ⌃⌥⌘B."
+      >
+        <Toggle
+          on={boardsOn}
+          onChange={(next) => {
+            // Mirror what the store ACTUALLY reached, not what was
+            // asked for. `setSectionEnabled` already returns the real
+            // state precisely so a failed write cannot leave this
+            // switch disagreeing with the navigation.
+            setBoardsOn(setSectionEnabled("boards", next));
+          }}
+        />
       </Row>
       <Row
         label="Launch at login"

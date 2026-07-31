@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { ShortcutsModal } from "./ShortcutsModal";
-import { sections } from "../sections/registry";
+import {
+  enabledSections,
+  setSectionEnabled,
+} from "../lib/optionalSections";
 
 /**
  * ⌘1..⌘9 is bound by *position* in the section registry (see
@@ -23,24 +26,59 @@ describe("ShortcutsModal — navigation reflects the real bindings", () => {
     return screen.getByText("Navigation").parentElement!;
   }
 
-  it("lists one row per section, in registry order, with its ⌘ number", () => {
+  // `useSection` binds ⌘1..⌘9 by position, so only the first NINE
+  // sections have a number. This used to read `sections.length` because
+  // there happened to be exactly nine; adding Boards as a tenth made
+  // that coincidence load-bearing.
+  const BINDABLE = 9;
+
+
+  it("lists one row per BINDABLE section, in registry order, with its ⌘ number", () => {
     const nav = renderNavGroup();
     const rows = within(nav).getAllByRole("listitem");
-    // One row per section, plus the trailing ⌘, alias for Settings.
-    expect(rows).toHaveLength(sections.length + 1);
+    // Assert on the NUMBERED rows, not the total. The list also carries
+    // non-numbered aliases (⌘, and ⌃⌥⌘B), and a raw length check made
+    // adding one of those look like a section-count regression.
+    const sections = enabledSections();
+    const numbered = rows.filter((r) => /[1-9]/.test(r.textContent ?? ""));
+    expect(numbered).toHaveLength(Math.min(sections.length, BINDABLE));
 
-    sections.forEach((section, i) => {
+    sections.slice(0, BINDABLE).forEach((section, i) => {
       const row = rows[i]!;
       expect(row.textContent).toContain(section.label);
       expect(row.textContent).toContain(String(i + 1));
     });
   });
 
+  it("does not claim a ⌘ number for a section past the ninth", () => {
+    // Enable Boards so a tenth section actually exists — the previous
+    // version bailed out via an early `return` whenever the registry
+    // had nine or fewer, which is the default, so it never ran.
+    setSectionEnabled("boards", true);
+    const sections = enabledSections();
+    expect(sections.length).toBeGreaterThan(BINDABLE);
+
+    const nav = renderNavGroup();
+    const numbered = within(nav)
+      .getAllByRole("listitem")
+      .map((r) => r.textContent ?? "")
+      .filter((t) => /[1-9]/.test(t));
+
+    for (const extra of sections.slice(BINDABLE)) {
+      expect(
+        numbered.some((t) => t.includes(extra.label)),
+        `${extra.label} claims a ⌘ number it does not have`,
+      ).toBe(false);
+    }
+    cleanup();
+    setSectionEnabled("boards", false);
+  });
+
   it("names no section the registry does not have", () => {
     const nav = renderNavGroup();
-    const known = sections.map((s) => s.label);
+    const known = enabledSections().map((s) => s.label);
     const rows = within(nav).getAllByRole("listitem");
-    for (const row of rows.slice(0, sections.length)) {
+    for (const row of rows.slice(0, Math.min(enabledSections().length, BINDABLE))) {
       const matched = known.some((k) => row.textContent?.includes(k));
       expect(matched, `unknown section in row "${row.textContent}"`).toBe(true);
     }
@@ -48,7 +86,35 @@ describe("ShortcutsModal — navigation reflects the real bindings", () => {
 
   it("still documents ⌘, as the standard Settings shortcut", () => {
     const nav = renderNavGroup();
-    const rows = within(nav).getAllByRole("listitem");
-    expect(rows[rows.length - 1]!.textContent).toMatch(/Settings/);
+    const text = within(nav)
+      .getAllByRole("listitem")
+      .map((r) => r.textContent ?? "");
+    expect(text.some((t) => /Settings/.test(t) && t.includes(","))).toBe(true);
+  });
+
+  it("documents ⌃⌥⌘B, and lists a NUMBERED Boards row only once enabled", () => {
+    // The first version of this test asserted `t.includes("Boards")`,
+    // which the always-present "Show / hide Boards" shortcut row
+    // satisfies — so it passed while the modal was in fact stale and
+    // never showed the section at all. Assert the NUMBERED row.
+    const numberedBoards = (rows: string[]) =>
+      rows.some((t) => /Boards/.test(t) && /[1-9]/.test(t));
+
+    setSectionEnabled("boards", false);
+    let text = within(renderNavGroup())
+      .getAllByRole("listitem")
+      .map((r) => r.textContent ?? "");
+    expect(text.some((t) => t.includes("Show / hide Boards"))).toBe(true);
+    expect(numberedBoards(text)).toBe(false);
+    cleanup();
+
+    setSectionEnabled("boards", true);
+    text = within(renderNavGroup())
+      .getAllByRole("listitem")
+      .map((r) => r.textContent ?? "");
+    // Boards is the ninth section, so it must carry ⌘9.
+    expect(text.some((t) => /Boards/.test(t) && t.includes("9"))).toBe(true);
+    cleanup();
+    setSectionEnabled("boards", false);
   });
 });

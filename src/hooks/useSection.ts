@@ -67,6 +67,30 @@ export function useSection<Id extends string>(
     safeGet(SUBROUTE_KEY_PREFIX + defaultId),
   );
 
+  // Mirror `section` into a ref so the keydown handler can read the
+  // current value without forcing the listener effect to re-run on
+  // every navigation, and so the deferred startup restore below can
+  // check whether the user has already navigated.
+  const sectionRef = useRef(section);
+  useEffect(() => {
+    sectionRef.current = section;
+  }, [section]);
+
+  // Same idea for `ids`, which is no longer static: the startup restore
+  // must validate against the list as it is when the idle callback
+  // fires, not as it was when the effect was scheduled.
+  const idsRef = useRef(ids);
+  useEffect(() => {
+    idsRef.current = ids;
+  }, [ids]);
+
+  // Set by any explicit `setSection`. Comparing `sectionRef` against
+  // `defaultId` was not enough: navigating away and back to the
+  // default before the idle restore fired left it indistinguishable
+  // from "never navigated", so the saved section still overwrote a
+  // deliberate choice.
+  const userNavigated = useRef(false);
+
   useEffect(() => {
     // Startup resolution (deferred to post-paint):
     //   1. `claudepot.startSection` if user chose an explicit "Open on
@@ -84,6 +108,20 @@ export function useSection<Id extends string>(
     if (!target || target === defaultId) return;
 
     const handle = requestIdle(() => {
+      // Re-validate at fire time, not at schedule time. Two things can
+      // change during the idle wait:
+      //
+      //   - the user navigates, and restoring a saved section on top of
+      //     a deliberate click is a stolen navigation;
+      //   - an optional section is switched off, and `target` is now a
+      //     section that no longer exists.
+      //
+      // Both were possible because `target` was computed once when the
+      // effect ran.
+      if (userNavigated.current) return;
+      if (sectionRef.current !== defaultId) return;
+      if (!(idsRef.current as readonly string[]).includes(target)) return;
+
       // Wrap in startTransition so the still-mounted default-section
       // tree stays on screen while the saved-section's lazy chunk
       // resolves — eliminates the blank Suspense fallback flash.
@@ -93,10 +131,29 @@ export function useSection<Id extends string>(
       });
     });
     return () => cancelIdle(handle);
-    // Only resolves once per mount — saved prefs are static for this
-    // session, and `defaultId` / `ids` don't change at runtime.
+    // Startup resolution runs once per mount. `ids` CAN change at
+    // runtime now (optional sections) — that case is handled by the
+    // reconciliation effect below, not by re-running startup.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reconcile when the active section stops existing.
+  //
+  // `ids` used to be a compile-time constant. Optional sections make it
+  // shrink at runtime, and without this the app keeps rendering a
+  // section that is gone from the sidebar, the palette, and the ⌘
+  // bindings — visible but unreachable, the mirror of the bug the
+  // filter exists to prevent.
+  //
+  // Centralized here on purpose: every caller that can hide a section
+  // would otherwise need its own copy of this check, which is the
+  // duplicate-list failure `AGENTS.md` calls a review finding.
+  useEffect(() => {
+    if ((ids as readonly string[]).includes(section)) return;
+    setSectionState(defaultId);
+    setSubRouteState(safeGet(SUBROUTE_KEY_PREFIX + defaultId));
+    safeSet(STORAGE_KEY, defaultId);
+  }, [ids, section, defaultId]);
 
   const setSubRoute = useCallback(
     (next: string | null) => {
@@ -116,6 +173,9 @@ export function useSection<Id extends string>(
 
   const setSection = useCallback(
     (id: Id, nextSubRoute?: string | null) => {
+      // Any explicit navigation cancels the deferred startup restore,
+      // including one that lands back on the default section.
+      userNavigated.current = true;
       // Persist synchronously — localStorage writes are cheap and the
       // user's choice survives even if the transition is interrupted.
       safeSet(STORAGE_KEY, id);
@@ -148,15 +208,6 @@ export function useSection<Id extends string>(
     },
     [],
   );
-
-  // Mirror `section` into a ref so the keydown handler can read the
-  // current value without forcing the listener effect to re-run on
-  // every navigation. Without this, every section change unwired and
-  // re-wired the global keydown listener.
-  const sectionRef = useRef(section);
-  useEffect(() => {
-    sectionRef.current = section;
-  }, [section]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -10,6 +10,7 @@ import { sessionOpsApi } from "./session-ops";
 import { settingsApi } from "./settings";
 import { keyApi } from "./key";
 import { activityApi } from "./activity";
+import { boardApi } from "./board";
 import { configApi } from "./config";
 import { pricingApi } from "./pricing";
 import { artifactUsageApi } from "./artifact-usage";
@@ -43,6 +44,7 @@ import { diagnosticsApi } from "./diagnostics";
 import { sharedMemoryApi } from "./sharedMemory";
 
 export const api = {
+  ...boardApi,
   ...accountApi,
   ...projectApi,
   ...sessionApi,

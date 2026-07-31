@@ -2,6 +2,7 @@ import { lazy, type ComponentType, type ReactElement } from "react";
 import { NF } from "../icons";
 import type { NfIcon } from "../icons";
 import {
+  optionalSectionKey,
   SECTION_ACTIVE_KEY,
   SECTION_START_KEY,
 } from "../lib/storageKeys";
@@ -58,6 +59,13 @@ export interface SectionDef {
   /** Render the section body. The ErrorBoundary wrapper (keyed on
    *  `id`, labeled with `label`) is applied by App.tsx. */
   render: (props: SectionHostProps) => ReactElement;
+  /**
+   * Set when the user can switch this section off. The value is its
+   * key in `lib/optionalSections.ts`, which owns the ONE filter every
+   * section consumer reads — see that file for why a second list is a
+   * review finding.
+   */
+  optional?: "boards";
 }
 
 // Named import promises so React.lazy and the preload helpers share
@@ -78,6 +86,8 @@ const importThirdParty = () =>
   import("./ThirdPartySection").then((m) => ({ default: m.ThirdPartySection }));
 const importAgents = () =>
   import("./AgentsSection").then((m) => ({ default: m.AgentsSection }));
+const importBoards = () =>
+  import("./boards/BoardsSection").then((m) => ({ default: m.BoardsSection }));
 const importSharedMemory = () =>
   import("./SharedMemorySection").then((m) => ({
     default: m.SharedMemorySection,
@@ -98,6 +108,7 @@ const GlobalSection = lazy(importGlobal);
 const ThirdPartySection = lazy(importThirdParty);
 const AgentsSection = lazy(importAgents);
 const SharedMemorySection = lazy(importSharedMemory);
+const BoardsSection = lazy(importBoards);
 
 export const sections: readonly SectionDef[] = [
   {
@@ -174,6 +185,23 @@ export const sections: readonly SectionDef[] = [
     ),
   },
   {
+    // NINTH on purpose. `useSection` binds ⌘1..⌘9 to the first nine, so
+    // this position gives Boards ⌘9 and pushes Settings to tenth —
+    // which costs nothing, because Settings has its own `⌘,` in
+    // `useShellShortcuts`. Placing Boards anywhere earlier would
+    // renumber sections people already have in muscle memory.
+    id: "boards",
+    label: "Boards",
+    glyph: NF.board,
+    loader: importBoards,
+    render: () => <BoardsSection />,
+    // Off by default: Boards is on trial, and a feature that installs
+    // itself into the navigation before the trial answers whether it
+    // belongs there has prejudged the question. Toggle with ⌃⌥⌘B or
+    // Settings → General.
+    optional: "boards",
+  },
+  {
     id: "settings",
     label: "Settings",
     glyph: NF.sliders,
@@ -188,11 +216,25 @@ export const sectionIds = sections.map((s) => s.id);
  *  Reads the same keys useSection resolves on its post-paint tick;
  *  the eager Accounts entry has no loader, so it's a no-op there. */
 export function preloadSavedSection(): void {
+  // Filtered below: a stale saved id pointing at a switched-off section
+  // would otherwise fetch its chunk at startup, warming a feature the
+  // user has turned off.
   try {
     const id =
       localStorage.getItem(SECTION_START_KEY) ||
       localStorage.getItem(SECTION_ACTIVE_KEY);
-    void sections.find((s) => s.id === id)?.loader?.();
+    const hit = sections.find((s) => s.id === id);
+    // A disabled optional section is not preloaded. The registry
+    // cannot import `optionalSections` (that module imports this one),
+    // so it reads the SAME key via `storageKeys.optionalSectionKey`
+    // rather than a hand-copied literal that could drift.
+    if (
+      hit?.optional &&
+      localStorage.getItem(optionalSectionKey(hit.optional)) !== "1"
+    ) {
+      return;
+    }
+    void hit?.loader?.();
   } catch {
     // localStorage unavailable — nothing to preload.
   }
@@ -214,6 +256,17 @@ export function preloadSavedSection(): void {
  */
 export function preloadAllSections(): void {
   const factories = sections
+    // Skip switched-off optional sections: warming a chunk for a
+    // feature the user disabled is work they did not ask for. Shares
+    // `optionalSectionKey` with `optionalSections.ts` — see above.
+    .filter((s) => {
+      if (!s.optional) return true;
+      try {
+        return localStorage.getItem(optionalSectionKey(s.optional)) === "1";
+      } catch {
+        return false;
+      }
+    })
     .filter((s) => s.loader !== undefined)
     .map((s) => s.loader!);
 

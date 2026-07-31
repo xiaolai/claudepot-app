@@ -48,6 +48,7 @@
 //! a second full read of 7.9 GB to decide whether to read it.
 
 pub mod detect;
+pub mod interaction_demand;
 pub mod normalize;
 
 use crate::session::core::{scan_session, SessionRow};

@@ -43,6 +43,7 @@ pub mod attribution_settings;
 pub mod auto_dream;
 pub mod available_models;
 pub mod blob;
+pub mod board;
 pub mod breaker;
 pub mod cc_daemon;
 pub mod cc_doctor;

@@ -368,6 +368,18 @@
   /* ── Font stack ─────────────────────────────────────────── */
   --font:      'JetBrainsMonoNF', 'JetBrains Mono', ui-monospace, Menlo, monospace;
   --font-mono: var(--font);
+
+  /* Boards (top-level section) — chart geometry.
+     Declared here because tokens.css is the only file allowed to
+     declare custom properties; see App.css's header. */
+  --board-spark-h: 72px;
+  --board-bar-h: 10px;
+  --board-bar-label-w: 40%;
+  --board-bar-value-w: 48px;
+  --board-widget-min-w: 320px;
+  --board-spark-stroke-w: 1.5;
+  --radius-xs: 2px;
+
 }
 
 /* ── LIGHT (warm paper) — default ─────────────────────────── */

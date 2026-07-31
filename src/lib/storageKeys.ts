@@ -19,6 +19,19 @@
  * that lands.
  */
 
+/**
+ * Per-section "is this optional section enabled" key.
+ *
+ * Lives here rather than in `optionalSections.ts` because
+ * `sections/registry.tsx` needs it for its preload guards and cannot
+ * import that module — `optionalSections` imports the registry. Two
+ * hand-written copies of the key would drift silently: the preload
+ * guard would either never fire or never stop firing, with no error
+ * either way. One definition, two importers.
+ */
+export const optionalSectionKey = (key: string): string =>
+  `claudepot.optional.${key}`;
+
 // --- Section navigation (owner: src/hooks/useSection.ts) -----------
 /** Last section the user navigated to. */
 export const SECTION_ACTIVE_KEY = "claudepot.activeSection";

@@ -51,6 +51,7 @@ import {
   Info,
   Key,
   Layers,
+  LayoutDashboard,
   Link,
   Lock,
   LogIn,
@@ -102,6 +103,9 @@ import {
 export const NF = {
   // --- nav
   dashboard:  Layers,
+  /** Boards — a grid of agent-written widgets. Distinct from
+   *  `dashboard` (Activities), which is a stream of derived cards. */
+  board:      LayoutDashboard,
   folder:     Folder,
   folderOpen: FolderOpen,
   chat:       MessageSquare,

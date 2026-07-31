@@ -173,6 +173,12 @@ claudepot update    check | cli | desktop | config  # CC + Desktop updates
 claudepot settings  auto-memory {status|enable|disable|clear}
 claudepot mcp       memory-server | print-snippet | install-snippet
 claudepot codex     index | rebuild | forget        # Codex transcript indexing
+claudepot experimental board                        # durable agent-written
+                    open | list | get | push |      # boards — ON TRIAL, may be
+                    show | clear | rm |             # removed; no compatibility
+                    export | import                 # promise. Writer identity
+                                                    # is self-declared, not
+                                                    # authenticated.
 claudepot export / import                           # *.claudepot.tar.zst bundles
 claudepot migrate   inspect | undo
 claudepot doctor                                    # health check

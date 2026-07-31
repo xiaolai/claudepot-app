@@ -28,6 +28,20 @@ const GOLDEN: Record<string, string> = {
 
 describe("storageKeys — byte-for-byte compat contract", () => {
   it("every exported key matches its golden value", () => {
-    expect({ ...keys }).toEqual(GOLDEN);
+    // Only the string constants are the on-disk contract. Key
+    // *builders* are checked separately below — comparing the whole
+    // module would make adding one look like a compat break.
+    const constants = Object.fromEntries(
+      Object.entries(keys).filter(([, v]) => typeof v === "string"),
+    );
+    expect(constants).toEqual(GOLDEN);
+  });
+
+  it("optionalSectionKey builds the persisted per-section key", () => {
+    // Same contract as the constants: this string is already on disk,
+    // and `sections/registry.tsx` reads it through this builder rather
+    // than a hand-copied literal, so a change here silently breaks the
+    // preload guards as well as the toggle.
+    expect(keys.optionalSectionKey("boards")).toBe("claudepot.optional.boards");
   });
 });

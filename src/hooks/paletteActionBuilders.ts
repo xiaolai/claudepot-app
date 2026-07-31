@@ -1,5 +1,5 @@
 import { NF } from "../icons";
-import { sections } from "../sections/registry";
+import { enabledSections } from "../lib/optionalSections";
 import { SETTINGS_PANES } from "../sections/settings/panes";
 import { GLOBAL_TABS } from "../sections/global/tabs";
 import {
@@ -68,7 +68,10 @@ export function buildNavigateActions(
   // Every top-level section, straight off the registry that the
   // sidebar and ⌘1..⌘9 already read. Hardcoding a subset here is what
   // left six of the nine sections unreachable from ⌘K.
-  for (const s of sections) {
+  // The enabled list, not the registry: offering a switched-off
+  // section here would make it reachable from ⌘K while invisible in
+  // the sidebar.
+  for (const s of enabledSections()) {
     items.push({
       id: `nav-${s.id}`,
       label: `Open ${s.label}`,

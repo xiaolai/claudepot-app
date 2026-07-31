@@ -16,6 +16,8 @@ describe("section registry — single source of truth", () => {
       ["third-party", "Providers"],
       ["automations", "Agents"],
       ["global", "Global"],
+      // Ninth on purpose so it takes ⌘9; see the registry comment.
+      ["boards", "Boards"],
       ["settings", "Settings"],
     ]);
     expect(sectionIds).toEqual(sections.map((s) => s.id));

@@ -216,6 +216,82 @@ enum Commands {
         #[command(subcommand)]
         action: CodexAction,
     },
+    /// Unstable surfaces on trial. No compatibility promise: a verb
+    /// here may change shape or be deleted outright when its trial
+    /// concludes. See `dev-docs/agent-boards-plan.md` §10.1.
+    Experimental {
+        #[command(subcommand)]
+        action: ExperimentalAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExperimentalAction {
+    /// Durable agent-written boards (on trial).
+    ///
+    /// Provenance recorded by these verbs is **self-declared**.
+    /// Claudepot does not authenticate writers, so every surface
+    /// reports a writer as a claim, never as verified identity.
+    Board {
+        #[command(subcommand)]
+        action: BoardAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum BoardAction {
+    /// Create a board from a JSON definition (name, series, spec)
+    Open {
+        /// Path to the definition JSON, or `-` for stdin
+        #[arg(long)]
+        from: String,
+        /// Override the definition's name
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// List every board
+    List,
+    /// Show a board's spec, revision, and series
+    Get { board_id: String },
+    /// Append or replace rows on a series
+    Push {
+        #[command(flatten)]
+        args: commands::board::data::PushArgs,
+    },
+    /// Render a board's series as terminal tables
+    Show {
+        board_id: String,
+        /// Limit to one series
+        #[arg(long)]
+        series: Option<String>,
+        /// Maximum rows per series
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Delete every row on a series, keeping its definition
+    Clear {
+        board_id: String,
+        #[arg(long)]
+        series: String,
+    },
+    /// Delete a board and all its data
+    Rm { board_id: String },
+    /// Export a board as a re-importable JSON envelope or CSV files
+    Export {
+        board_id: String,
+        /// `json` (single envelope) or `csv` (one file per series)
+        #[arg(long, default_value = "json")]
+        format: String,
+        /// Output path, or `-` for stdout (json only)
+        #[arg(long, default_value = "-")]
+        out: String,
+    },
+    /// Import an envelope as a new board
+    Import {
+        /// Path to the envelope JSON, or `-` for stdin
+        #[arg(long)]
+        from: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -567,6 +643,18 @@ enum CorpusAction {
     Detect {
         /// Cap per detector.
         #[arg(long, default_value_t = 5000)]
+        limit: usize,
+    },
+    /// How often does a human need to tell an agent something text
+    /// cannot carry? Counts the residue of the text channel being
+    /// strained — clarification chains, pasted tables, spatial
+    /// gestures, corrections after a terse answer. A lower bound, and
+    /// deliberately NOT a count of rich questions agents had no
+    /// channel to ask. See `dev-docs/agent-boards-plan.md` §10.2.
+    #[command(name = "interaction-demand")]
+    InteractionDemand {
+        /// Cap on sampled signals. Counts are always complete.
+        #[arg(long, default_value_t = 200)]
         limit: usize,
     },
 }
@@ -1289,6 +1377,32 @@ async fn main() -> Result<()> {
             }
             CorpusAction::Status => commands::corpus::status_cmd(&ctx)?,
             CorpusAction::Detect { limit } => commands::corpus_detect::detect_cmd(&ctx, limit)?,
+            CorpusAction::InteractionDemand { limit } => {
+                commands::corpus_detect::interaction_demand_cmd(&ctx, limit)?
+            }
+        },
+        Commands::Experimental { action } => match action {
+            ExperimentalAction::Board { action } => match action {
+                BoardAction::Open { from, name } => commands::board::open_cmd(&ctx, &from, name)?,
+                BoardAction::List => commands::board::list_cmd(&ctx)?,
+                BoardAction::Get { board_id } => commands::board::get_cmd(&ctx, &board_id)?,
+                BoardAction::Push { args } => commands::board::push_cmd(&ctx, &args)?,
+                BoardAction::Show {
+                    board_id,
+                    series,
+                    limit,
+                } => commands::board::show_cmd(&ctx, &board_id, series, limit)?,
+                BoardAction::Clear { board_id, series } => {
+                    commands::board::clear_cmd(&ctx, &board_id, &series)?
+                }
+                BoardAction::Rm { board_id } => commands::board::rm_cmd(&ctx, &board_id)?,
+                BoardAction::Export {
+                    board_id,
+                    format,
+                    out,
+                } => commands::board::export_cmd(&ctx, &board_id, &format, &out)?,
+                BoardAction::Import { from } => commands::board::import_cmd(&ctx, &from)?,
+            },
         },
         Commands::Status => commands::status::run(&ctx).await?,
         Commands::Usage { action } => match action {
