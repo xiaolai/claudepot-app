@@ -118,3 +118,62 @@ describe("scoreFields", () => {
     expect(scoreFields("net", "Network", [undefined])).not.toBeNull();
   });
 });
+
+// zh-CN behavior (i18n plan §8 QA). The scorer is character-based, so
+// Chinese works without a tokenizer — but two properties are worth
+// pinning, because both are load-bearing for a localized palette and
+// neither is obvious from the English tests above.
+describe("scoreMatch — CJK queries", () => {
+  it("matches a Chinese substring inside a Chinese label", () => {
+    expect(scoreMatch("账户", "打开账户")).not.toBeNull();
+  });
+
+  it("ranks a Chinese prefix above a mid-string Chinese match", () => {
+    const prefix = scoreMatch("账户", "账户设置")!;
+    const middle = scoreMatch("账户", "打开账户")!;
+    expect(prefix).toBeGreaterThan(middle);
+  });
+
+  it("scores an exact Chinese label at the top tier", () => {
+    const exact = scoreMatch("面板", "面板")!;
+    const partial = scoreMatch("面板", "打开面板")!;
+    expect(exact).toBeGreaterThan(partial);
+  });
+
+  it("does not match a Chinese query against unrelated Chinese text", () => {
+    expect(scoreMatch("密钥", "项目设置")).toBeNull();
+  });
+
+  // Chinese has no spaces, so BOUNDARY can never fire between two Han
+  // characters and every in-label hit lands in the substring tier
+  // rather than the word-start tier. That is consistent across all
+  // Chinese candidates, so relative ordering still holds — this test
+  // documents the behavior so a future "fix" doesn't chase it.
+  it("treats an interior Chinese hit as a substring, not a word start", () => {
+    const chinese = scoreMatch("设置", "打开设置")!;
+    const englishWordStart = scoreMatch("settings", "Open settings")!;
+    expect(englishWordStart).toBeGreaterThan(chinese);
+  });
+});
+
+describe("scoreFields — English muscle memory in a localized UI", () => {
+  // Nav rows carry their English label as a keyword precisely so a
+  // user who has typed "projects" for months keeps hitting the row
+  // after switching the UI to Chinese. If this breaks, the palette
+  // silently stops answering the queries people already know.
+  it("finds a Chinese-labelled row by its English keyword", () => {
+    expect(scoreFields("Projects", "打开项目", ["Open Projects"])).not.toBeNull();
+  });
+
+  // Ranking is only meaningful WITHIN one query, and only between
+  // matches of equal strength — the 50-point keyword discount is
+  // deliberately smaller than the 100-point tier spacing, so an exact
+  // keyword hit outranking a mid-string label hit is correct, not a
+  // bug. This mirrors the English "equally-good" case above.
+  it("ranks a Chinese label hit above an equally-good keyword hit", () => {
+    const q = "项目";
+    const viaLabel = scoreFields(q, "项目", [])!;
+    const viaKeyword = scoreFields(q, "设置", [q])!;
+    expect(viaLabel).toBeGreaterThan(viaKeyword);
+  });
+});

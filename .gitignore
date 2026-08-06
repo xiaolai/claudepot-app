@@ -56,6 +56,15 @@ typescript
 # preflight.sh and by the `check:envvar-layout` package script, so leaving it
 # out would point a committed gate at a file a fresh clone does not have.
 !/scripts/check-envvar-layout.mjs
+# Locale-catalog gate. ci.yml runs it via `pnpm check:catalogs`, so the same
+# rule as the entry above applies with teeth: leaving it out points a
+# committed CI step at a file a fresh clone does not have, and the job fails
+# on checkout rather than on a real finding.
+!/scripts/check-catalogs.mjs
+# Advisory scan for user-visible strings that never reached a catalog. Not a
+# CI gate, but `pnpm scan:untranslated` is a committed package script and a
+# script a fresh clone cannot run is worse than no script.
+!/scripts/scan-untranslated.mjs
 # Producer of assets/screenshots/ and web/public/screenshots/, both committed.
 # `pnpm screenshots` runs it, and `cargo xtask verify-docs` fails when a
 # SCREENSHOTS row there has no matching SHOTS row here — a two-file contract

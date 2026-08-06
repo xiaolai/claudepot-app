@@ -213,6 +213,13 @@ jobs:
       - name: Typecheck
         run: pnpm tsc --noEmit
 
+      # Locale catalogs. A key present in en but missing from another
+      # locale falls back to English at runtime rather than failing,
+      # so a half-translated UI would ship silently green. Cheap
+      # (pure JSON, no jsdom) — run it before the build.
+      - name: Check locale catalogs
+        run: pnpm check:catalogs
+
       # The production vite build catches failure classes tsc and
       # vitest don't (asset resolution, CSS shard syntax errors,
       # rollup-only module issues). Without this step the first
