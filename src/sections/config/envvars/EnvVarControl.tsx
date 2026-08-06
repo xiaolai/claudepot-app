@@ -2,6 +2,7 @@
 // the name. Split from the row so that the row is about *what to say*
 // about a variable and this is about *what you can do to it*.
 
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/primitives";
 import type { EnvValue, EnvVarSpec } from "../../../types/ccEnv";
 import {
@@ -31,9 +32,10 @@ function ClearButton({
   busy: boolean;
   onClear: (name: string) => void;
 }) {
+  const { t } = useTranslation("config");
   return (
     <Button variant="ghost" disabled={busy} onClick={() => onClear(name)}>
-      Clear
+      {t("envvars.clear")}
     </Button>
   );
 }
@@ -63,6 +65,7 @@ function CustomValueControl({
   busy: boolean;
   onClear: (name: string) => void;
 }) {
+  const { t } = useTranslation("config");
   return (
     <span className="envvar-scalar">
       {value.state === "custom" ? (
@@ -70,15 +73,15 @@ function CustomValueControl({
         // Rendering it as an empty node would make it indistinguishable
         // from unset — which is the confusion, not a display detail.
         <code className="envvar-custom-raw selectable">
-          {value.raw === "" ? "(empty string)" : value.raw}
+          {value.raw === "" ? t("envvars.emptyString") : value.raw}
         </code>
       ) : (
         <span className="envvar-custom-raw">
-          a JSON {value.kind} — contents not shown
+          {t("envvars.jsonNotShown", { kind: value.kind })}
         </span>
       )}
       <Button variant="subtle" disabled={busy} onClick={() => onClear(spec.name)}>
-        Replace
+        {t("envvars.replace")}
       </Button>
       <ClearButton name={spec.name} busy={busy} onClear={onClear} />
     </span>
@@ -96,11 +99,12 @@ export function EnvVarControl({
   busy: boolean;
   handlers: ControlHandlers;
 }) {
+  const { t } = useTranslation("config");
   const { onSet, onClear, onRequestSecret } = handlers;
   const isSet = value.state !== "absent";
 
   if (spec.safety.blocked_reason) {
-    return <span className="envvar-readonly">read-only</span>;
+    return <span className="envvar-readonly">{t("envvars.readOnly")}</span>;
   }
 
   if (value.state === "custom" || value.state === "custom_opaque") {
@@ -146,7 +150,7 @@ export function EnvVarControl({
         onLiteral={spec.on ?? "1"}
         offLiteral={spec.off}
         disabled={busy}
-        label={`${spec.name} state`}
+        label={t("envvars.stateAria", { name: spec.name })}
         onChange={(next) =>
           next === UNSET ? onClear(spec.name) : onSet(spec.name, next)
         }

@@ -16,6 +16,7 @@
 //     value you can see and change back.
 
 import { useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Input } from "../../../components/primitives";
 import type { EnvVarSpec } from "../../../types/ccEnv";
 
@@ -95,10 +96,15 @@ export function ToggleTriState({
   label: string;
   onChange: (next: TriState) => void;
 }) {
+  const { t } = useTranslation("config");
   const options: { key: TriState; text: string; hint: string }[] = [
-    { key: UNSET, text: "Unset", hint: "Remove the key — Claude Code decides" },
-    { key: offLiteral, text: offLiteral, hint: "Explicitly off" },
-    { key: onLiteral, text: onLiteral, hint: "Explicitly on" },
+    {
+      key: UNSET,
+      text: t("envvars.unset"),
+      hint: t("envvars.unsetHint"),
+    },
+    { key: offLiteral, text: offLiteral, hint: t("envvars.explicitlyOff") },
+    { key: onLiteral, text: onLiteral, hint: t("envvars.explicitlyOn") },
   ];
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -158,14 +164,16 @@ export function EnumChooser({
   onSelect: (v: string) => void;
   onClear: () => void;
 }) {
+  const { t } = useTranslation("config");
   // A sentinel the generator can never emit as a real value: its
   // literal shape is /[a-z0-9][a-z0-9._-]{0,15}/, so nothing starting
-  // with a parenthesis can collide with one.
+  // with a parenthesis can collide with one. Never rendered — it is an
+  // option *value*, not a label — so it stays untranslated.
   const UNSET = "(unset)";
   return (
     <select
       className="envvar-select"
-      aria-label={`${spec.name} value`}
+      aria-label={t("envvars.valueAria", { name: spec.name })}
       disabled={disabled}
       value={value ?? UNSET}
       onChange={(e) => {
@@ -173,7 +181,7 @@ export function EnumChooser({
         else onSelect(e.target.value);
       }}
     >
-      <option value={UNSET}>(unset — CC default)</option>
+      <option value={UNSET}>{t("envvars.unsetOption")}</option>
       {(spec.values ?? []).map((v) => (
         <option key={v} value={v}>
           {v}
@@ -204,6 +212,7 @@ export function ScalarChooser({
   commitMode: CommitMode;
   onCommit: (next: string) => void;
 }) {
+  const { t } = useTranslation("config");
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const dirty = draft !== value;
@@ -234,8 +243,8 @@ export function ScalarChooser({
         value={draft}
         disabled={disabled}
         type="text"
-        aria-label={`${spec.name} value`}
-        placeholder={spec.default || spec.format || "unset"}
+        aria-label={t("envvars.valueAria", { name: spec.name })}
+        placeholder={spec.default || spec.format || t("envvars.unsetPlaceholder")}
         style={{ minWidth: "var(--input-width-md)" }}
         onChange={(e) => {
           submitted.current = null;
@@ -265,7 +274,7 @@ export function ScalarChooser({
             commit(draft);
           }}
         >
-          Apply
+          {t("envvars.apply")}
         </Button>
       ) : null}
     </span>
@@ -324,21 +333,22 @@ export function SecretChooser({
   disabled?: boolean;
   onRequestStore: (handle: SecretHandle) => void;
 }) {
+  const { t } = useTranslation("config");
   const field = useRef<HTMLInputElement | null>(null);
   const [empty, setEmpty] = useState(true);
   const id = useId();
   return (
     <span className="envvar-scalar">
       <span className="envvar-badge" data-tone={isSet ? "set" : "unset"} id={id}>
-        {isSet ? "set" : "not set"}
+        {isSet ? t("envvars.badgeSet") : t("envvars.badgeNotSet")}
       </span>
       <Input
         type="password"
         inputRef={field}
         disabled={disabled}
-        aria-label={`${spec.name} new value`}
+        aria-label={t("envvars.newValueAria", { name: spec.name })}
         aria-describedby={id}
-        placeholder="paste to replace"
+        placeholder={t("envvars.pasteToReplace")}
         style={{ minWidth: "var(--input-width-md)" }}
         onChange={(e) => setEmpty(e.target.value.length === 0)}
       />
@@ -355,7 +365,7 @@ export function SecretChooser({
           })
         }
       >
-        Store in settings.json
+        {t("envvars.storeInSettings")}
       </Button>
     </span>
   );

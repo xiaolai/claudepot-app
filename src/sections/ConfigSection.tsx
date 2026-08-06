@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
+import { renderError } from "../lib/i18n-error";
 import type {
   ArtifactUsageStatsDto,
   ConfigAnchor,
@@ -85,16 +88,26 @@ const DEFINITION_KINDS: readonly ConfigKind[] = [
   "statusline",
 ] as const;
 
-const DEFINITION_KIND_LABEL: Record<string, string> = {
-  agent: "Agents",
-  skill: "Skills",
-  command: "Commands",
-  output_style: "Output styles",
-  workflow: "Workflows",
-  rule: "Rules",
-  keybindings: "Keybindings",
-  statusline: "Statusline",
-};
+// Catalog keys, not literals — the group heading is resolved where the
+// row is built, so a language switch reaches a tree already on screen.
+const DEFINITION_KIND_LABEL_KEYS = {
+  agent: "tree.defAgent",
+  skill: "tree.defSkill",
+  command: "tree.defCommand",
+  output_style: "tree.defOutputStyle",
+  workflow: "tree.defWorkflow",
+  rule: "tree.defRule",
+  keybindings: "tree.defKeybindings",
+  statusline: "tree.defStatusline",
+} as const;
+
+function definitionKindLabel(kind: string): string | null {
+  if (!(kind in DEFINITION_KIND_LABEL_KEYS)) return null;
+  return i18n.t(
+    DEFINITION_KIND_LABEL_KEYS[kind as keyof typeof DEFINITION_KIND_LABEL_KEYS],
+    { ns: "config" },
+  );
+}
 
 const PLUGINS_GROUP_ID = "grp:plugins";
 const FILES_GROUP_ID = "grp:files";
@@ -163,7 +176,9 @@ function anchorCwd(anchor: ConfigAnchor): string | null {
 }
 
 function anchorLabel(anchor: ConfigAnchor): string {
-  if (anchor.kind === "global") return "Global only";
+  if (anchor.kind === "global") {
+    return i18n.t("anchor.globalOnly", { ns: "config" });
+  }
   const p = anchor.path;
   const m = p.match(/([^/\\]+)[/\\]?$/);
   return m ? m[1] : p;
@@ -177,7 +192,7 @@ function anchorLabel(anchor: ConfigAnchor): string {
  * outer breadcrumb is far away.
  */
 function effectiveScopeLabel(anchor: ConfigAnchor): string | null {
-  if (anchor.kind === "global") return "Global";
+  if (anchor.kind === "global") return i18n.t("anchor.global", { ns: "config" });
   return anchorLabel(anchor);
 }
 
@@ -196,6 +211,7 @@ function EmbeddedStatusStrip({
   updating: boolean;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation("config");
   return (
     <div
       style={{
@@ -211,15 +227,15 @@ function EmbeddedStatusStrip({
     >
       <span>
         {artifactCount == null
-          ? "Scanning…"
-          : `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}`}
-        {updating ? " · updating…" : ""}
+          ? t("strip.scanning")
+          : t("strip.artifacts", { count: artifactCount })}
+        {updating ? t("strip.updatingSuffix") : ""}
       </span>
       <button
         type="button"
         className="pm-focus"
         onClick={onRefresh}
-        title="Re-scan on-disk artifacts"
+        title={t("actions.refreshTitle")}
         style={{
           display: "flex",
           alignItems: "center",
@@ -233,7 +249,7 @@ function EmbeddedStatusStrip({
           borderRadius: "var(--r-1)",
         }}
       >
-        <span>Refresh</span>
+        <span>{t("actions.refresh")}</span>
       </button>
     </div>
   );
@@ -250,6 +266,7 @@ export function ConfigSection({
     setTree,
     orphanPatchSignal,
   } = useConfigTree(null);
+  const { t } = useTranslation("config");
   const { pushToast } = useAppState();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editors, setEditors] = useState<EditorCandidateDto[] | null>(null);
@@ -359,7 +376,7 @@ export function ConfigSection({
       setLoadError(null);
     } catch (e) {
       if (myGen !== scanGenRef.current) return; // superseded
-      setLoadError(String(e));
+      setLoadError(renderError(e));
     }
   }, [setTree, anchor]);
 
@@ -491,14 +508,14 @@ export function ConfigSection({
       const picked = await openDialog({
         multiple: false,
         directory: true,
-        title: "Choose project folder",
+        title: t("anchor.pickerTitle"),
       });
       if (typeof picked !== "string" || picked.length === 0) return;
       chooseAnchor({ kind: "folder", path: picked });
     } catch {
-      pushToast("error", "Could not open folder picker");
+      pushToast("error", t("toasts.folderPickerFailed"));
     }
-  }, [chooseAnchor, pushToast]);
+  }, [chooseAnchor, pushToast, t]);
 
   // Repair stale subRoute. Virtual routes are always valid.
   useEffect(() => {
@@ -546,7 +563,7 @@ export function ConfigSection({
       .catch((e) => {
         if (!cancelled) {
           setPreview(null);
-          setPreviewError(String(e));
+          setPreviewError(renderError(e));
         }
       });
     return () => {
@@ -614,7 +631,7 @@ export function ConfigSection({
       );
       searchUnlistenersRef.current = [u1, u2];
     } catch (e) {
-      pushToast("error", `Search failed: ${e}`);
+      pushToast("error", renderError(e, t("errors.search")));
       detachSearchListeners();
       return;
     }
@@ -627,12 +644,12 @@ export function ConfigSection({
         case_sensitive: false,
       });
     } catch (e) {
-      pushToast("error", `Search failed: ${e}`);
+      pushToast("error", renderError(e, t("errors.search")));
       detachSearchListeners();
       setSearchActive(false);
       setActiveSearchId(null);
     }
-  }, [searchQuery, searchRegex, activeSearchId, pushToast, detachSearchListeners]);
+  }, [searchQuery, searchRegex, activeSearchId, pushToast, detachSearchListeners, t]);
 
   const cancelSearch = useCallback(async () => {
     if (activeSearchId) {
@@ -681,7 +698,7 @@ export function ConfigSection({
           selectedFile.kind as ConfigKind,
         );
       } catch (err) {
-        pushToast("error", String(err));
+        pushToast("error", renderError(err));
       }
     },
     [selectedFile, pushToast],
@@ -693,7 +710,7 @@ export function ConfigSection({
       try {
         await api.configOpenInEditorPath(tree.config_home_dir, editorId, null);
       } catch (err) {
-        pushToast("error", String(err));
+        pushToast("error", renderError(err));
       }
     },
     [tree?.config_home_dir, pushToast],
@@ -703,14 +720,14 @@ export function ConfigSection({
     try {
       const picked = await openDialog({
         multiple: false,
-        title: "Choose editor binary",
+        title: t("editors.pickBinaryTitle"),
       });
       if (typeof picked !== "string") return;
-      pushToast("info", `Custom editor support lands with P8: ${picked}`);
+      pushToast("info", t("toasts.customEditorPending", { path: picked }));
     } catch {
-      pushToast("error", "Could not open file picker");
+      pushToast("error", t("toasts.filePickerFailed"));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   const setDefault = useCallback(
     async (kind: ConfigKind | null, editorId: string) => {
@@ -721,14 +738,14 @@ export function ConfigSection({
         pushToast(
           "info",
           kind
-            ? `Default editor for ${kind} set to ${editorId}`
-            : `Fallback editor set to ${editorId}`,
+            ? t("toasts.defaultEditorForKind", { kind, editor: editorId })
+            : t("toasts.fallbackEditor", { editor: editorId }),
         );
       } catch (err) {
-        pushToast("error", String(err));
+        pushToast("error", renderError(err));
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   return (
@@ -756,7 +773,7 @@ export function ConfigSection({
         />
       ) : (
       <ScreenHeader
-        title="Config"
+        title={t("section.title")}
         subtitle={
           tree
             ? (() => {
@@ -765,10 +782,12 @@ export function ConfigSection({
                   0,
                 );
                 const locus =
-                  anchor.kind === "folder" ? anchor.path : "Global only";
-                return `${total} artifact${total === 1 ? "" : "s"} · ${locus}${watcherDirty ? " · updating…" : ""}`;
+                  anchor.kind === "folder"
+                    ? anchor.path
+                    : t("anchor.globalOnly");
+                return `${t("strip.artifacts", { count: total })} · ${locus}${watcherDirty ? t("strip.updatingSuffix") : ""}`;
               })()
-            : "Read-only browser over Claude Code's filesystem artifacts."
+            : t("section.subtitle")
         }
         actions={
           <div style={{ display: "flex", gap: "var(--sp-6)", alignItems: "center" }}>
@@ -783,9 +802,9 @@ export function ConfigSection({
               variant="ghost"
               glyph={NF.refresh}
               onClick={() => void refreshTree()}
-              title="Re-scan on-disk artifacts"
+              title={t("actions.refreshTitle")}
             >
-              Refresh
+              {t("actions.refresh")}
             </Button>
           </div>
         }
@@ -859,8 +878,8 @@ export function ConfigSection({
         >
           {virtualRoute === "effective-settings" ? (
             <EffectiveShell
-              title="Active settings"
-              subtitle="Merged view of every enabled source. Hover a value to see contributors."
+              title={t("effective.settingsTitle")}
+              subtitle={t("effective.settingsSubtitle")}
               scopeLabel={effectiveScopeLabel(anchor)}
               onClose={() => onSubRouteChange(null)}
             >
@@ -868,8 +887,8 @@ export function ConfigSection({
             </EffectiveShell>
           ) : virtualRoute === "effective-mcp" ? (
             <EffectiveShell
-              title="Active MCP"
-              subtitle="MCP servers CC would see, per simulation mode."
+              title={t("effective.mcpTitle")}
+              subtitle={t("effective.mcpSubtitle")}
               scopeLabel={effectiveScopeLabel(anchor)}
               onClose={() => onSubRouteChange(null)}
             >
@@ -877,8 +896,8 @@ export function ConfigSection({
             </EffectiveShell>
           ) : virtualRoute === "hooks" ? (
             <EffectiveShell
-              title="Hooks"
-              subtitle="Registered hooks across every enabled settings layer. One row per matcher → command."
+              title={t("effective.hooksTitle")}
+              subtitle={t("effective.hooksSubtitle")}
               scopeLabel={effectiveScopeLabel(anchor)}
               onClose={() => onSubRouteChange(null)}
             >
@@ -886,9 +905,9 @@ export function ConfigSection({
             </EffectiveShell>
           ) : virtualRoute === "env-vars" ? (
             <EffectiveShell
-              title="Env variables"
-              subtitle="Claude Code's officially documented environment variables, backed by the env block of ~/.claude/settings.json."
-              scopeLabel="user"
+              title={t("effective.envTitle")}
+              subtitle={t("effective.envSubtitle")}
+              scopeLabel={t("effective.envScope")}
               onClose={() => onSubRouteChange(null)}
             >
               <EnvVarsPane />
@@ -978,6 +997,7 @@ function SearchBar({
   inputRef: React.RefObject<HTMLInputElement | null>;
   active: boolean;
 }) {
+  const { t } = useTranslation("config");
   return (
     <div
       style={{
@@ -1004,14 +1024,14 @@ function SearchBar({
             rendering fault. The full scope stays on `aria-label`. */}
         <Input
           glyph={NF.search}
-          placeholder="Search…"
+          placeholder={t("search.placeholder")}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") onSubmit();
             if (e.key === "Escape") onClear();
           }}
-          aria-label="Search contents"
+          aria-label={t("search.ariaLabel")}
           inputRef={inputRef}
           style={{ flex: 1, minWidth: 0 }}
         />
@@ -1023,16 +1043,16 @@ function SearchBar({
             glyph={NF.x}
             onClick={onClear}
             size="sm"
-            title="Clear search"
-            aria-label="Clear search"
+            title={t("search.clear")}
+            aria-label={t("search.clear")}
           />
         ) : null}
       </div>
       <FilterChip
         active={regex}
         onToggle={onToggleRegex}
-        title="Toggle regex mode"
-        aria-label="Regex mode"
+        title={t("search.regexTitle")}
+        aria-label={t("search.regexAria")}
       >
         .*
       </FilterChip>
@@ -1122,6 +1142,7 @@ function ConfigTreePane({
    */
   usageByFileId: Map<string, ArtifactUsageStatsDto> | null;
 }) {
+  const { t } = useTranslation("config");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     [FILES_GROUP_ID]: false,
     [PLUGINS_GROUP_ID]: false,
@@ -1160,20 +1181,20 @@ function ConfigTreePane({
       out.push({
         kind: "virtual-row",
         id: EFFECTIVE_SETTINGS_ROUTE,
-        label: "Settings",
+        label: t("tree.settings"),
         depth: 0,
       });
       out.push({
         kind: "virtual-row",
         id: EFFECTIVE_MCP_ROUTE,
-        label: "MCP servers",
+        label: t("tree.mcpServers"),
         depth: 0,
       });
       if (hooksCount != null && hooksCount > 0) {
         out.push({
           kind: "virtual-row",
           id: HOOKS_ROUTE,
-          label: "Hooks",
+          label: t("tree.hooks"),
           count: hooksCount,
           depth: 0,
         });
@@ -1189,7 +1210,7 @@ function ConfigTreePane({
       out.push({
         kind: "virtual-row",
         id: ENV_VARS_ROUTE,
-        label: "Env variables",
+        label: t("tree.envVariables"),
         depth: 0,
       });
     }
@@ -1201,7 +1222,7 @@ function ConfigTreePane({
       out.push({
         kind: "virtual-row",
         id: DISABLED_ROUTE,
-        label: "Disabled",
+        label: t("tree.disabled"),
         count: disabledCount,
         depth: 0,
       });
@@ -1249,7 +1270,7 @@ function ConfigTreePane({
         out.push({
           kind: "group",
           id: gid,
-          label: DEFINITION_KIND_LABEL[k] ?? kindLabel(k),
+          label: definitionKindLabel(k) ?? kindLabel(k),
           count: bucket.length,
           expanded: gOpen,
           depth: 0,
@@ -1273,7 +1294,7 @@ function ConfigTreePane({
       out.push({
         kind: "group",
         id: PLUGINS_GROUP_ID,
-        label: "Plugins",
+        label: t("tree.plugins"),
         count: plugins.length,
         expanded: plugOpen,
         depth: 0,
@@ -1308,7 +1329,7 @@ function ConfigTreePane({
       out.push({
         kind: "group",
         id: FILES_GROUP_ID,
-        label: "Files",
+        label: t("tree.files"),
         count: tree.scopes.length,
         expanded: filesOpen,
         depth: 0,
@@ -1334,7 +1355,7 @@ function ConfigTreePane({
     }
 
     return out;
-  }, [tree, expanded, globalOnly, hooksCount, disabledCount]);
+  }, [tree, expanded, globalOnly, hooksCount, disabledCount, t]);
 
   const virt = useVirtualizer({
     count: rows.length,
@@ -1353,14 +1374,14 @@ function ConfigTreePane({
           color: "var(--danger)",
         }}
       >
-        Scan failed: {loadError}
+        {t("tree.scanFailed", { error: loadError })}
       </div>
     );
   }
   if (!tree) {
     return (
       <div style={{ padding: "var(--sp-20)", color: "var(--fg-faint)" }}>
-        Scanning…
+        {t("state.scanning")}
       </div>
     );
   }
@@ -1378,7 +1399,7 @@ function ConfigTreePane({
           color: "var(--fg-faint)",
         }}
       >
-        No Claude config found at this cwd or ~/.claude.
+        {t("tree.empty")}
       </div>
     );
   }
@@ -1390,7 +1411,7 @@ function ConfigTreePane({
     <div
       ref={parentRef}
       role="tree"
-      aria-label="Config artifacts"
+      aria-label={t("tree.ariaLabel")}
       style={{
         flex: 1,
         minHeight: 0,
@@ -1676,6 +1697,7 @@ function FileRowButton({
    */
   usage?: ArtifactUsageStatsDto | null;
 }) {
+  const { t } = useTranslation("config");
   // Base indent derives from tree depth (section/group/file). `@include`
   // chains nest further under their parent file.
   const basePad =
@@ -1692,7 +1714,7 @@ function FileRowButton({
       className="pm-focus"
       title={
         isUnused
-          ? `${title ?? ""}${title ? " — " : ""}Never invoked in last 30 days`
+          ? `${title ?? ""}${title ? " — " : ""}${t("tree.neverInvoked")}`
           : title
       }
       style={{
@@ -1739,7 +1761,10 @@ function FileRowButton({
       </span>
       {scopeBadge && <ScopeBadgeChip badge={scopeBadge} />}
       {issuesCount != null && issuesCount > 0 && (
-        <span title={issuesTitle} aria-label={`${issuesCount} issue${issuesCount === 1 ? "" : "s"}`}>
+        <span
+          title={issuesTitle}
+          aria-label={t("tree.issues", { count: issuesCount })}
+        >
           <Glyph g={NF.warn} color="var(--danger)" />
         </span>
       )}
@@ -1758,35 +1783,31 @@ interface ScopeBadge {
   full: string;
 }
 
+// The one-char `short` values are mnemonic codes, not prose — they stay
+// as-is in every language so the chip column keeps its fixed width, and
+// the legend in `full` carries the meaning.
+const SCOPE_BADGES = {
+  user: { short: "U", key: "scopeBadge.user" },
+  project: { short: "P", key: "scopeBadge.project" },
+  local: { short: "L", key: "scopeBadge.local" },
+  flag: { short: "F", key: "scopeBadge.flag" },
+  plugin: { short: "Pl", key: "scopeBadge.plugin" },
+  plugin_base: { short: "Pb", key: "scopeBadge.pluginBase" },
+  policy: { short: "Po", key: "scopeBadge.policy" },
+  claude_md_dir: { short: "C", key: "scopeBadge.claudeMdDir" },
+  memory_current: { short: "M", key: "scopeBadge.memoryCurrent" },
+  memory_other: { short: "m", key: "scopeBadge.memoryOther" },
+  redacted_user_config: { short: "G", key: "scopeBadge.redactedUserConfig" },
+  effective: { short: "A", key: "scopeBadge.effective" },
+} as const;
+
 function scopeBadgeFor(scopeType: string): ScopeBadge {
-  switch (scopeType) {
-    case "user":
-      return { short: "U", full: "User (~/.claude)" };
-    case "project":
-      return { short: "P", full: "Project (cwd/.claude)" };
-    case "local":
-      return { short: "L", full: "Local overrides" };
-    case "flag":
-      return { short: "F", full: "CLI flag override" };
-    case "plugin":
-      return { short: "Pl", full: "Plugin" };
-    case "plugin_base":
-      return { short: "Pb", full: "Plugin base" };
-    case "policy":
-      return { short: "Po", full: "Managed policy" };
-    case "claude_md_dir":
-      return { short: "C", full: "CLAUDE.md walk" };
-    case "memory_current":
-      return { short: "M", full: "Memory (this project)" };
-    case "memory_other":
-      return { short: "m", full: "Memory (other project)" };
-    case "redacted_user_config":
-      return { short: "G", full: "Global config" };
-    case "effective":
-      return { short: "A", full: "Active" };
-    default:
-      return { short: "·", full: scopeType };
+  if (scopeType in SCOPE_BADGES) {
+    const b = SCOPE_BADGES[scopeType as keyof typeof SCOPE_BADGES];
+    return { short: b.short, full: i18n.t(b.key, { ns: "config" }) };
   }
+  // Unknown scope: the wire discriminator itself, rendered raw.
+  return { short: "·", full: scopeType };
 }
 
 function ScopeBadgeChip({ badge }: { badge: ScopeBadge }) {
@@ -1830,11 +1851,21 @@ interface PluginBundle {
   files: ConfigFileNodeDto[];
 }
 
+/** Grouping id for files whose path carries no resolvable plugin id.
+ *  An id, never rendered — the display label is looked up separately. */
+const UNKNOWN_PLUGIN_ID = "(unknown plugin)";
+
 function groupFilesByPlugin(files: ConfigFileNodeDto[]): PluginBundle[] {
   const byId = new Map<string, PluginBundle>();
   for (const f of files) {
     const id = pluginIdFromPath(f.abs_path);
-    const bucket = byId.get(id) ?? { id, label: id, files: [] };
+    // `id` stays the untranslated sentinel so grouping, React keys, and
+    // sort order don't change with the UI language; only the label does.
+    const label =
+      id === UNKNOWN_PLUGIN_ID
+        ? i18n.t("tree.unknownPlugin", { ns: "config" })
+        : id;
+    const bucket = byId.get(id) ?? { id, label, files: [] };
     bucket.files.push(f);
     byId.set(id, bucket);
   }
@@ -1863,7 +1894,7 @@ function groupFilesByPlugin(files: ConfigFileNodeDto[]): PluginBundle[] {
 function pluginIdFromPath(absPath: string): string {
   const segs = absPath.split(/[/\\]/).filter(Boolean);
   const idx = segs.lastIndexOf("plugins");
-  if (idx === -1) return "(unknown plugin)";
+  if (idx === -1) return UNKNOWN_PLUGIN_ID;
   // cache/<marketplace>/<plugin>/<version>/…  → segs[idx + 3]
   if (segs[idx + 1] === "cache" && segs.length > idx + 3) {
     return segs[idx + 3];
@@ -1872,7 +1903,7 @@ function pluginIdFromPath(absPath: string): string {
   if (segs.length > idx + 2) return segs[idx + 2];
   // Even older: plugins/<plugin>/…
   if (segs.length > idx + 1) return segs[idx + 1];
-  return "(unknown plugin)";
+  return UNKNOWN_PLUGIN_ID;
 }
 
 function isManifestLike(f: ConfigFileNodeDto): boolean {
@@ -1889,18 +1920,22 @@ function isManifestLike(f: ConfigFileNodeDto): boolean {
 // file-row level). This purely cosmetic map keeps labels consistent.
 function cleanScopeLabel(label: string): string {
   // Exact rewrites first — cheaper and more predictable than regexes.
-  const exact: Record<string, string> = {
-    "User (~/.claude)": "User",
-    "Project (cwd/.claude)": "Project",
-    "Local (settings.local.json + CLAUDE.local.md)": "Local",
-    "MCP (.mcp.json walk)": "MCP walk",
-    "Policy (managed-settings)": "Managed policy",
-    "Memory (this project)": "Memory",
-    "Memory (other projects)": "Other projects memory",
-    "Global config (redacted)": "Global config",
-    Plugins: "Plugins",
-  };
-  if (label in exact) return exact[label];
+  // Keys are the backend's own label strings (matched, never rendered);
+  // values are catalog keys for the short display form.
+  const exact = {
+    "User (~/.claude)": "scopeLabel.user",
+    "Project (cwd/.claude)": "scopeLabel.project",
+    "Local (settings.local.json + CLAUDE.local.md)": "scopeLabel.local",
+    "MCP (.mcp.json walk)": "scopeLabel.mcpWalk",
+    "Policy (managed-settings)": "scopeLabel.managedPolicy",
+    "Memory (this project)": "scopeLabel.memory",
+    "Memory (other projects)": "scopeLabel.otherProjectsMemory",
+    "Global config (redacted)": "scopeLabel.globalConfig",
+    Plugins: "scopeLabel.plugins",
+  } as const;
+  if (label in exact) {
+    return i18n.t(exact[label as keyof typeof exact], { ns: "config" });
+  }
   // `CLAUDE.md — /some/dir` and `CLAUDE.md — /some/dir (cwd)` stay as-is:
   // the per-directory path is the only way to tell duplicates apart.
   return label;
@@ -2030,6 +2065,7 @@ function FilePreview({
    * the lifecycle classifier. Forwarded to PreviewHeader. */
   headerSecondaryActions?: React.ReactNode;
 }) {
+  const { t } = useTranslation("config");
   const kind = file.kind as ConfigKind;
   const isMarkdown = MARKDOWN_KINDS.includes(kind);
   const isJson = JSON_KINDS.includes(kind);
@@ -2082,7 +2118,7 @@ function FilePreview({
               fontSize: "var(--fs-sm)",
             }}
           >
-            Preview failed: {previewError}
+            {t("preview.failed", { error: previewError })}
           </div>
         ) : !preview ? (
           <div style={{ padding: "var(--sp-16) var(--sp-20)" }}>
@@ -2138,14 +2174,20 @@ function IncludedByBanner({
     >
       <Glyph g={NF.link} color="var(--fg-muted)" />
       <span>
-        Loaded via <code style={{ fontFamily: "var(--font-mono)" }}>@include</code>{" "}
-        (depth {depth}) from{" "}
-        <code
-          style={{ fontFamily: "var(--font-mono)" }}
-          title={includedBy}
-        >
-          {parentName}
-        </code>
+        <Trans
+          ns="config"
+          i18nKey="preview.includedBy"
+          values={{ depth, name: parentName }}
+          components={{
+            code: <code style={{ fontFamily: "var(--font-mono)" }} />,
+            parent: (
+              <code
+                style={{ fontFamily: "var(--font-mono)" }}
+                title={includedBy}
+              />
+            ),
+          }}
+        />
       </span>
     </div>
   );
@@ -2156,6 +2198,7 @@ function TruncationFooter({
 }: {
   onOpen: (editorId: string | null) => void;
 }) {
+  const { t } = useTranslation("config");
   return (
     <div
       style={{
@@ -2171,9 +2214,9 @@ function TruncationFooter({
         fontStyle: "italic",
       }}
     >
-      <span>Preview truncated at 256 KB.</span>
+      <span>{t("preview.truncated")}</span>
       <Button variant="subtle" size="sm" onClick={() => onOpen(null)}>
-        Open full file
+        {t("preview.openFull")}
       </Button>
     </div>
   );
@@ -2198,6 +2241,7 @@ function ConfigHomePane({
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
 }) {
+  const { t } = useTranslation("config");
   return (
     <div
       style={{
@@ -2208,8 +2252,8 @@ function ConfigHomePane({
       }}
     >
       <PreviewHeader
-        title="Config home"
-        subtitle="Pick a file on the left to preview it, or open the whole .claude/ folder."
+        title={t("home.title")}
+        subtitle={t("home.subtitle")}
         path={configHomeDir}
         kind={null}
         editors={editors}
@@ -2231,7 +2275,7 @@ function ConfigHomePane({
           textAlign: "center",
         }}
       >
-        Select an artifact from the tree on the left to preview it.
+        {t("home.empty")}
       </div>
     </div>
   );
@@ -2259,6 +2303,7 @@ function EffectiveShell({
   onClose?: () => void;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation("config");
   return (
     <div
       style={{
@@ -2277,9 +2322,9 @@ function EffectiveShell({
       >
         {onClose && (
           <BackAffordance
-            label="Artifacts"
+            label={t("effective.back")}
             onClick={onClose}
-            title="Back to artifact list"
+            title={t("effective.backTitle")}
             style={{ marginBottom: "var(--sp-6)" }}
           />
         )}
@@ -2337,33 +2382,40 @@ function EffectiveShell({
 
 // ---------- Kind labels ----------------------------------------------
 
-const KIND_LABELS: Record<string, string> = {
-  claude_md: "CLAUDE.md",
-  settings: "settings.json",
-  settings_local: "settings.local.json",
-  managed_settings: "managed-settings.json",
-  redacted_user_config: "Global config (redacted)",
-  mcp_json: ".mcp.json",
-  managed_mcp_json: "managed-mcp.json",
-  agent: "Agent",
-  skill: "Skill",
-  command: "Command",
-  output_style: "Output style",
-  workflow: "Workflow",
-  rule: "Rule",
-  hook: "Hook",
-  memory: "Memory",
-  memory_index: "MEMORY.md",
-  plugin: "Plugin",
-  keybindings: "Keybindings",
-  statusline: "Status line",
-  effective_settings: "Active settings",
-  effective_mcp: "Active MCP",
-  other: "Other",
-};
+// Catalog keys, not literals. The file-name kinds (CLAUDE.md,
+// settings.json, .mcp.json …) still route through the catalog so the
+// lookup has one shape; their zh-CN values are the same file names,
+// because a file name is not translatable copy.
+const KIND_LABEL_KEYS = {
+  claude_md: "kinds.claudeMd",
+  settings: "kinds.settings",
+  settings_local: "kinds.settingsLocal",
+  managed_settings: "kinds.managedSettings",
+  redacted_user_config: "kinds.redactedUserConfig",
+  mcp_json: "kinds.mcpJson",
+  managed_mcp_json: "kinds.managedMcpJson",
+  agent: "kinds.agent",
+  skill: "kinds.skill",
+  command: "kinds.command",
+  output_style: "kinds.outputStyle",
+  workflow: "kinds.workflow",
+  rule: "kinds.rule",
+  hook: "kinds.hook",
+  memory: "kinds.memory",
+  memory_index: "kinds.memoryIndex",
+  plugin: "kinds.plugin",
+  keybindings: "kinds.keybindings",
+  statusline: "kinds.statusline",
+  effective_settings: "kinds.effectiveSettings",
+  effective_mcp: "kinds.effectiveMcp",
+  other: "kinds.other",
+} as const;
 
 function kindLabel(kind: string): string {
-  return KIND_LABELS[kind] ?? kind;
+  if (!(kind in KIND_LABEL_KEYS)) return kind;
+  return i18n.t(KIND_LABEL_KEYS[kind as keyof typeof KIND_LABEL_KEYS], {
+    ns: "config",
+  });
 }
 
 // ---------- Search results pane --------------------------------------
@@ -2381,6 +2433,7 @@ function SearchResultsPane({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const { t } = useTranslation("config");
   const idToLabel = useMemo(() => {
     const m = new Map<string, string>();
     if (!tree) return m;
@@ -2395,7 +2448,7 @@ function SearchResultsPane({
   return (
     <div
       role="listbox"
-      aria-label="Search results"
+      aria-label={t("search.resultsAria")}
       style={{
         flex: 1,
         minHeight: 0,
@@ -2411,8 +2464,16 @@ function SearchResultsPane({
         }}
       >
         {summary
-          ? `${summary.total_hits}${summary.capped ? " (capped)" : ""} hit${summary.total_hits === 1 ? "" : "s"}${summary.skipped_large > 0 ? ` · ${summary.skipped_large} file${summary.skipped_large === 1 ? "" : "s"} skipped (>2MB)` : ""}${summary.cancelled ? " · cancelled" : ""}`
-          : `${hits.length} hit${hits.length === 1 ? "" : "s"} so far…`}
+          ? `${
+              summary.capped
+                ? t("search.hitsCapped", { count: summary.total_hits })
+                : t("search.hits", { count: summary.total_hits })
+            }${
+              summary.skipped_large > 0
+                ? t("search.skipped", { count: summary.skipped_large })
+                : ""
+            }${summary.cancelled ? t("search.cancelled") : ""}`
+          : t("search.soFar", { count: hits.length })}
       </div>
       {hits.length === 0 && summary && summary.total_hits === 0 && (
         <div
@@ -2422,7 +2483,7 @@ function SearchResultsPane({
             fontSize: "var(--fs-sm)",
           }}
         >
-          No matches.
+          {t("search.noMatches")}
         </div>
       )}
       {hits.map((hit, i) => (
@@ -2519,6 +2580,7 @@ function AnchorPicker({
   onFolder: (path: string) => void;
   onPickFolder: () => void;
 }) {
+  const { t } = useTranslation("config");
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -2565,7 +2627,7 @@ function AnchorPicker({
         className="pm-focus"
         aria-haspopup="menu"
         aria-expanded={open}
-        title={isGlobal ? "No project anchored" : anchor.path}
+        title={isGlobal ? t("anchor.noneTitle") : anchor.path}
         style={{
           display: "flex",
           alignItems: "center",
@@ -2595,7 +2657,7 @@ function AnchorPicker({
       {open && (
         <div
           role="menu"
-          aria-label="Project anchor"
+          aria-label={t("anchor.menuAria")}
           style={{
             position: "absolute",
             top: "calc(100% + var(--sp-4))",
@@ -2612,7 +2674,7 @@ function AnchorPicker({
           }}
         >
           {reachable.length > 0 && (
-            <AnchorMenuGroup label="Recent projects">
+            <AnchorMenuGroup label={t("anchor.recent")}>
               {reachable.map((p) => (
                 <AnchorMenuItem
                   key={p.original_path}
@@ -2648,18 +2710,18 @@ function AnchorPicker({
               onPickFolder();
             }}
           >
-            Pick folder…
+            {t("anchor.pickFolder")}
           </AnchorMenuItem>
           <AnchorMenuItem
             selected={isGlobal}
             glyph={NF.globe}
-            subtitle="Hide project / local / CLAUDE.md-walk scopes"
+            subtitle={t("anchor.globalOnlySubtitle")}
             onClick={() => {
               onGlobal();
               setOpen(false);
             }}
           >
-            Global only
+            {t("anchor.globalOnly")}
           </AnchorMenuItem>
         </div>
       )}

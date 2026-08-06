@@ -1,7 +1,9 @@
 import { useCallback, useId, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
@@ -47,6 +49,7 @@ export function AdoptOrphansModal({
   /** Called after every user adoption so the section can refresh. */
   onCompleted: () => void;
 }) {
+  const { t } = useTranslation("projects");
   const headingId = useId();
 
   const initialTargets: Record<string, string> = {};
@@ -66,18 +69,18 @@ export function AdoptOrphansModal({
     const picked = await openDialog({
       directory: true,
       multiple: false,
-      title: "Choose adoption target directory",
+      title: t("adopt.chooseDirTitle"),
     });
     if (typeof picked === "string") {
       setTargets((t) => ({ ...t, [slug]: picked }));
     }
-  }, []);
+  }, [t]);
 
   const adopt = useCallback(
     async (slug: string) => {
       const target = targets[slug]?.trim();
       if (!target) {
-        setStates((s) => ({ ...s, [slug]: { kind: "error", message: "Target required" } }));
+        setStates((s) => ({ ...s, [slug]: { kind: "error", message: t("adopt.targetRequired") } }));
         return;
       }
       setStates((s) => ({ ...s, [slug]: { kind: "adopting" } }));
@@ -86,10 +89,10 @@ export function AdoptOrphansModal({
         setStates((s) => ({ ...s, [slug]: { kind: "done", report } }));
         onCompleted();
       } catch (e) {
-        setStates((s) => ({ ...s, [slug]: { kind: "error", message: String(e) } }));
+        setStates((s) => ({ ...s, [slug]: { kind: "error", message: renderError(e) } }));
       }
     },
-    [targets, onCompleted],
+    [targets, onCompleted, t],
   );
 
   const remove = useCallback(
@@ -101,7 +104,7 @@ export function AdoptOrphansModal({
         setStates((s) => ({ ...s, [slug]: { kind: "removed", report } }));
         onCompleted();
       } catch (e) {
-        setStates((s) => ({ ...s, [slug]: { kind: "error", message: String(e) } }));
+        setStates((s) => ({ ...s, [slug]: { kind: "error", message: renderError(e) } }));
       }
     },
     [onCompleted],
@@ -110,18 +113,21 @@ export function AdoptOrphansModal({
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
-        title="Adopt orphaned projects"
+        title={t("adopt.title")}
         id={headingId}
         onClose={onClose}
       />
       <ModalBody>
         <p className="muted" style={{ marginTop: 0 }}>
-          Each orphan's original cwd no longer exists. <strong>Adopt</strong>{" "}
-          to keep the history — choose a live target cwd and every
-          session file is rewritten so <code>--resume</code> will
-          cd into the new target. <strong>Remove</strong> to forget the
-          orphan entirely — the slug dir is moved to the Trash and can
-          be restored from there if you change your mind.
+          <Trans
+            ns="projects"
+            i18nKey="adopt.intro"
+            components={{
+              adopt: <strong />,
+              resume: <code>--resume</code>,
+              remove: <strong />,
+            }}
+          />
         </p>
 
         <ul className="adopt-orphans-list" role="list">
@@ -140,10 +146,10 @@ export function AdoptOrphansModal({
               <li key={o.slug} className="adopt-orphans-row">
                 <div className="adopt-orphans-row-head">
                   <code className="mono selectable">
-                    {o.cwdFromTranscript ?? "(unparseable)"}
+                    {o.cwdFromTranscript ?? t("adopt.unparseable")}
                   </code>
                   <span className="muted">
-                    {o.sessionCount} session{o.sessionCount === 1 ? "" : "s"}
+                    {t("shared.sessions", { count: o.sessionCount })}
                     {" · "}
                     {formatSize(o.totalSizeBytes)}
                   </span>
@@ -153,7 +159,7 @@ export function AdoptOrphansModal({
                   <input
                     type="text"
                     className="path-input pm-focus"
-                    placeholder="Target cwd (absolute path)"
+                    placeholder={t("shared.targetCwd")}
                     value={target}
                     onChange={(e) =>
                       setTargets((t) => ({ ...t, [o.slug]: e.target.value }))
@@ -165,46 +171,47 @@ export function AdoptOrphansModal({
                     onClick={() => browse(o.slug)}
                     disabled={disabled}
                   >
-                    Browse…
+                    {t("shared.browse")}
                   </Button>
                   <Button
                     variant="solid"
                     onClick={() => adopt(o.slug)}
                     disabled={disabled || !target.trim()}
                   >
-                    {state.kind === "adopting" ? "Adopting…" : "Adopt"}
+                    {state.kind === "adopting" ? t("adopt.adopting") : t("adopt.adopt")}
                   </Button>
                   <Button
                     variant="ghost"
                     danger
                     onClick={() => setConfirmRemove(o)}
                     disabled={disabled}
-                    title="Move this orphan's slug dir to the Trash"
+                    title={t("adopt.removeTitle")}
                   >
-                    {state.kind === "removing" ? "Removing…" : "Remove"}
+                    {state.kind === "removing" ? t("adopt.removing") : t("adopt.remove")}
                   </Button>
                 </div>
 
                 {state.kind === "done" && (
                   <p className="adopt-orphans-row-status ok">
-                    <Icon name="check" size={12} /> Adopted{" "}
-                    {state.report.sessionsMoved}/{state.report.sessionsAttempted}{" "}
-                    sessions
-                    {state.report.sessionsFailed.length > 0 && (
-                      <>
-                        {", "}
-                        {state.report.sessionsFailed.length} failed
-                      </>
-                    )}
+                    <Icon name="check" size={12} />{" "}
+                    {t("adopt.adoptedStatus", {
+                      moved: state.report.sessionsMoved,
+                      attempted: state.report.sessionsAttempted,
+                    })}
+                    {state.report.sessionsFailed.length > 0 &&
+                      t("adopt.failedSuffix", {
+                        n: state.report.sessionsFailed.length,
+                      })}
                     .
                   </p>
                 )}
                 {state.kind === "removed" && (
                   <p className="adopt-orphans-row-status ok">
-                    <Icon name="check" size={12} /> Moved{" "}
-                    {state.report.sessionsDiscarded} session
-                    {state.report.sessionsDiscarded === 1 ? "" : "s"} ·{" "}
-                    {formatSize(state.report.totalSizeBytes)} to Trash.
+                    <Icon name="check" size={12} />{" "}
+                    {t("adopt.removedStatus", {
+                      count: state.report.sessionsDiscarded,
+                      size: formatSize(state.report.totalSizeBytes),
+                    })}
                   </p>
                 )}
                 {state.kind === "error" && (
@@ -219,12 +226,12 @@ export function AdoptOrphansModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose}>
-          Close
+          {t("shared.close")}
         </Button>
       </ModalFooter>
       {confirmRemove && (
         <ConfirmDialog
-          title="Move orphan to Trash?"
+          title={t("adopt.confirmTitle")}
           body={
             <>
               <p style={{ marginTop: 0 }}>
@@ -233,15 +240,14 @@ export function AdoptOrphansModal({
                 </code>
               </p>
               <p className="muted" style={{ marginBottom: 0 }}>
-                {confirmRemove.sessionCount} session
-                {confirmRemove.sessionCount === 1 ? "" : "s"} ·{" "}
-                {formatSize(confirmRemove.totalSizeBytes)} will be moved
-                to the Trash. You can restore from Trash if you change
-                your mind.
+                {t("adopt.confirmBody", {
+                  count: confirmRemove.sessionCount,
+                  size: formatSize(confirmRemove.totalSizeBytes),
+                })}
               </p>
             </>
           }
-          confirmLabel="Move to Trash"
+          confirmLabel={t("adopt.confirmLabel")}
           confirmDanger
           onCancel={() => setConfirmRemove(null)}
           onConfirm={() => remove(confirmRemove.slug)}

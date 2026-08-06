@@ -13,13 +13,17 @@
 // to cut.
 
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
+import { renderError } from "../../lib/i18n-error";
+import { formatNumber } from "../../lib/intl";
 import type { FileHealth, MemoryHealthReport } from "../../types";
 import { AutoMemoryGlobalCard } from "./AutoMemoryGlobalCard";
 import { AutoDreamGlobalCard } from "./AutoDreamGlobalCard";
 
 export function MemoryHealthPanel() {
+  const { t } = useTranslation("global");
   const [report, setReport] = useState<MemoryHealthReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +35,7 @@ export function MemoryHealthPanel() {
       setReport(r);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(renderError(e));
     } finally {
       setLoading(false);
     }
@@ -71,7 +75,7 @@ export function MemoryHealthPanel() {
             margin: 0,
           }}
         >
-          Memory health
+          {t("memory.health.title")}
         </h2>
         <span
           style={{
@@ -79,15 +83,16 @@ export function MemoryHealthPanel() {
             color: "var(--fg-faint)",
           }}
         >
-          Static analysis of CLAUDE.md and MEMORY.md.
+          {t("memory.health.subtitle")}
           {report && (
-            <>
-              {" CC truncates global memory after line "}
-              <strong style={{ color: "var(--fg-muted)" }}>
-                {report.line_cutoff}
-              </strong>
-              {"."}
-            </>
+            <Trans
+              ns="global"
+              i18nKey="memory.health.cutoffNote"
+              components={{
+                strong: <strong style={{ color: "var(--fg-muted)" }} />,
+              }}
+              values={{ line: report.line_cutoff }}
+            />
           )}
         </span>
         <button
@@ -107,7 +112,7 @@ export function MemoryHealthPanel() {
             fontFamily: "inherit",
           }}
         >
-          {loading ? "loading…" : "Refresh"}
+          {loading ? t("memory.health.loadingLower") : t("memory.health.refresh")}
         </button>
       </div>
       {error && (
@@ -132,13 +137,13 @@ export function MemoryHealthPanel() {
         >
           <FileHealthCard
             title="CLAUDE.md"
-            subtitle="Global instructions"
+            subtitle={t("memory.health.claudeMdSubtitle")}
             health={report.claude_md}
             cutoff={report.line_cutoff}
           />
           <FileHealthCard
             title="MEMORY.md"
-            subtitle="Per-account memory index"
+            subtitle={t("memory.health.memoryMdSubtitle")}
             health={report.memory_md}
             cutoff={report.line_cutoff}
           />
@@ -159,6 +164,7 @@ function FileHealthCard({
   health: FileHealth;
   cutoff: number;
 }) {
+  const { t } = useTranslation("global");
   const isBlown = health.lines_past_cutoff > 0;
   return (
     <div
@@ -237,7 +243,7 @@ function FileHealthCard({
             padding: "var(--sp-6) 0",
           }}
         >
-          File not present — nothing to audit.
+          {t("memory.health.fileMissing")}
         </div>
       ) : (
         <div
@@ -248,21 +254,25 @@ function FileHealthCard({
           }}
         >
           <Stat
-            label="Lines"
-            value={health.line_count.toLocaleString()}
+            label={t("memory.health.lines")}
+            value={formatNumber(health.line_count)}
           />
           <Stat
-            label="Est. tokens"
-            value={health.est_tokens.toLocaleString()}
-            sub={`${(health.char_count / 1024).toFixed(1)} KB`}
+            label={t("memory.health.estTokens")}
+            value={formatNumber(health.est_tokens)}
+            sub={t("memory.health.kb", {
+              kb: (health.char_count / 1024).toFixed(1),
+            })}
           />
           <Stat
-            label={`Past line ${cutoff}`}
-            value={health.lines_past_cutoff.toLocaleString()}
+            label={t("memory.health.pastLine", { line: cutoff })}
+            value={formatNumber(health.lines_past_cutoff)}
             sub={
               health.lines_past_cutoff > 0
-                ? `${(health.chars_past_cutoff / 1024).toFixed(1)} KB invisible`
-                : "all visible"
+                ? t("memory.health.kbInvisible", {
+                    kb: (health.chars_past_cutoff / 1024).toFixed(1),
+                  })
+                : t("memory.health.allVisible")
             }
             tone={health.lines_past_cutoff > 0 ? "warn" : "ok"}
           />

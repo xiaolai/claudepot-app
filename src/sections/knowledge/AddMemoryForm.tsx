@@ -8,11 +8,12 @@
 // human-gated: memories land `accepted`, and decisions land `active`.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type { MemoryKind, MemoryScope } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
 import { Input } from "../../components/primitives/Input";
-import { toUserError } from "../../lib/errors";
+import { renderError } from "../../lib/i18n-error";
 
 export function AddMemoryForm({
   defaultProject,
@@ -28,6 +29,7 @@ export function AddMemoryForm({
   onCreated: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const [scope, setScope] = useState<MemoryScope>(
     defaultProject ? "project" : "global",
   );
@@ -44,7 +46,7 @@ export function AddMemoryForm({
   const submit = useCallback(async () => {
     if (!content.trim() || !createdBy.trim()) return;
     if (scope === "project" && !projectPath.trim()) {
-      setErr("A project path is required for project scope.");
+      setErr(t("know.add.errProjectRequired"));
       return;
     }
     setBusy(true);
@@ -72,11 +74,11 @@ export function AddMemoryForm({
       setRationale("");
       onCreated();
     } catch (e) {
-      setErr(toUserError(e));
+      setErr(renderError(e));
     } finally {
       setBusy(false);
     }
-  }, [mode, scope, projectPath, kind, content, topic, rationale, createdBy, onCreated]);
+  }, [mode, scope, projectPath, kind, content, topic, rationale, createdBy, onCreated, t]);
 
   return (
     <div
@@ -94,40 +96,40 @@ export function AddMemoryForm({
         <select
           value={mode}
           onChange={(e) => setMode(e.currentTarget.value as "memory" | "decision")}
-          aria-label="Knowledge type"
+          aria-label={t("know.add.typeAria")}
           style={selectStyle()}
         >
-          <option value="memory">Memory</option>
-          <option value="decision">Decision</option>
+          <option value="memory">{t("know.add.typeMemory")}</option>
+          <option value="decision">{t("know.add.typeDecision")}</option>
         </select>
         <select
           value={scope}
           onChange={(e) => setScope(e.currentTarget.value as MemoryScope)}
-          aria-label="Scope"
+          aria-label={t("know.add.scopeAria")}
           style={selectStyle()}
         >
-          <option value="global">Global</option>
-          <option value="project">Project</option>
+          <option value="global">{t("know.add.scopeGlobal")}</option>
+          <option value="project">{t("know.add.scopeProject")}</option>
         </select>
         {mode === "memory" ? (
           <select
             value={kind}
             onChange={(e) => setKind(e.currentTarget.value as MemoryKind)}
-            aria-label="Kind"
+            aria-label={t("know.add.kindAria")}
             style={selectStyle()}
           >
-            <option value="fact">Fact</option>
-            <option value="preference">Preference</option>
-            <option value="pattern">Pattern</option>
-            <option value="constraint">Constraint</option>
-            <option value="summary">Summary</option>
+            <option value="fact">{t("know.add.kindFact")}</option>
+            <option value="preference">{t("know.add.kindPreference")}</option>
+            <option value="pattern">{t("know.add.kindPattern")}</option>
+            <option value="constraint">{t("know.add.kindConstraint")}</option>
+            <option value="summary">{t("know.add.kindSummary")}</option>
           </select>
         ) : (
           <Input
             value={topic}
             onChange={(e) => setTopic(e.currentTarget.value)}
-            placeholder="topic (optional)"
-            aria-label="Decision topic"
+            placeholder={t("know.add.topicPlaceholder")}
+            aria-label={t("know.add.topicAria")}
             style={{ flex: 1 }}
           />
         )}
@@ -135,8 +137,8 @@ export function AddMemoryForm({
           <Input
             value={projectPath}
             onChange={(e) => setProjectPath(e.currentTarget.value)}
-            placeholder="project path (absolute)"
-            aria-label="Project path"
+            placeholder={t("know.add.projectPlaceholder")}
+            aria-label={t("know.add.projectAria")}
             list="add-memory-projects"
             style={{ flex: 1 }}
           />
@@ -152,8 +154,16 @@ export function AddMemoryForm({
       <textarea
         value={content}
         onChange={(e) => setContent(e.currentTarget.value)}
-        placeholder={mode === "memory" ? "What should we remember?" : "What decision should this record?"}
-        aria-label={mode === "memory" ? "Memory content" : "Decision"}
+        placeholder={
+          mode === "memory"
+            ? t("know.add.contentPlaceholderMemory")
+            : t("know.add.contentPlaceholderDecision")
+        }
+        aria-label={
+          mode === "memory"
+            ? t("know.add.contentAriaMemory")
+            : t("know.add.contentAriaDecision")
+        }
         rows={3}
         style={{
           padding: "var(--sp-8)",
@@ -169,8 +179,8 @@ export function AddMemoryForm({
         <textarea
           value={rationale}
           onChange={(e) => setRationale(e.currentTarget.value)}
-          placeholder="Why? (optional)"
-          aria-label="Decision rationale"
+          placeholder={t("know.add.rationalePlaceholder")}
+          aria-label={t("know.add.rationaleAria")}
           rows={2}
           style={{
             padding: "var(--sp-8)",
@@ -187,19 +197,23 @@ export function AddMemoryForm({
         <Input
           value={createdBy}
           onChange={(e) => setCreatedBy(e.currentTarget.value)}
-          placeholder="created_by (e.g. user:me)"
-          aria-label="Created by"
+          placeholder={t("know.add.createdByPlaceholder")}
+          aria-label={t("know.add.createdByAria")}
           style={{ flex: 1 }}
         />
         <Button onClick={onCancel} disabled={busy}>
-          Cancel
+          {t("know.add.cancel")}
         </Button>
         <Button
           variant="solid"
           onClick={() => void submit()}
           disabled={busy || !content.trim()}
         >
-          {busy ? "Saving…" : mode === "memory" ? "Save memory" : "Save decision"}
+          {busy
+            ? t("know.add.saving")
+            : mode === "memory"
+              ? t("know.add.saveMemory")
+              : t("know.add.saveDecision")}
         </Button>
       </div>
       {err && <div style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>{err}</div>}

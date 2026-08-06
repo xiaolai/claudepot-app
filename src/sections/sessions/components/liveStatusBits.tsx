@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { LiveSessionSummary } from "../../../types";
 
 /**
@@ -76,11 +77,13 @@ export function Chip({
  */
 export function ElapsedCounter({
   idleMs,
-  label = "elapsed",
+  label,
 }: {
   idleMs: number;
   label?: string;
 }) {
+  const { t } = useTranslation("sessions");
+  const resolvedLabel = label ?? t("live.elapsed");
   const [tickMs, setTickMs] = useState(0);
   useEffect(() => {
     setTickMs(0);
@@ -101,7 +104,11 @@ export function ElapsedCounter({
   const text = m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
   return (
     <span
-      aria-label={`${label} ${m > 0 ? `${m}m ${s}s` : `${s} seconds`}`}
+      aria-label={
+        m > 0
+          ? t("live.elapsedAriaMin", { label: resolvedLabel, m, s })
+          : t("live.elapsedAriaSec", { label: resolvedLabel, s })
+      }
       style={{
         display: "inline-flex",
         alignItems: "baseline",
@@ -114,7 +121,7 @@ export function ElapsedCounter({
         className="mono-cap"
         style={{ color: "var(--fg-faint)", fontSize: "var(--fs-3xs)" }}
       >
-        {label}
+        {resolvedLabel}
       </span>
       <span>{text}</span>
     </span>

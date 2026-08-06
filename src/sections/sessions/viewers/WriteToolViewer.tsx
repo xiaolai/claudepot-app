@@ -1,8 +1,10 @@
+import { useTranslation } from "react-i18next";
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
 import { CopyButton } from "../../../components/CopyButton";
 import { redactSecrets } from "../../../lib/redactSecrets";
+import { formatNumber } from "../../../lib/intl";
 import { parseToolInput, type WriteInput } from "./toolInput";
 
 const CONTENT_CLAMP = 4000;
@@ -13,9 +15,10 @@ const CONTENT_CLAMP = 4000;
  * rest via the transcript modal.
  */
 export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
+  const { t } = useTranslation("sessions");
   const parsed = parseToolInput<WriteInput>(tool.input_preview);
   const input = parsed.ok ? parsed.value : {};
-  const path = input.file_path ?? "(unknown file)";
+  const path = input.file_path ?? t("viewer.unknownFile");
   const content = redactSecrets(input.content ?? "");
   const shown = content.slice(0, CONTENT_CLAMP);
   const clamped = content.length > CONTENT_CLAMP;
@@ -55,7 +58,9 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
           {path}
         </span>
         <span style={{ color: "var(--fg-ghost)" }}>
-          {content.length.toLocaleString()} chars
+          {t("viewer.write.chars", {
+            chars: formatNumber(content.length),
+          })}
         </span>
         {tool.is_error && (
           <span
@@ -66,11 +71,11 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
               letterSpacing: "var(--ls-wide)",
             }}
           >
-            error
+            {t("viewer.error")}
           </span>
         )}
         {content.length > 0 && (
-          <CopyButton text={content} ariaLabel="Copy file contents" />
+          <CopyButton text={content} ariaLabel={t("viewer.copyFileContents")} />
         )}
       </header>
       <pre
@@ -87,7 +92,8 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
         }}
       >
         {shown}
-        {clamped && `\n… ${content.length - shown.length} chars hidden`}
+        {clamped &&
+          `\n${t("viewer.charsHidden", { n: content.length - shown.length })}`}
       </pre>
     </div>
   );

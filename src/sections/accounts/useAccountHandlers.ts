@@ -1,7 +1,9 @@
 import { emit } from "@tauri-apps/api/event";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { USAGE_REFETCH_EVENT } from "../../lib/events";
+import { renderError } from "../../lib/i18n-error";
 import { runVerifyAll } from "./runVerifyAll";
 import type { AccountSummary, VerifyOutcomeKind } from "../../types";
 
@@ -67,6 +69,7 @@ export function useAccountHandlers({
   refresh,
   useDesktop,
 }: Args) {
+  const { t } = useTranslation("accounts");
   const runVerifyAccount = useCallback(
     async (a: AccountSummary) => {
       try {
@@ -75,22 +78,25 @@ export function useAccountHandlers({
         // refreshed summary. Tone the toast to match the outcome.
         switch (updated.verify_status) {
           case "ok":
-            pushToast("info", `Verified ${a.email}`);
+            pushToast("info", t("verify.ok", { email: a.email }));
             break;
           case "drift":
             pushToast(
               "error",
-              `Drift: ${a.email} actually authenticates as ${updated.verified_email ?? "unknown"}`,
+              t("verify.drift", {
+                email: a.email,
+                actual: updated.verified_email ?? t("verify.unknown"),
+              }),
             );
             break;
           case "rejected":
-            pushToast("error", `Server rejected ${a.email} — re-login required`);
+            pushToast("error", t("verify.rejected", { email: a.email }));
             break;
           case "network_error":
-            pushToast("error", `Couldn't verify ${a.email} — /profile unreachable`);
+            pushToast("error", t("verify.networkError", { email: a.email }));
             break;
           default:
-            pushToast("info", `Verified ${a.email}`);
+            pushToast("info", t("verify.ok", { email: a.email }));
         }
         await refresh();
         // Only a verify that actually healed the account (status now
@@ -103,10 +109,10 @@ export function useAccountHandlers({
           emit(USAGE_REFETCH_EVENT).catch(() => {});
         }
       } catch (e) {
-        pushToast("error", `Verify failed: ${e}`);
+        pushToast("error", renderError(e, t("verify.failed")));
       }
     },
-    [pushToast, refresh],
+    [pushToast, refresh, t],
   );
 
   const [verify, setVerify] = useState<VerifyAllState>(IDLE_VERIFY);
@@ -132,33 +138,41 @@ export function useAccountHandlers({
           })),
       });
       if (summary.drift + summary.rejected === 0) {
-        pushToast("info", `All ${summary.total} accounts verified.`);
+        pushToast("info", t("verify.allOk", { total: summary.total }));
       } else {
         pushToast(
           "error",
-          `Verify: ${summary.drift} drift, ${summary.rejected} rejected — see card banners.`,
+          t("verify.summaryBad", {
+            drift: summary.drift,
+            rejected: summary.rejected,
+          }),
         );
       }
       await refresh();
     } catch (e) {
-      pushToast("error", `Verify-all failed: ${e}`);
+      pushToast("error", renderError(e, t("verify.allFailed")));
     } finally {
       // Clear only after `refresh()` has landed the persisted statuses,
       // so cards read `account.verify_status` (now current) the instant
       // the live override drops — no stale flash.
       setVerify(IDLE_VERIFY);
     }
-  }, [pushToast, refresh]);
+  }, [pushToast, refresh, t]);
 
   const handleDesktopSwitch = useCallback(
     (a: AccountSummary) => {
-      pushToast("info", `Switching Desktop to ${a.email}…`, () => {}, {
-        undoMs: 3000,
-        dedupeKey: "desktop-switch",
-        onCommit: () => useDesktop(a),
-      });
+      pushToast(
+        "info",
+        t("verify.switchingDesktop", { email: a.email }),
+        () => {},
+        {
+          undoMs: 3000,
+          dedupeKey: "desktop-switch",
+          onCommit: () => useDesktop(a),
+        },
+      );
     },
-    [pushToast, useDesktop],
+    [pushToast, useDesktop, t],
   );
 
   return {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { ThinkingState } from "../../api/thinking";
-import { toastError } from "../../lib/toastError";
+import { toastError } from "../../lib/i18n-error";
 
 // Settings → General → Claude Code behavior.
 //
@@ -24,6 +25,7 @@ export function ExtendedThinkingToggle({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [state, setState] = useState<ThinkingState | null>(null);
   const [busy, setBusy] = useState(false);
   const hintId = useId();
@@ -32,9 +34,9 @@ export function ExtendedThinkingToggle({
     try {
       setState(await api.thinkingState());
     } catch (e) {
-      toastError(pushToast, "Thinking setting load failed", e);
+      toastError(pushToast, t("thinking.loadFailed"), e);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     void refresh();
@@ -51,22 +53,20 @@ export function ExtendedThinkingToggle({
       setState(updated);
       pushToast(
         "info",
-        nextOn
-          ? "Extended thinking on by default for new sessions."
-          : "Extended thinking off by default — new sessions skip it.",
+        nextOn ? t("thinking.onToast") : t("thinking.offToast"),
       );
     } catch (e) {
-      toastError(pushToast, "Toggle extended thinking", e);
+      toastError(pushToast, t("thinking.toggleFailed"), e);
     } finally {
       setBusy(false);
     }
   };
 
   const hint = !state
-    ? "Loading…"
+    ? t("shared.loading")
     : locked
-      ? "Overridden by the MAX_THINKING_TOKENS environment variable. Unset it to control this here."
-      : "On by default: Claude thinks before responding on supported models — better quality, more latency and tokens. Turn off to make new sessions skip thinking by default. Only affects new sessions; per-session flags still win.";
+      ? t("thinking.lockedHint")
+      : t("thinking.hint");
 
   return (
     <div
@@ -81,7 +81,7 @@ export function ExtendedThinkingToggle({
     >
       <div>
         <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-          Extended thinking by default
+          {t("thinking.label")}
         </div>
         <div
           id={hintId}
@@ -100,7 +100,7 @@ export function ExtendedThinkingToggle({
           type="button"
           role="switch"
           aria-checked={on}
-          aria-label="Extended thinking by default"
+          aria-label={t("thinking.label")}
           aria-describedby={hintId}
           aria-disabled={disabled || undefined}
           disabled={disabled}

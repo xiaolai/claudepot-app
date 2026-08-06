@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
 import { useEmit } from "../providers/AppStateProvider";
 import { useSessionLive, useSessionLiveSelector } from "./useSessionLive";
 import { useTauriEvent } from "./useTauriEvent";
@@ -164,7 +165,7 @@ export function useActivityNotifications(): void {
         category,
         kind: dispatchKind,
         title,
-        body: `${body} @ ${title}`,
+        body: i18n.t("activity.bodyWithProject", { body, project: title }),
         dedupeKey: `session:${sessionId}:${kind}`,
         target: { kind: "host", session_id: sessionId, cwd },
       });
@@ -205,7 +206,7 @@ export function useActivityNotifications(): void {
           s.cwd,
           "error",
           project,
-          "multiple errors in the last minute",
+          i18n.t("activity.errorBurst"),
         );
       }
 
@@ -218,7 +219,9 @@ export function useActivityNotifications(): void {
           s.cwd,
           "stuck",
           project,
-          `possibly stuck (tool call > ${prefs.notify_on_stuck_minutes ?? 10} min)`,
+          i18n.t("activity.stuck", {
+            minutes: prefs.notify_on_stuck_minutes ?? 10,
+          }),
         );
       }
 
@@ -235,7 +238,7 @@ export function useActivityNotifications(): void {
           s.cwd,
           "idle-done",
           project,
-          `task finished (${minutes}m)`,
+          i18n.t("activity.taskFinished", { minutes }),
         );
       }
 
@@ -264,7 +267,9 @@ export function useActivityNotifications(): void {
           s.cwd,
           "waiting",
           project,
-          reason ?? "needs your answer",
+          // `reason` is CC's own wording, forwarded verbatim; only the
+          // fallback is ours to translate.
+          reason ?? i18n.t("activity.needsAnswer"),
         );
         waitingReasonForMemo = reason;
       } else if (s.status === "waiting" && waitingReasonForMemo === null) {

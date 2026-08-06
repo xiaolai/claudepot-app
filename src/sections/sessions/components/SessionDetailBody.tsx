@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../../components/primitives/Button";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { Input } from "../../../components/primitives/Input";
@@ -30,6 +31,7 @@ export function MetaMatchNote({
   query: string;
   matches: MetaMatch[];
 }) {
+  const { t } = useTranslation("sessions");
   if (matches.length === 0) return null;
   // Every string that crosses into the DOM here goes through
   // `redactSecrets`. The banner displays `project_path`, `git_branch`,
@@ -62,8 +64,12 @@ export function MetaMatchNote({
           color: "var(--fg)",
         }}
       >
-        The term <strong>"{safeQuery}"</strong> isn't inside this transcript.
-        It matched on:
+        <Trans
+          t={t}
+          i18nKey="detail.metaMatchIntro"
+          values={{ query: safeQuery }}
+          components={{ strong: <strong /> }}
+        />
       </span>
       <ul
         style={{
@@ -180,6 +186,7 @@ export function SessionDetailBody({
   eventPage: number;
   chunkPage: number;
 }) {
+  const { t } = useTranslation("sessions");
   const trimmedQuery = search.trim();
   return (
     <>
@@ -196,11 +203,11 @@ export function SessionDetailBody({
       >
         <Input
           glyph={NF.search}
-          placeholder="Search within transcript"
+          placeholder={t("detail.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ flex: 1 }}
-          aria-label="Search within transcript"
+          aria-label={t("detail.searchPlaceholder")}
         />
         {search.trim().length >= 2 && (
           <span
@@ -210,7 +217,7 @@ export function SessionDetailBody({
               whiteSpace: "nowrap",
             }}
           >
-            {matchCount} match{matchCount === 1 ? "" : "es"}
+            {t("detail.matches", { count: matchCount })}
           </span>
         )}
       </div>
@@ -230,8 +237,8 @@ export function SessionDetailBody({
             <EmptyState>
               <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
               {trimmedQuery
-                ? "Nothing matches that query."
-                : "This session has no events yet."}
+                ? t("detail.nothingMatches")
+                : t("detail.noEventsYet")}
               {trimmedQuery && metaMatches.length > 0 && (
                 <MetaMatchNote query={trimmedQuery} matches={metaMatches} />
               )}
@@ -254,15 +261,12 @@ export function SessionDetailBody({
                     }}
                   >
                     <Button variant="ghost" onClick={onLoadMoreChunks}>
-                      Show{" "}
-                      {Math.min(
-                        chunksFiltered.length - visibleChunksList.length,
-                        chunkPage,
-                      )}{" "}
-                      older chunk
-                      {chunksFiltered.length - visibleChunksList.length === 1
-                        ? ""
-                        : "s"}
+                      {t("detail.showOlderChunks", {
+                        count: Math.min(
+                          chunksFiltered.length - visibleChunksList.length,
+                          chunkPage,
+                        ),
+                      })}
                     </Button>
                   </div>
                 )}
@@ -280,8 +284,8 @@ export function SessionDetailBody({
           <EmptyState>
             <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
             {trimmedQuery
-              ? "Nothing matches that query."
-              : "This session has no events yet."}
+              ? t("detail.nothingMatches")
+              : t("detail.noEventsYet")}
             {trimmedQuery && metaMatches.length > 0 && (
               <MetaMatchNote query={trimmedQuery} matches={metaMatches} />
             )}
@@ -297,8 +301,9 @@ export function SessionDetailBody({
                 }}
               >
                 <Button variant="ghost" onClick={onLoadMoreEvents}>
-                  Show {Math.min(hidden, eventPage)} older event
-                  {hidden === 1 ? "" : "s"}
+                  {t("detail.showOlderEvents", {
+                    count: Math.min(hidden, eventPage),
+                  })}
                 </Button>
               </div>
             )}

@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../lib/i18n";
 
 /**
  * Lazy-rendered Mermaid diagram for markdown ` ```mermaid ` fences.
@@ -19,6 +21,7 @@ import { useEffect, useId, useRef, useState } from "react";
  * has already passed through `claudepot_core::config_view::mask`.
  */
 export function MermaidBlock({ source }: { source: string }) {
+  const { t } = useTranslation("config");
   const ref = useRef<HTMLDivElement>(null);
   const reactId = useId();
   const id = `mermaid-${reactId.replace(/[:]/g, "-")}`;
@@ -78,7 +81,7 @@ export function MermaidBlock({ source }: { source: string }) {
   if (error) {
     return (
       <div className="mermaid-error" role="alert">
-        <div className="mermaid-error-title">Mermaid render failed</div>
+        <div className="mermaid-error-title">{t("mermaid.renderFailed")}</div>
         <pre className="mermaid-error-msg">{error}</pre>
         <pre className="mermaid-error-source">{source}</pre>
       </div>
@@ -90,7 +93,7 @@ export function MermaidBlock({ source }: { source: string }) {
       ref={ref}
       className="mermaid-block"
       role="img"
-      aria-label="Mermaid diagram"
+      aria-label={t("mermaid.diagramAria")}
     />
   );
 }
@@ -118,7 +121,10 @@ function attachSvg(container: HTMLElement, svgString: string): void {
   const doc = new DOMParser().parseFromString(svgString, "image/svg+xml");
   const parserError = doc.querySelector("parsererror");
   if (parserError) {
-    throw new Error(parserError.textContent ?? "SVG parse error");
+    throw new Error(
+      parserError.textContent ??
+        i18n.t("mermaid.svgParseError", { ns: "config" }),
+    );
   }
   const root = doc.documentElement;
   if (
@@ -126,7 +132,7 @@ function attachSvg(container: HTMLElement, svgString: string): void {
     root.namespaceURI !== "http://www.w3.org/2000/svg" ||
     root.tagName.toLowerCase() !== "svg"
   ) {
-    throw new Error("Mermaid returned non-SVG markup");
+    throw new Error(i18n.t("mermaid.nonSvg", { ns: "config" }));
   }
   sanitizeSvg(root);
   container.replaceChildren(document.importNode(root, true));

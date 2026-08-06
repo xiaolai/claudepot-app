@@ -8,6 +8,7 @@
 // suspect item, copy a path).
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type {
   Decision,
@@ -20,7 +21,8 @@ import { Tag } from "../../components/primitives/Tag";
 import type { TagTone } from "../../components/primitives/Tag";
 import { CopyButton } from "../../components/CopyButton";
 import { basename } from "../../lib/paths";
-import { toExcerptError, toUserError } from "../../lib/errors";
+import { formatDate } from "../../lib/intl";
+import { renderError } from "../../lib/i18n-error";
 
 // ─── the unified item ────────────────────────────────────────────
 
@@ -186,6 +188,7 @@ function MemoryBody({
   onArchived: () => void;
   onReview: (queue?: "proposed" | "suspect") => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const state = memoryStateBadge(row);
   const evidence = parseAnchorEvidence(row.anchor_json);
   return (
@@ -195,8 +198,8 @@ function MemoryBody({
         state={state}
         meta={
           typeof row.confidence === "number"
-            ? `${row.confidence}% · ${new Date(row.created_at_ms).toLocaleDateString()}`
-            : new Date(row.created_at_ms).toLocaleDateString()
+            ? `${row.confidence}% · ${formatDate(row.created_at_ms)}`
+            : formatDate(row.created_at_ms)
         }
       />
       <p style={{ margin: 0, fontWeight: 500, fontSize: "var(--fs-base)" }}>{row.content}</p>
@@ -222,7 +225,7 @@ function MemoryBody({
 
       {evidence && (
         <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-          because: {evidence}
+          {t("know.card.because", { evidence })}
         </p>
       )}
 
@@ -230,11 +233,14 @@ function MemoryBody({
           learned from (an inline excerpt via read_locator). */}
       {isEnforced(row) && row.guard_ref && (
         <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", fontSize: "var(--fs-sm)" }}>
-          <span style={{ color: "var(--ok)" }}>enforced by</span>
+          <span style={{ color: "var(--ok)" }}>{t("know.card.enforcedBy")}</span>
           <code style={{ fontSize: "var(--fs-sm)" }} title={row.guard_ref}>
             {row.guard_ref}
           </code>
-          <CopyButton text={row.guard_ref} ariaLabel={`Copy guard path ${row.guard_ref}`} />
+          <CopyButton
+            text={row.guard_ref}
+            ariaLabel={t("know.card.copyGuardAria", { path: row.guard_ref })}
+          />
         </div>
       )}
 
@@ -261,11 +267,11 @@ function MemoryBody({
       <footer style={{ display: "flex", gap: "var(--sp-8)", marginTop: "var(--sp-4)" }}>
         {row.review_state === "suspect" && (
           <Button variant="subtle" onClick={() => onReview("suspect")}>
-            Re-review
+            {t("know.card.reReview")}
           </Button>
         )}
         <ArchiveButton
-          label="Archive"
+          label={t("know.card.archive")}
           onArchive={() => sharedMemoryApi.archiveMemory(id)}
           onDone={onArchived}
         />
@@ -285,13 +291,14 @@ function DecisionBody({
   id: string;
   onArchived: () => void;
 }) {
+  const { t } = useTranslation("knowledge");
   return (
     <>
       <CardHeader
         kindLabel={row.topic ? `decision · ${row.topic}` : "decision"}
         kindTone="accent"
         state={decisionStateBadge(row)}
-        meta={`${row.created_by} · ${new Date(row.created_at_ms).toLocaleDateString()}`}
+        meta={`${row.created_by} · ${formatDate(row.created_at_ms)}`}
       />
       <p style={{ margin: 0, fontWeight: 500, fontSize: "var(--fs-base)" }}>{row.decision}</p>
       {row.rationale && (
@@ -301,7 +308,7 @@ function DecisionBody({
       )}
       {row.supersedes_id && (
         <p style={{ margin: 0, fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
-          supersedes an earlier decision
+          {t("know.card.supersedes")}
         </p>
       )}
 
@@ -310,7 +317,7 @@ function DecisionBody({
       {row.status === "active" && (
         <footer style={{ marginTop: "var(--sp-4)" }}>
           <ArchiveButton
-            label="Archive"
+            label={t("know.card.archive")}
             onArchive={() => sharedMemoryApi.archiveDecision(id)}
             onDone={onArchived}
           />
@@ -323,17 +330,18 @@ function DecisionBody({
 // ─── evidence ────────────────────────────────────────────────────
 
 function EvidenceBody({ row }: { row: Evidence }) {
+  const { t } = useTranslation("knowledge");
   const files = parseFilesChanged(row.files_changed_json);
   return (
     <>
       <CardHeader
         kindLabel={row.topic ? `evidence · ${row.topic}` : "evidence"}
         state={{ label: `${row.confidence}%`, tone: "neutral" }}
-        meta={`${row.created_by} · ${new Date(row.created_at_ms).toLocaleDateString()}`}
+        meta={`${row.created_by} · ${formatDate(row.created_at_ms)}`}
       />
       <p style={{ margin: 0, fontWeight: 500, fontSize: "var(--fs-base)" }}>{row.summary}</p>
       <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-        verified: {row.verification}
+        {t("know.card.verified", { verification: row.verification })}
       </p>
       {files.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-6)" }}>
@@ -372,6 +380,7 @@ function Provenance({
   open: boolean;
   onToggle?: () => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const [body, setBody] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -394,7 +403,7 @@ function Provenance({
         });
         if (!cancelled) setBody(r.body);
       } catch (e) {
-        if (!cancelled) setErr(toExcerptError(e));
+        if (!cancelled) setErr(renderError(e));
       }
     })();
     return () => {
@@ -405,7 +414,7 @@ function Provenance({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", fontSize: "var(--fs-sm)" }}>
-        <span style={{ color: "var(--fg-muted)" }}>learned from</span>
+        <span style={{ color: "var(--fg-muted)" }}>{t("know.card.learnedFrom")}</span>
         <button
           type="button"
           className="pm-focus"
@@ -433,7 +442,7 @@ function Provenance({
           >
             <span>{err}</span>
             <Button variant="ghost" onClick={() => setReloadKey((k) => k + 1)}>
-              Retry
+              {t("know.card.retry")}
             </Button>
           </div>
         ) : (
@@ -449,7 +458,7 @@ function Provenance({
               fontSize: "var(--fs-2xs)",
             }}
           >
-            {body ?? "loading…"}
+            {body ?? t("know.card.loading")}
           </pre>
         ))}
     </div>
@@ -467,6 +476,7 @@ function CrossLinks({
   decisionId?: string;
   evidenceId?: string;
 }) {
+  const { t } = useTranslation("knowledge");
   const [open, setOpen] = useState(false);
   const [links, setLinks] = useState<MemoryLink[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -489,7 +499,7 @@ function CrossLinks({
       });
       setLinks(r);
     } catch (e) {
-      setErr(toUserError(e));
+      setErr(renderError(e));
     }
   }, [open, links, memoryId, decisionId, evidenceId]);
 
@@ -510,12 +520,14 @@ function CrossLinks({
           cursor: "pointer",
         }}
       >
-        {open ? "Hide links" : "Show links"}
+        {open ? t("know.card.hideLinks") : t("know.card.showLinks")}
       </button>
       {open && (
         <div style={{ marginTop: "var(--sp-6)", fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
           {err && <span style={{ color: "var(--danger)" }}>{err}</span>}
-          {!err && links != null && links.length === 0 && <span>No links recorded.</span>}
+          {!err && links != null && links.length === 0 && (
+            <span>{t("know.card.noLinks")}</span>
+          )}
           {!err &&
             links?.map((l) => (
               <div key={l.id}>
@@ -538,20 +550,20 @@ function CrossLinks({
 // A lesson with no project has nowhere to write a guard.
 
 function CompileHint({ id, hasProject }: { id: string; hasProject: boolean }) {
+  const { t } = useTranslation("knowledge");
   if (!hasProject) return null;
   const cmd = `claudepot lesson compile ${id} --write`;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
-        <span style={{ color: "var(--fg-muted)" }}>Enforce as a guard:</span>
+        <span style={{ color: "var(--fg-muted)" }}>{t("know.card.enforceHint")}</span>
         <code style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
           claudepot lesson compile … --write
         </code>
-        <CopyButton text={cmd} ariaLabel="Copy compile command" />
+        <CopyButton text={cmd} ariaLabel={t("know.card.copyCompileAria")} />
       </div>
       <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
-        Synthesizes a grep check into this project’s scripts/repo-invariants.sh
-        (a model call) and keeps it only if it stays clean. Review the git diff.
+        {t("know.card.compileNote")}
       </span>
     </div>
   );
@@ -587,7 +599,7 @@ function ArchiveButton({
       // error keeps the card, with its reason.
       onDone();
     } catch (e) {
-      setErr(toUserError(e));
+      setErr(renderError(e));
     } finally {
       setBusy(false);
     }

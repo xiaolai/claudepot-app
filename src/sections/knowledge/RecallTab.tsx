@@ -6,6 +6,7 @@
 // offset paging.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type { SearchHit } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
@@ -13,12 +14,14 @@ import { Input } from "../../components/primitives/Input";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
-import { toExcerptError, toUserError } from "../../lib/errors";
+import { formatDateTime } from "../../lib/intl";
+import { renderError } from "../../lib/i18n-error";
 
 type SourceFilter = "all" | "claude_code" | "codex";
 const PAGE = 25;
 
 export function RecallTab() {
+  const { t } = useTranslation("knowledge");
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -70,7 +73,7 @@ export function RecallTab() {
         setHasMore(append && res.hits.length === 0 ? false : res.has_more);
         setOffset(nextOffset + res.hits.length);
       } catch (e) {
-        if (ticket === searchReq.current) setErr(toUserError(e));
+        if (ticket === searchReq.current) setErr(renderError(e));
       } finally {
         if (ticket === searchReq.current) setLoading(false);
       }
@@ -90,7 +93,7 @@ export function RecallTab() {
       });
       if (ticket === bodyReq.current) setBody(r.body);
     } catch (e) {
-      if (ticket === bodyReq.current) setBodyErr(toExcerptError(e));
+      if (ticket === bodyReq.current) setBodyErr(renderError(e));
     }
   }, []);
 
@@ -143,8 +146,8 @@ export function RecallTab() {
         <Input
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
-          placeholder='e.g. "rate limiter" or a file path'
-          aria-label="Search query"
+          placeholder={t("recall.queryPlaceholder")}
+          aria-label={t("recall.queryAria")}
           style={{ flex: 1 }}
         />
         <select
@@ -156,7 +159,7 @@ export function RecallTab() {
             // the selection instead of staying stale until the next click.
             if (query.trim()) void runSearch(false, next);
           }}
-          aria-label="Source filter"
+          aria-label={t("recall.sourceAria")}
           style={{
             padding: "0 var(--sp-8)",
             background: "var(--bg-raised)",
@@ -166,12 +169,12 @@ export function RecallTab() {
             font: "inherit",
           }}
         >
-          <option value="all">All sources</option>
-          <option value="claude_code">Claude Code</option>
-          <option value="codex">Codex</option>
+          <option value="all">{t("recall.sourceAll")}</option>
+          <option value="claude_code">{t("recall.sourceClaude")}</option>
+          <option value="codex">{t("recall.sourceCodex")}</option>
         </select>
         <Button type="submit" variant="solid" glyph={NF.search} disabled={!query.trim() || loading}>
-          {loading ? "Searching…" : "Search"}
+          {loading ? t("recall.searching") : t("recall.search")}
         </Button>
       </form>
 
@@ -179,14 +182,14 @@ export function RecallTab() {
         <div role="alert" style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)" }}>
           <span style={{ color: "var(--danger)" }}>{err}</span>
           <Button variant="ghost" onClick={() => void runSearch(false)} disabled={loading}>
-            Retry
+            {t("recall.retry")}
           </Button>
         </div>
       )}
 
       {!loading && hits.length === 0 && !err && (
         <SectionLabel>
-          {query.trim() ? "No matches." : "Enter a query to search raw transcripts."}
+          {query.trim() ? t("recall.noMatches") : t("recall.emptyPrompt")}
         </SectionLabel>
       )}
 
@@ -212,14 +215,18 @@ export function RecallTab() {
                 marginBottom: "var(--sp-6)",
               }}
             >
-              <Tag>{hit.source_kind === "codex" ? "Codex" : "Claude"}</Tag>
+              <Tag>
+                {hit.source_kind === "codex"
+                  ? t("recall.tagCodex")
+                  : t("recall.tagClaude")}
+              </Tag>
               <span
                 style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={hit.project_path}
               >
                 {hit.project_path}
               </span>
-              {hit.timestamp_ms && <span>{new Date(hit.timestamp_ms).toLocaleString()}</span>}
+              {hit.timestamp_ms && <span>{formatDateTime(hit.timestamp_ms)}</span>}
             </header>
             <p style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: "var(--fs-sm)" }}>
               {hit.snippet}
@@ -230,7 +237,9 @@ export function RecallTab() {
                 glyph={expanded === hit.exchange_id ? NF.chevronU : NF.chevronD}
                 onClick={() => void expand(hit)}
               >
-                {expanded === hit.exchange_id ? "Hide" : "Read excerpt"}
+                {expanded === hit.exchange_id
+                  ? t("recall.hide")
+                  : t("recall.readExcerpt")}
               </Button>
             </footer>
             {expanded === hit.exchange_id &&
@@ -241,7 +250,7 @@ export function RecallTab() {
                 >
                   <span>{bodyErr}</span>
                   <Button variant="ghost" onClick={() => void loadBody(hit)}>
-                    Retry
+                    {t("recall.retry")}
                   </Button>
                 </div>
               ) : (
@@ -257,7 +266,7 @@ export function RecallTab() {
                     fontSize: "var(--fs-2xs)",
                   }}
                 >
-                  {body ?? "loading…"}
+                  {body ?? t("recall.loadingBody")}
                 </pre>
               ))}
           </article>
@@ -266,7 +275,7 @@ export function RecallTab() {
 
       {hasMore && (
         <Button variant="ghost" onClick={() => void runSearch(true)} disabled={loading}>
-          {loading ? "Loading…" : "Load more"}
+          {loading ? t("recall.loading") : t("recall.loadMore")}
         </Button>
       )}
     </div>

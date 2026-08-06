@@ -29,7 +29,10 @@
 //     self-declared and core cannot verify it (plan §8.5).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import type { BoardDetail, BoardSummary } from "../../types";
 import { Button } from "../../components/primitives/Button";
 import { BackAffordance } from "../../components/primitives/BackAffordance";
@@ -51,10 +54,12 @@ function relative(iso: string): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return "—";
   const secs = Math.max(0, (Date.now() - then) / 1000);
-  if (secs < 60) return "just now";
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
+  if (secs < 60) return i18n.t("time.justNow", { ns: "boards" });
+  if (secs < 3600)
+    return i18n.t("time.minutesAgo", { ns: "boards", n: Math.floor(secs / 60) });
+  if (secs < 86400)
+    return i18n.t("time.hoursAgo", { ns: "boards", n: Math.floor(secs / 3600) });
+  return i18n.t("time.daysAgo", { ns: "boards", n: Math.floor(secs / 86400) });
 }
 
 type BoardState = "live" | "idle" | "stale";
@@ -69,10 +74,13 @@ function boardState(updatedAt: string): BoardState {
 
 /** Text + glyph, never colour alone — `rules/design.md` a11y floor. */
 function StateTag({ state }: { state: BoardState }) {
+  const { t } = useTranslation("boards");
+  // Built per render, not hoisted to a module constant, so a language
+  // switch reaches these labels without a remount.
   const map = {
-    live: { g: NF.play, label: "Live", color: "var(--ok)" },
-    idle: { g: NF.clock, label: "Idle", color: "var(--fg-muted)" },
-    stale: { g: NF.archive, label: "Stale", color: "var(--fg-faint)" },
+    live: { g: NF.play, label: t("state.live"), color: "var(--ok)" },
+    idle: { g: NF.clock, label: t("state.idle"), color: "var(--fg-muted)" },
+    stale: { g: NF.archive, label: t("state.stale"), color: "var(--fg-faint)" },
   } as const;
   const m = map[state];
   return (
@@ -92,6 +100,7 @@ function StateTag({ state }: { state: BoardState }) {
 }
 
 export function BoardsSection() {
+  const { t } = useTranslation("boards");
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<BoardDetail | null>(null);
@@ -137,7 +146,7 @@ export function BoardsSection() {
       setBoards(await api.boardList());
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
     }
   }, []);
 
@@ -156,7 +165,7 @@ export function BoardsSection() {
       setActionError(null);
     } catch (e) {
       if (wanted.current !== id) return;
-      setActionError(String(e));
+      setActionError(renderError(e));
     }
   }, []);
 
@@ -226,12 +235,16 @@ export function BoardsSection() {
   if (boards.length === 0) {
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        <ScreenHeader title="Boards" subtitle="Durable surfaces agents write into" />
+        <ScreenHeader title={t("list.title")} subtitle={t("list.emptySubtitle")} />
       <div style={{ padding: "var(--sp-24)", color: "var(--fg-muted)" }}>
-        <p style={{ marginTop: 0 }}>No boards yet.</p>
+        <p style={{ marginTop: 0 }}>{t("list.noBoards")}</p>
         <p style={{ fontSize: "var(--fs-sm)" }}>
-          An agent or script creates one by writing to it. Boards are on
-          trial — see <code>claudepot experimental board --help</code>.
+          <Trans
+            ns="boards"
+            i18nKey="list.emptyHint"
+            values={{ cmd: "claudepot experimental board --help" }}
+            components={{ code: <code /> }}
+          />
         </p>
       </div>
       </div>
@@ -244,11 +257,11 @@ export function BoardsSection() {
   if (selected && (!detail || detail.board_id !== selected)) {
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        <ScreenHeader title="Boards" />
+        <ScreenHeader title={t("list.title")} />
         <div style={{ padding: "var(--sp-16)" }}>
           <BackAffordance
-            label="Boards"
-            title="Back to the board list"
+            label={t("list.title")}
+            title={t("list.backTitle")}
             onClick={() => {
               setSelected(null);
               setActionError(null);
@@ -298,8 +311,8 @@ export function BoardsSection() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <ScreenHeader
-        title="Boards"
-        subtitle={`${boards.length} board${boards.length === 1 ? "" : "s"} · ${totalRows} row${totalRows === 1 ? "" : "s"}`}
+        title={t("list.title")}
+        subtitle={`${t("list.boards", { count: boards.length })} · ${t("list.rows", { count: totalRows })}`}
       />
       <div
         ref={rootRef}
@@ -310,14 +323,14 @@ export function BoardsSection() {
       <Table>
         <thead>
           <Tr>
-            <Th>Name</Th>
-            <Th>State</Th>
-            <Th>Last update</Th>
+            <Th>{t("list.colName")}</Th>
+            <Th>{t("list.colState")}</Th>
+            <Th>{t("list.colLastUpdate")}</Th>
             {/* Header says "Reported" because the value is a claim. */}
-            <Th title="Self-declared by the writer; Claudepot does not verify it">
-              Reported writer
+            <Th title={t("list.reportedWriterTitle")}>
+              {t("list.colReportedWriter")}
             </Th>
-            <Th align="right">Rows</Th>
+            <Th align="right">{t("list.colRows")}</Th>
           </Tr>
         </thead>
         <tbody>
@@ -350,8 +363,8 @@ export function BoardsSection() {
               <Td title={b.updated_at}>{relative(b.updated_at)}</Td>
               <Td>
                 {b.reported_writer ? (
-                  <span title="Self-declared; not verified">
-                    Reported by: {b.reported_writer}
+                  <span title={t("provenance.selfDeclaredTitle")}>
+                    {t("provenance.reportedBy", { writer: b.reported_writer })}
                   </span>
                 ) : (
                   <span style={{ color: "var(--fg-faint)" }}>—</span>
@@ -377,6 +390,7 @@ export function BoardsSection() {
  * replacing the data under them is the failure this prevents.
  */
 function LiveBanner({ onApply }: { onApply: () => void }) {
+  const { t } = useTranslation("boards");
   return (
     <div
       role="status"
@@ -393,9 +407,9 @@ function LiveBanner({ onApply }: { onApply: () => void }) {
         fontSize: "var(--fs-sm)",
       }}
     >
-      <span>New updates arrived while you were reading</span>
+      <span>{t("banner.updatesArrived")}</span>
       <Button variant="subtle" onClick={onApply}>
-        Jump to latest
+        {t("banner.jumpToLatest")}
       </Button>
     </div>
   );
@@ -420,6 +434,7 @@ function BoardDetailView({
   onBack: () => void;
   onDeleted: () => void;
 }) {
+  const { t } = useTranslation("boards");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const state = boardState(detail.updated_at);
@@ -438,7 +453,11 @@ function BoardDetailView({
           marginBottom: "var(--sp-12)",
         }}
       >
-        <BackAffordance label="Boards" title="Back to the board list" onClick={onBack} />
+        <BackAffordance
+          label={t("list.title")}
+          title={t("list.backTitle")}
+          onClick={onBack}
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: "var(--fs-md)", fontWeight: 600 }}>
             {detail.name}
@@ -454,9 +473,9 @@ function BoardDetailView({
           >
             <StateTag state={state} />
             <span title={detail.updated_at}>
-              updated {relative(detail.updated_at)}
+              {t("detail.updated", { when: relative(detail.updated_at) })}
             </span>
-            {detail.source_board_id && <span>imported</span>}
+            {detail.source_board_id && <span>{t("detail.imported")}</span>}
           </div>
         </div>
         <Button
@@ -468,7 +487,9 @@ function BoardDetailView({
             // user choose; the command now refuses a relative path.
             const target = await save({
               defaultPath: `${detail.name}.board.json`,
-              filters: [{ name: "Board export", extensions: ["json"] }],
+              filters: [
+                { name: t("detail.exportFilterName"), extensions: ["json"] },
+              ],
             });
             if (!target) return;
             setBusy(true);
@@ -478,20 +499,20 @@ function BoardDetailView({
             } catch (e) {
               // A silent failure here reads as a successful export of
               // the only copy of this data.
-              onActionError(`Export failed: ${e}`);
+              onActionError(t("detail.exportFailed", { error: renderError(e) }));
             } finally {
               setBusy(false);
             }
           }}
           disabled={busy}
         >
-          Export
+          {t("detail.export")}
         </Button>
         {confirming ? (
           <>
             {/* High-stakes action, so text not icon, per rules/icon-buttons.md */}
             <Button variant="ghost" onClick={() => setConfirming(false)}>
-              Cancel
+              {t("detail.cancel")}
             </Button>
             <Button
               variant="solid"
@@ -503,16 +524,16 @@ function BoardDetailView({
                 } catch (e) {
                   // Reporting a delete that did not happen is worse
                   // than the failure itself.
-                  onActionError(`Delete failed: ${e}`);
+                  onActionError(t("detail.deleteFailed", { error: renderError(e) }));
                 }
               }}
             >
-              Delete permanently
+              {t("detail.deletePermanently")}
             </Button>
           </>
         ) : (
           <Button variant="ghost" onClick={() => setConfirming(true)}>
-            Delete
+            {t("detail.delete")}
           </Button>
         )}
       </div>
@@ -527,8 +548,7 @@ function BoardDetailView({
             color: "var(--danger)",
           }}
         >
-          Boards are user data and nothing backs them up. Export first —
-          this cannot be undone.
+          {t("detail.deleteWarning")}
         </p>
       )}
 
@@ -576,10 +596,10 @@ function BoardDetailView({
         <Table density="compact">
           <thead>
             <Tr>
-              <Th>Series</Th>
-              <Th>Columns</Th>
-              <Th align="right">Rows</Th>
-              <Th>Reported writer</Th>
+              <Th>{t("detail.colSeries")}</Th>
+              <Th>{t("detail.colColumns")}</Th>
+              <Th align="right">{t("detail.colRows")}</Th>
+              <Th>{t("list.colReportedWriter")}</Th>
             </Tr>
           </thead>
           <tbody>
@@ -593,7 +613,7 @@ function BoardDetailView({
                 <Td>
                   {s.reported_writer ? (
                     <span title={s.last_pushed_at ?? undefined}>
-                      Reported by: {s.reported_writer}
+                      {t("provenance.reportedBy", { writer: s.reported_writer })}
                     </span>
                   ) : (
                     <span style={{ color: "var(--fg-faint)" }}>—</span>

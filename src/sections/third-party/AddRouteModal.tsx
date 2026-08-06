@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Modal } from "../../components/primitives/Modal";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
+import { i18n } from "../../lib/i18n";
 import { useAppState } from "../../providers/AppStateProvider";
 import type {
   RouteCreateDto,
@@ -17,6 +20,7 @@ interface AddRouteModalProps {
 }
 
 export function AddRouteModal({ open, onClose, onCreated }: AddRouteModalProps) {
+  const { t } = useTranslation("providers");
   const { pushToast } = useAppState();
   return (
     <Modal open={open} onClose={onClose} width="lg" aria-labelledby="add-route-title">
@@ -40,7 +44,7 @@ export function AddRouteModal({ open, onClose, onCreated }: AddRouteModalProps) 
               color: "var(--fg-strong)",
             }}
           >
-            Add a provider route
+            {t("addModal.title")}
           </h2>
           <p
             style={{
@@ -49,8 +53,7 @@ export function AddRouteModal({ open, onClose, onCreated }: AddRouteModalProps) 
               color: "var(--fg-faint)",
             }}
           >
-            Configure a non-Anthropic LLM backend. Picks the provider
-            type below; per-provider fields appear inline.
+            {t("addModal.subtitle")}
           </p>
         </header>
         <RouteForm
@@ -62,10 +65,7 @@ export function AddRouteModal({ open, onClose, onCreated }: AddRouteModalProps) 
               onCreated(created);
               onClose();
             } catch (e) {
-              pushToast(
-                "error",
-                `Add route failed: ${e instanceof Error ? e.message : e}`,
-              );
+              pushToast("error", renderError(e, t("addModal.addFailed")));
               throw e;
             }
           }}
@@ -94,6 +94,7 @@ export function EditRouteModal({
   onClose,
   onSaved,
 }: EditRouteModalProps) {
+  const { t } = useTranslation("providers");
   const { pushToast } = useAppState();
   const [details, setDetails] = useState<RouteDetailsDto | null>(null);
   const [loading, setLoading] = useState(false);
@@ -131,9 +132,14 @@ export function EditRouteModal({
       .catch((e) => {
         if (!cancelled) {
           setLoading(false);
+          // `i18n.t`, not the hook's `t` — same reason `onClose`
+          // sits in a ref above. `t`'s identity changes on a
+          // language switch, so listing it as a dep would re-run
+          // this fetch and discard the user's in-progress edits.
+          // A toast resolves at fire time either way.
           pushToast(
             "error",
-            `Failed to load route: ${e instanceof Error ? e.message : e}`,
+            renderError(e, i18n.t("editModal.loadFailed", { ns: "providers" })),
           );
           onCloseRef.current();
         }
@@ -167,7 +173,7 @@ export function EditRouteModal({
               color: "var(--fg-strong)",
             }}
           >
-            Edit route
+            {t("editModal.title")}
           </h2>
           <p
             style={{
@@ -176,13 +182,16 @@ export function EditRouteModal({
               color: "var(--fg-faint)",
             }}
           >
-            Editing <code>{initialSummary.name}</code>. Secret fields
-            are blank for safety — leave blank to keep the existing
-            values, or type to replace.
+            <Trans
+              ns="providers"
+              i18nKey="editModal.subtitle"
+              values={{ name: initialSummary.name }}
+              components={{ code: <code /> }}
+            />
           </p>
         </header>
         {loading || !details ? (
-          <p style={{ color: "var(--fg-faint)" }}>Loading route…</p>
+          <p style={{ color: "var(--fg-faint)" }}>{t("editModal.loading")}</p>
         ) : (
           <RouteForm
             mode="edit"
@@ -194,10 +203,7 @@ export function EditRouteModal({
                 onSaved(updated);
                 onClose();
               } catch (e) {
-                pushToast(
-                  "error",
-                  `Edit failed: ${e instanceof Error ? e.message : e}`,
-                );
+                pushToast("error", renderError(e, t("editModal.editFailed")));
                 throw e;
               }
             }}

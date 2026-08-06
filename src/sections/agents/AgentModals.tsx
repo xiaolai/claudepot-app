@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Modal,
   ModalBody,
@@ -8,6 +9,8 @@ import {
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
+import { i18n } from "../../lib/i18n";
 import { useAppState } from "../../providers/AppStateProvider";
 import type {
   AgentCreateDto,
@@ -34,6 +37,7 @@ export function AddAgentModal({
   onClose,
   onCreated,
 }: AddProps) {
+  const { t } = useTranslation("agents");
   const { pushToast } = useAppState();
   const [busy, setBusy] = useState(false);
 
@@ -44,7 +48,7 @@ export function AddAgentModal({
       onCreated(created);
       onClose();
     } catch (e) {
-      pushToast("error", String(e));
+      pushToast("error", renderError(e));
     } finally {
       setBusy(false);
     }
@@ -59,7 +63,7 @@ export function AddAgentModal({
       aria-labelledby="add-agent-title"
     >
       <ModalHeader
-        title="Add agent"
+        title={t("add.title")}
         id="add-agent-title"
         onClose={onClose}
       />
@@ -68,7 +72,7 @@ export function AddAgentModal({
           routes={routes}
           capabilities={capabilities}
           busy={busy}
-          submitLabel="Create"
+          submitLabel={t("add.submit")}
           onSubmit={submit}
           onCancel={onClose}
         />
@@ -106,6 +110,7 @@ export function AddFromBuiltinTemplateModal({
   onClose,
   onCreated,
 }: AddFromBuiltinTemplateProps) {
+  const { t } = useTranslation("agents");
   const { pushToast } = useAppState();
   const [cwd, setCwd] = useState("");
   const [busy, setBusy] = useState(false);
@@ -116,7 +121,7 @@ export function AddFromBuiltinTemplateModal({
 
   async function create() {
     if (!cwd.trim()) {
-      pushToast("error", "Working directory is required.");
+      pushToast("error", t("template.cwdRequired"));
       return;
     }
     setBusy(true);
@@ -128,7 +133,7 @@ export function AddFromBuiltinTemplateModal({
       onCreated(created);
       onClose();
     } catch (e) {
-      pushToast("error", String(e));
+      pushToast("error", renderError(e));
     } finally {
       setBusy(false);
     }
@@ -143,7 +148,7 @@ export function AddFromBuiltinTemplateModal({
       aria-labelledby="add-builtin-template-title"
     >
       <ModalHeader
-        title={`Add ${templateName} draft`}
+        title={t("template.title", { name: templateName })}
         id="add-builtin-template-title"
         onClose={onClose}
       />
@@ -162,10 +167,7 @@ export function AddFromBuiltinTemplateModal({
               color: "var(--fg-2)",
             }}
           >
-            Creates a {templateName} draft. The agent is inert until
-            you review and install it. Pick the project directory the
-            narrator should watch — the `session-settled` trigger
-            only fires for sessions inside this path.
+            {t("template.body", { name: templateName })}
           </p>
           <label
             style={{
@@ -176,7 +178,7 @@ export function AddFromBuiltinTemplateModal({
               color: "var(--fg)",
             }}
           >
-            <span>Working directory</span>
+            <span>{t("template.cwdLabel")}</span>
             <input
               type="text"
               value={cwd}
@@ -199,14 +201,14 @@ export function AddFromBuiltinTemplateModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose} disabled={busy}>
-          Cancel
+          {t("actions.cancel")}
         </Button>
         <Button
           variant="solid"
           onClick={create}
           disabled={busy || !cwd.trim()}
         >
-          {busy ? "Creating…" : "Create draft"}
+          {busy ? t("template.creating") : t("template.submit")}
         </Button>
       </ModalFooter>
     </Modal>
@@ -230,6 +232,7 @@ export function EditAgentModal({
   onClose,
   onUpdated,
 }: EditProps) {
+  const { t } = useTranslation("agents");
   const { pushToast } = useAppState();
   const [details, setDetails] = useState<AgentDetailsDto | null>(null);
   const [busy, setBusy] = useState(false);
@@ -248,7 +251,7 @@ export function EditAgentModal({
         // Guard the toast too: if the modal closed (or the target
         // switched) while the fetch was in flight, a late rejection
         // must not fire a stray error toast.
-        if (!cancelled) pushToast("error", String(e));
+        if (!cancelled) pushToast("error", renderError(e));
       }
     })();
     return () => {
@@ -295,7 +298,7 @@ export function EditAgentModal({
       onUpdated(updated);
       onClose();
     } catch (e) {
-      pushToast("error", String(e));
+      pushToast("error", renderError(e));
     } finally {
       setBusy(false);
     }
@@ -310,7 +313,9 @@ export function EditAgentModal({
       aria-labelledby="edit-agent-title"
     >
       <ModalHeader
-        title={`Edit ${target?.display_name || target?.name || ""}`.trim()}
+        title={t("edit.title", {
+          name: target?.display_name || target?.name || "",
+        }).trim()}
         id="edit-agent-title"
         onClose={onClose}
       />
@@ -321,13 +326,13 @@ export function EditAgentModal({
             routes={routes}
             capabilities={capabilities}
             busy={busy}
-            submitLabel="Save"
+            submitLabel={t("edit.submit")}
             onSubmit={submit}
             onCancel={onClose}
           />
         ) : (
           <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-sm)" }}>
-            Loading…
+            {t("loading")}
           </div>
         )}
       </ModalBody>
@@ -358,6 +363,7 @@ export function ReviewInstallModal({
   onClose,
   onInstalled,
 }: ReviewProps) {
+  const { t } = useTranslation("agents");
   const { pushToast } = useAppState();
   const [details, setDetails] = useState<AgentDetailsDto | null>(null);
   const [busy, setBusy] = useState(false);
@@ -373,7 +379,7 @@ export function ReviewInstallModal({
         const d = await api.agentsGet(target.id);
         if (!cancelled) setDetails(d);
       } catch (e) {
-        if (!cancelled) pushToast("error", String(e));
+        if (!cancelled) pushToast("error", renderError(e));
       }
     })();
     return () => {
@@ -389,7 +395,7 @@ export function ReviewInstallModal({
       onInstalled(installed);
       onClose();
     } catch (e) {
-      pushToast("error", String(e));
+      pushToast("error", renderError(e));
     } finally {
       setBusy(false);
     }
@@ -419,14 +425,16 @@ export function ReviewInstallModal({
       aria-labelledby="review-agent-title"
     >
       <ModalHeader
-        title={`Review & install ${target.display_name || target.name}`}
+        title={t("review.title", {
+          name: target.display_name || target.name,
+        })}
         id="review-agent-title"
         onClose={onClose}
       />
       <ModalBody>
         {!details || !s ? (
           <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-sm)" }}>
-            Loading…
+            {t("loading")}
           </div>
         ) : (
           <div
@@ -443,19 +451,20 @@ export function ReviewInstallModal({
                 color: "var(--fg-2)",
               }}
             >
-              This agent is a draft
+              {/* Two whole sentences, not a stitched fragment: the
+                  "(drafted by …)" aside sits mid-sentence, and a
+                  translator must be free to move it. This copy is the
+                  arming gate — it has to keep saying that a draft does
+                  not run until this install. */}
               {details.drafted_by
-                ? ` (drafted by ${details.drafted_by})`
-                : ""}
-              . Installing it arms the agent — Claudepot will
-              materialize a scheduler artifact and the agent can run
-              unattended. Review the spec below before you install.
+                ? t("review.introDrafted", { name: details.drafted_by })
+                : t("review.intro")}
             </p>
 
             {notHandAuthored && (
               <div
                 role="alert"
-                aria-label="Origin warning"
+                aria-label={t("review.origin.aria")}
                 style={{
                   display: "flex",
                   flexDirection: "column",
@@ -477,23 +486,17 @@ export function ReviewInstallModal({
                 >
                   <Tag tone="accent">
                     {createdVia === "cli_draft"
-                      ? "AI-drafted"
-                      : "template-drafted"}
+                      ? t("review.origin.aiDrafted")
+                      : t("review.origin.templateDrafted")}
                   </Tag>
                   <span style={{ color: "var(--fg)" }}>
-                    Not authored in the GUI
+                    {t("review.origin.notGui")}
                   </span>
                 </div>
                 <span>
-                  This record was produced by the{" "}
                   {createdVia === "cli_draft"
-                    ? "AI-drafting CLI verb"
-                    : "built-in template flow"}
-                  , not by the Add Agent form. The `drafted_by` value
-                  above is advisory and can be set by the caller —
-                  scrutinize the prompt, working directory, MCP
-                  servers, and allowed-tools list below before
-                  arming.
+                    ? t("review.origin.bodyCli")
+                    : t("review.origin.bodyTemplate")}
                 </span>
               </div>
             )}
@@ -515,16 +518,13 @@ export function ReviewInstallModal({
               >
                 <Tag tone="danger">bypassPermissions</Tag>
                 <span style={{ color: "var(--fg-2)" }}>
-                  This agent runs with permission prompts disabled.
-                  Installing it consents to an unattended, elevated
-                  run scoped only by the allowed-tools whitelist
-                  below. Make sure that list is tight.
+                  {t("review.bypassBody")}
                 </span>
               </div>
             )}
 
             <ReviewGrid>
-              <ReviewRow label="Prompt">
+              <ReviewRow label={t("review.rows.prompt")}>
                 <pre
                   style={{
                     margin: 0,
@@ -538,16 +538,16 @@ export function ReviewInstallModal({
                 </pre>
               </ReviewRow>
               {details.system_prompt && (
-                <ReviewRow label="System prompt">
+                <ReviewRow label={t("review.rows.systemPrompt")}>
                   <span style={{ fontFamily: "var(--ff-mono)" }}>
                     {details.system_prompt}
                   </span>
                 </ReviewRow>
               )}
-              <ReviewRow label="Model">
-                {s.model || "(CLI default)"}
+              <ReviewRow label={t("review.rows.model")}>
+                {s.model || t("review.values.cliDefault")}
               </ReviewRow>
-              <ReviewRow label="Working dir">
+              <ReviewRow label={t("review.rows.workingDir")}>
                 <span
                   className="selectable"
                   style={{
@@ -558,37 +558,44 @@ export function ReviewInstallModal({
                   {s.cwd}
                 </span>
               </ReviewRow>
-              <ReviewRow label="Permission mode">
+              <ReviewRow label={t("review.rows.permissionMode")}>
                 {bypassFlagged ? (
                   <Tag tone="danger">{s.permission_mode}</Tag>
                 ) : (
                   <span>{s.permission_mode}</span>
                 )}
               </ReviewRow>
-              <ReviewRow label="Allowed tools">
+              <ReviewRow label={t("review.rows.allowedTools")}>
                 {s.allowed_tools.length > 0 ? (
                   <span style={{ fontFamily: "var(--ff-mono)" }}>
                     {s.allowed_tools.join(", ")}
                   </span>
                 ) : (
-                  <span style={{ color: "var(--fg-3)" }}>none</span>
+                  <span style={{ color: "var(--fg-3)" }}>
+                    {t("review.values.none")}
+                  </span>
                 )}
               </ReviewRow>
               {details.disallowed_tools.length > 0 && (
-                <ReviewRow label="Disallowed tools">
+                <ReviewRow label={t("review.rows.disallowedTools")}>
                   <span style={{ fontFamily: "var(--ff-mono)" }}>
                     {details.disallowed_tools.join(", ")}
                   </span>
                 </ReviewRow>
               )}
-              <ReviewRow label="Trigger">
+              <ReviewRow label={t("review.rows.trigger")}>
+                {/* The cron expression and its IANA timezone are data
+                    and pass through verbatim; only the surrounding
+                    label is translated. */}
                 {s.trigger_kind === "cron"
-                  ? `cron ${s.cron ?? ""}${
-                      s.timezone ? ` (${s.timezone})` : ""
-                    }`
-                  : "manual (Run-Now only)"}
+                  ? t("review.values.triggerCron", {
+                      value: `${s.cron ?? ""}${
+                        s.timezone ? ` (${s.timezone})` : ""
+                      }`,
+                    })
+                  : t("review.values.triggerManual")}
               </ReviewRow>
-              <ReviewRow label="Run as">
+              <ReviewRow label={t("review.rows.runAs")}>
                 {runAsFlagged ? (
                   <div
                     style={{
@@ -607,25 +614,25 @@ export function ReviewInstallModal({
                         fontSize: "var(--fs-xs)",
                       }}
                     >
-                      Per-run credential injection is not yet wired —
-                      this run will use whichever account is CLI-active
-                      at fire time, not the pinned email above.
+                      {t("review.values.runAsWarning")}
                     </span>
                   </div>
                 ) : (
-                  <span>active account at fire time</span>
+                  <span>{t("review.values.activeAccount")}</span>
                 )}
               </ReviewRow>
-              <ReviewRow label="Task budget">
+              <ReviewRow label={t("review.rows.taskBudget")}>
                 {details.task_budget != null
-                  ? `${details.task_budget} tokens/run`
-                  : "no ceiling"}
+                  ? t("review.values.tokensPerRun", {
+                      tokens: details.task_budget,
+                    })
+                  : t("review.values.noCeiling")}
               </ReviewRow>
-              <ReviewRow label="Rate limit">
+              <ReviewRow label={t("review.rows.rateLimit")}>
                 {formatRateLimit(details)}
               </ReviewRow>
               {details.mcp_servers.length > 0 && (
-                <ReviewRow label="MCP servers">
+                <ReviewRow label={t("review.rows.mcpServers")}>
                   {details.mcp_servers
                     .map((m) =>
                       m.kind === "claudepot_memory"
@@ -641,31 +648,48 @@ export function ReviewInstallModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose} disabled={busy}>
-          Cancel
+          {t("actions.cancel")}
         </Button>
         <Button
           variant="solid"
           onClick={confirmInstall}
           disabled={busy || !details}
         >
-          {busy ? "Installing…" : "Install"}
+          {busy ? t("review.installing") : t("review.install")}
         </Button>
       </ModalFooter>
     </Modal>
   );
 }
 
+/**
+ * Plain helper, not a component — it resolves through the module
+ * `i18n` per the non-component convention. It is called during
+ * ReviewInstallModal's render, whose `useTranslation` subscription is
+ * what re-runs it on a language switch.
+ */
 function formatRateLimit(d: AgentDetailsDto): string {
+  const none = i18n.t("review.values.rateNone", { ns: "agents" });
   const rl = d.rate_limit;
-  if (!rl) return "none";
+  if (!rl) return none;
   const parts: string[] = [];
   if (rl.min_interval_secs != null) {
-    parts.push(`min ${rl.min_interval_secs}s between runs`);
+    parts.push(
+      i18n.t("review.values.rateMin", {
+        ns: "agents",
+        secs: rl.min_interval_secs,
+      }),
+    );
   }
   if (rl.max_per_day != null) {
-    parts.push(`max ${rl.max_per_day}/day`);
+    parts.push(
+      i18n.t("review.values.rateMax", {
+        ns: "agents",
+        perDay: rl.max_per_day,
+      }),
+    );
   }
-  return parts.length > 0 ? parts.join(", ") : "none";
+  return parts.length > 0 ? parts.join(", ") : none;
 }
 
 function ReviewGrid({ children }: { children: React.ReactNode }) {

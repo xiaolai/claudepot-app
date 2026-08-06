@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { FieldBlock } from "../../components/primitives/modalParts";
+import { renderError } from "../../lib/i18n-error";
 import { useAppState } from "../../providers/AppStateProvider";
 import type {
   ScheduleDto,
@@ -47,8 +49,9 @@ export function TemplateInstallView({
   onBack,
   onInstalled,
   onOpenThirdParties,
-  backLabel = "Cancel",
+  backLabel,
 }: Props) {
+  const { t } = useTranslation("projects");
   const { pushToast } = useAppState();
   const [details, setDetails] = useState<TemplateDetailsDto | null>(null);
   const [routes, setRoutes] = useState<TemplateRouteSummaryDto[]>([]);
@@ -81,7 +84,7 @@ export function TemplateInstallView({
         setSchedule(initialSchedule(d.allowed_schedule_shapes, d));
       })
       .catch((e: unknown) => {
-        if (!cancelled) pushToast("error", String(e));
+        if (!cancelled) pushToast("error", renderError(e));
       });
     return () => {
       cancelled = true;
@@ -109,7 +112,7 @@ export function TemplateInstallView({
       onInstalled();
     } catch (e: unknown) {
       setBusy(false);
-      pushToast("error", String(e));
+      pushToast("error", renderError(e));
     }
   }
 
@@ -129,7 +132,7 @@ export function TemplateInstallView({
           width: "100%",
         }}
       >
-        Loading template…
+        {t("templates.loadingTemplate")}
       </div>
     );
   }
@@ -215,18 +218,18 @@ export function TemplateInstallView({
               fontSize: "var(--fs-sm)",
             }}
           >
-            {sampleOpen ? "Hide" : "View"} sample report
+            {sampleOpen ? t("templates.hideSample") : t("templates.viewSample")}
           </button>
         </div>
 
         {sampleOpen && <TemplateSampleReport templateId={details.summary.id} />}
 
-        <FieldBlock label="What this can do">
+        <FieldBlock label={t("templates.whatCanDo")}>
           <ScopeStatements scope={details.scope} />
         </FieldBlock>
 
         {schedule && (
-          <FieldBlock label="When should it run?">
+          <FieldBlock label={t("templates.whenRun")}>
             <SchedulePicker
               allowedShapes={details.allowed_schedule_shapes}
               defaultShape={pickInitialShape(details.allowed_schedule_shapes)}
@@ -254,7 +257,7 @@ export function TemplateInstallView({
               color: "var(--fg-faint)",
             }}
           >
-            Sends data to your selected route.
+            {t("templates.sendsData")}
           </p>
         )}
       </div>
@@ -272,14 +275,14 @@ export function TemplateInstallView({
         }}
       >
         <Button variant="ghost" onClick={onBack} disabled={busy}>
-          {backLabel}
+          {backLabel ?? t("shared.cancel")}
         </Button>
         <Button
           variant="solid"
           onClick={handleInstall}
           disabled={busy || installDisabled(details, routes)}
         >
-          {busy ? "Installing…" : "Install"}
+          {busy ? t("templates.installing") : t("templates.install")}
         </Button>
       </div>
     </div>

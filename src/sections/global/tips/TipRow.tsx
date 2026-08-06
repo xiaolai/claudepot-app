@@ -4,12 +4,14 @@
 // experiment metadata, raw isRelevant source under disclosure.
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { RenderedTip } from "../../../types/cc-tips";
 
 export function TipRow({ tip }: { tip: RenderedTip }) {
+  const { t } = useTranslation("global");
   const [open, setOpen] = useState(false);
   const hasVariants = tip.prose_b !== null;
 
@@ -17,10 +19,10 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
     tip.seen_status === "seen" ? (
       <Tag tone="ok">
         <Glyph g={NF.check} />
-        seen
+        {t("tips.seen")}
       </Tag>
     ) : (
-      <Tag tone="neutral">never seen</Tag>
+      <Tag tone="neutral">{t("tips.neverSeen")}</Tag>
     );
 
   const summary = hasVariants
@@ -79,18 +81,20 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
             <span>
               {tip.last_seen
                 ? tip.seen_status === "seen"
-                  ? `seen ${tip.last_seen.relative}`
+                  ? t("tips.seenRelative", { relative: tip.last_seen.relative })
                   : null
                 : null}
             </span>
             <span>
               {tip.cooldown_sessions !== null
-                ? `cooldown ${tip.cooldown_sessions}`
+                ? t("tips.cooldown", { n: tip.cooldown_sessions })
                 : null}
             </span>
             <span>{tip.trigger_summary}</span>
             {tip.experiment_flag && (
-              <Tag tone="warn">experiment: {tip.experiment_flag}</Tag>
+              <Tag tone="warn">
+                {t("tips.experiment", { flag: tip.experiment_flag })}
+              </Tag>
             )}
           </div>
         </div>
@@ -110,11 +114,11 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
           {hasVariants ? (
             <>
               <Variant
-                label={tip.condition_label ?? "Variant A"}
+                label={tip.condition_label ?? t("tips.variantA")}
                 prose={tip.prose}
               />
               <Variant
-                label={tip.condition_label_b ?? "Variant B"}
+                label={tip.condition_label_b ?? t("tips.variantB")}
                 prose={tip.prose_b ?? ""}
               />
             </>
@@ -129,10 +133,14 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
                 color: "var(--fg-faint)",
               }}
             >
-              Last seen at startup #{tip.last_seen.startup_count_when_seen}
+              {t("tips.lastSeenAt", {
+                n: tip.last_seen.startup_count_when_seen,
+              })}
               {tip.last_seen.exact_unknown
-                ? " (before snapshot history)"
-                : ` (${tip.last_seen.relative})`}
+                ? t("tips.beforeSnapshot")
+                : t("tips.relativeParen", {
+                    relative: tip.last_seen.relative,
+                  })}
             </p>
           )}
           {tip.relevance_source && (
@@ -144,7 +152,7 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
                   color: "var(--fg-faint)",
                 }}
               >
-                Show advanced trigger logic
+                {t("tips.showTriggerLogic")}
               </summary>
               <pre
                 style={{

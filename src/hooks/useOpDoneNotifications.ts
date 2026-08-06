@@ -1,5 +1,6 @@
 import { useEmit } from "../providers/AppStateProvider";
 import { useTauriEvent } from "./useTauriEvent";
+import { i18n } from "../lib/i18n";
 import type { EmitFn } from "../lib/notifications/dispatch";
 import { redactSecrets } from "../lib/redactSecrets";
 
@@ -41,9 +42,11 @@ interface OpTerminalWire {
 }
 
 function dispatchPayload(emit: EmitFn, payload: OpTerminalWire): void {
+  // `payload.label` is backend-supplied op text, not copy this module
+  // owns — interpolated, never translated.
   const title =
     payload.status === "error"
-      ? `Operation failed: ${payload.label}`
+      ? i18n.t("op.failedTitle", { label: payload.label })
       : payload.label;
   // Defense-in-depth secret redaction. The backend redacts sk-ant-*
   // upstream in most paths, but a panic backtrace or third-party
@@ -64,8 +67,8 @@ function dispatchPayload(emit: EmitFn, payload: OpTerminalWire): void {
     payload.status === "error" && errBody
       ? errBody
       : payload.status === "error"
-        ? "See the running-ops chip for details."
-        : "Done.";
+        ? i18n.t("op.errorFallbackBody")
+        : i18n.t("op.doneBody");
   // dedupeKey per op_id (each op should only ever fire one
   // terminal notification, but the bucket is the right defense
   // against a future bug that double-emits).

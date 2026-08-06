@@ -1,4 +1,5 @@
 import { memo, type MouseEvent, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { BrandGithubMark } from "../../components/primitives/BrandGithubMark";
 import { Glyph } from "../../components/primitives/Glyph";
@@ -130,6 +131,7 @@ export function ProjectsTable({
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, p: ProjectInfo) => void;
 }) {
+  const { t } = useTranslation("projects");
   // Default: last_touched desc — freshest work on top. Clicking a
   // sortable column cycles that column through asc → desc → default.
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
@@ -170,7 +172,7 @@ export function ProjectsTable({
     return (
       <EmptyRow>
         <Glyph g={NF.folder} size="var(--sp-24)" color="var(--fg-ghost)" />
-        <div>No CC projects yet.</div>
+        <div>{t("table.emptyTitle")}</div>
         <div
           style={{
             marginTop: "var(--sp-4)",
@@ -178,8 +180,13 @@ export function ProjectsTable({
             color: "var(--fg-faint)",
           }}
         >
-          Run <code style={{ fontFamily: "var(--font)" }}>claude</code>{" "}
-          in any directory to create one.
+          <Trans
+            ns="projects"
+            i18nKey="table.emptyHint"
+            components={{
+              cmd: <code style={{ fontFamily: "var(--font)" }}>claude</code>,
+            }}
+          />
         </div>
       </EmptyRow>
     );
@@ -209,29 +216,29 @@ export function ProjectsTable({
       >
         <span />
         <SortHeader
-          label="Project"
+          label={t("table.colProject")}
           col="path"
           currentKey={sort.key}
           currentDir={sort.dir}
           onToggle={toggleSort}
         />
         <SortHeader
-          label="Sessions"
+          label={t("table.colSessions")}
           col="session_count"
           currentKey={sort.key}
           currentDir={sort.dir}
           onToggle={toggleSort}
         />
         <SortHeader
-          label="Size"
+          label={t("table.colSize")}
           col="size"
           currentKey={sort.key}
           currentDir={sort.dir}
           onToggle={toggleSort}
         />
-        <span>Status</span>
+        <span>{t("table.colStatus")}</span>
         <SortHeader
-          label="Last touched"
+          label={t("table.colLastTouched")}
           col="last_touched"
           currentKey={sort.key}
           currentDir={sort.dir}
@@ -241,11 +248,11 @@ export function ProjectsTable({
       </div>
 
       {shown.length === 0 ? (
-        <EmptyRow>No projects in this filter.</EmptyRow>
+        <EmptyRow>{t("table.emptyFilter")}</EmptyRow>
       ) : (
         <ul
           role="listbox"
-          aria-label="Projects"
+          aria-label={t("table.listAria")}
           style={{ listStyle: "none", margin: 0, padding: 0 }}
         >
           {shown.map((p) => (
@@ -291,6 +298,7 @@ const ProjectRow = memo(function ProjectRow({
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, p: ProjectInfo) => void;
 }) {
+  const { t } = useTranslation("projects");
   const [hover, setHover] = useState(false);
   const status = classifyProject(p);
   // Cross-platform basename — see projectBasename above (audit #11).
@@ -368,8 +376,11 @@ const ProjectRow = memo(function ProjectRow({
                 e.stopPropagation();
                 if (p.pr) void openUrl(p.pr.url).catch(() => {});
               }}
-              title={`PR #${p.pr.number} — ${p.pr.state}`}
-              aria-label={`Open pull request #${p.pr.number} for ${name}`}
+              title={t("table.prTitle", {
+                number: p.pr.number,
+                state: p.pr.state,
+              })}
+              aria-label={t("table.prAria", { number: p.pr.number, name })}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -473,8 +484,8 @@ const ProjectRow = memo(function ProjectRow({
                   p,
                 );
               }}
-              title="More actions"
-              aria-label={`More actions for ${name}`}
+              title={t("table.moreActionsTitle")}
+              aria-label={t("table.moreActionsAria", { name })}
               aria-haspopup="menu"
             />
           </span>
@@ -500,6 +511,7 @@ const ProjectRow = memo(function ProjectRow({
  * a sighted-user glance signal.
  */
 function LiveDotCluster({ live }: { live: LiveSessionSummary[] }) {
+  const { t } = useTranslation("projects");
   const MAX = 5;
   const visible = live.slice(0, MAX);
   const overflow = live.length - visible.length;
@@ -515,7 +527,7 @@ function LiveDotCluster({ live }: { live: LiveSessionSummary[] }) {
             status={s.status}
             errored={s.errored}
             title={verb}
-            aria-label={`Session ${verb}`}
+            aria-label={t("status.liveSessionAria", { verb })}
           />
         );
       })}
@@ -559,6 +571,7 @@ function SortHeader({
   currentDir: SortDir;
   onToggle: (key: SortKey) => void;
 }) {
+  const { t } = useTranslation("projects");
   const active = currentKey === col;
   const aria: "ascending" | "descending" | "none" = active
     ? currentDir === "asc"
@@ -571,7 +584,7 @@ function SortHeader({
       role="columnheader"
       aria-sort={aria}
       onClick={() => onToggle(col)}
-      title={`Sort by ${label.toLowerCase()}`}
+      title={t("table.sortTitle", { column: label.toLowerCase() })}
       style={{
         background: "transparent",
         border: 0,
@@ -600,23 +613,24 @@ function SortHeader({
 }
 
 function StatusTag({ status }: { status: ProjectStatus }) {
+  const { t } = useTranslation("projects");
   switch (status) {
     case "orphan":
       return (
-        <Tag tone="warn" glyph={NF.warn} title="Source directory is missing">
-          orphan
+        <Tag tone="warn" glyph={NF.warn} title={t("status.orphanTitle")}>
+          {t("status.orphan")}
         </Tag>
       );
     case "unreachable":
       return (
-        <Tag tone="neutral" title="Volume unmounted or permission denied">
-          offline
+        <Tag tone="neutral" title={t("status.offlineTitle")}>
+          {t("status.offline")}
         </Tag>
       );
     case "empty":
       return (
-        <Tag tone="ghost" title="No sessions or memory files">
-          empty
+        <Tag tone="ghost" title={t("status.emptyTitle")}>
+          {t("status.empty")}
         </Tag>
       );
     case "alive":

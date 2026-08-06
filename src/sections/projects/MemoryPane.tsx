@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type {
   AutoMemoryStateDto,
   MemoryChange,
@@ -33,6 +36,7 @@ interface MemoryPaneProps {
  * land in real time when they have the pane open.
  */
 export function MemoryPane({ projectRoot }: MemoryPaneProps) {
+  const { t } = useTranslation("projects");
   const [data, setData] = useState<MemoryEnumerate | null>(null);
   const [autoMem, setAutoMem] = useState<AutoMemoryStateDto | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -62,7 +66,7 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
         return list.files[0]?.abs_path ?? null;
       });
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
     }
   }, [projectRoot]);
 
@@ -107,7 +111,7 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
       .catch((e) => {
         if (!cancelled) {
           setContent("");
-          setContentError(String(e));
+          setContentError(renderError(e));
         }
       })
       .finally(() => {
@@ -131,8 +135,8 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
   if (error) {
     return (
       <section className="memory-pane">
-        <SectionLabel>Memory</SectionLabel>
-        <p className="muted small">Failed to load memory: {error}</p>
+        <SectionLabel>{t("memory.heading")}</SectionLabel>
+        <p className="muted small">{t("memory.loadFailed", { error })}</p>
       </section>
     );
   }
@@ -140,7 +144,7 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
   return (
     <section className="memory-pane">
       <header className="memory-pane__header">
-        <SectionLabel>Memory</SectionLabel>
+        <SectionLabel>{t("memory.heading")}</SectionLabel>
         {autoMem && (
           <PerProjectAutoMemoryToggle
             state={autoMem}
@@ -152,52 +156,68 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
 
       {data && data.files.length === 0 && (
         <p className="muted small memory-pane__empty">
-          No memory files yet. CC writes auto-memory to{" "}
-          <code className="mono small">{data.anchor.auto_memory_dir}</code>{" "}
-          after sessions; project CLAUDE.md is created when you write one.
+          <Trans
+            ns="projects"
+            i18nKey="memory.empty"
+            components={{
+              dir: (
+                <code className="mono small">
+                  {data.anchor.auto_memory_dir}
+                </code>
+              ),
+            }}
+          />
         </p>
       )}
 
       {data && data.files.length > 0 && (
         <div className="memory-pane__body">
           <aside className="memory-pane__filelist">
-            {groups.map((g) => (
-              <div key={g.label} className="memory-pane__filegroup">
-                <span className="memory-pane__grouplabel">{g.label}</span>
-                <ul role="listbox" aria-label={`${g.label} files`}>
-                  {g.files.map((f) => (
-                    <li
-                      key={f.abs_path}
-                      role="option"
-                      aria-selected={f.abs_path === selectedPath}
-                      tabIndex={0}
-                      // Per .claude/rules/path-display.md state B: row
-                      // shows the basename only; tooltip discloses the
-                      // full path. Canonical copy site is the viewer
-                      // header (CopyButton on the selected file).
-                      title={f.abs_path}
-                      onClick={() => setSelectedPath(f.abs_path)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setSelectedPath(f.abs_path);
+            {groups.map((g) => {
+              const groupLabel = groupLabelFor(t, g.id);
+              return (
+                <div key={g.id} className="memory-pane__filegroup">
+                  <span className="memory-pane__grouplabel">{groupLabel}</span>
+                  <ul
+                    role="listbox"
+                    aria-label={t("memory.groupFilesAria", {
+                      group: groupLabel,
+                    })}
+                  >
+                    {g.files.map((f) => (
+                      <li
+                        key={f.abs_path}
+                        role="option"
+                        aria-selected={f.abs_path === selectedPath}
+                        tabIndex={0}
+                        // Per .claude/rules/path-display.md state B: row
+                        // shows the basename only; tooltip discloses the
+                        // full path. Canonical copy site is the viewer
+                        // header (CopyButton on the selected file).
+                        title={f.abs_path}
+                        onClick={() => setSelectedPath(f.abs_path)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedPath(f.abs_path);
+                          }
+                        }}
+                        className={
+                          f.abs_path === selectedPath
+                            ? "memory-pane__fileitem memory-pane__fileitem--selected"
+                            : "memory-pane__fileitem"
                         }
-                      }}
-                      className={
-                        f.abs_path === selectedPath
-                          ? "memory-pane__fileitem memory-pane__fileitem--selected"
-                          : "memory-pane__fileitem"
-                      }
-                    >
-                      <span className="memory-pane__filebasename">
-                        {filePillLabel(f, projectRoot)}
-                      </span>
-                      <FileBadges file={f} />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+                      >
+                        <span className="memory-pane__filebasename">
+                          {filePillLabel(f, projectRoot)}
+                        </span>
+                        <FileBadges file={f} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </aside>
 
           <div className="memory-pane__viewer">
@@ -219,9 +239,11 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
                 </span>
               )}
             </div>
-            {contentLoading && <p className="muted small">Loading…</p>}
+            {contentLoading && <p className="muted small">{t("shared.loading")}</p>}
             {contentError && (
-              <p className="muted small">Read failed: {contentError}</p>
+              <p className="muted small">
+                {t("memory.readFailed", { error: contentError })}
+              </p>
             )}
             {!contentLoading && !contentError && (
               <div className="memory-pane__content">
@@ -235,7 +257,9 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
 
             {changes.length > 0 && (
               <div className="memory-pane__changelog">
-                <SectionLabel>{`Change log · ${changes.length}`}</SectionLabel>
+                <SectionLabel>
+                  {t("memory.changeLog", { n: changes.length })}
+                </SectionLabel>
                 <ul>
                   {changes.map((c) => (
                     <ChangeRow
@@ -257,9 +281,22 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
   );
 }
 
+type FileGroupId = "project" | "auto" | "global";
+
 interface FileGroup {
-  label: string;
+  id: FileGroupId;
   files: MemoryFileSummary[];
+}
+
+function groupLabelFor(t: TFunction<"projects">, id: FileGroupId): string {
+  switch (id) {
+    case "project":
+      return t("memory.groupProject");
+    case "auto":
+      return t("memory.groupAuto");
+    case "global":
+      return t("memory.groupGlobal");
+  }
 }
 
 function groupFiles(files: MemoryFileSummary[]): FileGroup[] {
@@ -279,9 +316,9 @@ function groupFiles(files: MemoryFileSummary[]): FileGroup[] {
     }
   }
   const out: FileGroup[] = [];
-  if (project.length) out.push({ label: "Project", files: project });
-  if (auto.length) out.push({ label: "Auto-memory", files: auto });
-  if (global.length) out.push({ label: "Global", files: global });
+  if (project.length) out.push({ id: "project", files: project });
+  if (auto.length) out.push({ id: "auto", files: auto });
+  if (global.length) out.push({ id: "global", files: global });
   return out;
 }
 
@@ -337,14 +374,22 @@ interface FileBadgesProps {
 }
 
 function FileBadges({ file }: FileBadgesProps) {
+  const { t } = useTranslation("projects");
   const recent = isRecent(file.last_change_unix_ns);
   return (
     <span className="memory-pane__filemeta">
       <span className="memory-pane__filesize">{formatSize(file.size_bytes)}</span>
       {file.lines_past_cutoff && file.lines_past_cutoff > 0 ? (
-        <Tag tone="warn">+{file.lines_past_cutoff} past 200</Tag>
+        <Tag tone="warn">
+          {t("memory.pastCutoff", { n: file.lines_past_cutoff })}
+        </Tag>
       ) : null}
-      {recent ? <span className="memory-pane__dot" aria-label="recently changed" /> : null}
+      {recent ? (
+        <span
+          className="memory-pane__dot"
+          aria-label={t("memory.recentAria")}
+        />
+      ) : null}
     </span>
   );
 }
@@ -362,13 +407,14 @@ interface ChangeRowProps {
 }
 
 function ChangeRow({ change, expanded, onToggle }: ChangeRowProps) {
+  const { t } = useTranslation("projects");
   const ms = Math.floor(change.detected_at_ns / 1_000_000);
   const summary =
     change.size_before != null && change.size_after != null
       ? `${formatSize(change.size_before)} → ${formatSize(change.size_after)}`
       : change.change_type === "created"
-        ? `created · ${formatSize(change.size_after ?? 0)}`
-        : `deleted · ${formatSize(change.size_before ?? 0)}`;
+        ? t("memory.created", { size: formatSize(change.size_after ?? 0) })
+        : t("memory.deleted", { size: formatSize(change.size_before ?? 0) });
   const canExpand = !!change.diff_text;
   return (
     <li className="memory-pane__changerow">
@@ -390,7 +436,7 @@ function ChangeRow({ change, expanded, onToggle }: ChangeRowProps) {
           <Glyph g={expanded ? NF.chevronD : NF.chevronR} />
         ) : (
           <span className="memory-pane__changereason">
-            {diffOmitLabel(change.diff_omit_reason)}
+            {diffOmitLabel(t, change.diff_omit_reason)}
           </span>
         )}
       </button>
@@ -401,16 +447,19 @@ function ChangeRow({ change, expanded, onToggle }: ChangeRowProps) {
   );
 }
 
-function diffOmitLabel(reason: MemoryChange["diff_omit_reason"]): string {
+function diffOmitLabel(
+  t: TFunction<"projects">,
+  reason: MemoryChange["diff_omit_reason"],
+): string {
   switch (reason) {
     case "too_large":
-      return "(too large)";
+      return t("memory.omitTooLarge");
     case "binary":
-      return "(binary)";
+      return t("memory.omitBinary");
     case "endpoint":
       return "";
     case "baseline":
-      return "(baseline)";
+      return t("memory.omitBaseline");
     case null:
     default:
       return "";
@@ -428,6 +477,7 @@ function PerProjectAutoMemoryToggle({
   projectRoot,
   onChange,
 }: PerProjectAutoMemoryToggleProps) {
+  const { t } = useTranslation("projects");
   const [busy, setBusy] = useState(false);
   const overridden =
     state.decided_by === "env_disable" || state.decided_by === "env_simple";
@@ -451,15 +501,15 @@ function PerProjectAutoMemoryToggle({
     return (
       <span className="memory-pane__toggle memory-pane__toggle--locked">
         <Tag tone={state.effective ? "neutral" : "warn"}>
-          auto-memory {state.effective ? "on" : "off"}
+          {state.effective ? t("memory.autoOn") : t("memory.autoOff")}
         </Tag>
-        <span className="muted small">overridden by env var</span>
+        <span className="muted small">{t("memory.envOverridden")}</span>
       </span>
     );
   }
 
   const localValue = state.local_project_settings_value;
-  const status = state.effective ? "ENABLED" : "DISABLED";
+  const status = state.effective ? t("memory.enabled") : t("memory.disabled");
   return (
     <span className="memory-pane__toggle">
       <Tag tone={state.effective ? "neutral" : "warn"}>{status}</Tag>
@@ -471,8 +521,8 @@ function PerProjectAutoMemoryToggle({
           onClick={() => void setValue(true)}
           disabled={busy || localValue === true}
           aria-pressed={localValue === true}
-          title="Enable auto-memory for this project"
-          aria-label="Enable auto-memory for this project"
+          title={t("memory.enableTitle")}
+          aria-label={t("memory.enableTitle")}
         />
         <IconButton
           glyph={NF.x}
@@ -480,8 +530,8 @@ function PerProjectAutoMemoryToggle({
           onClick={() => void setValue(false)}
           disabled={busy || localValue === false}
           aria-pressed={localValue === false}
-          title="Disable auto-memory for this project"
-          aria-label="Disable auto-memory for this project"
+          title={t("memory.disableTitle")}
+          aria-label={t("memory.disableTitle")}
         />
         {localValue !== null && (
           <IconButton
@@ -489,16 +539,21 @@ function PerProjectAutoMemoryToggle({
             size="sm"
             onClick={() => void setValue(null)}
             disabled={busy}
-            title="Clear the project-scope override"
-            aria-label="Clear the project-scope override"
+            title={t("memory.clearTitle")}
+            aria-label={t("memory.clearTitle")}
           />
         )}
       </span>
       {state.local_settings_gitignored === false && (
         <p className="muted small memory-pane__gitignore-hint">
-          ⚠ <code className="mono">.gitignore</code> doesn't cover{" "}
-          <code className="mono">settings.local.json</code> — this override
-          could be committed by accident.
+          <Trans
+            ns="projects"
+            i18nKey="memory.gitignoreHint"
+            components={{
+              gi: <code className="mono">.gitignore</code>,
+              slj: <code className="mono">settings.local.json</code>,
+            }}
+          />
         </p>
       )}
     </span>
@@ -511,8 +566,13 @@ interface ViewToggleProps {
 }
 
 function ViewToggle({ mode, onChange }: ViewToggleProps) {
+  const { t } = useTranslation("projects");
   return (
-    <span className="memory-pane__viewtoggle" role="group" aria-label="View mode">
+    <span
+      className="memory-pane__viewtoggle"
+      role="group"
+      aria-label={t("memory.viewAria")}
+    >
       <button
         type="button"
         className={
@@ -523,7 +583,7 @@ function ViewToggle({ mode, onChange }: ViewToggleProps) {
         onClick={() => onChange("rendered")}
         aria-pressed={mode === "rendered"}
       >
-        Rendered
+        {t("memory.rendered")}
       </button>
       <button
         type="button"
@@ -535,7 +595,7 @@ function ViewToggle({ mode, onChange }: ViewToggleProps) {
         onClick={() => onChange("raw")}
         aria-pressed={mode === "raw"}
       >
-        Raw
+        {t("memory.raw")}
       </button>
     </span>
   );
@@ -552,6 +612,7 @@ interface OpenWithMenuProps {
  * the system handler — same posture as Reveal-in-Finder.
  */
 function OpenWithMenu({ absPath }: OpenWithMenuProps) {
+  const { t } = useTranslation("projects");
   const [editors, setEditors] = useState<EditorCandidateDto[] | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -602,9 +663,9 @@ function OpenWithMenu({ absPath }: OpenWithMenuProps) {
         disabled={busy}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Open this file in an external editor"
+        title={t("memory.openWithTitle")}
       >
-        Open with…
+        {t("memory.openWith")}
       </Button>
       {open && (
         <div role="menu" className="memory-pane__openwith-menu">
@@ -615,15 +676,15 @@ function OpenWithMenu({ absPath }: OpenWithMenuProps) {
             onClick={() => void launch(null)}
             disabled={busy}
           >
-            System default
+            {t("memory.systemDefault")}
           </button>
           {editors === null ? (
             <span className="memory-pane__openwith-loading muted small">
-              Detecting editors…
+              {t("memory.detecting")}
             </span>
           ) : editors.length === 0 ? (
             <span className="memory-pane__openwith-loading muted small">
-              No editors detected
+              {t("memory.noEditors")}
             </span>
           ) : (
             editors.map((ed) => (

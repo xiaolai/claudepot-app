@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { AutoDreamMode, AutoDreamState } from "../../api/auto-dream";
 import { Button } from "../../components/primitives/Button";
+import { renderError } from "../../lib/i18n-error";
 import { useAppState } from "../../providers/AppStateProvider";
 
 // Global → Memory, directly below Auto-memory.
@@ -19,6 +21,7 @@ import { useAppState } from "../../providers/AppStateProvider";
 // control is disabled with the dependency stated inline (design.md:
 // "disabled buttons state a reason inline").
 export function AutoDreamGlobalCard() {
+  const { t } = useTranslation("global");
   const { pushToast } = useAppState();
   const [state, setState] = useState<AutoDreamState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -28,9 +31,9 @@ export function AutoDreamGlobalCard() {
     try {
       setState(await api.autoDreamState());
     } catch (e) {
-      pushToast("error", `Consolidation state load failed: ${e}`);
+      pushToast("error", renderError(e, t("dream.loadFailed")));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     void refresh();
@@ -46,28 +49,28 @@ export function AutoDreamGlobalCard() {
       pushToast(
         "info",
         next === "default"
-          ? "Consolidation follows Claude Code's default."
+          ? t("dream.followsDefaultToast")
           : next === "on"
-            ? "Background consolidation on."
-            : "Background consolidation off.",
+            ? t("dream.onToast")
+            : t("dream.offToast"),
       );
     } catch (e) {
-      pushToast("error", `Toggle failed: ${e}`);
+      pushToast("error", renderError(e, t("dream.toggleFailed")));
     } finally {
       setBusy(false);
     }
   };
 
   const description = !state
-    ? "Loading…"
+    ? t("dream.loading")
     : depOff
-      ? "Requires auto-memory, which is off — consolidation won't run until it's enabled above."
-      : "Lets Claude Code review recent sessions in the background and distill them into memory. Default follows Claude Code's own rollout; override it here.";
+      ? t("dream.requiresAutoMemory")
+      : t("dream.description");
 
   const OPTIONS: { value: AutoDreamMode; label: string }[] = [
-    { value: "default", label: "Default" },
-    { value: "on", label: "On" },
-    { value: "off", label: "Off" },
+    { value: "default", label: t("dream.modeDefault") },
+    { value: "on", label: t("dream.modeOn") },
+    { value: "off", label: t("dream.modeOff") },
   ];
   const current: AutoDreamMode = state?.mode ?? "default";
 
@@ -86,7 +89,7 @@ export function AutoDreamGlobalCard() {
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
         <div style={{ fontSize: "var(--fs-sm)", fontWeight: 500, color: "var(--fg)" }}>
-          Background memory consolidation
+          {t("dream.title")}
         </div>
         <div
           id={hintId}
@@ -101,7 +104,7 @@ export function AutoDreamGlobalCard() {
       </div>
       <div
         role="group"
-        aria-label="Background memory consolidation"
+        aria-label={t("dream.title")}
         aria-describedby={hintId}
         style={{ display: "inline-flex", gap: "var(--sp-4)" }}
       >

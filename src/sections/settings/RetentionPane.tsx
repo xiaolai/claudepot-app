@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { i18n } from "../../lib/i18n";
+import { formatNumber } from "../../lib/intl";
 import type { RetentionReport } from "../../api/cc-retention";
 import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
-import { toastError } from "../../lib/toastError";
+import { renderError, toastError } from "../../lib/i18n-error";
 
 // Settings → Retention.
 //
@@ -26,12 +29,18 @@ import { toastError } from "../../lib/toastError";
 //     in CC's cache directory under CC's rules. Say so, or a big
 //     number reads as "solved".
 
-/** Stops on the scale. `0` is deliberately absent — see rule 2. */
+/** Stops on the scale. `0` is deliberately absent — see rule 2.
+ *  Labels resolve through the catalog at access time so a locale
+ *  change re-renders them without this module needing React. */
 const PRESETS: { days: number; label: string }[] = [
-  { days: 30, label: "30 days" },
-  { days: 90, label: "90 days" },
-  { days: 365, label: "1 year" },
-  { days: 3650, label: "10 years" },
+  { days: 30,
+    get label() { return i18n.t("retention.preset30", { ns: "settings" }); } },
+  { days: 90,
+    get label() { return i18n.t("retention.preset90", { ns: "settings" }); } },
+  { days: 365,
+    get label() { return i18n.t("retention.preset365", { ns: "settings" }); } },
+  { days: 3650,
+    get label() { return i18n.t("retention.preset3650", { ns: "settings" }); } },
 ];
 
 function fmtDate(ms: number | null): string | null {
@@ -44,6 +53,7 @@ export function RetentionPane({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [report, setReport] = useState<RetentionReport | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,10 +68,10 @@ export function RetentionPane({
       // A pane that sits on "Loading…" forever after a failed toast
       // reads as "still working", which in this pane specifically
       // implies "still safe". Fail visibly instead.
-      setLoadError(e instanceof Error ? e.message : String(e));
-      toastError(pushToast, "Retention load failed", e);
+      setLoadError(renderError(e));
+      toastError(pushToast, t("retention.loadFailed"), e);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     void refresh();
@@ -73,7 +83,7 @@ export function RetentionPane({
       setReport(await fn());
       pushToast("info", msg);
     } catch (e) {
-      toastError(pushToast, "Change retention", e);
+      toastError(pushToast, t("retention.changeFailed"), e);
     } finally {
       setBusy(false);
       setConfirmClear(false);
@@ -85,21 +95,20 @@ export function RetentionPane({
     return (
       <div style={{ display: "grid", gap: "var(--sp-12)", justifyItems: "start" }}>
         <div style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>
-          Couldn&rsquo;t read Claude Code&rsquo;s retention setting, so this
-          pane cannot tell you what is scheduled for deletion.
+          {t("retention.loadErrorLead")}
         </div>
         <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-xs)" }}>
           {loadError}
         </div>
         <Button variant="outline" onClick={() => void refresh()}>
-          Try again
+          {t("retention.tryAgain")}
         </Button>
       </div>
     );
   }
 
   if (!report) {
-    return <div style={{ color: "var(--fg-faint)" }}>Loading…</div>;
+    return <div style={{ color: "var(--fg-faint)" }}>{t("shared.loading")}</div>;
   }
 
   const { state, risk, is_durable_archive } = report;
@@ -116,12 +125,12 @@ export function RetentionPane({
 
   const modeLine =
     state.mode === "cc_default"
-      ? `${state.effective_days} days — Claude Code's default, not a choice you made`
+      ? t("retention.modeDefault", { days: state.effective_days })
       : state.mode === "persistence_disabled"
-        ? "Transcripts are not being saved at all"
+        ? t("retention.modeDisabled")
         : state.mode === "invalid"
-          ? `Invalid value (${state.configured_days}) — Claude Code's settings schema rejects it`
-          : `${state.effective_days} days`;
+          ? t("retention.modeInvalid", { days: state.configured_days })
+          : t("retention.modeDays", { days: state.effective_days });
 
   return (
     <div
@@ -133,7 +142,7 @@ export function RetentionPane({
       }}
     >
       <div>
-        <SectionLabel>Transcript retention</SectionLabel>
+        <SectionLabel>{t("retention.sectionTitle")}</SectionLabel>
         <div
           style={{
             fontSize: "var(--fs-md)",
@@ -156,52 +165,55 @@ export function RetentionPane({
         >
           {risk.already_deletable > 0 && (
             <div style={{ color: "var(--danger)" }}>
-              {risk.already_deletable.toLocaleString()} transcript
-              {risk.already_deletable === 1 ? "" : "s"} will be deleted the
-              next time Claude Code starts.
+              {t("retention.risk.deletable", {
+                count: risk.already_deletable,
+                num: formatNumber(risk.already_deletable),
+              })}
             </div>
           )}
           {risk.at_risk_within_horizon > 0 && (
             <div style={{ color: "var(--warn)" }}>
-              {risk.at_risk_within_horizon.toLocaleString()} more cross the
-              cutoff within {risk.horizon_days} days.
+              {t("retention.risk.horizon", {
+                num: formatNumber(risk.at_risk_within_horizon),
+                days: risk.horizon_days,
+              })}
             </div>
           )}
           {/* Never reassure on an incomplete scan — a permissions
               failure must not read as "all clear". */}
           {risk.scan_incomplete && (
             <div style={{ color: "var(--warn)" }}>
-              Part of Claude Code&rsquo;s transcript folder couldn&rsquo;t be
-              read, so these counts are a floor, not a total.
+              {t("retention.risk.scanIncomplete")}
             </div>
           )}
           {atRiskTotal === 0 &&
             !risk.scan_incomplete &&
             state.mode !== "persistence_disabled" && (
               <div>
-                Nothing is scheduled for deletion.
+                {t("retention.risk.nothing")}
                 {/* render-if-nonzero: never ship "0 transcripts". */}
                 {risk.total_transcripts > 0 && (
-                  <> {risk.total_transcripts.toLocaleString()} transcripts on this machine.</>
+                  <>
+                    {" "}
+                    {t("retention.risk.totalOnMachine", {
+                      num: formatNumber(risk.total_transcripts),
+                    })}
+                  </>
                 )}
               </div>
             )}
           {state.cleanup_suppressed && (
             <div style={{ color: "var(--warn)" }}>
-              Claude Code is skipping cleanup entirely because this value
-              makes its settings file invalid. That is protecting your
-              transcripts by accident — correct the value rather than
-              restoring the default, which would re-arm deletion.
+              {t("retention.risk.suppressed")}
             </div>
           )}
           {oldest && (
             <div style={{ marginTop: "var(--sp-3)" }}>
-              Oldest surviving conversation: {oldest}.
+              {t("retention.risk.oldest", { date: oldest })}
             </div>
           )}
           <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
-            Claude Code does this silently — it never reports what it
-            deleted.
+            {t("retention.risk.silent")}
           </div>
         </div>
       </div>
@@ -216,17 +228,15 @@ export function RetentionPane({
             lineHeight: "var(--lh-body)",
           }}
         >
-          Cleanup only removes the {risk.total_transcripts.toLocaleString()}{" "}
-          top-level session transcripts.{" "}
-          {risk.nested_immortal.toLocaleString()} nested files (subagent
-          runs, tool results) are never removed, so the folder keeps
-          growing while conversations are deleted — disk usage cannot
-          reveal this loss.
+          {t("retention.nestedNote", {
+            total: formatNumber(risk.total_transcripts),
+            nested: formatNumber(risk.nested_immortal),
+          })}
         </div>
       )}
 
       <div>
-        <SectionLabel>Keep transcripts for</SectionLabel>
+        <SectionLabel>{t("retention.keepFor")}</SectionLabel>
         <div
           style={{
             display: "flex",
@@ -247,7 +257,7 @@ export function RetentionPane({
                 onClick={() =>
                   void run(
                     () => api.retentionSet(p.days),
-                    `Claude Code will keep transcripts for ${p.label}.`,
+                    t("retention.keepToast", { label: p.label }),
                   )
                 }
               >
@@ -268,7 +278,7 @@ export function RetentionPane({
               color: "var(--fg-muted)",
             }}
           >
-            Saving retention…
+            {t("retention.savingNote")}
           </div>
         )}
         {!is_durable_archive && (
@@ -280,16 +290,13 @@ export function RetentionPane({
               lineHeight: "var(--lh-body)",
             }}
           >
-            A longer window buys time; it is not a backup. These files
-            still live in Claude Code's cache directory under Claude
-            Code's rules, and they grow by roughly a gigabyte a week on
-            heavy use.
+            {t("retention.bufferNote")}
           </div>
         )}
       </div>
 
       <div>
-        <SectionLabel>Danger zone</SectionLabel>
+        <SectionLabel>{t("retention.dangerZone")}</SectionLabel>
         <div
           style={{
             display: "flex",
@@ -304,7 +311,7 @@ export function RetentionPane({
               disabled={busy}
               onClick={() => setConfirmClear(true)}
             >
-              Restore Claude Code's default
+              {t("retention.restoreDefaultBtn")}
             </Button>
           )}
           {state.mode !== "persistence_disabled" && (
@@ -314,7 +321,7 @@ export function RetentionPane({
               disabled={busy}
               onClick={() => setConfirmDisable(true)}
             >
-              Stop saving transcripts entirely
+              {t("retention.stopSavingBtn")}
             </Button>
           )}
         </div>
@@ -325,73 +332,70 @@ export function RetentionPane({
             color: "var(--fg-faint)",
           }}
         >
-          Both re-enable deletion. Neither can be undone for transcripts
-          already removed.
+          {t("retention.dangerNote")}
         </div>
       </div>
 
       {confirmClear && (
         <ConfirmDialog
-          title="Restore Claude Code's default retention?"
+          title={t("retention.confirmRestore.title")}
           body={
-            <>
-              Retention returns to <strong>30 days</strong>. Claude Code
-              will delete every transcript older than that the next time
-              it starts
-              {risk.total_transcripts > 0 && (
-                <>
-                  {" "}
-                  — {risk.total_transcripts.toLocaleString()} transcripts
-                  are currently kept
-                </>
-              )}
-              . This cannot be undone.
-            </>
+            risk.total_transcripts > 0 ? (
+              <Trans
+                ns="settings"
+                i18nKey="retention.confirmRestore.bodyCount"
+                components={{ strong: <strong /> }}
+                values={{ num: formatNumber(risk.total_transcripts) }}
+              />
+            ) : (
+              <Trans
+                ns="settings"
+                i18nKey="retention.confirmRestore.body"
+                components={{ strong: <strong /> }}
+              />
+            )
           }
-          confirmLabel="Restore default"
+          confirmLabel={t("retention.confirmRestore.confirm")}
           confirmDanger
           onCancel={() => setConfirmClear(false)}
           onConfirm={() =>
-            void run(
-              () => api.retentionClear(),
-              "Retention restored to Claude Code's 30-day default.",
-            )
+            void run(() => api.retentionClear(), t("retention.restoredToast"))
           }
         />
       )}
 
       {confirmDisable && (
         <ConfirmDangerousAction
-          title="Stop saving transcripts entirely?"
+          title={t("retention.confirmDisable.title")}
           consequences={
             <>
               <p>
-                This writes <code>cleanupPeriodDays: 0</code>, which does
-                two things:
+                <Trans
+                  ns="settings"
+                  i18nKey="retention.confirmDisable.intro"
+                  components={{ code: <code /> }}
+                />
               </p>
               <ul>
-                <li>Claude Code stops writing transcripts for new sessions.</li>
+                <li>{t("retention.confirmDisable.li1")}</li>
                 <li>
-                  Every existing transcript
-                  {risk.total_transcripts > 0 && (
-                    <> ({risk.total_transcripts.toLocaleString()} on this machine)</>
-                  )}{" "}
-                  is deleted the next time Claude Code starts.
+                  {risk.total_transcripts > 0
+                    ? t("retention.confirmDisable.li2Count", {
+                        num: formatNumber(risk.total_transcripts),
+                      })
+                    : t("retention.confirmDisable.li2")}
                 </li>
               </ul>
-              <p>
-                Session resume, search, and every Claudepot surface built
-                on transcripts stop working. This cannot be undone.
-              </p>
+              <p>{t("retention.confirmDisable.outro")}</p>
             </>
           }
-          confirmLabel="Stop saving and delete"
-          typeToConfirm="delete my transcripts"
+          confirmLabel={t("retention.confirmDisable.confirm")}
+          typeToConfirm={t("retention.confirmDisable.phrase")}
           onCancel={() => setConfirmDisable(false)}
           onConfirm={() =>
             void run(
               () => api.retentionDisablePersistence(),
-              "Transcript persistence disabled.",
+              t("retention.disabledToast"),
             )
           }
         />

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { useOperations } from "../../hooks/useOperations";
 import { useAppState } from "../../providers/AppStateProvider";
 import type { JournalEntry } from "../../types";
@@ -17,6 +19,7 @@ export function RepairView({
   onOpTerminated?: () => void;
   embedded?: boolean;
 }) {
+  const { t } = useTranslation("projects");
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +38,7 @@ export function RepairView({
         setLoading(false);
         setError(null);
       })
-      .catch((e) => { setError(String(e)); setLoading(false); });
+      .catch((e) => { setError(renderError(e)); setLoading(false); });
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -44,13 +47,18 @@ export function RepairView({
   // show a "Done." toast. Previously both onComplete and onError
   // pointed at the same afterTerminal which always set "Done." —
   // indistinguishable from success at the page level.
+  const kindLabel = (kind: "Resume" | "Rollback") =>
+    kind === "Resume" ? t("repair.kindResume") : t("repair.kindRollback");
   const afterComplete = (kind: "Resume" | "Rollback", id: string) => {
-    pushToast("info", `${kind} complete: ${id}`);
+    pushToast("info", t("repair.completeToast", { kind: kindLabel(kind), id }));
     refresh();
     onOpTerminated?.();
   };
   const afterError = (kind: "Resume" | "Rollback", id: string, detail: string | null) => {
-    pushToast("error", `${kind} failed: ${detail ?? id}`);
+    pushToast(
+      "error",
+      renderError(detail ?? id, t("repair.failedScope", { kind: kindLabel(kind) })),
+    );
     refresh();
     onOpTerminated?.();
   };
@@ -61,11 +69,11 @@ export function RepairView({
       const opId = await api.repairResumeStart(entry.id);
       openOpModal({
         opId,
-        title: `Resuming ${entry.id}`,
+        title: t("repair.resumingTitle", { id: entry.id }),
         onComplete: () => afterComplete("Resume", entry.id),
         onError: (detail) => afterError("Resume", entry.id, detail),
       });
-    } catch (e) { pushToast("error", `Resume failed: ${e}`); }
+    } catch (e) { pushToast("error", renderError(e, t("repair.resumeFailedScope"))); }
   };
 
   const runRollback = async (entry: JournalEntry) => {
@@ -74,21 +82,21 @@ export function RepairView({
       const opId = await api.repairRollbackStart(entry.id);
       openOpModal({
         opId,
-        title: `Rolling back ${entry.id}`,
+        title: t("repair.rollingBackTitle", { id: entry.id }),
         onComplete: () => afterComplete("Rollback", entry.id),
         onError: (detail) => afterError("Rollback", entry.id, detail),
       });
-    } catch (e) { pushToast("error", `Rollback failed: ${e}`); }
+    } catch (e) { pushToast("error", renderError(e, t("repair.rollbackFailedScope"))); }
   };
 
   const runAbandon = async (entry: JournalEntry) => {
     setPending(null);
     try {
       await api.repairAbandon(entry.id);
-      pushToast("info", `Abandoned ${entry.id}.`);
+      pushToast("info", t("repair.abandonedToast", { id: entry.id }));
       refresh();
       onOpTerminated?.();
-    } catch (e) { pushToast("error", `Abandon failed: ${e}`); }
+    } catch (e) { pushToast("error", renderError(e, t("repair.abandonFailedScope"))); }
   };
 
   const runBreakLock = async (entry: JournalEntry) => {
@@ -97,12 +105,15 @@ export function RepairView({
       const outcome = await api.repairBreakLock(entry.old_path);
       pushToast(
         "info",
-        `Lock broken — prior owner PID ${outcome.prior_pid} on ${outcome.prior_hostname}. Audit saved.`,
+        t("repair.lockBrokenToast", {
+          pid: outcome.prior_pid,
+          host: outcome.prior_hostname,
+        }),
       );
       refresh();
       onOpTerminated?.();
     } catch (e) {
-      pushToast("error", `Break lock failed: ${e}`);
+      pushToast("error", renderError(e, t("repair.breakLockFailedScope")));
     }
   };
 
@@ -113,10 +124,10 @@ export function RepairView({
       {!embedded && (
         <header className="repair-header">
           <button type="button" className="icon-btn" onClick={onBack}
-            aria-label="Back to Projects" title="Back to Projects">
+            aria-label={t("repair.backTitle")} title={t("repair.backTitle")}>
             <Icon name="arrow-left" size={14} />
           </button>
-          <h2><Icon name="wrench" size={14} /> Repair</h2>
+          <h2><Icon name="wrench" size={14} /> {t("repair.heading")}</h2>
         </header>
       )}
 
@@ -125,14 +136,14 @@ export function RepairView({
       )}
       {error && (
         <div className="banner warn" role="alert">
-          <div><strong>Couldn't load repair queue.</strong> <span className="mono">{error}</span></div>
+          <div><strong>{t("repair.loadFailed")}</strong> <span className="mono">{error}</span></div>
         </div>
       )}
       {!loading && !error && entries.length === 0 && (
         <div className="empty">
           <Icon name="wrench" size={32} />
-          <h2>All clear</h2>
-          <p className="muted">No pending rename journals.</p>
+          <h2>{t("repair.allClear")}</h2>
+          <p className="muted">{t("repair.noPending")}</p>
         </div>
       )}
 
@@ -153,21 +164,18 @@ export function RepairView({
 
       {breakLockTarget && (
         <ConfirmDangerousAction
-          title="Break lock?"
-          confirmLabel="Break lock"
+          title={t("repair.breakLockTitle")}
+          confirmLabel={t("repair.breakLock")}
           consequences={
             <>
               <p>
-                Force-breaks the lock file for this journal and writes an
-                audit record. The prior owner (if still alive) will fail
-                on its next write.
+                {t("repair.breakLockBody")}
               </p>
               <p className="mono small selectable">
                 {breakLockTarget.old_path}
               </p>
               <p className="muted small">
-                Safe when the journal is stale (≥24 h). Don't break a
-                running lock — that can corrupt in-flight state.
+                {t("repair.breakLockNote")}
               </p>
             </>
           }

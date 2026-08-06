@@ -6,6 +6,7 @@
 // dialects. Extracted here so both import one source of truth (the doc's
 // "extract Gazette's StatCard + toneColor" note).
 
+import { useTranslation } from "react-i18next";
 import type { LessonCounts } from "../../api/sharedMemory";
 
 // ─── tone → color ────────────────────────────────────────────────
@@ -120,12 +121,18 @@ export function trustTotal(mix: TrustMix): number {
   return mix.enforced + mix.documented + mix.suspect + mix.proposed;
 }
 
-const TRUST_SEGMENTS: { key: keyof TrustMix; label: string; color: string }[] = [
-  { key: "enforced", label: "enforced", color: "var(--ok)" },
-  { key: "documented", label: "documented", color: "var(--info)" },
-  { key: "suspect", label: "suspect", color: "var(--warn)" },
-  { key: "proposed", label: "proposed", color: "var(--accent)" },
-];
+// `labelKey` (not a baked label) so a locale switch re-labels the bar and
+// its aria description at render time rather than at module load.
+const TRUST_SEGMENTS = [
+  { key: "enforced", labelKey: "dashboard.trust.enforced", color: "var(--ok)" },
+  { key: "documented", labelKey: "dashboard.trust.documented", color: "var(--info)" },
+  { key: "suspect", labelKey: "dashboard.trust.suspect", color: "var(--warn)" },
+  { key: "proposed", labelKey: "dashboard.trust.proposed", color: "var(--accent)" },
+] as const satisfies readonly {
+  key: keyof TrustMix;
+  labelKey: string;
+  color: string;
+}[];
 
 /** A single horizontal bar showing a project's (or the roll-up's)
  *  enforced / documented / suspect / proposed proportions. Accessible:
@@ -140,12 +147,13 @@ export function TrustBar({
   height?: number;
   showLegend?: boolean;
 }) {
+  const { t } = useTranslation("knowledge");
   const total = trustTotal(mix);
   const present = TRUST_SEGMENTS.filter((s) => mix[s.key] > 0);
   const label =
     total === 0
-      ? "No curated knowledge yet"
-      : present.map((s) => `${mix[s.key]} ${s.label}`).join(", ");
+      ? t("dashboard.trust.empty")
+      : present.map((s) => `${mix[s.key]} ${t(s.labelKey)}`).join(", ");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
@@ -198,7 +206,7 @@ export function TrustBar({
                   background: s.color,
                 }}
               />
-              {mix[s.key]} {s.label}
+              {mix[s.key]} {t(s.labelKey)}
             </span>
           ))}
         </div>

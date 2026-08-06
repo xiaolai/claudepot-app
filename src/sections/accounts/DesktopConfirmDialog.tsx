@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { DesktopConfirmRequest } from "../../providers/AppStateProvider";
 
@@ -16,29 +17,27 @@ interface Props {
  * regardless of entry point.
  */
 export function DesktopConfirmDialog({ request, onCancel, onConfirm }: Props) {
+  const { t } = useTranslation("accounts");
   switch (request.kind) {
     case "sign_out":
       return (
         <ConfirmDialog
-          title="Sign Claude Desktop out?"
-          confirmLabel="Sign out"
+          title={t("desktopConfirm.signOut.title")}
+          confirmLabel={t("desktopConfirm.signOut.confirm")}
           confirmDanger
           body={
             <>
-              <p>
-                Claudepot will quit Claude Desktop and delete the live
-                session items. The current snapshot is preserved, so you
-                can swap this account back in later.
-              </p>
+              <p>{t("desktopConfirm.signOut.body")}</p>
               <ul className="muted small" style={{ paddingLeft: 18 }}>
-                <li>Any unsent Desktop chat drafts will be lost.</li>
+                <li>{t("desktopConfirm.signOut.bullet1")}</li>
+                <li>{t("desktopConfirm.signOut.bullet2")}</li>
                 <li>
-                  Next Desktop launch will open to the login screen until
-                  you sign in again.
-                </li>
-                <li>
-                  The snapshot under <code>~/.claudepot/desktop/</code>
-                  {" "}stays intact.
+                  <Trans
+                    i18nKey="desktopConfirm.signOut.bullet3"
+                    ns="accounts"
+                    values={{ path: "~/.claudepot/desktop/" }}
+                    components={{ c: <code /> }}
+                  />
                 </li>
               </ul>
             </>
@@ -50,21 +49,23 @@ export function DesktopConfirmDialog({ request, onCancel, onConfirm }: Props) {
     case "overwrite_profile":
       return (
         <ConfirmDialog
-          title={`Replace Desktop profile for ${request.account.email}?`}
-          confirmLabel="Replace"
+          title={t("desktopConfirm.overwrite.title", {
+            email: request.account.email,
+          })}
+          confirmLabel={t("desktopConfirm.overwrite.confirm")}
           confirmDanger
           body={
             <>
               <p>
-                <strong>{request.account.email}</strong> already has a
-                stored Desktop snapshot. Binding the live session will
-                overwrite it with the current state.
+                <Trans
+                  i18nKey="desktopConfirm.overwrite.body"
+                  ns="accounts"
+                  values={{ email: request.account.email }}
+                  components={{ emph: <strong /> }}
+                />
               </p>
               <p className="muted small">
-                The previous snapshot is stashed to a temporary directory
-                during the copy; if the new snapshot fails, the old one
-                is rolled back. On success, the old snapshot is
-                permanently discarded.
+                {t("desktopConfirm.overwrite.note")}
               </p>
             </>
           }

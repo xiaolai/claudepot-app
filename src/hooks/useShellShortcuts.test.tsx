@@ -101,7 +101,7 @@ describe("useShellShortcuts", () => {
     renderShortcuts();
     document.body.innerHTML = `
       <div role="dialog" aria-modal="true"><button id="ok">ok</button></div>
-      <div aria-label="Live Claude sessions">
+      <div data-live-strip aria-label="Live Claude sessions">
         <button role="option" id="row-1">one</button>
       </div>`;
     const ok = document.getElementById("ok")!;
@@ -133,9 +133,25 @@ describe("useShellShortcuts", () => {
   it("⌘⇧L focuses the first live-strip row", () => {
     renderShortcuts();
     document.body.innerHTML = `
-      <div aria-label="Live Claude sessions">
+      <div data-live-strip aria-label="Live Claude sessions">
         <button role="option" id="row-1">one</button>
         <button role="option" id="row-2">two</button>
+      </div>`;
+    press("l", { metaKey: true, shiftKey: true });
+    expect(document.activeElement?.id).toBe("row-1");
+  });
+
+  // The strip's aria-label is translated. This test used to build its
+  // fixture with the English label and the hook used to select on that
+  // label, so the pair agreed in English and agreed nowhere else —
+  // ⌘⇧L was dead in zh-CN with the suite fully green. The label here is
+  // deliberately Chinese: the shortcut must find the strip by its
+  // stable `data-live-strip` hook, never by rendered copy.
+  it("⌘⇧L finds the strip regardless of the translated aria-label", () => {
+    renderShortcuts();
+    document.body.innerHTML = `
+      <div data-live-strip aria-label="实时 Claude 会话">
+        <button role="option" id="row-1">one</button>
       </div>`;
     press("l", { metaKey: true, shiftKey: true });
     expect(document.activeElement?.id).toBe("row-1");

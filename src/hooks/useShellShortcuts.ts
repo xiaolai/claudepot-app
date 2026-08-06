@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { readDevMode, writeDevMode } from "./useDevMode";
 import { isShortcutContextBlocked } from "./useGlobalShortcuts";
+import { i18n } from "../lib/i18n";
 import { toggleSection } from "../lib/optionalSections";
 
 /**
@@ -78,7 +79,10 @@ export function useShellShortcuts(args: {
       e.preventDefault();
       const next = !readDevMode();
       writeDevMode(next);
-      pushToast("info", next ? "Developer mode on" : "Developer mode off");
+      pushToast(
+        "info",
+        i18n.t(next ? "shortcuts.devModeOn" : "shortcuts.devModeOff"),
+      );
     };
     window.addEventListener("keydown", onDevKey);
     return () => window.removeEventListener("keydown", onDevKey);
@@ -107,7 +111,10 @@ export function useShellShortcuts(args: {
       // localStorage here duplicated that logic and could disagree
       // with React's actual state.
       if (next) setSection("boards");
-      pushToast("info", next ? "Boards shown" : "Boards hidden");
+      pushToast(
+        "info",
+        i18n.t(next ? "shortcuts.boardsShown" : "shortcuts.boardsHidden"),
+      );
     };
     window.addEventListener("keydown", onBoardsKey);
     return () => window.removeEventListener("keydown", onBoardsKey);
@@ -125,8 +132,11 @@ export function useShellShortcuts(args: {
       if (isShortcutContextBlocked()) return;
       e.preventDefault();
       // The strip renders with role=listbox; focus the first option.
+      // Keyed on `data-live-strip` rather than the strip's aria-label,
+      // which is translated — matching on it worked in English and
+      // matched nothing in every other locale.
       const firstRow = document.querySelector<HTMLButtonElement>(
-        '[aria-label="Live Claude sessions"] [role="option"]',
+        "[data-live-strip] [role='option']",
       );
       firstRow?.focus();
     };

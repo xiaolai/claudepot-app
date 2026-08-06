@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
 import { useTauriEvent, useTauriEvents } from "./useTauriEvent";
 import type { EmitFn } from "../lib/notifications/dispatch";
 import type { AccountSummary } from "../types";
@@ -158,9 +159,12 @@ export function useTrayBridge(args: {
       }
       void refreshAccounts();
 
-      const caveat = p.cc_was_running
-        ? " — restart Claude Code to apply"
-        : "";
+      // Two whole-phrase keys rather than a translated suffix appended
+      // to a translated stem — the caveat doesn't sit at the end of the
+      // sentence in every language.
+      const title = p.cc_was_running
+        ? i18n.t("tray.cliSwitchedTitleRestart", { email: p.to_email })
+        : i18n.t("tray.cliSwitchedTitle", { email: p.to_email });
       const undoFn = p.from_email
         ? () => {
             const prev = accountsRef.current.find(
@@ -169,7 +173,7 @@ export function useTrayBridge(args: {
             if (!prev) {
               pushToastRef.current(
                 "error",
-                `Undo failed: ${p.from_email} not found`,
+                i18n.t("tray.undoFailed", { email: p.from_email }),
               );
               return;
             }
@@ -186,13 +190,13 @@ export function useTrayBridge(args: {
       // setting category=accountSwitched and letting routing apply.
       void emit({
         category: "accountSwitched",
-        title: `CLI → ${p.to_email}${caveat}`,
+        title,
         body: p.cc_was_running
-          ? "Restart Claude Code to apply. Open Claudepot to undo."
-          : "Open Claudepot within 10 s to undo.",
+          ? i18n.t("tray.cliSwitchedBodyRestart")
+          : i18n.t("tray.cliSwitchedBodyUndo"),
         target: { kind: "app", route: { section: "accounts" } },
         toastAction: undoFn
-          ? { label: "Undo", onPress: undoFn, timeoutMs: 10_000 }
+          ? { label: i18n.t("ui.undo"), onPress: undoFn, timeoutMs: 10_000 }
           : undefined,
       });
     },
@@ -200,11 +204,11 @@ export function useTrayBridge(args: {
       const detail =
         typeof ev?.payload === "string" && ev.payload.length > 0
           ? ev.payload
-          : "unknown";
+          : i18n.t("ui.unknown");
       void emit({
         category: "accountSwitched",
         kind: "error",
-        title: "CLI switch failed",
+        title: i18n.t("account.cliSwitchFailed"),
         body: detail,
         target: { kind: "app", route: { section: "accounts" } },
       });

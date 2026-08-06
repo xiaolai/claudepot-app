@@ -1,5 +1,7 @@
+import { Trans, useTranslation } from "react-i18next";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
+import { i18n } from "../../lib/i18n";
 import type { AccountSummary } from "../../types";
 
 interface AnomalyBannerProps {
@@ -24,6 +26,7 @@ export function AnomalyBanner({
   onRelogin,
   disabled,
 }: AnomalyBannerProps) {
+  const { t } = useTranslation("accounts");
   const copy = anomalyCopy(account);
   if (!copy) return null;
 
@@ -66,7 +69,7 @@ export function AnomalyBanner({
         type="button"
         onClick={onRelogin}
         disabled={disabled}
-        title="Open a browser OAuth flow and import the result"
+        title={t("anomaly.reloginTitle")}
         style={{
           padding: "var(--sp-3) var(--sp-8)",
           fontSize: "var(--fs-xs)",
@@ -80,7 +83,7 @@ export function AnomalyBanner({
           opacity: disabled ? "var(--opacity-dimmed)" : 1,
         }}
       >
-        Re-login
+        {t("anomaly.relogin")}
       </button>
     </div>
   );
@@ -105,29 +108,31 @@ function anomalyCopy(
 ): { title: string; detail: React.ReactNode } | null {
   if (a.drift) {
     return {
-      title: "Wrong account on this slot",
+      title: i18n.t("anomaly.drift.title", { ns: "accounts" }),
       detail: (
-        <>
-          The credentials saved here actually belong to{" "}
-          <strong style={{ color: "var(--fg)" }}>
-            {a.verified_email || "another account"}
-          </strong>
-          . Log in again to fix this, or remove this account.
-        </>
+        <Trans
+          i18nKey="anomaly.drift.detail"
+          ns="accounts"
+          values={{
+            email:
+              a.verified_email ||
+              i18n.t("anomaly.drift.anotherAccount", { ns: "accounts" }),
+          }}
+          components={{ emph: <strong style={{ color: "var(--fg)" }} /> }}
+        />
       ),
     };
   }
   if (a.verify_status === "rejected") {
     return {
-      title: "Server rejected the saved login",
-      detail: "The stored login is no longer valid — log in again to fix.",
+      title: i18n.t("anomaly.rejected.title", { ns: "accounts" }),
+      detail: i18n.t("anomaly.rejected.detail", { ns: "accounts" }),
     };
   }
   if (!a.credentials_healthy) {
     return {
-      title: "Saved login is missing or broken",
-      detail:
-        "The stored credential file couldn't be read. Log in again or remove.",
+      title: i18n.t("anomaly.broken.title", { ns: "accounts" }),
+      detail: i18n.t("anomaly.broken.detail", { ns: "accounts" }),
     };
   }
   return null;

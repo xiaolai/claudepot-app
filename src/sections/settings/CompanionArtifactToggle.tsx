@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { ArtifactState } from "../../api/artifact-tool";
-import { toastError } from "../../lib/toastError";
+import { toastError } from "../../lib/i18n-error";
 
 // Settings → General → Claude Code behavior.
 //
@@ -29,6 +30,7 @@ export function CompanionArtifactToggle({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [state, setState] = useState<ArtifactState | null>(null);
   const [busy, setBusy] = useState(false);
   const hintId = useId();
@@ -37,9 +39,9 @@ export function CompanionArtifactToggle({
     try {
       setState(await api.artifactToolState());
     } catch (e) {
-      toastError(pushToast, "Artifact setting load failed", e);
+      toastError(pushToast, t("companion.loadFailed"), e);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     void refresh();
@@ -59,22 +61,20 @@ export function CompanionArtifactToggle({
       setState(updated);
       pushToast(
         "info",
-        nextLocal
-          ? "Companion output kept local — cloud Artifacts off."
-          : "Cloud Artifacts re-enabled.",
+        nextLocal ? t("companion.keptLocal") : t("companion.reenabled"),
       );
     } catch (e) {
-      toastError(pushToast, "Toggle companion output", e);
+      toastError(pushToast, t("companion.toggleFailed"), e);
     } finally {
       setBusy(false);
     }
   };
 
   const hint = !state
-    ? "Loading…"
+    ? t("shared.loading")
     : locked
-      ? "Overridden by the CLAUDE_CODE_DISABLE_ARTIFACT environment variable. Unset it to control this here."
-      : "Off by default: Claude Code publishes charts and mini-apps as private pages in the signed-in account's claude.ai gallery. Turn on to keep that output as a local file — it then belongs to no account and survives account switches.";
+      ? t("companion.lockedHint")
+      : t("companion.hint");
 
   return (
     <div
@@ -89,7 +89,7 @@ export function CompanionArtifactToggle({
     >
       <div>
         <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-          Keep companion output local
+          {t("companion.label")}
         </div>
         <div
           id={hintId}
@@ -108,7 +108,7 @@ export function CompanionArtifactToggle({
           type="button"
           role="switch"
           aria-checked={local}
-          aria-label="Keep companion output local"
+          aria-label={t("companion.label")}
           aria-describedby={hintId}
           aria-disabled={disabled || undefined}
           disabled={disabled}

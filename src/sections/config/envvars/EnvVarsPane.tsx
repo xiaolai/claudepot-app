@@ -7,8 +7,11 @@
 // control type and safety attribute beside it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api } from "../../../api";
+import { i18n } from "../../../lib/i18n";
+import { renderError } from "../../../lib/i18n-error";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { EnvOverview } from "../../../types/ccEnv";
 import { commitModeFor, type SecretHandle } from "./choosers";
@@ -46,11 +49,17 @@ type Pending =
  * Clearing is never live. Claude Code re-applies settings `env`
  * additively — nothing is deleted from a running session — so the old
  * value survives until relaunch, and every clear says so.
+ *
+ * Resolved per call, never hoisted to a module constant: the confirmation
+ * body is built inside a callback, and a constant captured at module load
+ * would keep saying it in the language the app booted in.
  */
-const RELAUNCH_NOTE =
-  "Sessions already running keep the old value until you relaunch Claude Code.";
+function relaunchNote(): string {
+  return i18n.t("envvars.relaunchNote", { ns: "config" });
+}
 
 export function EnvVarsPane() {
+  const { t } = useTranslation("config");
   const [data, setData] = useState<EnvOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,7 +75,7 @@ export function EnvVarsPane() {
       setData(await api.ccEnvList());
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
     }
   }, []);
 
@@ -83,7 +92,7 @@ export function EnvVarsPane() {
       setStatus(done);
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
       setStatus("");
     } finally {
       setBusy(false);
@@ -105,14 +114,17 @@ export function EnvVarsPane() {
           kind: "set",
           name,
           value,
-          title: `Set ${name}?`,
+          title: t("envvars.confirmSetTitle", { name }),
           body: confirmBody(spec.safety.secret, spec.safety.hazards),
         });
         return;
       }
-      void apply(() => api.ccEnvSet(name, value), `Saved ${name}.`);
+      void apply(
+        () => api.ccEnvSet(name, value),
+        t("envvars.savedStatus", { name }),
+      );
     },
-    [apply, specOf],
+    [apply, specOf, t],
   );
 
   const onRequestSecret = useCallback(
@@ -122,11 +134,11 @@ export function EnvVarsPane() {
         kind: "secret",
         name,
         handle,
-        title: `Store ${name} in settings.json?`,
+        title: t("envvars.confirmSecretTitle", { name }),
         body: confirmBody(true, spec?.safety.hazards ?? []),
       });
     },
-    [specOf],
+    [specOf, t],
   );
 
   const onClear = useCallback(
@@ -134,11 +146,13 @@ export function EnvVarsPane() {
       setPending({
         kind: "clear",
         name,
-        title: `Remove ${name}?`,
-        body: `The key is removed from settings.json, so Claude Code's own default applies to new sessions. ${RELAUNCH_NOTE}`,
+        title: t("envvars.confirmClearTitle", { name }),
+        // Says outright that the old value survives until relaunch —
+        // clearing is never live.
+        body: t("envvars.clearBody", { relaunch: relaunchNote() }),
       });
     },
-    [],
+    [t],
   );
 
   const runPending = useCallback(() => {
@@ -146,7 +160,10 @@ export function EnvVarsPane() {
     const p = pending;
     setPending(null);
     if (p.kind === "set") {
-      void apply(() => api.ccEnvSet(p.name, p.value), `Saved ${p.name}.`);
+      void apply(
+        () => api.ccEnvSet(p.name, p.value),
+        t("envvars.savedStatus", { name: p.name }),
+      );
     } else if (p.kind === "secret") {
       // Read at the moment of the write, and blank the field whatever
       // happens next. `value` is a function-local const — the same lifetime
@@ -157,17 +174,23 @@ export function EnvVarsPane() {
         // The field went away while the dialog was open. Writing `""` here
         // would replace a stored credential with an empty one, which the
         // backend accepts as a legitimate value.
-        setStatus(`${p.name} was not changed — the field was no longer there.`);
+        setStatus(t("envvars.notChanged", { name: p.name }));
         return;
       }
-      void apply(() => api.ccEnvSet(p.name, value), `Saved ${p.name}.`);
+      void apply(
+        () => api.ccEnvSet(p.name, value),
+        t("envvars.savedStatus", { name: p.name }),
+      );
     } else {
       void apply(
         () => api.ccEnvClear(p.name),
-        `Removed ${p.name}. ${RELAUNCH_NOTE}`,
+        t("envvars.removedStatus", {
+          name: p.name,
+          relaunch: relaunchNote(),
+        }),
       );
     }
-  }, [apply, pending]);
+  }, [apply, pending, t]);
 
   /** Cancelling a secret write must destroy the paste too. */
   const cancelPending = useCallback(() => {
@@ -213,9 +236,13 @@ export function EnvVarsPane() {
   });
 
   if (error && !data) {
-    return <div className="envvar-empty">Could not read settings: {error}</div>;
+    return (
+      <div className="envvar-empty">
+        {t("envvars.readFailed", { error })}
+      </div>
+    );
   }
-  if (!data) return <div className="envvar-empty">Loading…</div>;
+  if (!data) return <div className="envvar-empty">{t("state.loading")}</div>;
 
   return (
     <div className="envvar-pane">
@@ -240,7 +267,10 @@ export function EnvVarsPane() {
       </p>
 
       <p className="envvar-count">
-        {rows.length} of {data.documented.length} documented variables
+        {t("envvars.countLine", {
+          shown: rows.length,
+          total: data.documented.length,
+        })}
       </p>
 
       {/* The ONE scroll container in this pane. `.envvar-pane` deliberately
@@ -262,7 +292,7 @@ export function EnvVarsPane() {
         className="envvar-list"
         ref={parentRef}
         role="region"
-        aria-label="Environment variable results"
+        aria-label={t("envvars.resultsAria")}
         tabIndex={0}
       >
         {virtualize ? (
@@ -305,9 +335,7 @@ export function EnvVarsPane() {
             space, which reads as a broken pane rather than an answer. The
             count alone ("0 of 308") is a number, not a statement. */}
         {rows.length === 0 ? (
-          <p className="envvar-no-match">
-            No documented variable matches these filters.
-          </p>
+          <p className="envvar-no-match">{t("envvars.noMatch")}</p>
         ) : null}
 
         <UnrecognizedBucket data={data} busy={busy} onClear={onClear} />
@@ -318,7 +346,11 @@ export function EnvVarsPane() {
         <ConfirmDialog
           title={pending.title}
           body={pending.body}
-          confirmLabel={pending.kind === "clear" ? "Remove" : "Apply"}
+          confirmLabel={
+            pending.kind === "clear"
+              ? t("envvars.remove")
+              : t("envvars.apply")
+          }
           confirmDanger={pending.kind === "clear"}
           onCancel={cancelPending}
           onConfirm={runPending}

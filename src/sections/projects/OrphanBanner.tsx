@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Icon } from "../../components/Icon";
 import type { OrphanedProject } from "../../types";
 import { formatSize } from "./format";
@@ -17,6 +18,7 @@ export function OrphanBanner({
   orphans: OrphanedProject[];
   onAdopt: () => void;
 }) {
+  const { t } = useTranslation("projects");
   if (orphans.length === 0) return null;
 
   const sessionTotal = orphans.reduce((n, o) => n + o.sessionCount, 0);
@@ -24,8 +26,15 @@ export function OrphanBanner({
   const sizeLabel = formatSize(byteTotal);
   const label =
     orphans.length === 1
-      ? `1 orphaned project (${sessionTotal} session${sessionTotal === 1 ? "" : "s"}, ${sizeLabel})`
-      : `${orphans.length} orphaned projects (${sessionTotal} sessions, ${sizeLabel})`;
+      ? t("orphans.bannerSingle", {
+          sessions: t("shared.sessions", { count: sessionTotal }),
+          size: sizeLabel,
+        })
+      : t("orphans.bannerMany", {
+          n: orphans.length,
+          sessions: sessionTotal,
+          size: sizeLabel,
+        });
 
   return (
     <div className="banner banner-warn" role="alert">
@@ -33,14 +42,12 @@ export function OrphanBanner({
       <div className="banner-body">
         <strong>{label}</strong>
         <span className="banner-hint">
-          Their original cwd no longer exists. Adopt them into a live
-          project to keep them resumable.
+          {t("orphans.hint")}
         </span>
       </div>
       <button className="btn" onClick={onAdopt}>
-        Review &amp; adopt…
+        {t("orphans.reviewAdopt")}
       </button>
     </div>
   );
 }
-

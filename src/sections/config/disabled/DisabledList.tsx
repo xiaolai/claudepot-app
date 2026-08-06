@@ -3,22 +3,27 @@
 // DisabledScopeView so each shard stays under the loc-guardian limit.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
 import { Button } from "../../../components/primitives/Button";
 import { IconButton } from "../../../components/primitives/IconButton";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { NF } from "../../../icons";
+import { i18n } from "../../../lib/i18n";
+import { renderError } from "../../../lib/i18n-error";
 import type { DisabledRecordDto, LifecycleKind } from "../../../types";
 
-const KINDS: ReadonlyArray<{ key: LifecycleKind; label: string }> = [
-  { key: "skill", label: "Skills" },
-  { key: "agent", label: "Agents" },
-  { key: "command", label: "Commands" },
-];
+// Catalog keys, not literals — the group heading is resolved where the
+// block renders, so a language switch reaches a list already on screen.
+const KINDS = [
+  { key: "skill", labelKey: "disabled.kindSkills" },
+  { key: "agent", labelKey: "disabled.kindAgents" },
+  { key: "command", labelKey: "disabled.kindCommands" },
+] as const satisfies readonly { key: LifecycleKind; labelKey: string }[];
 
 interface KindGroup {
   kind: LifecycleKind;
-  label: string;
+  labelKey: (typeof KINDS)[number]["labelKey"];
   byRoot: Map<string, DisabledRecordDto[]>;
 }
 
@@ -34,9 +39,9 @@ export function matches(target: DisabledRecordDto): (r: DisabledRecordDto) => bo
 }
 
 function groupByKindAndRoot(rows: DisabledRecordDto[]): KindGroup[] {
-  const out: KindGroup[] = KINDS.map(({ key, label }) => ({
+  const out: KindGroup[] = KINDS.map(({ key, labelKey }) => ({
     kind: key,
-    label,
+    labelKey,
     byRoot: new Map(),
   }));
   for (const r of rows) {
@@ -110,6 +115,8 @@ function KindBlock({
   pushToast: (kind: "info" | "error", text: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("config");
+  const label = t(group.labelKey);
   const total = Array.from(group.byRoot.values()).reduce(
     (n, list) => n + list.length,
     0,
@@ -132,12 +139,12 @@ function KindBlock({
           fontWeight: 600,
         }}
       >
-        <span style={{ flex: 1 }}>{group.label}</span>
+        <span style={{ flex: 1 }}>{label}</span>
         <span>{total}</span>
       </header>
       <ul
         role="listbox"
-        aria-label={`Disabled ${group.label.toLowerCase()}`}
+        aria-label={t("disabled.listAria", { kind: label.toLowerCase() })}
         style={{ listStyle: "none", margin: 0, padding: 0 }}
       >
         {Array.from(group.byRoot.entries()).map(([root, list]) => (
@@ -226,6 +233,7 @@ function Row({
   pushToast: (kind: "info" | "error", text: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("config");
   const [busy, setBusy] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
 
@@ -239,17 +247,20 @@ function Row({
         "refuse",
         projectRoot,
       );
-      pushToast("info", `Re-enabled ${record.kind} "${record.name}"`);
+      pushToast(
+        "info",
+        t("disabled.reenabledToast", {
+          kind: record.kind,
+          name: record.name,
+        }),
+      );
       onChanged();
     } catch (err) {
-      pushToast(
-        "error",
-        `Re-enable failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      pushToast("error", renderError(err, t("errors.reenable")));
     } finally {
       setBusy(false);
     }
-  }, [record, projectRoot, pushToast, onChanged]);
+  }, [record, projectRoot, pushToast, onChanged, t]);
 
   const doTrash = useCallback(async () => {
     setConfirmTrash(false);
@@ -261,17 +272,17 @@ function Row({
         record.name,
         projectRoot,
       );
-      pushToast("info", `Moved ${record.kind} "${record.name}" to trash`);
+      pushToast(
+        "info",
+        t("disabled.trashedToast", { kind: record.kind, name: record.name }),
+      );
       onChanged();
     } catch (err) {
-      pushToast(
-        "error",
-        `Trash failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      pushToast("error", renderError(err, t("errors.trash")));
     } finally {
       setBusy(false);
     }
-  }, [record, projectRoot, pushToast, onChanged]);
+  }, [record, projectRoot, pushToast, onChanged, t]);
 
   return (
     <>
@@ -326,7 +337,7 @@ function Row({
           {/* Tier 3 (icon-buttons.md): "Disable / Enable" verbs have no
               universal glyph — the label IS the affordance. */}
           <Button variant="ghost" onClick={onEnable} disabled={busy} size="sm">
-            Re-enable
+            {t("disabled.reenable")}
           </Button>
           {/* Tier 1: trash in a dense list row is a universal verb. */}
           <IconButton
@@ -334,16 +345,16 @@ function Row({
             onClick={() => setConfirmTrash(true)}
             disabled={busy}
             size="sm"
-            title="Move to trash"
-            aria-label="Move to trash"
+            title={t("disabled.moveToTrash")}
+            aria-label={t("disabled.moveToTrash")}
           />
         </span>
       </li>
       {confirmTrash && (
         <ConfirmDialog
-          title={`Move ${record.kind} to trash?`}
-          body={`"${record.name}" will move to trash. You can restore it within ~30 days.`}
-          confirmLabel="Move to trash"
+          title={t("disabled.trashTitle", { kind: record.kind })}
+          body={t("disabled.trashBody", { name: record.name })}
+          confirmLabel={t("disabled.moveToTrash")}
           confirmDanger
           onConfirm={doTrash}
           onCancel={() => setConfirmTrash(false)}
@@ -354,12 +365,12 @@ function Row({
 }
 
 function scopeShort(scope: string | undefined, root: string): string {
-  if (scope === "user") return "User";
+  if (scope === "user") return i18n.t("disabled.scopeUser", { ns: "config" });
   if (scope === "project") {
     // Strip trailing `/.claude` (Unix) or `\.claude` (Windows) so the
     // row shows the repo path, not the trailing config subdir.
     const trimmed = root.replace(/[/\\]\.claude[/\\]?$/, "");
-    return `Project: ${trimmed}`;
+    return i18n.t("disabled.scopeProject", { ns: "config", path: trimmed });
   }
   return root;
 }

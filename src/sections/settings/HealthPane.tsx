@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
+import { formatNumber, formatTime } from "../../lib/intl";
 import type {
   DoctorSection,
   DoctorSeverity,
@@ -37,6 +40,7 @@ interface HealthPaneProps {
 }
 
 export function HealthPane({ pushToast }: HealthPaneProps) {
+  const { t } = useTranslation("settings");
   const [snapshot, setSnapshot] = useState<DoctorSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const tokenRef = useRef(0);
@@ -59,14 +63,14 @@ export function HealthPane({ pushToast }: HealthPaneProps) {
         setSnapshot(s);
       } catch (e) {
         if (!mountedRef.current || myToken !== tokenRef.current) return;
-        pushToast("error", `Health refresh failed: ${e}`);
+        pushToast("error", renderError(e, t("health.refreshFailed")));
       } finally {
         if (mountedRef.current && myToken === tokenRef.current) {
           setBusy(false);
         }
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   useEffect(() => {
@@ -77,17 +81,18 @@ export function HealthPane({ pushToast }: HealthPaneProps) {
     try {
       await api.ccDoctorOpenParseFailuresLog();
     } catch (e) {
-      pushToast("error", `Could not open log: ${e}`);
+      pushToast("error", renderError(e, t("health.openLogFailed")));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   return (
     <section style={paneStyle}>
       <p style={descStyle}>
-        Read-only summary of <code style={codeInline}>claude doctor</code>.
-        Captured by spawning Claude Code in a pty and parsing its output;
-        cached for 60 s. Distinct from Settings → Diagnostics, which shows
-        Claudepot’s own self-check.
+        <Trans
+          ns="settings"
+          i18nKey="health.desc"
+          components={{ code: <code style={codeInline} /> }}
+        />
       </p>
 
       {snapshot ? (
@@ -122,6 +127,7 @@ function HeaderRow({
   busy: boolean;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const captured = new Date(snapshot.capturedAtMs);
   // Three states for the header:
   // - "measured":  we have a cc_version (from probe or scrape). Show
@@ -150,7 +156,7 @@ function HeaderRow({
             }}
           >
             {unmeasured
-              ? "Couldn’t read claude doctor"
+              ? t("health.unmeasured")
               : `claude ${snapshot.ccVersion}${
                   snapshot.installType ? ` · ${snapshot.installType}` : ""
                 }`}
@@ -163,8 +169,13 @@ function HeaderRow({
         ) : null}
         <span style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
           {unmeasured
-            ? `Captured ${captured.toLocaleTimeString()} · refresh to retry`
-            : `Captured ${captured.toLocaleTimeString()} · ${snapshot.rawBytes.toLocaleString()} B`}
+            ? t("health.capturedRetry", {
+                time: formatTime(captured),
+              })
+            : t("health.capturedBytes", {
+                time: formatTime(captured),
+                bytes: formatNumber(snapshot.rawBytes),
+              })}
         </span>
       </div>
       <Button
@@ -174,7 +185,7 @@ function HeaderRow({
         disabled={busy}
         glyph={NF.refresh}
       >
-        {busy ? "Refreshing…" : "Refresh"}
+        {busy ? t("health.refreshing") : t("shared.refresh")}
       </Button>
     </div>
   );
@@ -189,6 +200,7 @@ function ParseStatusBanner({
   status: ParseStatus;
   onOpenLog: () => void;
 }) {
+  const { t } = useTranslation("settings");
   if (status.kind === "ok") return null;
   const isFailed = status.kind === "failed";
   return (
@@ -200,17 +212,15 @@ function ParseStatusBanner({
       }}
     >
       <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>
-        {isFailed ? "Parser failed" : "Partial parse"}
+        {isFailed ? t("health.parserFailed") : t("health.partialParse")}
       </div>
       <div style={{ fontSize: "var(--fs-xs)", color: "var(--fg-muted)", lineHeight: "var(--lh-body)" }}>
         {status.reason}.{" "}
-        {isFailed
-          ? "The pill in the chrome falls back to the last-known-good snapshot. "
-          : "Some sections may be missing. "}
-        Raw output is recorded for review.
+        {isFailed ? t("health.failedNote") : t("health.partialNote")}
+        {t("health.rawRecorded")}
       </div>
       <Button variant="ghost" size="sm" onClick={onOpenLog} glyph={NF.file}>
-        Open parse-failures log
+        {t("health.openParseLog")}
       </Button>
     </div>
   );
@@ -219,6 +229,7 @@ function ParseStatusBanner({
 /* ─── One section block ────────────────────────────────────────── */
 
 function SectionCard({ section }: { section: DoctorSection }) {
+  const { t } = useTranslation("settings");
   return (
     <article
       style={{
@@ -248,7 +259,7 @@ function SectionCard({ section }: { section: DoctorSection }) {
       </header>
       {section.entries.length === 0 ? (
         <div style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
-          (no entries)
+          {t("health.noEntries")}
         </div>
       ) : (
         <ul style={entriesListStyle}>
@@ -286,11 +297,12 @@ function SeverityDot({ severity }: { severity: DoctorSeverity }) {
 }
 
 function EmptyState() {
+  const { t } = useTranslation("settings");
   return (
     <div style={emptyStyle}>
       <Glyph g={NF.info} color="var(--fg-faint)" />
       <span style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-        No sections parsed from the doctor output.
+        {t("health.noSections")}
       </span>
     </div>
   );
@@ -301,8 +313,11 @@ function LoadingSkeleton() {
     <div style={emptyStyle}>
       <Glyph g={NF.clock} color="var(--fg-faint)" />
       <span style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-        Running <code style={codeInline}>claude doctor</code>… (first call per
-        minute takes 6–10&nbsp;s)
+        <Trans
+          ns="settings"
+          i18nKey="health.running"
+          components={{ code: <code style={codeInline} /> }}
+        />
       </span>
     </div>
   );

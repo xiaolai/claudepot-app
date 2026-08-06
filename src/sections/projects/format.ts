@@ -10,6 +10,8 @@
 export { formatSize } from "../../lib/format";
 export { basename } from "../../lib/paths";
 
+import { i18n } from "../../lib/i18n";
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -28,9 +30,23 @@ const WEEK = 7 * DAY;
  */
 export function formatRelativeTime(ms: number): string {
   const diff = Date.now() - ms;
-  if (diff < MINUTE) return "just now";
-  if (diff < HOUR) return `${Math.floor(diff / MINUTE)}m ago`;
-  if (diff < DAY) return `${Math.floor(diff / HOUR)}h ago`;
-  if (diff < WEEK) return `${Math.floor(diff / DAY)}d ago`;
-  return `${Math.floor(diff / WEEK)}w ago`;
+  if (diff < MINUTE) return i18n.t("projects:format.justNow");
+  if (diff < HOUR) {
+    return i18n.t("projects:format.minutesAgo", {
+      n: Math.floor(diff / MINUTE),
+    });
+  }
+  if (diff < DAY) {
+    return i18n.t("projects:format.hoursAgo", {
+      n: Math.floor(diff / HOUR),
+    });
+  }
+  if (diff < WEEK) {
+    return i18n.t("projects:format.daysAgo", {
+      n: Math.floor(diff / DAY),
+    });
+  }
+  return i18n.t("projects:format.weeksAgo", {
+    n: Math.floor(diff / WEEK),
+  });
 }

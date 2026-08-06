@@ -10,11 +10,13 @@
 // matching window selector. Pulling the fetch up keeps the two
 // surfaces (cost table + top prompts) consistent across re-fetches.
 
+import { useTranslation } from "react-i18next";
 import type { CostlyTurn, TopCostlyPrompts } from "../../types";
 import { shortModelId } from "./CostTabHelpers";
 import { displayPath, formatCompact } from "./format";
 
 export function TopPromptsPanel({ data }: { data: TopCostlyPrompts }) {
+  const { t } = useTranslation("activities");
   return (
     <div
       style={{
@@ -31,7 +33,7 @@ export function TopPromptsPanel({ data }: { data: TopCostlyPrompts }) {
           textTransform: "uppercase",
         }}
       >
-        Top {data.turns.length} costly prompt{data.turns.length === 1 ? "" : "s"}
+        {t("cost.topPrompts", { count: data.turns.length })}
       </div>
       <ol
         style={{
@@ -52,8 +54,9 @@ export function TopPromptsPanel({ data }: { data: TopCostlyPrompts }) {
 }
 
 function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
+  const { t } = useTranslation("activities");
   const project = displayPath(turn.project_path);
-  const preview = turn.user_prompt_preview ?? "(no prompt recorded)";
+  const preview = turn.user_prompt_preview ?? t("cost.noPromptRecorded");
   const totalTokens =
     turn.tokens_input + turn.tokens_output + turn.tokens_cache_creation + turn.tokens_cache_read;
   return (
@@ -113,11 +116,14 @@ function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
             whiteSpace: "nowrap",
           }}
         >
-          {project} · turn {turn.turn_index + 1}
+          {t("cost.promptMeta", { project, n: turn.turn_index + 1 })}
         </div>
       </div>
       <span
-        title={`${turn.model} · ${formatCompact(totalTokens)} tokens`}
+        title={t("cost.modelTokensTitle", {
+          model: turn.model,
+          tokens: formatCompact(totalTokens),
+        })}
         style={{
           fontSize: "var(--fs-2xs)",
           color: "var(--fg-muted)",
@@ -140,11 +146,7 @@ function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
         }}
         // This turn's model isn't in the rate table, so its cost came
         // from the family's rate. Marked rather than quoted flat.
-        title={
-          turn.cost_is_estimated
-            ? "Estimated: this model isn't in the rate table yet, so its family's current rate was used."
-            : undefined
-        }
+        title={turn.cost_is_estimated ? t("cost.estimatedTitle") : undefined}
       >
         {turn.cost_is_estimated ? "≈ " : ""}${turn.cost_usd.toFixed(2)}
       </div>

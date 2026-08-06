@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ConfigSection } from "./ConfigSection";
 import { UpdatesPanel } from "./global/UpdatesPanel";
 import { MemoryHealthPanel } from "./global/MemoryHealthPanel";
@@ -65,6 +66,7 @@ export function GlobalSection({
   subRoute: string | null;
   onSubRouteChange: (next: string | null) => void;
 }) {
+  const { t } = useTranslation("global");
   const [tab, setTab] = useState<GlobalTab>(loadTab);
 
   // A `node:<id>` subRoute is a deep-link into the Config tree (e.g.
@@ -115,7 +117,7 @@ export function GlobalSection({
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div
         role="tablist"
-        aria-label="Global views"
+        aria-label={t("tabs.ariaLabel")}
         style={{
           display: "flex",
           gap: "var(--sp-4)",
@@ -126,19 +128,20 @@ export function GlobalSection({
         {/* Rendered from GLOBAL_TABS so the tab bar and the ⌘K deep
             links can't disagree about which tabs exist or their
             order — they already had, with Tips and Updates swapped. */}
-        {GLOBAL_TABS.map((t) => (
+        {/* Named `def`, not `t` — `t` is the translator in this scope. */}
+        {GLOBAL_TABS.map((def) => (
           <Button
-            key={t.id}
-            id={`global-tab-${t.id}`}
+            key={def.id}
+            id={`global-tab-${def.id}`}
             role="tab"
-            aria-selected={tab === t.id}
-            aria-controls={`global-panel-${t.id}`}
+            aria-selected={tab === def.id}
+            aria-controls={`global-panel-${def.id}`}
             size="sm"
-            variant={tab === t.id ? "subtle" : "ghost"}
-            active={tab === t.id}
-            onClick={() => switchTab(t.id)}
+            variant={tab === def.id ? "subtle" : "ghost"}
+            active={tab === def.id}
+            onClick={() => switchTab(def.id)}
           >
-            {t.label}
+            {def.label}
           </Button>
         ))}
       </div>

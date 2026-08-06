@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { AccountSummary } from "../../types";
 
@@ -14,35 +15,34 @@ interface Props {
  * makes the trade-off knowingly rather than recovering from it.
  */
 export function SplitBrainConfirm({ account, onCancel, onConfirm }: Props) {
+  const { t } = useTranslation("accounts");
   return (
     <ConfirmDialog
-      title="Claude Code is running"
-      confirmLabel={`Swap to ${account.email} anyway`}
+      title={t("splitBrain.title")}
+      confirmLabel={t("splitBrain.confirm", { email: account.email })}
       confirmDanger
       body={
         <>
-          <p>
-            A running Claude Code session is using the current account.
-            Until you quit it you'll see split-brain state:
-          </p>
+          <p>{t("splitBrain.intro")}</p>
           <ul className="muted small" style={{ paddingLeft: 18 }}>
+            <li>{t("splitBrain.bullet1")}</li>
             <li>
-              Session identity (header, org name) stays as the old
-              account — cached at startup.
+              <Trans
+                i18nKey="splitBrain.bullet2"
+                ns="accounts"
+                values={{ email: account.email }}
+                components={{ emph: <strong /> }}
+              />
             </li>
-            <li>
-              API calls (/usage, completions, billing) switch to{" "}
-              <strong>{account.email}</strong> immediately.
-            </li>
-            <li>
-              The next OAuth refresh (typically within the hour) may
-              overwrite the keychain back to the old account, silently
-              reverting this swap.
-            </li>
+            <li>{t("splitBrain.bullet3")}</li>
           </ul>
           <p className="muted small">
-            Safest: quit Claude Code first, then swap. This action
-            proceeds with <code>--force</code>.
+            <Trans
+              i18nKey="splitBrain.note"
+              ns="accounts"
+              values={{ flag: "--force" }}
+              components={{ c: <code /> }}
+            />
           </p>
         </>
       }

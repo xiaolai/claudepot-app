@@ -1,5 +1,7 @@
 import { useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import {
   Modal,
   ModalBody,
@@ -30,6 +32,7 @@ export function OAuthUsageModal({
   token: OauthTokenSummary;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("keys");
   const [state, setState] = useState<State>({ status: "loading" });
   const titleId = useId();
 
@@ -41,7 +44,7 @@ export function OAuthUsageModal({
         if (!cancelled) setState({ status: "ok", usage });
       })
       .catch((e) => {
-        if (!cancelled) setState({ status: "error", detail: `${e}` });
+        if (!cancelled) setState({ status: "error", detail: renderError(e) });
       });
     return () => {
       cancelled = true;
@@ -52,7 +55,7 @@ export function OAuthUsageModal({
     <Modal open onClose={onClose} width="md" aria-labelledby={titleId}>
       <ModalHeader
         glyph={NF.bolt}
-        title={`Usage · ${token.label}`}
+        title={t("usageModal.title", { label: token.label })}
         id={titleId}
         onClose={onClose}
       />
@@ -73,7 +76,7 @@ export function OAuthUsageModal({
             }}
           >
             <Tag tone={token.account_email ? "accent" : "warn"}>
-              {token.account_email ?? "account removed"}
+              {token.account_email ?? t("list.accountRemoved")}
             </Tag>
             <code
               style={{
@@ -86,7 +89,9 @@ export function OAuthUsageModal({
           </div>
 
           {state.status === "loading" && (
-            <p style={{ margin: 0, color: "var(--fg-muted)" }}>Loading…</p>
+            <p style={{ margin: 0, color: "var(--fg-muted)" }}>
+              {t("usageModal.loading")}
+            </p>
           )}
 
           {state.status === "error" && (
@@ -95,8 +100,7 @@ export function OAuthUsageModal({
 
           {state.status === "ok" && state.usage === null && (
             <p style={{ margin: 0, color: "var(--fg-muted)" }}>
-              No cached usage for this account yet. Open the Accounts
-              section to refresh.
+              {t("usageModal.noCached")}
             </p>
           )}
 
@@ -107,7 +111,7 @@ export function OAuthUsageModal({
       </ModalBody>
       <ModalFooter>
         <Button onClick={onClose} variant="ghost">
-          Close
+          {t("usageModal.close")}
         </Button>
       </ModalFooter>
     </Modal>
@@ -115,13 +119,16 @@ export function OAuthUsageModal({
 }
 
 function UsageBody({ usage }: { usage: AccountUsage }) {
+  const { t } = useTranslation("keys");
+  // Render-time lookups, not a module constant — a language switch has
+  // to reach these labels without a remount.
   const rows: Array<[string, UsageWindow | null]> = [
-    ["5-hour window", usage.five_hour],
-    ["7-day window", usage.seven_day],
-    ["7-day · Opus", usage.seven_day_opus],
-    ["7-day · Sonnet", usage.seven_day_sonnet],
-    ["7-day · OAuth apps", usage.seven_day_oauth_apps],
-    ["7-day · Cowork", usage.seven_day_cowork],
+    [t("usageModal.fiveHour"), usage.five_hour],
+    [t("usageModal.sevenDay"), usage.seven_day],
+    [t("usageModal.sevenDayOpus"), usage.seven_day_opus],
+    [t("usageModal.sevenDaySonnet"), usage.seven_day_sonnet],
+    [t("usageModal.sevenDayOauthApps"), usage.seven_day_oauth_apps],
+    [t("usageModal.sevenDayCowork"), usage.seven_day_cowork],
   ];
 
   // Render-if-nonzero per design rules — drop rows that have no window.
@@ -131,7 +138,7 @@ function UsageBody({ usage }: { usage: AccountUsage }) {
   if (visible.length === 0 && !hasExtra) {
     return (
       <p style={{ margin: 0, color: "var(--fg-muted)" }}>
-        No usage windows reported for this token yet.
+        {t("usageModal.noWindows")}
       </p>
     );
   }
@@ -180,6 +187,7 @@ function ExtraRow({
 }: {
   extra: NonNullable<AccountUsage["extra_usage"]>;
 }) {
+  const { t } = useTranslation("keys");
   const pct = extra.utilization ?? 0;
   return (
     <div
@@ -191,7 +199,9 @@ function ExtraRow({
         fontSize: "var(--fs-sm)",
       }}
     >
-      <span style={{ color: "var(--fg-muted)" }}>Extra usage</span>
+      <span style={{ color: "var(--fg-muted)" }}>
+        {t("usageModal.extraUsage")}
+      </span>
       <span style={{ fontFeatureSettings: "'tnum'" }}>
         {pct.toFixed(1)}%
       </span>

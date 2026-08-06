@@ -6,6 +6,7 @@
 // owns.
 
 import { useId } from "react";
+import { useTranslation } from "react-i18next";
 import { FilterChip, IconButton, Input } from "../../../components/primitives";
 import { NF } from "../../../icons";
 import type { EnvControl } from "../../../types/ccEnv";
@@ -36,6 +37,7 @@ export function EnvVarsToolbar({
   onToggleInfo: () => void;
   onReload: () => void;
 }) {
+  const { t } = useTranslation("config");
   const typeFacetId = useId();
   const attrFacetId = useId();
 
@@ -45,22 +47,22 @@ export function EnvVarsToolbar({
         <Input
           glyph={NF.search}
           value={query}
-          placeholder="Search name or description…"
-          aria-label="Search environment variables"
+          placeholder={t("envvars.searchPlaceholder")}
+          aria-label={t("envvars.searchAria")}
           onChange={(e) => onQueryChange(e.target.value)}
           style={{ flex: 1 }}
         />
         <IconButton
           glyph={NF.info}
-          title="About environment variables"
-          aria-label="About environment variables"
+          title={t("envvars.aboutAria")}
+          aria-label={t("envvars.aboutAria")}
           aria-expanded={showInfo}
           onClick={onToggleInfo}
         />
         <IconButton
           glyph={NF.refresh}
-          title="Reload from disk"
-          aria-label="Reload from disk"
+          title={t("envvars.reload")}
+          aria-label={t("envvars.reload")}
           onClick={onReload}
         />
       </div>
@@ -75,7 +77,8 @@ export function EnvVarsToolbar({
       <div className="envvar-facets">
         <div className="envvar-facet">
           <span className="envvar-facet-label" id={typeFacetId}>
-            Type <span className="envvar-facet-rule">— any</span>
+            {t("envvars.facetType")}{" "}
+            <span className="envvar-facet-rule">{t("envvars.facetAny")}</span>
           </span>
           <div
             className="envvar-chips"
@@ -95,7 +98,8 @@ export function EnvVarsToolbar({
         </div>
         <div className="envvar-facet">
           <span className="envvar-facet-label" id={attrFacetId}>
-            Attributes <span className="envvar-facet-rule">— all</span>
+            {t("envvars.facetAttributes")}{" "}
+            <span className="envvar-facet-rule">{t("envvars.facetAll")}</span>
           </span>
           <div
             className="envvar-chips"
@@ -108,7 +112,7 @@ export function EnvVarsToolbar({
                 active={safety.has(f.key)}
                 onToggle={() => onToggleSafety(f.key)}
               >
-                {f.label}
+                {t(f.labelKey)}
               </FilterChip>
             ))}
           </div>

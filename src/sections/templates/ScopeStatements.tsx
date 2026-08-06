@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { TemplateScopeDto } from "../../types";
 
 /**
@@ -11,6 +12,7 @@ import type { TemplateScopeDto } from "../../types";
  * commitment explicit BEFORE the user clicks Install.
  */
 export function ScopeStatements({ scope }: { scope: TemplateScopeDto }) {
+  const { t } = useTranslation("projects");
   return (
     <div
       style={{
@@ -25,10 +27,10 @@ export function ScopeStatements({ scope }: { scope: TemplateScopeDto }) {
         fontSize: "var(--fs-sm)",
       }}
     >
-      <Row label="Reads">{scope.reads}</Row>
-      <Row label="Writes">{scope.writes}</Row>
-      <Row label="Changes">{scope.could_change}</Row>
-      <Row label="Network">{scope.network}</Row>
+      <Row label={t("templates.reads")}>{scope.reads}</Row>
+      <Row label={t("templates.writes")}>{scope.writes}</Row>
+      <Row label={t("templates.changes")}>{scope.could_change}</Row>
+      <Row label={t("templates.network")}>{scope.network}</Row>
     </div>
   );
 }

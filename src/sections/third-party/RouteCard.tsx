@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { IconButton } from "../../components/primitives/IconButton";
 import { Tag } from "../../components/primitives/Tag";
@@ -34,6 +35,7 @@ export function RouteCard({
   onRemove,
   onEdit,
 }: RouteCardProps) {
+  const { t } = useTranslation("providers");
   return (
     <article
       style={{
@@ -69,14 +71,14 @@ export function RouteCard({
           <Tag
             tone="ok"
             glyph={NF.lock}
-            title="Secret is held in the OS keychain; the wrapper + Cowork helper read it on demand."
+            title={t("card.keychainTitle")}
           >
-            Keychain
+            {t("card.keychain")}
           </Tag>
         )}
         {route.active_on_desktop && (
-          <Tag tone="accent" title="Mirrored into Claude Desktop's enterpriseConfig">
-            Active on Desktop
+          <Tag tone="accent" title={t("card.activeOnDesktopTitle")}>
+            {t("card.activeOnDesktop")}
           </Tag>
         )}
       </header>
@@ -91,7 +93,7 @@ export function RouteCard({
           fontSize: "var(--fs-sm)",
         }}
       >
-        <dt style={{ color: "var(--fg-faint)" }}>Endpoint</dt>
+        <dt style={{ color: "var(--fg-faint)" }}>{t("card.endpoint")}</dt>
         <dd
           style={{
             margin: 0,
@@ -116,23 +118,25 @@ export function RouteCard({
           <CopyButton text={route.base_url} />
         </dd>
 
-        <dt style={{ color: "var(--fg-faint)" }}>Key</dt>
+        <dt style={{ color: "var(--fg-faint)" }}>{t("card.key")}</dt>
         <dd style={{ margin: 0, color: "var(--fg)" }}>
           <code>{route.api_key_preview}</code>
         </dd>
 
-        <dt style={{ color: "var(--fg-faint)" }}>Model</dt>
+        <dt style={{ color: "var(--fg-faint)" }}>{t("card.model")}</dt>
         <dd style={{ margin: 0, color: "var(--fg)" }}>
           <code>{route.model}</code>
           {route.additional_models.length > 0 && (
             <span style={{ color: "var(--fg-faint)" }}>
               {" "}
-              + {route.additional_models.length} more
+              {t("card.moreModels", {
+                count: route.additional_models.length,
+              })}
             </span>
           )}
         </dd>
 
-        <dt style={{ color: "var(--fg-faint)" }}>Wrapper</dt>
+        <dt style={{ color: "var(--fg-faint)" }}>{t("card.wrapper")}</dt>
         <dd style={{ margin: 0, color: "var(--fg)" }}>
           <code>{route.wrapper_name}</code>
           <WrapperStatus
@@ -159,9 +163,9 @@ export function RouteCard({
               onClick={() => onUnuseCli(route.id)}
               disabled={busy}
               glyph={NF.minus}
-              title="Delete the wrapper script from ~/.claudepot/bin/"
+              title={t("card.uninstallCliTitle")}
             >
-              Uninstall CLI
+              {t("card.uninstallCli")}
             </Button>
           ) : (
             <Button
@@ -170,9 +174,9 @@ export function RouteCard({
               onClick={() => onUseCli(route.id)}
               disabled={busy}
               glyph={NF.terminal}
-              title="Write the wrapper script to ~/.claudepot/bin/"
+              title={t("card.useCliTitle")}
             >
-              Use in CLI
+              {t("card.useCli")}
             </Button>
           )}
           {route.active_on_desktop ? (
@@ -182,9 +186,9 @@ export function RouteCard({
               onClick={() => onUnuseDesktop(route.id)}
               disabled={busy}
               glyph={NF.minus}
-              title="Clear enterpriseConfig (the Desktop profile stays defined)"
+              title={t("card.deactivateDesktopTitle")}
             >
-              Deactivate Desktop
+              {t("card.deactivateDesktop")}
             </Button>
           ) : (
             <Button
@@ -193,9 +197,9 @@ export function RouteCard({
               onClick={() => onUseDesktop(route.id)}
               disabled={busy}
               glyph={NF.desktop}
-              title="Mirror this route into Claude Desktop's enterpriseConfig"
+              title={t("card.useDesktopTitle")}
             >
-              Use in Desktop
+              {t("card.useDesktop")}
             </Button>
           )}
         </div>
@@ -204,15 +208,15 @@ export function RouteCard({
             glyph={NF.edit}
             onClick={() => onEdit(route)}
             disabled={busy}
-            title="Edit this route"
-            aria-label="Edit route"
+            title={t("card.editTitle")}
+            aria-label={t("card.editAria")}
           />
           <IconButton
             glyph={NF.trash}
             onClick={() => onRemove(route.id)}
             disabled={busy}
-            title="Delete this route — also tears down its CLI wrapper and Desktop activation"
-            aria-label="Delete route"
+            title={t("card.deleteTitle")}
+            aria-label={t("card.deleteAria")}
           />
         </div>
       </footer>
@@ -234,26 +238,35 @@ function WrapperStatus({
   installed: boolean;
   pathStatus: PathStatus;
 }) {
+  const { t } = useTranslation("providers");
   const base = { marginLeft: "var(--sp-8)" } as const;
 
   if (!installed) {
-    return <span style={{ ...base, color: "var(--fg-faint)" }}>not installed</span>;
+    return (
+      <span style={{ ...base, color: "var(--fg-faint)" }}>
+        {t("card.status.notInstalled")}
+      </span>
+    );
   }
   if (pathStatus === "on_path") {
     return (
       <span style={{ ...base, color: "var(--fg-faint)" }}>
-        <Glyph g={NF.check} /> on PATH
+        <Glyph g={NF.check} /> {t("card.status.onPath")}
       </span>
     );
   }
   if (pathStatus === "not_on_path") {
     return (
       <span style={{ ...base, color: "var(--warn)" }}>
-        <Glyph g={NF.warn} /> installed · not on PATH
+        <Glyph g={NF.warn} /> {t("card.status.notOnPath")}
       </span>
     );
   }
   // "unknown" — wrapper exists, but the PATH probe was inconclusive.
   // Don't claim either way.
-  return <span style={{ ...base, color: "var(--fg-faint)" }}>installed</span>;
+  return (
+    <span style={{ ...base, color: "var(--fg-faint)" }}>
+      {t("card.status.installed")}
+    </span>
+  );
 }

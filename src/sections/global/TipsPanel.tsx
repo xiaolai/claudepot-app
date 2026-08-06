@@ -5,6 +5,7 @@
 // log, and renders a searchable, filterable list. See
 // `dev-docs/cc-tips-ledger.md` for the design.
 
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
@@ -12,6 +13,7 @@ import { TipsList } from "./tips/TipsList";
 import { useTipsCatalog } from "./tips/useTipsCatalog";
 
 export function TipsPanel() {
+  const { t } = useTranslation("global");
   const { data, loading, error, refresh, refreshing } = useTipsCatalog();
 
   return (
@@ -40,7 +42,7 @@ export function TipsPanel() {
             margin: 0,
           }}
         >
-          CC tips
+          {t("tips.title")}
         </h2>
         <span
           style={{
@@ -50,14 +52,20 @@ export function TipsPanel() {
           }}
         >
           {data ? (
-            <>
-              {data.extracted_count} of {data.known_count} known tips extracted
-              from CC <strong>{data.catalog_version}</strong>
-              {data.partial && " (partial — format may have shifted)"} ·
-              current startup #{data.current_num_startups}
-            </>
+            <Trans
+              ns="global"
+              i18nKey="tips.headerSummary"
+              components={{ strong: <strong /> }}
+              values={{
+                extracted: data.extracted_count,
+                known: data.known_count,
+                version: data.catalog_version,
+                partial: data.partial ? t("tips.partialSuffix") : "",
+                startup: data.current_num_startups,
+              }}
+            />
           ) : (
-            "Loading tip catalog…"
+            t("tips.loadingCatalog")
           )}
         </span>
         <Button
@@ -67,7 +75,7 @@ export function TipsPanel() {
           disabled={refreshing}
           glyph={NF.refresh}
         >
-          {refreshing ? "Refreshing…" : "Refresh"}
+          {refreshing ? t("tips.refreshing") : t("tips.refresh")}
         </Button>
       </div>
       <p
@@ -78,9 +86,11 @@ export function TipsPanel() {
           color: "var(--fg-faint)",
         }}
       >
-        Tip prose is read from your local CC binary. History and timing
-        come from <code>~/.claude.json</code> and Claudepot's local
-        snapshot log. Nothing is uploaded.
+        <Trans
+          ns="global"
+          i18nKey="tips.privacyNote"
+          components={{ code: <code /> }}
+        />
       </p>
       {loading && (
         <div
@@ -91,7 +101,7 @@ export function TipsPanel() {
             textAlign: "center",
           }}
         >
-          Reading CC binary…
+          {t("tips.readingBinary")}
         </div>
       )}
       {error && (
@@ -111,7 +121,7 @@ export function TipsPanel() {
         >
           <Glyph g={NF.warn} />
           <div>
-            <strong>Tips catalog unavailable.</strong>
+            <strong>{t("tips.unavailable")}</strong>
             <div style={{ marginTop: "var(--sp-4)", color: "var(--fg-faint)" }}>
               {error}
             </div>
@@ -122,7 +132,7 @@ export function TipsPanel() {
                 color: "var(--fg-faint)",
               }}
             >
-              Install or update CC, then click Refresh.
+              {t("tips.installHint")}
             </div>
           </div>
         </div>

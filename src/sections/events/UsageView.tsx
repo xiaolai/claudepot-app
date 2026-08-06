@@ -27,8 +27,10 @@
 // they can't be missed against the ledger.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type { ArtifactUsageRowDto } from "../../types";
 import { UsageTable, type SortKey } from "./UsageTable";
 import { UnusedPane } from "./UnusedPane";
@@ -56,6 +58,7 @@ interface UsageViewProps {
 }
 
 export function UsageView({ registerRefresh, onNavigate }: UsageViewProps = {}) {
+  const { t } = useTranslation("activities");
   const [rows, setRows] = useState<ArtifactUsageRowDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +77,7 @@ export function UsageView({ registerRefresh, onNavigate }: UsageViewProps = {}) 
       setError(null);
     } catch (e) {
       if (seq !== seqRef.current) return;
-      setError(e instanceof Error ? e.message : String(e));
+      setError(renderError(e));
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
@@ -184,19 +187,19 @@ export function UsageView({ registerRefresh, onNavigate }: UsageViewProps = {}) 
           flexWrap: "wrap",
         }}
       >
-        <KindChip current={kind} onPick={setKind} value="all" label="All" />
-        <KindChip current={kind} onPick={setKind} value="skill" label="Skills" />
-        <KindChip current={kind} onPick={setKind} value="hook" label="Hooks" />
-        <KindChip current={kind} onPick={setKind} value="agent" label="Agents" />
-        <KindChip current={kind} onPick={setKind} value="command" label="Commands" />
-        <KindChip current={kind} onPick={setKind} value="mcp" label="MCP" />
+        <KindChip current={kind} onPick={setKind} value="all" label={t("usage.kindAll")} />
+        <KindChip current={kind} onPick={setKind} value="skill" label={t("usage.kindSkills")} />
+        <KindChip current={kind} onPick={setKind} value="hook" label={t("usage.kindHooks")} />
+        <KindChip current={kind} onPick={setKind} value="agent" label={t("usage.kindAgents")} />
+        <KindChip current={kind} onPick={setKind} value="command" label={t("usage.kindCommands")} />
+        <KindChip current={kind} onPick={setKind} value="mcp" label={t("usage.kindMcp")} />
         <span style={{ flex: 1 }} />
-        <ViewChip current={view} onPick={setView} value="hot" label="Hot" />
-        <ViewChip current={view} onPick={setView} value="noisy" label="Noisy" />
-        <ViewChip current={view} onPick={setView} value="unused" label="Unused" />
-        <ViewChip current={view} onPick={setView} value="all" label="All" />
+        <ViewChip current={view} onPick={setView} value="hot" label={t("usage.viewHot")} />
+        <ViewChip current={view} onPick={setView} value="noisy" label={t("usage.viewNoisy")} />
+        <ViewChip current={view} onPick={setView} value="unused" label={t("usage.viewUnused")} />
+        <ViewChip current={view} onPick={setView} value="all" label={t("usage.viewAll")} />
         <select
-          aria-label="Filter by plugin"
+          aria-label={t("usage.filterByPlugin")}
           value={plugin}
           onChange={(e) => setPlugin(e.target.value as string)}
           style={{
@@ -208,7 +211,7 @@ export function UsageView({ registerRefresh, onNavigate }: UsageViewProps = {}) 
             fontSize: "var(--fs-xs)",
           }}
         >
-          <option value="all">All plugins</option>
+          <option value="all">{t("usage.allPlugins")}</option>
           {plugins.map((p) => (
             <option key={p} value={p}>
               {p}
@@ -226,15 +229,15 @@ export function UsageView({ registerRefresh, onNavigate }: UsageViewProps = {}) 
             onPluginsDiscovered={handleUnusedPlugins}
           />
         ) : loading && rows.length === 0 ? (
-          <EmptyHint>Loading usage data…</EmptyHint>
+          <EmptyHint>{t("usage.loading")}</EmptyHint>
         ) : error ? (
-          <EmptyHint danger>Failed to load: {error}</EmptyHint>
+          <EmptyHint danger>{t("usage.loadFailed", { error })}</EmptyHint>
         ) : visible.length === 0 ? (
           <EmptyHint>
-            No matching artifacts.{" "}
+            {t("usage.noMatch")}{" "}
             {rows.length === 0
-              ? "Run a session to populate usage data."
-              : "Try a different filter."}
+              ? t("usage.runSession")
+              : t("usage.tryDifferentFilter")}
           </EmptyHint>
         ) : (
           <UsageTable

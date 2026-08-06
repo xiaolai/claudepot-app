@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import { formatNumber } from "../../../lib/intl";
 import type { ContextCategory, ContextStats } from "../../../types";
 import { formatTokens } from "../format";
 
@@ -20,6 +22,7 @@ export function ContextTotals({
   reportedTotal: number | null;
   phaseLabel: number | null;
 }) {
+  const { t: tr } = useTranslation("sessions");
   const t = totals;
   const total =
     t.claude_md +
@@ -29,16 +32,36 @@ export function ContextTotals({
     t.team_coordination +
     t.user_message;
   const rows: { key: ContextCategory; label: string; value: number }[] = [
-    { key: "claude-md", label: "CLAUDE.md", value: t.claude_md },
-    { key: "mentioned-file", label: "Mentioned files", value: t.mentioned_file },
-    { key: "tool-output", label: "Tool output", value: t.tool_output },
-    { key: "thinking-text", label: "Thinking/text", value: t.thinking_text },
+    {
+      key: "claude-md",
+      label: tr("context.categories.claudeMd"),
+      value: t.claude_md,
+    },
+    {
+      key: "mentioned-file",
+      label: tr("context.categories.mentionedFiles"),
+      value: t.mentioned_file,
+    },
+    {
+      key: "tool-output",
+      label: tr("context.categories.toolOutput"),
+      value: t.tool_output,
+    },
+    {
+      key: "thinking-text",
+      label: tr("context.categories.thinkingText"),
+      value: t.thinking_text,
+    },
     {
       key: "team-coordination",
-      label: "Team coord.",
+      label: tr("context.categories.teamCoord"),
       value: t.team_coordination,
     },
-    { key: "user-message", label: "User messages", value: t.user_message },
+    {
+      key: "user-message",
+      label: tr("context.categories.userMessages"),
+      value: t.user_message,
+    },
   ];
 
   return (
@@ -52,8 +75,10 @@ export function ContextTotals({
           color: "var(--fg-muted)",
         }}
       >
-        <span>Visible</span>
-        <span className="mono">{formatTokens(total)} tok</span>
+        <span>{tr("context.visible")}</span>
+        <span className="mono">
+          {tr("viewer.tok", { tokens: formatTokens(total) })}
+        </span>
       </div>
       {rows.map((row) => {
         const pct = total > 0 ? (row.value / total) * 100 : 0;
@@ -107,8 +132,10 @@ export function ContextTotals({
         }}
       >
         {reportedTotal != null
-          ? `Model reported ${reportedTotal.toLocaleString()} total`
-          : `Phase #${phaseLabel} (session total hidden)`}
+          ? tr("context.modelReported", {
+              total: formatNumber(reportedTotal),
+            })
+          : tr("context.phaseTotalHidden", { phase: phaseLabel })}
       </div>
     </section>
   );

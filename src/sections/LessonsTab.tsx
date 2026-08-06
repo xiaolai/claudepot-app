@@ -12,6 +12,7 @@
 // many have gone SUSPECT because the code they relied on changed.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../api/sharedMemory";
 import type {
   LessonCounts,
@@ -24,7 +25,7 @@ import { Tag } from "../components/primitives/Tag";
 import { RecurrencePanel } from "./knowledge/RecurrencePanel";
 import { StatCard } from "./knowledge/dashboard-primitives";
 import type { StatCardProps } from "./knowledge/dashboard-primitives";
-import { toUserError } from "../lib/errors";
+import { renderError } from "../lib/i18n-error";
 
 type QueueState = Extract<ReviewStateName, "proposed" | "suspect">;
 
@@ -38,6 +39,7 @@ export function LessonsTab({
   /** Deep-link a recurrence's matched lesson into Know. */
   onOpenMemory?: (projectPath: string, memoryId: string) => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const [counts, setCounts] = useState<LessonCounts | null>(null);
   const [rows, setRows] = useState<LessonRow[]>([]);
   const [queue, setQueue] = useState<QueueState>(initialQueue);
@@ -58,7 +60,7 @@ export function LessonsTab({
       setRows(r);
       setCursor((i) => Math.min(i, Math.max(0, r.length - 1)));
     } catch (e) {
-      setErr(toUserError(e));
+      setErr(renderError(e));
     } finally {
       setLoading(false);
     }
@@ -83,7 +85,9 @@ export function LessonsTab({
         // drop it as if the verdict took — surface it and refresh.
         if (!ok) {
           setErr(
-            `Could not ${verdict} this lesson — it may have changed. Refreshing.`,
+            verdict === "accept"
+              ? t("review.errCouldNotAccept")
+              : t("review.errCouldNotReject"),
           );
           await refresh();
           return;
@@ -105,12 +109,12 @@ export function LessonsTab({
         setCounts((c) => (c ? adjustCounts(c, row.review_state, verdict) : c));
         void sharedMemoryApi.lessonCounts().then(setCounts).catch(() => {});
       } catch (e) {
-        setErr(toUserError(e));
+        setErr(renderError(e));
       } finally {
         setBusyId(null);
       }
     },
-    [refresh],
+    [refresh, t],
   );
 
   // Keyboard triage: j/k move, a accept, r reject. Never while an input
@@ -143,11 +147,11 @@ export function LessonsTab({
       <RecurrencePanel onOpenMemory={onOpenMemory} />
 
       <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-12)" }}>
-        <SectionLabel>Review queue</SectionLabel>
+        <SectionLabel>{t("review.queueLabel")}</SectionLabel>
         <QueueToggle value={queue} counts={counts} onChange={setQueue} />
         <div style={{ flex: 1 }} />
         <Button variant="ghost" onClick={() => void refresh()} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
+          {loading ? t("review.loading") : t("review.refresh")}
         </Button>
       </div>
 
@@ -177,8 +181,11 @@ export function LessonsTab({
 
       {rows.length > 0 && (
         <p style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)", margin: 0 }}>
-          <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> accept · <kbd>r</kbd> reject.
-          You judge; you never author.
+          <Trans
+            ns="knowledge"
+            i18nKey="review.kbdHint"
+            components={{ kbd: <kbd /> }}
+          />
         </p>
       )}
     </div>
@@ -188,37 +195,38 @@ export function LessonsTab({
 // ─── the honest gazette (Phase 5) ────────────────────────────────
 
 function Gazette({ counts }: { counts: LessonCounts | null }) {
+  const { t } = useTranslation("knowledge");
   // Uses the shared StatCard + toneColor from dashboard-primitives so the
   // Review gazette and the Dashboard speak one visual language (the doc's
   // "extract Gazette's StatCard + toneColor so both surfaces agree").
   const stats: StatCardProps[] = useMemo(
     () => [
       {
-        label: "To review",
+        label: t("review.toReview"),
         value: counts?.proposed ?? 0,
         tone: "accent",
-        hint: "waiting on your yes / no",
+        hint: t("review.toReviewHint"),
       },
       {
-        label: "Enforced",
+        label: t("review.enforced"),
         value: counts?.enforced ?? 0,
         tone: "good",
-        hint: "compiled into a check that fails the build",
+        hint: t("review.enforcedHint"),
       },
       {
-        label: "Documented",
+        label: t("review.documented"),
         value: Math.max(0, (counts?.accepted ?? 0) - (counts?.enforced ?? 0)),
         tone: "neutral",
-        hint: "accepted, not yet a check",
+        hint: t("review.documentedHint"),
       },
       {
-        label: "Suspect",
+        label: t("review.suspect"),
         value: counts?.suspect ?? 0,
         tone: "warn",
-        hint: "the code they relied on changed",
+        hint: t("review.suspectHint"),
       },
     ],
-    [counts],
+    [counts, t],
   );
 
   return (
@@ -253,6 +261,7 @@ function LessonCard({
   onAccept: () => void;
   onReject: () => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const evidence = useMemo(() => parseAnchor(row.anchor_json), [row.anchor_json]);
   return (
     <li>
@@ -300,16 +309,16 @@ function LessonCard({
 
         {evidence && (
           <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-            because: {evidence}
+            {t("review.because", { evidence })}
           </p>
         )}
 
         <div style={{ display: "flex", gap: "var(--sp-8)", marginTop: "var(--sp-4)" }}>
           <Button variant="solid" onClick={onAccept} disabled={busy}>
-            {busy ? "…" : "Accept"}
+            {busy ? "…" : t("review.accept")}
           </Button>
           <Button variant="ghost" onClick={onReject} disabled={busy}>
-            Reject
+            {t("review.reject")}
           </Button>
         </div>
       </div>
@@ -328,9 +337,10 @@ function QueueToggle({
   counts: LessonCounts | null;
   onChange: (q: QueueState) => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const opts: { id: QueueState; label: string; n: number }[] = [
-    { id: "proposed", label: "Proposed", n: counts?.proposed ?? 0 },
-    { id: "suspect", label: "Suspect", n: counts?.suspect ?? 0 },
+    { id: "proposed", label: t("review.queueProposed"), n: counts?.proposed ?? 0 },
+    { id: "suspect", label: t("review.queueSuspect"), n: counts?.suspect ?? 0 },
   ];
   return (
     <div style={{ display: "flex", gap: "var(--sp-4)" }}>
@@ -350,6 +360,7 @@ function QueueToggle({
 }
 
 function EmptyQueue({ queue }: { queue: QueueState }) {
+  const { t } = useTranslation("knowledge");
   return (
     <div
       style={{
@@ -362,16 +373,14 @@ function EmptyQueue({ queue }: { queue: QueueState }) {
     >
       {queue === "proposed" ? (
         <>
-          <p style={{ margin: 0 }}>Nothing to review.</p>
+          <p style={{ margin: 0 }}>{t("review.emptyTitle")}</p>
           <p style={{ margin: "var(--sp-8) 0 0", fontSize: "var(--fs-sm)" }}>
-            Harvest lessons from your sessions:{" "}
+            {t("review.emptyHarvestHint")}{" "}
             <code>claudepot lesson harvest</code>
           </p>
         </>
       ) : (
-        <p style={{ margin: 0 }}>
-          No suspect lessons. Nothing you accepted has gone stale.
-        </p>
+        <p style={{ margin: 0 }}>{t("review.emptySuspect")}</p>
       )}
     </div>
   );

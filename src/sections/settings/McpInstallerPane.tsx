@@ -18,6 +18,7 @@
 // guessing). UI shows the snippet path as a confirmation.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { projectApi } from "../../api/project";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type {
@@ -30,6 +31,7 @@ import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
+import { renderError } from "../../lib/i18n-error";
 
 // Narrow toast signature to the only two kinds we use, keeping the
 // pane decoupled from the broader Toast type. The PushToast prop
@@ -42,6 +44,7 @@ export function McpInstallerPane({
 }: {
   pushToast: PushToast;
 }) {
+  const { t } = useTranslation("settings");
   const [health, setHealth] = useState<McpHealth | null>(null);
   const [checking, setChecking] = useState(false);
   const [snippet, setSnippet] = useState<string>("");
@@ -57,7 +60,7 @@ export function McpInstallerPane({
       const h = await sharedMemoryApi.mcpHealth();
       setHealth(h);
     } catch (e) {
-      setHealth({ tool_visible: false, tool_count: 0, error: String(e) });
+      setHealth({ tool_visible: false, tool_count: 0, error: renderError(e) });
     } finally {
       setChecking(false);
     }
@@ -68,9 +71,9 @@ export function McpInstallerPane({
       const body = await sharedMemoryApi.snippetBody();
       setSnippet(body);
     } catch (e) {
-      pushToast("error", `Failed to load snippet preview: ${e}`);
+      pushToast("error", renderError(e, t("mcp.snippetLoadFailed")));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   const doInstall = useCallback(async () => {
     setInstalling(true);
@@ -81,32 +84,35 @@ export function McpInstallerPane({
           : { scope: "user" },
       );
       setInstall(r);
-      pushToast("info", `Wrote ${r.path} (${r.bytes_written} bytes)`);
+      pushToast(
+        "info",
+        t("mcp.wroteToast", { path: r.path, bytes: r.bytes_written }),
+      );
     } catch (e) {
-      pushToast("error", `Install failed: ${e}`);
+      pushToast("error", renderError(e, t("mcp.installFailed")));
     } finally {
       setInstalling(false);
     }
-  }, [pushToast, scope, projectPath]);
+  }, [pushToast, scope, projectPath, t]);
 
   const loadProjects = useCallback(async () => {
     try {
       const list = await projectApi.projectList();
       setProjects(list.filter((p: ProjectInfo) => p.is_reachable));
     } catch (e) {
-      pushToast("error", `Failed to load projects: ${e}`);
+      pushToast("error", renderError(e, t("mcp.projectsLoadFailed")));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   const copyIncludeLine = useCallback(async () => {
     if (!install) return;
     try {
       await navigator.clipboard.writeText(install.include_line);
-      pushToast("info", "@include line copied to clipboard");
+      pushToast("info", t("mcp.includeCopied"));
     } catch (e) {
-      pushToast("error", `Copy failed: ${e}`);
+      pushToast("error", renderError(e, t("shared.copyFailed")));
     }
-  }, [install, pushToast]);
+  }, [install, pushToast, t]);
 
   useEffect(() => {
     void loadSnippet();
@@ -126,7 +132,7 @@ export function McpInstallerPane({
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)", maxWidth: "var(--content-cap-md)" }}>
       {/* ─── Server health ─────────────────────────────────── */}
       <section>
-        <SectionLabel>Server health</SectionLabel>
+        <SectionLabel>{t("mcp.serverHealth")}</SectionLabel>
         <div
           style={{
             marginTop: "var(--sp-8)",
@@ -143,16 +149,19 @@ export function McpInstallerPane({
             <Tag>
               {health
                 ? health.tool_visible
-                  ? `tool_visible · ${health.tool_count} tools`
-                  : "tool_visible · failed"
-                : "unknown"}
+                  ? t("mcp.toolVisibleCount", { count: health.tool_count })
+                  : t("mcp.toolVisibleFailed")
+                : t("mcp.unknown")}
             </Tag>
             <div style={{ flex: 1, color: "var(--fg-muted)", fontSize: "var(--fs-sm)" }}>
-              Spawns <code>claudepot mcp memory-server</code>, runs
-              <code> initialize</code> + <code>tools/list</code>, counts the tools.
+              <Trans
+                ns="settings"
+                i18nKey="mcp.healthDesc"
+                components={{ code: <code /> }}
+              />
             </div>
             <Button glyph={NF.refresh} onClick={() => void checkHealth()} disabled={checking}>
-              {checking ? "Checking…" : "Check"}
+              {checking ? t("mcp.checking") : t("mcp.check")}
             </Button>
           </div>
           {health?.error && (
@@ -175,14 +184,13 @@ export function McpInstallerPane({
 
       {/* ─── Agent-instruction snippet installer ──────────── */}
       <section>
-        <SectionLabel>Agent instructions</SectionLabel>
+        <SectionLabel>{t("mcp.agentInstructions")}</SectionLabel>
         <p style={{ marginTop: "var(--sp-6)", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-          Configuring an MCP entry alone isn't enough — agents have to
-          be told <em>when</em> to call the tools. This snippet does
-          that. Pick a scope, install it once, then paste the{" "}
-          <code>@include</code> line into the target file Claudepot
-          names. Future regenerations refresh the file in place; the{" "}
-          <code>@include</code> line never changes.
+          <Trans
+            ns="settings"
+            i18nKey="mcp.introDesc"
+            components={{ em: <em />, code: <code /> }}
+          />
         </p>
         <div
           style={{
@@ -208,7 +216,7 @@ export function McpInstallerPane({
             }}
           >
             <legend style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)", padding: 0 }}>
-              Scope
+              {t("mcp.scope")}
             </legend>
             <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start", cursor: "pointer" }}>
               <input
@@ -219,12 +227,13 @@ export function McpInstallerPane({
                 onChange={() => setScope("user")}
               />
               <span>
-                <strong>User</strong>{" "}
+                <strong>{t("mcp.scopeUser")}</strong>{" "}
                 <span style={{ color: "var(--fg-muted)" }}>
-                  — writes <code>~/.claude/claudepot-mcp-instructions.md</code>; paste{" "}
-                  <code>@include</code> into <code>~/.claude/CLAUDE.md</code>,{" "}
-                  <code>~/.codex/AGENTS.md</code>, <code>~/.gemini/GEMINI.md</code>. Loads
-                  in every project.
+                  <Trans
+                    ns="settings"
+                    i18nKey="mcp.scopeUserDesc"
+                    components={{ code: <code /> }}
+                  />
                 </span>
               </span>
             </label>
@@ -237,12 +246,16 @@ export function McpInstallerPane({
                 onChange={() => setScope("project")}
               />
               <span>
-                <strong>Project</strong>{" "}
+                <strong>{t("mcp.scopeProject")}</strong>{" "}
                 <span style={{ color: "var(--fg-muted)" }}>
-                  — writes <code>&lt;project&gt;/.claude/claudepot-mcp-instructions.md</code>;
-                  paste <code>@include</code> into the project's <code>AGENTS.md</code> (the
-                  canonical source per <code>/init-workspace</code>). Loads only in that
-                  project.
+                  <Trans
+                    ns="settings"
+                    i18nKey="mcp.scopeProjectDesc"
+                    components={{ code: <code /> }}
+                    values={{
+                      path: "<project>/.claude/claudepot-mcp-instructions.md",
+                    }}
+                  />
                 </span>
               </span>
             </label>
@@ -251,7 +264,7 @@ export function McpInstallerPane({
             <select
               value={projectPath}
               onChange={(e) => setProjectPath(e.currentTarget.value)}
-              aria-label="Project"
+              aria-label={t("mcp.projectAria")}
               style={{
                 padding: "var(--sp-8)",
                 border: "var(--sp-px) solid var(--line)",
@@ -261,7 +274,7 @@ export function McpInstallerPane({
                 fontSize: "var(--fs-sm)",
               }}
             >
-              <option value="">Select project…</option>
+              <option value="">{t("mcp.selectProject")}</option>
               {projects.map((p) => (
                 <option key={p.original_path} value={p.original_path}>
                   {p.original_path}
@@ -276,11 +289,11 @@ export function McpInstallerPane({
               onClick={() => void doInstall()}
               disabled={installDisabled}
             >
-              {installing ? "Installing…" : "Install snippet"}
+              {installing ? t("mcp.installing") : t("mcp.installSnippet")}
             </Button>
             {install && (
               <Button glyph={NF.copy} onClick={() => void copyIncludeLine()}>
-                Copy @include line
+                {t("mcp.copyInclude")}
               </Button>
             )}
           </div>
@@ -299,12 +312,12 @@ export function McpInstallerPane({
               }}
             >
               <div>
-                Wrote ({install.scope}): {install.path}
+                {t("mcp.wroteLine", { scope: install.scope, path: install.path })}
               </div>
               <div style={{ marginTop: "var(--sp-4)", fontWeight: 600 }}>{install.include_line}</div>
               {install.target_files.length > 0 && (
                 <div style={{ marginTop: "var(--sp-6)", color: "var(--fg-muted)" }}>
-                  Paste the line above into:
+                  {t("mcp.pasteInto")}
                   <ul style={{ margin: "var(--sp-4) 0 0 var(--sp-16)", padding: 0 }}>
                     {install.target_files.map((f) => (
                       <li key={f}>{f}</li>
@@ -316,7 +329,7 @@ export function McpInstallerPane({
           )}
           <details style={{ marginTop: "var(--sp-4)" }}>
             <summary style={{ cursor: "pointer", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-              Preview snippet content
+              {t("mcp.preview")}
             </summary>
             {/* <pre> is already select-opted-in by base.css; the old
                 inline userSelect was redundant (and non-functional). */}

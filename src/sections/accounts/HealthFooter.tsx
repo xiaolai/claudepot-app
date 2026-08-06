@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
@@ -18,6 +19,7 @@ interface HealthFooterProps {
  * so cards align.
  */
 export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
+  const { t } = useTranslation("accounts");
   // A run is actively checking THIS account — show a neutral pulse
   // instead of the stale prior result so the user sees work happening.
   const isVerifying = verifyLive === "verifying";
@@ -43,18 +45,19 @@ export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
   // signal (slot is misfiled to another email). For "ok" we append a
   // freshness suffix so a 3-day-old "verified" doesn't read as
   // reassurance.
-  const verifiedAgo = a.verified_at ? ` · ${relTime(a.verified_at)}` : "";
   const verifyLabel = isVerifying
-    ? "verifying…"
+    ? t("footer.verifying")
     : effectiveStatus === "ok"
-      ? `verified${verifiedAgo}`
+      ? a.verified_at
+        ? t("footer.verifiedAgo", { ago: relTime(a.verified_at) })
+        : t("footer.verified")
       : effectiveStatus === "drift"
-        ? `drift → ${a.verified_email ?? "?"}`
+        ? t("footer.drift", { email: a.verified_email ?? "?" })
         : effectiveStatus === "rejected"
-          ? "token rejected"
+          ? t("footer.tokenRejected")
           : effectiveStatus === "network_error"
-            ? "profile unreachable"
-            : "not yet verified";
+            ? t("footer.profileUnreachable")
+            : t("footer.notYetVerified");
 
   return (
     <div
@@ -118,7 +121,7 @@ export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
             textOverflow: "ellipsis",
           }}
         >
-          token {a.token_status}
+          {t("footer.token", { status: a.token_status })}
         </span>
       </Cell>
 
@@ -132,7 +135,7 @@ export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
             color="var(--fg-faint)"
             style={{ fontSize: "var(--fs-2xs)" }}
           />
-          <span>CLI switch {relTime(a.last_cli_switch)}</span>
+          <span>{t("footer.cliSwitch", { ago: relTime(a.last_cli_switch) })}</span>
         </Cell>
       )}
 
@@ -143,7 +146,9 @@ export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
             color="var(--fg-faint)"
             style={{ fontSize: "var(--fs-2xs)" }}
           />
-          <span>Desktop switch {relTime(a.last_desktop_switch)}</span>
+          <span>
+            {t("footer.desktopSwitch", { ago: relTime(a.last_desktop_switch) })}
+          </span>
         </Cell>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { api } from "../../api";
 import {
@@ -17,6 +18,7 @@ import {
   ModalHeader,
 } from "../../components/primitives/Modal";
 import { NF } from "../../icons";
+import { renderError } from "../../lib/i18n-error";
 import {
   CandidateChecklist,
   Field,
@@ -42,24 +44,6 @@ const WINDOW_IDS: WindowId[] = [
   "seven_day_sonnet",
 ];
 
-const SELECTOR_KINDS: { value: SelectorKind; label: string; hint: string }[] = [
-  {
-    value: "least_used",
-    label: "Least used",
-    hint: "Pick the candidate with the lowest utilization on the chosen window.",
-  },
-  {
-    value: "round_robin",
-    label: "Round robin",
-    hint: "Pick the next candidate after the active one in list order.",
-  },
-  {
-    value: "explicit",
-    label: "Explicit",
-    hint: "Always swap to one specific account.",
-  },
-];
-
 export function RotationRuleModal({
   existing,
   existingIds,
@@ -67,8 +51,27 @@ export function RotationRuleModal({
   onClose,
   onSave,
 }: Props) {
+  const { t } = useTranslation("settings");
   const titleId = useId();
   const isEdit = existing != null;
+
+  const SELECTOR_KINDS: { value: SelectorKind; label: string; hint: string }[] = [
+    {
+      value: "least_used",
+      label: t("rotationModal.selector.leastUsed"),
+      hint: t("rotationModal.selector.leastUsedHint"),
+    },
+    {
+      value: "round_robin",
+      label: t("rotationModal.selector.roundRobin"),
+      hint: t("rotationModal.selector.roundRobinHint"),
+    },
+    {
+      value: "explicit",
+      label: t("rotationModal.selector.explicit"),
+      hint: t("rotationModal.selector.explicitHint"),
+    },
+  ];
 
   const [rule, setRule] = useState<RotationRule>(() =>
     existing ?? newRule(suggestId(existingIds), candidateEmails),
@@ -148,11 +151,11 @@ export function RotationRuleModal({
         !isEdit &&
         existingIds.includes(rule.id.trim())
       ) {
-        throw new Error(`Rule id "${rule.id}" already exists`);
+        throw new Error(t("rotationModal.idExists", { id: rule.id }));
       }
       await onSave(rule);
     } catch (e) {
-      setError(`${e}`);
+      setError(renderError(e));
     } finally {
       setSaving(false);
     }
@@ -168,7 +171,7 @@ export function RotationRuleModal({
       setDry({
         wouldFire: false,
         targetEmail: null,
-        reason: `dry-run failed: ${e}`,
+        reason: t("rotationModal.dryRunFailed", { error: renderError(e) }),
       });
     } finally {
       setDryLoading(false);
@@ -179,14 +182,21 @@ export function RotationRuleModal({
     <Modal open onClose={onClose} aria-labelledby={titleId} width="lg">
       <ModalHeader
         glyph={NF.refresh}
-        title={isEdit ? `Edit rule: ${existing.id}` : "New rotation rule"}
+        title={
+          isEdit
+            ? t("rotationModal.titleEdit", { id: existing.id })
+            : t("rotationModal.titleNew")
+        }
         id={titleId}
         onClose={onClose}
       />
       <ModalBody>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-16)" }}>
           {/* Rule id */}
-          <Field label="Rule id" hint="Short, unique identifier — appears in the audit log.">
+          <Field
+            label={t("rotationModal.ruleId.label")}
+            hint={t("rotationModal.ruleId.hint")}
+          >
             <input
               type="text"
               value={rule.id}
@@ -198,8 +208,8 @@ export function RotationRuleModal({
 
           {/* Trigger */}
           <Field
-            label="Fire when"
-            hint="Anthropic's per-account utilization for the active CLI account."
+            label={t("rotationModal.fireWhen.label")}
+            hint={t("rotationModal.fireWhen.hint")}
           >
             <div style={{ display: "flex", gap: "var(--sp-8)", flexWrap: "wrap" }}>
               <select
@@ -229,7 +239,7 @@ export function RotationRuleModal({
           </Field>
 
           {/* Selector */}
-          <Field label="Then rotate to" hint="">
+          <Field label={t("rotationModal.rotateTo")} hint="">
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
               <select
                 value={rule.action.selector.kind}
@@ -251,7 +261,7 @@ export function RotationRuleModal({
                   onChange={(e) => setExplicitEmail(e.target.value)}
                   style={selectStyle()}
                 >
-                  <option value="">Pick an account…</option>
+                  <option value="">{t("rotationModal.pickAccount")}</option>
                   {candidateOptions.map((email) => (
                     <option key={email} value={email}>
                       {email}
@@ -270,20 +280,20 @@ export function RotationRuleModal({
 
           {/* Mode */}
           <Field
-            label="Mode"
-            hint="Confirm shows a toast before swapping. Auto swaps immediately."
+            label={t("rotationModal.mode.label")}
+            hint={t("rotationModal.mode.hint")}
           >
             <div style={{ display: "flex", gap: "var(--sp-12)" }}>
               <ModeRadio
                 value="confirm"
                 current={rule.mode}
-                label="Confirm (recommended)"
+                label={t("rotationModal.mode.confirm")}
                 onChange={(v) => setRule((r) => ({ ...r, mode: v }))}
               />
               <ModeRadio
                 value="auto"
                 current={rule.mode}
-                label="Auto"
+                label={t("rotationModal.mode.auto")}
                 onChange={(v) => setRule((r) => ({ ...r, mode: v }))}
               />
             </div>
@@ -303,7 +313,7 @@ export function RotationRuleModal({
                 color: "var(--fg-muted)",
               }}
             >
-              Advanced (guards)
+              {t("rotationModal.advanced")}
             </summary>
             <div
               style={{
@@ -314,8 +324,8 @@ export function RotationRuleModal({
               }}
             >
               <Field
-                label="Min interval between swaps (seconds)"
-                hint="Across all rules. Stops cascade swaps from a single tick."
+                label={t("rotationModal.minInterval.label")}
+                hint={t("rotationModal.minInterval.hint")}
               >
                 <input
                   type="number"
@@ -334,8 +344,8 @@ export function RotationRuleModal({
                 />
               </Field>
               <Field
-                label="Max swaps per cycle"
-                hint="Per-rule cap inside the trigger window's reset cycle."
+                label={t("rotationModal.maxSwaps.label")}
+                hint={t("rotationModal.maxSwaps.hint")}
               >
                 <input
                   type="number"
@@ -374,7 +384,7 @@ export function RotationRuleModal({
                     }))
                   }
                 />
-                Skip when CC is running
+                {t("rotationModal.skipWhenCc")}
               </label>
             </div>
           </details>
@@ -391,19 +401,22 @@ export function RotationRuleModal({
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <strong style={{ fontSize: "var(--fs-sm)" }}>Test now</strong>
+              <strong style={{ fontSize: "var(--fs-sm)" }}>
+                {t("rotationModal.testNow")}
+              </strong>
               <Button
                 variant="ghost"
                 glyph={NF.refresh}
                 onClick={runDryRun}
                 disabled={dryLoading}
               >
-                {dryLoading ? "Testing…" : "Run dry test"}
+                {dryLoading
+                  ? t("rotationModal.testing")
+                  : t("rotationModal.runDryTest")}
               </Button>
             </div>
             <small style={{ color: "var(--fg-muted)", fontSize: "var(--fs-xs)" }}>
-              Evaluates this rule against the current usage snapshot —
-              answers "would this fire right now?"
+              {t("rotationModal.dryHint")}
             </small>
             {dry && (
               <div
@@ -415,7 +428,11 @@ export function RotationRuleModal({
                 }}
               >
                 <div>
-                  <strong>{dry.wouldFire ? "Would fire" : "Would not fire"}</strong>
+                  <strong>
+                    {dry.wouldFire
+                      ? t("rotationModal.wouldFire")
+                      : t("rotationModal.wouldNotFire")}
+                  </strong>
                   {dry.targetEmail ? ` → ${dry.targetEmail}` : ""}
                 </div>
                 <div style={{ color: "var(--fg-muted)", marginTop: "var(--sp-4)" }}>
@@ -443,10 +460,14 @@ export function RotationRuleModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose} disabled={saving}>
-          Cancel
+          {t("shared.cancel")}
         </Button>
         <Button variant="solid" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving…" : isEdit ? "Save" : "Create rule"}
+          {saving
+            ? t("shared.saving")
+            : isEdit
+              ? t("rotationModal.save")
+              : t("rotationModal.create")}
         </Button>
       </ModalFooter>
     </Modal>

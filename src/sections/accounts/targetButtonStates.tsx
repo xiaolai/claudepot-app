@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import type { ContextMenuItem } from "../../components/ContextMenu";
 import { NF } from "../../icons";
 import { TargetButton } from "../../components/primitives/TargetButton";
+import { i18n } from "../../lib/i18n";
 import type { AccountSummary, AppStatus } from "../../types";
 
 type TargetButtonProps = ComponentProps<typeof TargetButton>;
@@ -39,20 +40,25 @@ export function cliTargetProps(
 
   const menu: ContextMenuItem[] = [
     {
-      label: "Verify now",
+      label: i18n.t("target.verifyNow", { ns: "accounts" }),
       disabled: !healthy,
-      disabledReason: !healthy ? "no credentials to verify" : undefined,
+      disabledReason: !healthy
+        ? i18n.t("target.noCredsToVerify", { ns: "accounts" })
+        : undefined,
       onClick: () => h.verify(a),
     },
-    { label: "Re-login", onClick: () => h.login(a) },
+    {
+      label: i18n.t("target.relogin", { ns: "accounts" }),
+      onClick: () => h.login(a),
+    },
   ];
 
   const state = active ? "active" : healthy ? "available" : "disabled";
   const primaryTitle = active
-    ? `Active CLI — ${a.email}`
+    ? i18n.t("target.activeCli", { ns: "accounts", email: a.email })
     : healthy
-      ? `Switch CLI to ${a.email}`
-      : "Credentials missing — re-login from the menu";
+      ? i18n.t("target.switchCli", { ns: "accounts", email: a.email })
+      : i18n.t("target.credsMissing", { ns: "accounts" });
 
   // No inline caption under the button. The CLI button is only
   // `disabled` when `!credentials_healthy`, which is exactly one of the
@@ -65,7 +71,7 @@ export function cliTargetProps(
   // the reason inline; the button's `primaryTitle` tooltip supplements.
   return {
     icon: NF.terminal,
-    label: "CLI",
+    label: i18n.t("target.cli", { ns: "accounts" }),
     state,
     onPrimary: state === "available" ? () => h.switchCli(a) : undefined,
     primaryTitle,
@@ -94,12 +100,21 @@ export function desktopTargetProps(
   if (a.is_desktop_active) {
     return {
       icon: NF.desktop,
-      label: "Desktop",
+      label: i18n.t("target.desktop", { ns: "accounts" }),
       state: "active",
-      primaryTitle: `Active Desktop — ${a.email}`,
+      primaryTitle: i18n.t("target.activeDesktop", {
+        ns: "accounts",
+        email: a.email,
+      }),
       menu: [
-        { label: "Re-launch", onClick: h.launchDesktop },
-        { label: "Bind again", onClick: () => h.adoptDesktop(a) },
+        {
+          label: i18n.t("target.relaunch", { ns: "accounts" }),
+          onClick: h.launchDesktop,
+        },
+        {
+          label: i18n.t("target.bindAgain", { ns: "accounts" }),
+          onClick: () => h.adoptDesktop(a),
+        },
       ],
     };
   }
@@ -107,16 +122,22 @@ export function desktopTargetProps(
   if (a.desktop_profile_on_disk) {
     return {
       icon: NF.desktop,
-      label: "Desktop",
+      label: i18n.t("target.desktop", { ns: "accounts" }),
       state: "available",
       onPrimary: () => h.switchDesktop(a),
-      primaryTitle: `Set Desktop to ${a.email}`,
+      primaryTitle: i18n.t("target.setDesktop", {
+        ns: "accounts",
+        email: a.email,
+      }),
       menu: [
         {
-          label: "Set without relaunch",
+          label: i18n.t("target.setNoRelaunch", { ns: "accounts" }),
           onClick: () => h.switchDesktopNoLaunch(a),
         },
-        { label: "Bind again", onClick: () => h.adoptDesktop(a) },
+        {
+          label: i18n.t("target.bindAgain", { ns: "accounts" }),
+          onClick: () => h.adoptDesktop(a),
+        },
       ],
     };
   }
@@ -128,9 +149,9 @@ export function desktopTargetProps(
   // tooltip carry the "this will bind" signal.
   return {
     icon: NF.desktop,
-    label: "Desktop",
+    label: i18n.t("target.desktop", { ns: "accounts" }),
     state: "adopt",
     onPrimary: () => h.adoptDesktop(a),
-    primaryTitle: "Bind the currently-running Desktop session to this account",
+    primaryTitle: i18n.t("target.bindTooltip", { ns: "accounts" }),
   };
 }

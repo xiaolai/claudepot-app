@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { CopyButton } from "../../components/CopyButton";
+import { i18n } from "../../lib/i18n";
 import { IconButton } from "../../components/primitives/IconButton";
 import { NF } from "../../icons";
 import { SkeletonRows } from "../../components/primitives/Skeleton";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type { ProtectedPath } from "../../types";
 
 interface Props {
@@ -32,7 +35,7 @@ interface Props {
 export function validateProtectedPath(raw: string): string | null {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
-    return "Path cannot be empty.";
+    return i18n.t("protected.errEmpty", { ns: "settings" });
   }
   // Reject anything containing a `..` segment — easy footgun for the
   // protected-paths feature where the goal is to nail down a stable
@@ -41,11 +44,11 @@ export function validateProtectedPath(raw: string): string | null {
     .split(/[/\\]/)
     .some((seg) => seg === "..");
   if (hasParentSegment) {
-    return "Path cannot contain '..' segments.";
+    return i18n.t("protected.errParent", { ns: "settings" });
   }
   // UNC root only: just leading backslashes with no host/share.
   if (/^\\\\+$/.test(trimmed)) {
-    return "Path cannot be a UNC root.";
+    return i18n.t("protected.errUncRoot", { ns: "settings" });
   }
   // Absolute path shapes — any one of these is sufficient.
   const isUnixAbsolute = trimmed.startsWith("/");
@@ -55,18 +58,18 @@ export function validateProtectedPath(raw: string): string | null {
   const isDriveBare = /^[A-Za-z]:$/.test(trimmed);
   const isUncPath = /^\\\\[^\\]+\\[^\\]+/.test(trimmed);
   if (isDriveBare) {
-    return "Path cannot be a bare drive letter; specify a directory under the drive.";
+    return i18n.t("protected.errBareDrive", { ns: "settings" });
   }
   if (!isUnixAbsolute && !isHomeRelative && !isWindowsDrive && !isUncPath) {
-    return "Path must be absolute (start with '/', '~', a drive letter, or '\\\\').";
+    return i18n.t("protected.errNotAbsolute", { ns: "settings" });
   }
   // Reject filesystem roots: `/`, `~`, `~/`, drive roots like `C:\` /
   // `C:/`. Protecting "everything" is never the user's intent.
   if (trimmed === "/" || trimmed === "~" || trimmed === "~/" || trimmed === "~\\") {
-    return "Path cannot be a filesystem root.";
+    return i18n.t("protected.errFsRoot", { ns: "settings" });
   }
   if (/^[A-Za-z]:[\\/]?$/.test(trimmed)) {
-    return "Path cannot be a drive root; specify a directory under the drive.";
+    return i18n.t("protected.errDriveRoot", { ns: "settings" });
   }
   return null;
 }
@@ -81,6 +84,7 @@ export function validateProtectedPath(raw: string): string | null {
  * it's a global state change the user will want to confirm landed.
  */
 export function ProtectedPathsPane({ pushToast }: Props) {
+  const { t } = useTranslation("settings");
   const [items, setItems] = useState<ProtectedPath[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
@@ -93,11 +97,11 @@ export function ProtectedPathsPane({ pushToast }: Props) {
       const list = await api.protectedPathsList();
       setItems(list);
     } catch (e) {
-      pushToast("error", `Load failed: ${e}`);
+      pushToast("error", renderError(e, t("protected.loadFailed")));
     } finally {
       setLoading(false);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     reload();
@@ -118,7 +122,7 @@ export function ProtectedPathsPane({ pushToast }: Props) {
       setDraft("");
       await reload();
     } catch (err) {
-      setAddError(String(err));
+      setAddError(renderError(err));
     } finally {
       setBusy(false);
     }
@@ -132,12 +136,12 @@ export function ProtectedPathsPane({ pushToast }: Props) {
         await api.protectedPathsRemove(path);
         await reload();
       } catch (err) {
-        pushToast("error", `Remove failed: ${err}`);
+        pushToast("error", renderError(err, t("protected.removeFailed")));
       } finally {
         setBusy(false);
       }
     },
-    [busy, reload, pushToast],
+    [busy, reload, pushToast, t],
   );
 
   const handleReset = useCallback(async () => {
@@ -146,30 +150,35 @@ export function ProtectedPathsPane({ pushToast }: Props) {
     try {
       const list = await api.protectedPathsReset();
       setItems(list);
-      pushToast("info", "Protected paths reset to defaults.");
+      pushToast("info", t("protected.resetDone"));
     } catch (err) {
-      pushToast("error", `Reset failed: ${err}`);
+      pushToast("error", renderError(err, t("protected.resetFailed")));
     } finally {
       setBusy(false);
     }
-  }, [busy, pushToast]);
+  }, [busy, pushToast, t]);
 
   return (
     <section className="settings-group">
       <p className="muted settings-desc">
-        Cleaning will not strip <code>~/.claude.json</code> entries or{" "}
-        <code>history.jsonl</code> lines for these paths. The CC artifact
-        directory under <code>~/.claude/projects/</code> is still removable
-        — only sibling state is preserved.
+        <Trans
+          ns="settings"
+          i18nKey="protected.desc"
+          components={{ code: <code /> }}
+        />
       </p>
 
       {loading ? (
         <SkeletonRows rows={3} />
       ) : (
-        <ul className="protected-list" role="list" aria-label="Protected paths">
+        <ul
+          className="protected-list"
+          role="list"
+          aria-label={t("protected.listAria")}
+        >
           {items.length === 0 && (
             <li className="protected-row protected-empty">
-              <span className="muted small">No protected paths.</span>
+              <span className="muted small">{t("protected.empty")}</span>
             </li>
           )}
           {items.map((p) => (
@@ -192,19 +201,21 @@ export function ProtectedPathsPane({ pushToast }: Props) {
                 }`}
                 title={
                   p.source === "default"
-                    ? "Built-in default"
-                    : "Added by you"
+                    ? t("protected.sourceDefaultTitle")
+                    : t("protected.sourceUserTitle")
                 }
               >
-                {p.source}
+                {p.source === "default"
+                  ? t("protected.sourceDefault")
+                  : t("protected.sourceUser")}
               </span>
               <IconButton
                 glyph={NF.x}
                 size="sm"
                 onClick={() => handleRemove(p.path)}
                 disabled={busy}
-                aria-label={`Remove ${p.path}`}
-                title={`Remove ${p.path}`}
+                aria-label={t("protected.removeAria", { path: p.path })}
+                title={t("protected.removeAria", { path: p.path })}
               />
             </li>
           ))}
@@ -215,7 +226,7 @@ export function ProtectedPathsPane({ pushToast }: Props) {
         <input
           type="text"
           className="settings-input wide"
-          placeholder="/path/to/protect or ~/path"
+          placeholder={t("protected.placeholder")}
           value={draft}
           onChange={(e) => {
             setDraft(e.target.value);
@@ -236,9 +247,9 @@ export function ProtectedPathsPane({ pushToast }: Props) {
           className="btn primary"
           onClick={handleAdd}
           disabled={busy || draft.trim().length === 0}
-          title="Add this path to the protected list"
+          title={t("protected.addTitle")}
         >
-          Add
+          {t("protected.add")}
         </button>
       </div>
       {addError ? (
@@ -250,7 +261,11 @@ export function ProtectedPathsPane({ pushToast }: Props) {
         // reason the primary action is disabled instead of leaving the
         // user to guess.
         <p className="muted small settings-inline-hint">
-          Enter an absolute path (or one starting with <code>~</code>) to enable Add.
+          <Trans
+            ns="settings"
+            i18nKey="protected.addHint"
+            components={{ code: <code /> }}
+          />
         </p>
       ) : null}
 
@@ -260,13 +275,13 @@ export function ProtectedPathsPane({ pushToast }: Props) {
           className="btn outline"
           onClick={handleReset}
           disabled={busy || loading}
-          title="Discard your additions and removals — restore the built-in defaults"
+          title={t("protected.resetTitle")}
         >
-          Reset to defaults
+          {t("protected.reset")}
         </button>
         {(busy || loading) && (
           <span className="muted small settings-inline-hint">
-            {loading ? "Loading…" : "Working…"}
+            {loading ? t("shared.loading") : t("protected.working")}
           </span>
         )}
       </div>

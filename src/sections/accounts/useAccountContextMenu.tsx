@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import type { AccountSummary, AppStatus } from "../../types";
 import { WAKE_ESTIMATED_TOKENS } from "../../types";
@@ -55,6 +56,7 @@ export function useAccountContextMenu({
   needsWake = false,
   wakeBusy = false,
 }: Args): ContextMenuItem[] {
+  const { t } = useTranslation("accounts");
   return useMemo(() => {
     // `desktop_profile_on_disk` is the disk truth; we prefer it over
     // `has_desktop_profile` (the DB cache) per plan v2 D18. The
@@ -62,73 +64,75 @@ export function useAccountContextMenu({
     // a swap that would immediately fail at `restore()`.
     const hasProfile = a.desktop_profile_on_disk;
     const desktopReason = !status.desktop_installed
-      ? "Claude Desktop not installed"
+      ? t("menu.desktopNotInstalled")
       : !hasProfile
-        ? "bind current Desktop session first"
+        ? t("menu.bindFirst")
         : a.is_desktop_active
-          ? "already active"
+          ? t("menu.alreadyActive")
           : undefined;
     const adoptDesktopDisabled =
       !status.desktop_installed || !onAdoptDesktop;
     const adoptDesktopReason = !status.desktop_installed
-      ? "Claude Desktop not installed"
+      ? t("menu.desktopNotInstalled")
       : undefined;
     const cliReason = a.is_cli_active
-      ? "already active"
+      ? t("menu.alreadyActive")
       : !a.credentials_healthy
-        ? "credentials missing or corrupt"
+        ? t("menu.credsMissingCorrupt")
         : undefined;
     const loginBusy = busyKeys.has(`re-${a.uuid}`);
 
     return [
       {
-        label: "Copy email",
+        label: t("menu.copyEmail"),
         onClick: () => navigator.clipboard.writeText(a.email),
       },
       // UUID is an internal identifier — dev-mode only (design.md).
       {
-        label: "Copy UUID",
+        label: t("menu.copyUuid"),
         devOnly: true,
         onClick: () => navigator.clipboard.writeText(a.uuid),
       },
       { label: "", separator: true, onClick: () => {} },
       {
-        label: a.is_cli_active ? "Active CLI" : "Set as CLI",
+        label: a.is_cli_active ? t("menu.activeCli") : t("menu.setCli"),
         disabled: a.is_cli_active || !a.credentials_healthy,
         disabledReason: cliReason,
         onClick: () => onSwitchCli(a),
       },
       {
-        label: a.is_desktop_active ? "Active Desktop" : "Set as Desktop",
+        label: a.is_desktop_active
+          ? t("menu.activeDesktop")
+          : t("menu.setDesktop"),
         disabled:
           a.is_desktop_active || !hasProfile || !status.desktop_installed,
         disabledReason: desktopReason,
         onClick: () => onSwitchDesktop(a),
       },
       {
-        label: "Set as Desktop (don't relaunch)",
+        label: t("menu.setDesktopNoRelaunch"),
         disabled:
           a.is_desktop_active || !hasProfile || !status.desktop_installed,
         disabledReason: desktopReason,
         onClick: () => onSwitchDesktopNoLaunch(a),
       },
       {
-        label: "Bind current Desktop session",
+        label: t("menu.bindDesktop"),
         disabled: adoptDesktopDisabled,
         disabledReason: adoptDesktopReason,
         onClick: () => onAdoptDesktop?.(a),
       },
       { label: "", separator: true, onClick: () => {} },
       {
-        label: "Verify now",
+        label: t("menu.verifyNow"),
         disabled: !a.credentials_healthy,
         disabledReason: !a.credentials_healthy
-          ? "no credentials to verify"
+          ? t("menu.noCredsToVerify")
           : undefined,
         onClick: () => onVerify(a),
       },
       {
-        label: "Refresh usage",
+        label: t("menu.refreshUsage"),
         onClick: () =>
           a.credentials_healthy ? onRefreshUsageFor(a) : onRefreshUsageAll(),
       },
@@ -140,12 +144,12 @@ export function useAccountContextMenu({
             {
               // The cost is in the label because the GUI has no confirm
               // step — this label IS the pre-spend disclosure.
-              label: `Wake windows (~${WAKE_ESTIMATED_TOKENS} tokens)`,
+              label: t("menu.wakeWindows", { tokens: WAKE_ESTIMATED_TOKENS }),
               disabled: !a.credentials_healthy || wakeBusy,
               disabledReason: !a.credentials_healthy
-                ? "no credentials"
+                ? t("menu.noCreds")
                 : wakeBusy
-                  ? "wake in progress"
+                  ? t("menu.wakeInProgress")
                   : undefined,
               onClick: () => onWake(a),
             } satisfies ContextMenuItem,
@@ -156,22 +160,24 @@ export function useAccountContextMenu({
       // Stub behind dev-mode until that Tauri surface lands; devs can
       // use `claudepot cli run <email> claude` from a shell.
       {
-        label: "Launch CC as…",
+        label: t("menu.launchCcAs"),
         devOnly: true,
         disabled: true,
-        disabledReason: "use `claudepot cli run` from your shell",
+        disabledReason: t("menu.launchCcAsReason", {
+          cmd: "`claudepot cli run`",
+        }),
         onClick: () => {},
       },
       { label: "", separator: true, onClick: () => {} },
       {
-        label: "Log in again…",
+        label: t("menu.loginAgain"),
         disabled: loginBusy,
-        disabledReason: loginBusy ? "login in progress" : undefined,
+        disabledReason: loginBusy ? t("menu.loginInProgress") : undefined,
         onClick: () => onLogin(a),
       },
       { label: "", separator: true, onClick: () => {} },
       {
-        label: "Remove",
+        label: t("menu.remove"),
         danger: true,
         onClick: () => onRemove(a),
       },
@@ -192,6 +198,7 @@ export function useAccountContextMenu({
     onWake,
     needsWake,
     wakeBusy,
+    t,
   ]);
 }
 

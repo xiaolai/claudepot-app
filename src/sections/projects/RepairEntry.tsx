@@ -1,12 +1,17 @@
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Icon } from "../../components/Icon";
 import type { JournalEntry, JournalStatus } from "../../types";
 
-const STATUS_COPY: Record<JournalStatus, string> = {
-  running: "running",
-  pending: "pending",
-  stale: "stale ≥24h",
-  abandoned: "abandoned",
-};
+/** Status → user-facing copy, resolved at render time. */
+function statusCopy(t: TFunction<"projects">, s: JournalStatus): string {
+  switch (s) {
+    case "running": return t("repair.statusRunning");
+    case "pending": return t("repair.statusPending");
+    case "stale": return t("repair.statusStale");
+    case "abandoned": return t("repair.statusAbandoned");
+  }
+}
 
 function statusClass(s: JournalStatus): string {
   switch (s) {
@@ -36,14 +41,18 @@ export function RepairEntry({
    */
   onBreakLock?: () => void;
 }) {
+  const { t } = useTranslation("projects");
   return (
     <li
       className={`repair-entry status-${e.status}`}
-      aria-label={`Journal ${e.id} — ${STATUS_COPY[e.status]}`}
+      aria-label={t("repair.journalAria", {
+        id: e.id,
+        status: statusCopy(t, e.status),
+      })}
     >
       <div className="repair-entry-head">
         <span className={`tag ${statusClass(e.status)}`}>
-          {STATUS_COPY[e.status]}
+          {statusCopy(t, e.status)}
         </span>
         <span className="mono small muted">{e.id}</span>
       </div>
@@ -53,12 +62,14 @@ export function RepairEntry({
         <span className="mono small selectable">{e.new_path}</span>
       </div>
       <div className="repair-entry-meta muted small">
-        started {e.started_at} · phases [
-        {e.phases_completed.join(", ") || "none"}]
+        {t("repair.startedMeta", {
+          date: e.started_at,
+          phases: e.phases_completed.join(", ") || t("repair.phasesNone"),
+        })}
       </div>
       {e.last_error && (
         <div className="repair-entry-error bad small">
-          last error: {e.last_error}
+          {t("repair.lastError", { error: e.last_error })}
         </div>
       )}
       {e.status !== "abandoned" && e.status !== "running" && (
@@ -68,24 +79,24 @@ export function RepairEntry({
         // `stale` (lock present but no live owner) entries get the
         // mutating actions; `running` is render-only.
         <div className="repair-entry-actions">
-          <button type="button" className="btn" title="Re-run the original rename" onClick={onResume}>
-            <Icon name="rotate-ccw" />Resume
+          <button type="button" className="btn" title={t("repair.resumeTitle")} onClick={onResume}>
+            <Icon name="rotate-ccw" />{t("repair.resume")}
           </button>
-          <button type="button" className="btn" title="Reverse the rename (runs new → old)" onClick={onRollback}>
-            <Icon name="undo" />Rollback
+          <button type="button" className="btn" title={t("repair.rollbackTitle")} onClick={onRollback}>
+            <Icon name="undo" />{t("repair.rollback")}
           </button>
           {e.status === "stale" && onBreakLock && (
             <button
               type="button"
               className="btn warn"
-              title="Force-break the stale lock file so resume can proceed"
+              title={t("repair.breakLockBtnTitle")}
               onClick={onBreakLock}
             >
-              <Icon name="unlock" />Break lock
+              <Icon name="unlock" />{t("repair.breakLock")}
             </button>
           )}
-          <button type="button" className="btn danger" title="Stop nagging about this journal" onClick={onAbandon}>
-            <Icon name="ban" />Abandon
+          <button type="button" className="btn danger" title={t("repair.abandonTitle")} onClick={onAbandon}>
+            <Icon name="ban" />{t("repair.abandon")}
           </button>
         </div>
       )}

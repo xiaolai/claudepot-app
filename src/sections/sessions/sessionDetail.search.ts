@@ -1,4 +1,5 @@
 import type { SessionChunk, SessionEvent, SessionRow } from "../../types";
+import { i18n } from "../../lib/i18n";
 
 /**
  * Search predicates for the session-detail viewer's filter input.
@@ -96,7 +97,10 @@ export function chunkMatchesSearch(
  * contains no hits.
  *
  * `field` is a user-facing label (`"project path"`, `"branch"`, …) —
- * not a programmatic key. The UI renders it directly.
+ * not a programmatic key. The UI renders it directly. Resolved
+ * through the `sessions` catalog at call time (the caller invokes
+ * `classifyMetaMatch` during render), so the label follows the
+ * active UI language.
  */
 export interface MetaMatch {
   field: string;
@@ -121,11 +125,17 @@ export function classifyMetaMatch(
   const out: MetaMatch[] = [];
   const projectPath = row.project_path ?? "";
   if (safeLower(projectPath).includes(qLower)) {
-    out.push({ field: "project path", value: projectPath });
+    out.push({
+      field: i18n.t("detail.metaField.projectPath", { ns: "sessions" }),
+      value: projectPath,
+    });
   }
   const branch = row.git_branch ?? "";
   if (branch && safeLower(branch).includes(qLower)) {
-    out.push({ field: "branch", value: branch });
+    out.push({
+      field: i18n.t("detail.metaField.branch", { ns: "sessions" }),
+      value: branch,
+    });
   }
   // `models` is the historical list of every model that touched the
   // session; report the first match so the UI stays compact. An
@@ -133,13 +143,19 @@ export function classifyMetaMatch(
   const models = Array.isArray(row.models) ? row.models : [];
   const modelHit = models.find((m) => safeLower(m).includes(qLower));
   if (modelHit) {
-    out.push({ field: "model", value: modelHit });
+    out.push({
+      field: i18n.t("detail.metaField.model", { ns: "sessions" }),
+      value: modelHit,
+    });
   }
   // Session id prefix match mirrors the list-level fast path — same
   // field, same predicate.
   const sessionId = row.session_id ?? "";
   if (safeLower(sessionId).startsWith(qLower)) {
-    out.push({ field: "session id", value: sessionId });
+    out.push({
+      field: i18n.t("detail.metaField.sessionId", { ns: "sessions" }),
+      value: sessionId,
+    });
   }
   return out;
 }

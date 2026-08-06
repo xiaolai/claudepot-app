@@ -1,3 +1,4 @@
+import { i18n } from "../lib/i18n";
 import { useEmit } from "../providers/AppStateProvider";
 import { useTauriEvent } from "./useTauriEvent";
 
@@ -53,7 +54,13 @@ export function useUsageThresholdNotifications(): void {
   useTauriEvent<CrossingPayload>("usage-threshold-crossed", (ev) => {
     if (!ev.payload) return;
     const p = ev.payload;
-    const title = `${p.accountEmail ?? "Account"} — ${p.windowLabel} at ${p.thresholdPct}%`;
+    // `windowLabel` arrives already-rendered from the Rust watcher —
+    // interpolated here, not translated.
+    const title = i18n.t("usage.thresholdTitle", {
+      account: p.accountEmail ?? i18n.t("usage.accountFallback"),
+      window: p.windowLabel,
+      pct: p.thresholdPct,
+    });
     const body = formatBody(p.utilizationPct, p.resetsAtIso);
     void emit({
       category: "usageThreshold",
@@ -78,21 +85,23 @@ export function useUsageThresholdNotifications(): void {
 }
 
 function formatBody(utilizationPct: number, resetsAtIso: string | null): string {
-  const pct = `at ${utilizationPct.toFixed(1)}%`;
-  if (!resetsAtIso) return pct;
+  const base = i18n.t("usage.utilization", {
+    pct: utilizationPct.toFixed(1),
+  });
+  if (!resetsAtIso) return base;
   const ms = Date.parse(resetsAtIso);
-  if (!Number.isFinite(ms)) return pct;
+  if (!Number.isFinite(ms)) return base;
   const remaining = ms - Date.now();
-  if (remaining <= 0) return `${pct} · resets now`;
+  if (remaining <= 0) return i18n.t("usage.resetsNow", { base });
   const minutes = Math.floor(remaining / 60_000);
-  if (minutes < 60) return `${pct} · resets in ${minutes}m`;
+  if (minutes < 60) return i18n.t("usage.resetsInMinutes", { base, minutes });
   const hours = Math.floor(minutes / 60);
   const remMin = minutes % 60;
   if (hours < 24) {
     return remMin === 0
-      ? `${pct} · resets in ${hours}h`
-      : `${pct} · resets in ${hours}h ${remMin}m`;
+      ? i18n.t("usage.resetsInHours", { base, hours })
+      : i18n.t("usage.resetsInHoursMinutes", { base, hours, minutes: remMin });
   }
   const days = Math.floor(hours / 24);
-  return `${pct} · resets in ${days}d`;
+  return i18n.t("usage.resetsInDays", { base, days });
 }

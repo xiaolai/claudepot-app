@@ -4,6 +4,7 @@
 // the design.
 
 import { invoke } from "@tauri-apps/api/core";
+import { i18n } from "../lib/i18n";
 
 /** CC's `permissions.defaultMode` wire values. Unknown strings (e.g.
  *  a feature-flagged `auto`) pass through verbatim.
@@ -111,14 +112,22 @@ export const permissionApi = {
  *  `default` and `manual` are one mode with two on-disk spellings, so
  *  they share a label. It reads "Manual" rather than "Default" to match
  *  what CC v2.1.200+ shows in its own UI — a control center that named
- *  the same state differently would look like it disagreed with CC. */
+ *  the same state differently would look like it disagreed with CC.
+ *
+ *  Every entry is a getter: the catalog is read when the label is
+ *  looked up, so a language switch reaches a row already on screen.
+ *  A plain table evaluated at module load would pin the boot language.
+ *  Indexing an unlisted mode still yields `undefined`, which is what
+ *  `permissionModeLabel`'s `?? mode` fallback depends on. */
 export const PERMISSION_MODE_LABEL: Record<string, string> = {
-  default: "Manual",
-  manual: "Manual",
-  acceptEdits: "Accept edits",
-  plan: "Plan",
-  dontAsk: "Don't ask",
-  bypassPermissions: "Bypass permissions",
+  get default() { return i18n.t("permission.mode.default"); },
+  get manual() { return i18n.t("permission.mode.manual"); },
+  get acceptEdits() { return i18n.t("permission.mode.acceptEdits"); },
+  get plan() { return i18n.t("permission.mode.plan"); },
+  get dontAsk() { return i18n.t("permission.mode.dontAsk"); },
+  get bypassPermissions() {
+    return i18n.t("permission.mode.bypassPermissions");
+  },
 };
 
 export function permissionModeLabel(mode: PermissionModeId): string {
@@ -127,13 +136,29 @@ export function permissionModeLabel(mode: PermissionModeId): string {
 
 /** Grant-duration presets the ProjectDetail control offers.
  *  `secs: null` is the "Never" / sticky option — the orchestrator
- *  won't auto-revert; the user removes it via the same Revert action. */
+ *  won't auto-revert; the user removes it via the same Revert action.
+ *
+ *  `label` is a getter (see `PERMISSION_MODE_LABEL`) so the option list
+ *  re-reads the catalog on every render rather than freezing the boot
+ *  language into a module-level constant. */
 export const GRANT_DURATION_PRESETS: ReadonlyArray<{
   label: string;
   secs: number | null;
 }> = [
-  { label: "30 minutes", secs: 30 * 60 },
-  { label: "2 hours", secs: 2 * 60 * 60 },
-  { label: "8 hours", secs: 8 * 60 * 60 },
-  { label: "Never", secs: null },
+  {
+    get label() { return i18n.t("permission.duration.minutes30"); },
+    secs: 30 * 60,
+  },
+  {
+    get label() { return i18n.t("permission.duration.hours2"); },
+    secs: 2 * 60 * 60,
+  },
+  {
+    get label() { return i18n.t("permission.duration.hours8"); },
+    secs: 8 * 60 * 60,
+  },
+  {
+    get label() { return i18n.t("permission.duration.never"); },
+    secs: null,
+  },
 ];

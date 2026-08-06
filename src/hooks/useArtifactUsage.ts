@@ -6,6 +6,7 @@ import type {
   ConfigTreeDto,
 } from "../types";
 import { artifactKeyForFile } from "../sections/config/artifactKey";
+import { renderError } from "../lib/i18n-error";
 
 /**
  * Fetch artifact-usage stats for every trackable file in a Config
@@ -104,7 +105,7 @@ export function useArtifactUsage(
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(renderError(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

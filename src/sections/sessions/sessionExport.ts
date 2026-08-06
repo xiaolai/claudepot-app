@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
-import { formatErrorMessage } from "../../lib/toastError";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 
 export type SessionExportFormat = "md" | "json";
 
@@ -15,7 +16,7 @@ export type SessionExportFormat = "md" | "json";
  * raw plugin string is logged to the console instead of toasted.
  *
  * Error strings handed to `onError` are routed through
- * `formatErrorMessage`, which redacts `sk-ant-*` substrings and
+ * `renderError`, which redacts `sk-ant-*` substrings and
  * caps the toast at 240 chars. The Rust side already strips secrets
  * from transcripts before writing, but a user-supplied path or file
  * permission message could in principle echo a secret-shaped
@@ -34,7 +35,10 @@ export async function exportSession(
       defaultPath: defaultName,
       filters: [
         {
-          name: format === "md" ? "Markdown" : "JSON",
+          name:
+            format === "md"
+              ? i18n.t("export.filterMarkdown", { ns: "sessions" })
+              : i18n.t("export.filterJson", { ns: "sessions" }),
           extensions: [format === "md" ? "md" : "json"],
         },
       ],
@@ -42,14 +46,14 @@ export async function exportSession(
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error("save() failed:", e);
-    onError?.("Couldn't open the save dialog. Please retry.");
+    onError?.(i18n.t("export.saveDialogFailed", { ns: "sessions" }));
     return;
   }
   if (target === null) return;
   try {
     await api.sessionExportToFile(filePath, format, target);
   } catch (e) {
-    onError?.(formatErrorMessage("Export failed", e));
+    onError?.(renderError(e, i18n.t("export.failedScope", { ns: "sessions" })));
   }
 }
 

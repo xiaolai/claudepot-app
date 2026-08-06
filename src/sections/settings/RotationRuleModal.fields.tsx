@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 /* Field + form-input primitives shared by the RotationRuleModal.
  * Extracted to keep the modal under the loc-guardian production-LOC
@@ -44,10 +45,11 @@ export function CandidateChecklist({
   selected: string[];
   onToggle: (email: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   if (options.length === 0) {
     return (
       <small style={{ color: "var(--fg-faint)", fontSize: "var(--fs-xs)" }}>
-        No accounts registered yet.
+        {t("rotationModal.noAccounts")}
       </small>
     );
   }

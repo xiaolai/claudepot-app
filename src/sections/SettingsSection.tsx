@@ -6,8 +6,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { NfIcon } from "../icons";
 import { api } from "../api";
+import { applyLocalePreference, i18n } from "../lib/i18n";
+import { formatDateTime } from "../lib/intl";
 import type { CategoryMeta } from "../api/notification";
 import type { CategoryPrefs as CategoryPrefsType } from "../api/settings";
 import type { Category } from "../lib/notifications/types";
@@ -15,6 +18,10 @@ import {
   setCategoryPrefLocal,
   updateCategoryPref,
 } from "../lib/notifications/prefs";
+import {
+  categoryGroupLabel,
+  categoryLabel,
+} from "../lib/notifications/labels";
 import { BrandGithubMark } from "../components/primitives/BrandGithubMark";
 import { Button } from "../components/primitives/Button";
 import { ExternalLink } from "../components/primitives/ExternalLink";
@@ -25,7 +32,7 @@ import { useSettingsActions } from "../hooks/useSettingsActions";
 import { useTheme, type ThemeMode } from "../hooks/useTheme";
 import { useAppState } from "../providers/AppStateProvider";
 import { useUpdater, type CheckFrequency } from "../providers/UpdateProvider";
-import { toastError } from "../lib/toastError";
+import { renderError, toastError } from "../lib/i18n-error";
 import {
   dispatchOsNotification,
   getPermissionStatus,
@@ -89,21 +96,24 @@ const TAB_DEFS = SETTINGS_PANES;
 // Computed per render rather than at module load: a disabled
 // section must not remain selectable after it is switched off.
 const sectionOptions = () =>
-  enabledSections().map((s) => ({ value: s.id, label: s.label }));
+  enabledSections().map((s) => ({
+    value: s.id,
+    label: i18n.t(s.labelKey, { ns: "shell" }),
+  }));
 
 export function SettingsSection() {
-
+  const { t } = useTranslation("settings");
   const { pushToast } = useAppState();
   // Cold-mount path: read the sessionStorage hint set by the
   // NetworkUnreachablePanel before this section mounted.
   const [tab, setTab] = useState<Tab>(() => {
     const hint = consumeSettingsTabHint();
-    if (hint && TAB_DEFS.some((t) => t.id === hint)) {
+    if (hint && TAB_DEFS.some((d) => d.id === hint)) {
       return hint as Tab;
     }
     return "general";
   });
-  const active = TAB_DEFS.find((t) => t.id === tab) ?? TAB_DEFS[0];
+  const active = TAB_DEFS.find((d) => d.id === tab) ?? TAB_DEFS[0];
 
   // Hot-mount path: when this section is already mounted,
   // `setSection("settings")` is a no-op and the cold-mount
@@ -113,7 +123,7 @@ export function SettingsSection() {
     const handler = (e: Event) => {
       const ce = e as CustomEvent<SettingsTabEventDetail>;
       const next = ce.detail?.tab;
-      if (next && TAB_DEFS.some((t) => t.id === next)) {
+      if (next && TAB_DEFS.some((d) => d.id === next)) {
         setTab(next as Tab);
       }
     };
@@ -124,8 +134,8 @@ export function SettingsSection() {
   return (
     <>
       <ScreenHeader
-        title="Settings"
-        subtitle="Preferences, data, and diagnostics."
+        title={t("header.title")}
+        subtitle={t("header.subtitle")}
       />
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
@@ -182,15 +192,16 @@ function SettingsNav({
   active: Tab;
   onSelect: (t: Tab) => void;
 }) {
+  const { t } = useTranslation("settings");
   const groups: { label: string; items: readonly SettingsPane[] }[] = useMemo(
     () => [
-      { label: "", items: TAB_DEFS.filter((t) => t.group === "core") },
+      { label: "", items: TAB_DEFS.filter((d) => d.group === "core") },
       {
-        label: "Advanced",
-        items: TAB_DEFS.filter((t) => t.group === "advanced"),
+        label: t("header.advanced"),
+        items: TAB_DEFS.filter((d) => d.group === "advanced"),
       },
     ],
-    [],
+    [t],
   );
 
   return (
@@ -217,13 +228,13 @@ function SettingsNav({
               {group.label}
             </div>
           )}
-          {group.items.map((t) => {
-            const isActive = t.id === active;
+          {group.items.map((p) => {
+            const isActive = p.id === active;
             return (
               <button
-                key={t.id}
+                key={p.id}
                 type="button"
-                onClick={() => onSelect(t.id)}
+                onClick={() => onSelect(p.id)}
                 aria-current={isActive ? "page" : undefined}
                 className="pm-focus"
                 style={{
@@ -245,11 +256,11 @@ function SettingsNav({
                 }}
               >
                 <Glyph
-                  g={t.glyph}
+                  g={p.glyph}
                   color={isActive ? "var(--accent)" : "currentColor"}
                   style={{ fontSize: "var(--fs-base)" }}
                 />
-                <span>{t.label}</span>
+                <span>{p.label}</span>
               </button>
             );
           })}
@@ -275,12 +286,18 @@ function GeneralPane({
       return "accounts";
     }
   });
+  const { t } = useTranslation();
+  const { t: ts } = useTranslation("settings");
   const [hideDock, setHideDock] = useState<boolean | null>(null);
   const [showWindowOnStartup, setShowWindowOnStartup] = useState<
     boolean | null
   >(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [isMac, setIsMac] = useState<boolean>(false);
+  // null = follow system; undefined = not yet loaded.
+  const [localePref, setLocalePref] = useState<string | null | undefined>(
+    undefined,
+  );
   // Mirrors `optionalSections`, and re-reads on its event so the
   // switch stays correct when ⌃⌥⌘B is pressed while this pane is open.
   const [boardsOn, setBoardsOn] = useState(() => isSectionEnabled("boards"));
@@ -317,6 +334,7 @@ function GeneralPane({
         if (cancelled) return;
         setHideDock(prefs.hide_dock_icon);
         setShowWindowOnStartup(prefs.show_window_on_startup);
+        setLocalePref(prefs.locale ?? null);
         setIsMac(status.platform === "macos");
         try {
           setLaunchAtLogin(await isEnabled());
@@ -324,25 +342,44 @@ function GeneralPane({
           setLaunchAtLogin(false);
         }
       } catch (e) {
-        if (!cancelled) pushToast("error", `Preferences load failed: ${e}`);
+        if (!cancelled)
+          pushToast("error", renderError(e, ts("shared.prefsLoadFailed")));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [pushToast]);
+  }, [pushToast, ts]);
 
   const changeStart = useCallback(
     (v: string) => {
       setStartSection(v);
       try {
         localStorage.setItem("claudepot.startSection", v);
-        pushToast("info", `Open on launch: ${v}`);
+        pushToast("info", ts("general.openOnLaunchToast", { value: v }));
       } catch {
         // best-effort persistence
       }
     },
-    [pushToast],
+    [pushToast, ts],
+  );
+
+  const changeLocale = useCallback(
+    async (v: string) => {
+      const next = v === "system" ? null : v;
+      const prev = localePref;
+      setLocalePref(next);
+      try {
+        // Persist first — preferences.json is authoritative — then
+        // apply to the live instance + boot mirror.
+        await api.preferencesSetLocale(next);
+        await applyLocalePreference(next);
+      } catch (e) {
+        setLocalePref(prev ?? null);
+        pushToast("error", renderError(e, t("language.changeFailed")));
+      }
+    },
+    [localePref, pushToast, t],
   );
 
   const toggleHideDock = useCallback(
@@ -353,14 +390,16 @@ function GeneralPane({
         await api.preferencesSetHideDockIcon(next);
         pushToast(
           "info",
-          next ? "Dock icon hidden — tray-only mode." : "Dock icon restored.",
+          next
+            ? ts("general.hideDock.hiddenToast")
+            : ts("general.hideDock.restoredToast"),
         );
       } catch (e) {
         setHideDock(prev);
-        pushToast("error", `Toggle failed: ${e}`);
+        pushToast("error", renderError(e, ts("shared.toggleFailed")));
       }
     },
-    [hideDock, pushToast],
+    [hideDock, pushToast, ts],
   );
 
   const toggleShowWindowOnStartup = useCallback(
@@ -371,10 +410,10 @@ function GeneralPane({
         await api.preferencesSetShowWindowOnStartup(next);
       } catch (e) {
         setShowWindowOnStartup(prev);
-        pushToast("error", `Toggle failed: ${e}`);
+        pushToast("error", renderError(e, ts("shared.toggleFailed")));
       }
     },
-    [showWindowOnStartup, pushToast],
+    [showWindowOnStartup, pushToast, ts],
   );
 
   const toggleLaunchAtLogin = useCallback(
@@ -387,18 +426,18 @@ function GeneralPane({
         else await mod.disable();
       } catch (e) {
         setLaunchAtLogin(prev);
-        pushToast("error", `Launch-at-login toggle failed: ${e}`);
+        pushToast("error", renderError(e, ts("general.launchAtLogin.error")));
       }
     },
-    [launchAtLogin, pushToast],
+    [launchAtLogin, pushToast, ts],
   );
 
   return (
     <>
     <SettingsGroup
-      desc="Behavior that runs when Claudepot starts up, plus the diagnostic overlays you can opt into."
+      desc={ts("general.groupStartupDesc")}
     >
-      <Row label="Open on launch">
+      <Row label={ts("general.openOnLaunch")}>
         <select
           value={startSection}
           onChange={(e) => changeStart(e.target.value)}
@@ -411,9 +450,21 @@ function GeneralPane({
           ))}
         </select>
       </Row>
+      <Row label={t("language.label")} hint={t("language.hint")}>
+        <select
+          value={localePref === undefined ? "system" : (localePref ?? "system")}
+          onChange={(e) => changeLocale(e.target.value)}
+          disabled={localePref === undefined}
+          style={selectStyle}
+        >
+          <option value="system">{t("language.system")}</option>
+          <option value="en">{t("language.en")}</option>
+          <option value="zh-CN">{t("language.zh-CN")}</option>
+        </select>
+      </Row>
       <Row
-        label="Show Boards"
-        hint="Durable surfaces agents write into. On trial and off by default — toggle any time with ⌃⌥⌘B."
+        label={ts("general.showBoards.label")}
+        hint={ts("general.showBoards.hint")}
       >
         <Toggle
           on={boardsOn}
@@ -427,8 +478,8 @@ function GeneralPane({
         />
       </Row>
       <Row
-        label="Launch at login"
-        hint="Claudepot starts automatically when you log in."
+        label={ts("general.launchAtLogin.label")}
+        hint={ts("general.launchAtLogin.hint")}
       >
         <Toggle
           on={launchAtLogin === true}
@@ -436,8 +487,8 @@ function GeneralPane({
         />
       </Row>
       <Row
-        label="Show window on startup"
-        hint="Off: Claudepot launches into the tray with no window. Click the tray icon to open it."
+        label={ts("general.showWindow.label")}
+        hint={ts("general.showWindow.hint")}
       >
         <Toggle
           on={showWindowOnStartup === true}
@@ -446,8 +497,8 @@ function GeneralPane({
       </Row>
       {isMac && (
         <Row
-          label="Hide dock icon"
-          hint="Tray-only mode: no dock icon, no Cmd+Tab, no app menu bar. The window still opens from the tray."
+          label={ts("general.hideDock.label")}
+          hint={ts("general.hideDock.hint")}
         >
           <Toggle on={hideDock === true} onChange={toggleHideDock} />
         </Row>
@@ -460,7 +511,7 @@ function GeneralPane({
           confirms the new state since the toggle has no visual
           surface to mirror it. */}
     </SettingsGroup>
-    <SettingsGroup desc="Claude Code behavior. Written to ~/.claude/settings.json and shared by every account that uses Claude Code's config.">
+    <SettingsGroup desc={ts("general.groupCcDesc")}>
       <CompanionArtifactToggle pushToast={pushToast} />
       <ExtendedThinkingToggle pushToast={pushToast} />
       <FastModeToggle pushToast={pushToast} />
@@ -476,15 +527,16 @@ function GeneralPane({
 /* ──────────────────────────────────────────────────────────── */
 
 function AppearancePane() {
+  const { t } = useTranslation("settings");
   const { mode, resolved, setMode } = useTheme();
   const options: { value: ThemeMode; label: string; glyph?: NfIcon }[] = [
-    { value: null, label: "System", glyph: NF.cpu },
-    { value: "light", label: "Light", glyph: NF.sun },
-    { value: "dark", label: "Dark", glyph: NF.moon },
+    { value: null, label: t("appearance.system"), glyph: NF.cpu },
+    { value: "light", label: t("appearance.light"), glyph: NF.sun },
+    { value: "dark", label: t("appearance.dark"), glyph: NF.moon },
   ];
   return (
-    <SettingsGroup desc="Theme controls flow through CSS variables on the html element; no component code is aware of the active mode.">
-      <Row label="Theme">
+    <SettingsGroup desc={t("appearance.groupDesc")}>
+      <Row label={t("appearance.theme")}>
         <div
           style={{
             display: "flex",
@@ -531,9 +583,11 @@ function AppearancePane() {
           })}
         </div>
       </Row>
-      <Row label="Active" hint="Which palette the app is rendering right now.">
+      <Row label={t("appearance.active.label")} hint={t("appearance.active.hint")}>
         <Tag tone="accent" glyph={resolved === "dark" ? NF.moon : NF.sun}>
-          {resolved}
+          {resolved === "dark"
+            ? t("appearance.resolvedDark")
+            : t("appearance.resolvedLight")}
         </Tag>
       </Row>
     </SettingsGroup>
@@ -549,10 +603,11 @@ function LocksPane({
 }: {
   pushToast: (t: "info" | "error", msg: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const gc = useSettingsActions(pushToast);
   return (
-    <SettingsGroup desc="Force-break a stale lock file left behind by a crashed rename. Generates an audit trail.">
-      <Row label="Lock file path">
+    <SettingsGroup desc={t("locks.desc")}>
+      <Row label={t("locks.pathLabel")}>
         <input
           type="text"
           placeholder="/absolute/path/to/lockfile"
@@ -571,13 +626,13 @@ function LocksPane({
           danger
           onClick={gc.breakLock}
           disabled={gc.lockBusy || !gc.lockPath.trim()}
-          title="Force-break the lock file and create an audit trail"
+          title={t("locks.breakTitle")}
         >
-          Break lock
+          {t("locks.breakButton")}
         </Button>
         {(gc.lockBusy || !gc.lockPath.trim()) && (
           <DisabledReason>
-            {gc.lockBusy ? "Breaking lock…" : "Enter a lock file path"}
+            {gc.lockBusy ? t("locks.breaking") : t("locks.enterPath")}
           </DisabledReason>
         )}
       </div>
@@ -594,6 +649,7 @@ function DiagnosticsPane({
 }: {
   pushToast: (t: "info" | "error", msg: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
   const [ccIdentity, setCcIdentity] = useState<CcIdentity | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
@@ -622,13 +678,13 @@ function DiagnosticsPane({
     } catch (e) {
       if (!diagMountedRef.current || myToken !== diagTokenRef.current)
         return;
-      pushToast("error", `Diagnostics failed: ${e}`);
+      pushToast("error", renderError(e, t("diagnostics.loadFailed")));
     } finally {
       if (diagMountedRef.current && myToken === diagTokenRef.current) {
         setDiagBusy(false);
       }
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     loadDiagnostics();
@@ -652,23 +708,35 @@ function DiagnosticsPane({
     ];
     void navigator.clipboard
       .writeText(lines.join("\n"))
-      .then(() => pushToast("info", "Diagnostics copied."))
-      .catch((err) => pushToast("error", `Copy failed: ${err}`));
-  }, [appStatus, ccIdentity, pushToast]);
+      .then(() => pushToast("info", t("diagnostics.copied")))
+      .catch((err) =>
+        pushToast("error", renderError(err, t("shared.copyFailed"))),
+      );
+  }, [appStatus, ccIdentity, pushToast, t]);
 
   return (
-    <SettingsGroup desc="Read-only view of platform, active slots, and the identity Claude Code is currently authenticated as.">
+    <SettingsGroup desc={t("diagnostics.groupDesc")}>
       {appStatus ? (
         <dl style={gridStyle}>
-          <Kv label="Platform" value={`${appStatus.platform}/${appStatus.arch}`} mono />
-          <Kv label="CLI active" value={appStatus.cli_active_email ?? "—"} />
-          <Kv label="Desktop active" value={appStatus.desktop_active_email ?? "—"} />
-          <Kv label="Desktop installed" value={appStatus.desktop_installed ? "yes" : "no"} />
-          <Kv label="Accounts" value={String(appStatus.account_count)} />
-          <Kv label="Data dir" value={appStatus.data_dir} mono />
-          <Kv label="CC identity" value={ccIdentity?.email ?? "(not signed in)"} />
+          <Kv label={t("diagnostics.platform")} value={`${appStatus.platform}/${appStatus.arch}`} mono />
+          <Kv label={t("diagnostics.cliActive")} value={appStatus.cli_active_email ?? "—"} />
+          <Kv label={t("diagnostics.desktopActive")} value={appStatus.desktop_active_email ?? "—"} />
+          <Kv
+            label={t("diagnostics.desktopInstalled")}
+            value={
+              appStatus.desktop_installed
+                ? t("diagnostics.yes")
+                : t("diagnostics.no")
+            }
+          />
+          <Kv label={t("diagnostics.accounts")} value={String(appStatus.account_count)} />
+          <Kv label={t("diagnostics.dataDir")} value={appStatus.data_dir} mono />
+          <Kv
+            label={t("diagnostics.ccIdentity")}
+            value={ccIdentity?.email ?? t("diagnostics.notSignedIn")}
+          />
           {ccIdentity?.error && (
-            <Kv label="CC error" value={ccIdentity.error} mono tone="warn" />
+            <Kv label={t("diagnostics.ccError")} value={ccIdentity.error} mono tone="warn" />
           )}
         </dl>
       ) : (
@@ -681,7 +749,7 @@ function DiagnosticsPane({
           onClick={loadDiagnostics}
           disabled={diagBusy}
         >
-          Refresh
+          {t("shared.refresh")}
         </Button>
         <Button
           variant="ghost"
@@ -689,7 +757,7 @@ function DiagnosticsPane({
           onClick={copyDiagnostics}
           disabled={!appStatus}
         >
-          Copy
+          {t("diagnostics.copy")}
         </Button>
       </div>
     </SettingsGroup>
@@ -701,21 +769,22 @@ function DiagnosticsPane({
 /* ──────────────────────────────────────────────────────────── */
 
 function AboutPane() {
+  const { t } = useTranslation("settings");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)" }}>
       <SettingsGroup>
         <dl style={gridStyle}>
           <Kv
-            label="App"
+            label={t("about.app")}
             value={
               <span>
                 clau<span style={{ color: "var(--accent)" }}>depot</span>
               </span>
             }
           />
-          <Kv label="Version" value={APP_VERSION} mono />
+          <Kv label={t("about.version")} value={APP_VERSION} mono />
           <Kv
-            label="Website"
+            label={t("about.website")}
             value={
               <span
                 style={{
@@ -736,7 +805,7 @@ function AboutPane() {
             }
           />
           <Kv
-            label="Author"
+            label={t("about.author")}
             value={
               <div
                 style={{
@@ -754,7 +823,7 @@ function AboutPane() {
                   }}
                 >
                   <BrandGithubMark
-                    aria-label="GitHub"
+                    aria-label={t("about.githubAria")}
                     style={{
                       width: "var(--fs-base)",
                       height: "var(--fs-base)",
@@ -784,8 +853,8 @@ function AboutPane() {
               </div>
             }
           />
-          <Kv label="Publisher" value="HANDO K.K." />
-          <Kv label="Design" value="paper-mono" />
+          <Kv label={t("about.publisher")} value="HANDO K.K." />
+          <Kv label={t("about.design")} value="paper-mono" />
         </dl>
         <p
           style={{
@@ -795,17 +864,11 @@ function AboutPane() {
             lineHeight: "var(--lh-body)",
           }}
         >
-          HANDO K.K. is the Apple Developer–registered entity that
-          code-signs and notarizes Claudepot. macOS shows this name in
-          {" "}
-          <em>
-            System Settings → General → Login Items &amp; Extensions →
-            App Background Activity
-          </em>
-          {" "}when “Launch at login” is enabled, and in occasional
-          “ran in the background” notifications. It’s the legal name
-          behind the Developer ID certificate — not a third-party
-          process.
+          <Trans
+            ns="settings"
+            i18nKey="about.signingNote"
+            components={{ em: <em /> }}
+          />
         </p>
       </SettingsGroup>
       <UpdatesPane />
@@ -824,12 +887,12 @@ function formatMB(n: number): string {
 
 /** Render the local datetime of a string the updater plugin handed us. */
 function formatLastChecked(at: number | null): string {
-  if (!at) return "Never";
-  const d = new Date(at);
-  return d.toLocaleString();
+  if (!at) return i18n.t("updates.never", { ns: "settings" });
+  return formatDateTime(at);
 }
 
 function UpdatesPane() {
+  const { t } = useTranslation("settings");
   const {
     supported,
     status,
@@ -861,8 +924,8 @@ function UpdatesPane() {
   // pointing at the Releases page so the user knows where to go.
   if (supported === false) {
     return (
-      <SettingsGroup desc="In-app updates aren't available on this install — your package manager owns this binary. Check the Releases page for new versions.">
-        <Row label="Updates">
+      <SettingsGroup desc={t("updates.unsupportedDesc")}>
+        <Row label={t("updates.rowLabel")}>
           <ExternalLink href="https://github.com/xiaolai/claudepot-app/releases">
             github.com/xiaolai/claudepot-app/releases
           </ExternalLink>
@@ -884,7 +947,7 @@ function UpdatesPane() {
       status === "ready");
 
   return (
-    <SettingsGroup desc="Claudepot checks an authenticated, minisign-signed manifest hosted on GitHub Releases. Your install only updates to versions signed by the project's release key.">
+    <SettingsGroup desc={t("updates.groupDesc")}>
       {/* Status row + manual trigger. The "Check now" button only
           renders for user-actionable states. While the badge is
           showing a transient state ("Checking…", "Downloading…",
@@ -893,7 +956,7 @@ function UpdatesPane() {
           state, so adding a second label next to it just duplicates
           the same word. The detailed download card below carries
           the progress percentage. */}
-      <Row label="Updates">
+      <Row label={t("updates.rowLabel")}>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-12)" }}>
           <UpdateStatusBadge
             status={status}
@@ -904,7 +967,7 @@ function UpdatesPane() {
           />
           {!checkDisabled && (
             <Button variant="ghost" onClick={() => void checkNow()}>
-              Check now
+              {t("updates.checkNow")}
             </Button>
           )}
         </div>
@@ -927,25 +990,25 @@ function UpdatesPane() {
           inline note + an "undo" so they can change their mind. */}
       {updateInfo && isSkipped && (
         <Row
-          label="Skipped"
-          hint={`Version ${updateInfo.version} won't prompt again.`}
+          label={t("updates.skipped.label")}
+          hint={t("updates.skipped.hint", { version: updateInfo.version })}
         >
           <Button variant="ghost" onClick={resetSkip}>
-            Show again
+            {t("updates.showAgain")}
           </Button>
         </Row>
       )}
 
       <Row
-        label="Check automatically"
-        hint="Background checks run after the chosen interval has elapsed since the last successful check."
+        label={t("updates.auto.label")}
+        hint={t("updates.auto.hint")}
       >
         <Toggle on={autoCheckEnabled} onChange={setAutoCheckEnabled} />
       </Row>
 
       <Row
-        label="Frequency"
-        hint={!autoCheckEnabled ? "Enable auto-check to set." : undefined}
+        label={t("updates.frequency.label")}
+        hint={!autoCheckEnabled ? t("updates.frequency.hint") : undefined}
       >
         <select
           value={checkFrequency}
@@ -955,26 +1018,26 @@ function UpdatesPane() {
           disabled={!autoCheckEnabled}
           style={selectStyle}
         >
-          <option value="startup">On every launch</option>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="manual">Only when I click Check now</option>
+          <option value="startup">{t("updates.frequency.startup")}</option>
+          <option value="daily">{t("updates.frequency.daily")}</option>
+          <option value="weekly">{t("updates.frequency.weekly")}</option>
+          <option value="manual">{t("updates.frequency.manual")}</option>
         </select>
       </Row>
 
       <Row
-        label="Release channel"
+        label={t("updates.channel.label")}
         hint={
           releaseChannel === "beta"
-            ? "Beta: you'll be offered prereleases (vX.Y.Z-beta.N) as well as stable releases. Earlier access, less tested. Switch back to Stable any time — it applies on the next check."
-            : "Stable: you're only offered fully-released versions. Choose Beta to also receive prereleases and try new features early."
+            ? t("updates.channel.betaHint")
+            : t("updates.channel.stableHint")
         }
       >
         {releaseChannel === null ? (
           <span
             style={{ fontSize: "var(--fs-sm)", color: "var(--fg-faint)" }}
           >
-            Loading…
+            {t("shared.loading")}
           </span>
         ) : (
           <select
@@ -983,15 +1046,15 @@ function UpdatesPane() {
               setReleaseChannel(e.target.value as "stable" | "beta")
             }
             style={selectStyle}
-            aria-label="Release channel"
+            aria-label={t("updates.channel.aria")}
           >
-            <option value="stable">Stable</option>
-            <option value="beta">Beta — include prereleases</option>
+            <option value="stable">{t("updates.channel.stable")}</option>
+            <option value="beta">{t("updates.channel.beta")}</option>
           </select>
         )}
       </Row>
 
-      <Row label="Last checked">
+      <Row label={t("updates.lastChecked")}>
         <span
           style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}
         >
@@ -999,7 +1062,7 @@ function UpdatesPane() {
         </span>
       </Row>
 
-      <Row label="All releases" hint="Browse the changelog and download installers for any platform.">
+      <Row label={t("updates.allReleases.label")} hint={t("updates.allReleases.hint")}>
         <ExternalLink href="https://github.com/xiaolai/claudepot-app/releases">
           github.com/xiaolai/claudepot-app/releases
         </ExternalLink>
@@ -1021,14 +1084,15 @@ function UpdateStatusBadge({
   isSkipped: boolean;
   stranded: ReturnType<typeof useUpdater>["stranded"];
 }) {
+  const { t } = useTranslation("settings");
   let glyph: NfIcon = NF.info;
   let color = "var(--fg-muted)";
-  let label = "Idle";
+  let label = t("updates.status.idle");
 
   if (status === "checking") {
     glyph = NF.refresh;
     color = "var(--fg-muted)";
-    label = "Checking…";
+    label = t("updates.status.checking");
   } else if (status === "up-to-date" && stranded) {
     // Beta → Stable switch while running a prerelease newer than the
     // stable channel's current release: "latest version" would be
@@ -1037,30 +1101,34 @@ function UpdateStatusBadge({
     glyph = NF.info;
     color = "var(--fg-muted)";
     label = stranded.stableVersion
-      ? `You're on a prerelease newer than the current stable (v${stranded.stableVersion}) — you'll be offered the next stable release`
-      : "You're on a prerelease newer than the current stable — you'll be offered the next stable release";
+      ? t("updates.status.strandedVersioned", {
+          version: stranded.stableVersion,
+        })
+      : t("updates.status.stranded");
   } else if (status === "up-to-date") {
     glyph = NF.check;
     color = "var(--ok)";
-    label = "You're on the latest version";
+    label = t("updates.status.latest");
   } else if (status === "available" && updateInfo) {
     glyph = NF.download;
     color = "var(--accent)";
     label = isSkipped
-      ? `v${updateInfo.version} skipped`
-      : `Update available — v${updateInfo.version}`;
+      ? t("updates.status.skippedVersion", { version: updateInfo.version })
+      : t("updates.status.available", { version: updateInfo.version });
   } else if (status === "downloading") {
     glyph = NF.download;
     color = "var(--fg-muted)";
-    label = "Downloading…";
+    label = t("updates.downloading");
   } else if (status === "ready") {
     glyph = NF.check;
     color = "var(--ok)";
-    label = "Ready to install — restart Claudepot";
+    label = t("updates.status.ready");
   } else if (status === "error") {
     glyph = NF.warn;
     color = "var(--danger)";
-    label = error ? `Check failed: ${error}` : "Check failed";
+    label = error
+      ? t("updates.status.checkFailedDetail", { error })
+      : t("updates.status.checkFailed");
   }
 
   return (
@@ -1096,6 +1164,7 @@ function UpdateAvailableCard({
   onSkip: () => void;
   onApply: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const total = progress?.total ?? 0;
   const downloaded = progress?.downloaded ?? 0;
   const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
@@ -1140,7 +1209,7 @@ function UpdateAvailableCard({
                 color: "var(--fg-faint)",
               }}
             >
-              current v{info.currentVersion}
+              {t("updates.card.current", { version: info.currentVersion })}
             </span>
             {info.pubDate && (
               <span
@@ -1180,21 +1249,23 @@ function UpdateAvailableCard({
           {status === "available" && (
             <>
               <Button variant="solid" onClick={onDownload}>
-                Download
+                {t("updates.card.download")}
               </Button>
               <Button variant="ghost" onClick={onSkip}>
-                Skip this version
+                {t("updates.card.skip")}
               </Button>
             </>
           )}
           {status === "downloading" && (
             <Button variant="solid" disabled>
-              {total > 0 ? `Downloading… ${pct}%` : "Downloading…"}
+              {total > 0
+                ? t("updates.card.downloadingPct", { pct })
+                : t("updates.downloading")}
             </Button>
           )}
           {status === "ready" && (
             <Button variant="solid" onClick={onApply}>
-              Restart to update
+              {t("updates.card.restart")}
             </Button>
           )}
         </div>
@@ -1211,7 +1282,7 @@ function UpdateAvailableCard({
               marginBottom: "var(--sp-4)",
             }}
           >
-            <span>Downloading…</span>
+            <span>{t("updates.downloading")}</span>
             <span>
               {formatMB(downloaded)} / {total > 0 ? formatMB(total) : "?"} MB
               {total > 0 && ` (${pct}%)`}
@@ -1357,13 +1428,14 @@ function DiagnosticLogsPane({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const onReveal = useCallback(async () => {
     try {
       await api.revealLogsDir();
     } catch (e) {
-      toastError(pushToast, "Open log folder", e);
+      toastError(pushToast, t("logs.openFailed"), e);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
   return (
     <div
       style={{
@@ -1379,7 +1451,7 @@ function DiagnosticLogsPane({
           color: "var(--fg)",
         }}
       >
-        Diagnostic logs
+        {t("logs.title")}
       </div>
       <div
         style={{
@@ -1388,10 +1460,11 @@ function DiagnosticLogsPane({
           lineHeight: 1.5,
         }}
       >
-        Every <code>tracing</code> event and any panic the app emits is
-        written to a rolling daily log file. Open the folder to attach
-        the most recent file when reporting an unexpected quit. Files
-        older than 7 days are pruned at startup.
+        <Trans
+          ns="settings"
+          i18nKey="logs.desc"
+          components={{ code: <code /> }}
+        />
       </div>
       <div>
         <Button
@@ -1399,7 +1472,7 @@ function DiagnosticLogsPane({
           glyph={NF.folder}
           onClick={onReveal}
         >
-          Reveal logs folder
+          {t("logs.reveal")}
         </Button>
       </div>
     </div>
@@ -1413,8 +1486,9 @@ function DiagnosticLogsPane({
 function NotificationsPane({
   pushToast,
 }: {
-  pushToast: (k: "info" | "error", t: string) => void;
+  pushToast: (k: "info" | "error", msg: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [loaded, setLoaded] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [hideThinking, setHideThinking] = useState(true);
@@ -1457,7 +1531,7 @@ function NotificationsPane({
       })
       .catch((e) => {
         if (cancelled) return;
-        pushToast("error", `Preferences load failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.prefsLoadFailed")));
         // Flip loaded anyway — otherwise the pane is stuck on
         // "Loading…" forever after one backend hiccup. Toggles stay
         // at their safe defaults (all off) until the user interacts.
@@ -1466,7 +1540,7 @@ function NotificationsPane({
     return () => {
       cancelled = true;
     };
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   const toggleEnabled = useCallback(
     async (next: boolean) => {
@@ -1481,14 +1555,14 @@ function NotificationsPane({
         window.dispatchEvent(new CustomEvent("cp-activity-prefs-changed"));
         pushToast(
           "info",
-          next ? "Activity feature enabled." : "Activity feature disabled.",
+          next ? t("notifications.activityOn") : t("notifications.activityOff"),
         );
       } catch (e) {
         setEnabled(prev);
-        pushToast("error", `Toggle failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.toggleFailed")));
       }
     },
-    [enabled, pushToast],
+    [enabled, pushToast, t],
   );
 
   const toggleHideThinking = useCallback(
@@ -1500,10 +1574,10 @@ function NotificationsPane({
         window.dispatchEvent(new CustomEvent("cp-activity-prefs-changed"));
       } catch (e) {
         setHideThinking(prev);
-        pushToast("error", `Toggle failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.toggleFailed")));
       }
     },
-    [hideThinking, pushToast],
+    [hideThinking, pushToast, t],
   );
 
   const setNotifyBool = useCallback(
@@ -1518,28 +1592,29 @@ function NotificationsPane({
         await api.preferencesSetNotifications({ [key]: next });
       } catch (e) {
         setter(prev);
-        pushToast("error", `Toggle failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.toggleFailed")));
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   const toggleUsageThreshold = useCallback(
-    async (t: number) => {
+    // `pct`, not `t` — a `t` parameter would shadow the translation fn.
+    async (pct: number) => {
       const prev = usageThresholds;
-      const has = prev.includes(t);
+      const has = prev.includes(pct);
       const next = has
-        ? prev.filter((x) => x !== t)
-        : [...prev, t].sort((a, b) => a - b);
+        ? prev.filter((x) => x !== pct)
+        : [...prev, pct].sort((a, b) => a - b);
       setUsageThresholds(next);
       try {
         await api.preferencesSetNotifications({ onUsageThresholds: next });
       } catch (e) {
         setUsageThresholds(prev);
-        pushToast("error", `Save failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.saveFailed")));
       }
     },
-    [usageThresholds, pushToast],
+    [usageThresholds, pushToast, t],
   );
 
   const toggleSubWindows = useCallback(
@@ -1550,10 +1625,10 @@ function NotificationsPane({
         await api.preferencesSetNotifications({ onSubWindows: next });
       } catch (e) {
         setNotifySubWindows(prev);
-        pushToast("error", `Toggle failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.toggleFailed")));
       }
     },
-    [notifySubWindows, pushToast],
+    [notifySubWindows, pushToast, t],
   );
 
   const setStuckMin = useCallback(
@@ -1571,10 +1646,10 @@ function NotificationsPane({
         });
       } catch (e) {
         setNotifyStuckMin(prev);
-        pushToast("error", `Save failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.saveFailed")));
       }
     },
-    [notifyStuckMin, pushToast],
+    [notifyStuckMin, pushToast, t],
   );
 
   if (!loaded) {
@@ -1583,16 +1658,16 @@ function NotificationsPane({
 
   return (
     <>
-      <SettingsGroup desc="The live Activity feature watches the transcript files Claude Code already writes, so you can see which of your sessions are busy, waiting, or idle at a glance. Nothing is sent anywhere; all data stays on this Mac.">
+      <SettingsGroup desc={t("notifications.groupActivityDesc")}>
         <Row
-          label="Enable Activity"
-          hint="Start the live runtime. Turning this off stops all polling and clears the LIVE strip."
+          label={t("notifications.enable.label")}
+          hint={t("notifications.enable.hint")}
         >
           <Toggle on={enabled} onChange={toggleEnabled} />
         </Row>
         <Row
-          label="Hide thinking by default"
-          hint="Thinking blocks render as 'redacted · N chars' until you click to reveal. Privacy-forward."
+          label={t("notifications.hideThinking.label")}
+          hint={t("notifications.hideThinking.hint")}
         >
           <Toggle
             on={hideThinking}
@@ -1601,11 +1676,11 @@ function NotificationsPane({
         </Row>
       </SettingsGroup>
 
-      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. 'Waiting for you' and the 90% usage threshold default on; the rest are opt-in. OS notifications only fire when the Claudepot window is unfocused — the bell icon in the top bar shows the in-app history either way.">
+      <SettingsGroup desc={t("notifications.groupAlertsDesc")}>
         <NotificationPermissionRow pushToast={pushToast} />
         <Row
-          label="Alert on error burst"
-          hint="At least two tool results with is_error=true inside a 60-second window."
+          label={t("notifications.errorBurst.label")}
+          hint={t("notifications.errorBurst.hint")}
         >
           <Toggle
             on={notifyError}
@@ -1615,8 +1690,8 @@ function NotificationsPane({
           />
         </Row>
         <Row
-          label="Alert when waiting for you"
-          hint="A session paused for permission, plan-mode approval, or a clarifying answer."
+          label={t("notifications.waiting.label")}
+          hint={t("notifications.waiting.hint")}
         >
           <Toggle
             on={notifyWaiting}
@@ -1631,8 +1706,8 @@ function NotificationsPane({
           />
         </Row>
         <Row
-          label="Alert when task finished"
-          hint="A session busy for 2+ minutes returned to idle. The 2-minute gate filters out drive-by edits."
+          label={t("notifications.taskDone.label")}
+          hint={t("notifications.taskDone.hint")}
         >
           <Toggle
             on={notifyIdleDone}
@@ -1647,15 +1722,15 @@ function NotificationsPane({
           />
         </Row>
         <Row
-          label="Alert when stuck"
-          hint="Empty = off. Fires 10 minutes after the last tool result; this value is shown in the toast copy only."
+          label={t("notifications.stuck.label")}
+          hint={t("notifications.stuck.hint")}
         >
           <input
             type="number"
             min="1"
             step="1"
             inputMode="numeric"
-            placeholder="off"
+            placeholder={t("notifications.stuck.off")}
             value={notifyStuckMin ?? ""}
             onChange={(e) => setStuckMin(e.target.value)}
             style={{
@@ -1667,8 +1742,8 @@ function NotificationsPane({
           />
         </Row>
         <Row
-          label="Alert at usage thresholds"
-          hint="Fires once per (5h / 7d window × threshold) per reset cycle for the CLI-active account. Polled every 5 min. When utilization jumps past two thresholds in one poll, only the higher one fires. Click any chip to toggle; empty = feature off."
+          label={t("notifications.usage.label")}
+          hint={t("notifications.usage.hint")}
         >
           <UsageThresholdChips
             thresholds={usageThresholds}
@@ -1676,14 +1751,14 @@ function NotificationsPane({
           />
         </Row>
         <Row
-          label="Include 7-day Opus / Sonnet sub-windows"
-          hint="The umbrella 7-day window is always checked. Per-model sub-quotas usually track it for users near cap, so leaving them off avoids triple-firing for what reads as one cap. Turn on if you watch each model's quota separately."
+          label={t("notifications.subWindows.label")}
+          hint={t("notifications.subWindows.hint")}
         >
           <Toggle on={notifySubWindows} onChange={toggleSubWindows} />
         </Row>
         <Row
-          label="Alert when long operations complete"
-          hint="Verify-all, project rename, session prune/slim/share/move, account login, or clean projects — fires an OS notification when any of these terminate while the window is unfocused."
+          label={t("notifications.opDone.label")}
+          hint={t("notifications.opDone.hint")}
         >
           <Toggle
             on={notifyOpDone}
@@ -1698,8 +1773,8 @@ function NotificationsPane({
           />
         </Row>
         <Row
-          label="Send test notification"
-          hint="Fire a sample OS notification to verify permissions and that the runtime path is wired. Doesn't toggle any preference."
+          label={t("notifications.test.label")}
+          hint={t("notifications.test.hint")}
         >
           <Button
             variant="ghost"
@@ -1712,12 +1787,12 @@ function NotificationsPane({
                 // category-prefs gate (which would suppress the test
                 // banner if the user had configEdited disabled).
                 const ok = await dispatchOsNotification(
-                  "Claudepot test",
-                  "If you see this, notifications are working.",
+                  t("notifications.test.title"),
+                  t("notifications.test.body"),
                   { ignoreFocus: true },
                 );
                 if (ok) {
-                  pushToast("info", "Test notification sent.");
+                  pushToast("info", t("notifications.test.sent"));
                   return;
                 }
                 // `dispatchOsNotification` returns false for several
@@ -1727,28 +1802,21 @@ function NotificationsPane({
                 // give the user the right remediation copy.
                 const status = getPermissionStatus();
                 if (status === "denied") {
-                  pushToast(
-                    "error",
-                    "OS notification permission denied. Open System Settings to re-enable.",
-                  );
+                  pushToast("error", t("notifications.test.denied"));
                 } else if (status === "not-requested") {
-                  pushToast(
-                    "info",
-                    "Notification permission was not granted. Click Request to retry.",
-                  );
+                  pushToast("info", t("notifications.test.notGranted"));
                 } else {
-                  pushToast(
-                    "error",
-                    "Couldn't reach the OS notification system. Try again, or check that Claudepot has Notification permission in System Settings.",
-                  );
+                  pushToast("error", t("notifications.test.unreachable"));
                 }
               } catch (e) {
-                const msg = e instanceof Error ? e.message : String(e);
-                pushToast("error", `Couldn't send notification: ${msg}`);
+                pushToast(
+                  "error",
+                  renderError(e, t("notifications.test.sendFailed")),
+                );
               }
             }}
           >
-            Send test
+            {t("notifications.test.button")}
           </Button>
         </Row>
       </SettingsGroup>
@@ -1789,8 +1857,9 @@ function NotificationsPane({
 function CategoryPrefsListGroup({
   pushToast,
 }: {
-  pushToast: (k: "info" | "error", t: string) => void;
+  pushToast: (k: "info" | "error", msg: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [meta, setMeta] = useState<CategoryMeta[] | null>(null);
   const [prefs, setPrefs] = useState<Record<string, CategoryPrefsType> | null>(
     null,
@@ -1810,12 +1879,15 @@ function CategoryPrefsListGroup({
       })
       .catch((e) => {
         if (cancelled) return;
-        pushToast("error", `Notification categories failed to load: ${e}`);
+        pushToast(
+          "error",
+          renderError(e, t("notifications.categories.loadFailed")),
+        );
       });
     return () => {
       cancelled = true;
     };
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   // Categories already represented by a scalar toggle above —
   // these stay hidden unless the user expands "show all".
@@ -1859,22 +1931,22 @@ function CategoryPrefsListGroup({
         // Revert on failure.
         setPrefs((p) => ({ ...(p ?? {}), [id]: cur }));
         setCategoryPrefLocal(id, cur);
-        pushToast("error", `Toggle failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.toggleFailed")));
       }
     },
-    [prefs, pushToast],
+    [prefs, pushToast, t],
   );
 
   if (!meta || !prefs) {
     return (
-      <SettingsGroup desc="More notification categories — loading…">
+      <SettingsGroup desc={t("notifications.categories.loadingDesc")}>
         <div />
       </SettingsGroup>
     );
   }
 
   return (
-    <SettingsGroup desc="More notification categories. Categories already covered by the toggles above (Error, Stuck, Waiting, Op done, Usage, Service status) are hidden by default — flip the bottom toggle to reveal them.">
+    <SettingsGroup desc={t("notifications.categories.desc")}>
       {Object.entries(grouped).map(([group, items]) => (
         <Fragment key={group}>
           <div
@@ -1887,16 +1959,20 @@ function CategoryPrefsListGroup({
               marginTop: "var(--sp-12)",
             }}
           >
-            {group}
+            {categoryGroupLabel(group)}
           </div>
           {items.map((c) => {
             const p = prefs[c.id] ?? { enabled: true, osOverride: null };
             return (
               <Row
                 key={c.id}
-                label={c.label}
+                // Localized off the stable id; the IPC-shipped English
+                // label is only the fallback (lib/notifications/labels).
+                label={categoryLabel(c)}
                 hint={`${c.priority.replace(/([A-Z])/g, " $1").trim()} — ${
-                  legacyCategories.has(c.id) ? "(also above)" : ""
+                  legacyCategories.has(c.id)
+                    ? t("notifications.categories.alsoAbove")
+                    : ""
                 }`}
               >
                 <Toggle
@@ -1909,8 +1985,8 @@ function CategoryPrefsListGroup({
         </Fragment>
       ))}
       <Row
-        label="Show all categories"
-        hint="Include those already covered by the toggles above."
+        label={t("notifications.categories.showAll")}
+        hint={t("notifications.categories.showAllHint")}
       >
         <Toggle on={showLegacy} onChange={setShowLegacy} />
       </Row>
@@ -1985,55 +2061,59 @@ function UsageThresholdChips({
 function NotificationPermissionRow({
   pushToast,
 }: {
-  pushToast: (k: "info" | "error", t: string) => void;
+  pushToast: (k: "info" | "error", msg: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [status, setStatus] = useState<PermissionStatus>(() =>
     getPermissionStatus(),
   );
 
   useEffect(() => subscribePermissionStatus(setStatus), []);
 
-  const label = "OS notification permission";
+  const label = t("notifications.permission.label");
   let hint: string;
   switch (status) {
     case "granted":
-      hint = "Granted. Claudepot can post system-level alerts when the window is unfocused.";
+      hint = t("notifications.permission.grantedHint");
       break;
     case "denied":
-      hint = "Denied. Re-enable Claudepot in System Settings → Notifications to receive alerts.";
+      hint = t("notifications.permission.deniedHint");
       break;
     case "not-requested":
-      hint = "Not yet requested. Click Request to enable system-level alerts.";
+      hint = t("notifications.permission.notRequestedHint");
       break;
     case "unknown":
     default:
-      hint = "Probing OS permission state…";
+      hint = t("notifications.permission.probingHint");
       break;
   }
 
   return (
     <Row label={label} hint={hint}>
-      {status === "granted" && <Tag>Granted</Tag>}
-      {status === "denied" && <Tag tone="danger">Denied</Tag>}
+      {status === "granted" && (
+        <Tag>{t("notifications.permission.grantedTag")}</Tag>
+      )}
+      {status === "denied" && (
+        <Tag tone="danger">{t("notifications.permission.deniedTag")}</Tag>
+      )}
       {status === "not-requested" && (
         <Button
           variant="ghost"
           onClick={async () => {
             const next = await requestNotificationPermission();
             if (next === "granted") {
-              pushToast("info", "Notifications enabled.");
+              pushToast("info", t("notifications.permission.enabled"));
             } else if (next === "denied") {
-              pushToast(
-                "error",
-                "Notification permission denied. Open System Settings to re-enable.",
-              );
+              pushToast("error", t("notifications.permission.deniedToast"));
             }
           }}
         >
-          Request
+          {t("notifications.permission.request")}
         </Button>
       )}
-      {status === "unknown" && <Tag tone="ghost">Unknown</Tag>}
+      {status === "unknown" && (
+        <Tag tone="ghost">{t("notifications.permission.unknownTag")}</Tag>
+      )}
     </Row>
   );
 }
@@ -2047,6 +2127,7 @@ function GithubPane({
 }: {
   pushToast: (t: "info" | "error", msg: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [status, setStatus] = useState<{
     present: boolean;
     last4: string | null;
@@ -2063,9 +2144,9 @@ function GithubPane({
       // any `sk-ant-*` / `ghp_*` blob the backend might echo back. The
       // toast lingers in the DOM (and now in the status-bar echo) so
       // raw stringification is a leak surface.
-      toastError(pushToast, "GitHub token load failed", e);
+      toastError(pushToast, t("github.loadFailed"), e);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     refresh();
@@ -2080,9 +2161,9 @@ function GithubPane({
       await api.settingsGithubTokenSet(input.trim());
       setInput("");
       await refresh();
-      pushToast("info", "GitHub token saved.");
+      pushToast("info", t("github.saved"));
     } catch (e) {
-      toastError(pushToast, "GitHub token save failed", e);
+      toastError(pushToast, t("github.saveFailed"), e);
     } finally {
       setBusy(false);
     }
@@ -2094,40 +2175,41 @@ function GithubPane({
       await api.settingsGithubTokenClear();
       setInput("");
       await refresh();
-      pushToast("info", "GitHub token cleared.");
+      pushToast("info", t("github.cleared"));
     } catch (e) {
-      toastError(pushToast, "GitHub token clear failed", e);
+      toastError(pushToast, t("github.clearFailed"), e);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <SettingsGroup desc="Personal Access Token for publishing session exports as gists. Stored in the Keychain; only the last four characters are ever shown.">
-      <Row label="Status">
+    <SettingsGroup desc={t("github.desc")}>
+      <Row label={t("github.status")}>
         {status?.present ? (
           <code data-testid="github-token-last4">
             …{status.last4 ?? "????"}
           </code>
         ) : (
-          <span style={{ color: "var(--fg-muted)" }}>No token stored</span>
+          <span style={{ color: "var(--fg-muted)" }}>
+            {t("github.noToken")}
+          </span>
         )}
       </Row>
       {status?.env_override && (
-        <Row label="Override">
+        <Row label={t("github.override")}>
           <span
             data-testid="github-env-override-note"
             style={{ color: "var(--warn)", fontSize: "var(--fs-xs)" }}
           >
-            GITHUB_TOKEN env var is set — it overrides the stored token for
-            uploads. Unset the env var if you want Save/Clear to take effect.
+            {t("github.envNote")}
           </span>
         </Row>
       )}
-      <Row label="Token">
+      <Row label={t("github.token")}>
         <input
           type="password"
-          aria-label="GitHub token"
+          aria-label={t("github.tokenAria")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="ghp_…"
@@ -2137,11 +2219,15 @@ function GithubPane({
       </Row>
       <div style={actionsStyle}>
         <Button variant="solid" onClick={save} disabled={busy || !input.trim()}>
-          {busy ? "Saving…" : status?.present ? "Replace" : "Save"}
+          {busy
+            ? t("shared.saving")
+            : status?.present
+              ? t("github.replace")
+              : t("github.save")}
         </Button>
         {status?.present && (
           <Button variant="ghost" onClick={clear} disabled={busy}>
-            Clear
+            {t("github.clear")}
           </Button>
         )}
       </div>

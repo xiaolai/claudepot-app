@@ -16,6 +16,7 @@
 // surface changed.
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { LessonsTab } from "./LessonsTab";
 import { KnowledgeDashboard } from "./knowledge/KnowledgeDashboard";
 import { KnowView } from "./knowledge/KnowView";
@@ -26,14 +27,17 @@ type Tab = "dashboard" | "know" | "review" | "recall";
 /** Which Review sub-queue a deep-link should open. */
 export type QueueTarget = "proposed" | "suspect";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "know", label: "Know" },
-  { id: "review", label: "Review" },
-  { id: "recall", label: "Recall" },
-];
+// labelKey resolves through the `knowledge` catalog at render time so a
+// locale switch re-labels the tabs without a remount.
+const TABS = [
+  { id: "dashboard", labelKey: "section.tabs.dashboard" },
+  { id: "know", labelKey: "section.tabs.know" },
+  { id: "review", labelKey: "section.tabs.review" },
+  { id: "recall", labelKey: "section.tabs.recall" },
+] as const satisfies readonly { id: Tab; labelKey: string }[];
 
 export function SharedMemorySection() {
+  const { t } = useTranslation("knowledge");
   const [tab, setTab] = useState<Tab>("dashboard");
   // Deep-link carriers: a Dashboard/Review jump pre-filters Know or targets
   // a Review sub-queue. `null`/default = no deep-link. These are ONE-SHOT:
@@ -82,7 +86,7 @@ export function SharedMemorySection() {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
     const delta = e.key === "ArrowRight" ? 1 : -1;
-    const i = TABS.findIndex((t) => t.id === tab);
+    const i = TABS.findIndex((tb) => tb.id === tab);
     const next = TABS[(i + delta + TABS.length) % TABS.length]!.id;
     navTab(next);
     document.getElementById(`shared-memory-tab-${next}`)?.focus();
@@ -97,13 +101,10 @@ export function SharedMemorySection() {
         minHeight: 0,
       }}
     >
-      <ScreenHeader
-        title="Knowledge"
-        subtitle="What Claude knows — health, curated base, triage, and recall"
-      />
+      <ScreenHeader title={t("section.title")} subtitle={t("section.subtitle")} />
       <nav
         role="tablist"
-        aria-label="Knowledge tabs"
+        aria-label={t("section.tabsAria")}
         onKeyDown={onTablistKeyDown}
         style={{
           display: "flex",
@@ -112,15 +113,15 @@ export function SharedMemorySection() {
           borderBottom: "var(--sp-px) solid var(--line)",
         }}
       >
-        {TABS.map((t) => (
+        {TABS.map((tb) => (
           <TabButton
-            key={t.id}
-            id={`shared-memory-tab-${t.id}`}
-            panelId={`shared-memory-panel-${t.id}`}
-            active={tab === t.id}
-            onClick={() => navTab(t.id)}
+            key={tb.id}
+            id={`shared-memory-tab-${tb.id}`}
+            panelId={`shared-memory-panel-${tb.id}`}
+            active={tab === tb.id}
+            onClick={() => navTab(tb.id)}
           >
-            {t.label}
+            {t(tb.labelKey)}
           </TabButton>
         ))}
       </nav>

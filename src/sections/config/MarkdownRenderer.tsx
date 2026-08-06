@@ -5,9 +5,11 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { i18n } from "../../lib/i18n";
 import { MermaidBlock } from "./MermaidBlock";
 
 /**
@@ -124,7 +126,7 @@ const components: Components = {
     return (
       <span
         role="img"
-        aria-label={alt || "image"}
+        aria-label={alt || i18n.t("markdown.image", { ns: "config" })}
         title={src ?? undefined}
         style={{
           display: "inline-flex",
@@ -138,7 +140,9 @@ const components: Components = {
           color: "var(--fg-muted)",
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)" }}>image</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>
+          {i18n.t("markdown.image", { ns: "config" })}
+        </span>
         {alt && <span>· {alt}</span>}
         {host && <span style={{ color: "var(--fg-faint)" }}>· {host}</span>}
       </span>
@@ -192,10 +196,11 @@ function extractFrontmatter(input: string): {
 }
 
 function FrontmatterCard({ entries }: { entries: FrontmatterEntry[] }) {
+  const { t } = useTranslation("config");
   if (entries.length === 0) return null;
   return (
     <aside
-      aria-label="Frontmatter"
+      aria-label={t("markdown.frontmatter")}
       style={{
         display: "grid",
         gridTemplateColumns: "auto 1fr",
@@ -217,10 +222,13 @@ function FrontmatterCard({ entries }: { entries: FrontmatterEntry[] }) {
 }
 
 function Row({ k, v }: { k: string; v: string }) {
+  const { t } = useTranslation("config");
   return (
     <>
       <span style={{ color: "var(--fg-faint)" }}>{k}</span>
-      <span style={{ color: "var(--fg)" }}>{v || <em>(empty)</em>}</span>
+      <span style={{ color: "var(--fg)" }}>
+        {v || <em>{t("markdown.empty")}</em>}
+      </span>
     </>
   );
 }

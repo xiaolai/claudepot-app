@@ -1,5 +1,8 @@
 import { useEffect, useId, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import { Input } from "../../components/primitives/Input";
 import {
@@ -43,6 +46,7 @@ export function RemoveProjectModal({
   onCompleted: (result: RemoveProjectResult) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const headingId = useId();
   const inputId = useId();
   const [basic, setBasic] = useState<RemoveProjectPreviewBasic | null>(null);
@@ -66,7 +70,7 @@ export function RemoveProjectModal({
       })
       .catch((e) => {
         if (cancelled) return;
-        setPreviewError(String(e));
+        setPreviewError(renderError(e));
       });
     api
       .projectRemovePreviewExtras(target)
@@ -94,9 +98,9 @@ export function RemoveProjectModal({
   // race — never make the user wait on lsof).
   const canSubmit = matches && !liveBlocked && !submitting;
   const disabledReason = liveBlocked
-    ? "Live CC session running — close it first."
+    ? t("remove.liveBlocked")
     : !matches && basic
-      ? `Type ${basic.slug} to confirm.`
+      ? t("remove.typeToConfirmReason", { slug: basic.slug })
       : null;
 
   const recoverableUntil = (() => {
@@ -112,7 +116,7 @@ export function RemoveProjectModal({
       const result = await api.projectRemoveExecute(target);
       onCompleted(result);
     } catch (e) {
-      onError(String(e));
+      onError(renderError(e));
       setSubmitting(false);
     }
   };
@@ -121,7 +125,7 @@ export function RemoveProjectModal({
     <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
         glyph={NF.trash}
-        title="Remove project"
+        title={t("remove.title")}
         onClose={onClose}
         id={headingId}
       />
@@ -146,11 +150,11 @@ export function RemoveProjectModal({
               fontSize: "var(--fs-sm)",
             }}
           >
-            Loading…
+            {t("shared.loading")}
           </p>
         ) : (
           <>
-            <Block label="Removing">
+            <Block label={t("remove.blockRemoving")}>
               {basic.artifact_dir_present ? (
                 <code
                   className="selectable"
@@ -172,13 +176,13 @@ export function RemoveProjectModal({
                     color: "var(--fg)",
                   }}
                 >
-                  No session directory — config entries only.
+                  {t("remove.noSessionDir")}
                 </p>
               )}
-              <Meta items={metaItems(basic, extras)} />
+              <Meta items={metaItems(t, basic, extras)} />
             </Block>
 
-            <Block label="Not touching">
+            <Block label={t("remove.blockNotTouching")}>
               <code
                 className="selectable"
                 style={{
@@ -187,7 +191,7 @@ export function RemoveProjectModal({
                   wordBreak: "break-all",
                 }}
               >
-                {basic.original_path ?? "(unknown source path)"}
+                {basic.original_path ?? t("remove.unknownSource")}
               </code>
               <p
                 style={{
@@ -196,12 +200,12 @@ export function RemoveProjectModal({
                   color: "var(--fg-faint)",
                 }}
               >
-                Your actual project files. Untouched.
+                {t("remove.notTouchingHint")}
               </p>
             </Block>
 
             {basic.artifact_dir_present ? (
-              <Block label={`Recoverable until ${recoverableUntil}`}>
+              <Block label={t("remove.recoverableUntil", { date: recoverableUntil })}>
                 <p
                   style={{
                     margin: 0,
@@ -209,14 +213,20 @@ export function RemoveProjectModal({
                     color: "var(--fg-faint)",
                   }}
                 >
-                  Lives in <code>~/.claudepot/trash/projects/</code> for 30 days.
-                  Restore via <code>claudepot project trash restore &lt;id&gt;</code>.
+                  <Trans
+                    ns="projects"
+                    i18nKey="remove.trashBody"
+                    components={{
+                      dir: <code>~/.claudepot/trash/projects/</code>,
+                      cmd: <code>claudepot project trash restore &lt;id&gt;</code>,
+                    }}
+                  />
                 </p>
               </Block>
             ) : (
               // No artifact dir means no trash entry — promising a
               // restore id here would be a lie.
-              <Block label="Nothing to trash">
+              <Block label={t("remove.nothingToTrash")}>
                 <p
                   style={{
                     margin: 0,
@@ -224,10 +234,14 @@ export function RemoveProjectModal({
                     color: "var(--fg-faint)",
                   }}
                 >
-                  No session directory exists, so nothing moves to the trash. A
-                  snapshot of the stripped entries is kept in{" "}
-                  <code>~/.claudepot/repair/snapshots/</code> (under{" "}
-                  <code>$CLAUDEPOT_DATA_DIR</code> if set).
+                  <Trans
+                    ns="projects"
+                    i18nKey="remove.noTrashBody"
+                    components={{
+                      dir: <code>~/.claudepot/repair/snapshots/</code>,
+                      env: <code>$CLAUDEPOT_DATA_DIR</code>,
+                    }}
+                  />
                 </p>
               </Block>
             )}
@@ -248,30 +262,35 @@ export function RemoveProjectModal({
                   letterSpacing: "var(--ls-wide)",
                 }}
               >
-                Type{" "}
-                <code
-                  className="selectable"
-                  style={{
-                    color: "var(--fg)",
-                    // Slugs are case-sensitive on disk. The
-                    // surrounding label is `text-transform:
-                    // uppercase` for visual consistency with the
-                    // REMOVING/NOT TOUCHING/RECOVERABLE block
-                    // headers, but the slug itself must render in
-                    // its original casing — otherwise users type
-                    // what they see (uppercase) and the match fails
-                    // forever.
-                    textTransform: "none",
+                <Trans
+                  ns="projects"
+                  i18nKey="remove.typeLabel"
+                  values={{ slug: basic.slug }}
+                  components={{
+                    slug: (
+                      <code
+                        className="selectable"
+                        style={{
+                          color: "var(--fg)",
+                          // Slugs are case-sensitive on disk. The
+                          // surrounding label is `text-transform:
+                          // uppercase` for visual consistency with the
+                          // REMOVING/NOT TOUCHING/RECOVERABLE block
+                          // headers, but the slug itself must render in
+                          // its original casing — otherwise users type
+                          // what they see (uppercase) and the match fails
+                          // forever.
+                          textTransform: "none",
+                        }}
+                      />
+                    ),
                   }}
-                >
-                  {basic.slug}
-                </code>{" "}
-                to confirm
+                />
               </label>
               <Input
                 value={confirmInput}
                 onChange={(e) => setConfirmInput(e.target.value)}
-                aria-label="Type project slug to confirm removal"
+                aria-label={t("remove.confirmAria")}
                 autoFocus
                 style={{ fontFamily: "var(--font-mono)" }}
               />
@@ -293,7 +312,7 @@ export function RemoveProjectModal({
           </span>
         )}
         <Button variant="solid" onClick={onClose} autoFocus={!basic}>
-          Cancel
+          {t("shared.cancel")}
         </Button>
         <Button
           variant="outline"
@@ -301,7 +320,7 @@ export function RemoveProjectModal({
           disabled={!canSubmit}
           onClick={handleSubmit}
         >
-          {submitting ? "Removing…" : "Remove"}
+          {submitting ? t("remove.removing") : t("remove.submit")}
         </Button>
       </ModalFooter>
     </Modal>
@@ -312,7 +331,7 @@ function Block({
   label,
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -356,27 +375,30 @@ function Meta({ items }: { items: string[] }) {
 }
 
 function metaItems(
+  t: TFunction<"projects">,
   basic: RemoveProjectPreviewBasic,
   extras: RemoveProjectPreviewExtras | null,
 ): string[] {
   const items: string[] = [];
   if (basic.session_count > 0) {
-    items.push(
-      `${basic.session_count} session${basic.session_count === 1 ? "" : "s"}`,
-    );
+    items.push(t("shared.sessions", { count: basic.session_count }));
   }
   if (basic.bytes > 0) {
     items.push(formatSize(basic.bytes));
   }
   if (basic.last_modified_ms != null) {
-    items.push(`last touched ${formatRelativeTime(basic.last_modified_ms)}`);
+    items.push(
+      t("remove.lastTouchedMeta", {
+        time: formatRelativeTime(basic.last_modified_ms),
+      }),
+    );
   }
   if (extras?.claude_json_entry_present) {
-    items.push("with .claude.json entry");
+    items.push(t("remove.claudeJsonEntry"));
   }
   if (extras && extras.history_lines_count > 0) {
     items.push(
-      `${extras.history_lines_count} history line${extras.history_lines_count === 1 ? "" : "s"}`,
+      t("remove.historyLines", { count: extras.history_lines_count }),
     );
   }
   return items;

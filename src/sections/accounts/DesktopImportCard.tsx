@@ -1,8 +1,11 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import type { AccountSummary, DesktopIdentity } from "../../types";
 import { ActionCard } from "./ActionCard";
 import { IdentityPreview } from "./IdentityPreview";
@@ -56,6 +59,7 @@ export function DesktopImportCard({
   onAdoptDesktop,
   onAdopted,
 }: Props) {
+  const { t } = useTranslation("accounts");
   const [adopting, setAdopting] = useState(false);
   // Probe result is cached for the lifetime of the card. The live
   // probe runs `/profile` + DPAPI unwrap which is ~1s — rerunning it
@@ -90,7 +94,7 @@ export function DesktopImportCard({
         if (cancelled) return;
         setProbe({
           kind: "failed",
-          message: e instanceof Error ? e.message : String(e),
+          message: renderError(e),
         });
       }
     })();
@@ -111,15 +115,14 @@ export function DesktopImportCard({
     const id = probe.identity;
     if (id.error) return { kind: "error", message: id.error };
     if (!id.email) {
-      return { kind: "empty", reason: "Claude Desktop is not signed in." };
+      return { kind: "empty", reason: t("desktopImport.notSignedIn") };
     }
     // Only Decrypted results are trusted. A fast-path candidate is
     // intentionally NOT offered here (Codex D5-1).
     if (id.probe_method !== "decrypted") {
       return {
         kind: "error",
-        message:
-          "Couldn't confirm which account Claude Desktop is signed in as. Open Claude Desktop once, then try again.",
+        message: t("desktopImport.unconfirmed"),
       };
     }
     const match = accounts.find(
@@ -130,7 +133,7 @@ export function DesktopImportCard({
       return { kind: "adopted", email: id.email, account: match };
     }
     return { kind: "known", email: id.email, account: match };
-  }, [probe, accounts]);
+  }, [probe, accounts, t]);
 
   const handleAdopt = async () => {
     if (preflight.kind !== "known") return;
@@ -160,24 +163,24 @@ export function DesktopImportCard({
     switch (preflight.kind) {
       case "checking":
         return {
-          subtitle: "Probing live Claude Desktop identity…",
-          cta: "Checking…",
+          subtitle: t("desktopImport.checkingSubtitle"),
+          cta: t("desktopImport.checking"),
           ctaGlyph: NF.clock,
           disabled: true,
           onClick: () => {},
         };
       case "new":
         return {
-          subtitle: `Desktop is signed in as ${preflight.email}, which isn't registered yet. Register it via the CC flow above, then return here.`,
-          cta: "Register first",
+          subtitle: t("desktopImport.newSubtitle", { email: preflight.email }),
+          cta: t("desktopImport.registerFirst"),
           ctaGlyph: NF.user,
           disabled: true,
           onClick: () => {},
         };
       case "known":
         return {
-          subtitle: `Snapshot the current Desktop session under the stored account.`,
-          cta: adopting ? "Binding…" : "Bind",
+          subtitle: t("desktopImport.knownSubtitle"),
+          cta: adopting ? t("desktopImport.binding") : t("desktopImport.bind"),
           ctaGlyph: adopting ? NF.clock : NF.desktop,
           disabled: adopting || externallyDisabled,
           inner: (
@@ -193,8 +196,8 @@ export function DesktopImportCard({
         };
       case "adopted":
         return {
-          subtitle: "Already bound — use Accounts → Set as Desktop to swap in.",
-          cta: "Done",
+          subtitle: t("desktopImport.adoptedSubtitle"),
+          cta: t("desktopImport.done"),
           ctaGlyph: NF.check,
           disabled: true,
           inner: (
@@ -203,7 +206,7 @@ export function DesktopImportCard({
               subscription={preflight.account.subscription_type}
               orgName={preflight.account.org_name}
               dimmed
-              badge={<Tag tone="neutral">already bound</Tag>}
+              badge={<Tag tone="neutral">{t("desktopImport.alreadyBound")}</Tag>}
             />
           ),
           onClick: () => {},
@@ -211,15 +214,17 @@ export function DesktopImportCard({
       case "empty":
         return {
           subtitle: preflight.reason,
-          cta: "Nothing to bind",
+          cta: t("desktopImport.nothingToBind"),
           ctaGlyph: NF.info,
           disabled: true,
           onClick: () => {},
         };
       case "error":
         return {
-          subtitle: `Couldn't read Desktop session: ${preflight.message}`,
-          cta: "Unavailable",
+          subtitle: t("desktopImport.errorSubtitle", {
+            message: preflight.message,
+          }),
+          cta: t("desktopImport.unavailable"),
           ctaGlyph: NF.warn,
           disabled: true,
           onClick: () => {},
@@ -243,7 +248,7 @@ export function DesktopImportCard({
         aria-hidden
       >
         <div style={{ flex: 1, height: "var(--bw-hair)", background: "var(--line)" }} />
-        <span className="mono-cap">or bind current Claude Desktop session</span>
+        <span className="mono-cap">{t("desktopImport.orDivider")}</span>
         <div style={{ flex: 1, height: "var(--bw-hair)", background: "var(--line)" }} />
       </div>
 
@@ -268,7 +273,7 @@ export function DesktopImportCard({
 
       <ActionCard
         glyph={NF.desktop}
-        title="Bind current Desktop session"
+        title={t("desktopImport.title")}
         subtitle={body.subtitle}
         command="desktop_adopt"
         disabled={body.disabled}
@@ -288,18 +293,21 @@ function summaryFor(p: Preflight): { glyph: typeof NF.clock; tone: string; text:
       return {
         glyph: NF.clock,
         tone: "var(--fg-faint)",
-        text: "Probing live Desktop identity…",
+        text: i18n.t("desktopImport.summary.checking", { ns: "accounts" }),
       };
     case "new":
       return {
         glyph: NF.info,
         tone: "var(--fg-muted)",
         text: (
-          <>
-            Claude Desktop is signed in as{" "}
-            <span style={{ color: "var(--fg)", fontWeight: 600 }}>{p.email}</span> —
-            not yet registered.
-          </>
+          <Trans
+            i18nKey="desktopImport.summary.newText"
+            ns="accounts"
+            values={{ email: p.email }}
+            components={{
+              emph: <span style={{ color: "var(--fg)", fontWeight: 600 }} />,
+            }}
+          />
         ),
       };
     case "known":
@@ -307,10 +315,14 @@ function summaryFor(p: Preflight): { glyph: typeof NF.clock; tone: string; text:
         glyph: NF.check,
         tone: "var(--ok)",
         text: (
-          <>
-            Claude Desktop is signed in as{" "}
-            <span style={{ color: "var(--fg)", fontWeight: 600 }}>{p.email}</span>.
-          </>
+          <Trans
+            i18nKey="desktopImport.summary.knownText"
+            ns="accounts"
+            values={{ email: p.email }}
+            components={{
+              emph: <span style={{ color: "var(--fg)", fontWeight: 600 }} />,
+            }}
+          />
         ),
       };
     case "adopted":
@@ -318,10 +330,14 @@ function summaryFor(p: Preflight): { glyph: typeof NF.clock; tone: string; text:
         glyph: NF.check,
         tone: "var(--ok)",
         text: (
-          <>
-            Snapshot already stored for{" "}
-            <span style={{ color: "var(--fg)", fontWeight: 600 }}>{p.email}</span>.
-          </>
+          <Trans
+            i18nKey="desktopImport.summary.adopted"
+            ns="accounts"
+            values={{ email: p.email }}
+            components={{
+              emph: <span style={{ color: "var(--fg)", fontWeight: 600 }} />,
+            }}
+          />
         ),
       };
     case "empty":
@@ -330,7 +346,10 @@ function summaryFor(p: Preflight): { glyph: typeof NF.clock; tone: string; text:
       return {
         glyph: NF.warn,
         tone: "var(--warn)",
-        text: <>Couldn't read Desktop session: {p.message}</>,
+        text: i18n.t("desktopImport.errorSubtitle", {
+          ns: "accounts",
+          message: p.message,
+        }),
       };
   }
 }

@@ -6,6 +6,7 @@
 // would have updated the warning a user reads while leaving the
 // confirmation they actually click describing something else.
 
+import { i18n } from "../../../lib/i18n";
 import type { Hazard } from "../../../types/ccEnv";
 
 /** A specific risk, named. `unknown` is deliberately absent: it is a
@@ -44,43 +45,47 @@ export function hasUnnamedHazard(hazards: Hazard[]): boolean {
   );
 }
 
-/** Inline warning copy — what the row says while you are looking at it. */
-export const HAZARD_WARNING: Record<NamedHazard, string> = {
+/** Inline warning copy — what the row says while you are looking at it.
+ *  Resolved at call time, not at module load, so a language switch
+ *  applies to a row already on screen. */
+const HAZARD_WARNING_KEYS = {
   // Covers both endpoint overrides and NO_PROXY, which is a bypass list
   // rather than a destination — "an endpoint you control" was wrong for it.
-  redirect:
-    "Changes where Claude Code sends traffic, or which traffic bypasses your proxy. Only use destinations and bypass rules you trust.",
-  trust_cert:
-    "Changes which TLS certificates Claude Code trusts. A wrong value makes interception undetectable.",
+  redirect: "envvars.hazardWarn.redirect",
+  trust_cert: "envvars.hazardWarn.trustCert",
   // The bucket is shell paths, a wrapper prefix, and CLAUDE_ENV_FILE: what
   // runs is the code this points AT, not the string itself.
-  execute_code:
-    "Names a binary, wrapper, or script that Claude Code runs. Only point it at local code you trust.",
-  switch_project:
-    "Switches which account or project your requests bill and log to.",
-  disable_updates:
-    "Stops Claude Code from updating itself, including security fixes.",
-};
+  execute_code: "envvars.hazardWarn.executeCode",
+  switch_project: "envvars.hazardWarn.switchProject",
+  disable_updates: "envvars.hazardWarn.disableUpdates",
+} as const satisfies Record<NamedHazard, string>;
+
+export function hazardWarning(h: NamedHazard): string {
+  return i18n.t(HAZARD_WARNING_KEYS[h], { ns: "config" });
+}
 
 /** Confirmation copy — shorter, because it sits next to an Apply button
  *  the user is about to press. Same taxonomy, same source of truth. */
-export const HAZARD_CONFIRM: Record<NamedHazard, string> = {
-  redirect: "This redirects Claude Code's traffic.",
-  trust_cert: "This changes which TLS certificates are trusted.",
-  execute_code: "This value ends up in a command Claude Code runs.",
-  switch_project: "This changes which account or project you bill and log to.",
-  disable_updates: "This stops Claude Code from updating itself.",
-};
+const HAZARD_CONFIRM_KEYS = {
+  redirect: "envvars.hazardConfirm.redirect",
+  trust_cert: "envvars.hazardConfirm.trustCert",
+  execute_code: "envvars.hazardConfirm.executeCode",
+  switch_project: "envvars.hazardConfirm.switchProject",
+  disable_updates: "envvars.hazardConfirm.disableUpdates",
+} as const satisfies Record<NamedHazard, string>;
 
 /** The plaintext-storage warning every secret write carries. */
-export const SECRET_CONFIRM =
-  "This writes the value into Claude Code's user settings file in plaintext. Claude Code does not encrypt it, and anything that can read the file can read the value.";
+export function secretConfirm(): string {
+  return i18n.t("envvars.secretConfirm", { ns: "config" });
+}
 
 /** Build the one combined confirmation body for a write. Secret and
  *  hazardous rows get a single dialog, never two stacked ones. */
 export function confirmBody(secret: boolean, hazards: Hazard[]): string {
   const parts: string[] = [];
-  if (secret) parts.push(SECRET_CONFIRM);
-  for (const h of namedHazards(hazards)) parts.push(HAZARD_CONFIRM[h]);
+  if (secret) parts.push(secretConfirm());
+  for (const h of namedHazards(hazards)) {
+    parts.push(i18n.t(HAZARD_CONFIRM_KEYS[h], { ns: "config" }));
+  }
   return parts.join(" ");
 }

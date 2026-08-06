@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { tierColor, tierLabel } from "../../api/service-status";
 import { Button } from "../../components/primitives/Button";
 import { ExternalLink } from "../../components/primitives/ExternalLink";
 import { useServiceStatus } from "../../hooks/useServiceStatus";
 import { formatRelative } from "../../lib/formatRelative";
+import { renderError } from "../../lib/i18n-error";
 import type { Preferences } from "../../types";
 
 interface Props {
@@ -22,6 +24,7 @@ interface Props {
  * because the api setter emits `cp-prefs-changed`.
  */
 export function NetworkPane({ pushToast }: Props) {
+  const { t } = useTranslation("settings");
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   // Monotonic save token. Each `setField` call increments and captures
   // its own value; the response is only applied if the captured token
@@ -37,12 +40,13 @@ export function NetworkPane({ pushToast }: Props) {
         if (!cancelled) setPrefs(p);
       })
       .catch((e) => {
-        if (!cancelled) pushToast("error", `Preferences load failed: ${e}`);
+        if (!cancelled)
+          pushToast("error", renderError(e, t("shared.prefsLoadFailed")));
       });
     return () => {
       cancelled = true;
     };
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   // Defensive: tests / partial fixtures may omit `service_status`.
   const ss = prefs?.service_status;
@@ -104,15 +108,15 @@ export function NetworkPane({ pushToast }: Props) {
         // Same staleness guard: a later save has already been issued,
         // its optimistic update is now the truth.
         if (saveTokenRef.current === myToken) setPrefs(prevSnapshot);
-        pushToast("error", `Save failed: ${e}`);
+        pushToast("error", renderError(e, t("shared.saveFailed")));
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   if (!prefs || !ss) {
     return (
-      <div style={{ color: "var(--fg-faint)" }}>Loading preferences…</div>
+      <div style={{ color: "var(--fg-faint)" }}>{t("network.loadingPrefs")}</div>
     );
   }
 
@@ -121,22 +125,29 @@ export function NetworkPane({ pushToast }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-20)" }}>
       <p style={{ margin: 0, color: "var(--fg-muted)", fontSize: "var(--fs-sm)" }}>
-        Surface upstream incidents from <code>status.claude.com</code> and
-        measure round-trip latency to the hosts Claude Code actually hits.
-        See{" "}
-        <ExternalLink href="https://github.com/xiaolai/anthropic-claude-surge-rules-set">
-          xiaolai/anthropic-claude-surge-rules-set
-        </ExternalLink>{" "}
-        for the curated registry the host list is seeded from.
+        <Trans
+          ns="settings"
+          i18nKey="network.intro"
+          components={{
+            code: <code />,
+            link: (
+              <ExternalLink href="https://github.com/xiaolai/anthropic-claude-surge-rules-set">
+                xiaolai/anthropic-claude-surge-rules-set
+              </ExternalLink>
+            ),
+          }}
+        />
       </p>
 
       {/* Status-page polling -------------------------------------- */}
-      <Section title="Service status">
+      <Section title={t("network.serviceStatus")}>
         <ToggleRow
           checked={ss.poll_status_page}
           onChange={(v) => void setField({ pollStatusPage: v })}
-          label="Check status.claude.com"
-          detail={`One small request every ${ss.poll_interval_minutes} minutes. Indicates when Anthropic itself is degraded.`}
+          label={t("network.poll.label")}
+          detail={t("network.poll.detail", {
+            minutes: ss.poll_interval_minutes,
+          })}
         />
 
         <div
@@ -152,7 +163,7 @@ export function NetworkPane({ pushToast }: Props) {
             htmlFor="poll-interval"
             style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}
           >
-            Poll every
+            {t("network.poll.every")}
           </label>
           <input
             id="poll-interval"
@@ -179,31 +190,31 @@ export function NetworkPane({ pushToast }: Props) {
             }}
           />
           <span style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-            minutes (2–60)
+            {t("network.poll.minutes")}
           </span>
         </div>
 
         <ToggleRow
           checked={ss.os_notify_on_status_change}
           onChange={(v) => void setField({ osNotifyOnStatusChange: v })}
-          label="Show OS notification on status change"
-          detail="Off by default — false positives from Anthropic blips can train you to ignore real signals. The bell-icon log gets every transition regardless."
+          label={t("network.osNotify.label")}
+          detail={t("network.osNotify.detail")}
         />
       </Section>
 
       {/* Latency probe -------------------------------------------- */}
-      <Section title="Path latency">
+      <Section title={t("network.latency.title")}>
         <ToggleRow
           checked={ss.probe_latency_on_focus}
           onChange={(v) => void setField({ probeLatencyOnFocus: v })}
-          label="Probe latency when window opens"
-          detail="HEAD request to each Claude host. On-demand only — no continuous background polling, by design."
+          label={t("network.latency.label")}
+          detail={t("network.latency.detail")}
         />
       </Section>
 
       {/* Live data -------------------------------------------- */}
       {enabled && (
-        <Section title="Current">
+        <Section title={t("network.current.title")}>
           <div
             style={{
               display: "flex",
@@ -227,8 +238,10 @@ export function NetworkPane({ pushToast }: Props) {
             </span>
             <span style={{ color: "var(--fg-faint)" }}>
               {summary?.fetchedAtMs
-                ? `· checked ${formatRelative(summary.fetchedAtMs)}`
-                : "· no data yet"}
+                ? t("network.current.checked", {
+                    when: formatRelative(summary.fetchedAtMs),
+                  })
+                : t("network.current.noData")}
             </span>
           </div>
 
@@ -240,14 +253,16 @@ export function NetworkPane({ pushToast }: Props) {
                 color: "var(--warn)",
               }}
             >
-              Last poll failed: {summary.lastError}
+              {t("network.current.lastPollFailed", {
+                error: summary.lastError,
+              })}
             </div>
           )}
 
           {summary?.incidents && summary.incidents.length > 0 && (
             <div style={{ marginTop: "var(--sp-10)" }}>
               <div style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)", marginBottom: "var(--sp-4)" }}>
-                Active incidents
+                {t("network.current.incidents")}
               </div>
               {summary.incidents.map((inc) => (
                 <div key={inc.id} style={{ fontSize: "var(--fs-sm)", color: "var(--warn)" }}>
@@ -273,11 +288,15 @@ export function NetworkPane({ pushToast }: Props) {
               }}
               disabled={probing}
             >
-              {probing ? "Probing…" : "Probe now"}
+              {probing
+                ? t("network.current.probing")
+                : t("network.current.probeNow")}
             </Button>
             {latency && latency.probedAtMs > 0 && (
               <span style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
-                Latency probed {formatRelative(latency.probedAtMs)}
+                {t("network.current.probedAt", {
+                  when: formatRelative(latency.probedAtMs),
+                })}
               </span>
             )}
           </div>
@@ -317,8 +336,8 @@ export function NetworkPane({ pushToast }: Props) {
                       {h.kind === "ok" && h.ms != null
                         ? `${h.ms} ms`
                         : h.kind === "timeout"
-                          ? "timeout"
-                          : "error"}
+                          ? t("network.current.timeout")
+                          : t("network.current.error")}
                     </td>
                   </tr>
                 ))}

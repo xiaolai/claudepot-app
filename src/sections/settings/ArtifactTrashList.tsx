@@ -8,12 +8,14 @@
 // configured retention.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { IconButton } from "../../components/primitives/IconButton";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
 import { formatRelative } from "../../lib/formatRelative";
+import { extractMessage, renderError } from "../../lib/i18n-error";
 import type { LifecycleKind, TrashEntryDto } from "../../types";
 import { Table, Th, Td, Tr } from "../../components/primitives";
 import { Section, Empty } from "./LifecyclePresentational";
@@ -30,20 +32,18 @@ export function ArtifactTrashList({
   pushToast: (kind: "info" | "error", text: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("settings");
   if (rows === null) {
     return (
-      <Section title="Artifact trash">
-        <Empty>Loading…</Empty>
+      <Section title={t("trash.title")}>
+        <Empty>{t("shared.loading")}</Empty>
       </Section>
     );
   }
   if (rows.length === 0) {
     return (
-      <Section title="Artifact trash">
-        <Empty>
-          Trash is empty. Trashed artifacts are restorable here for
-          ~{PURGE_AFTER_DAYS} days.
-        </Empty>
+      <Section title={t("trash.title")}>
+        <Empty>{t("trash.empty", { days: PURGE_AFTER_DAYS })}</Empty>
       </Section>
     );
   }
@@ -52,7 +52,7 @@ export function ArtifactTrashList({
   );
   return (
     <Section
-      title={`Artifact trash (${rows.length})`}
+      title={t("trash.titleCount", { count: rows.length })}
       action={
         <PurgeButton
           pushToast={pushToast}
@@ -64,11 +64,11 @@ export function ArtifactTrashList({
       <Table>
         <thead>
           <tr>
-            <Th>Kind</Th>
-            <Th>Name</Th>
-            <Th>Trashed</Th>
-            <Th>State</Th>
-            <Th aria-label="Actions" />
+            <Th>{t("artifacts.thKind")}</Th>
+            <Th>{t("artifacts.thName")}</Th>
+            <Th>{t("artifacts.thTrashed")}</Th>
+            <Th>{t("artifacts.thState")}</Th>
+            <Th aria-label={t("artifacts.thActions")} />
           </tr>
         </thead>
         <tbody>
@@ -95,63 +95,64 @@ function TrashRow({
   pushToast: (kind: "info" | "error", text: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const [busy, setBusy] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
   const [confirmSuffix, setConfirmSuffix] = useState(false);
   const [recoverOpen, setRecoverOpen] = useState(false);
   const m = row.manifest;
   const kind = m?.kind ?? "—";
-  const name = m?.relative_path ?? `(unrecoverable: ${row.state})`;
+  const name =
+    m?.relative_path ?? t("trash.unrecoverable", { state: row.state });
 
   const onRestore = useCallback(async () => {
     setBusy(true);
     try {
       const r = await api.artifactRestoreFromTrash(row.id, "refuse");
-      pushToast("info", `Restored to ${r.final_path}`);
+      pushToast("info", t("trash.restoredTo", { path: r.final_path }));
       onChanged();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Raw (untruncated, unredacted) text — this is a control-flow
+      // test, not a display string. `renderError` would cap it at 240
+      // chars and could push the marker out of range.
+      const msg = extractMessage(err);
       if (/already exists/i.test(msg)) {
         setConfirmSuffix(true);
       } else {
-        pushToast("error", `Restore failed: ${msg}`);
+        pushToast("error", renderError(err, t("trash.restoreFailed")));
       }
     } finally {
       setBusy(false);
     }
-  }, [row, pushToast, onChanged]);
+  }, [row, pushToast, onChanged, t]);
 
   const restoreWithSuffix = useCallback(async () => {
     setConfirmSuffix(false);
     setBusy(true);
     try {
       const r = await api.artifactRestoreFromTrash(row.id, "suffix");
-      pushToast("info", `Restored to ${r.final_path}`);
+      pushToast("info", t("trash.restoredTo", { path: r.final_path }));
       onChanged();
     } catch (err) {
-      pushToast(
-        "error",
-        `Restore failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      pushToast("error", renderError(err, t("trash.restoreFailed")));
     } finally {
       setBusy(false);
     }
-  }, [row, pushToast, onChanged]);
+  }, [row, pushToast, onChanged, t]);
 
   const doForget = useCallback(async () => {
     setConfirmForget(false);
     setBusy(true);
     try {
       await api.artifactForgetTrash(row.id);
-      pushToast("info", "Trash entry forgotten");
+      pushToast("info", t("trash.forgotten"));
       onChanged();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pushToast("error", `Forget failed: ${msg}`);
+      pushToast("error", renderError(err, t("trash.forgetFailed")));
     } finally {
       setBusy(false);
     }
-  }, [row, pushToast, onChanged]);
+  }, [row, pushToast, onChanged, t]);
 
   const doRecover = useCallback(
     async (target: string, recoveryKind: LifecycleKind) => {
@@ -164,21 +165,20 @@ function TrashRow({
           recoveryKind,
           "refuse",
         );
-        pushToast("info", `Recovered to ${r.final_path}`);
+        pushToast("info", t("trash.recoveredTo", { path: r.final_path }));
         onChanged();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        pushToast("error", `Recover failed: ${msg}`);
+        pushToast("error", renderError(err, t("trash.recoverFailed")));
       } finally {
         setBusy(false);
       }
     },
-    [row, pushToast, onChanged],
+    [row, pushToast, onChanged, t],
   );
 
   const trashedAt = row.trashed_at_ms
     ? formatRelative(row.trashed_at_ms, { ago: true })
-    : "unknown";
+    : t("trash.unknown");
 
   return (
     <>
@@ -201,8 +201,8 @@ function TrashRow({
                 onClick={onRestore}
                 disabled={busy}
                 size="sm"
-                title="Restore"
-                aria-label="Restore"
+                title={t("trash.restore")}
+                aria-label={t("trash.restore")}
               />
             )}
             {(row.state === "missing_manifest" ||
@@ -214,7 +214,7 @@ function TrashRow({
                 disabled={busy}
                 size="sm"
               >
-                Recover…
+                {t("trash.recover")}
               </Button>
             )}
             <IconButton
@@ -222,17 +222,17 @@ function TrashRow({
               onClick={() => setConfirmForget(true)}
               disabled={busy}
               size="sm"
-              title="Forget — remove from disk, no further undo"
-              aria-label="Forget — remove from disk, no further undo"
+              title={t("trash.forgetTitle")}
+              aria-label={t("trash.forgetTitle")}
             />
           </span>
         </Td>
       </Tr>
       {confirmForget && (
         <ConfirmDialog
-          title="Forget this trash entry?"
-          body="This entry will be removed from disk. There's no further undo."
-          confirmLabel="Forget"
+          title={t("trash.confirmForget.title")}
+          body={t("trash.confirmForget.body")}
+          confirmLabel={t("trash.confirmForget.confirm")}
           confirmDanger
           onConfirm={doForget}
           onCancel={() => setConfirmForget(false)}
@@ -240,9 +240,9 @@ function TrashRow({
       )}
       {confirmSuffix && (
         <ConfirmDialog
-          title="Original location is occupied"
-          body={`Restore "${name}" with a "-N" suffix instead?`}
-          confirmLabel="Restore with suffix"
+          title={t("trash.confirmSuffix.title")}
+          body={t("trash.confirmSuffix.body", { name })}
+          confirmLabel={t("trash.confirmSuffix.confirm")}
           onConfirm={restoreWithSuffix}
           onCancel={() => setConfirmSuffix(false)}
         />
@@ -267,6 +267,7 @@ function PurgeButton({
   onChanged: () => void;
   rowCount: number;
 }) {
+  const { t } = useTranslation("settings");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
 
@@ -275,15 +276,14 @@ function PurgeButton({
     setBusy(true);
     try {
       const n = await api.artifactPurgeTrash(PURGE_AFTER_DAYS);
-      pushToast("info", `Purged ${n} entr${n === 1 ? "y" : "ies"}`);
+      pushToast("info", t("trash.purged", { count: n }));
       onChanged();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pushToast("error", `Purge failed: ${msg}`);
+      pushToast("error", renderError(err, t("trash.purgeFailed")));
     } finally {
       setBusy(false);
     }
-  }, [pushToast, onChanged]);
+  }, [pushToast, onChanged, t]);
 
   return (
     <>
@@ -293,15 +293,15 @@ function PurgeButton({
         onClick={() => setConfirm(true)}
         disabled={busy}
         size="sm"
-        title={`Purge Healthy entries older than ${PURGE_AFTER_DAYS} days`}
+        title={t("trash.purgeTitle", { days: PURGE_AFTER_DAYS })}
       >
-        Empty old
+        {t("trash.emptyOld")}
       </Button>
       {confirm && (
         <ConfirmDialog
-          title={`Purge old trash entries?`}
-          body={`Healthy entries older than ${PURGE_AFTER_DAYS} days will be removed. Corrupt entries are kept until manually forgotten.`}
-          confirmLabel="Purge"
+          title={t("trash.confirmPurge.title")}
+          body={t("trash.confirmPurge.body", { days: PURGE_AFTER_DAYS })}
+          confirmLabel={t("trash.confirmPurge.confirm")}
           confirmDanger
           onConfirm={doPurge}
           onCancel={() => setConfirm(false)}
@@ -312,6 +312,7 @@ function PurgeButton({
 }
 
 function StateBadge({ state }: { state: TrashEntryDto["state"] }) {
+  const { t } = useTranslation("settings");
   const tone =
     state === "healthy"
       ? "var(--fg-faint)"
@@ -319,6 +320,14 @@ function StateBadge({ state }: { state: TrashEntryDto["state"] }) {
         ? "var(--warn)"
         : // missing_*, orphan_payload, tampered — all destructive states
           "var(--danger)";
+  const stateLabels: Record<TrashEntryDto["state"], string> = {
+    healthy: t("trash.state.healthy"),
+    missing_manifest: t("trash.state.missing_manifest"),
+    missing_payload: t("trash.state.missing_payload"),
+    orphan_payload: t("trash.state.orphan_payload"),
+    abandoned_staging: t("trash.state.abandoned_staging"),
+    tampered: t("trash.state.tampered"),
+  };
   return (
     <span
       style={{
@@ -327,13 +336,9 @@ function StateBadge({ state }: { state: TrashEntryDto["state"] }) {
         textTransform: "uppercase",
         color: tone,
       }}
-      title={
-        state === "tampered"
-          ? "Payload differs from the byte count / sha256 the manifest recorded — restore refused; investigate or forget."
-          : undefined
-      }
+      title={state === "tampered" ? t("trash.tamperedTitle") : undefined}
     >
-      {state.replace(/_/g, " ")}
+      {stateLabels[state] ?? state.replace(/_/g, " ")}
     </span>
   );
 }

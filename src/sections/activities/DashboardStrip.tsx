@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../lib/i18n";
 import { api } from "../../api";
 import { useDaemonStatus } from "../../hooks/useDaemonStatus";
 import { useSessionLive } from "../../hooks/useSessionLive";
+import { renderError } from "../../lib/i18n-error";
 import { compactModelLabel } from "../../lib/modelLabel";
 import { sessionEventMs } from "../../lib/sessionTime";
 import type { PriceTableDto, SessionRow } from "../../types";
 import {
-  ESTIMATED_RATE_HINT,
+  estimatedRateHint,
   formatUsd,
   sessionCostEstimate,
   usePriceTable,
@@ -32,6 +35,7 @@ import {
  * users read this as the amount they DIDN'T pay.
  */
 export function DashboardStrip() {
+  const { t } = useTranslation("activities");
   const live = useSessionLive();
   // Background CC supervisor + detached worker count. Surfaces in
   // the "Live" card when > 0 so the user sees the full picture of
@@ -95,7 +99,7 @@ export function DashboardStrip() {
       // click landed. Scrape-level failures are already expressed
       // via the returned table's `last_fetch_error` field and the
       // chip tooltip — those don't reach this catch.
-      setRefreshError(String(e));
+      setRefreshError(renderError(e));
     } finally {
       setRefreshing(false);
     }
@@ -112,52 +116,62 @@ export function DashboardStrip() {
         background: "var(--bg-sunken)",
       }}
     >
-      <StatCard label="Live">
+      <StatCard label={t("dashboard.live")}>
         {liveStats.running > 0 ? (
           <>
-            <BigValue value={liveStats.running} suffix="running" />
+            <BigValue
+              value={liveStats.running}
+              suffix={t("dashboard.running")}
+            />
             {liveStats.models.length > 0 && (
               <Subline>{liveStats.models.join(" · ")}</Subline>
             )}
             {bgWorkers > 0 && (
-              <Subline>
-                + {bgWorkers} bg worker{bgWorkers === 1 ? "" : "s"}
-              </Subline>
+              <Subline>{t("dashboard.bgWorkers", { count: bgWorkers })}</Subline>
             )}
           </>
         ) : bgWorkers > 0 ? (
           <>
-            <BigValue value={bgWorkers} suffix={`bg worker${bgWorkers === 1 ? "" : "s"}`} />
-            <Subline>foreground idle</Subline>
+            <BigValue
+              value={bgWorkers}
+              suffix={t("dashboard.bgWorkerSuffix", { count: bgWorkers })}
+            />
+            <Subline>{t("dashboard.foregroundIdle")}</Subline>
           </>
         ) : (
-          <IdleValue>idle</IdleValue>
+          <IdleValue>{t("dashboard.idle")}</IdleValue>
         )}
       </StatCard>
 
-      <StatCard label="Today">
+      <StatCard label={t("dashboard.today")}>
         {allSessions === null ? (
-          <Subline>loading…</Subline>
+          <Subline>{t("dashboard.loading")}</Subline>
         ) : rollups.today.sessions === 0 ? (
-          <IdleValue>no activity yet</IdleValue>
+          <IdleValue>{t("dashboard.noActivity")}</IdleValue>
         ) : (
           <>
             <BigValue
               value={rollups.today.sessions}
-              suffix={`session${rollups.today.sessions === 1 ? "" : "s"}`}
+              suffix={t("dashboard.sessionsSuffix", {
+                count: rollups.today.sessions,
+              })}
             />
             <Subline>
               {rollups.today.tokens > 0 && (
-                <>{formatTokensHuman(rollups.today.tokens)} tokens</>
+                <>
+                  {t("dashboard.tokens", {
+                    value: formatTokensHuman(rollups.today.tokens),
+                  })}
+                </>
               )}
               {rollups.today.costUsd != null && (
                 <>
                   {rollups.today.tokens > 0 ? " · " : ""}
-                  <span title={rollups.today.costEstimated ? ESTIMATED_RATE_HINT : undefined}>
+                  <span title={rollups.today.costEstimated ? estimatedRateHint() : undefined}>
                     {rollups.today.costEstimated ? "≈ " : ""}
                     {formatUsd(rollups.today.costUsd)}
                   </span>{" "}
-                  on API
+                  {t("dashboard.onApi")}
                 </>
               )}
             </Subline>
@@ -166,7 +180,7 @@ export function DashboardStrip() {
       </StatCard>
 
       <StatCard
-        label="This month"
+        label={t("dashboard.thisMonth")}
         right={
           <RateSourceChip
             table={table}
@@ -177,27 +191,33 @@ export function DashboardStrip() {
         }
       >
         {allSessions === null ? (
-          <Subline>loading…</Subline>
+          <Subline>{t("dashboard.loading")}</Subline>
         ) : rollups.month.sessions === 0 ? (
-          <IdleValue>no activity yet</IdleValue>
+          <IdleValue>{t("dashboard.noActivity")}</IdleValue>
         ) : (
           <>
             <BigValue
               value={rollups.month.sessions}
-              suffix={`session${rollups.month.sessions === 1 ? "" : "s"}`}
+              suffix={t("dashboard.sessionsSuffix", {
+                count: rollups.month.sessions,
+              })}
             />
             <Subline>
               {rollups.month.tokens > 0 && (
-                <>{formatTokensHuman(rollups.month.tokens)} tokens</>
+                <>
+                  {t("dashboard.tokens", {
+                    value: formatTokensHuman(rollups.month.tokens),
+                  })}
+                </>
               )}
               {rollups.month.costUsd != null && (
                 <>
                   {rollups.month.tokens > 0 ? " · " : ""}
-                  <span title={rollups.month.costEstimated ? ESTIMATED_RATE_HINT : undefined}>
+                  <span title={rollups.month.costEstimated ? estimatedRateHint() : undefined}>
                     {rollups.month.costEstimated ? "≈ " : ""}
                     {formatUsd(rollups.month.costUsd)}
                   </span>{" "}
-                  on API
+                  {t("dashboard.onApi")}
                 </>
               )}
             </Subline>
@@ -503,10 +523,13 @@ function RateSourceChip({
     const m = timestamp.match(/^(\d{4}-\d{2}-\d{2})/);
     return m ? m[1] : timestamp;
   })();
+  // Resolved per render, not at module load, so the chip follows a
+  // language switch. `kind` itself is a wire value and stays raw when
+  // it is one this map doesn't know.
   const labelByKind: Record<string, string> = {
-    bundled: "built-in",
-    cached: "cached",
-    live: "fresh",
+    bundled: i18n.t("dashboard.rate.builtIn", { ns: "activities" }),
+    cached: i18n.t("dashboard.rate.cached", { ns: "activities" }),
+    live: i18n.t("dashboard.rate.fresh", { ns: "activities" }),
   };
   const tone =
     kind === "live"
@@ -514,21 +537,33 @@ function RateSourceChip({
       : kind === "cached"
       ? "var(--fg-muted)"
       : "var(--fg-faint)";
+  const ns = { ns: "activities" } as const;
   const titleParts: string[] = [
-    `Rate source: ${kind}`,
-    `As of: ${timestamp}`,
+    i18n.t("dashboard.rate.source", { ...ns, kind }),
+    i18n.t("dashboard.rate.asOf", { ...ns, timestamp }),
   ];
-  if (table.source.url) titleParts.push(`From: ${table.source.url}`);
-  if (table.last_fetch_error) {
-    titleParts.push(`Last refresh error: ${table.last_fetch_error}`);
+  if (table.source.url) {
+    titleParts.push(
+      i18n.t("dashboard.rate.from", { ...ns, url: table.source.url }),
+    );
   }
-  if (error) titleParts.push(`Click error: ${error}`);
-  titleParts.push("Click to refresh now.");
+  if (table.last_fetch_error) {
+    titleParts.push(
+      i18n.t("dashboard.rate.lastError", {
+        ...ns,
+        error: table.last_fetch_error,
+      }),
+    );
+  }
+  if (error) {
+    titleParts.push(i18n.t("dashboard.rate.clickError", { ...ns, error }));
+  }
+  titleParts.push(i18n.t("dashboard.rate.clickToRefresh", ns));
   const effectiveTone = error ? "var(--danger)" : tone;
   const labelText = loading
-    ? "refreshing…"
+    ? i18n.t("dashboard.rate.refreshing", ns)
     : error
-    ? "refresh failed"
+    ? i18n.t("dashboard.rate.refreshFailed", ns)
     : `${labelByKind[kind] ?? kind} · ${shortTs}`;
   return (
     <button

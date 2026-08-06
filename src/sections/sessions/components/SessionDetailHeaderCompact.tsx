@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { BackAffordance } from "../../../components/primitives/BackAffordance";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { Tag } from "../../../components/primitives/Tag";
@@ -30,6 +31,7 @@ export function SessionDetailHeaderCompact({
   revealNode: ReactNode;
   kebabNode: ReactNode;
 }) {
+  const { t } = useTranslation("sessions");
   const project = projectBasename(row.project_path) || row.slug;
   return (
     <div
@@ -67,7 +69,7 @@ export function SessionDetailHeaderCompact({
           <BackAffordance
             label={project}
             onClick={onBack}
-            title={`Back to session list for ${project}`}
+            title={t("detail.backToSessionList", { project })}
             style={{
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -129,7 +131,7 @@ export function SessionDetailHeaderCompact({
       >
         {row.has_error && (
           <Tag tone="warn" glyph={NF.warn}>
-            error
+            {t("detail.tagError")}
           </Tag>
         )}
         {row.models.length > 0 && (

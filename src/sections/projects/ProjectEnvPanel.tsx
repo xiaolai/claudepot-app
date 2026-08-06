@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type {
   EnvFileEntry,
@@ -11,6 +12,8 @@ import { Button } from "../../components/primitives/Button";
 import { IconButton } from "../../components/primitives/IconButton";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import { useAppState } from "../../providers/AppStateProvider";
 
 /**
@@ -31,6 +34,7 @@ export function ProjectEnvPanel({
   projectPath: string;
   onError?: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const { pushToast } = useAppState();
   const [env, setEnv] = useState<ProjectEnv | null>(null);
   const [vaultNames, setVaultNames] = useState<string[]>([]);
@@ -66,7 +70,7 @@ export function ProjectEnvPanel({
       })
       .catch((err) => {
         if (cancelled) return;
-        fail(`Couldn't load .env files: ${err}`);
+        fail(renderError(err, i18n.t("projects:env.loadFailedScope")));
         setLoading(false);
       });
     return () => {
@@ -80,13 +84,13 @@ export function ProjectEnvPanel({
         const r = await api.envFileCopyValue(projectPath, fileName, key);
         pushToast(
           "info",
-          `Copied ${r.label} (${r.preview}) — clipboard clears in 30s.`,
+          t("env.copyToast", { label: r.label, preview: r.preview }),
         );
       } catch (e) {
-        fail(`Copy failed: ${e}`);
+        fail(renderError(e, t("env.copyFailedScope")));
       }
     },
-    [projectPath, pushToast, fail],
+    [projectPath, pushToast, fail, t],
   );
 
   const toggleComment = useCallback(
@@ -98,10 +102,10 @@ export function ProjectEnvPanel({
             : await api.envFileUncomment(projectPath, fileName, entry.key);
         setEnv(next);
       } catch (e) {
-        fail(`Couldn't update ${entry.key}: ${e}`);
+        fail(renderError(e, t("env.updateFailedScope", { key: entry.key })));
       }
     },
-    [projectPath, fail],
+    [projectPath, fail, t],
   );
 
   const doDelete = useCallback(async () => {
@@ -111,11 +115,11 @@ export function ProjectEnvPanel({
     try {
       const next = await api.envFileDelete(projectPath, fileName, key);
       setEnv(next);
-      pushToast("info", `Deleted ${key} from ${fileName}.`);
+      pushToast("info", t("env.deletedToast", { key, file: fileName }));
     } catch (e) {
-      fail(`Delete failed: ${e}`);
+      fail(renderError(e, t("env.deleteFailedScope")));
     }
-  }, [confirmDelete, projectPath, pushToast, fail]);
+  }, [confirmDelete, projectPath, pushToast, fail, t]);
 
   // Show the loader only on the initial mount when we have no data
   // yet. Refetches keep the prior content visible (stale-while-
@@ -123,8 +127,8 @@ export function ProjectEnvPanel({
   if (loading && env === null) {
     return (
       <section className="detail-section">
-        <h3>Environment files</h3>
-        <p className="muted small">Loading…</p>
+        <h3>{t("env.heading")}</h3>
+        <p className="muted small">{t("shared.loading")}</p>
       </section>
     );
   }
@@ -133,12 +137,15 @@ export function ProjectEnvPanel({
 
   return (
     <section className="detail-section">
-      <h3>Environment files</h3>
+      <h3>{t("env.heading")}</h3>
       {files.length === 0 ? (
         <>
           <p className="muted small">
-            No <code className="mono">.env*</code> files in this project. Add a
-            key below to create one.
+            <Trans
+              ns="projects"
+              i18nKey="env.emptyHint"
+              components={{ envfiles: <code className="mono">.env*</code> }}
+            />
           </p>
           <EnvFileCard
             projectPath={projectPath}
@@ -173,16 +180,21 @@ export function ProjectEnvPanel({
 
       {confirmDelete && (
         <ConfirmDialog
-          title={`Delete ${confirmDelete.key}?`}
+          title={t("env.deleteTitle", { key: confirmDelete.key })}
           body={
             <span>
-              This removes <code className="mono">{confirmDelete.key}</code>{" "}
-              from <code className="mono">{confirmDelete.fileName}</code>{" "}
-              entirely. To keep the value but disable it, use{" "}
-              <strong>Comment out</strong> instead.
+              <Trans
+                ns="projects"
+                i18nKey="env.deleteBody"
+                components={{
+                  k: <code className="mono">{confirmDelete.key}</code>,
+                  f: <code className="mono">{confirmDelete.fileName}</code>,
+                  b: <strong />,
+                }}
+              />
             </span>
           }
-          confirmLabel="Delete"
+          confirmLabel={t("env.confirmDelete")}
           confirmDanger
           onCancel={() => setConfirmDelete(null)}
           onConfirm={doDelete}
@@ -211,6 +223,7 @@ function EnvFileCard({
   onMutated: (env: ProjectEnv) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   return (
     <div className="env-file-card">
       <div className="env-file-card-head">
@@ -221,7 +234,7 @@ function EnvFileCard({
       </div>
 
       {file.entries.length === 0 ? (
-        <p className="muted small">No keys yet.</p>
+        <p className="muted small">{t("env.noKeys")}</p>
       ) : (
         <ul className="env-entry-list" role="list">
           {/* Key by index too: a malformed .env can repeat a key,
@@ -230,9 +243,9 @@ function EnvFileCard({
             <li key={`${entry.key}-${idx}`} className="env-entry-row">
               <span className="mono env-entry-key">{entry.key}</span>
               {entry.state === "active" ? (
-                <Tag tone="neutral">active</Tag>
+                <Tag tone="neutral">{t("env.tagActive")}</Tag>
               ) : (
-                <Tag tone="ghost">commented</Tag>
+                <Tag tone="ghost">{t("env.tagCommented")}</Tag>
               )}
               <span className="mono muted env-entry-preview">
                 {entry.valuePreview}
@@ -241,8 +254,8 @@ function EnvFileCard({
                 <IconButton
                   glyph={NF.copy}
                   size="sm"
-                  title="Copy value to clipboard"
-                  aria-label={`Copy ${entry.key}`}
+                  title={t("env.copyTitle")}
+                  aria-label={t("env.copyAria", { key: entry.key })}
                   onClick={() => onCopy(file.fileName, entry.key)}
                 />
                 <Button
@@ -250,7 +263,9 @@ function EnvFileCard({
                   size="sm"
                   onClick={() => onToggleComment(entry, file.fileName)}
                 >
-                  {entry.state === "active" ? "Comment out" : "Uncomment"}
+                  {entry.state === "active"
+                    ? t("env.commentOut")
+                    : t("env.uncomment")}
                 </Button>
                 <Button
                   variant="ghost"
@@ -258,7 +273,7 @@ function EnvFileCard({
                   danger
                   onClick={() => onRequestDelete(entry.key)}
                 >
-                  Delete
+                  {t("env.delete")}
                 </Button>
               </span>
             </li>
@@ -301,13 +316,14 @@ function SetKeyForm({
   onMutated: (env: ProjectEnv) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!key.trim()) {
-      onError("Key name is required.");
+      onError(t("env.keyRequired"));
       return;
     }
     setBusy(true);
@@ -321,7 +337,7 @@ function SetKeyForm({
       onMutated(next);
       setKey("");
     } catch (e) {
-      onError(`Set failed: ${e}`);
+      onError(renderError(e, t("env.setFailedScope")));
     } finally {
       // Clear the secret from React state regardless of outcome.
       setValue("");
@@ -339,23 +355,23 @@ function SetKeyForm({
     >
       <input
         className="mono"
-        placeholder="KEY"
+        placeholder={t("env.keyPlaceholder")}
         value={key}
         onChange={(e) => setKey(e.target.value)}
-        aria-label={`Key name for ${fileName}`}
+        aria-label={t("env.keyAria", { file: fileName })}
         disabled={busy}
       />
       <input
         className="mono"
         type="password"
-        placeholder="value"
+        placeholder={t("env.valuePlaceholder")}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        aria-label={`Value for ${fileName}`}
+        aria-label={t("env.valueAria", { file: fileName })}
         disabled={busy}
       />
       <Button variant="outline" size="sm" type="submit" disabled={busy}>
-        Set key
+        {t("env.setKey")}
       </Button>
     </form>
   );
@@ -377,6 +393,7 @@ function InjectForm({
   onMutated: (env: ProjectEnv) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const [vaultName, setVaultName] = useState(vaultNames[0] ?? "");
   const [busy, setBusy] = useState(false);
 
@@ -387,7 +404,7 @@ function InjectForm({
       const next = await api.envFileInject(projectPath, fileName, vaultName);
       onMutated(next);
     } catch (e) {
-      onError(`Inject failed: ${e}`);
+      onError(renderError(e, t("env.injectFailedScope")));
     } finally {
       setBusy(false);
     }
@@ -399,7 +416,7 @@ function InjectForm({
         className="mono"
         value={vaultName}
         onChange={(e) => setVaultName(e.target.value)}
-        aria-label={`Vault secret to inject into ${fileName}`}
+        aria-label={t("env.vaultAria", { file: fileName })}
         disabled={busy}
       >
         {vaultNames.map((n) => (
@@ -415,7 +432,7 @@ function InjectForm({
         onClick={() => void inject()}
         disabled={busy}
       >
-        Inject from vault
+        {t("env.injectFromVault")}
       </Button>
     </div>
   );

@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
 import type { JournalEntry } from "../../types";
 
@@ -21,17 +22,18 @@ export function RepairConfirmDialogs({
   onRollback: (entry: JournalEntry) => void;
   onAbandon: (entry: JournalEntry) => void;
 }) {
+  const { t } = useTranslation("projects");
   if (!pending) return null;
 
   if (pending.kind === "resume") {
     return (
       <ConfirmDangerousAction
-        title="Resume rename?"
-        confirmLabel="Resume"
+        title={t("repair.resumeConfirmTitle")}
+        confirmLabel={t("repair.resume")}
         danger={false}
         consequences={
           <>
-            <p>Re-runs the move pipeline. Phases are idempotent.</p>
+            <p>{t("repair.resumeBody")}</p>
             <p className="mono small muted">
               {pending.entry.old_path} → {pending.entry.new_path}
             </p>
@@ -46,20 +48,20 @@ export function RepairConfirmDialogs({
   if (pending.kind === "rollback") {
     return (
       <ConfirmDangerousAction
-        title="Rollback rename?"
-        confirmLabel="Rollback"
+        title={t("repair.rollbackConfirmTitle")}
+        confirmLabel={t("repair.rollback")}
         consequences={
           <>
-            <p>Runs the reverse move (new → old).</p>
+            <p>{t("repair.rollbackBody")}</p>
             {pending.entry.snapshot_paths.length > 0 && (
               <div className="muted small">
-                <strong>Snapshots of destructive-phase targets:</strong>
+                <strong>{t("repair.snapshotsLabel")}</strong>
                 <ul>
                   {pending.entry.snapshot_paths.map((s) => (
                     <li key={s} className="mono">{s}</li>
                   ))}
                 </ul>
-                Snapshots are NOT auto-restored.
+                {t("repair.snapshotsNote")}
               </div>
             )}
           </>
@@ -72,17 +74,20 @@ export function RepairConfirmDialogs({
 
   return (
     <ConfirmDangerousAction
-      title="Abandon journal?"
-      confirmLabel="Abandon"
+      title={t("repair.abandonConfirmTitle")}
+      confirmLabel={t("repair.abandon")}
       typeToConfirm="ABANDON"
       consequences={
         <>
           <p>
-            Writes a <code className="mono">.abandoned.json</code> sidecar.
-            Future runs will no longer nag about this journal.
+            <Trans
+              ns="projects"
+              i18nKey="repair.abandonBody"
+              components={{ f: <code className="mono">.abandoned.json</code> }}
+            />
           </p>
           <p className="muted small">
-            Audit trail is preserved; the journal itself is kept on disk.
+            {t("repair.abandonNote")}
           </p>
         </>
       }

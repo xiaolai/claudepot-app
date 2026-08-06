@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { Modal } from "../../components/primitives/Modal";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
+import { renderError } from "../../lib/i18n-error";
 import { useAppState } from "../../providers/AppStateProvider";
 import type {
   TemplateCategory,
@@ -11,14 +13,15 @@ import type {
 } from "../../types";
 import { TemplateInstallView } from "./TemplateInstallView";
 
-const CATEGORY_LABELS: Record<TemplateCategory, string> = {
-  "it-health": "IT health",
-  diagnostics: "Diagnostics",
-  housekeeping: "Housekeeping",
-  audit: "Audit",
-  caregiver: "Caregiver",
-  network: "Network",
-};
+/** Category → catalog key, resolved with `t` at render time. */
+const CATEGORY_LABEL_KEYS = {
+  "it-health": "templates.category.itHealth",
+  diagnostics: "templates.category.diagnostics",
+  housekeeping: "templates.category.housekeeping",
+  audit: "templates.category.audit",
+  caregiver: "templates.category.caregiver",
+  network: "templates.category.network",
+} as const satisfies Record<TemplateCategory, string>;
 
 interface Props {
   open: boolean;
@@ -39,6 +42,7 @@ export function TemplateGallery({
   onInstalled,
   onOpenThirdParties,
 }: Props) {
+  const { t } = useTranslation("projects");
   const { pushToast } = useAppState();
   const [templates, setTemplates] = useState<TemplateSummaryDto[] | null>(null);
   const [filter, setFilter] = useState<TemplateCategory | "all">("all");
@@ -61,7 +65,7 @@ export function TemplateGallery({
       .catch((e: unknown) => {
         // Guarded: if the gallery closed while the list was in
         // flight, don't write stale state or fire a hidden toast.
-        if (!cancelled) pushToast("error", String(e));
+        if (!cancelled) pushToast("error", renderError(e));
       });
     return () => {
       cancelled = true;
@@ -100,7 +104,7 @@ export function TemplateGallery({
             onClose();
           }}
           onOpenThirdParties={onOpenThirdParties}
-          backLabel="Back"
+          backLabel={t("templates.back")}
         />
       ) : (
         <GalleryGrid
@@ -134,6 +138,7 @@ function GalleryGrid({
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("projects");
   return (
     <div
       style={{
@@ -174,10 +179,10 @@ function GalleryGrid({
             id="template-gallery-title"
             style={{ margin: 0, fontSize: "var(--fs-lg)", color: "var(--fg)" }}
           >
-            Install from template
+            {t("templates.galleryTitle")}
           </h2>
           <Button variant="ghost" onClick={onClose}>
-            Close
+            {t("shared.close")}
           </Button>
         </div>
 
@@ -191,7 +196,7 @@ function GalleryGrid({
             }}
           >
             <FilterChip active={filter === "all"} onClick={() => onFilter("all")}>
-              All
+              {t("templates.filterAll")}
             </FilterChip>
             {categories.map((c) => (
               <FilterChip
@@ -199,7 +204,7 @@ function GalleryGrid({
                 active={filter === c}
                 onClick={() => onFilter(c)}
               >
-                {CATEGORY_LABELS[c]}
+                {t(CATEGORY_LABEL_KEYS[c])}
               </FilterChip>
             ))}
           </div>
@@ -223,7 +228,7 @@ function GalleryGrid({
               fontSize: "var(--fs-sm)",
             }}
           >
-            Loading templates…
+            {t("templates.loadingList")}
           </div>
         ) : visible.length === 0 ? (
           <div
@@ -234,7 +239,7 @@ function GalleryGrid({
               textAlign: "center",
             }}
           >
-            No templates in this category.
+            {t("templates.emptyCategory")}
           </div>
         ) : (
           <div
@@ -274,6 +279,7 @@ function TemplateCard({
   template: TemplateSummaryDto;
   onClick: () => void;
 }) {
+  const { t } = useTranslation("projects");
   return (
     <button
       type="button"
@@ -320,10 +326,12 @@ function TemplateCard({
           color: "var(--fg-faint)",
         }}
       >
-        <Tag>{CATEGORY_LABELS[template.category]}</Tag>
+        <Tag>{t(CATEGORY_LABEL_KEYS[template.category])}</Tag>
         <Tag>{template.default_schedule_label}</Tag>
         <Tag>{template.cost_class}</Tag>
-        {template.privacy === "local" && <Tag tone="accent">local-only</Tag>}
+        {template.privacy === "local" && (
+          <Tag tone="accent">{t("templates.localOnlyTag")}</Tag>
+        )}
       </div>
     </button>
   );

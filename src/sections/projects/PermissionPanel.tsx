@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
 import {
@@ -11,16 +12,21 @@ import {
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import { useAppState } from "../../providers/AppStateProvider";
 
 /** "1h 47m", "47m", or "<1m" for a positive millisecond span. */
 function formatRemaining(ms: number): string {
-  if (ms <= 0) return "expired";
+  const t = i18n.getFixedT(null, "projects");
+  if (ms <= 0) return t("permission.expired");
   const totalMin = Math.floor(ms / 60_000);
-  if (totalMin < 1) return "<1m";
+  if (totalMin < 1) return t("permission.underMinute");
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return h > 0
+    ? t("permission.hoursMinutes", { h, m })
+    : t("permission.minutesOnly", { m });
 }
 
 /**
@@ -41,6 +47,7 @@ export function PermissionPanel({
   projectPath: string;
   onError?: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const { pushToast } = useAppState();
   const [perm, setPerm] = useState<ProjectPermission | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +88,9 @@ export function PermissionPanel({
         if (!cancelled) setPerm(p);
       })
       .catch((e) => {
-        if (!cancelled) fail(`Couldn't load permission state: ${e}`);
+        if (!cancelled) {
+          fail(renderError(e, i18n.t("projects:permission.loadFailedScope")));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -113,7 +122,9 @@ export function PermissionPanel({
       if (e.payload.projectPath === projectPath) {
         pushToast(
           "error",
-          `Auto-revert for this project was paused after ${e.payload.consecutiveFailures} consecutive failures. The bypass grant is still active — revert it manually, then check the project's settings file.`,
+          i18n.t("projects:permission.breakerToast", {
+            n: e.payload.consecutiveFailures,
+          }),
         );
         setReloadTick((n) => n + 1);
       }
@@ -149,15 +160,15 @@ export function PermissionPanel({
       pushToast(
         "info",
         durationSecs == null
-          ? "Bypass granted — stays until you revert."
-          : "Bypass granted — auto-reverts on schedule.",
+          ? t("permission.grantStickyToast")
+          : t("permission.grantTimedToast"),
       );
     } catch (e) {
-      fail(`Grant failed: ${e}`);
+      fail(renderError(e, t("permission.grantFailedScope")));
     } finally {
       setBusy(false);
     }
-  }, [projectPath, durationSecs, pushToast, fail]);
+  }, [projectPath, durationSecs, pushToast, fail, t]);
 
   const extend = useCallback(async () => {
     setBusy(true);
@@ -167,35 +178,35 @@ export function PermissionPanel({
       pushToast(
         "info",
         durationSecs == null
-          ? "Grant set to never expire."
-          : "Grant extended.",
+          ? t("permission.neverExpireToast")
+          : t("permission.extendedToast"),
       );
     } catch (e) {
-      fail(`Extend failed: ${e}`);
+      fail(renderError(e, t("permission.extendFailedScope")));
     } finally {
       setBusy(false);
     }
-  }, [projectPath, durationSecs, pushToast, fail]);
+  }, [projectPath, durationSecs, pushToast, fail, t]);
 
   const revert = useCallback(async () => {
     setBusy(true);
     try {
       const next = await api.permissionRevert(projectPath);
       setPerm(next);
-      pushToast("info", "Reverted to the prior permission mode.");
+      pushToast("info", t("permission.revertedToast"));
     } catch (e) {
-      fail(`Revert failed: ${e}`);
+      fail(renderError(e, t("permission.revertFailedScope")));
     } finally {
       setBusy(false);
     }
-  }, [projectPath, pushToast, fail]);
+  }, [projectPath, pushToast, fail, t]);
 
   if (loading || !perm) {
     return (
       <section className="detail-section">
-        <h3>Permissions</h3>
+        <h3>{t("permission.heading")}</h3>
         <p className="muted small">
-          {loading ? "Loading…" : "No permission data for this project."}
+          {loading ? t("shared.loading") : t("permission.noData")}
         </p>
       </section>
     );
@@ -212,10 +223,10 @@ export function PermissionPanel({
   return (
     <section className="detail-section">
       <h3 style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)" }}>
-        Permissions
+        {t("permission.heading")}
         {perm.isElevated ? (
-          <Tag tone="danger" glyph={NF.unlock} title="permissions.defaultMode is bypassPermissions">
-            elevated
+          <Tag tone="danger" glyph={NF.unlock} title={t("permission.elevatedTitle")}>
+            {t("permission.elevatedTag")}
           </Tag>
         ) : (
           <Tag tone="ghost" glyph={NF.lock}>
@@ -228,19 +239,26 @@ export function PermissionPanel({
         <div className="permission-grant-active" role="status">
           <span>
             {isSticky ? (
-              <>
-                Bypass active — <strong>stays until you revert</strong>
-              </>
+              <Trans
+                ns="projects"
+                i18nKey="permission.bypassSticky"
+                components={{ hold: <strong /> }}
+              />
             ) : (
-              <>
-                Bypass active — reverts in{" "}
-                <strong>{formatRemaining(remainingMs)}</strong>
-              </>
+              <Trans
+                ns="projects"
+                i18nKey="permission.bypassTimed"
+                components={{
+                  time: <strong>{formatRemaining(remainingMs)}</strong>,
+                }}
+              />
             )}
             {g.previousMode != null && (
               <span className="muted">
                 {" "}
-                (to {permissionModeLabel(g.previousMode)})
+                {t("permission.toPrior", {
+                  mode: permissionModeLabel(g.previousMode),
+                })}
               </span>
             )}
           </span>
@@ -251,27 +269,34 @@ export function PermissionPanel({
               disabled={busy}
             />
             <Button variant="outline" onClick={extend} disabled={busy} glyph={NF.clock}>
-              {durationSecs == null ? "Make sticky" : isSticky ? "Set deadline" : "Extend"}
+              {durationSecs == null
+                ? t("permission.makeSticky")
+                : isSticky
+                  ? t("permission.setDeadline")
+                  : t("permission.extend")}
             </Button>
             <Button variant="solid" onClick={revert} disabled={busy} glyph={NF.lock}>
-              Revert now
+              {t("permission.revertNow")}
             </Button>
           </div>
         </div>
       ) : elevatedByHand ? (
         <p className="muted small">
-          This project is in <strong>bypassPermissions</strong> from your own
-          settings ({decisionLabel(perm.decidedBy)}) — not a Claudepot grant.
-          Edit that file directly to change it.
+          <Trans
+            ns="projects"
+            i18nKey="permission.byHand"
+            values={{ source: decisionLabel(perm.decidedBy) }}
+            components={{ b: <strong /> }}
+          />
         </p>
       ) : (
         <div className="permission-grant-form">
           <p className="muted small">
-            Grant <strong>bypassPermissions</strong> for this project.
-            Time-boxed grants auto-revert when the timer ends; the{" "}
-            <strong>Never</strong> preset is a sticky grant — Claudepot
-            won't auto-revert, you remove it with the Revert button when
-            you're done.
+            <Trans
+              ns="projects"
+              i18nKey="permission.grantIntro"
+              components={{ b1: <strong />, b2: <strong /> }}
+            />
           </p>
           <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center" }}>
             <DurationSelect
@@ -280,7 +305,7 @@ export function PermissionPanel({
               disabled={busy}
             />
             <Button variant="solid" onClick={grant} disabled={busy} glyph={NF.unlock}>
-              Grant bypass
+              {t("permission.grantBypass")}
             </Button>
           </div>
         </div>
@@ -302,6 +327,7 @@ function DurationSelect({
   onChange: (secs: number | null) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("projects");
   return (
     <select
       className="mono"
@@ -310,7 +336,7 @@ function DurationSelect({
       onChange={(e) =>
         onChange(e.target.value === NEVER_SENTINEL ? null : Number(e.target.value))
       }
-      aria-label="Grant duration"
+      aria-label={t("permission.durationAria")}
       style={{
         background: "var(--bg-raised)",
         border: "var(--bw-hair) solid var(--line-strong)",
@@ -342,6 +368,6 @@ function decisionLabel(src: ProjectPermission["decidedBy"]): string {
     case "user_settings":
       return "~/.claude/settings.json";
     case "default":
-      return "CC default";
+      return i18n.t("projects:permission.ccDefault");
   }
 }

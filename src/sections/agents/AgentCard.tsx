@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
 import type { AgentSummaryDto } from "../../types";
@@ -27,6 +28,7 @@ export function AgentCard({
   onRemove,
   onReview,
 }: Props) {
+  const { t } = useTranslation("agents");
   const [open, setOpen] = useState(false);
   // A draft is inert — no scheduler artifact, never fires. The
   // footer below swaps the run/toggle controls for "Review &
@@ -74,10 +76,12 @@ export function AgentCard({
         </span>
         <span style={{ flex: 1 }} />
         {isDraft ? (
-          <Tag tone="warn">draft</Tag>
+          <Tag tone="warn">{t("card.status.draft")}</Tag>
         ) : (
           <Tag tone={agent.enabled ? "ok" : "ghost"}>
-            {agent.enabled ? "enabled" : "disabled"}
+            {agent.enabled
+              ? t("card.status.enabled")
+              : t("card.status.disabled")}
           </Tag>
         )}
       </header>
@@ -95,8 +99,7 @@ export function AgentCard({
             background: "var(--bg)",
           }}
         >
-          This agent is a draft — it is inert and will not run.
-          Review the spec and install it to arm it.
+          {t("card.draftNote")}
         </p>
       )}
 
@@ -121,22 +124,24 @@ export function AgentCard({
           color: "var(--fg-2)",
         }}
       >
-        <span style={{ color: "var(--fg-3)" }}>cron</span>
+        <span style={{ color: "var(--fg-3)" }}>{t("card.labels.cron")}</span>
         <span style={{ fontFamily: "var(--ff-mono)" }}>
           {agent.cron ?? "—"}
         </span>
-        <span style={{ color: "var(--fg-3)" }}>cwd</span>
+        <span style={{ color: "var(--fg-3)" }}>{t("card.labels.cwd")}</span>
         <span style={{ fontFamily: "var(--ff-mono)" }}>{agent.cwd}</span>
-        <span style={{ color: "var(--fg-3)" }}>binary</span>
+        <span style={{ color: "var(--fg-3)" }}>{t("card.labels.binary")}</span>
         <span>
           {agent.binary_kind === "first_party"
-            ? "claude (first-party)"
-            : `route (${agent.binary_route_id ?? "?"})`}
+            ? t("card.binaryFirstParty")
+            : t("card.binaryRoute", { id: agent.binary_route_id ?? "?" })}
           {agent.model && (
             <span style={{ color: "var(--fg-3)" }}> · {agent.model}</span>
           )}
         </span>
-        <span style={{ color: "var(--fg-3)" }}>permissions</span>
+        <span style={{ color: "var(--fg-3)" }}>
+          {t("card.labels.permissions")}
+        </span>
         <span>
           {agent.permission_mode}
           {agent.allowed_tools.length > 0 && (
@@ -153,7 +158,9 @@ export function AgentCard({
         </span>
         {agent.max_budget_usd !== null && (
           <>
-            <span style={{ color: "var(--fg-3)" }}>budget</span>
+            <span style={{ color: "var(--fg-3)" }}>
+              {t("card.labels.budget")}
+            </span>
             <span>${agent.max_budget_usd.toFixed(2)}</span>
           </>
         )}
@@ -176,14 +183,14 @@ export function AgentCard({
               onClick={() => onReview(agent)}
               disabled={busy}
             >
-              Review & install
+              {t("card.actions.reviewInstall")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onRemove(agent)}
               disabled={busy}
             >
-              Delete
+              {t("card.actions.delete")}
             </Button>
           </>
         ) : (
@@ -193,32 +200,36 @@ export function AgentCard({
               onClick={() => onRun(agent.id)}
               disabled={busy}
             >
-              Run now
+              {t("card.actions.runNow")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onEdit(agent)}
               disabled={busy}
             >
-              Edit
+              {t("card.actions.edit")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onToggle(agent.id, !agent.enabled)}
               disabled={busy}
             >
-              {agent.enabled ? "Disable" : "Enable"}
+              {agent.enabled
+                ? t("card.actions.disable")
+                : t("card.actions.enable")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onRemove(agent)}
               disabled={busy}
             >
-              Delete
+              {t("card.actions.delete")}
             </Button>
             <span style={{ flex: 1 }} />
             <Button variant="ghost" onClick={() => setOpen((o) => !o)}>
-              {open ? "Hide runs" : "Show runs"}
+              {open
+                ? t("card.actions.hideRuns")
+                : t("card.actions.showRuns")}
             </Button>
           </>
         )}

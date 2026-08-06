@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
@@ -34,6 +36,7 @@ export function AbandonedCleanupCard({
    *  the Repair queue (which shares journals-dir state). */
   onCleaned?: () => void;
 }) {
+  const { t } = useTranslation("projects");
   const [preview, setPreview] = useState<AbandonedCleanupReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -56,7 +59,7 @@ export function AbandonedCleanupCard({
       setError(null);
     } catch (e) {
       if (!mountedRef.current) return;
-      setError(e instanceof Error ? e.message : String(e));
+      setError(renderError(e));
     }
   }, []);
 
@@ -73,7 +76,7 @@ export function AbandonedCleanupCard({
       await refresh();
     } catch (e) {
       if (!mountedRef.current) return;
-      setError(e instanceof Error ? e.message : String(e));
+      setError(renderError(e));
     } finally {
       if (mountedRef.current) setCleaning(false);
     }
@@ -88,10 +91,10 @@ export function AbandonedCleanupCard({
         <section className="maintenance-section">
           <div className="maintenance-section-header">
             <Icon name="alert-circle" size={14} />
-            <h2>Clean Recovery Artifacts</h2>
+            <h2>{t("artifacts.heading")}</h2>
           </div>
           <p className="muted maintenance-desc">
-            Couldn't list abandoned journals: <span className="mono">{error}</span>
+            {t("artifacts.listFailed")} <span className="mono">{error}</span>
           </p>
         </section>
       );
@@ -110,12 +113,10 @@ export function AbandonedCleanupCard({
   // too — snapshot count is only shown when there are any.
   const summary = (() => {
     const parts = [
-      `${journalCount} abandoned ${journalCount === 1 ? "journal" : "journals"}`,
+      t("artifacts.abandonedJournals", { count: journalCount }),
     ];
     if (snapshotCount > 0) {
-      parts.push(
-        `${snapshotCount} ${snapshotCount === 1 ? "snapshot" : "snapshots"}`,
-      );
+      parts.push(t("shared.snapshots", { count: snapshotCount }));
     }
     parts.push(formatSize(totalBytes));
     return parts.join(" · ");
@@ -125,10 +126,10 @@ export function AbandonedCleanupCard({
     <section className="maintenance-section">
       <div className="maintenance-section-header">
         <Icon name="trash-2" size={14} />
-        <h2>Clean Recovery Artifacts</h2>
+        <h2>{t("artifacts.heading")}</h2>
       </div>
       <p className="muted maintenance-desc">
-        From renames you abandoned. CC isn't using these — safe to delete.{" "}
+        {t("artifacts.desc")}{" "}
         <span className="mono">{summary}</span>
       </p>
       <div
@@ -144,7 +145,7 @@ export function AbandonedCleanupCard({
           onClick={() => setPreviewOpen(true)}
           disabled={cleaning}
         >
-          Preview…
+          {t("artifacts.preview")}
         </Button>
         <Button
           variant="solid"
@@ -152,7 +153,7 @@ export function AbandonedCleanupCard({
           onClick={() => setConfirming(true)}
           disabled={cleaning}
         >
-          {cleaning ? "Cleaning…" : "Clean"}
+          {cleaning ? t("artifacts.cleaning") : t("artifacts.clean")}
         </Button>
       </div>
 
@@ -165,29 +166,25 @@ export function AbandonedCleanupCard({
 
       {confirming && (
         <ConfirmDialog
-          title="Delete abandoned recovery files?"
+          title={t("artifacts.confirmTitle")}
           body={
             <>
               <p style={{ marginTop: 0 }}>
-                {journalCount}{" "}
-                {journalCount === 1 ? "journal" : "journals"}
+                {t("artifacts.journalCount", { count: journalCount })}
                 {snapshotCount > 0 && (
                   <>
-                    {" "}
-                    · {snapshotCount}{" "}
-                    {snapshotCount === 1 ? "snapshot" : "snapshots"}
+                    {" · "}
+                    {t("shared.snapshots", { count: snapshotCount })}
                   </>
                 )}{" "}
-                · {formatSize(totalBytes)} will be permanently removed.
+                · {t("artifacts.willBeRemoved", { size: formatSize(totalBytes) })}
               </p>
               <p className="muted" style={{ marginBottom: 0 }}>
-                Only files linked to an abandoned rename are affected.
-                Recovery snapshots from successful or in-progress renames
-                are left alone.
+                {t("artifacts.confirmNote")}
               </p>
             </>
           }
-          confirmLabel="Delete"
+          confirmLabel={t("artifacts.delete")}
           confirmDanger
           onCancel={() => setConfirming(false)}
           onConfirm={runClean}
@@ -204,10 +201,11 @@ function PreviewModal({
   report: AbandonedCleanupReport;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("projects");
   return (
     <Modal open onClose={onClose} width="lg">
       <ModalHeader
-        title={`Recovery artifacts to clean (${report.entries.length})`}
+        title={t("artifacts.previewTitle", { n: report.entries.length })}
         onClose={onClose}
       />
       <ModalBody>
@@ -220,16 +218,16 @@ function PreviewModal({
               </div>
               <div style={{ display: "grid", gap: "var(--sp-4)" }}>
                 <div>
-                  <span className="muted">journal</span>{" "}
+                  <span className="muted">{t("artifacts.journalLabel")}</span>{" "}
                   <code className="mono small selectable">{e.journalPath}</code>
                 </div>
                 <div>
-                  <span className="muted">sidecar</span>{" "}
+                  <span className="muted">{t("artifacts.sidecarLabel")}</span>{" "}
                   <code className="mono small selectable">{e.sidecarPath}</code>
                 </div>
                 {e.referencedSnapshots.map((s) => (
                   <div key={s}>
-                    <span className="muted">snapshot</span>{" "}
+                    <span className="muted">{t("artifacts.snapshotLabel")}</span>{" "}
                     <code className="mono small selectable">{s}</code>
                   </div>
                 ))}
@@ -240,7 +238,7 @@ function PreviewModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose}>
-          Close
+          {t("shared.close")}
         </Button>
       </ModalFooter>
     </Modal>

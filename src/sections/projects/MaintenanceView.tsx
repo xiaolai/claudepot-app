@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../../components/Icon";
 import type { CleanResult } from "../../types";
 import { useAppState } from "../../providers/AppStateProvider";
@@ -16,6 +17,7 @@ export function MaintenanceView({
 }: {
   onOpTerminated?: () => void;
 }) {
+  const { t } = useTranslation("projects");
   const [cleanOpen, setCleanOpen] = useState(false);
   // Bump on successful abandoned-cleanup to force the embedded
   // RepairView to re-fetch (its `entries` list shares state with
@@ -30,19 +32,19 @@ export function MaintenanceView({
       const parts: string[] = [];
       if (result.orphans_removed > 0)
         parts.push(
-          `Removed ${result.orphans_removed} project${result.orphans_removed === 1 ? "" : "s"}`,
+          t("maint.removedProjects", { count: result.orphans_removed }),
         );
       if (result.orphans_skipped_live > 0)
         parts.push(
-          `skipped ${result.orphans_skipped_live} with live sessions`,
+          t("maint.skippedLive", { n: result.orphans_skipped_live }),
         );
       if (result.snapshot_paths.length > 0)
         parts.push(
-          `${result.snapshot_paths.length} recovery snapshots saved`,
+          t("maint.snapshotsSaved", { n: result.snapshot_paths.length }),
         );
       if (parts.length > 0) pushToast("info", parts.join(" — "));
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   return (
@@ -51,15 +53,14 @@ export function MaintenanceView({
       <section className="maintenance-section">
         <div className="maintenance-section-header">
           <Icon name="trash-2" size={14} />
-          <h2>Clean Orphan Projects</h2>
+          <h2>{t("maint.cleanHeading")}</h2>
         </div>
         <p className="muted maintenance-desc">
-          Remove CC project directories whose source folder no longer exists.
-          Unreachable projects (unmounted volumes) are never auto-cleaned.
+          {t("maint.cleanDesc")}
         </p>
         <button className="btn primary" onClick={() => setCleanOpen(true)}
-          title="Preview which orphan projects would be removed">
-          Preview cleanup…
+          title={t("maint.previewTitle")}>
+          {t("maint.previewCleanup")}
         </button>
       </section>
 
@@ -69,7 +70,7 @@ export function MaintenanceView({
           the sidecar; this card sweeps it up). */}
       <AbandonedCleanupCard
         onCleaned={() => {
-          latestPushToast.current("info", "Abandoned recovery files removed.");
+          latestPushToast.current("info", t("maint.abandonedRemovedToast"));
           // Refresh the Repair list too — list_actionable excludes
           // abandoned entries, but a stale cached view could still
           // reference the journal paths we just deleted.
@@ -84,7 +85,7 @@ export function MaintenanceView({
       <section className="maintenance-section">
         <div className="maintenance-section-header">
           <Icon name="wrench" size={14} />
-          <h2>Repair Queue</h2>
+          <h2>{t("maint.repairHeading")}</h2>
         </div>
         <RepairView
           key={repairRefreshKey}

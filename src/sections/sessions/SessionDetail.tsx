@@ -6,9 +6,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
 import { useReachTop } from "../../hooks/useReachTop";
+import { renderError } from "../../lib/i18n-error";
 import { useScrollCompact } from "../../hooks/useScrollCompact";
 import { NF } from "../../icons";
 import type {
@@ -76,6 +78,7 @@ export function SessionDetail({
   onError?: (msg: string) => void;
   onBack?: () => void;
 }) {
+  const { t } = useTranslation("sessions");
   const [detail, setDetail] = useState<SessionDetailData | null>(null);
   const [chunks, setChunks] = useState<SessionChunk[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,7 +125,7 @@ export function SessionDetail({
       })
       .catch((e) => {
         if (myToken !== tokenRef.current) return;
-        setError(String(e));
+        setError(renderError(e));
         setLoading(false);
       });
   }, [filePath, refreshSignal]);
@@ -210,22 +213,22 @@ export function SessionDetail({
     const text = detail?.row.first_user_prompt;
     if (!text) return;
     navigator.clipboard.writeText(text).catch(() => {
-      onError?.("Couldn't copy first prompt to clipboard.");
+      onError?.(t("detail.copyFirstPromptFailed"));
     });
-  }, [detail, onError]);
+  }, [detail, onError, t]);
 
   const handleReveal = useCallback(() => {
     if (!detail) return;
     api.revealInFinder(detail.row.file_path).catch((e) => {
-      onError?.(`Couldn't reveal: ${e}`);
+      onError?.(renderError(e, t("detail.revealFailedScope")));
     });
-  }, [detail, onError]);
+  }, [detail, onError, t]);
 
   if (loading && !detail) {
     return (
       <LoadingPane>
         <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
-        Loading session…
+        {t("detail.loadingSession")}
       </LoadingPane>
     );
   }
@@ -234,7 +237,7 @@ export function SessionDetail({
     return (
       <LoadingPane>
         <Glyph g={NF.warn} color="var(--warn)" />
-        <div style={{ color: "var(--fg)" }}>Couldn't load session</div>
+        <div style={{ color: "var(--fg)" }}>{t("detail.loadFailed")}</div>
         <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-xs)" }}>
           {error}
         </div>

@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Avatar, avatarColorFor } from "../../components/primitives/Avatar";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
@@ -21,6 +22,7 @@ export function IdentityPreview({
   dimmed?: boolean;
   badge?: ReactNode;
 }) {
+  const { t } = useTranslation("accounts");
   return (
     <div
       style={{
@@ -85,7 +87,7 @@ export function IdentityPreview({
       </div>
       {badge ?? (
         <Tag tone="ok" glyph={NF.check}>
-          verified
+          {t("identity.verified")}
         </Tag>
       )}
     </div>

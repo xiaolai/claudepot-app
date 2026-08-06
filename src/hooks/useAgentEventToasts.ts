@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
 
+import { i18n } from "../lib/i18n";
 import { useEmit } from "../providers/AppStateProvider";
 import { useTauriEvents } from "./useTauriEvent";
 
@@ -52,8 +53,12 @@ export function useAgentEventToasts(): void {
       void emit({
         category: "agentEventFailed",
         kind: "error",
-        title: "Agent fire failed",
-        body: `${short(p.agentId)} on session ${short(p.sessionId)} — ${p.error}`,
+        title: i18n.t("agentEvents.fireFailedTitle"),
+        body: i18n.t("agentEvents.fireFailedBody", {
+          agent: short(p.agentId),
+          session: short(p.sessionId),
+          error: p.error,
+        }),
         // Dedupe per (agent, session) so a re-fire that keeps
         // failing doesn't pile identical toasts. The orchestrator
         // already records each failure in the bell. No `target`:
@@ -69,17 +74,19 @@ export function useAgentEventToasts(): void {
 
   const handleBurstCapped = useCallback(
     (p: BurstCappedPayload) => {
-      const noun = p.dropped === 1 ? "session" : "sessions";
       void emit({
         category: "agentEventBurstCapped",
-        title: "Agent first-tick cap applied",
+        title: i18n.t("agentEvents.burstCappedTitle"),
         // grill X16: the cap is per-agent — every event agent
         // gets its bounded catch-up the first time it
         // participates in a tick this process (boot-time AND
         // late-added agents alike). The dropped sessions stay
         // OUT of the ledger so they will re-evaluate on later
         // ticks.
-        body: `${p.dropped} settled ${noun} were held back on a fresh agent's first contact (cap ${p.cap}). They will fire on later ticks.`,
+        body: i18n.t("agentEvents.burstCappedBody", {
+          count: p.dropped,
+          cap: p.cap,
+        }),
         // The orchestrator emits at most once per first-contact
         // burst per tick. The dedupe key collapses a near-
         // instant repeat (e.g. a relaunch followed by a tick).

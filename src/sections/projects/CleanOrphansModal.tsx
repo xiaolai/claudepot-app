@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { CopyButton } from "../../components/CopyButton";
 import { Button } from "../../components/primitives/Button";
 import {
@@ -55,6 +57,7 @@ export function CleanOrphansModal({
   onClose: () => void;
   onDone: (result: CleanResult) => void;
 }) {
+  const { t } = useTranslation("projects");
   const [state, setState] = useState<State>({ kind: "loading" });
   const headingId = useId();
   const firedTerminal = useRef(false);
@@ -65,7 +68,7 @@ export function CleanOrphansModal({
     api
       .projectCleanPreview()
       .then((data) => setState({ kind: "preview", data }))
-      .catch((e) => setState({ kind: "error", message: String(e) }));
+      .catch((e) => setState({ kind: "error", message: renderError(e) }));
   }, []);
 
   useEffect(() => {
@@ -113,14 +116,14 @@ export function CleanOrphansModal({
             } else {
               setState({
                 kind: "error",
-                message: ev.detail ?? info?.last_error ?? "clean failed",
+                message: ev.detail ?? info?.last_error ?? t("clean.failed"),
               });
             }
           })
           .catch(() => {
             setState({
               kind: "error",
-              message: ev.detail ?? "clean failed (unreachable status)",
+              message: ev.detail ?? t("clean.failedUnreachable"),
             });
           });
         return;
@@ -150,7 +153,7 @@ export function CleanOrphansModal({
         );
       }
     },
-    [onDone],
+    [onDone, t],
   );
 
   useTauriEvent<OperationProgressEvent>(channel, handleEvent);
@@ -169,7 +172,7 @@ export function CleanOrphansModal({
           total: 0,
         });
       })
-      .catch((e) => setState({ kind: "error", message: String(e) }));
+      .catch((e) => setState({ kind: "error", message: renderError(e) }));
   };
 
   const closeSafe = () => {
@@ -180,7 +183,7 @@ export function CleanOrphansModal({
   return (
     <Modal open onClose={closeSafe} width="lg" aria-labelledby={headingId}>
       <ModalHeader
-        title="Clean project data"
+        title={t("clean.title")}
         id={headingId}
         onClose={closeSafe}
       />
@@ -205,11 +208,10 @@ export function CleanOrphansModal({
           <div className="clean-error" role="alert">
             <Icon name="alert-triangle" size={14} />
             <div>
-              <strong>Couldn't clean.</strong>
+              <strong>{t("clean.errorHeading")}</strong>
               <p className="mono small">{state.message}</p>
               <p className="muted small">
-                If pending rename journals are blocking, resolve them
-                in the Repair view first.
+                {t("clean.errorHint")}
               </p>
             </div>
           </div>
@@ -218,7 +220,7 @@ export function CleanOrphansModal({
       <ModalFooter>
         {state.kind === "done" ? (
           <Button variant="solid" onClick={closeSafe} autoFocus>
-            Close
+            {t("shared.close")}
           </Button>
         ) : (
           <>
@@ -228,15 +230,15 @@ export function CleanOrphansModal({
               disabled={state.kind === "running"}
               title={
                 state.kind === "running"
-                  ? "Can't cancel mid-run — the backend is holding the clean lock"
+                  ? t("clean.cantCancelTitle")
                   : undefined
               }
             >
               {state.kind === "running"
-                ? "Running…"
+                ? t("clean.running")
                 : state.kind === "error"
-                  ? "Close"
-                  : "Cancel"}
+                  ? t("shared.close")
+                  : t("shared.cancel")}
             </Button>
             <Button
               variant="solid"
@@ -248,10 +250,8 @@ export function CleanOrphansModal({
               glyph={NF.trash}
             >
               {state.kind === "preview" && state.data.orphans_found > 0
-                ? `Remove ${state.data.orphans_found} project${
-                    state.data.orphans_found === 1 ? "" : "s"
-                  }`
-                : "Remove"}
+                ? t("clean.removeN", { count: state.data.orphans_found })
+                : t("clean.remove")}
             </Button>
           </>
         )}
@@ -276,12 +276,13 @@ function Preview({
   data: CleanPreview;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation("projects");
   if (data.orphans_found === 0 && data.unreachable_skipped === 0) {
     return (
       <div className="clean-empty">
-        <p>Nothing to clean.</p>
+        <p>{t("clean.nothing")}</p>
         <p className="muted small">
-          Every CC project dir maps to a source path that exists. Good.
+          {t("clean.nothingHint")}
         </p>
       </div>
     );
@@ -290,33 +291,39 @@ function Preview({
   return (
     <>
       <p className="clean-summary">
-        <strong>{data.orphans_found}</strong> project
-        {data.orphans_found === 1 ? "" : "s"} will be removed (
-        {formatSize(data.total_bytes)}).
+        <Trans
+          ns="projects"
+          i18nKey="clean.summary"
+          count={data.orphans_found}
+          values={{ size: formatSize(data.total_bytes) }}
+          components={{ n: <strong /> }}
+        />
       </p>
 
       {data.unreachable_skipped > 0 && (
         <div className="clean-unreachable" role="status">
           <Icon name="wifi-off" size={14} />
           <span>
-            <strong>{data.unreachable_skipped}</strong> project
-            {data.unreachable_skipped === 1 ? "" : "s"} with unreachable
-            source paths will be left alone (drive unmounted or
-            permission denied).{" "}
+            <Trans
+              ns="projects"
+              i18nKey="clean.unreachableNote"
+              count={data.unreachable_skipped}
+              components={{ n: <strong /> }}
+            />{" "}
             <button
               type="button"
               className="link-btn"
               onClick={onRefresh}
-              title="Re-run the preview"
+              title={t("clean.refreshTitle")}
             >
-              Refresh
+              {t("clean.refresh")}
             </button>
           </span>
         </div>
       )}
 
       {data.orphans_found > 0 && (
-        <ul className="clean-orphan-list" aria-label="Projects to be removed">
+        <ul className="clean-orphan-list" aria-label={t("clean.toRemoveAria")}>
           {data.orphans.map((p) => (
             <OrphanRow key={p.sanitized_name} info={p} />
           ))}
@@ -324,18 +331,28 @@ function Preview({
       )}
 
       <p className="muted small clean-disclaimer">
-        Also prunes matching entries in <code>~/.claude.json</code> and{" "}
-        <code>history.jsonl</code>. Recovery snapshots are written before
-        anything is deleted.
+        <Trans
+          ns="projects"
+          i18nKey="clean.disclaimer"
+          components={{
+            cj: <code>~/.claude.json</code>,
+            hj: <code>history.jsonl</code>,
+          }}
+        />
       </p>
 
       {data.protected_count > 0 && (
         <p className="muted small clean-disclaimer">
-          <strong>{data.protected_count}</strong> of these{" "}
-          {data.protected_count === 1 ? "is" : "are"} on your protected list
-          — its CC artifact directory will be removed, but{" "}
-          <code>~/.claude.json</code> and <code>history.jsonl</code> entries
-          for that path will be preserved.
+          <Trans
+            ns="projects"
+            i18nKey="clean.protectedNote"
+            count={data.protected_count}
+            components={{
+              n: <strong />,
+              cj: <code>~/.claude.json</code>,
+              hj: <code>history.jsonl</code>,
+            }}
+          />
         </p>
       )}
     </>
@@ -343,6 +360,7 @@ function Preview({
 }
 
 function OrphanRow({ info }: { info: ProjectInfo }) {
+  const { t } = useTranslation("projects");
   return (
     <li className="clean-orphan-row">
       <div className="clean-orphan-main">
@@ -350,23 +368,18 @@ function OrphanRow({ info }: { info: ProjectInfo }) {
           {info.original_path}
         </span>
         <span className="muted small">
-          {info.session_count} session{info.session_count === 1 ? "" : "s"} ·{" "}
+          {t("shared.sessions", { count: info.session_count })} ·{" "}
           {formatSize(info.total_size_bytes)}
         </span>
       </div>
       {info.is_empty && (
-        <span className="project-tag empty" title="empty project dir">
-          <Icon name="circle-dashed" size={11} /> empty
+        <span className="project-tag empty" title={t("clean.emptyDirTitle")}>
+          <Icon name="circle-dashed" size={11} /> {t("status.empty")}
         </span>
       )}
     </li>
   );
 }
-
-const PHASE_LABEL: Record<string, string> = {
-  "batch-sibling": "Rewriting ~/.claude.json and history.jsonl",
-  "remove-dirs": "Removing project directories",
-};
 
 function RunningView({
   phase,
@@ -377,7 +390,13 @@ function RunningView({
   done: number;
   total: number;
 }) {
-  const label = PHASE_LABEL[phase] ?? "Cleaning";
+  const { t } = useTranslation("projects");
+  const label =
+    phase === "batch-sibling"
+      ? t("clean.phaseBatchSibling")
+      : phase === "remove-dirs"
+        ? t("clean.phaseRemoveDirs")
+        : t("clean.phaseCleaning");
   const pct =
     total > 0 ? Math.round((Math.min(done, total) / total) * 100) : 0;
   return (
@@ -392,8 +411,9 @@ function RunningView({
             />
           </div>
           <p className="muted small">
-            {done} of {total}
-            {phase === "remove-dirs" ? " projects" : " steps"}
+            {phase === "remove-dirs"
+              ? t("clean.progressProjects", { done, total })
+              : t("clean.progressSteps", { done, total })}
           </p>
         </>
       ) : (
@@ -404,22 +424,29 @@ function RunningView({
 }
 
 function Result({ result }: { result: CleanResult }) {
+  const { t } = useTranslation("projects");
   return (
     <>
       <p className="clean-summary">
-        Removed <strong>{result.orphans_removed}</strong> project
-        {result.orphans_removed === 1 ? "" : "s"}, freed{" "}
-        <strong>{formatSize(result.bytes_freed)}</strong>.
+        <Trans
+          ns="projects"
+          i18nKey="clean.resultSummary"
+          count={result.orphans_removed}
+          values={{ size: formatSize(result.bytes_freed) }}
+          components={{ n: <strong />, s: <strong /> }}
+        />
       </p>
 
       {result.orphans_skipped_live > 0 && (
         <div className="clean-unreachable" role="status">
           <Icon name="alert-triangle" size={14} />
           <span>
-            <strong>{result.orphans_skipped_live}</strong> project
-            {result.orphans_skipped_live === 1 ? "" : "s"} skipped because a
-            live Claude Code session was detected. Quit the session and
-            re-run.
+            <Trans
+              ns="projects"
+              i18nKey="clean.skippedLive"
+              count={result.orphans_skipped_live}
+              components={{ n: <strong /> }}
+            />
           </span>
         </div>
       )}
@@ -427,40 +454,41 @@ function Result({ result }: { result: CleanResult }) {
       <ul className="clean-result-list">
         {result.claude_json_entries_removed > 0 && (
           <li>
-            Pruned {result.claude_json_entries_removed} entr
-            {result.claude_json_entries_removed === 1 ? "y" : "ies"} from{" "}
+            {t("clean.prunedEntries", {
+              count: result.claude_json_entries_removed,
+            })}{" "}
             <code>~/.claude.json</code>
           </li>
         )}
         {result.history_lines_removed > 0 && (
           <li>
-            Removed {result.history_lines_removed} line
-            {result.history_lines_removed === 1 ? "" : "s"} from{" "}
+            {t("clean.removedLines", {
+              count: result.history_lines_removed,
+            })}{" "}
             <code>history.jsonl</code>
           </li>
         )}
         {result.claudepot_artifacts_removed > 0 && (
           <li>
-            Removed {result.claudepot_artifacts_removed} stale claudepot
-            artifact{result.claudepot_artifacts_removed === 1 ? "" : "s"}
+            {t("clean.removedArtifacts", {
+              count: result.claudepot_artifacts_removed,
+            })}
           </li>
         )}
         {result.protected_paths_skipped > 0 && (
           <li>
-            Preserved sibling state for {result.protected_paths_skipped}{" "}
-            protected path{result.protected_paths_skipped === 1 ? "" : "s"}{" "}
-            (CC artifact dir{result.protected_paths_skipped === 1 ? "" : "s"}{" "}
-            still removed)
+            {t("clean.preservedProtected", {
+              count: result.protected_paths_skipped,
+            })}
           </li>
         )}
       </ul>
 
       {result.snapshot_paths.length > 0 && (
         <div className="clean-snapshots">
-          <div className="field-label">Recovery snapshots</div>
+          <div className="field-label">{t("clean.snapshotsLabel")}</div>
           <p className="muted small">
-            Saved before anything was deleted. Copy a path and open it with
-            a JSON viewer to restore.
+            {t("clean.snapshotsHint")}
           </p>
           <ul className="clean-snapshot-list">
             {result.snapshot_paths.map((p) => (
@@ -475,4 +503,3 @@ function Result({ result }: { result: CleanResult }) {
     </>
   );
 }
-

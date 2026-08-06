@@ -1,7 +1,9 @@
 import { useState, useCallback } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { formatSize } from "../../lib/format";
+import { renderError } from "../../lib/i18n-error";
 import type { GcOutcome } from "../../types";
 
 /**
@@ -19,6 +21,7 @@ export function GcCard({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   // Audit T2 H#3: `days` is forwarded to an irreversible GC. Track the
   // raw input as the source of truth so empty / NaN / out-of-range
   // values disable the actions instead of silently coercing to 0 (or
@@ -47,11 +50,11 @@ export function GcCard({
       setResult(r);
       setPreviewDays(days);
     } catch (e) {
-      pushToast("error", `GC preview failed: ${e}`);
+      pushToast("error", renderError(e, t("gc.previewFailedScope")));
     } finally {
       setBusy(false);
     }
-  }, [days, daysValid, pushToast]);
+  }, [days, daysValid, pushToast, t]);
 
   const execute = useCallback(async () => {
     if (!daysValid || !previewMatchesInput) return;
@@ -62,26 +65,26 @@ export function GcCard({
       setPreviewDays(null);
       pushToast(
         "info",
-        `GC: removed ${r.removed_journals} journals, ${r.removed_snapshots} snapshots, freed ${formatSize(
-          r.bytes_freed,
-        )}`,
+        t("gc.execToast", {
+          journals: r.removed_journals,
+          snapshots: r.removed_snapshots,
+          size: formatSize(r.bytes_freed),
+        }),
       );
     } catch (e) {
-      pushToast("error", `GC failed: ${e}`);
+      pushToast("error", renderError(e, t("gc.failedScope")));
     } finally {
       setBusy(false);
     }
-  }, [days, daysValid, previewMatchesInput, pushToast]);
+  }, [days, daysValid, previewMatchesInput, pushToast, t]);
 
   return (
     <section className="maintenance-section">
       <div className="maintenance-section-header">
-        <h2>Garbage-collect old repair data</h2>
+        <h2>{t("gc.heading")}</h2>
       </div>
       <p className="muted maintenance-desc">
-        Remove abandoned rename journals and recovery snapshots older
-        than the threshold. Preview first — the execute step is
-        irreversible.
+        {t("gc.desc")}
       </p>
       <div
         style={{
@@ -92,7 +95,7 @@ export function GcCard({
         }}
       >
         <label htmlFor="gc-days" className="muted small">
-          Older than
+          {t("gc.olderThan")}
         </label>
         <input
           id="gc-days"
@@ -121,7 +124,7 @@ export function GcCard({
             fontVariantNumeric: "tabular-nums",
           }}
         />
-        <span className="muted small">days</span>
+        <span className="muted small">{t("gc.days")}</span>
       </div>
       <div
         style={{
@@ -136,11 +139,11 @@ export function GcCard({
           disabled={busy || !daysValid}
           title={
             daysValid
-              ? "Preview what GC would remove"
-              : `Enter a value between ${GC_DAYS_MIN} and ${GC_DAYS_MAX}`
+              ? t("gc.previewTitle")
+              : t("gc.rangeTitle", { min: GC_DAYS_MIN, max: GC_DAYS_MAX })
           }
         >
-          Preview
+          {t("gc.preview")}
         </Button>
         <Button
           variant="solid"
@@ -149,13 +152,13 @@ export function GcCard({
           disabled={busy || !result || !daysValid || !previewMatchesInput}
           title={
             !daysValid
-              ? `Enter a value between ${GC_DAYS_MIN} and ${GC_DAYS_MAX}`
+              ? t("gc.rangeTitle", { min: GC_DAYS_MIN, max: GC_DAYS_MAX })
               : !result || !previewMatchesInput
-                ? "Run Preview first"
+                ? t("gc.runPreviewFirst")
                 : undefined
           }
         >
-          Execute GC
+          {t("gc.execute")}
         </Button>
         {!daysValid && (
           <span
@@ -163,7 +166,7 @@ export function GcCard({
             style={{ color: "var(--bad)" }}
             role="status"
           >
-            Days must be {GC_DAYS_MIN}–{GC_DAYS_MAX}.
+            {t("gc.daysRange", { min: GC_DAYS_MIN, max: GC_DAYS_MAX })}
           </span>
         )}
       </div>
@@ -179,15 +182,18 @@ export function GcCard({
             color: "var(--fg-muted)",
           }}
         >
-          Would remove:{" "}
-          <strong style={{ color: "var(--fg)" }}>
-            {result.removed_journals}
-          </strong>{" "}
-          journals,{" "}
-          <strong style={{ color: "var(--fg)" }}>
-            {result.removed_snapshots}
-          </strong>{" "}
-          snapshots
+          <Trans
+            ns="projects"
+            i18nKey="gc.wouldRemove"
+            values={{
+              journals: result.removed_journals,
+              snapshots: result.removed_snapshots,
+            }}
+            components={{
+              j: <strong style={{ color: "var(--fg)" }} />,
+              s: <strong style={{ color: "var(--fg)" }} />,
+            }}
+          />
         </div>
       )}
     </section>

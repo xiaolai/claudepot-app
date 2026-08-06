@@ -1,4 +1,5 @@
 import { NF } from "../icons";
+import { i18n } from "../lib/i18n";
 import { enabledSections } from "../lib/optionalSections";
 import { SETTINGS_PANES } from "../sections/settings/panes";
 import { GLOBAL_TABS } from "../sections/global/tabs";
@@ -29,8 +30,8 @@ export function buildSwitchActions(o: {
     if (!a.is_cli_active && a.credentials_healthy) {
       items.push({
         id: `cli-${a.uuid}`,
-        label: `Switch CLI to ${a.email}`,
-        detail: a.org_name ?? "personal",
+        label: i18n.t("palette.switchCli", { email: a.email }),
+        detail: a.org_name ?? i18n.t("palette.personal"),
         glyph: NF.terminal,
         category: "switch",
         onSelect: () => o.onSwitchCli(a),
@@ -48,8 +49,8 @@ export function buildSwitchActions(o: {
     ) {
       items.push({
         id: `desk-${a.uuid}`,
-        label: `Switch Desktop to ${a.email}`,
-        detail: a.org_name ?? "personal",
+        label: i18n.t("palette.switchDesktop", { email: a.email }),
+        detail: a.org_name ?? i18n.t("palette.personal"),
         glyph: NF.desktop,
         category: "switch",
         onSelect: () => o.onSwitchDesktop(a),
@@ -74,7 +75,14 @@ export function buildNavigateActions(
   for (const s of enabledSections()) {
     items.push({
       id: `nav-${s.id}`,
-      label: `Open ${s.label}`,
+      label: i18n.t("chrome.openSection", {
+        ns: "shell",
+        section: i18n.t(s.labelKey, { ns: "shell" }),
+      }),
+      // The English row label rides along as a keyword so muscle-memory
+      // English queries still hit the row in a localized UI
+      // (i18n plan §2.2).
+      keywords: [`Open ${i18n.getFixedT("en", "shell")(s.labelKey)}`],
       glyph: s.glyph,
       category: "navigate",
       onSelect: () => onNavigate(s.id),
@@ -86,8 +94,8 @@ export function buildNavigateActions(
   // search for by name.
   items.push({
     id: "nav-maintenance",
-    label: "Open Projects → Maintenance",
-    detail: "Clean + Repair",
+    label: i18n.t("palette.openMaintenance"),
+    detail: i18n.t("palette.maintenanceDetail"),
     keywords: ["clean", "repair", "gc", "orphans"],
     glyph: NF.tools,
     category: "navigate",
@@ -98,7 +106,7 @@ export function buildNavigateActions(
   for (const pane of SETTINGS_PANES) {
     items.push({
       id: `nav-settings-${pane.id}`,
-      label: `Open Settings → ${pane.label}`,
+      label: i18n.t("palette.openSettingsPane", { pane: pane.label }),
       keywords: pane.keywords,
       glyph: pane.glyph,
       category: "navigate",
@@ -116,7 +124,7 @@ export function buildNavigateActions(
   for (const tab of GLOBAL_TABS) {
     items.push({
       id: `nav-global-${tab.id}`,
-      label: `Open Global → ${tab.label}`,
+      label: i18n.t("palette.openGlobalTab", { tab: tab.label }),
       keywords: tab.keywords,
       glyph: tab.glyph,
       category: "navigate",
@@ -143,14 +151,18 @@ export function buildGeneralActions(o: {
   const items: PaletteAction[] = [
     {
       id: "add",
-      label: "Add account",
+      label: i18n.t("palette.addAccount"),
       glyph: NF.userPlus,
       category: "action",
       onSelect: o.onAdd,
     },
     {
       id: "refresh",
-      label: "Refresh all",
+      label: i18n.t("palette.refreshAll"),
+      // `keywords` stay English on purpose — they never render, and the
+      // localized label is already matched by `scoreFields`, so these
+      // are pure muscle-memory aliases (same rule as the section rows
+      // above).
       keywords: ["reload", "sync"],
       glyph: NF.refresh,
       category: "action",
@@ -160,8 +172,8 @@ export function buildGeneralActions(o: {
   if (o.onToggleTheme) {
     items.push({
       id: "toggle-theme",
-      label: "Toggle theme",
-      detail: "Light / dark",
+      label: i18n.t("palette.toggleTheme"),
+      detail: i18n.t("palette.toggleThemeDetail"),
       keywords: ["dark mode", "light mode", "appearance"],
       glyph: NF.moon,
       category: "action",
@@ -171,7 +183,8 @@ export function buildGeneralActions(o: {
   if (o.onShowShortcuts) {
     items.push({
       id: "shortcuts",
-      label: "Show keyboard shortcuts",
+      label: i18n.t("palette.showShortcuts"),
+      // Key combo, not copy.
       detail: "⌘ /",
       glyph: NF.help,
       category: "action",
@@ -195,7 +208,7 @@ export function buildDesktopActions(o: {
   if (onLaunchDesktop) {
     items.push({
       id: "desktop-launch",
-      label: "Launch Claude Desktop",
+      label: i18n.t("palette.launchDesktop"),
       glyph: NF.desktop,
       category: "action",
       onSelect: onLaunchDesktop,
@@ -209,8 +222,8 @@ export function buildDesktopActions(o: {
       if (a.desktop_profile_on_disk) continue;
       items.push({
         id: `adopt-${a.uuid}`,
-        label: `Bind current Desktop session to ${a.email}`,
-        detail: a.org_name ?? "personal",
+        label: i18n.t("palette.bindDesktop", { email: a.email }),
+        detail: a.org_name ?? i18n.t("palette.personal"),
         glyph: NF.desktop,
         category: "action",
         onSelect: () => onAdoptDesktop(a),
@@ -220,7 +233,7 @@ export function buildDesktopActions(o: {
   if (onClearDesktop) {
     items.push({
       id: "desktop-clear",
-      label: "Sign Desktop out",
+      label: i18n.t("palette.signDesktopOut"),
       keywords: ["log out", "disconnect"],
       glyph: NF.trash,
       category: "action",
@@ -236,8 +249,8 @@ export function buildAccountRemovalActions(
 ): PaletteAction[] {
   return accounts.map((a) => ({
     id: `rm-${a.uuid}`,
-    label: `Remove ${a.email}`,
-    detail: a.org_name ?? "personal",
+    label: i18n.t("palette.removeAccount", { email: a.email }),
+    detail: a.org_name ?? i18n.t("palette.personal"),
     glyph: NF.trash,
     category: "action" as const,
     onSelect: () => onRemove(a),

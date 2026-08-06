@@ -1,4 +1,5 @@
 import { type MouseEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Input } from "../../components/primitives/Input";
@@ -79,6 +80,7 @@ export function AccountsGrid({
   onRefreshUsage,
   onVerifyAccount,
 }: Props) {
+  const { t } = useTranslation("accounts");
   // Pre-fill adoption when CC is already signed in. `error` null +
   // non-empty email covers the 0- or 1-account case where Claudepot
   // opens on a clean profile but the user's CLI is already authed.
@@ -104,11 +106,11 @@ export function AccountsGrid({
         >
           <Input
             glyph={NF.search}
-            placeholder="Filter accounts"
+            placeholder={t("grid.filterAccounts")}
             value={filter}
             onChange={(e) => onFilterChange(e.target.value)}
             style={{ width: "var(--filter-input-width)" }}
-            aria-label="Filter accounts"
+            aria-label={t("grid.filterAccounts")}
           />
           {filter.trim() !== "" && (
             <span
@@ -178,7 +180,7 @@ export function AccountsGrid({
               fontSize: "var(--fs-sm)",
             }}
           >
-            No accounts match "{filter}".
+            {t("grid.noMatch", { filter })}
           </div>
         )}
         {accounts.length === 0 && (
@@ -204,7 +206,7 @@ export function AccountsGrid({
                 fontWeight: 500,
               }}
             >
-              No accounts yet.
+              {t("grid.empty.title")}
             </p>
             {ccSignedInEmail ? (
               <>
@@ -216,11 +218,14 @@ export function AccountsGrid({
                     maxWidth: "var(--content-cap-sm)",
                   }}
                 >
-                  Claude Code is already signed in as{" "}
-                  <strong style={{ color: "var(--fg)" }}>
-                    {ccSignedInEmail}
-                  </strong>
-                  . Adopt this session as your first Claudepot account?
+                  <Trans
+                    i18nKey="grid.empty.adoptPrompt"
+                    ns="accounts"
+                    values={{ email: ccSignedInEmail }}
+                    components={{
+                      emph: <strong style={{ color: "var(--fg)" }} />,
+                    }}
+                  />
                 </p>
                 <div
                   style={{
@@ -234,10 +239,10 @@ export function AccountsGrid({
                     glyph={NF.check}
                     onClick={onAdoptCurrent}
                   >
-                    {`Adopt ${ccSignedInEmail}`}
+                    {t("grid.empty.adoptCta", { email: ccSignedInEmail })}
                   </Button>
                   <Button variant="ghost" glyph={NF.plus} onClick={onAdd}>
-                    Add a different account
+                    {t("grid.empty.addDifferent")}
                   </Button>
                 </div>
               </>
@@ -251,12 +256,10 @@ export function AccountsGrid({
                     maxWidth: "var(--content-cap-sm)",
                   }}
                 >
-                  Claudepot manages multiple Anthropic logins for Claude
-                  Code and Claude Desktop. Sign in with a browser OAuth
-                  flow to get started.
+                  {t("grid.empty.intro")}
                 </p>
                 <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
-                  Add account
+                  {t("grid.empty.addAccount")}
                 </Button>
               </>
             )}

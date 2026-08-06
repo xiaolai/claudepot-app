@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../lib/i18n";
 import type {
   AccountSummary,
   AppStatus,
@@ -107,6 +109,13 @@ export function useStatusIssues(opts: {
     onImportDesktop,
   } = opts;
 
+  // Banner copy is resolved inside the memo, so the active locale is
+  // one of its inputs — without it a language switch would leave the
+  // already-derived banners in the previous language until some other
+  // dependency happened to change.
+  const { i18n: runtimeI18n } = useTranslation();
+  const language = runtimeI18n.language;
+
   return useMemo(() => {
     const issues: StatusIssue[] = [];
 
@@ -118,11 +127,13 @@ export function useStatusIssues(opts: {
       issues.push({
         id: "keychain",
         severity: "error",
-        label: "Keychain locked",
+        label: i18n.t("status.keychain.label"),
         detail: isMac
-          ? "Click Unlock to enter your macOS password."
-          : "Unlock the system keychain, then click Refresh.",
-        action: isMac ? { label: "Unlock", onClick: onUnlock } : undefined,
+          ? i18n.t("status.keychain.detailMac")
+          : i18n.t("status.keychain.detailOther"),
+        action: isMac
+          ? { label: i18n.t("status.keychain.action"), onClick: onUnlock }
+          : undefined,
       });
     }
 
@@ -135,13 +146,21 @@ export function useStatusIssues(opts: {
       issues.push({
         id: "drift",
         severity: "error",
-        label: "Account drift detected",
+        label: i18n.t("status.drift.label"),
         detail: driftAccounts
-          .map((a) => `${a.email} authenticates as ${a.verified_email}`)
+          .map((a) =>
+            i18n.t("status.drift.detailItem", {
+              email: a.email,
+              verified: a.verified_email,
+            }),
+          )
           .join("; "),
         action:
           onSelectAccount && primary
-            ? { label: "Open", onClick: () => onSelectAccount(primary.uuid) }
+            ? {
+                label: i18n.t("status.drift.action"),
+                onClick: () => onSelectAccount(primary.uuid),
+              }
             : undefined,
       });
     }
@@ -154,11 +173,13 @@ export function useStatusIssues(opts: {
       issues.push({
         id: "auth-rejected",
         severity: "error",
-        label: "Claude Code needs to sign in again",
-        detail:
-          "The stored login is no longer valid. Open the matching account and click Log in.",
+        label: i18n.t("status.authRejected.label"),
+        detail: i18n.t("status.authRejected.detail"),
         action: onReloginActive
-          ? { label: "Sign in", onClick: onReloginActive }
+          ? {
+              label: i18n.t("status.authRejected.action"),
+              onClick: onReloginActive,
+            }
           : undefined,
       });
     } else if (syncError) {
@@ -168,7 +189,7 @@ export function useStatusIssues(opts: {
       issues.push({
         id: `sync:${syncError}`,
         severity: "warning",
-        label: "Couldn't sync with Claude Code",
+        label: i18n.t("status.syncErrorLabel"),
         detail: syncError,
         dismissable: true,
       });
@@ -232,7 +253,7 @@ export function useStatusIssues(opts: {
       if (target) {
         if (onSelectAccount) {
           action = {
-            label: "Open matching account",
+            label: i18n.t("status.ccDrift.openMatch"),
             onClick: () => onSelectAccount(target.uuid),
           };
         }
@@ -240,12 +261,15 @@ export function useStatusIssues(opts: {
         if (onImportCurrent) {
           const email = ccIdentity.email;
           action = {
-            label: `Import ${email}`,
+            label: i18n.t("status.importEmail", { email }),
             onClick: () => onImportCurrent(email),
           };
         }
         if (onReloginActive) {
-          action2 = { label: "Re-login active", onClick: onReloginActive };
+          action2 = {
+            label: i18n.t("status.ccDrift.relogin"),
+            onClick: onReloginActive,
+          };
         }
         // If only re-login is wired, promote it to primary so the
         // banner still has a primary-weight action.
@@ -260,7 +284,10 @@ export function useStatusIssues(opts: {
         // email comparison above.
         id: `cc-drift:${ccIdentity.email.toLowerCase()}:${status.cli_active_email.toLowerCase()}`,
         severity: "warning",
-        label: `CC slot drift — CC authenticates as ${ccIdentity.email}, Claudepot expects ${status.cli_active_email}`,
+        label: i18n.t("status.ccDrift.label", {
+          ccEmail: ccIdentity.email,
+          expectedEmail: status.cli_active_email,
+        }),
         action,
         action2,
         dismissable: true,
@@ -279,11 +306,13 @@ export function useStatusIssues(opts: {
           issues.push({
             id: `desktop-adopt:${email.toLowerCase()}`,
             severity: "info",
-            label: `Claude Desktop is signed in as ${email}`,
-            detail:
-              "Bind this session to the matching registered account so Claudepot can swap in later.",
+            label: i18n.t("status.desktop.signedInAs", { email }),
+            detail: i18n.t("status.desktop.adoptDetail"),
             action: onAdoptLiveDesktop
-              ? { label: "Bind", onClick: () => onAdoptLiveDesktop(email) }
+              ? {
+                  label: i18n.t("status.desktop.bind"),
+                  onClick: () => onAdoptLiveDesktop(email),
+                }
               : undefined,
             dismissable: true,
           });
@@ -294,12 +323,11 @@ export function useStatusIssues(opts: {
           issues.push({
             id: `desktop-stranger:${email.toLowerCase()}`,
             severity: "info",
-            label: `Claude Desktop is signed in as ${email}`,
-            detail:
-              "This email isn't registered with Claudepot yet. Import it to start managing this session.",
+            label: i18n.t("status.desktop.signedInAs", { email }),
+            detail: i18n.t("status.desktop.strangerDetail"),
             action: onImportDesktop
               ? {
-                  label: `Import ${email}`,
+                  label: i18n.t("status.importEmail", { email }),
                   onClick: () => onImportDesktop(email),
                 }
               : undefined,
@@ -318,8 +346,8 @@ export function useStatusIssues(opts: {
           issues.push({
             id: `desktop-candidate:${email.toLowerCase()}`,
             severity: "info",
-            label: "Couldn't confirm Claude Desktop's current account",
-            detail: `The most likely match is ${email}. Open Claude Desktop once to refresh this.`,
+            label: i18n.t("status.desktop.candidateLabel"),
+            detail: i18n.t("status.desktop.candidateDetail", { email }),
             dismissable: true,
           });
           break;
@@ -346,5 +374,6 @@ export function useStatusIssues(opts: {
     desktopSync,
     onAdoptLiveDesktop,
     onImportDesktop,
+    language,
   ]);
 }

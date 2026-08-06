@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
+import { renderError } from "../../../lib/i18n-error";
 import { Button } from "../../../components/primitives/Button";
 import { Modal } from "../../../components/primitives/Modal";
 
@@ -17,6 +19,7 @@ interface Props {
  * fixed-width pane; full markdown rendering is a polish item.
  */
 export function ReportViewer({ path, onClose }: Props) {
+  const { t } = useTranslation("agents");
   const [body, setBody] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +37,7 @@ export function ReportViewer({ path, onClose }: Props) {
         if (!cancelled) setBody(s);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(renderError(e));
       });
     return () => {
       cancelled = true;
@@ -71,17 +74,17 @@ export function ReportViewer({ path, onClose }: Props) {
             {basename(path)}
           </h2>
           <Button variant="ghost" onClick={onClose}>
-            Close
+            {t("actions.close")}
           </Button>
         </div>
 
         {error ? (
           <div style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>
-            Couldn&rsquo;t read report: {error}
+            {t("report.readError", { error })}
           </div>
         ) : body === null ? (
           <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-sm)" }}>
-            Loading…
+            {t("loading")}
           </div>
         ) : (
           <pre

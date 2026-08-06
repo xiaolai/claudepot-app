@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   ROTATION_OUTCOME_LABEL,
@@ -6,6 +7,7 @@ import {
   type RotationAuditEntry,
   type RotationRule,
 } from "../../api/rotation";
+import { i18n } from "../../lib/i18n";
 import { Button } from "../../components/primitives/Button";
 import { IconButton } from "../../components/primitives/IconButton";
 import { Tag } from "../../components/primitives/Tag";
@@ -28,6 +30,7 @@ export function RuleRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const triggerWindow =
     rule.trigger.window && rule.trigger.window in WINDOW_LABELS
       ? WINDOW_LABELS[rule.trigger.window as keyof typeof WINDOW_LABELS]
@@ -55,26 +58,28 @@ export function RuleRow({
           }}
         >
           <strong style={{ fontSize: "var(--fs-sm)" }}>{rule.id}</strong>
-          <Tag>{rule.mode === "auto" ? "Auto" : "Confirm"}</Tag>
-          {!rule.enabled && <Tag>Disabled</Tag>}
+          <Tag>
+            {rule.mode === "auto" ? t("rotation.modeAuto") : t("rotation.modeConfirm")}
+          </Tag>
+          {!rule.enabled && <Tag>{t("rotation.disabledTag")}</Tag>}
         </div>
         <div style={{ fontSize: "var(--fs-xs)", color: "var(--fg-muted)" }}>
           {triggerWindow} ≥ {rule.trigger.pct}% → {selectorSummary(rule)}
         </div>
       </div>
       <Button variant="ghost" onClick={() => onToggle(!rule.enabled)}>
-        {rule.enabled ? "Disable" : "Enable"}
+        {rule.enabled ? t("rotation.disable") : t("rotation.enable")}
       </Button>
       <IconButton
         glyph={NF.edit}
-        title="Edit rule"
-        aria-label="Edit rule"
+        title={t("rotation.editRule")}
+        aria-label={t("rotation.editRule")}
         onClick={onEdit}
       />
       <IconButton
         glyph={NF.trash}
-        title="Delete rule"
-        aria-label="Delete rule"
+        title={t("rotation.deleteRule")}
+        aria-label={t("rotation.deleteRule")}
         onClick={onDelete}
       />
     </li>
@@ -85,15 +90,25 @@ function selectorSummary(rule: RotationRule): string {
   const sel = rule.action.selector;
   switch (sel.kind) {
     case "least_used":
-      return `least-used among ${sel.candidates.length} accounts`;
+      return i18n.t("rotation.selectorLeastUsed", {
+        ns: "settings",
+        count: sel.candidates.length,
+      });
     case "round_robin":
-      return `round-robin across ${sel.candidates.length} accounts`;
+      return i18n.t("rotation.selectorRoundRobin", {
+        ns: "settings",
+        count: sel.candidates.length,
+      });
     case "explicit":
-      return `swap to ${sel.email}`;
+      return i18n.t("rotation.selectorExplicit", {
+        ns: "settings",
+        email: sel.email,
+      });
   }
 }
 
 export function EmptyRulesPanel({ hasAccounts }: { hasAccounts: boolean }) {
+  const { t } = useTranslation("settings");
   return (
     <div
       style={{
@@ -105,22 +120,15 @@ export function EmptyRulesPanel({ hasAccounts }: { hasAccounts: boolean }) {
         fontSize: "var(--fs-sm)",
       }}
     >
-      {hasAccounts ? (
-        <>
-          No rotation rules yet. Add one to auto-switch accounts when
-          usage thresholds trip.
-        </>
-      ) : (
-        <>
-          Add at least one Anthropic account before creating rotation
-          rules — the candidate picker reads the account list.
-        </>
-      )}
+      {hasAccounts
+        ? t("rotation.emptyWithAccounts")
+        : t("rotation.emptyNoAccounts")}
     </div>
   );
 }
 
 export function AuditTable({ entries }: { entries: RotationAuditEntry[] }) {
+  const { t } = useTranslation("settings");
   return (
     <div
       style={{
@@ -138,11 +146,11 @@ export function AuditTable({ entries }: { entries: RotationAuditEntry[] }) {
       >
         <thead style={{ background: "var(--bg-sunken)" }}>
           <tr>
-            <Th>When</Th>
-            <Th>Rule</Th>
-            <Th>From → To</Th>
-            <Th>Outcome</Th>
-            <Th>Reason</Th>
+            <Th>{t("rotation.thWhen")}</Th>
+            <Th>{t("rotation.thRule")}</Th>
+            <Th>{t("rotation.thFromTo")}</Th>
+            <Th>{t("rotation.thOutcome")}</Th>
+            <Th>{t("rotation.thReason")}</Th>
           </tr>
         </thead>
         <tbody>
@@ -166,8 +174,7 @@ export function AuditTable({ entries }: { entries: RotationAuditEntry[] }) {
                   <>
                     {e.reason && " "}
                     <Tag>
-                      {e.trigger.bgWorkers} bg worker
-                      {e.trigger.bgWorkers === 1 ? "" : "s"} active
+                      {t("rotation.bgWorkers", { count: e.trigger.bgWorkers })}
                     </Tag>
                   </>
                 )}

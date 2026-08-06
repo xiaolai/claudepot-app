@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
+import { renderError } from "../lib/i18n-error";
+import { formatDateTime, formatNumber } from "../lib/intl";
 import { basename } from "../lib/paths";
 import type {
   ActivityCard,
@@ -17,6 +21,7 @@ import { LiveSessionsStrip } from "../components/activity/LiveSessionsStrip";
 import {
   aggregate,
   daySeries,
+  severityLabelKey,
   SeverityMix,
   Sparkbars,
   TopKinds,
@@ -87,24 +92,26 @@ function saveTab(t: EventsTab) {
 
 // All filter-vocab values match `CardKindLabel` / `SeverityLabel`
 // in src/types.ts. Updated in lock-step with the Rust catalog.
-const KIND_OPTIONS: { value: CardKindLabel; label: string }[] = [
-  { value: "hook", label: "Hook failures" },
-  { value: "hook-slow", label: "Slow hooks" },
-  { value: "tool-error", label: "Tool errors" },
-  { value: "agent", label: "Agent returns" },
-  { value: "agent-stranded", label: "Agent stranded" },
-  { value: "milestone", label: "Milestones" },
-];
+// Labels are catalog keys resolved at render time so a language
+// switch takes effect without a remount.
+const KIND_OPTIONS = [
+  { value: "hook", labelKey: "kinds.hook" },
+  { value: "hook-slow", labelKey: "kinds.hookSlow" },
+  { value: "tool-error", labelKey: "kinds.toolError" },
+  { value: "agent", labelKey: "kinds.agent" },
+  { value: "agent-stranded", labelKey: "kinds.agentStranded" },
+  { value: "milestone", labelKey: "kinds.milestone" },
+] as const satisfies readonly { value: CardKindLabel; labelKey: string }[];
 
-const SEVERITY_OPTIONS: {
+const SEVERITY_OPTIONS = [
+  { value: "info", labelKey: "filters.severityAll" },
+  { value: "notice", labelKey: "filters.severityNotice" },
+  { value: "warn", labelKey: "filters.severityWarn" },
+  { value: "error", labelKey: "filters.severityErrorOnly" },
+] as const satisfies readonly {
   value: "info" | "notice" | "warn" | "error";
-  label: string;
-}[] = [
-  { value: "info", label: "All" },
-  { value: "notice", label: "Notice+" },
-  { value: "warn", label: "Warn+" },
-  { value: "error", label: "Error only" },
-];
+  labelKey: string;
+}[];
 
 const DEFAULT_LIMIT = 200;
 // Aggregate fetch is filter-independent and time-windowed to match
@@ -184,7 +191,7 @@ export function EventsSection({
     if (listR.status === "fulfilled") setCards(listR.value);
     if (countsR.status === "fulfilled") setCounts(countsR.value);
     if (listR.status === "rejected" && countsR.status === "rejected") {
-      setError(String(listR.reason));
+      setError(renderError(listR.reason));
     }
     setLoading(false);
   }, [filters]);
@@ -275,7 +282,7 @@ export function EventsSection({
       await api.cardsReindex();
       await Promise.all([refresh(), refreshAgg()]);
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
     } finally {
       setReindexing(false);
     }
@@ -312,7 +319,7 @@ export function EventsSection({
         }),
       );
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
     }
   }, []);
 
@@ -433,10 +440,11 @@ function TabStrip({
   current: EventsTab;
   onPick: (t: EventsTab) => void;
 }) {
+  const { t } = useTranslation("activities");
   return (
     <div
       role="tablist"
-      aria-label="Activity view"
+      aria-label={t("tabs.ariaLabel")}
       style={{
         display: "flex",
         gap: "var(--sp-2)",
@@ -448,24 +456,24 @@ function TabStrip({
         id="events-tab-stream"
         controls="events-panel-stream"
         active={current === "stream"}
-        label="Stream"
-        sub="Failures + slow events"
+        label={t("tabs.stream")}
+        sub={t("tabs.streamSub")}
         onClick={() => onPick("stream")}
       />
       <TabButton
         id="events-tab-usage"
         controls="events-panel-usage"
         active={current === "usage"}
-        label="Usage"
-        sub="Per-artifact invocation counts"
+        label={t("tabs.usage")}
+        sub={t("tabs.usageSub")}
         onClick={() => onPick("usage")}
       />
       <TabButton
         id="events-tab-cost"
         controls="events-panel-cost"
         active={current === "cost"}
-        label="Cost"
-        sub="Per-project tokens + USD"
+        label={t("tabs.cost")}
+        sub={t("tabs.costSub")}
         onClick={() => onPick("cost")}
       />
     </div>
@@ -528,6 +536,7 @@ function TabButton({
  * — first paint, after a reindex, or no cards at all.
  */
 function MetricsStrip({ cards, loading }: { cards: ActivityCard[]; loading: boolean }) {
+  const { t } = useTranslation("activities");
   const agg = useMemo(() => aggregate(cards), [cards]);
   const series = useMemo(() => daySeries(agg.byDay, 30), [agg.byDay]);
 
@@ -550,13 +559,16 @@ function MetricsStrip({ cards, loading }: { cards: ActivityCard[]; loading: bool
         background: "var(--bg-sunken)",
       }}
     >
-      <MetricCell title={`${agg.total.toLocaleString()} cards`} subtitle="last 30 days">
+      <MetricCell
+        title={t("stream.cardsTotal", { value: formatNumber(agg.total) })}
+        subtitle={t("stream.last30Days")}
+      >
         <Sparkbars data={series} />
       </MetricCell>
-      <MetricCell title="Severity mix">
+      <MetricCell title={t("stream.severityMix")}>
         <SeverityMix agg={agg} />
       </MetricCell>
-      <MetricCell title="Top kinds">
+      <MetricCell title={t("stream.topKinds")}>
         <TopKinds agg={agg} limit={5} labelFor={kindLabel} />
       </MetricCell>
     </div>
@@ -617,6 +629,7 @@ interface FilterRailProps {
 }
 
 function FilterRail({ filters, onChange }: FilterRailProps) {
+  const { t } = useTranslation("activities");
   const togglekind = (k: CardKindLabel) => {
     const cur = new Set(filters.kinds ?? []);
     if (cur.has(k)) cur.delete(k);
@@ -636,7 +649,7 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
         overflowY: "auto",
       }}
     >
-      <FilterGroup label="Severity">
+      <FilterGroup label={t("filters.severity")}>
         <select
           value={filters.minSeverity ?? "info"}
           onChange={(e) =>
@@ -649,12 +662,12 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
         >
           {SEVERITY_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {o.label}
+              {t(o.labelKey)}
             </option>
           ))}
         </select>
       </FilterGroup>
-      <FilterGroup label="Kind">
+      <FilterGroup label={t("filters.kind")}>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
           {KIND_OPTIONS.map((opt) => {
             const checked = filters.kinds?.includes(opt.value) ?? false;
@@ -675,28 +688,28 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
                   checked={checked}
                   onChange={() => togglekind(opt.value)}
                 />
-                {opt.label}
+                {t(opt.labelKey)}
               </label>
             );
           })}
         </div>
       </FilterGroup>
-      <FilterGroup label="Plugin">
+      <FilterGroup label={t("filters.plugin")}>
         <input
           type="text"
           value={filters.plugin ?? ""}
-          placeholder="grill, mermaid-preview, …"
+          placeholder={t("filters.pluginPlaceholder")}
           onChange={(e) =>
             onChange({ ...filters, plugin: e.target.value || undefined })
           }
           style={inputStyle}
         />
       </FilterGroup>
-      <FilterGroup label="Project (cwd prefix)">
+      <FilterGroup label={t("filters.project")}>
         <input
           type="text"
           value={filters.projectPathPrefix ?? ""}
-          placeholder="/Users/x/proj"
+          placeholder={t("filters.projectPlaceholder")}
           onChange={(e) =>
             onChange({
               ...filters,
@@ -706,7 +719,7 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
           style={inputStyle}
         />
       </FilterGroup>
-      <FilterGroup label="Window">
+      <FilterGroup label={t("filters.window")}>
         <select
           value={filters.sinceMs ? String(rangeBucket(filters.sinceMs)) : "all"}
           onChange={(e) => {
@@ -719,10 +732,10 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
           }}
           style={selectStyle}
         >
-          <option value="all">All time</option>
-          <option value={String(60 * 60 * 1000)}>Last 1 h</option>
-          <option value={String(24 * 60 * 60 * 1000)}>Last 24 h</option>
-          <option value={String(7 * 24 * 60 * 60 * 1000)}>Last 7 d</option>
+          <option value="all">{t("filters.windowAll")}</option>
+          <option value={String(60 * 60 * 1000)}>{t("filters.window1h")}</option>
+          <option value={String(24 * 60 * 60 * 1000)}>{t("filters.window24h")}</option>
+          <option value={String(7 * 24 * 60 * 60 * 1000)}>{t("filters.window7d")}</option>
         </select>
       </FilterGroup>
     </aside>
@@ -768,6 +781,7 @@ function Header({
   onMarkAllSeen,
   onRefresh,
 }: HeaderProps) {
+  const { t } = useTranslation("activities");
   return (
     <div
       style={{
@@ -788,7 +802,7 @@ function Header({
             color: "var(--fg)",
           }}
         >
-          Activities
+          {t("header.title")}
         </h2>
         {counts && (
           <span
@@ -797,7 +811,7 @@ function Header({
               color: "var(--muted)",
             }}
           >
-            {counts.total.toLocaleString()} total
+            {t("header.total", { value: formatNumber(counts.total) })}
             {counts.new > 0 && (
               <>
                 {" · "}
@@ -807,7 +821,7 @@ function Header({
                     fontWeight: 600,
                   }}
                 >
-                  {counts.new} new
+                  {t("header.new", { value: counts.new })}
                 </span>
               </>
             )}
@@ -819,25 +833,25 @@ function Header({
           onClick={onMarkAllSeen}
           disabled={!counts?.new}
           style={btnStyle}
-          title="Set last-seen to the newest card; clears the badge"
+          title={t("header.markAllSeenTitle")}
         >
-          Mark all seen
+          {t("header.markAllSeen")}
         </button>
         <button
           onClick={onRefresh}
           style={btnStyle}
-          title="Re-fetch from the index"
-          aria-label="Refresh events"
+          title={t("header.refreshTitle")}
+          aria-label={t("header.refreshAria")}
         >
-          Refresh
+          {t("header.refresh")}
         </button>
         <button
           onClick={onReindex}
           disabled={reindexing}
           style={btnStyle}
-          title="Walk every JSONL and rebuild the index"
+          title={t("header.reindexTitle")}
         >
-          {reindexing ? "Reindexing…" : "Reindex"}
+          {reindexing ? t("header.reindexing") : t("header.reindex")}
         </button>
       </div>
     </div>
@@ -853,6 +867,7 @@ interface CardStreamProps {
 }
 
 function CardStream({ cards, loading, error, lastSeenId, onCardClick }: CardStreamProps) {
+  const { t } = useTranslation("activities");
   if (loading) {
     return <SkeletonList rows={4} style={{ padding: "var(--sp-16)" }} />;
   }
@@ -875,15 +890,18 @@ function CardStream({ cards, loading, error, lastSeenId, onCardClick }: CardStre
   if (cards.length === 0) {
     return (
       <div style={emptyStyle}>
-        No cards. Try lowering the severity filter, or click <em>Reindex</em> to
-        backfill from your JSONL history.
+        <Trans
+          ns="activities"
+          i18nKey="stream.empty"
+          components={{ em: <em /> }}
+        />
       </div>
     );
   }
   return (
     <ul
       role="listbox"
-      aria-label="Activity cards"
+      aria-label={t("stream.cardsAria")}
       style={{
         margin: 0,
         padding: 0,
@@ -912,6 +930,7 @@ interface CardRowProps {
 }
 
 function CardRow({ card, isNew, onClick }: CardRowProps) {
+  const { t } = useTranslation("activities");
   return (
     <li
       role="option"
@@ -1025,7 +1044,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
           {card.plugin && (
             <>
               <span>·</span>
-              <span>plugin:{card.plugin}</span>
+              <span>{t("stream.pluginTag", { name: card.plugin })}</span>
             </>
           )}
           {card.source_ref && (
@@ -1044,6 +1063,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
 }
 
 function SeverityChip({ severity }: { severity: SeverityLabel }) {
+  const { t } = useTranslation("activities");
   const { bg, fg } = severityColors(severity);
   return (
     <div
@@ -1062,7 +1082,7 @@ function SeverityChip({ severity }: { severity: SeverityLabel }) {
         lineHeight: "var(--lh-base)",
       }}
     >
-      {severity}
+      {t(severityLabelKey(severity))}
     </div>
   );
 }
@@ -1084,7 +1104,8 @@ function severityColors(s: SeverityLabel): { bg: string; fg: string } {
 }
 
 function kindLabel(k: CardKindLabel): string {
-  return KIND_OPTIONS.find((o) => o.value === k)?.label ?? k;
+  const opt = KIND_OPTIONS.find((o) => o.value === k);
+  return opt ? i18n.t(opt.labelKey, { ns: "activities" }) : k;
 }
 
 function formatTime(ms: number): string {
@@ -1092,9 +1113,9 @@ function formatTime(ms: number): string {
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
   if (sameDay) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return formatDateTime(d, { hour: "2-digit", minute: "2-digit" });
   }
-  return d.toLocaleString([], {
+  return formatDateTime(d, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",

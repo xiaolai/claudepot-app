@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type {
   AgentCreateDto,
   AgentDetailsDto,
@@ -36,9 +38,6 @@ const PERMISSION_MODES: PermissionMode[] = [
 
 const OUTPUT_FORMATS: OutputFormat[] = ["json", "text", "stream-json"];
 
-const CWD_HINT =
-  "CC discovers .claude (commands, agents, skills) from cwd up to git-root. Set this to your project root for slash-commands to work.";
-
 /**
  * Trigger shape the form authors. `"event"` is v1's session-settled
  * reactive trigger (PRD §7); `"cron"` is the default; `"manual"`
@@ -66,6 +65,7 @@ export function AgentForm({
   onSubmit,
   onCancel,
 }: AgentFormProps) {
+  const { t } = useTranslation("agents");
   const [name, setName] = useState(initial?.summary.name ?? "");
   const [displayName, setDisplayName] = useState(
     initial?.summary.display_name ?? "",
@@ -167,16 +167,22 @@ export function AgentForm({
       try {
         const v = await api.agentsValidateName(name);
         if (!cancelled) {
-          setNameError(v.valid ? null : v.error ?? "invalid name");
+          setNameError(
+            v.valid ? null : v.error ?? t("form.errors.invalidName"),
+          );
         }
       } catch (e) {
-        if (!cancelled) setNameError(String(e));
+        if (!cancelled) setNameError(renderError(e));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [name, initial]);
+    // `t` is a dep because the fallback message is localized. Re-running
+    // on a language switch just re-validates the same name — idempotent,
+    // and it relabels an on-screen error instead of stranding it in the
+    // previous language.
+  }, [name, initial, t]);
 
   // Allowed-tools tokenizer: split on commas and whitespace, but
   // preserve patterns like `Bash(git *)` whose parentheses contain
@@ -367,8 +373,8 @@ export function AgentForm({
       }}
     >
       {/* Identity */}
-      <Group title="Identity">
-        <Field label="Name (a-z, 0-9, dash; 1-64; permanent)">
+      <Group title={t("form.groups.identity")}>
+        <Field label={t("form.fields.name")}>
           <input
             type="text"
             value={name}
@@ -379,7 +385,7 @@ export function AgentForm({
           />
           {nameError && <Hint kind="error">{nameError}</Hint>}
         </Field>
-        <Field label="Display name (optional)">
+        <Field label={t("form.fields.displayName")}>
           <input
             type="text"
             value={displayName}
@@ -388,7 +394,7 @@ export function AgentForm({
             style={inputStyle()}
           />
         </Field>
-        <Field label="Description (optional)">
+        <Field label={t("form.fields.description")}>
           <input
             type="text"
             value={description}
@@ -400,8 +406,14 @@ export function AgentForm({
       </Group>
 
       {/* What it runs */}
-      <Group title="What it runs">
-        <Field label={initial ? "Binary (locked in edit mode)" : "Binary"}>
+      <Group title={t("form.groups.what")}>
+        <Field
+          label={
+            initial
+              ? t("form.fields.binaryLocked")
+              : t("form.fields.binary")
+          }
+        >
           <select
             value={binaryKind}
             disabled={busy || !!initial}
@@ -410,8 +422,10 @@ export function AgentForm({
             }
             style={inputStyle()}
           >
-            <option value="first_party">First-party `claude`</option>
-            <option value="route">Provider route</option>
+            <option value="first_party">
+              {t("form.options.binaryFirstParty")}
+            </option>
+            <option value="route">{t("form.options.binaryRoute")}</option>
           </select>
           {binaryKind === "route" && (
             <select
@@ -420,7 +434,7 @@ export function AgentForm({
               onChange={(e) => setRouteId(e.target.value)}
               style={{ ...inputStyle(), marginTop: "var(--sp-6)" }}
             >
-              <option value="">— select a route —</option>
+              <option value="">{t("form.options.selectRoute")}</option>
               {routes.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name} ({r.provider_kind})
@@ -429,14 +443,10 @@ export function AgentForm({
             </select>
           )}
           {initial && (
-            <Hint>
-              Binary cannot change in edit mode — the scheduler
-              registration and helper shim are tied to the original
-              binary. Delete and re-create to switch.
-            </Hint>
+            <Hint>{t("form.hints.binaryLocked")}</Hint>
           )}
         </Field>
-        <Field label="Working directory (cwd)">
+        <Field label={t("form.fields.cwd")}>
           <input
             type="text"
             value={cwd}
@@ -445,19 +455,19 @@ export function AgentForm({
             placeholder="/Users/me/github/myproject"
             style={inputStyle()}
           />
-          <Hint>{CWD_HINT}</Hint>
+          <Hint>{t("form.hints.cwd")}</Hint>
         </Field>
-        <Field label="Prompt">
+        <Field label={t("form.fields.prompt")}>
           <textarea
             value={prompt}
             disabled={busy}
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
-            placeholder="summarize today's PRs..."
+            placeholder={t("form.placeholders.prompt")}
             style={{ ...inputStyle(), resize: "vertical", minHeight: "5rem" }}
           />
         </Field>
-        <Field label="System prompt (optional, replaces default)">
+        <Field label={t("form.fields.systemPrompt")}>
           <textarea
             value={systemPrompt}
             disabled={busy}
@@ -466,7 +476,7 @@ export function AgentForm({
             style={{ ...inputStyle(), resize: "vertical", minHeight: "3rem" }}
           />
         </Field>
-        <Field label="Append to system prompt (optional)">
+        <Field label={t("form.fields.appendSystemPrompt")}>
           <textarea
             value={appendSystemPrompt}
             disabled={busy}
@@ -478,8 +488,8 @@ export function AgentForm({
       </Group>
 
       {/* How it runs */}
-      <Group title="How it runs">
-        <Field label="Model">
+      <Group title={t("form.groups.how")}>
+        <Field label={t("form.fields.model")}>
           <input
             type="text"
             value={model}
@@ -489,7 +499,7 @@ export function AgentForm({
             style={inputStyle()}
           />
         </Field>
-        <Field label="Fallback model (when default is overloaded)">
+        <Field label={t("form.fields.fallbackModel")}>
           <input
             type="text"
             value={fallbackModel}
@@ -499,7 +509,7 @@ export function AgentForm({
             style={inputStyle()}
           />
         </Field>
-        <Field label="Permission mode">
+        <Field label={t("form.fields.permissionMode")}>
           <select
             value={permissionMode}
             disabled={busy}
@@ -512,12 +522,9 @@ export function AgentForm({
               </option>
             ))}
           </select>
-          <Hint>
-            Unattended runs typically need bypassPermissions with a tight
-            allowed-tools whitelist below.
-          </Hint>
+          <Hint>{t("form.hints.permissionMode")}</Hint>
         </Field>
-        <Field label="Allowed tools (comma- or space-separated)">
+        <Field label={t("form.fields.allowedTools")}>
           <input
             type="text"
             value={allowedToolsText}
@@ -531,12 +538,10 @@ export function AgentForm({
             }}
           />
           {bypassWithoutTools && (
-            <Hint kind="error">
-              bypassPermissions requires a non-empty whitelist.
-            </Hint>
+            <Hint kind="error">{t("form.errors.bypassNeedsTools")}</Hint>
           )}
         </Field>
-        <Field label="Max budget (USD per run; empty = unlimited)">
+        <Field label={t("form.fields.maxBudget")}>
           <input
             type="number"
             step="0.01"
@@ -547,12 +552,10 @@ export function AgentForm({
             style={inputStyle(budgetInvalid)}
           />
           {budgetInvalid && (
-            <Hint kind="error">
-              Budget must be a finite non-negative number.
-            </Hint>
+            <Hint kind="error">{t("form.errors.budget")}</Hint>
           )}
         </Field>
-        <Field label="Output format">
+        <Field label={t("form.fields.outputFormat")}>
           <select
             value={outputFormat}
             disabled={busy}
@@ -566,19 +569,19 @@ export function AgentForm({
             ))}
           </select>
         </Field>
-        <Field label="Minimal mode (--bare)">
+        <Field label={t("form.fields.bareMode")}>
           <Toggle
             checked={bareMode}
             onChange={setBareMode}
             disabled={busy}
-            label="Skip hooks, plugin sync, attribution, auto-memory, keychain reads, CLAUDE.md auto-discovery"
+            label={t("form.fields.bareToggle")}
           />
         </Field>
       </Group>
 
       {/* Agent spec — the richer construction knobs (Phase 1) */}
-      <Group title="Agent spec">
-        <Field label="Disallowed tools (comma- or space-separated; optional)">
+      <Group title={t("form.groups.spec")}>
+        <Field label={t("form.fields.disallowedTools")}>
           <input
             type="text"
             value={disallowedToolsText}
@@ -588,13 +591,10 @@ export function AgentForm({
             spellCheck={false}
             style={{ ...inputStyle(), fontFamily: "var(--ff-mono)" }}
           />
-          <Hint>
-            Prefer the allowed-tools whitelist above. Use this only to
-            carve specific tools out of an otherwise broad grant.
-          </Hint>
+          <Hint>{t("form.hints.disallowedTools")}</Hint>
         </Field>
 
-        <Field label="MCP servers">
+        <Field label={t("form.fields.mcpServers")}>
           <div
             style={{
               display: "flex",
@@ -609,27 +609,22 @@ export function AgentForm({
               disabled={busy}
             >
               {memoryAttached
-                ? "Detach Claudepot memory"
-                : "Attach Claudepot memory"}
+                ? t("form.mcp.detach")
+                : t("form.mcp.attach")}
             </Button>
             {memoryAttached && (
               <Tag tone="accent">claudepot-memory</Tag>
             )}
             {customMcpServers.map((s) => (
-              <Tag key={s.name} tone="neutral" title="Custom MCP server">
+              <Tag key={s.name} tone="neutral" title={t("form.mcp.customTitle")}>
                 {s.name}
               </Tag>
             ))}
           </div>
-          <Hint>
-            Attaching Claudepot memory passes a stdio MCP server
-            running `claudepot mcp memory-server` to the agent. Custom
-            MCP servers carried on this agent are preserved but not
-            editable here.
-          </Hint>
+          <Hint>{t("form.hints.mcp")}</Hint>
         </Field>
 
-        <Field label="Run as (account email; empty = active account)">
+        <Field label={t("form.fields.runAs")}>
           <input
             type="text"
             value={runAs}
@@ -639,14 +634,10 @@ export function AgentForm({
             spellCheck={false}
             style={inputStyle()}
           />
-          <Hint>
-            Phase 1 records this but still runs as the CLI-active
-            account; per-run credential pinning lands in a later
-            release.
-          </Hint>
+          <Hint>{t("form.hints.runAs")}</Hint>
         </Field>
 
-        <Field label="Task budget (tokens per run; empty = no ceiling)">
+        <Field label={t("form.fields.taskBudget")}>
           <input
             type="number"
             step="1"
@@ -658,13 +649,11 @@ export function AgentForm({
             style={inputStyle(taskBudgetInvalid)}
           />
           {taskBudgetInvalid && (
-            <Hint kind="error">
-              Task budget must be a positive whole number of tokens.
-            </Hint>
+            <Hint kind="error">{t("form.errors.taskBudget")}</Hint>
           )}
         </Field>
 
-        <Field label="Rate limit — minimum seconds between runs (optional)">
+        <Field label={t("form.fields.rateMin")}>
           <input
             type="number"
             step="1"
@@ -676,13 +665,10 @@ export function AgentForm({
             style={inputStyle(minIntervalInvalid)}
           />
           {minIntervalInvalid && (
-            <Hint kind="error">
-              Minimum interval must be a positive whole number of
-              seconds.
-            </Hint>
+            <Hint kind="error">{t("form.errors.rateMin")}</Hint>
           )}
         </Field>
-        <Field label="Rate limit — maximum runs per day (optional)">
+        <Field label={t("form.fields.rateMax")}>
           <input
             type="number"
             step="1"
@@ -694,28 +680,31 @@ export function AgentForm({
             style={inputStyle(maxPerDayInvalid)}
           />
           {maxPerDayInvalid && (
-            <Hint kind="error">
-              Maximum runs per day must be a positive whole number.
-            </Hint>
+            <Hint kind="error">{t("form.errors.rateMax")}</Hint>
           )}
         </Field>
 
-        <Field label="Lifecycle">
+        <Field label={t("form.fields.lifecycle")}>
           <div>
+            {/* `lifecycle` is a wire value (`AgentSummaryDto.lifecycle`
+                is typed `string`). Only the two the UI knows about get
+                a display label; anything else renders raw rather than
+                being mislabeled as "installed". */}
             <Tag tone={lifecycle === "installed" ? "ok" : "neutral"}>
-              {lifecycle}
+              {lifecycle === "draft"
+                ? t("form.lifecycle.draft")
+                : lifecycle === "installed"
+                  ? t("form.lifecycle.installed")
+                  : lifecycle}
             </Tag>
           </div>
-          <Hint>
-            Read-only. A draft is inert until armed; the GUI Add Agent
-            flow arms agents on create.
-          </Hint>
+          <Hint>{t("form.hints.lifecycle")}</Hint>
         </Field>
       </Group>
 
       {/* When it runs */}
-      <Group title="When it runs">
-        <Field label="Trigger type">
+      <Group title={t("form.groups.when")}>
+        <Field label={t("form.fields.triggerType")}>
           <select
             value={triggerKind}
             disabled={busy}
@@ -724,16 +713,16 @@ export function AgentForm({
             }
             style={inputStyle()}
           >
-            <option value="cron">Cron schedule</option>
-            <option value="event">Event — session settled (reactive)</option>
-            <option value="manual">Manual — Run-Now only</option>
+            <option value="cron">{t("form.options.triggerCron")}</option>
+            <option value="event">{t("form.options.triggerEvent")}</option>
+            <option value="manual">{t("form.options.triggerManual")}</option>
           </select>
           <Hint>
             {triggerKind === "event"
-              ? "Fires when a CC session in this agent's cwd has been idle for the debounce window. Requires a rate-limit (set below) to bound cost."
+              ? t("form.hints.triggerEvent")
               : triggerKind === "manual"
-                ? "No scheduler artifact is created. The agent only runs when you click Run Now."
-                : "Five-field cron expression; an IANA timezone is optional."}
+                ? t("form.hints.triggerManual")
+                : t("form.hints.triggerCron")}
           </Hint>
         </Field>
 
@@ -747,7 +736,7 @@ export function AgentForm({
         )}
 
         {triggerKind === "event" && (
-          <Field label="Debounce — seconds of session inactivity before firing">
+          <Field label={t("form.fields.debounce")}>
             <input
               type="number"
               step="1"
@@ -760,22 +749,17 @@ export function AgentForm({
               aria-invalid={eventDebounceInvalid}
             />
             {eventDebounceInvalid ? (
-              <Hint kind="error">
-                Debounce must be a positive whole number of seconds.
-              </Hint>
+              <Hint kind="error">{t("form.errors.debounce")}</Hint>
             ) : (
               <Hint>
-                Default {DEFAULT_EVENT_DEBOUNCE_SECS}s (10 min). A
-                session quiet for this long has almost certainly
-                ended.
+                {t("form.hints.debounceDefault", {
+                  secs: DEFAULT_EVENT_DEBOUNCE_SECS,
+                })}
               </Hint>
             )}
             {rateLimitMissingForEvent && (
               <Hint kind="error">
-                Event-triggered agents must carry a rate-limit
-                (above): set a minimum interval and/or a maximum
-                runs-per-day. Without one, a busy project could
-                fire dozens of billed runs an hour.
+                {t("form.errors.eventNeedsRateLimit")}
               </Hint>
             )}
           </Field>
@@ -784,7 +768,9 @@ export function AgentForm({
 
       {/* Platform behavior */}
       <Group
-        title={`Platform behavior (${capabilities?.native_label ?? "—"})`}
+        title={t("form.groups.platform", {
+          scheduler: capabilities?.native_label ?? "—",
+        })}
       >
         <Toggle
           checked={platformOptions.wake_to_run}
@@ -792,8 +778,8 @@ export function AgentForm({
             setPlatformOptions({ ...platformOptions, wake_to_run: v })
           }
           disabled={busy || !capabilities?.wake_to_run}
-          label={`Wake the computer to run this${
-            capabilities?.wake_to_run ? "" : " (not supported on this OS)"
+          label={`${t("form.platform.wake")}${
+            capabilities?.wake_to_run ? "" : t("form.platform.notSupported")
           }`}
         />
         <Toggle
@@ -802,10 +788,10 @@ export function AgentForm({
             setPlatformOptions({ ...platformOptions, catch_up_if_missed: v })
           }
           disabled={busy || !capabilities?.catch_up_if_missed}
-          label={`Catch up if a run was missed${
+          label={`${t("form.platform.catchUp")}${
             capabilities?.catch_up_if_missed
               ? ""
-              : " (not supported on this OS)"
+              : t("form.platform.notSupported")
           }`}
         />
         <Toggle
@@ -817,10 +803,10 @@ export function AgentForm({
             })
           }
           disabled={busy || !capabilities?.run_when_logged_out}
-          label={`Run while logged out${
+          label={`${t("form.platform.runLoggedOut")}${
             capabilities?.run_when_logged_out
               ? ""
-              : " (not supported on this OS)"
+              : t("form.platform.notSupported")
           }`}
         />
       </Group>
@@ -834,7 +820,7 @@ export function AgentForm({
         }}
       >
         <Button variant="ghost" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t("actions.cancel")}
         </Button>
         <Button
           variant="solid"

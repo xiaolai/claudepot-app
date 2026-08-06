@@ -3,6 +3,7 @@
 // Filters are single-select. Counts come from the backend.
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/primitives/Button";
 import type { RenderedTip, TipsCounts } from "../../../types/cc-tips";
 import { TipRow } from "./TipRow";
@@ -16,6 +17,7 @@ export function TipsList({
   tips: RenderedTip[];
   counts: TipsCounts;
 }) {
+  const { t } = useTranslation("global");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -53,7 +55,7 @@ export function TipsList({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter tips by prose, id, or trigger…"
+          placeholder={t("tips.filterPlaceholder")}
           style={{
             flex: "1 1 var(--config-cmd-col-max)",
             minWidth: 240,
@@ -68,22 +70,22 @@ export function TipsList({
         />
         <Chip
           active={filter === "all"}
-          label={`All ${counts.all}`}
+          label={t("tips.filterAll", { n: counts.all })}
           onClick={() => setFilter("all")}
         />
         <Chip
           active={filter === "seen"}
-          label={`Seen ${counts.seen}`}
+          label={t("tips.filterSeen", { n: counts.seen })}
           onClick={() => setFilter("seen")}
         />
         <Chip
           active={filter === "never-seen"}
-          label={`Never seen ${counts.never_seen}`}
+          label={t("tips.filterNeverSeen", { n: counts.never_seen })}
           onClick={() => setFilter("never-seen")}
         />
         <Chip
           active={filter === "active-experiments"}
-          label={`Experiments ${counts.active_experiments}`}
+          label={t("tips.filterExperiments", { n: counts.active_experiments })}
           onClick={() => setFilter("active-experiments")}
         />
       </div>
@@ -97,10 +99,11 @@ export function TipsList({
               textAlign: "center",
             }}
           >
-            No tips match the current filter.
+            {t("tips.noMatch")}
           </div>
         ) : (
-          filtered.map((t) => <TipRow key={t.id} tip={t} />)
+          // Named `tip`, not `t` — `t` is the translator in this scope.
+          filtered.map((tip) => <TipRow key={tip.id} tip={tip} />)
         )}
       </div>
     </div>

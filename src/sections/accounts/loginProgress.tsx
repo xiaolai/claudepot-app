@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { i18n } from "../../lib/i18n";
 import type { RunningOpInfo } from "../../types";
 import type { PhaseSpec } from "../projects/OperationProgressModal";
 
@@ -8,14 +9,47 @@ import type { PhaseSpec } from "../projects/OperationProgressModal";
  * adapter in `src-tauri/src/ops.rs::TauriLoginProgressSink` writes the
  * snake_case names matching `LoginPhase::as_str`). The labels are kept
  * short so the row reads well at the modal's default width.
+ *
+ * Labels are getters (not values captured at module load) so they
+ * resolve against the *current* language each time the modal renders.
  */
 export const LOGIN_PHASES: PhaseSpec[] = [
-  { id: "spawning", label: "Preparing" },
-  { id: "waiting_for_browser", label: "Waiting for browser" },
-  { id: "reading_blob", label: "Reading credentials" },
-  { id: "fetching_profile", label: "Fetching profile" },
-  { id: "verifying_identity", label: "Verifying identity" },
-  { id: "persisting", label: "Saving" },
+  {
+    id: "spawning",
+    get label() {
+      return i18n.t("loginPhases.spawning", { ns: "accounts" });
+    },
+  },
+  {
+    id: "waiting_for_browser",
+    get label() {
+      return i18n.t("loginPhases.waitingForBrowser", { ns: "accounts" });
+    },
+  },
+  {
+    id: "reading_blob",
+    get label() {
+      return i18n.t("loginPhases.readingBlob", { ns: "accounts" });
+    },
+  },
+  {
+    id: "fetching_profile",
+    get label() {
+      return i18n.t("loginPhases.fetchingProfile", { ns: "accounts" });
+    },
+  },
+  {
+    id: "verifying_identity",
+    get label() {
+      return i18n.t("loginPhases.verifyingIdentity", { ns: "accounts" });
+    },
+  },
+  {
+    id: "persisting",
+    get label() {
+      return i18n.t("loginPhases.persisting", { ns: "accounts" });
+    },
+  },
 ];
 
 /**

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { AttributionModeKind, AttributionState } from "../../api/attribution";
 import { Button } from "../../components/primitives/Button";
-import { toastError } from "../../lib/toastError";
+import { toastError } from "../../lib/i18n-error";
 
 // Settings → General → Claude Code behavior.
 //
@@ -23,6 +24,7 @@ export function AttributionControl({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [state, setState] = useState<AttributionState | null>(null);
   const [mode, setMode] = useState<AttributionModeKind>("default");
   const [commit, setCommit] = useState("");
@@ -41,9 +43,9 @@ export function AttributionControl({
     try {
       hydrate(await api.attributionState());
     } catch (e) {
-      toastError(pushToast, "Attribution setting load failed", e);
+      toastError(pushToast, t("attribution.loadFailed"), e);
     }
-  }, [pushToast, hydrate]);
+  }, [pushToast, hydrate, t]);
 
   useEffect(() => {
     void refresh();
@@ -61,13 +63,13 @@ export function AttributionControl({
       pushToast(
         "info",
         next === "default"
-          ? "Attribution reset to Claude Code's default."
+          ? t("attribution.resetToast")
           : next === "off"
-            ? "Attribution off — commits and PRs carry none."
-            : "Custom attribution saved.",
+            ? t("attribution.offToast")
+            : t("attribution.customToast"),
       );
     } catch (e) {
-      toastError(pushToast, "Set attribution", e);
+      toastError(pushToast, t("attribution.applyFailed"), e);
     } finally {
       setBusy(false);
     }
@@ -81,9 +83,9 @@ export function AttributionControl({
   };
 
   const OPTIONS: { value: AttributionModeKind; label: string }[] = [
-    { value: "default", label: "Default" },
-    { value: "off", label: "Off" },
-    { value: "custom", label: "Custom" },
+    { value: "default", label: t("attribution.default") },
+    { value: "off", label: t("attribution.off") },
+    { value: "custom", label: t("attribution.custom") },
   ];
 
   const dirty =
@@ -124,7 +126,7 @@ export function AttributionControl({
     >
       <div>
         <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-          Commit &amp; PR attribution
+          {t("attribution.label")}
         </div>
         <div
           id={hintId}
@@ -135,15 +137,13 @@ export function AttributionControl({
             lineHeight: "var(--lh-body)",
           }}
         >
-          Whether Claude's attribution appears on git commits and pull
-          requests, and what it says. Off removes the “Co-Authored-By”
-          trailer and the “Generated with Claude Code” line everywhere.
+          {t("attribution.hint")}
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
         <div
           role="group"
-          aria-label="Attribution mode"
+          aria-label={t("attribution.modeAria")}
           aria-describedby={hintId}
           style={{ display: "inline-flex", gap: "var(--sp-4)" }}
         >
@@ -173,7 +173,7 @@ export function AttributionControl({
                 color: "var(--fg-faint)",
               }}
             >
-              Commit trailer
+              {t("attribution.commitLabel")}
               <textarea
                 value={commit}
                 onChange={(e) => setCommit(e.target.value)}
@@ -192,7 +192,7 @@ export function AttributionControl({
                 color: "var(--fg-faint)",
               }}
             >
-              Pull-request body
+              {t("attribution.prLabel")}
               <textarea
                 value={pr}
                 onChange={(e) => setPr(e.target.value)}
@@ -209,11 +209,11 @@ export function AttributionControl({
                 disabled={busy || !dirty || bothEmpty}
                 onClick={() => void apply("custom", commit, pr)}
               >
-                {busy ? "Saving…" : "Save custom attribution"}
+                {busy ? t("shared.saving") : t("attribution.save")}
               </Button>
               {bothEmpty && (
                 <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
-                  Both fields empty — use Off instead.
+                  {t("attribution.bothEmpty")}
                 </span>
               )}
             </div>
