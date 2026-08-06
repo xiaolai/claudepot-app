@@ -668,7 +668,7 @@
     "sync_conflict_present": "该会话旁存在同步冲突副本。请先处理，或强制移动。",
     "target_collision": "目标项目中已存在该会话。",
     "target_cwd_missing": "{{path}} 不存在，没有可以接收这些会话的目录。",
-    "trash_failed": "无法移入回收站：{{detail}}",
+    "trash_failed": "无法移入系统废纸篓：{{detail}}",
     "worktree_sibling_still_live": "{{path}} 仍是活跃的 git worktree——Claude Code 本就支持跨 worktree 恢复，无需移动。"
   },
   "session_prune": {

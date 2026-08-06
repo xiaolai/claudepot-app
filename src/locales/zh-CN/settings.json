@@ -507,7 +507,7 @@
   "artifacts": {
     "sectionTitle": "工件",
     "loadError": "无法加载工件生命周期：{{error}}",
-    "autoPurged_other": "已自动清除 {{count}} 条超过 {{days}} 天的废纸篓条目",
+    "autoPurged_other": "已自动清除 {{count}} 条超过 {{days}} 天的回收站条目",
     "disabledTitle": "已停用的工件",
     "disabledTitleCount": "已停用的工件（{{count}}）",
     "noneDisabled": "没有停用任何工件。在 Config 树中使用<em>停用</em>操作，可以在不删除的情况下对 Claude Code 隐藏某个工件。",
@@ -521,24 +521,24 @@
     "scopeProject": "项目",
     "reenabled": "已重新启用 {{kind}}“{{name}}”",
     "reenableFailed": "重新启用失败",
-    "movedToTrash": "已把 {{kind}}“{{name}}”移入废纸篓",
-    "trashFailed": "移入废纸篓失败",
+    "movedToTrash": "已把 {{kind}}“{{name}}”移入回收站",
+    "trashFailed": "移入回收站失败",
     "reenable": "重新启用",
-    "moveToTrash": "移入废纸篓",
+    "moveToTrash": "移入回收站",
     "confirmTrash": {
-      "title": "把 {{kind}} 移入废纸篓？",
-      "body": "“{{name}}”将移入废纸篓。约 30 天内可以恢复。",
-      "confirm": "移入废纸篓"
+      "title": "把 {{kind}} 移入回收站？",
+      "body": "“{{name}}”将移入回收站。约 30 天内可以恢复。",
+      "confirm": "移入回收站"
     }
   },
   "trash": {
-    "title": "工件废纸篓",
-    "titleCount": "工件废纸篓（{{count}}）",
-    "empty": "废纸篓为空。移入废纸篓的工件可在此保留约 {{days}} 天并可恢复。",
+    "title": "工件回收站",
+    "titleCount": "工件回收站（{{count}}）",
+    "empty": "回收站为空。移入回收站的工件可在此保留约 {{days}} 天并可恢复。",
     "unrecoverable": "（不可恢复：{{state}}）",
     "restoredTo": "已恢复到 {{path}}",
     "restoreFailed": "恢复失败",
-    "forgotten": "废纸篓条目已抹除",
+    "forgotten": "回收站条目已抹除",
     "forgetFailed": "抹除失败",
     "recoveredTo": "已恢复到 {{path}}",
     "recoverFailed": "恢复失败",
@@ -547,7 +547,7 @@
     "recover": "恢复…",
     "forgetTitle": "抹除 — 从磁盘删除，无法再撤销",
     "confirmForget": {
-      "title": "抹除这条废纸篓条目？",
+      "title": "抹除这条回收站条目？",
       "body": "该条目将从磁盘删除。之后无法再撤销。",
       "confirm": "抹除"
     },
@@ -559,7 +559,7 @@
     "purgeTitle": "清除超过 {{days}} 天的完好条目",
     "emptyOld": "清空旧条目",
     "confirmPurge": {
-      "title": "清除旧的废纸篓条目？",
+      "title": "清除旧的回收站条目？",
       "body": "超过 {{days}} 天的完好条目将被删除。损坏的条目会保留，直到手动抹除。",
       "confirm": "清除"
     },
@@ -576,7 +576,7 @@
     }
   },
   "recover": {
-    "title": "恢复废纸篓条目",
+    "title": "恢复回收站条目",
     "intro": "该条目没有完整的清单。请确认它应恢复到哪里、属于哪种工件。条目的载荷内容保持原样 — 只有目标位置是补写的。",
     "targetLabel": "绝对目标路径",
     "pathError": "路径必须是绝对路径（以 <code>/</code> 或 <code>C:\\</code> 开头）。",

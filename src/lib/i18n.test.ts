@@ -131,3 +131,73 @@ describe("type-to-confirm tokens are localized", () => {
     expect(zh).toContain("确认");
   });
 });
+
+// Claudepot has two distinct trashes, and English separates them only by
+// capitalisation: lowercase "trash" is Claudepot's own store under
+// `~/.claudepot/trash/`, restorable in Settings → Cleanup; capital "Trash"
+// is the OS Trash reached via the `trash` crate (session/move_), restorable
+// in Finder. Chinese has no capitalisation to lean on, so the two need two
+// words — 回收站 for ours, 废纸篓 for the OS one.
+//
+// They had drifted: Settings called our artifact trash 废纸篓 while Config,
+// Sessions and the error catalog called the same store 回收站. That broke a
+// pointer — Config said "移入回收站…可在设置 → 清理中恢复" and the pane it
+// named was titled 工件废纸篓 — and it collided with adopt's 废纸篓, which
+// really is the OS Trash and has a different recovery procedure entirely.
+//
+// No structural gate can catch this: every key existed, placeholders and
+// tags matched, and both words are real Chinese. Only the mapping was wrong.
+describe("trash terminology maps to the right store", () => {
+  // The only surfaces that mean the OS Trash. `projects.adopt.*` moves an
+  // orphan slug dir via session::move_, which calls trash::delete;
+  // `errors.session_move.trash_failed` is that call's failure.
+  const OS_TRASH_KEYS = [/^adopt\./, /^session_move\.trash_failed$/];
+
+  const flatten = (obj: unknown, prefix = ""): [string, string][] => {
+    if (typeof obj === "string") return [[prefix, obj]];
+    if (!obj || typeof obj !== "object") return [];
+    return Object.entries(obj as Record<string, unknown>).flatMap(([k, v]) =>
+      flatten(v, prefix ? `${prefix}.${k}` : k),
+    );
+  };
+
+  const zhEntries = (): { ns: string; key: string; value: string }[] => {
+    const namespaces = (i18n.options.ns ?? []) as string[];
+    return namespaces.flatMap((ns) =>
+      flatten(i18n.getResourceBundle("zh-CN", ns)).map(([key, value]) => ({
+        ns,
+        key,
+        value,
+      })),
+    );
+  };
+
+  it("废纸篓 appears only where the OS Trash is actually meant", () => {
+    const stray = zhEntries()
+      .filter((e) => e.value.includes("废纸篓"))
+      .filter((e) => !OS_TRASH_KEYS.some((re) => re.test(e.key)));
+    expect(
+      stray.map((e) => `${e.ns}:${e.key}`),
+      "these say 废纸篓 (OS Trash) but back onto Claudepot's own store",
+    ).toEqual([]);
+  });
+
+  it("every OS-trash surface says 废纸篓, not 回收站", () => {
+    const wrong = zhEntries()
+      .filter((e) => OS_TRASH_KEYS.some((re) => re.test(e.key)))
+      .filter((e) => e.value.includes("回收站"));
+    expect(
+      wrong.map((e) => `${e.ns}:${e.key}`),
+      "these reach the OS Trash but name Claudepot's store",
+    ).toEqual([]);
+  });
+
+  it("the Config pointer names the pane Settings actually renders", () => {
+    // The whole failure mode in one assertion: follow the cross-reference.
+    const pointer = i18n.getFixedT("zh-CN", "config")("lifecycle.trashTitle");
+    const destination = i18n.getFixedT("zh-CN", "settings")("trash.title");
+    const term = "回收站";
+    expect(pointer).toContain(term);
+    expect(destination).toContain(term);
+  });
+});
