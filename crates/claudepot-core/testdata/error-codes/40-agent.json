@@ -1,0 +1,960 @@
+{
+  "comment": [
+    "Error codes for the agent / board / env-vault / routes / MCP / PR",
+    "domain. Schema and rules: see 00-foundation.json — this file is one",
+    "domain's slice of the same registry, split so parallel conversions",
+    "do not serialize behind a single editor.",
+    "",
+    "Secret discipline, which this domain needs more than any other:",
+    "",
+    "  - env_vault.* and env_file.* carry the *name* of a secret or an",
+    "    env key, never its value. A vault value crossing into params",
+    "    would land in the JS heap — see rules/architecture.md, 'IPC",
+    "    trust + secret direction'.",
+    "  - board.* identifiers are user-controlled and pass through",
+    "    board::error::redact_identifier before they reach an error, so",
+    "    a token-shaped board or series name is masked, not echoed.",
+    "  - board.sequence_replay names the writer as reported_writer.",
+    "    boards.db has no IPC channel between its writers, so writer_id",
+    "    is self-reported; the param name must not imply otherwise.",
+    "    Every surface renders it as 'Reported by …'."
+  ],
+  "codes": [
+    {
+      "code": "agent.io",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "io: permission denied"
+    },
+    {
+      "code": "agent.json",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "json: expected value at line 1 column 1"
+    },
+    {
+      "code": "agent.not_found",
+      "owner": "core",
+      "params": ["id"],
+      "message": "agent not found: 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "agent.duplicate_name",
+      "owner": "core",
+      "params": ["name"],
+      "message": "agent name already taken: nightly-usage"
+    },
+    {
+      "code": "agent.invalid_name",
+      "owner": "core",
+      "params": ["name", "reason"],
+      "message": "invalid name 'Nightly Usage': must be lowercase"
+    },
+    {
+      "code": "agent.invalid_cron",
+      "owner": "core",
+      "params": ["cron", "reason"],
+      "message": "invalid cron expression '* * *': expected 5 fields"
+    },
+    {
+      "code": "agent.cron_too_dense",
+      "owner": "core",
+      "params": ["cron", "slots", "limit"],
+      "message": "cron '* * * * *' expands to 1440 launch slots, exceeds limit of 96"
+    },
+    {
+      "code": "agent.invalid_env",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "invalid env: key 'PATH' is set by Claudepot and cannot be overridden"
+    },
+    {
+      "code": "agent.missing_field",
+      "owner": "core",
+      "params": ["field"],
+      "message": "missing required field: prompt"
+    },
+    {
+      "code": "agent.invalid_path",
+      "owner": "core",
+      "params": ["path", "reason"],
+      "message": "invalid path 'relative/dir': must be absolute"
+    },
+    {
+      "code": "agent.no_home_dir",
+      "owner": "core",
+      "params": [],
+      "message": "home directory unavailable"
+    },
+    {
+      "code": "agent.unsupported_platform",
+      "owner": "core",
+      "params": ["operation"],
+      "message": "operation not supported on this platform: scheduler register"
+    },
+    {
+      "code": "agent.not_managed",
+      "owner": "core",
+      "params": ["path"],
+      "message": "agent file at /Users/me/Library/LaunchAgents/x.plist is not managed by Claudepot — refusing to overwrite"
+    },
+    {
+      "code": "agent_events.io",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "io error: permission denied"
+    },
+    {
+      "code": "agent_events.serde",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "serde error: expected value at line 1 column 1"
+    },
+    {
+      "code": "agent_events.unsupported_schema_version",
+      "owner": "core",
+      "params": ["found", "expected"],
+      "message": "schema version 9 is unsupported (expected 1)"
+    },
+    {
+      "code": "board.sql",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "sqlite error: Query returned no rows"
+    },
+    {
+      "code": "board.io",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "io error: permission denied"
+    },
+    {
+      "code": "board.json",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "json error: expected value at line 1 column 1"
+    },
+    {
+      "code": "board.board_not_found",
+      "owner": "core",
+      "params": ["board_id"],
+      "message": "no board with id `nightly-usage`"
+    },
+    {
+      "code": "board.series_not_found",
+      "owner": "core",
+      "params": ["board", "series"],
+      "message": "board `nightly-usage` has no series named `tokens`"
+    },
+    {
+      "code": "board.duplicate_series",
+      "owner": "core",
+      "params": ["board", "series"],
+      "message": "board `nightly-usage` already has a series named `tokens`"
+    },
+    {
+      "code": "board.revision_conflict",
+      "owner": "core",
+      "params": ["board", "base", "current"],
+      "message": "board `nightly-usage` is at revision 7, not 5; re-read and retry"
+    },
+    {
+      "code": "board.column_type_mismatch",
+      "owner": "core",
+      "params": ["series", "column", "expected", "actual"],
+      "message": "series `tokens` column `count` expects number, got text"
+    },
+    {
+      "code": "board.column_count_mismatch",
+      "owner": "core",
+      "params": ["series", "expected", "actual"],
+      "message": "series `tokens` expects 3 columns per row, got 2"
+    },
+    {
+      "code": "board.invalid_name",
+      "owner": "core",
+      "params": ["name"],
+      "message": "`bad name!` is not a valid name: use 1-64 chars of [A-Za-z0-9._-]"
+    },
+    {
+      "code": "board.invalid_timestamp",
+      "owner": "core",
+      "params": [],
+      "message": "timestamp is not RFC 3339 with an explicit offset"
+    },
+    {
+      "code": "board.sequence_replay",
+      "owner": "core",
+      "params": ["reported_writer", "series", "seq"],
+      "message": "writer `nightly-agent` reused sequence 4 on series `tokens` with different rows"
+    },
+    {
+      "code": "board.cap_exceeded",
+      "owner": "core",
+      "params": ["what", "limit", "actual"],
+      "message": "rows per push exceeds the cap of 1000 (1500)"
+    },
+    {
+      "code": "board.invalid_spec",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "board spec is invalid: grid has no cells"
+    },
+    {
+      "code": "board.unsupported_export_version",
+      "owner": "core",
+      "params": ["found", "expected"],
+      "message": "export envelope has schema version 2, expected 1"
+    },
+    {
+      "code": "board.schema_too_new",
+      "owner": "core",
+      "params": ["found", "supported"],
+      "message": "boards.db is at schema version 9, newer than this build supports (3); upgrade Claudepot"
+    },
+    {
+      "code": "board.sequence_out_of_range",
+      "owner": "core",
+      "params": ["seq", "rows"],
+      "message": "writer sequence 0 is out of range for a 5-row push (must be >= 1 and not overflow)"
+    },
+    {
+      "code": "board.invalid_envelope",
+      "owner": "core",
+      "params": ["reason"],
+      "message": "export envelope is not valid: unknown column type"
+    },
+    {
+      "code": "board.corrupt_row",
+      "owner": "core",
+      "params": ["series", "what"],
+      "message": "board row in series `tokens` is corrupt: cell count does not match the series"
+    },
+    {
+      "code": "env_vault.sql",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "sqlite error: Query returned no rows"
+    },
+    {
+      "code": "env_vault.io",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "io error: permission denied"
+    },
+    {
+      "code": "env_vault.not_found",
+      "owner": "core",
+      "params": ["name"],
+      "message": "no vault secret named `OPENAI_API_KEY`"
+    },
+    {
+      "code": "env_vault.duplicate_name",
+      "owner": "core",
+      "params": ["name"],
+      "message": "a vault secret named `OPENAI_API_KEY` already exists"
+    },
+    {
+      "code": "env_vault.invalid_name",
+      "owner": "core",
+      "params": ["name"],
+      "message": "`9lives` is not a valid env key name"
+    },
+    {
+      "code": "env_file.key_not_found",
+      "owner": "core",
+      "params": ["key"],
+      "message": "no `.env` line found for key `OPENAI_API_KEY`"
+    },
+    {
+      "code": "env_file.already_active",
+      "owner": "core",
+      "params": ["key"],
+      "message": "key `OPENAI_API_KEY` is already active"
+    },
+    {
+      "code": "env_file.already_commented",
+      "owner": "core",
+      "params": ["key"],
+      "message": "key `OPENAI_API_KEY` is already commented out"
+    },
+    {
+      "code": "env_file.invalid_key_name",
+      "owner": "core",
+      "params": ["key"],
+      "message": "`9lives` is not a valid env key name"
+    },
+    {
+      "code": "env_file.value_has_newline",
+      "owner": "core",
+      "params": ["key"],
+      "message": "value for `OPENAI_API_KEY` contains a newline, which `.env` cannot represent"
+    },
+    {
+      "code": "routes.io",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "io: permission denied"
+    },
+    {
+      "code": "routes.json",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "json: expected value at line 1 column 1"
+    },
+    {
+      "code": "routes.not_found",
+      "owner": "core",
+      "params": ["id"],
+      "message": "route not found: 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "routes.duplicate_name",
+      "owner": "core",
+      "params": ["name"],
+      "message": "route name already taken: kimi"
+    },
+    {
+      "code": "routes.duplicate_wrapper_name",
+      "owner": "core",
+      "params": ["wrapper"],
+      "message": "wrapper name already in use by another route: claude-kimi"
+    },
+    {
+      "code": "routes.wrapper_shadows_claude",
+      "owner": "core",
+      "params": ["wrapper"],
+      "message": "wrapper name 'claude' would collide with the first-party `claude` binary"
+    },
+    {
+      "code": "routes.wrapper_file_not_managed",
+      "owner": "core",
+      "params": ["path"],
+      "message": "wrapper '/Users/me/.local/bin/claude-kimi' already exists on disk and was not written by Claudepot — refusing to overwrite"
+    },
+    {
+      "code": "routes.invalid_wrapper_name",
+      "owner": "core",
+      "params": ["wrapper", "reason"],
+      "message": "invalid wrapper name 'claude kimi': not shell-safe"
+    },
+    {
+      "code": "routes.invalid_base_url",
+      "owner": "core",
+      "params": ["url", "reason"],
+      "message": "invalid base URL 'ftp://example.com': URL must use http:// or https://"
+    },
+    {
+      "code": "routes.missing_field",
+      "owner": "core",
+      "params": ["field"],
+      "message": "missing required field: base_url"
+    },
+    {
+      "code": "routes.no_home_dir",
+      "owner": "core",
+      "params": [],
+      "message": "home directory unavailable"
+    },
+    {
+      "code": "routes.unsupported_platform",
+      "owner": "core",
+      "params": ["operation"],
+      "message": "operation not supported on this platform: Desktop profile install"
+    },
+    {
+      "code": "wrapper_name.empty",
+      "owner": "core",
+      "params": [],
+      "message": "wrapper name cannot be empty"
+    },
+    {
+      "code": "wrapper_name.invalid_chars",
+      "owner": "core",
+      "params": ["name"],
+      "message": "wrapper name 'claude kimi' contains characters that aren't shell-safe (allowed: alnum, dash, underscore)"
+    },
+    {
+      "code": "wrapper_name.reserved",
+      "owner": "core",
+      "params": ["name"],
+      "message": "wrapper name 'claude' is reserved"
+    },
+    {
+      "code": "base_url.empty",
+      "owner": "core",
+      "params": [],
+      "message": "URL is empty"
+    },
+    {
+      "code": "base_url.bad_scheme",
+      "owner": "core",
+      "params": ["url"],
+      "message": "URL must use http:// or https:// (got: ftp://example.com)"
+    },
+    {
+      "code": "base_url.no_host",
+      "owner": "core",
+      "params": [],
+      "message": "URL has no host"
+    },
+    {
+      "code": "base_url.invalid_chars",
+      "owner": "core",
+      "params": [],
+      "message": "URL contains whitespace or control characters"
+    },
+    {
+      "code": "base_url.malformed",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "URL is malformed: userinfo (`user:pass@host`) is not allowed in base URLs"
+    },
+    {
+      "code": "route_save.not_found",
+      "owner": "core",
+      "params": ["id"],
+      "message": "route not found: 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "route_save.secrets",
+      "owner": "core",
+      "params": ["detail", "cause_code"],
+      "message": "io: keychain write failed"
+    },
+    {
+      "code": "route_save.store",
+      "owner": "core",
+      "params": ["detail", "cause_code"],
+      "message": "route name already taken: kimi"
+    },
+    {
+      "code": "mcp_probe.cli_not_found",
+      "owner": "core",
+      "params": ["exe_dir", "tried"],
+      "message": "no claudepot CLI binary found in /Applications/Claudepot.app/Contents/MacOS (tried: claudepot-cli, claudepot)"
+    },
+    {
+      "code": "mcp_probe.spawn",
+      "owner": "core",
+      "params": ["bin", "detail"],
+      "message": "spawn claudepot-cli: permission denied"
+    },
+    {
+      "code": "mcp_snippet.no_home_dir",
+      "owner": "core",
+      "params": [],
+      "message": "could not resolve home directory"
+    },
+    {
+      "code": "mcp_snippet.missing_project_path",
+      "owner": "core",
+      "params": [],
+      "message": "project_path required for scope = \"project\""
+    },
+    {
+      "code": "mcp_snippet.project_path_not_absolute",
+      "owner": "core",
+      "params": ["path"],
+      "message": "project path must be absolute: relative/dir"
+    },
+    {
+      "code": "mcp_snippet.project_path_not_dir",
+      "owner": "core",
+      "params": ["path"],
+      "message": "project path is not an existing directory: /Users/me/gone"
+    },
+    {
+      "code": "mcp_snippet.create_parent",
+      "owner": "core",
+      "params": ["path", "detail"],
+      "message": "create parent of /Users/me/proj/.claude/claudepot-mcp-instructions.md: permission denied"
+    },
+    {
+      "code": "mcp_snippet.write",
+      "owner": "core",
+      "params": ["path", "detail"],
+      "message": "write /Users/me/proj/.claude/claudepot-mcp-instructions.md: permission denied"
+    },
+    {
+      "code": "github_pr.missing_cli",
+      "owner": "core",
+      "params": ["tool"],
+      "message": "required CLI not available: gh"
+    },
+    {
+      "code": "github_pr.subprocess",
+      "owner": "core",
+      "params": ["tool", "code", "stderr"],
+      "message": "gh exited 1: no pull requests found for branch feat/x"
+    },
+    {
+      "code": "github_pr.bad_output",
+      "owner": "core",
+      "params": ["tool", "detail"],
+      "message": "could not parse gh output: expected value at line 1 column 1"
+    },
+    {
+      "code": "github_pr.io",
+      "owner": "core",
+      "params": ["tool", "detail"],
+      "message": "io error running gh: No such file or directory"
+    },
+    {
+      "code": "github_pr.timeout",
+      "owner": "core",
+      "params": ["tool"],
+      "message": "gh timed out"
+    },
+    {
+      "code": "env_file.invalid_project_path",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "project path must be absolute: relative/dir"
+    },
+    {
+      "code": "env_file.read_failed",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "read /Users/me/proj/.env failed: permission denied"
+    },
+    {
+      "code": "env_file.too_large",
+      "owner": "command",
+      "params": ["path", "max_bytes"],
+      "message": "/Users/me/proj/.env is too large for the environment-file editor (maximum 4194304 bytes)"
+    },
+    {
+      "code": "env_file.invalid_encoding",
+      "owner": "command",
+      "params": ["path"],
+      "message": "/Users/me/proj/.env is not valid UTF-8"
+    },
+    {
+      "code": "env_file.invalid_dotenv_path",
+      "owner": "command",
+      "params": ["path"],
+      "message": "invalid dotenv path: /Users/me/proj/"
+    },
+    {
+      "code": "env_file.lock_open_failed",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "open dotenv lock /Users/me/proj/..env.claudepot.lock failed: permission denied"
+    },
+    {
+      "code": "env_file.lock_failed",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "lock dotenv file /Users/me/proj/.env failed: resource temporarily unavailable"
+    },
+    {
+      "code": "env_file.name_empty",
+      "owner": "command",
+      "params": [],
+      "message": "empty .env file name"
+    },
+    {
+      "code": "env_file.name_unsafe",
+      "owner": "command",
+      "params": ["file_name"],
+      "message": "unsafe .env file name: \"../.env\""
+    },
+    {
+      "code": "env_file.name_not_dotenv",
+      "owner": "command",
+      "params": ["file_name"],
+      "message": "not a .env file: \".envrc\""
+    },
+    {
+      "code": "env_file.read_dir_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "read project dir failed: permission denied"
+    },
+    {
+      "code": "env_file.dir_entry_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "read dir entry failed: permission denied"
+    },
+    {
+      "code": "env_file.stat_entry_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "stat dir entry failed: permission denied"
+    },
+    {
+      "code": "env_file.write_failed",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "write /Users/me/proj/.env failed: permission denied"
+    },
+    {
+      "code": "env_file.key_missing_in_file",
+      "owner": "command",
+      "params": ["key", "file_name"],
+      "message": "no `OPENAI_API_KEY` in .env"
+    },
+    {
+      "code": "notification.host_activate_failed",
+      "owner": "command",
+      "params": ["bundle_id", "detail"],
+      "message": "open -b com.apple.Terminal: exited 1"
+    },
+    {
+      "code": "notification.log_append_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "notification_log append failed: permission denied"
+    },
+    {
+      "code": "notification.log_append_routed_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "notification_log append_routed failed: permission denied"
+    },
+    {
+      "code": "notification.log_mark_all_read_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "notification_log mark_all_read failed: permission denied"
+    },
+    {
+      "code": "notification.log_mark_delivered_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "notification_log mark_delivered failed: permission denied"
+    },
+    {
+      "code": "notification.log_clear_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "notification_log clear failed: permission denied"
+    },
+    {
+      "code": "board.export_path_not_absolute",
+      "owner": "command",
+      "params": [],
+      "message": "export path must be absolute — pick a destination first"
+    },
+    {
+      "code": "board.export_path_exists",
+      "owner": "command",
+      "params": ["path"],
+      "message": "/Users/me/Desktop/board.json already exists"
+    },
+    {
+      "code": "board.export_create_failed",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "creating /Users/me/Desktop/board.json: permission denied"
+    },
+    {
+      "code": "routes.unknown_provider_kind",
+      "owner": "command",
+      "params": ["kind"],
+      "message": "unknown provider kind: openai"
+    },
+    {
+      "code": "routes.invalid_route_id",
+      "owner": "command",
+      "params": ["id"],
+      "message": "invalid route id: not-a-uuid"
+    },
+    {
+      "code": "routes.gateway_config_missing",
+      "owner": "command",
+      "params": [],
+      "message": "gateway config missing"
+    },
+    {
+      "code": "routes.bedrock_config_missing",
+      "owner": "command",
+      "params": [],
+      "message": "bedrock config missing"
+    },
+    {
+      "code": "routes.vertex_config_missing",
+      "owner": "command",
+      "params": [],
+      "message": "vertex config missing"
+    },
+    {
+      "code": "routes.foundry_config_missing",
+      "owner": "command",
+      "params": [],
+      "message": "foundry config missing"
+    },
+    {
+      "code": "routes.invalid_gateway_base_url",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "invalid gateway base URL: URL must use http:// or https:// (got: example.com)"
+    },
+    {
+      "code": "routes.bedrock_region_required",
+      "owner": "command",
+      "params": [],
+      "message": "AWS region is required"
+    },
+    {
+      "code": "routes.bedrock_auth_required",
+      "owner": "command",
+      "params": [],
+      "message": "Bedrock needs a bearer token, AWS profile, or skip_aws_auth set"
+    },
+    {
+      "code": "routes.invalid_bedrock_base_url",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "invalid Bedrock base URL: URL has no host"
+    },
+    {
+      "code": "routes.vertex_project_id_required",
+      "owner": "command",
+      "params": [],
+      "message": "GCP project ID is required"
+    },
+    {
+      "code": "routes.invalid_vertex_base_url",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "invalid Vertex base URL: URL has no host"
+    },
+    {
+      "code": "routes.foundry_target_required",
+      "owner": "command",
+      "params": [],
+      "message": "Foundry needs either a base URL or a resource name"
+    },
+    {
+      "code": "routes.foundry_target_ambiguous",
+      "owner": "command",
+      "params": [],
+      "message": "Foundry: choose base URL OR resource name, not both"
+    },
+    {
+      "code": "routes.invalid_foundry_base_url",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "invalid Foundry base URL: URL has no host"
+    },
+    {
+      "code": "routes.wrapper_name_rejected",
+      "owner": "command",
+      "params": ["name", "detail"],
+      "message": "invalid wrapper name 'claude': wrapper name 'claude' is reserved"
+    },
+    {
+      "code": "routes.gone_after_persist",
+      "owner": "command",
+      "params": [],
+      "message": "route disappeared after persist"
+    },
+    {
+      "code": "routes.edit_store_failed",
+      "owner": "command",
+      "params": ["detail", "cause_code"],
+      "message": "route name already taken: kimi; the previously-saved route remains active. If the route stops working after retry, re-enter the secret and save again."
+    },
+    {
+      "code": "routes.save_warnings",
+      "owner": "command",
+      "params": ["warnings"],
+      "message": "route saved, but follow-up writes had warnings — wrapper claude-kimi: permission denied"
+    },
+    {
+      "code": "routes.remove_cleanup_failed",
+      "owner": "command",
+      "params": ["count", "steps"],
+      "message": "route removed but 1 cleanup step(s) failed: keychain: item not found"
+    },
+    {
+      "code": "routes.desktop_not_supported",
+      "owner": "command",
+      "params": [],
+      "message": "Claude Desktop is not supported on this platform"
+    },
+    {
+      "code": "agents.invalid_id",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "invalid agent id: invalid length: expected length 32 for simple format, found 3"
+    },
+    {
+      "code": "agents.not_found",
+      "owner": "command",
+      "params": ["id"],
+      "message": "agent 6f9a1c2e-0000-4000-8000-000000000000 not found"
+    },
+    {
+      "code": "agents.name_taken",
+      "owner": "command",
+      "params": ["name"],
+      "message": "agent name 'nightly-usage' is already taken"
+    },
+    {
+      "code": "agents.template_name_taken",
+      "owner": "command",
+      "params": ["name"],
+      "message": "an agent named 'nightly-usage' already exists — rename or remove it before instantiating this template again"
+    },
+    {
+      "code": "agents.invalid_permission_mode",
+      "owner": "command",
+      "params": ["mode"],
+      "message": "invalid permission_mode: yolo"
+    },
+    {
+      "code": "agents.invalid_output_format",
+      "owner": "command",
+      "params": ["format"],
+      "message": "invalid output_format: yaml"
+    },
+    {
+      "code": "agents.bypass_requires_allowed_tools",
+      "owner": "command",
+      "params": [],
+      "message": "bypassPermissions requires a non-empty allowed_tools whitelist"
+    },
+    {
+      "code": "agents.route_binary_id_required",
+      "owner": "command",
+      "params": [],
+      "message": "route binary requires binary_route_id"
+    },
+    {
+      "code": "agents.unknown_binary_kind",
+      "owner": "command",
+      "params": ["kind"],
+      "message": "unknown binary_kind: bespoke"
+    },
+    {
+      "code": "agents.unknown_event_kind",
+      "owner": "command",
+      "params": ["event"],
+      "message": "unknown event_kind: file_changed"
+    },
+    {
+      "code": "agents.invalid_max_budget",
+      "owner": "command",
+      "params": ["value"],
+      "message": "max_budget_usd must be a finite non-negative number (got -1)"
+    },
+    {
+      "code": "agents.draft_not_runnable",
+      "owner": "command",
+      "params": ["name"],
+      "message": "agent 'nightly-usage' is a draft — review and install it before running. A draft is never executed directly; arming it through the install review is the gate."
+    },
+    {
+      "code": "agents.no_scheduler_adapter",
+      "owner": "command",
+      "params": [],
+      "message": "no scheduler adapter for this platform"
+    },
+    {
+      "code": "agents.no_artifact_dir",
+      "owner": "command",
+      "params": [],
+      "message": "no artifact dir for active scheduler"
+    },
+    {
+      "code": "agents.open_artifact_dir_failed",
+      "owner": "command",
+      "params": ["dir", "detail"],
+      "message": "open '/Users/me/Library/LaunchAgents' exited exit status: 1"
+    },
+    {
+      "code": "agents.linger_linux_only",
+      "owner": "command",
+      "params": [],
+      "message": "linger is a Linux-only feature"
+    },
+    {
+      "code": "templates.registry_load_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "bundled template registry failed to load: expected value at line 1 column 1"
+    },
+    {
+      "code": "templates.unknown_id",
+      "owner": "command",
+      "params": ["template_id"],
+      "message": "unknown template id: morning-health-check"
+    },
+    {
+      "code": "templates.no_sample_report",
+      "owner": "command",
+      "params": ["template_id"],
+      "message": "no sample report bundled for template id: morning-health-check"
+    },
+    {
+      "code": "templates.report_path_unresolvable",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "cannot resolve /Users/me/.claudepot/reports/gone.md: no such file or directory"
+    },
+    {
+      "code": "templates.report_path_outside_root",
+      "owner": "command",
+      "params": ["root", "path"],
+      "message": "report path is outside /Users/me/.claudepot: /etc/passwd"
+    },
+    {
+      "code": "templates.report_stat_failed",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "stat /Users/me/.claudepot/reports/r.md: permission denied"
+    },
+    {
+      "code": "templates.report_not_a_file",
+      "owner": "command",
+      "params": ["path"],
+      "message": "not a file: /Users/me/.claudepot/reports"
+    },
+    {
+      "code": "templates.report_too_large",
+      "owner": "command",
+      "params": ["path", "bytes"],
+      "message": "report is too large to display: 8388608 bytes"
+    },
+    {
+      "code": "templates.report_read_failed",
+      "owner": "command",
+      "params": ["path", "detail"],
+      "message": "read /Users/me/.claudepot/reports/r.md: permission denied"
+    },
+    {
+      "code": "templates.platform_unsupported",
+      "owner": "command",
+      "params": ["template_id", "platform"],
+      "message": "template morning-health-check does not declare support for Linux"
+    },
+    {
+      "code": "templates.placeholder_type_mismatch",
+      "owner": "command",
+      "params": ["placeholder", "expected"],
+      "message": "placeholder project_root expected string path"
+    },
+    {
+      "code": "templates.invalid_schedule",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "unknown weekday: modnay"
+    },
+    {
+      "code": "templates.instantiate_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "missing value for required placeholder: project_root"
+    },
+    {
+      "code": "templates.unique_name_exhausted",
+      "owner": "command",
+      "params": ["name"],
+      "message": "failed to derive a unique agent name for \"Morning health check\""
+    }
+  ]
+}

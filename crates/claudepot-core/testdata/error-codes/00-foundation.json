@@ -1,0 +1,201 @@
+{
+  "comment": [
+    "Registry of every error code that crosses the Tauri bridge, and the",
+    "cross-language contract that keeps the two halves in step.",
+    "",
+    "Same role as rate-resolution-vectors.json: one file, asserted from",
+    "both languages, so drift is caught from whichever side moves first.",
+    "",
+    "  Rust half (present):",
+    "    crates/claudepot-core/src/error_code.rs :: tests",
+    "      - every core enum variant's code appears here",
+    "      - every owner=\"core\" entry is produced by some variant",
+    "      - the params[] list equals params()'s object keys",
+    "    src-tauri/src/dto_error.rs :: tests",
+    "      - every owner=\"command\" entry is a const in codes::ALL,",
+    "        and every const in codes::ALL appears here",
+    "",
+    "  TS half (the follow-up phase, not yet written):",
+    "    a Vitest test asserting every code here has an errors.* entry",
+    "    in src/locales/en (and zh-CN, or an explicit allowlist). Until",
+    "    it lands, an unknown code renders `message` — English, correct,",
+    "    untranslated. Seed copy for those catalog entries lives in",
+    "    dev-docs/i18n-error-codes-seed.md.",
+    "",
+    "Fields:",
+    "  code    - <module>.<variant_snake_case>, lowercase.",
+    "  owner   - \"core\"    an error enum variant in claudepot-core.",
+    "            \"command\" an ad-hoc failure raised at a Tauri command",
+    "                      site with no core enum behind it. These are",
+    "                      candidates for promotion into a core enum;",
+    "                      until then the const in dto_error.rs::codes",
+    "                      is the single spelling.",
+    "  params  - the names params() carries. A translator interpolates",
+    "            these; renaming one is a breaking change to every",
+    "            catalog entry that uses it.",
+    "  message - a sample of the English Display string, illustrative",
+    "            only. The live value travels as ErrorDto.message and",
+    "            is what renders when a code has no catalog entry.",
+    "",
+    "Adding a variant: code() stops compiling first, then the sampler in",
+    "error_code.rs's tests, then these vectors. Follow the chain."
+  ],
+  "codes": [
+    {
+      "code": "keys.sql",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "sqlite: Query returned no rows"
+    },
+    {
+      "code": "keys.io",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "io: permission denied"
+    },
+    {
+      "code": "keys.keychain",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "keychain: keychain is locked"
+    },
+    {
+      "code": "keys.not_found",
+      "owner": "core",
+      "params": ["uuid"],
+      "message": "key not found: 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "oauth.http_error",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "HTTP request failed: error sending request"
+    },
+    {
+      "code": "oauth.refresh_failed",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "token expired and refresh failed: token endpoint rejected refresh_token with 401"
+    },
+    {
+      "code": "oauth.rate_limited",
+      "owner": "core",
+      "params": ["retry_after_secs"],
+      "message": "rate limited — retry after 60s"
+    },
+    {
+      "code": "oauth.auth_failed",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "authentication failed: api key rejected by /v1/models"
+    },
+    {
+      "code": "oauth.server_error",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "OAuth server error: /v1/models returned 503"
+    },
+    {
+      "code": "project.not_found",
+      "owner": "core",
+      "params": ["path"],
+      "message": "project not found: /Users/me/proj"
+    },
+    {
+      "code": "project.same_path",
+      "owner": "core",
+      "params": [],
+      "message": "old and new paths are the same"
+    },
+    {
+      "code": "project.ambiguous",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "ambiguous: old path contains invalid UTF-8"
+    },
+    {
+      "code": "project.claude_running",
+      "owner": "core",
+      "params": ["path"],
+      "message": "a claude process is running in /Users/me/proj — use --force to proceed"
+    },
+    {
+      "code": "project.io",
+      "owner": "core",
+      "params": ["detail"],
+      "message": "no such file or directory"
+    },
+    {
+      "code": "accounts.store_open_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "store open failed: unable to open database file"
+    },
+    {
+      "code": "accounts.list_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "no such table: accounts"
+    },
+    {
+      "code": "accounts.invalid_uuid",
+      "owner": "command",
+      "params": ["uuid"],
+      "message": "invalid account uuid: not-a-uuid"
+    },
+    {
+      "code": "accounts.unknown_uuid",
+      "owner": "command",
+      "params": ["uuid"],
+      "message": "no registered account with uuid 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "app.task_join_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "blocking task failed: task panicked"
+    },
+    {
+      "code": "keys.bad_uuid",
+      "owner": "command",
+      "params": ["uuid"],
+      "message": "bad uuid: invalid length: expected length 32 for simple format, found 3"
+    },
+    {
+      "code": "keys.label_required",
+      "owner": "command",
+      "params": [],
+      "message": "label is required"
+    },
+    {
+      "code": "keys.api_key_not_found",
+      "owner": "command",
+      "params": ["uuid"],
+      "message": "api key 6f9a1c2e-0000-4000-8000-000000000000 not found"
+    },
+    {
+      "code": "keys.oauth_token_not_found",
+      "owner": "command",
+      "params": ["uuid"],
+      "message": "oauth token 6f9a1c2e-0000-4000-8000-000000000000 not found"
+    },
+    {
+      "code": "keys.clipboard_write_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "clipboard: failed to write to the clipboard"
+    },
+    {
+      "code": "keys.probe_rejected",
+      "owner": "command",
+      "params": [],
+      "message": "rejected (invalid key)"
+    },
+    {
+      "code": "keys.probe_rate_limited",
+      "owner": "command",
+      "params": ["retry_after_secs"],
+      "message": "rate-limited (retry in 60s)"
+    }
+  ]
+}
