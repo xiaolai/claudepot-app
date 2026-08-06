@@ -1,4 +1,6 @@
 import { useId } from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Modal, ModalHeader, ModalBody } from "./primitives/Modal";
 import { Kbd } from "./primitives/Kbd";
 import { useEnabledSections } from "../hooks/useEnabledSections";
@@ -31,6 +33,7 @@ interface ShortcutGroup {
  */
 function navigationItems(
   enabled: readonly { label: string }[],
+  tc: TFunction<"components">,
 ): ShortcutBinding[] {
   return [
     // Enabled list: a switched-off section has no ⌘ number, so listing
@@ -39,53 +42,75 @@ function navigationItems(
       keys: ["⌘", String(i + 1)],
       label: s.label,
     })),
-    { keys: ["⌘", ","], label: "Settings (standard shortcut)" },
-    { keys: ["⌃", "⌥", "⌘", "B"], label: "Show / hide Boards" },
+    { keys: ["⌘", ","], label: tc("shortcuts.settingsStandard") },
+    { keys: ["⌃", "⌥", "⌘", "B"], label: tc("shortcuts.toggleBoards") },
   ];
 }
 
-const OTHER_GROUPS: ShortcutGroup[] = [
-  {
-    title: "Global actions",
-    items: [
-      { keys: ["⌘", "K"], label: "Open command palette" },
-      { keys: ["⌘", "/"], label: "Show keyboard shortcuts" },
-      { keys: ["⌘", "R"], label: "Refresh this section" },
-      { keys: ["⌘", "N"], label: "Add account", scope: "Accounts" },
-      // ⌘F was listed here as "Focus filter (where exposed)" but no
-      // section ever wired it — the hook option existed and nothing
-      // passed it. Documenting a shortcut that does nothing is worse
-      // than not documenting it.
-      { keys: ["⌘", "⇧", "C"], label: "Copy first matching email", scope: "Accounts" },
-      { keys: ["⌘", "⇧", "L"], label: "Focus Live sessions strip" },
-    ],
-  },
-  {
-    title: "In modals",
-    items: [
-      { keys: ["Esc"], label: "Close dialog" },
-      { keys: ["Tab"], label: "Cycle focus (trapped)" },
-    ],
-  },
-  {
-    title: "Command palette",
-    items: [
-      { keys: ["↑", "↓"], label: "Move selection" },
-      { keys: ["Home"], label: "First result" },
-      { keys: ["End"], label: "Last result" },
-      { keys: ["Enter"], label: "Run selected" },
-      { keys: ["Esc"], label: "Close palette" },
-    ],
-  },
-  {
-    title: "Live sessions strip",
-    items: [
-      { keys: ["j"], label: "Next session" },
-      { keys: ["k"], label: "Previous session" },
-      { keys: ["Enter"], label: "Open focused session" },
-    ],
-  },
-];
+/**
+ * Built per render for the same reason `navigationItems` is: a
+ * module-level `const` would freeze the copy at import time, so a
+ * language switch would leave the modal documenting the previous
+ * language until a reload.
+ *
+ * `scopeAccounts` resolves from the **shell** catalog — the scope is
+ * a section name, and the section labels already live there.
+ */
+function otherGroups(
+  tc: TFunction<"components">,
+  scopeAccounts: string,
+): ShortcutGroup[] {
+  return [
+    {
+      title: tc("shortcuts.groupGlobal"),
+      items: [
+        { keys: ["⌘", "K"], label: tc("shortcuts.openPalette") },
+        { keys: ["⌘", "/"], label: tc("shortcuts.showShortcuts") },
+        { keys: ["⌘", "R"], label: tc("shortcuts.refreshSection") },
+        {
+          keys: ["⌘", "N"],
+          label: tc("shortcuts.addAccount"),
+          scope: scopeAccounts,
+        },
+        // ⌘F was listed here as "Focus filter (where exposed)" but no
+        // section ever wired it — the hook option existed and nothing
+        // passed it. Documenting a shortcut that does nothing is worse
+        // than not documenting it.
+        {
+          keys: ["⌘", "⇧", "C"],
+          label: tc("shortcuts.copyEmail"),
+          scope: scopeAccounts,
+        },
+        { keys: ["⌘", "⇧", "L"], label: tc("shortcuts.focusLive") },
+      ],
+    },
+    {
+      title: tc("shortcuts.groupModals"),
+      items: [
+        { keys: ["Esc"], label: tc("shortcuts.closeDialog") },
+        { keys: ["Tab"], label: tc("shortcuts.cycleFocus") },
+      ],
+    },
+    {
+      title: tc("shortcuts.groupPalette"),
+      items: [
+        { keys: ["↑", "↓"], label: tc("shortcuts.moveSelection") },
+        { keys: ["Home"], label: tc("shortcuts.firstResult") },
+        { keys: ["End"], label: tc("shortcuts.lastResult") },
+        { keys: ["Enter"], label: tc("shortcuts.runSelected") },
+        { keys: ["Esc"], label: tc("shortcuts.closePalette") },
+      ],
+    },
+    {
+      title: tc("shortcuts.groupLiveStrip"),
+      items: [
+        { keys: ["j"], label: tc("shortcuts.nextSession") },
+        { keys: ["k"], label: tc("shortcuts.prevSession") },
+        { keys: ["Enter"], label: tc("shortcuts.openFocused") },
+      ],
+    },
+  ];
+}
 
 /**
  * Global shortcut reference. Mounted at the shell level so it's
@@ -96,15 +121,30 @@ const OTHER_GROUPS: ShortcutGroup[] = [
  */
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
   const titleId = useId();
+  // Two catalogs on purpose: `t` resolves section labels, which live
+  // in the shell namespace next to the registry that owns them; `tc`
+  // resolves this modal's own copy.
+  const { t } = useTranslation("shell");
+  const { t: tc } = useTranslation("components");
   // Live, not captured at import — see `navigationItems`.
   const enabled = useEnabledSections();
   const groups: ShortcutGroup[] = [
-    { title: "Navigation", items: navigationItems(enabled) },
-    ...OTHER_GROUPS,
+    {
+      title: tc("shortcuts.groupNavigation"),
+      items: navigationItems(
+        enabled.map((s) => ({ label: t(s.labelKey) })),
+        tc,
+      ),
+    },
+    ...otherGroups(tc, t("sections.accounts")),
   ];
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={titleId}>
-      <ModalHeader title="Keyboard shortcuts" id={titleId} onClose={onClose} />
+      <ModalHeader
+        title={tc("shortcuts.title")}
+        id={titleId}
+        onClose={onClose}
+      />
       <ModalBody>
         <div
           style={{
@@ -186,8 +226,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
             color: "var(--fg-faint)",
           }}
         >
-          Shortcuts are suppressed while typing in a text field or while
-          a dialog is open.
+          {tc("shortcuts.footer")}
         </p>
       </ModalBody>
     </Modal>

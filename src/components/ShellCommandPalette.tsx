@@ -1,7 +1,8 @@
+import { useTranslation } from "react-i18next";
 import { CommandPalette } from "./CommandPalette";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { api } from "../api";
-import { toastError } from "../lib/toastError";
+import { toastError } from "../lib/i18n-error";
 import { useAppState } from "../providers/AppStateProvider";
 
 /**
@@ -24,6 +25,7 @@ export function ShellCommandPalette(props: {
   onShowShortcuts: () => void;
   onToggleTheme: () => void;
 }) {
+  const { t } = useTranslation("components");
   const {
     accounts,
     status: appStatus,
@@ -59,7 +61,7 @@ export function ShellCommandPalette(props: {
         onClearDesktop={requestDesktopSignOut}
         onLaunchDesktop={() => {
           api.desktopLaunch().catch((e) => {
-            toastError(pushToast, "Desktop launch failed", e);
+            toastError(pushToast, t("toasts.desktopLaunchFailed"), e);
           });
         }}
         onNavigate={props.onNavigate}

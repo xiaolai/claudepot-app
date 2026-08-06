@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { NfIcon } from "../icons";
 import { Avatar, avatarColorFor } from "../components/primitives/Avatar";
 import { Glyph } from "../components/primitives/Glyph";
@@ -38,6 +39,7 @@ export function SidebarTargetSwitcher({
   onBind,
   onManage,
 }: SidebarTargetSwitcherProps) {
+  const { t } = useTranslation("components");
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const bound = boundUuid
@@ -118,7 +120,7 @@ export function SidebarTargetSwitcher({
                 {bound.email}
               </>
             ) : (
-              "Not bound"
+              t("sidebar.notBound")
             )}
           </div>
         </div>
@@ -158,7 +160,7 @@ export function SidebarTargetSwitcher({
             }}
           >
             <Glyph g={target.glyph} style={{ fontSize: "var(--fs-2xs)" }} />
-            Switch {target.label} to
+            {t("sidebar.switchTo", { target: target.label })}
           </div>
           <div style={{ padding: "var(--sp-4)" }}>
             {accounts.length === 0 ? (
@@ -169,7 +171,7 @@ export function SidebarTargetSwitcher({
                   color: "var(--fg-faint)",
                 }}
               >
-                No accounts registered yet.
+                {t("sidebar.noAccounts")}
               </div>
             ) : (
               accounts.map((a) => {
@@ -186,7 +188,7 @@ export function SidebarTargetSwitcher({
                     current={a.uuid === boundUuid}
                     disabled={disabled}
                     disabledReason={
-                      disabled ? "no profile — bind first" : undefined
+                      disabled ? t("sidebar.noProfile") : undefined
                     }
                     onClick={() => {
                       if (disabled) return;
@@ -226,7 +228,7 @@ export function SidebarTargetSwitcher({
               }}
             >
               <Glyph g={NF.sliders} style={{ fontSize: "var(--fs-xs)" }} />
-              <span>Manage accounts…</span>
+              <span>{t("sidebar.manageAccounts")}</span>
             </button>
           </div>
         </div>

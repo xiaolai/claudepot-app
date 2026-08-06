@@ -3,6 +3,7 @@ import {
   PALETTE_CATEGORY_LABELS,
   type PaletteAction,
 } from "../../hooks/usePaletteActions";
+import { i18n } from "../../lib/i18n";
 import { MIN_SEARCH_QUERY } from "../../lib/paletteScore";
 import type { ProjectInfo, SearchHit } from "../../types";
 
@@ -78,17 +79,26 @@ export function buildPaletteRows(args: {
    * below covers "nothing matched anywhere".
    */
   const pushSearchGroup = <T>(
+    /** Stable, language-independent React key seed. The rendered
+     *  `label` is translated, so keying off it would rebuild the row
+     *  identity on every language switch. */
+    id: string,
     label: string,
     loading: boolean,
     items: readonly T[],
     toRow: (item: T, i: number, index: number) => SelectableRow,
   ) => {
     if (!searching || (!loading && items.length === 0)) return;
-    rows.push({ kind: "heading", key: `h-${label}`, label, loading });
+    rows.push({ kind: "heading", key: `h-${id}`, label, loading });
     items.forEach((item, i) => push(toRow(item, i, selectable.length)));
   };
 
-  pushSearchGroup("Projects", args.projectsLoading, args.projects,
+  // Plain module, not a component — reads the global i18n instance.
+  // `CommandPalette` (the only caller) subscribes via `useTranslation`,
+  // so a language switch re-renders it and rebuilds these rows.
+  pushSearchGroup("projects",
+    i18n.t("palette.groupProjects", { ns: "components" }),
+    args.projectsLoading, args.projects,
     (project, _i, index) => ({
       kind: "project",
       key: `p-${project.original_path}`,
@@ -96,7 +106,9 @@ export function buildPaletteRows(args: {
       project,
     }));
 
-  pushSearchGroup("Sessions", args.sessionsLoading, args.sessions,
+  pushSearchGroup("sessions",
+    i18n.t("palette.groupSessions", { ns: "components" }),
+    args.sessionsLoading, args.sessions,
     (hit, i, index) => ({
       kind: "session",
       // file_path repeats across hits from the same transcript, so
@@ -107,7 +119,11 @@ export function buildPaletteRows(args: {
     }));
 
   if (selectable.length === 0 && !args.projectsLoading && !args.sessionsLoading) {
-    rows.push({ kind: "empty", key: "empty", text: "No matches" });
+    rows.push({
+      kind: "empty",
+      key: "empty",
+      text: i18n.t("palette.noMatches", { ns: "components" }),
+    });
   }
 
   return { rows, selectable };

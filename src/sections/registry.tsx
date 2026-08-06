@@ -1,6 +1,7 @@
 import { lazy, type ComponentType, type ReactElement } from "react";
 import { NF } from "../icons";
 import type { NfIcon } from "../icons";
+import type { SectionLabelKey } from "../lib/i18n";
 import {
   optionalSectionKey,
   SECTION_ACTIVE_KEY,
@@ -46,7 +47,12 @@ export interface SectionHostProps {
 
 export interface SectionDef {
   id: string;
-  label: string;
+  /** Catalog key for the display name — resolved with `t()` at each
+   *  render site so the label follows the active locale. Typed
+   *  against the shell catalog: a new section without a catalog
+   *  entry is a compile error. Log tags and other machine-facing
+   *  strings use `id`, never the localized label. */
+  labelKey: SectionLabelKey;
   glyph: NfIcon;
   /**
    * Shared chunk factory for lazy sections — handed to `React.lazy`
@@ -113,20 +119,20 @@ const BoardsSection = lazy(importBoards);
 export const sections: readonly SectionDef[] = [
   {
     id: "accounts",
-    label: "Accounts",
+    labelKey: "sections.accounts",
     glyph: NF.users,
     render: (p) => <AccountsSection onNavigate={p.onNavigate} />,
   },
   {
     id: "events",
-    label: "Activities",
+    labelKey: "sections.events",
     glyph: NF.dashboard,
     loader: importEvents,
     render: (p) => <EventsSection onNavigate={p.onNavigate} />,
   },
   {
     id: "projects",
-    label: "Projects",
+    labelKey: "sections.projects",
     glyph: NF.folder,
     loader: importProjects,
     render: (p) => (
@@ -144,14 +150,14 @@ export const sections: readonly SectionDef[] = [
   // `claudepot memory` CLI noun (CLAUDE.md files).
   {
     id: "shared-memory",
-    label: "Knowledge",
+    labelKey: "sections.shared-memory",
     glyph: NF.book,
     loader: importSharedMemory,
     render: () => <SharedMemorySection />,
   },
   {
     id: "keys",
-    label: "Keys",
+    labelKey: "sections.keys",
     glyph: NF.key,
     loader: importKeys,
     render: () => <KeysSection />,
@@ -159,7 +165,7 @@ export const sections: readonly SectionDef[] = [
   // id kept as "third-party" for localStorage compatibility
   {
     id: "third-party",
-    label: "Providers",
+    labelKey: "sections.third-party",
     glyph: NF.cpu,
     loader: importThirdParty,
     render: () => <ThirdPartySection />,
@@ -167,14 +173,14 @@ export const sections: readonly SectionDef[] = [
   // id kept as "automations" for localStorage compatibility
   {
     id: "automations",
-    label: "Agents",
+    labelKey: "sections.automations",
     glyph: NF.clock,
     loader: importAgents,
     render: () => <AgentsSection />,
   },
   {
     id: "global",
-    label: "Global",
+    labelKey: "sections.global",
     glyph: NF.globe,
     loader: importGlobal,
     render: (p) => (
@@ -191,7 +197,7 @@ export const sections: readonly SectionDef[] = [
     // `useShellShortcuts`. Placing Boards anywhere earlier would
     // renumber sections people already have in muscle memory.
     id: "boards",
-    label: "Boards",
+    labelKey: "sections.boards",
     glyph: NF.board,
     loader: importBoards,
     render: () => <BoardsSection />,
@@ -203,7 +209,7 @@ export const sections: readonly SectionDef[] = [
   },
   {
     id: "settings",
-    label: "Settings",
+    labelKey: "sections.settings",
     glyph: NF.sliders,
     loader: importSettings,
     render: () => <SettingsSection />,

@@ -1,4 +1,6 @@
 import type { CSSProperties } from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import type {
   NotificationKind,
   NotificationSource,
@@ -20,27 +22,40 @@ import type {
  * a `NotificationLogFilter` in the parent's `useMemo`.
  */
 
-const ALL_KIND_OPTIONS: { value: NotificationKind; label: string }[] = [
-  { value: "info", label: "Info" },
-  { value: "notice", label: "Notice" },
-  { value: "error", label: "Error" },
-];
+/**
+ * Option tables are built per render, not at module load: a
+ * module-level `const` would freeze the labels at import time, so a
+ * language switch would leave the filter row in the previous language
+ * until a reload. Only the *values* are static.
+ */
+type Tc = TFunction<"components">;
 
-const SOURCE_OPTIONS: {
-  value: NotificationSource | "both";
-  label: string;
-}[] = [
-  { value: "both", label: "Both" },
-  { value: "toast", label: "In-app" },
-  { value: "os", label: "OS" },
-];
+function kindOptions(t: Tc): { value: NotificationKind; label: string }[] {
+  return [
+    { value: "info", label: t("notifLog.kindInfo") },
+    { value: "notice", label: t("notifLog.kindNotice") },
+    { value: "error", label: t("notifLog.kindError") },
+  ];
+}
 
-export const WINDOW_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "All time" },
-  { value: String(60 * 60 * 1000), label: "Last 1 h" },
-  { value: String(24 * 60 * 60 * 1000), label: "Last 24 h" },
-  { value: String(7 * 24 * 60 * 60 * 1000), label: "Last 7 d" },
-];
+function sourceOptions(
+  t: Tc,
+): { value: NotificationSource | "both"; label: string }[] {
+  return [
+    { value: "both", label: t("notifLog.sourceBoth") },
+    { value: "toast", label: t("notifLog.sourceInApp") },
+    { value: "os", label: t("notifLog.sourceOs") },
+  ];
+}
+
+export function windowOptions(t: Tc): { value: string; label: string }[] {
+  return [
+    { value: "all", label: t("notifLog.windowAll") },
+    { value: String(60 * 60 * 1000), label: t("notifLog.window1h") },
+    { value: String(24 * 60 * 60 * 1000), label: t("notifLog.window24h") },
+    { value: String(7 * 24 * 60 * 60 * 1000), label: t("notifLog.window7d") },
+  ];
+}
 
 interface PopoverFiltersProps {
   kinds: Set<NotificationKind>;
@@ -63,6 +78,7 @@ export function NotificationLogFilters({
   query,
   onChangeQuery,
 }: PopoverFiltersProps) {
+  const { t } = useTranslation("components");
   return (
     <div
       style={{
@@ -77,7 +93,7 @@ export function NotificationLogFilters({
       <input
         type="search"
         value={query}
-        placeholder="Search title or body…"
+        placeholder={t("notifLog.searchPlaceholder")}
         onChange={(e) => onChangeQuery(e.target.value)}
         className="pm-focus"
         style={{
@@ -99,7 +115,7 @@ export function NotificationLogFilters({
           alignItems: "center",
         }}
       >
-        {ALL_KIND_OPTIONS.map((opt) => {
+        {kindOptions(t).map((opt) => {
           const active = kinds.has(opt.value);
           return (
             <button
@@ -124,11 +140,11 @@ export function NotificationLogFilters({
           onChange={(e) =>
             onChangeSource(e.target.value as NotificationSource | "both")
           }
-          aria-label="Source"
+          aria-label={t("notifLog.sourceLabel")}
           className="pm-focus"
           style={selectStyle}
         >
-          {SOURCE_OPTIONS.map((o) => (
+          {sourceOptions(t).map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -137,11 +153,11 @@ export function NotificationLogFilters({
         <select
           value={windowKey}
           onChange={(e) => onChangeWindow(e.target.value)}
-          aria-label="Time window"
+          aria-label={t("notifLog.windowLabel")}
           className="pm-focus"
           style={selectStyle}
         >
-          {WINDOW_OPTIONS.map((o) => (
+          {windowOptions(t).map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>

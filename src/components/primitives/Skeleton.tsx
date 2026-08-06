@@ -16,6 +16,7 @@
 // requires non-color signal for state — the SR label is that signal.
 
 import type { CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 
 const srOnly: CSSProperties = {
   position: "absolute",
@@ -52,17 +53,19 @@ export function Skeleton({
 export function SkeletonList({
   rows = 3,
   showHeader = true,
-  label = "Loading…",
+  label,
   style,
 }: {
   rows?: number;
   showHeader?: boolean;
-  /** Screen-reader text. Override only when "Loading…" misleads —
-   *  e.g. a refresh that's expected to be near-instant might say
-   *  "Refreshing accounts…". */
+  /** Screen-reader text. Defaults to the localized "Loading…",
+   *  resolved at render so a language switch applies live. Override
+   *  only when "Loading…" misleads — e.g. a refresh that's expected
+   *  to be near-instant might say "Refreshing accounts…". */
   label?: string;
   style?: CSSProperties;
 }) {
+  const { t } = useTranslation("components");
   return (
     <div
       className="skeleton-container"
@@ -71,7 +74,7 @@ export function SkeletonList({
       aria-live="polite"
       aria-busy="true"
     >
-      <span style={srOnly}>{label}</span>
+      <span style={srOnly}>{label ?? t("primitives.loading")}</span>
       {showHeader && <Skeleton variant="header" />}
       {Array.from({ length: rows }).map((_, i) => (
         <Skeleton key={i} variant="card" />

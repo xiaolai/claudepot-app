@@ -14,6 +14,7 @@
 // only emits ClaudeCode summaries; Codex sessions will appear
 // here automatically when the runtime is extended (WI-L1/L2).
 
+import { useTranslation } from "react-i18next";
 import type { LiveSessionSummary } from "../../types";
 import { NF } from "../../icons";
 import { basename } from "../../lib/paths";
@@ -25,6 +26,8 @@ interface Props {
 }
 
 export function LiveSessionCard({ summary, onClick }: Props) {
+  const { t } = useTranslation("components");
+  // Product names, deliberately untranslated.
   const sourceLabel =
     (summary as LiveSessionSummary & { source_kind?: string }).source_kind ===
     "codex"
@@ -49,7 +52,11 @@ export function LiveSessionCard({ summary, onClick }: Props) {
         gap: 8,
         minWidth: 0,
       }}
-      aria-label={`Live session ${summary.session_id} in ${project}, status ${summary.status}`}
+      aria-label={t("liveCards.cardAria", {
+        id: summary.session_id,
+        project,
+        status: summary.status,
+      })}
     >
       <header style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <span
@@ -70,8 +77,12 @@ export function LiveSessionCard({ summary, onClick }: Props) {
             (⚠/⏳ render as color emoji in WebKit, breaking the
             monochrome register). Glyph + text keeps the "color
             never alone" rule satisfied. */}
-        {summary.errored && <Tag glyph={NF.warn}>error</Tag>}
-        {summary.stuck && <Tag glyph={NF.hourglass}>stuck</Tag>}
+        {summary.errored && (
+          <Tag glyph={NF.warn}>{t("liveCards.error")}</Tag>
+        )}
+        {summary.stuck && (
+          <Tag glyph={NF.hourglass}>{t("liveCards.stuck")}</Tag>
+        )}
       </header>
       <div
         style={{
@@ -108,9 +119,14 @@ export function LiveSessionCard({ summary, onClick }: Props) {
           gap: 8,
         }}
       >
-        {summary.model && <span title="Model">{summary.model}</span>}
+        {summary.model && (
+          <span title={t("liveCards.model")}>{summary.model}</span>
+        )}
         {summary.idle_ms > 0 && (
-          <span style={{ marginLeft: "auto" }} title="Time since last delta">
+          <span
+            style={{ marginLeft: "auto" }}
+            title={t("liveCards.idle")}
+          >
             {humanizeMs(summary.idle_ms)}
           </span>
         )}

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "./primitives/Glyph";
 import { NF } from "../icons";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { usePaletteActions } from "../hooks/usePaletteActions";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useProjectSearch } from "../hooks/useProjectSearch";
+import { i18n } from "../lib/i18n";
 import { basename } from "../lib/paths";
 import { shortSessionId } from "../sections/sessions/format";
 import { buildPaletteRows, type SelectableRow } from "./palette/rows";
@@ -35,6 +37,7 @@ export function CommandPalette({
   /** Flip the light/dark theme. */
   onToggleTheme?: () => void;
 }) {
+  const { t } = useTranslation("components");
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const trapRef = useFocusTrap<HTMLDivElement>();
@@ -108,11 +111,12 @@ export function CommandPalette({
         type="button"
         className="palette-scrim"
         onClick={onClose}
-        aria-label="Close palette"
+        aria-label={t("palette.close")}
         tabIndex={-1}
       />
       <div ref={trapRef} className="palette"
-        onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Command palette">
+        onKeyDown={handleKeyDown} role="dialog" aria-modal="true"
+        aria-label={t("palette.dialogLabel")}>
         <div className="palette-input-row">
           <Glyph g={NF.search} size={16} className="palette-search-icon" />
           {/* Combobox semantics: focus stays in the input while the
@@ -120,9 +124,9 @@ export function CommandPalette({
               announced via aria-activedescendant. Without it a screen
               reader reads nothing as the user arrows down. */}
           <input ref={inputRef} className="palette-input" type="text"
-            placeholder="Search accounts, actions, projects…" value={query}
+            placeholder={t("palette.placeholder")} value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search accounts, actions and projects"
+            aria-label={t("palette.inputLabel")}
             role="combobox"
             aria-expanded={selectable.length > 0}
             aria-controls={listboxId}
@@ -132,14 +136,16 @@ export function CommandPalette({
           <kbd className="palette-kbd">esc</kbd>
         </div>
         <ul className="palette-list" ref={listRef} id={listboxId} role="listbox"
-          aria-label="Commands">
+          aria-label={t("palette.listLabel")}>
           {rows.map((row) => {
             if (row.kind === "heading") {
               return (
                 <li key={row.key} className="palette-group-label" role="presentation">
                   {row.label}{" "}
                   {row.loading && (
-                    <span className="palette-group-loading">…searching</span>
+                    <span className="palette-group-loading">
+                      {t("palette.searching")}
+                    </span>
                   )}
                 </li>
               );
@@ -237,7 +243,13 @@ function describeRow(row: SelectableRow) {
   return {
     glyph: NF.folder,
     label: basename(row.project.original_path),
-    detail: `${row.project.session_count} sessions`,
+    // Plain helper, not a component — reads the global i18n instance.
+    // `CommandPalette` subscribes via `useTranslation`, so a language
+    // switch re-renders it and re-invokes this.
+    detail: i18n.t("palette.projectSessions", {
+      ns: "components",
+      n: row.project.session_count,
+    }),
     title: row.project.original_path,
   };
 }

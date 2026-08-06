@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useId, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 import { IconButton } from "./IconButton";
@@ -190,6 +191,7 @@ interface ModalHeaderProps {
 }
 
 export function ModalHeader({ glyph, title, onClose, id }: ModalHeaderProps) {
+  const { t } = useTranslation("components");
   // When the caller doesn't pass an `id`, fall back to the Modal's
   // shared auto-id so the dialog's `aria-labelledby` resolves without
   // any per-call wiring.
@@ -230,8 +232,8 @@ export function ModalHeader({ glyph, title, onClose, id }: ModalHeaderProps) {
           glyph={NF.x}
           onClick={onClose}
           size={22}
-          title="Close (Esc)"
-          aria-label="Close"
+          title={t("modals.closeEsc")}
+          aria-label={t("modals.close")}
         />
       )}
     </div>

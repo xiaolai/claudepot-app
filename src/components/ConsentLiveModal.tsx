@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "./primitives/Button";
 import { Modal } from "./primitives/Modal";
 import { api } from "../api";
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function ConsentLiveModal({ open, onDismiss }: Props) {
+  const { t } = useTranslation("components");
   const [busy, setBusy] = useState<"enable" | "decline" | null>(null);
 
   const handleEnable = async () => {
@@ -71,7 +73,7 @@ export function ConsentLiveModal({ open, onDismiss }: Props) {
             marginBottom: "var(--sp-16)",
           }}
         >
-          Show live Claude sessions?
+          {t("consent.title")}
         </h2>
         <p
           style={{
@@ -82,9 +84,13 @@ export function ConsentLiveModal({ open, onDismiss }: Props) {
             lineHeight: "var(--lh-body)",
           }}
         >
-          Claudepot can watch the transcript files Claude Code already
-          writes to <code>~/.claude/</code> and show you which of your
-          sessions are busy, waiting, or idle — at a glance.
+          {/* Genuine mid-sentence element — the path renders as code
+              inside the sentence. */}
+          <Trans
+            ns="components"
+            i18nKey="consent.body"
+            components={{ path: <code /> }}
+          />
         </p>
         <ul
           style={{
@@ -96,14 +102,9 @@ export function ConsentLiveModal({ open, onDismiss }: Props) {
             lineHeight: "var(--lh-loose)",
           }}
         >
-          <li>Reads files Claude Code already writes to this Mac.</li>
-          <li>
-            Nothing is sent anywhere — no network, no analytics, on-device.
-          </li>
-          <li>
-            You can exclude specific projects, hide thinking blocks by
-            default, or turn the whole feature off in Settings any time.
-          </li>
+          <li>{t("consent.bulletReads")}</li>
+          <li>{t("consent.bulletLocal")}</li>
+          <li>{t("consent.bulletControl")}</li>
         </ul>
         <div
           style={{
@@ -117,14 +118,14 @@ export function ConsentLiveModal({ open, onDismiss }: Props) {
             disabled={busy !== null}
             onClick={handleDecline}
           >
-            {busy === "decline" ? "Saving…" : "Not now"}
+            {busy === "decline" ? t("consent.saving") : t("consent.notNow")}
           </Button>
           <Button
             variant="solid"
             disabled={busy !== null}
             onClick={handleEnable}
           >
-            {busy === "enable" ? "Enabling…" : "Enable activity"}
+            {busy === "enable" ? t("consent.enabling") : t("consent.enable")}
           </Button>
         </div>
       </div>

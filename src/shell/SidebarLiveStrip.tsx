@@ -1,6 +1,8 @@
 import { forwardRef, useCallback, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SectionLabel } from "../components/primitives/SectionLabel";
 import { useSessionLive } from "../hooks/useSessionLive";
+import { i18n } from "../lib/i18n";
 import type { LiveSessionSummary, LiveStatus } from "../types";
 
 /**
@@ -35,6 +37,7 @@ interface Props {
 }
 
 export function SidebarLiveStrip({ onOpenSession }: Props) {
+  const { t } = useTranslation("components");
   const all = useSessionLive();
   const sessions = useMemo(() => sortForStrip(all), [all]);
   // `focusedIdx` drives the j/k navigation state; the value itself
@@ -85,11 +88,18 @@ export function SidebarLiveStrip({ onOpenSession }: Props) {
   return (
     <>
       <SectionLabel right={<span style={{ color: "var(--fg-faint)" }}>{count}</span>}>
-        LIVE
+        {t("sidebar.live")}
       </SectionLabel>
       <div
         role="listbox"
-        aria-label="Live Claude sessions"
+        // ⌘⇧L finds this strip by `data-live-strip`, NOT by aria-label:
+        // the label is translated, so a locale switch would silently
+        // break the shortcut with no error and no failing test (the
+        // suite runs in English, where the old selector still matched).
+        // See `useShellShortcuts`. A translated string is never a
+        // selector.
+        data-live-strip
+        aria-label={t("sidebar.liveSessions")}
         onKeyDown={handleKeyDown}
         style={{ padding: "0 var(--sp-8)", marginBottom: "var(--sp-8)" }}
       >
@@ -131,7 +141,11 @@ const LiveRow = forwardRef<HTMLButtonElement, RowProps>(function LiveRow(
       type="button"
       role="option"
       aria-selected={false}
-      aria-label={`${label}: ${statusTitle}`}
+      aria-label={i18n.t("sidebar.rowAria", {
+        ns: "components",
+        project: label,
+        status: statusTitle,
+      })}
       onClick={onClick}
       onFocus={onFocus}
       className="pm-focus"
@@ -271,11 +285,14 @@ export function shortenModel(model: string | null): string {
   return model.length > 10 ? model.slice(0, 8) + "…" : model;
 }
 
+/** `s.status`, `s.waiting_for` and `s.current_action` are wire values
+ *  rendered raw; only the two literal overlays below are copy. */
 function buildStatusTitle(s: LiveSessionSummary): string {
+  const ns = { ns: "components" } as const;
   const parts: string[] = [s.status];
   if (s.waiting_for && s.status === "waiting") parts.push(s.waiting_for);
   if (s.current_action) parts.push(s.current_action);
-  if (s.errored) parts.push("errored");
-  if (s.stuck) parts.push("stuck");
+  if (s.errored) parts.push(i18n.t("sidebar.errored", ns));
+  if (s.stuck) parts.push(i18n.t("sidebar.stuck", ns));
   return parts.join(" · ");
 }

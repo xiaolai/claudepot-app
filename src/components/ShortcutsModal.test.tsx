@@ -5,6 +5,10 @@ import {
   enabledSections,
   setSectionEnabled,
 } from "../lib/optionalSections";
+import { i18n } from "../lib/i18n";
+
+// English section labels — tests run with the en locale active.
+const enShellT = i18n.getFixedT("en", "shell");
 
 /**
  * ⌘1..⌘9 is bound by *position* in the section registry (see
@@ -45,7 +49,7 @@ describe("ShortcutsModal — navigation reflects the real bindings", () => {
 
     sections.slice(0, BINDABLE).forEach((section, i) => {
       const row = rows[i]!;
-      expect(row.textContent).toContain(section.label);
+      expect(row.textContent).toContain(enShellT(section.labelKey));
       expect(row.textContent).toContain(String(i + 1));
     });
   });
@@ -65,9 +69,10 @@ describe("ShortcutsModal — navigation reflects the real bindings", () => {
       .filter((t) => /[1-9]/.test(t));
 
     for (const extra of sections.slice(BINDABLE)) {
+      const label = enShellT(extra.labelKey);
       expect(
-        numbered.some((t) => t.includes(extra.label)),
-        `${extra.label} claims a ⌘ number it does not have`,
+        numbered.some((t) => t.includes(label)),
+        `${label} claims a ⌘ number it does not have`,
       ).toBe(false);
     }
     cleanup();
@@ -76,7 +81,7 @@ describe("ShortcutsModal — navigation reflects the real bindings", () => {
 
   it("names no section the registry does not have", () => {
     const nav = renderNavGroup();
-    const known = enabledSections().map((s) => s.label);
+    const known = enabledSections().map((s) => enShellT(s.labelKey));
     const rows = within(nav).getAllByRole("listitem");
     for (const row of rows.slice(0, Math.min(enabledSections().length, BINDABLE))) {
       const matched = known.some((k) => row.textContent?.includes(k));

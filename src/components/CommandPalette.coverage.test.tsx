@@ -23,6 +23,22 @@ import {
   DEEPLINK_GLOBAL_TAB_KEY,
   DEEPLINK_SETTINGS_TAB_KEY,
 } from "../lib/storageKeys";
+import { i18n } from "../lib/i18n";
+
+// English section labels — tests run with the en locale active, and
+// the palette rows are asserted against the English catalog.
+const enShellT = i18n.getFixedT("en", "shell");
+
+// Every `userEvent.setup()` here passes `{ delay: null }`. The coverage
+// tests type a full label once per section, per Settings pane, and per
+// Global tab, and each keystroke re-renders the whole row list — which
+// now resolves a translation per row. With the default inter-keystroke
+// delay the "exposes every Settings pane and Global tab" case measured
+// 14.9 s against the suite's 15 s timeout, so it failed under any load
+// and passed alone, which reads as flakiness rather than as the cost it
+// is. Dropping the delay cuts it to ~10 s and changes timing only, not
+// semantics. Per `vitest.config.ts`: make the test cheaper, don't raise
+// the timeout.
 
 function renderPalette(over: Record<string, unknown> = {}) {
   const h = {
@@ -63,13 +79,16 @@ describe("CommandPalette — section coverage", () => {
     // Six of nine sections used to be unreachable: the nav entries
     // were three hardcoded strings rather than the registry.
     for (const section of enabledSections()) {
+      const label = enShellT(section.labelKey);
       const h = renderPalette();
-      const user = userEvent.setup();
-      await user.type(input(), section.label);
+      // One change event, not per-character typing — see the note on
+      // the pane/tab coverage test below. The click below is still a
+      // real event, so activation is exercised for every section.
+      fireEvent.change(input(), { target: { value: label } });
       const row = screen
         .getAllByRole("option")
-        .find((r) => r.textContent?.startsWith(`Open ${section.label}`));
-      expect(row, `no palette row opens "${section.label}"`).toBeTruthy();
+        .find((r) => r.textContent?.startsWith(`Open ${label}`));
+      expect(row, `no palette row opens "${label}"`).toBeTruthy();
       fireEvent.click(row!);
       expect(h.onNavigate).toHaveBeenCalledWith(section.id);
       cleanup();
@@ -82,7 +101,7 @@ describe("CommandPalette — section coverage", () => {
     // would make it invisible AND navigable, which is worse than either.
     setSectionEnabled("boards", false);
     renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.type(input(), "Boards");
     const row = screen
       .queryAllByRole("option")
@@ -92,7 +111,7 @@ describe("CommandPalette — section coverage", () => {
 
   it("ranks the exact section above a scattered subsequence match", async () => {
     renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.type(input(), "keys");
     const first = rowTexts()[0] ?? "";
     expect(first).toContain("Keys");
@@ -111,7 +130,7 @@ describe("CommandPalette — deep targets", () => {
 
   it("reaches a Settings pane and lands on the right tab", async () => {
     const h = renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.type(input(), "retention");
 
     const row = screen
@@ -130,7 +149,7 @@ describe("CommandPalette — deep targets", () => {
 
   it("finds a pane by keyword, not just by its label", async () => {
     renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     // "cleanupPeriodDays" is the CC setting Retention edits; the label
     // alone would never match what a user searching for it types.
     await user.type(input(), "cleanupPeriod");
@@ -141,7 +160,7 @@ describe("CommandPalette — deep targets", () => {
 
   it("reaches a Global tab via the transient tab hint", async () => {
     const h = renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.type(input(), "updates");
 
     const row = screen
@@ -153,22 +172,28 @@ describe("CommandPalette — deep targets", () => {
     expect(sessionStorage.getItem(DEEPLINK_GLOBAL_TAB_KEY)).toBe("updates");
   });
 
-  it("exposes every Settings pane and Global tab as a target", async () => {
+  // Reachability, not typing mechanics: this asserts that a query
+  // naming each pane/tab surfaces its row. Setting the query in one
+  // change event tests exactly that, where `user.type` re-rendered the
+  // whole row list once per character — 15 panes plus every Global tab,
+  // each row resolving a translation. The keystroke-level behavior of
+  // the input is covered by the interaction tests below, which still
+  // use `userEvent`.
+  it("exposes every Settings pane and Global tab as a target", () => {
     for (const pane of SETTINGS_PANES) {
-      const h = renderPalette();
-      const user = userEvent.setup();
-      await user.type(input(), `Settings ${pane.label}`);
+      renderPalette();
+      fireEvent.change(input(), {
+        target: { value: `Settings ${pane.label}` },
+      });
       const row = screen
         .queryAllByRole("option")
         .find((r) => r.textContent?.includes(`Settings → ${pane.label}`));
       expect(row, `pane "${pane.label}" unreachable`).toBeTruthy();
       cleanup();
-      void h;
     }
     for (const tab of GLOBAL_TABS) {
       renderPalette();
-      const user = userEvent.setup();
-      await user.type(input(), `Global ${tab.label}`);
+      fireEvent.change(input(), { target: { value: `Global ${tab.label}` } });
       const row = screen
         .queryAllByRole("option")
         .find((r) => r.textContent?.includes(`Global → ${tab.label}`));
@@ -199,7 +224,7 @@ describe("CommandPalette — project search", () => {
   it("finds a project by basename and opens it", async () => {
     projectList.mockResolvedValue([project]);
     renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     const dispatched: CustomEvent[] = [];
     const listener = (e: Event) => dispatched.push(e as CustomEvent);
@@ -220,7 +245,7 @@ describe("CommandPalette — project search", () => {
   it("shows the full path on hover — the row only has room for the basename", async () => {
     projectList.mockResolvedValue([project]);
     renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.type(input(), "claudepot");
     const row = await screen.findByRole("option", { name: /claudepot/ });
     expect(row.getAttribute("title")).toBe("/Users/joker/github/claudepot");
@@ -229,7 +254,7 @@ describe("CommandPalette — project search", () => {
   it("degrades to an empty state when the project list fails", async () => {
     projectList.mockRejectedValue(new Error("boom"));
     renderPalette();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.type(input(), "claudepot");
     // A failed project list must not blank the palette or throw — it
     // resolves to "no matches", the same as a query nothing matched.

@@ -1,4 +1,5 @@
 import React, { useId } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./primitives/Button";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "./primitives/Modal";
 
@@ -12,18 +13,21 @@ import { Modal, ModalHeader, ModalBody, ModalFooter } from "./primitives/Modal";
 export function ConfirmDialog({
   title,
   body,
-  confirmLabel = "Confirm",
+  confirmLabel,
   confirmDanger = false,
   onCancel,
   onConfirm,
 }: {
   title: string;
   body: React.ReactNode;
+  /** Defaults to the localized "Confirm" — resolved at render so a
+   *  language switch applies without remounting the dialog. */
   confirmLabel?: string;
   confirmDanger?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation("components");
   const titleId = useId();
   return (
     <Modal open onClose={onCancel} aria-labelledby={titleId}>
@@ -31,7 +35,7 @@ export function ConfirmDialog({
       <ModalBody>{body}</ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t("modals.cancel")}
         </Button>
         <Button
           variant="solid"
@@ -39,7 +43,7 @@ export function ConfirmDialog({
           onClick={onConfirm}
           autoFocus
         >
-          {confirmLabel}
+          {confirmLabel ?? t("modals.confirm")}
         </Button>
       </ModalFooter>
     </Modal>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../components/primitives/Glyph";
 import { useDaemonStatus } from "../hooks/useDaemonStatus";
 import { NF } from "../icons";
@@ -13,11 +14,12 @@ import { NF } from "../icons";
  * `dev-docs/cc-daemon-research.md` for the broader context.
  */
 export function SidebarBgBadge({ collapsed }: { collapsed?: boolean }) {
+  const { t } = useTranslation("components");
   const { status } = useDaemonStatus();
   const workers = status?.running ? status.bgWorkers ?? 0 : 0;
   if (workers <= 0) return null;
 
-  const label = `${workers} bg worker${workers === 1 ? "" : "s"}`;
+  const label = t("sidebar.bgWorkers", { count: workers });
 
   if (collapsed) {
     // Icon + count, vertically centered. Tooltip carries the full

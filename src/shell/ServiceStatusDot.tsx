@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
 import { useServiceStatus } from "../hooks/useServiceStatus";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { tierColor, tierLabel } from "../api/service-status";
@@ -22,6 +24,7 @@ import { formatRelative } from "../lib/formatRelative";
  * having to dive into Settings → Network.
  */
 export function ServiceStatusDot() {
+  const { t } = useTranslation("components");
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [hovering, setHovering] = useState(false);
 
@@ -67,10 +70,10 @@ export function ServiceStatusDot() {
   const probeAge =
     latency && latency.probedAtMs > 0
       ? formatRelative(latency.probedAtMs)
-      : "never";
+      : t("serviceStatus.never");
   const summaryAge = summary?.fetchedAtMs
     ? formatRelative(summary.fetchedAtMs)
-    : "never";
+    : t("serviceStatus.never");
 
   return (
     <div
@@ -81,8 +84,8 @@ export function ServiceStatusDot() {
       <button
         type="button"
         onClick={() => void probeNow()}
-        aria-label={`${label}. Click to refresh.`}
-        title={`${label} — click to refresh.`}
+        aria-label={t("serviceStatus.aria", { label })}
+        title={t("serviceStatus.title", { label })}
         className="pm-focus"
         style={{
           width: "var(--icon-btn-sm)",
@@ -154,7 +157,7 @@ export function ServiceStatusDot() {
             {summary?.description ?? label}
           </div>
           <div style={{ color: "var(--fg-faint)", marginTop: "var(--sp-2)" }}>
-            Status page · checked {summaryAge}
+            {t("serviceStatus.statusPage", { age: summaryAge })}
           </div>
 
           {summary?.incidents && summary.incidents.length > 0 && (
@@ -183,7 +186,7 @@ export function ServiceStatusDot() {
                   color: "var(--fg-faint)",
                 }}
               >
-                Path latency · probed {probeAge}
+                {t("serviceStatus.pathLatency", { age: probeAge })}
               </div>
               <table
                 style={{
@@ -234,7 +237,9 @@ export function ServiceStatusDot() {
                 color: "var(--warn)",
               }}
             >
-              Last poll failed: {summary.lastError}
+              {t("serviceStatus.lastPollFailed", {
+                error: summary.lastError,
+              })}
             </div>
           )}
         </div>
@@ -265,17 +270,22 @@ function hostColor(kind: "ok" | "timeout" | "error"): string {
   }
 }
 
+/** Plain helper, not a component — reads the global i18n instance.
+ *  `ServiceStatusDot` subscribes via `useTranslation`, so a language
+ *  switch re-renders it and re-invokes this. */
 function hostValue(h: {
   kind: "ok" | "timeout" | "error";
   ms: number | null;
   message: string | null;
 }): string {
+  const ns = { ns: "components" } as const;
   switch (h.kind) {
     case "ok":
-      return h.ms != null ? `${h.ms} ms` : "—";
+      // Em dash is punctuation, not copy.
+      return h.ms != null ? i18n.t("serviceStatus.ms", { ...ns, ms: h.ms }) : "—";
     case "timeout":
-      return "timeout";
+      return i18n.t("serviceStatus.timeout", ns);
     case "error":
-      return "error";
+      return i18n.t("serviceStatus.error", ns);
   }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useDevMode } from "../hooks/useDevMode";
 
 export interface ContextMenuItem {
@@ -32,6 +33,7 @@ export function ContextMenu({
   items: ContextMenuItem[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation("components");
   const menuRef = useRef<HTMLDivElement>(null);
   const [devMode] = useDevMode();
   // Dev-only items are dropped entirely when the toggle is off, so
@@ -114,7 +116,7 @@ export function ContextMenu({
       className="context-menu"
       style={{ left: x, top: y }}
       role="menu"
-      aria-label="Context menu"
+      aria-label={t("primitives.contextMenu")}
     >
       {(() => {
         let actionIdx = 0;

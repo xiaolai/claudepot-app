@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { NF, type NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 import { ContextMenu, type ContextMenuItem } from "../ContextMenu";
@@ -58,6 +59,7 @@ export function TargetButton({
   "aria-label": ariaLabel,
   disabledReason,
 }: TargetButtonProps) {
+  const { t } = useTranslation("components");
   const chevronRef = useRef<HTMLButtonElement>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -113,7 +115,10 @@ export function TargetButton({
           onClick={bodyInert ? undefined : onPrimary}
           title={primaryTitle}
           aria-label={
-            ariaLabel ?? `${label}${state === "active" ? " (active)" : ""}`
+            ariaLabel ??
+            (state === "active"
+              ? t("primitives.targetActive", { label })
+              : label)
           }
           aria-pressed={state === "active"}
           className="pm-focus"
@@ -161,8 +166,8 @@ export function TargetButton({
               // onClose (via mousedown) then onClick would reopen it.
               onMouseDown={(e) => e.stopPropagation()}
               onClick={toggleMenu}
-              title={`${label} options`}
-              aria-label={`${label} options`}
+              title={t("primitives.targetOptions", { label })}
+              aria-label={t("primitives.targetOptions", { label })}
               aria-haspopup="menu"
               aria-expanded={menuPos !== null}
               className="pm-focus"

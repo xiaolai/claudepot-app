@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { api } from "../api";
 import type {
@@ -8,6 +9,7 @@ import type {
   NotificationLogOrder,
   NotificationSource,
 } from "../api/notification";
+import { renderError } from "../lib/i18n-error";
 import { NotificationLogFilters } from "./NotificationLogFilters";
 import { NotificationLogEntry } from "./NotificationLogEntry";
 import { NotificationLogHeader } from "./NotificationLogHeader";
@@ -48,6 +50,7 @@ export function NotificationLogPopover({
   onClose,
   onCountMaybeChanged,
 }: PopoverProps) {
+  const { t } = useTranslation("components");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [entries, setEntries] = useState<NotificationEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,7 +161,7 @@ export function NotificationLogPopover({
         }
       }
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
       setLoading(false);
     }
   }, [filter, order, windowMs, onCountMaybeChanged]);
@@ -224,7 +227,7 @@ export function NotificationLogPopover({
       await api.notificationLogMarkAllRead();
       onCountMaybeChanged();
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
     }
   }, [onCountMaybeChanged]);
 
@@ -235,7 +238,7 @@ export function NotificationLogPopover({
       await refresh();
       onCountMaybeChanged();
     } catch (e) {
-      setError(String(e));
+      setError(renderError(e));
     }
   }, [refresh, onCountMaybeChanged]);
 
@@ -263,7 +266,7 @@ export function NotificationLogPopover({
       <div
         ref={panelRef}
         role="dialog"
-        aria-label="Notifications"
+        aria-label={t("notifLog.panel")}
         style={{
           position: "fixed",
           top: pos.top,
@@ -311,16 +314,16 @@ export function NotificationLogPopover({
           }}
         >
           {loading ? (
-            <EmptyHint>Loading…</EmptyHint>
+            <EmptyHint>{t("notifLog.loading")}</EmptyHint>
           ) : error ? (
             <EmptyHint danger>{error}</EmptyHint>
           ) : visibleEntries.length === 0 ? (
             <EmptyHint>
               {hasFilter(filter, windowMs) || hiddenAmbientCount > 0
                 ? hiddenAmbientCount > 0
-                  ? `No matches. ${hiddenAmbientCount} ambient entr${hiddenAmbientCount === 1 ? "y" : "ies"} hidden — click "Show ambient" to reveal.`
-                  : "No matches. Adjust the filter or clear it."
-                : "No notifications yet. Toasts and OS banners will collect here."}
+                  ? t("notifLog.emptyAmbient", { count: hiddenAmbientCount })
+                  : t("notifLog.emptyNoMatches")
+                : t("notifLog.emptyNone")}
             </EmptyHint>
           ) : (
             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
@@ -345,8 +348,9 @@ export function NotificationLogPopover({
                   }}
                 >
                   <span>
-                    {hiddenAmbientCount} ambient entr
-                    {hiddenAmbientCount === 1 ? "y" : "ies"} hidden
+                    {t("notifLog.hiddenAmbient", {
+                      count: hiddenAmbientCount,
+                    })}
                   </span>
                   <button
                     type="button"
@@ -362,7 +366,7 @@ export function NotificationLogPopover({
                       cursor: "pointer",
                     }}
                   >
-                    Show ambient
+                    {t("notifLog.showAmbient")}
                   </button>
                 </li>
               )}
@@ -372,14 +376,13 @@ export function NotificationLogPopover({
       </div>
       {confirmClear && (
         <ConfirmDialog
-          title="Clear notification history?"
+          title={t("notifLog.clearConfirmTitle")}
           body={
             <p style={{ margin: 0 }}>
-              All {entries.length} entries will be deleted. This can't be
-              undone.
+              {t("notifLog.clearConfirmBody", { n: entries.length })}
             </p>
           }
-          confirmLabel="Clear"
+          confirmLabel={t("notifLog.clear")}
           confirmDanger
           onCancel={() => setConfirmClear(false)}
           onConfirm={onClear}

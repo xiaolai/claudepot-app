@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "./Glyph";
 import { NF } from "../../icons";
 import { Button } from "./Button";
@@ -71,6 +72,7 @@ export function PreviewHeader({
   secondaryActions,
   style,
 }: PreviewHeaderProps) {
+  const { t } = useTranslation("components");
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuMaxHeight, setMenuMaxHeight] = useState<string>(
     "var(--config-menu-max-height)",
@@ -118,18 +120,18 @@ export function PreviewHeader({
   // alone, so a bare arrow would leave the user guessing.
   const showGlyph = !loading && resolvedEditor != null;
   const buttonLabel = loading
-    ? "Detecting editors…"
+    ? t("preview.detecting")
     : resolvedEditor
       ? resolvedEditor.label
-      : "Open in…";
+      : t("preview.openIn");
   // `aria-label` and hover title keep the full "Open in <Editor>" for
   // screen readers and tooltip users — the visible text is just the
   // editor name.
   const buttonAccessibleLabel = loading
-    ? "Detecting editors…"
+    ? t("preview.detecting")
     : resolvedEditor
-      ? `Open in ${resolvedEditor.label}`
-      : "Open in…";
+      ? t("preview.openInEditor", { editor: resolvedEditor.label })
+      : t("preview.openIn");
 
   return (
     <header
@@ -144,9 +146,9 @@ export function PreviewHeader({
     >
       {onClose && (
         <BackAffordance
-          label="Artifacts"
+          label={t("preview.back")}
           onClick={onClose}
-          title="Back to artifact list"
+          title={t("preview.backTitle")}
           style={{ marginBottom: "var(--sp-2)" }}
         />
       )}
@@ -255,7 +257,7 @@ export function PreviewHeader({
               disabled={disabled || loading}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              aria-label="Choose editor"
+              aria-label={t("preview.chooseEditor")}
               onClick={() => setMenuOpen((v) => !v)}
               className="pm-focus"
               style={{
@@ -339,6 +341,7 @@ function EditorMenu({
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
 }) {
+  const { t } = useTranslation("components");
   const detected = editors.filter(
     (e) => e.id !== "env" && e.id !== "system",
   );
@@ -348,7 +351,7 @@ function EditorMenu({
   return (
     <div
       role="menu"
-      aria-label="Open with"
+      aria-label={t("preview.openWith")}
       style={{
         position: "absolute",
         top: "calc(100% + var(--sp-4))",
@@ -365,7 +368,7 @@ function EditorMenu({
       }}
     >
       {detected.length > 0 && (
-        <MenuGroup label="Detected">
+        <MenuGroup label={t("preview.detected")}>
           {detected.map((c) => (
             <EditorRow
               key={c.id}
@@ -378,6 +381,7 @@ function EditorMenu({
         </MenuGroup>
       )}
       {env && (
+        // `$EDITOR` is the literal environment-variable name, not copy.
         <MenuGroup label="$EDITOR">
           <EditorRow
             candidate={env}
@@ -388,7 +392,7 @@ function EditorMenu({
         </MenuGroup>
       )}
       {system && (
-        <MenuGroup label="System default">
+        <MenuGroup label={t("preview.systemDefault")}>
           <EditorRow
             candidate={system}
             kind={kind}
@@ -408,11 +412,11 @@ function EditorMenu({
       />
       <MenuItem onClick={onPickOther}>
         <Glyph g={NF.ellipsis} color="var(--fg-muted)" />
-        <span>Other…</span>
+        <span>{t("preview.other")}</span>
       </MenuItem>
       <MenuItem onClick={onRefreshEditors}>
         <Glyph g={NF.refresh} color="var(--fg-muted)" />
-        <span>Refresh editor list</span>
+        <span>{t("preview.refreshEditors")}</span>
       </MenuItem>
       <div
         style={{
@@ -421,7 +425,7 @@ function EditorMenu({
           color: "var(--fg-faint)",
         }}
       >
-        Fallback: <strong>{defaults.fallback}</strong>
+        {t("preview.fallback")} <strong>{defaults.fallback}</strong>
       </div>
     </div>
   );
@@ -464,6 +468,7 @@ function EditorRow({
   onOpen: (editorId: string) => void;
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
 }) {
+  const { t } = useTranslation("components");
   return (
     <div style={{ display: "flex", alignItems: "stretch" }}>
       <MenuItem onClick={() => onOpen(candidate.id)} style={{ flex: 1 }}>
@@ -481,9 +486,12 @@ function EditorRow({
       {kind && (
         <MenuItem
           onClick={() => onSetDefault(kind, candidate.id)}
-          title={`Set ${candidate.label} as default for ${kind}`}
+          title={t("preview.setDefaultTitle", {
+            editor: candidate.label,
+            kind,
+          })}
           style={{ flex: "0 0 auto" }}
-          aria-label={`Set default for ${kind}`}
+          aria-label={t("preview.setDefaultAria", { kind })}
         >
           <span
             style={{
@@ -491,15 +499,15 @@ function EditorRow({
               color: "var(--fg-faint)",
             }}
           >
-            set default
+            {t("preview.setDefault")}
           </span>
         </MenuItem>
       )}
       <MenuItem
         onClick={() => onSetDefault(null, candidate.id)}
-        title={`Set ${candidate.label} as fallback default`}
+        title={t("preview.setFallbackTitle", { editor: candidate.label })}
         style={{ flex: "0 0 auto" }}
-        aria-label="Set fallback default"
+        aria-label={t("preview.setFallbackAria")}
       >
         <span
           style={{
@@ -507,7 +515,7 @@ function EditorRow({
             color: "var(--fg-faint)",
           }}
         >
-          set fallback
+          {t("preview.setFallback")}
         </span>
       </MenuItem>
     </div>

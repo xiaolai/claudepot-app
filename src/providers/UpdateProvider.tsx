@@ -48,13 +48,16 @@ import {
 } from "react";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
 import {
   RELEASE_DOWNLOAD_EVENT,
   type ReleaseChannelName,
   type ReleaseDownloadProgress,
 } from "../api/releaseUpdate";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { renderError } from "../lib/i18n-error";
 import {
   UPDATE_AUTO_CHECK_KEY,
   UPDATE_CHECK_FREQ_KEY,
@@ -225,6 +228,7 @@ function shouldCheckNow(
 }
 
 export function UpdateProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("components");
   // Probed once via Tauri command. `null` until the probe lands so
   // the auto-check effect doesn't fire prematurely on the wrong
   // assumption.
@@ -305,8 +309,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         // Surface the failure but don't tear down the UI — the
         // local state already shows the user's intent; the next
         // check will simply use whatever Rust actually persisted.
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(`Couldn't save release channel: ${msg}`);
+        //
+        // Read from the global i18n instance rather than the hook's
+        // `t`: this callback is part of the context value, and a `t`
+        // dep would invalidate that value for every consumer on a
+        // language switch. Failure time is always current.
+        setError(
+          renderError(
+            e,
+            i18n.t("update.channelSaveFailed", { ns: "components" }),
+          ),
+        );
       });
   }, []);
 
@@ -384,8 +397,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       setStatus("available");
     } catch (e) {
       // The command rejects with a string or Error; normalize.
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      setError(renderError(e));
       setStatus("error");
       throw e;
     }
@@ -442,8 +454,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       await api.releaseUpdateInstall();
       setStatus("ready");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      setError(renderError(e));
       setStatus("error");
     } finally {
       if (unlisten) unlisten();
@@ -454,8 +465,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     try {
       await relaunch();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      setError(renderError(e));
       setStatus("error");
     }
   }, []);
@@ -631,14 +641,10 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
           and the warning must never depend on which pane is mounted. */}
       {pendingRelaunchOps && (
         <ConfirmDialog
-          title="Operations still running"
+          title={t("update.relaunchTitle")}
           body={
             <>
-              <p style={{ margin: 0 }}>
-                Restarting now will abandon the work below. Repairable
-                operations leave a journal entry you can resume later;
-                one-shot operations will need to be restarted.
-              </p>
+              <p style={{ margin: 0 }}>{t("update.relaunchBody")}</p>
               <ul style={{ margin: "var(--sp-8) 0 0", paddingLeft: "var(--sp-20)" }}>
                 {pendingRelaunchOps.map((label, i) => (
                   // Index keys are fine: the list is a static snapshot
@@ -648,7 +654,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
               </ul>
             </>
           }
-          confirmLabel="Restart anyway"
+          confirmLabel={t("update.restartAnyway")}
           confirmDanger
           onConfirm={() => {
             setPendingRelaunchOps(null);

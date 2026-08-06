@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+// `?raw` rather than node:fs — this tsconfig targets the browser and
+// carries no @types/node, and Vite types these imports via vite/client.
+import stripSource from "./SidebarLiveStrip.tsx?raw";
+import shortcutsSource from "../hooks/useShellShortcuts.ts?raw";
 import {
   formatElapsed,
   projectLabel,
@@ -24,6 +28,41 @@ function session(over: Partial<LiveSessionSummary> = {}): LiveSessionSummary {
     ...over,
   };
 }
+
+// ⌘⇧L reaches this strip by DOM query from `useShellShortcuts`, which
+// is a coupling across two files that no rendering test covers. It
+// originally matched on the strip's aria-label; once that label became
+// translatable, the shortcut kept working in English — the language
+// this suite runs in — and matched nothing in zh-CN. A green suite was
+// therefore not evidence. Assert the contract at the source level so a
+// future "tidy up the selector" edit fails here instead of silently
+// killing the shortcut in every non-English locale.
+describe("⌘⇧L → live strip selector contract", () => {
+  const strip = stripSource;
+  const shortcuts = shortcutsSource;
+
+  it("the strip exposes the stable hook attribute", () => {
+    expect(strip).toContain("data-live-strip");
+  });
+
+  it("the shortcut queries that attribute", () => {
+    expect(shortcuts).toContain("[data-live-strip]");
+  });
+
+  it("no querySelector in the shortcut matches on a translated label", () => {
+    // `aria-label` is rendered through t(); selecting on its VALUE is
+    // the bug this suite exists to prevent.
+    const selectors = [
+      ...shortcuts.matchAll(/querySelector\w*<[^>]*>\(\s*([^)]+)\)/g),
+    ].map((m) => m[1]);
+    expect(selectors.length).toBeGreaterThan(0);
+    for (const s of selectors) {
+      expect(s, `selector couples to a translated string: ${s}`).not.toMatch(
+        /aria-label\s*=/,
+      );
+    }
+  });
+});
 
 describe("SidebarLiveStrip helpers", () => {
   describe("projectLabel", () => {
