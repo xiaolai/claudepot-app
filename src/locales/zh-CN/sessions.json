@@ -115,7 +115,7 @@
     "loadingSession": "正在加载会话…",
     "loadFailed": "无法加载会话",
     "copyFirstPromptFailed": "无法将首条提示复制到剪贴板。",
-    "revealFailedScope": "无法定位文件",
+    "revealFailedScope": "无法在文件管理器中显示",
     "agentSubsession": "代理子会话",
     "untitledSession": "（无标题会话）",
     "menuMoveToProject": "移动到项目…",

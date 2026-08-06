@@ -238,3 +238,44 @@ describe("zh quote marks separate UI affordances from data", () => {
     ).toEqual([]);
   });
 });
+
+// 工件 carries two senses already: the scheduler artifact an agent
+// materializes into (launchd plist / Task Scheduler XML / systemd timer),
+// and the CC artifact *directory* under ~/.claude/projects/. Config
+// artifacts — the Skills, Agents and slash commands you disable and trash —
+// are 配置产物, a third thing.
+//
+// Settings called that third thing 工件 while Config called it 配置产物, so
+// one word covered three concepts and the two panes that cross-reference
+// each other disagreed: Settings' empty state says "在 Config 树中使用停用操作"
+// about objects Config names differently, and Config's points at a trash
+// pane Settings titled with the other noun.
+describe("the config-artifact noun stays distinct from 工件", () => {
+  const SCHEDULER_OR_DIR = [/调度器工件/, /CC 工件目录/];
+
+  it("工件 appears only as a scheduler artifact or a CC artifact directory", () => {
+    const namespaces = (i18n.options.ns ?? []) as string[];
+    const offenders: string[] = [];
+
+    const walk = (obj: unknown, ns: string, prefix = ""): void => {
+      if (typeof obj === "string") {
+        if (!obj.includes("工件")) return;
+        // Strip the two legitimate senses; anything left is the third.
+        const rest = SCHEDULER_OR_DIR.reduce((s, re) => s.replace(re, ""), obj);
+        if (rest.includes("工件")) offenders.push(`${ns}:${prefix}`);
+        return;
+      }
+      if (!obj || typeof obj !== "object") return;
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        walk(v, ns, prefix ? `${prefix}.${k}` : k);
+      }
+    };
+
+    for (const ns of namespaces) walk(i18n.getResourceBundle("zh-CN", ns), ns);
+
+    expect(
+      offenders,
+      "these say 工件 for a config artifact; that noun is 配置产物",
+    ).toEqual([]);
+  });
+});

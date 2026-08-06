@@ -40,7 +40,7 @@
     "accountAuthRejected": "账户认证被拒",
     "keychainLocked": "钥匙串已锁定",
     "ccSlotDrift": "CC 槽位漂移",
-    "desktopDrift": "桌面版漂移",
+    "desktopDrift": "Desktop 漂移",
     "repairConflict": "修复冲突",
     "sessionWaiting": "会话等待输入",
     "sessionStuck": "会话卡住",

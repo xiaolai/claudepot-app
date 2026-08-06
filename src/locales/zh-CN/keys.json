@@ -30,7 +30,7 @@
     "oauthEmpty": "还没有 OAuth token。运行 <code>claude setup-token</code>，然后把值粘贴到「添加密钥」。",
     "addOauthToken": "添加 OAuth token",
     "colLabel": "标签",
-    "colCreatedBy": "创建账户",
+    "colCreatedBy": "创建者",
     "colCreated": "创建时间",
     "colExpires": "过期",
     "colShell": "Shell",

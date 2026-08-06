@@ -33,7 +33,7 @@
     }
   },
   "cost": {
-    "estimatedRateHint": "估算值：该模型尚未列入价目表，因此按其系列当前费率计算。"
+    "estimatedRateHint": "估算值：该模型尚未收录进费率表，因此按其家族当前费率计算。"
   },
   "rotation": {
     "window": {
@@ -198,10 +198,10 @@
   },
   "maintenance": {
     "gcPreviewFailed": "GC 预览失败",
-    "gcDone": "GC：已删除 {{journals}} 个日志、{{snapshots}} 个快照，释放 {{size}}",
+    "gcDone": "GC：已移除 {{journals}} 个日志、{{snapshots}} 个快照，释放 {{size}}",
     "gcFailed": "GC 失败",
     "lockBroken": "锁已强制解除 — PID {{pid}}（{{host}}）。审计记录：{{auditPath}}",
-    "breakLockFailed": "强制解锁失败"
+    "breakLockFailed": "破除锁失败"
   },
   "shortcuts": {
     "devModeOn": "开发者模式已开启",

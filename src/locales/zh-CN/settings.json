@@ -69,11 +69,11 @@
     "resolvedDark": "深色"
   },
   "locks": {
-    "desc": "强制清除重命名崩溃后遗留的过期锁文件。会生成审计记录。",
+    "desc": "强制破除重命名崩溃后遗留的过期锁文件。会生成审计记录。",
     "pathLabel": "锁文件路径",
-    "breakButton": "清除锁",
-    "breakTitle": "强制清除该锁文件并生成审计记录",
-    "breaking": "正在清除锁…",
+    "breakButton": "破除锁",
+    "breakTitle": "强制破除该锁文件并生成审计记录",
+    "breaking": "正在破除锁…",
     "enterPath": "请输入锁文件路径"
   },
   "diagnostics": {
@@ -505,12 +505,12 @@
     "resetFailed": "重置失败"
   },
   "artifacts": {
-    "sectionTitle": "工件",
-    "loadError": "无法加载工件生命周期：{{error}}",
+    "sectionTitle": "配置产物",
+    "loadError": "无法加载配置产物生命周期：{{error}}",
     "autoPurged_other": "已自动清除 {{count}} 条超过 {{days}} 天的回收站条目",
-    "disabledTitle": "已停用的工件",
-    "disabledTitleCount": "已停用的工件（{{count}}）",
-    "noneDisabled": "没有停用任何工件。在 Config 树中使用<em>停用</em>操作，可以在不删除的情况下对 Claude Code 隐藏某个工件。",
+    "disabledTitle": "已停用的配置产物",
+    "disabledTitleCount": "已停用的配置产物（{{count}}）",
+    "noneDisabled": "没有停用任何配置产物。在 Config 树中使用<em>停用</em>操作，可以在不删除的情况下对 Claude Code 隐藏某个配置产物。",
     "thKind": "类型",
     "thName": "名称",
     "thScope": "作用域",
@@ -532,9 +532,9 @@
     }
   },
   "trash": {
-    "title": "工件回收站",
-    "titleCount": "工件回收站（{{count}}）",
-    "empty": "回收站为空。移入回收站的工件可在此保留约 {{days}} 天并可恢复。",
+    "title": "配置产物回收站",
+    "titleCount": "配置产物回收站（{{count}}）",
+    "empty": "回收站为空。移入回收站的配置产物可在此保留约 {{days}} 天并可恢复。",
     "unrecoverable": "（不可恢复：{{state}}）",
     "restoredTo": "已恢复到 {{path}}",
     "restoreFailed": "恢复失败",
@@ -577,10 +577,10 @@
   },
   "recover": {
     "title": "恢复回收站条目",
-    "intro": "该条目没有完整的清单。请确认它应恢复到哪里、属于哪种工件。条目的载荷内容保持原样 — 只有目标位置是补写的。",
+    "intro": "该条目没有完整的清单。请确认它应恢复到哪里、属于哪种配置产物。条目的载荷内容保持原样 — 只有目标位置是补写的。",
     "targetLabel": "绝对目标路径",
     "pathError": "路径必须是绝对路径（以 <code>/</code> 或 <code>C:\\</code> 开头）。",
-    "kindLabel": "工件类型",
+    "kindLabel": "配置产物类型",
     "abandoned": "中止的暂存 — 上次被打断的操作",
     "submit": "恢复"
   },
