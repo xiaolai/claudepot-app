@@ -1,0 +1,659 @@
+{
+  "header": {
+    "title": "设置",
+    "subtitle": "偏好、数据与诊断。",
+    "advanced": "高级"
+  },
+  "panes": {
+    "general": "通用",
+    "appearance": "外观",
+    "notifications": "通知",
+    "network": "网络",
+    "rotation": "轮换",
+    "retention": "保留期",
+    "health": "健康检查",
+    "mcp": "MCP",
+    "cleanup": "清理",
+    "protected": "受保护路径",
+    "github": "GitHub",
+    "locks": "锁文件",
+    "diagnostics": "诊断",
+    "about": "关于"
+  },
+  "shared": {
+    "loading": "加载中…",
+    "saving": "正在保存…",
+    "cancel": "取消",
+    "refresh": "刷新",
+    "toggleFailed": "切换失败",
+    "saveFailed": "保存失败",
+    "copyFailed": "复制失败",
+    "prefsLoadFailed": "偏好设置加载失败"
+  },
+  "general": {
+    "groupStartupDesc": "Claudepot 启动时运行的行为，以及可选启用的诊断叠层。",
+    "groupCcDesc": "Claude Code 行为。写入 ~/.claude/settings.json，由所有共用 Claude Code 配置的账户共享。",
+    "openOnLaunch": "启动时打开",
+    "openOnLaunchToast": "启动时打开：{{value}}",
+    "showBoards": {
+      "label": "显示 Boards",
+      "hint": "供代理写入的持久化面板。试用功能，默认关闭 — 可随时用 ⌃⌥⌘B 切换。"
+    },
+    "launchAtLogin": {
+      "label": "登录时启动",
+      "hint": "登录后 Claudepot 自动启动。",
+      "error": "登录时启动切换失败"
+    },
+    "showWindow": {
+      "label": "启动时显示窗口",
+      "hint": "关闭时：Claudepot 启动后只驻留托盘，不显示窗口。点按托盘图标即可打开。"
+    },
+    "hideDock": {
+      "label": "隐藏程序坞图标",
+      "hint": "仅托盘模式：没有程序坞图标、没有 Cmd+Tab、没有应用菜单栏。窗口仍可从托盘打开。",
+      "hiddenToast": "已隐藏程序坞图标 — 仅托盘模式。",
+      "restoredToast": "已恢复程序坞图标。"
+    }
+  },
+  "appearance": {
+    "groupDesc": "主题通过 html 元素上的 CSS 变量生效；任何组件代码都不感知当前模式。",
+    "theme": "主题",
+    "system": "跟随系统",
+    "light": "浅色",
+    "dark": "深色",
+    "active": {
+      "label": "当前",
+      "hint": "应用此刻正在渲染的配色。"
+    },
+    "resolvedLight": "浅色",
+    "resolvedDark": "深色"
+  },
+  "locks": {
+    "desc": "强制清除重命名崩溃后遗留的过期锁文件。会生成审计记录。",
+    "pathLabel": "锁文件路径",
+    "breakButton": "清除锁",
+    "breakTitle": "强制清除该锁文件并生成审计记录",
+    "breaking": "正在清除锁…",
+    "enterPath": "请输入锁文件路径"
+  },
+  "diagnostics": {
+    "groupDesc": "只读视图：平台、活跃槽位，以及 Claude Code 当前的登录身份。",
+    "loadFailed": "诊断失败",
+    "copied": "诊断信息已复制。",
+    "platform": "平台",
+    "cliActive": "CLI 活跃账户",
+    "desktopActive": "Desktop 活跃账户",
+    "desktopInstalled": "已安装 Desktop",
+    "accounts": "账户数",
+    "dataDir": "数据目录",
+    "ccIdentity": "CC 身份",
+    "ccError": "CC 错误",
+    "yes": "是",
+    "no": "否",
+    "notSignedIn": "（未登录）",
+    "copy": "复制"
+  },
+  "about": {
+    "app": "应用",
+    "version": "版本",
+    "website": "网站",
+    "author": "作者",
+    "publisher": "发行方",
+    "design": "设计",
+    "githubAria": "GitHub",
+    "signingNote": "HANDO K.K. 是在 Apple Developer 注册、为 Claudepot 进行代码签名与公证的实体。启用“登录时启动”后，macOS 会在 <em>系统设置 → 通用 → 登录项与扩展 → App 后台活动</em> 中显示这个名字，偶尔也会出现在“曾在后台运行”通知里。它是 Developer ID 证书背后的法律实体名称 — 不是第三方进程。"
+  },
+  "updates": {
+    "unsupportedDesc": "此安装方式不支持应用内更新 — 这个二进制文件由你的包管理器管理。请到 Releases 页面查看新版本。",
+    "rowLabel": "更新",
+    "groupDesc": "Claudepot 检查托管在 GitHub Releases 上、经 minisign 签名的可信清单。你的安装只会更新到由项目发布密钥签名的版本。",
+    "checkNow": "立即检查",
+    "skipped": {
+      "label": "已跳过",
+      "hint": "版本 {{version}} 不会再提示。"
+    },
+    "showAgain": "重新提示",
+    "auto": {
+      "label": "自动检查",
+      "hint": "自上次成功检查起，超过所选间隔后在后台自动检查。"
+    },
+    "frequency": {
+      "label": "频率",
+      "hint": "先启用自动检查。",
+      "startup": "每次启动时",
+      "daily": "每天",
+      "weekly": "每周",
+      "manual": "仅当我点按“立即检查”时"
+    },
+    "channel": {
+      "label": "发布渠道",
+      "aria": "发布渠道",
+      "betaHint": "Beta：除稳定版外还会向你提供预发布版本（vX.Y.Z-beta.N）。更早拿到，测试较少。可随时切回 Stable — 在下一次检查时生效。",
+      "stableHint": "Stable：只向你提供正式发布的版本。选择 Beta 可同时接收预发布版本，抢先体验新功能。",
+      "stable": "Stable",
+      "beta": "Beta — 包含预发布版本"
+    },
+    "lastChecked": "上次检查",
+    "never": "从未",
+    "allReleases": {
+      "label": "全部版本",
+      "hint": "浏览更新日志并下载任意平台的安装包。"
+    },
+    "status": {
+      "idle": "空闲",
+      "checking": "正在检查…",
+      "strandedVersioned": "你正在使用比当前稳定版（v{{version}}）更新的预发布版本 — 将在下一个稳定版发布时向你提供",
+      "stranded": "你正在使用比当前稳定版更新的预发布版本 — 将在下一个稳定版发布时向你提供",
+      "latest": "你已是最新版本",
+      "skippedVersion": "已跳过 v{{version}}",
+      "available": "有可用更新 — v{{version}}",
+      "ready": "已准备好安装 — 请重启 Claudepot",
+      "checkFailedDetail": "检查失败：{{error}}",
+      "checkFailed": "检查失败"
+    },
+    "downloading": "正在下载…",
+    "card": {
+      "current": "当前 v{{version}}",
+      "download": "下载",
+      "skip": "跳过此版本",
+      "downloadingPct": "正在下载… {{pct}}%",
+      "restart": "重启以更新"
+    }
+  },
+  "logs": {
+    "title": "诊断日志",
+    "desc": "应用产生的每条 <code>tracing</code> 事件和任何 panic 都会写入按天滚动的日志文件。报告意外退出时，请打开该文件夹并附上最新的文件。超过 7 天的文件会在启动时清理。",
+    "reveal": "显示日志文件夹",
+    "openFailed": "打开日志文件夹"
+  },
+  "notifications": {
+    "groupActivityDesc": "实时 Activity 功能只是监视 Claude Code 本就在写入的对话记录文件，让你一眼看出哪些会话正忙、在等待或已空闲。不会向任何地方发送数据；所有数据都留在这台 Mac 上。",
+    "groupAlertsDesc": "当实时会话或长时间操作越过以下阈值时发送系统通知。“等待你介入”和 90% 用量阈值默认开启；其余为可选。系统通知只在 Claudepot 窗口未聚焦时发出 — 顶栏铃铛图标始终显示应用内历史。",
+    "activityOn": "Activity 功能已启用。",
+    "activityOff": "Activity 功能已停用。",
+    "enable": {
+      "label": "启用 Activity",
+      "hint": "启动实时运行时。关闭后停止所有轮询并清空 LIVE 状态条。"
+    },
+    "hideThinking": {
+      "label": "默认隐藏思考内容",
+      "hint": "思考块显示为“redacted · N 字符”，点按才展开。隐私优先。"
+    },
+    "errorBurst": {
+      "label": "错误爆发时提醒",
+      "hint": "60 秒窗口内至少出现两条 is_error=true 的工具结果。"
+    },
+    "waiting": {
+      "label": "等待你介入时提醒",
+      "hint": "会话因权限确认、计划模式批准或澄清问题而暂停。"
+    },
+    "taskDone": {
+      "label": "任务完成时提醒",
+      "hint": "忙碌 2 分钟以上的会话回到空闲。2 分钟门槛可滤掉顺手小改动。"
+    },
+    "stuck": {
+      "label": "卡住时提醒",
+      "hint": "留空 = 关闭。在最后一条工具结果后 10 分钟触发；此数值只出现在提示文案里。",
+      "off": "关闭"
+    },
+    "usage": {
+      "label": "达到用量阈值时提醒",
+      "hint": "针对 CLI 活跃账户，每个重置周期内每个（5 小时 / 7 天窗口 × 阈值）只触发一次。每 5 分钟轮询。若一次轮询内越过两个阈值，只触发较高的那个。点按任意标签切换；全部清空 = 关闭此功能。"
+    },
+    "subWindows": {
+      "label": "包含 7 天 Opus / Sonnet 子窗口",
+      "hint": "总的 7 天窗口始终会检查。接近上限时各模型子配额通常与其同步，保持关闭可避免同一件事触发三次。若你分别关注每个模型的配额，可打开。"
+    },
+    "opDone": {
+      "label": "长时间操作完成时提醒",
+      "hint": "全部验证、项目重命名、会话清理/瘦身/分享/移动、账户登录或清理项目 — 任一操作在窗口未聚焦时结束都会发送系统通知。"
+    },
+    "test": {
+      "label": "发送测试通知",
+      "hint": "发送一条示例系统通知，验证权限和运行链路是否就绪。不会改动任何偏好设置。",
+      "button": "发送测试",
+      "title": "Claudepot 测试",
+      "body": "看到这条说明通知功能正常。",
+      "sent": "测试通知已发送。",
+      "denied": "系统通知权限被拒绝。请打开系统设置重新启用。",
+      "notGranted": "通知权限未授予。点按“请求”重试。",
+      "unreachable": "无法连接系统通知服务。请重试，或在系统设置中确认 Claudepot 拥有通知权限。",
+      "sendFailed": "无法发送通知"
+    },
+    "categories": {
+      "loadFailed": "通知类别加载失败",
+      "loadingDesc": "更多通知类别 — 加载中…",
+      "desc": "更多通知类别。上方开关已覆盖的类别（错误、卡住、等待、操作完成、用量、服务状态）默认隐藏 — 打开底部开关可显示。",
+      "alsoAbove": "（上方也有）",
+      "showAll": "显示全部类别",
+      "showAllHint": "包含上方开关已覆盖的类别。"
+    },
+    "permission": {
+      "label": "系统通知权限",
+      "grantedHint": "已授予。窗口未聚焦时 Claudepot 可以发出系统级提醒。",
+      "deniedHint": "已拒绝。请在系统设置 → 通知中重新启用 Claudepot 以接收提醒。",
+      "notRequestedHint": "尚未请求。点按“请求”以启用系统级提醒。",
+      "probingHint": "正在探测系统权限状态…",
+      "grantedTag": "已授予",
+      "deniedTag": "已拒绝",
+      "unknownTag": "未知",
+      "request": "请求",
+      "enabled": "通知已启用。",
+      "deniedToast": "通知权限被拒绝。请打开系统设置重新启用。"
+    }
+  },
+  "github": {
+    "desc": "用于把会话导出发布为 gist 的 Personal Access Token。存放在 Keychain 中；界面上永远只显示最后四位。",
+    "status": "状态",
+    "noToken": "未存储 token",
+    "override": "覆盖",
+    "envNote": "已设置 GITHUB_TOKEN 环境变量 — 上传时它会覆盖已存储的 token。若想让保存/清除生效，请先取消该环境变量。",
+    "token": "Token",
+    "tokenAria": "GitHub token",
+    "save": "保存",
+    "replace": "替换",
+    "clear": "清除",
+    "saved": "GitHub token 已保存。",
+    "cleared": "GitHub token 已清除。",
+    "loadFailed": "GitHub token 加载失败",
+    "saveFailed": "GitHub token 保存失败",
+    "clearFailed": "GitHub token 清除失败"
+  },
+  "network": {
+    "loadingPrefs": "正在加载偏好设置…",
+    "intro": "从 <code>status.claude.com</code> 获取上游故障信息，并测量到 Claude Code 实际访问主机的往返延迟。主机列表源自 <link>xiaolai/anthropic-claude-surge-rules-set</link> 维护的注册表。",
+    "serviceStatus": "服务状态",
+    "poll": {
+      "label": "检查 status.claude.com",
+      "detail": "每 {{minutes}} 分钟发出一个小请求。用于指示 Anthropic 自身是否降级。",
+      "every": "轮询间隔",
+      "minutes": "分钟（2–60）"
+    },
+    "osNotify": {
+      "label": "状态变化时发送系统通知",
+      "detail": "默认关闭 — Anthropic 的短暂抖动会产生误报，让你渐渐忽略真正的信号。铃铛图标日志无论如何都会记录每次变化。"
+    },
+    "latency": {
+      "title": "链路延迟",
+      "label": "窗口打开时探测延迟",
+      "detail": "向每个 Claude 主机发送 HEAD 请求。仅按需执行 — 有意不做持续后台轮询。"
+    },
+    "current": {
+      "title": "当前",
+      "checked": "· 检查于 {{when}}",
+      "noData": "· 暂无数据",
+      "lastPollFailed": "上次轮询失败：{{error}}",
+      "incidents": "进行中的事故",
+      "probing": "正在探测…",
+      "probeNow": "立即探测",
+      "probedAt": "延迟探测于 {{when}}",
+      "timeout": "超时",
+      "error": "错误"
+    }
+  },
+  "rotation": {
+    "loadFailed": "轮换配置加载失败",
+    "saveFailed": "轮换配置保存失败",
+    "ruleSaved": "轮换规则“{{id}}”已保存",
+    "ruleDeleted": "轮换规则“{{id}}”已删除",
+    "loadingRules": "正在加载轮换规则…",
+    "intro": "当 Anthropic 用量窗口越过你设定的阈值时，自动切换 CLI 活跃账户。触发依据是 Anthropic 的 <code>/api/oauth/usage</code> 数据，每 5 分钟轮询一次。默认的<strong>确认</strong>模式会弹出提示并等待你点按；等你信任该规则后再切到<strong>自动</strong>。",
+    "rules": "规则",
+    "addRule": "添加规则",
+    "recentActivity": "近期活动",
+    "filter": "筛选",
+    "allOutcomes": "全部结果",
+    "noActivity": "尚无轮换活动。",
+    "deleteConfirm": {
+      "title": "删除轮换规则？",
+      "body": "规则 <code>{{id}}</code> 将被移除。之后可以重新添加。",
+      "confirm": "删除"
+    },
+    "modeAuto": "自动",
+    "modeConfirm": "确认",
+    "disabledTag": "已停用",
+    "selectorLeastUsed": "在 {{count}} 个账户中取用量最少者",
+    "selectorRoundRobin": "在 {{count}} 个账户间轮流",
+    "selectorExplicit": "切换到 {{email}}",
+    "disable": "停用",
+    "enable": "启用",
+    "editRule": "编辑规则",
+    "deleteRule": "删除规则",
+    "emptyWithAccounts": "还没有轮换规则。添加一条，在用量阈值触发时自动切换账户。",
+    "emptyNoAccounts": "创建轮换规则前请先添加至少一个 Anthropic 账户 — 候选账户选择器读取的是账户列表。",
+    "thWhen": "时间",
+    "thRule": "规则",
+    "thFromTo": "从 → 到",
+    "thOutcome": "结果",
+    "thReason": "原因",
+    "bgWorkers_other": "{{count}} 个后台工作进程活跃"
+  },
+  "rotationModal": {
+    "titleEdit": "编辑规则：{{id}}",
+    "titleNew": "新建轮换规则",
+    "ruleId": {
+      "label": "规则 id",
+      "hint": "简短且唯一的标识 — 会出现在审计日志中。"
+    },
+    "fireWhen": {
+      "label": "触发条件",
+      "hint": "Anthropic 报告的 CLI 活跃账户的用量占比。"
+    },
+    "rotateTo": "然后轮换到",
+    "selector": {
+      "leastUsed": "用量最少",
+      "leastUsedHint": "选择在所选窗口内用量占比最低的候选账户。",
+      "roundRobin": "轮流",
+      "roundRobinHint": "按列表顺序选择当前活跃账户之后的下一个候选。",
+      "explicit": "指定账户",
+      "explicitHint": "总是切换到某个特定账户。"
+    },
+    "pickAccount": "选择账户…",
+    "mode": {
+      "label": "模式",
+      "hint": "确认模式会先弹出提示再切换。自动模式立即切换。",
+      "confirm": "确认（推荐）",
+      "auto": "自动"
+    },
+    "advanced": "高级（防护）",
+    "minInterval": {
+      "label": "两次切换的最小间隔（秒）",
+      "hint": "对所有规则生效。防止单次轮询引发连锁切换。"
+    },
+    "maxSwaps": {
+      "label": "每周期最多切换次数",
+      "hint": "在触发窗口的重置周期内，对每条规则的上限。"
+    },
+    "skipWhenCc": "CC 运行时跳过",
+    "testNow": "立即测试",
+    "testing": "正在测试…",
+    "runDryTest": "空运行测试",
+    "dryHint": "用当前用量快照评估此规则 — 回答“现在会触发吗？”",
+    "wouldFire": "会触发",
+    "wouldNotFire": "不会触发",
+    "dryRunFailed": "空运行失败：{{error}}",
+    "idExists": "规则 id“{{id}}”已存在",
+    "save": "保存",
+    "create": "创建规则",
+    "noAccounts": "尚未注册任何账户。"
+  },
+  "retention": {
+    "loadFailed": "读取保留设置失败",
+    "changeFailed": "修改保留设置",
+    "loadErrorLead": "无法读取 Claude Code 的保留设置，因此本面板无法告诉你哪些内容已排定删除。",
+    "tryAgain": "重试",
+    "modeDefault": "{{days}} 天 — 这是 Claude Code 的默认值，不是你做的选择",
+    "modeDisabled": "对话记录完全没有在保存",
+    "modeInvalid": "无效值（{{days}}）— Claude Code 的设置校验会拒绝它",
+    "modeDays": "{{days}} 天",
+    "sectionTitle": "对话记录保留",
+    "risk": {
+      "deletable_other": "{{num}} 条对话记录将在 Claude Code 下次启动时被删除。",
+      "horizon": "另有 {{num}} 条将在 {{days}} 天内越过删除线。",
+      "scanIncomplete": "Claude Code 的对话记录文件夹有一部分无法读取，这些数字只是下限，不是总数。",
+      "nothing": "没有内容被排定删除。",
+      "totalOnMachine": "这台机器上共有 {{num}} 条对话记录。",
+      "suppressed": "由于这个值使设置文件无效，Claude Code 目前完全跳过清理。这是在无意中保护了你的对话记录 — 请改正这个值，而不要恢复默认值：恢复默认会重新启用删除。",
+      "oldest": "现存最早的对话：{{date}}。",
+      "silent": "Claude Code 会静默执行 — 它从不报告删除了什么。"
+    },
+    "nestedNote": "清理只删除 {{total}} 个顶层会话对话记录。另有 {{nested}} 个嵌套文件（子代理运行、工具结果）永远不会被删除，所以对话在被删除的同时文件夹仍在增长 — 磁盘占用无法暴露这种丢失。",
+    "keepFor": "对话记录保留时长",
+    "preset30": "30 天",
+    "preset90": "90 天",
+    "preset365": "1 年",
+    "preset3650": "10 年",
+    "keepToast": "Claude Code 将把对话记录保留 {{label}}。",
+    "savingNote": "正在保存保留设置…",
+    "bufferNote": "更长的窗口只是争取时间，不是备份。这些文件仍存放在 Claude Code 的缓存目录里、遵循 Claude Code 的规则，重度使用时每周大约增长 1 GB。",
+    "dangerZone": "危险区",
+    "restoreDefaultBtn": "恢复 Claude Code 的默认值",
+    "stopSavingBtn": "完全停止保存对话记录",
+    "dangerNote": "两者都会重新启用删除。对已被删除的对话记录，二者都无法撤销。",
+    "confirmRestore": {
+      "title": "恢复 Claude Code 的默认保留期？",
+      "bodyCount": "保留期将恢复为 <strong>30 天</strong>。Claude Code 下次启动时会删除所有早于该期限的对话记录 — 目前保存着 {{num}} 条对话记录。此操作无法撤销。",
+      "body": "保留期将恢复为 <strong>30 天</strong>。Claude Code 下次启动时会删除所有早于该期限的对话记录。此操作无法撤销。",
+      "confirm": "恢复默认值"
+    },
+    "restoredToast": "保留期已恢复为 Claude Code 的 30 天默认值。",
+    "confirmDisable": {
+      "title": "完全停止保存对话记录？",
+      "intro": "这会写入 <code>cleanupPeriodDays: 0</code>，它做两件事：",
+      "li1": "Claude Code 停止为新会话写入对话记录。",
+      "li2": "所有现存对话记录将在 Claude Code 下次启动时被删除。",
+      "li2Count": "所有现存对话记录（这台机器上有 {{num}} 条）将在 Claude Code 下次启动时被删除。",
+      "outro": "会话恢复、搜索，以及 Claudepot 所有建立在对话记录之上的功能都将停止工作。此操作无法撤销。",
+      "confirm": "停止保存并删除",
+      "phrase": "删除我的对话记录"
+    },
+    "disabledToast": "对话记录持久化已停用。"
+  },
+  "health": {
+    "refreshFailed": "健康检查刷新失败",
+    "openLogFailed": "无法打开日志",
+    "desc": "<code>claude doctor</code> 的只读摘要。通过在 pty 中启动 Claude Code 并解析其输出获得；缓存 60 秒。区别于“设置 → 诊断”—— 那里显示的是 Claudepot 自身的自检。",
+    "unmeasured": "无法读取 claude doctor",
+    "capturedRetry": "采集于 {{time}} · 刷新以重试",
+    "capturedBytes": "采集于 {{time}} · {{bytes}} B",
+    "refreshing": "正在刷新…",
+    "parserFailed": "解析失败",
+    "partialParse": "部分解析",
+    "failedNote": "顶栏胶囊会回退到最近一次成功的快照。",
+    "partialNote": "部分区块可能缺失。",
+    "rawRecorded": "原始输出已记录，可供查看。",
+    "openParseLog": "打开解析失败日志",
+    "noEntries": "（无条目）",
+    "noSections": "未从 doctor 输出中解析出任何区块。",
+    "running": "正在运行 <code>claude doctor</code>…（每分钟首次调用需 6–10 秒）"
+  },
+  "mcp": {
+    "serverHealth": "服务器健康",
+    "toolVisibleCount": "tool_visible · {{count}} 个工具",
+    "toolVisibleFailed": "tool_visible · 失败",
+    "unknown": "未知",
+    "healthDesc": "启动 <code>claudepot mcp memory-server</code>，执行 <code>initialize</code> + <code>tools/list</code>，统计工具数量。",
+    "checking": "正在检查…",
+    "check": "检查",
+    "agentInstructions": "代理指令",
+    "introDesc": "只配置 MCP 条目还不够 — 必须告诉代理<em>何时</em>调用这些工具。这个片段就是干这个的。选定作用域，安装一次，再把 <code>@include</code> 行粘贴到 Claudepot 指出的目标文件里。之后重新生成只会原地刷新文件；<code>@include</code> 行永不改变。",
+    "scope": "作用域",
+    "scopeUser": "用户",
+    "scopeUserDesc": "— 写入 <code>~/.claude/claudepot-mcp-instructions.md</code>；把 <code>@include</code> 粘贴到 <code>~/.claude/CLAUDE.md</code>、<code>~/.codex/AGENTS.md</code>、<code>~/.gemini/GEMINI.md</code>。在每个项目中生效。",
+    "scopeProject": "项目",
+    "scopeProjectDesc": "— 写入 <code>{{path}}</code>；把 <code>@include</code> 粘贴到项目的 <code>AGENTS.md</code>（按 <code>/init-workspace</code> 的约定为规范来源）。只在该项目中生效。",
+    "projectAria": "项目",
+    "selectProject": "选择项目…",
+    "installing": "正在安装…",
+    "installSnippet": "安装片段",
+    "copyInclude": "复制 @include 行",
+    "wroteToast": "已写入 {{path}}（{{bytes}} 字节）",
+    "installFailed": "安装失败",
+    "snippetLoadFailed": "片段预览加载失败",
+    "projectsLoadFailed": "项目列表加载失败",
+    "includeCopied": "@include 行已复制到剪贴板",
+    "wroteLine": "已写入（{{scope}}）：{{path}}",
+    "pasteInto": "把上面这一行粘贴到：",
+    "preview": "预览片段内容"
+  },
+  "protected": {
+    "errEmpty": "路径不能为空。",
+    "errParent": "路径不能包含 '..' 段。",
+    "errUncRoot": "路径不能是 UNC 根。",
+    "errBareDrive": "路径不能只是盘符；请指定该盘符下的目录。",
+    "errNotAbsolute": "路径必须是绝对路径（以 '/'、'~'、盘符或 '\\\\' 开头）。",
+    "errFsRoot": "路径不能是文件系统根目录。",
+    "errDriveRoot": "路径不能是盘符根目录；请指定该盘符下的目录。",
+    "desc": "清理时不会移除这些路径在 <code>~/.claude.json</code> 中的条目或 <code>history.jsonl</code> 中的行。<code>~/.claude/projects/</code> 下的 CC 工件目录仍可被删除 — 只保留旁路状态。",
+    "listAria": "受保护路径",
+    "empty": "没有受保护路径。",
+    "sourceDefaultTitle": "内置默认",
+    "sourceUserTitle": "你添加的",
+    "sourceDefault": "默认",
+    "sourceUser": "用户",
+    "removeAria": "移除 {{path}}",
+    "placeholder": "/path/to/protect 或 ~/path",
+    "add": "添加",
+    "addTitle": "把该路径加入受保护列表",
+    "addHint": "输入绝对路径（或以 <code>~</code> 开头的路径）以启用“添加”。",
+    "reset": "重置为默认",
+    "resetTitle": "丢弃你的添加与移除 — 恢复内置默认",
+    "working": "处理中…",
+    "resetDone": "受保护路径已重置为默认。",
+    "loadFailed": "加载失败",
+    "removeFailed": "移除失败",
+    "resetFailed": "重置失败"
+  },
+  "artifacts": {
+    "sectionTitle": "工件",
+    "loadError": "无法加载工件生命周期：{{error}}",
+    "autoPurged_other": "已自动清除 {{count}} 条超过 {{days}} 天的废纸篓条目",
+    "disabledTitle": "已停用的工件",
+    "disabledTitleCount": "已停用的工件（{{count}}）",
+    "noneDisabled": "没有停用任何工件。在 Config 树中使用<em>停用</em>操作，可以在不删除的情况下对 Claude Code 隐藏某个工件。",
+    "thKind": "类型",
+    "thName": "名称",
+    "thScope": "作用域",
+    "thTrashed": "移入时间",
+    "thState": "状态",
+    "thActions": "操作",
+    "scopeUser": "用户",
+    "scopeProject": "项目",
+    "reenabled": "已重新启用 {{kind}}“{{name}}”",
+    "reenableFailed": "重新启用失败",
+    "movedToTrash": "已把 {{kind}}“{{name}}”移入废纸篓",
+    "trashFailed": "移入废纸篓失败",
+    "reenable": "重新启用",
+    "moveToTrash": "移入废纸篓",
+    "confirmTrash": {
+      "title": "把 {{kind}} 移入废纸篓？",
+      "body": "“{{name}}”将移入废纸篓。约 30 天内可以恢复。",
+      "confirm": "移入废纸篓"
+    }
+  },
+  "trash": {
+    "title": "工件废纸篓",
+    "titleCount": "工件废纸篓（{{count}}）",
+    "empty": "废纸篓为空。移入废纸篓的工件可在此保留约 {{days}} 天并可恢复。",
+    "unrecoverable": "（不可恢复：{{state}}）",
+    "restoredTo": "已恢复到 {{path}}",
+    "restoreFailed": "恢复失败",
+    "forgotten": "废纸篓条目已抹除",
+    "forgetFailed": "抹除失败",
+    "recoveredTo": "已恢复到 {{path}}",
+    "recoverFailed": "恢复失败",
+    "unknown": "未知",
+    "restore": "恢复",
+    "recover": "恢复…",
+    "forgetTitle": "抹除 — 从磁盘删除，无法再撤销",
+    "confirmForget": {
+      "title": "抹除这条废纸篓条目？",
+      "body": "该条目将从磁盘删除。之后无法再撤销。",
+      "confirm": "抹除"
+    },
+    "confirmSuffix": {
+      "title": "原位置已被占用",
+      "body": "改为以“-N”后缀恢复“{{name}}”？",
+      "confirm": "以后缀恢复"
+    },
+    "purgeTitle": "清除超过 {{days}} 天的完好条目",
+    "emptyOld": "清空旧条目",
+    "confirmPurge": {
+      "title": "清除旧的废纸篓条目？",
+      "body": "超过 {{days}} 天的完好条目将被删除。损坏的条目会保留，直到手动抹除。",
+      "confirm": "清除"
+    },
+    "purged_other": "已清除 {{count}} 条条目",
+    "purgeFailed": "清除失败",
+    "tamperedTitle": "载荷与清单记录的字节数 / sha256 不符 — 已拒绝恢复；请调查或抹除。",
+    "state": {
+      "healthy": "完好",
+      "missing_manifest": "缺少清单",
+      "missing_payload": "缺少载荷",
+      "orphan_payload": "孤立载荷",
+      "abandoned_staging": "中止的暂存",
+      "tampered": "被篡改"
+    }
+  },
+  "recover": {
+    "title": "恢复废纸篓条目",
+    "intro": "该条目没有完整的清单。请确认它应恢复到哪里、属于哪种工件。条目的载荷内容保持原样 — 只有目标位置是补写的。",
+    "targetLabel": "绝对目标路径",
+    "pathError": "路径必须是绝对路径（以 <code>/</code> 或 <code>C:\\</code> 开头）。",
+    "kindLabel": "工件类型",
+    "abandoned": "中止的暂存 — 上次被打断的操作",
+    "submit": "恢复"
+  },
+  "attribution": {
+    "loadFailed": "署名设置加载失败",
+    "applyFailed": "设置署名",
+    "resetToast": "署名已重置为 Claude Code 的默认。",
+    "offToast": "署名已关闭 — 提交和 PR 不再携带任何署名。",
+    "customToast": "自定义署名已保存。",
+    "default": "默认",
+    "off": "关闭",
+    "custom": "自定义",
+    "label": "提交与 PR 署名",
+    "hint": "控制 Claude 的署名是否出现在 git 提交和 pull request 上，以及内容是什么。关闭会在所有位置移除“Co-Authored-By”尾注和“Generated with Claude Code”行。",
+    "modeAria": "署名模式",
+    "commitLabel": "提交尾注",
+    "prLabel": "Pull request 正文",
+    "save": "保存自定义署名",
+    "bothEmpty": "两个字段都为空 — 请改用“关闭”。"
+  },
+  "models": {
+    "loadFailed": "模型允许列表加载失败",
+    "saveFailed": "保存模型允许列表",
+    "saved_other": "模型允许列表已保存 — {{count}} 个条目。",
+    "cleared": "模型允许列表已清空 — 所有模型恢复可选。",
+    "label": "可选模型",
+    "hintRestricts": "只有这些模型可以在 /model、--model 和回退链中被选择。顺序很重要：启用强制后，Default 即为第一个条目。",
+    "hintEmpty": "为空 — 你账户可用的所有模型都可选择。可添加模型族别名、版本前缀或完整模型 id。",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "remove": "移除",
+    "moveUpAria": "上移 {{entry}}",
+    "moveDownAria": "下移 {{entry}}",
+    "removeAria": "移除 {{entry}}",
+    "inputAria": "要允许的模型",
+    "add": "添加",
+    "enforceLabel": "把列表应用于 Default 模型",
+    "enforceInert": "已设置，但暂不生效：列表为空时 Claude Code 会忽略它，Default 仍不受限。请先在上方添加至少一个模型。需要 Claude Code {{version}} 或更高版本。",
+    "enforceHint": "不开启时，在 /model 中选择“Default”会完全绕过列表，解析为账户的默认模型。开启后，Default 即为第一个允许的条目。需要 Claude Code {{version}} 或更高版本。"
+  },
+  "companion": {
+    "loadFailed": "Artifact 设置加载失败",
+    "toggleFailed": "切换伴生输出",
+    "keptLocal": "伴生输出已保留在本地 — 云端 Artifacts 已关闭。",
+    "reenabled": "云端 Artifacts 已重新启用。",
+    "label": "伴生输出保留在本地",
+    "lockedHint": "已被 CLAUDE_CODE_DISABLE_ARTIFACT 环境变量覆盖。取消该变量后才能在这里控制。",
+    "hint": "默认关闭：Claude Code 会把图表和小应用发布为当前登录账户 claude.ai 画廊中的私有页面。打开后这类输出改为本地文件 — 不属于任何账户，切换账户后依然可用。"
+  },
+  "thinking": {
+    "loadFailed": "思考设置加载失败",
+    "toggleFailed": "切换扩展思考",
+    "onToast": "新会话默认开启扩展思考。",
+    "offToast": "新会话默认关闭扩展思考 — 将跳过思考。",
+    "label": "默认开启扩展思考",
+    "lockedHint": "已被 MAX_THINKING_TOKENS 环境变量覆盖。取消该变量后才能在这里控制。",
+    "hint": "默认开启：在支持的模型上 Claude 会先思考再回答 — 质量更好，但延迟和 token 更多。关闭后新会话默认跳过思考。只影响新会话；单会话的标志仍然优先。"
+  },
+  "fastMode": {
+    "loadFailed": "快速模式设置加载失败",
+    "toggleFailed": "切换快速模式",
+    "perSessionFailed": "切换按会话启用",
+    "onToast": "快速模式已开启 — 新的 Opus 会话运行更快，费用计入用量额度。",
+    "offToast": "快速模式已关闭 — 新会话按标准 Opus 速度和费率运行。",
+    "perSessionOnToast": "快速模式现在每个会话重置 — 用 /fast 重新开启。",
+    "perSessionOffToast": "快速模式偏好现在跨会话保持。",
+    "joinAnd": " 和 ",
+    "rate": "每 MTok ${{input}}/${{output}}",
+    "label": "快速模式",
+    "lockedHint": "已被 CLAUDE_CODE_DISABLE_FAST_MODE 环境变量覆盖。取消该变量后才能在这里控制。",
+    "hint": "让 {{models}} 以最高 2.5× 的速度运行，按 {{rate}} 计费而非标准费率 — 同一模型、同等质量。从第一个 token 起计入用量额度，而非套餐内含用量。需要账户启用用量额度；Team 和 Enterprise 还需要所有者开启。",
+    "perSessionLabel": "要求按会话启用",
+    "perSessionOnHint": "每个新会话都以快速模式关闭开始；用 /fast 重新开启。已保存的偏好会保留。",
+    "perSessionOffHint": "快速模式一经开启便跨会话保持。启用此项可让每个会话都以关闭状态开始。"
+  }
+}

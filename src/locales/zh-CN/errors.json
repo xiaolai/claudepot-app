@@ -1,0 +1,786 @@
+{
+  "account_register": {
+    "already_registered": "{{email}} 已经注册过了。",
+    "auth_rejected": "Claude Code 存储的登录已失效，且无法刷新。请重新登录以恢复。",
+    "cc_changed_during_refresh": "刷新期间 Claude Code 改动了自己存储的登录。没有丢失任何东西——请重试。",
+    "cc_live_refresh_skipped": "检测到正在运行的 Claude Code 会话，已跳过令牌刷新，以免将其登出。等该会话自行刷新后即会恢复，无需处理。",
+    "credential_read": "无法读取 Claude Code 存储的凭据：{{detail}}",
+    "credential_write": "无法写回凭据：{{detail}}",
+    "no_credentials": "Claude Code 尚未登录，没有可导入的凭据。请先在那边登录，再添加账号。",
+    "not_found": "该账号已不在注册列表中。",
+    "profile_fetch": "无法确认这份登录属于哪个账号：{{detail}}",
+    "store": "账号存储拒绝了这次写入：{{detail}}"
+  },
+  "account_verify": {
+    "account_not_found": "该账号已不在注册列表中。",
+    "corrupt_blob": "无法解析已存储的凭据：{{detail}}",
+    "no_blob": "该账号没有可供验证的凭据。请重新添加以恢复。",
+    "store": "验证已执行，但结果未能保存：{{detail}}"
+  },
+  "accounts": {
+    "invalid_uuid": "该账号 ID 无效。",
+    "list_failed": "无法读取账号列表：{{detail}}",
+    "login_in_progress": "已有一个登录流程在进行中。",
+    "login_state_lock_poisoned": "之前的失败导致登录状态卡住。请重启 Claudepot。",
+    "lookup_failed": "无法重新读取该账号：{{detail}}",
+    "reconcile_failed": "无法校正账号列表：{{detail}}",
+    "remove_failed": "{{detail}}",
+    "store_open_failed": "无法打开账号存储：{{detail}}",
+    "unknown_uuid": "没有与该 ID 匹配的已注册账号。",
+    "verify_all_in_progress": "已有一次验证正在进行中。"
+  },
+  "activity": {
+    "prefs_lock_poisoned": "偏好设置暂时不可用：{{detail}}"
+  },
+  "activity_cards": {
+    "body_read_failed": "无法从会话记录中读取这张卡片的原始行：{{detail}}",
+    "invalid_query": "Claudepot 无法识别该筛选条件：{{detail}}"
+  },
+  "activity_index": {
+    "io": "无法读写活动存储：{{detail}}",
+    "serde": "活动卡片解析失败：{{detail}}",
+    "sql": "活动数据库出错：{{detail}}"
+  },
+  "agent": {
+    "cron_too_dense": "该定时会触发 {{slots}} 次，上限为 {{limit}} 次。",
+    "duplicate_name": "已存在名为“{{name}}”的 Agent。",
+    "invalid_cron": "该定时表达式无效：{{reason}}",
+    "invalid_env": "环境变量条目被拒绝：{{detail}}",
+    "invalid_name": "“{{name}}”不是可用的 Agent 名称：{{reason}}",
+    "invalid_path": "{{path}} 无法使用：{{reason}}",
+    "io": "无法读写 Agent 存储：{{detail}}",
+    "json": "Agent 存储不是有效的 JSON：{{detail}}",
+    "missing_field": "必须填写“{{field}}”。",
+    "no_home_dir": "无法定位主目录。",
+    "not_found": "该 Agent 已不存在。",
+    "not_managed": "{{path}} 并非由 Claudepot 写入，不会被覆盖。",
+    "unsupported_platform": "当前平台不支持：{{operation}}"
+  },
+  "agent_events": {
+    "io": "无法读写 Agent 事件账本：{{detail}}",
+    "serde": "Agent 事件账本不是有效的 JSON：{{detail}}",
+    "unsupported_schema_version": "Agent 事件账本为版本 {{found}}，此版本只支持 {{expected}}。"
+  },
+  "agents": {
+    "bypass_requires_allowed_tools": "绕过权限确认时，必须显式列出允许使用的工具。",
+    "draft_not_runnable": "“{{name}}”仍是草稿，本次没有运行任何内容。请先打开“审阅并安装”将其启用。",
+    "invalid_id": "该 Agent ID 无效。",
+    "invalid_max_budget": "预算必须是有限的非负数（当前为 {{value}}）。",
+    "invalid_output_format": "Claudepot 不认识输出格式“{{format}}”。",
+    "invalid_permission_mode": "Claudepot 不认识权限模式“{{mode}}”。",
+    "linger_linux_only": "linger 仅适用于 Linux。",
+    "name_taken": "已存在名为“{{name}}”的 Agent。",
+    "no_artifact_dir": "该调度器没有可展示的文件。",
+    "no_scheduler_adapter": "Claudepot 尚未支持当前平台的调度器。",
+    "not_found": "该 Agent 已不存在。",
+    "open_artifact_dir_failed": "无法打开 {{dir}}：{{detail}}",
+    "route_binary_id_required": "请为该 Agent 选择运行所用的供应商。",
+    "template_name_taken": "已存在名为“{{name}}”的 Agent——请先重命名或移除它，再安装此模板。",
+    "unknown_binary_kind": "Claudepot 不认识可执行类型“{{kind}}”。",
+    "unknown_event_kind": "此版本无法以“{{event}}”作为触发事件。"
+  },
+  "app": {
+    "keychain_unlock_unsupported": "仅 macOS 支持解锁钥匙串。",
+    "log_dir_create_failed": "无法创建日志目录：{{detail}}",
+    "reveal_failed": "文件管理器无法显示该项：{{detail}}",
+    "reveal_path_empty": "没有给出要显示的路径。",
+    "reveal_path_not_found": "该路径已不存在：{{path}}",
+    "reveal_spawn_failed": "无法启动文件管理器：{{detail}}",
+    "task_join_failed": "后台任务失败：{{detail}}"
+  },
+  "artifact": {
+    "invalid_relative_path": "该路径不可用：{{detail}}",
+    "not_disabled": "{{path}} 不是已停用的项目。",
+    "preview_open_failed": "无法打开已停用的文件：{{detail}}",
+    "preview_read_failed": "无法读取已停用的文件：{{detail}}",
+    "scope_root_not_active": "{{scope_root}} 不在 Claudepot 当前管理的目录中。",
+    "unknown_kind": "{{detail}}",
+    "unknown_on_conflict": "未知的冲突处理方式 {{value}}。"
+  },
+  "artifact_lifecycle": {
+    "conflict": "{{path}} 已存在。",
+    "invalid_trash_id": "回收站 ID 无效。",
+    "io": "{{op}} 失败：{{detail}}",
+    "manifest_parse": "回收站清单无法读取：{{detail}}",
+    "recovery_ambiguous": "Claudepot 无法判断其原始类型：{{detail}}",
+    "scope_root_missing": "原位置 {{path}} 已不存在。",
+    "source_missing": "{{path}} 已不存在。",
+    "trash_entry_not_found": "该回收站条目已不存在。",
+    "wrong_trash_state": "该回收站条目当前状态无法执行 {{action}}。"
+  },
+  "artifact_refused": {
+    "managed_policy": "该项由组织策略管理，在 Claudepot 中为只读。",
+    "out_of_scope": "{{path}} 不在 Claudepot 管理的目录范围内。",
+    "plugin": "该项属于插件 {{plugin_id}}，请在插件管理器中处理。",
+    "symlink_loop": "{{path}} 存在符号链接循环。",
+    "wrong_kind": "{{path}} 不是技能、Agent 或斜杠命令。"
+  },
+  "artifact_usage": {
+    "unknown_kind": "这不是 Claudepot 跟踪的产物类型：{{detail}}"
+  },
+  "attribution": {
+    "unknown_mode": "“{{mode}}”不是有效的署名模式。请选择「默认」「关闭」或「自定义」。"
+  },
+  "auto_dream": {
+    "unknown_mode": "“{{mode}}”不是有效的整合模式。请选择「默认」「开启」或「关闭」。"
+  },
+  "available_models": {
+    "contains_whitespace": "第 {{index}} 项含有空格：{{entry}}",
+    "empty_entry": "第 {{index}} 项为空。"
+  },
+  "base_url": {
+    "bad_scheme": "URL 必须以 http:// 或 https:// 开头。",
+    "empty": "必须填写 URL。",
+    "invalid_chars": "URL 中包含空白或控制字符。",
+    "malformed": "URL 格式错误：{{detail}}",
+    "no_host": "URL 缺少主机名。"
+  },
+  "board": {
+    "board_not_found": "该看板已不存在。",
+    "cap_exceeded": "{{what}} 的上限为 {{limit}}，本次为 {{actual}}。",
+    "column_count_mismatch": "系列“{{series}}”每行需要 {{expected}} 列，实际为 {{actual}} 列。",
+    "column_type_mismatch": "系列“{{series}}”的列“{{column}}”需要 {{expected}}，实际为 {{actual}}。",
+    "corrupt_row": "系列“{{series}}”中的一行数据已损坏：{{what}}",
+    "duplicate_series": "看板“{{board}}”中已存在名为“{{series}}”的数据系列。",
+    "export_create_failed": "无法创建 {{path}}：{{detail}}",
+    "export_path_exists": "{{path}} 已存在。",
+    "export_path_not_absolute": "请先为导出选择保存位置。",
+    "invalid_envelope": "无法读取该导出文件：{{reason}}",
+    "invalid_name": "“{{name}}”不是可用名称——请使用 1–64 个 A–Z、a–z、0–9、`.`、`_`、`-` 字符。",
+    "invalid_spec": "看板布局无效：{{detail}}",
+    "invalid_timestamp": "时间戳必须是带明确时区偏移的 RFC 3339 格式。",
+    "io": "无法读写看板存储：{{detail}}",
+    "json": "看板数据不是有效的 JSON：{{detail}}",
+    "revision_conflict": "其他写入方已修改“{{board}}”（当前版本 {{current}}，你基于 {{base}}）。请重新载入后重试。",
+    "schema_too_new": "boards.db 为版本 {{found}}，此版本只支持 {{supported}}——请更新 Claudepot。",
+    "sequence_out_of_range": "序号 {{seq}} 无法用于 {{rows}} 行的写入。",
+    "sequence_replay": "自称“{{reported_writer}}”的写入方在系列“{{series}}”上以不同数据重复使用了序号 {{seq}}。",
+    "series_not_found": "看板“{{board}}”中没有名为“{{series}}”的数据系列。",
+    "sql": "看板数据库出错：{{detail}}",
+    "unsupported_export_version": "该导出文件为版本 {{found}}，此版本只支持 {{expected}}。"
+  },
+  "cc_doctor": {
+    "cache_lock_poisoned": "诊断缓存处于异常状态。请重启 Claudepot 以清除。"
+  },
+  "cc_env": {
+    "contended": "其他程序正在写入 {{path}}，请重试。",
+    "env_not_an_object": "{{path}} 中的 `env` 是 {{found}}，不是对象。请手动修正——自动改写会破坏你原本的意图。",
+    "invalid_enum_value": "{{name}} 只接受 {{allowed}}，不接受 {{value}}。",
+    "invalid_number": "{{name}} 需要整数，{{value}} 不是整数。",
+    "io": "无法读写 Claude Code 设置：{{detail}}",
+    "json_parse": "Claude Code 设置文件不是有效的 JSON：{{detail}}",
+    "malformed_spec": "Claudepot 内置的环境变量清单不可用：{{detail}}",
+    "not_a_json_object": "{{path}} 不是 JSON 对象。",
+    "not_editable": "{{name}} 无法在此编辑。",
+    "not_set": "{{name}} 尚未设置，无需清除。",
+    "unknown_variable": "{{name}} 不是 Claude Code 的官方环境变量。"
+  },
+  "cc_retention": {
+    "non_positive": "{{days}} 不是有效的保留天数。若要让 Claude Code 完全不写会话记录，请使用「停用记录」——它同时会删除已有记录。",
+    "write": "无法保存保留期设置：{{detail}}"
+  },
+  "cc_tips": {
+    "binary_not_found": "在 {{path}} 找不到 Claude Code 可执行文件。",
+    "binary_read": "无法读取 {{path}} 的 Claude Code 可执行文件：{{detail}}",
+    "catalog_io": "{{path}} 的提示缓存出错：{{detail}}",
+    "catalog_parse": "提示缓存不是有效 JSON：{{detail}}",
+    "config_parse": "{{path}} 的 Claude Code 全局配置不是有效 JSON：{{detail}}",
+    "config_read": "无法读取 {{path}} 的 Claude Code 全局配置：{{detail}}",
+    "no_home": "无法确定主目录。",
+    "snapshot_read": "无法读取 {{path}} 的提示快照：{{detail}}",
+    "snapshot_write": "无法写入 {{path}} 的提示快照：{{detail}}"
+  },
+  "cli": {
+    "resolve_target_failed": "无法确定你指的是哪个账号：{{detail}}"
+  },
+  "cli_backend": {
+    "corrupt_blob": "已保存的凭据无法读取：{{detail}}",
+    "file_error": "文件系统出错：{{detail}}",
+    "identity_mismatch": "{{stored_email}} 持有的是 {{actual_email}} 的凭据。请移除该账号后重新添加。",
+    "identity_verification_failed": "无法确认该登录属于谁：{{detail}}",
+    "keychain_error": "钥匙串出错：{{detail}}",
+    "live_session_conflict": "Claude Code 正在运行——它下次刷新令牌会覆盖这次切换。",
+    "no_default_credentials": "Claude Code 尚未登录，没有可导入的凭据。",
+    "no_stored_credentials": "Claudepot 没有该账号的已保存登录信息。",
+    "refresh_failed": "无法续期登录：{{detail}}",
+    "write_failed": "无法保存凭据：{{detail}}"
+  },
+  "codex_session": {
+    "io": "无法读取 Codex 记录 {{path}}：{{detail}}",
+    "missing_session_id": "{{path}} 的 Codex 会话头缺少 id。",
+    "missing_session_meta": "{{path}} 中没有 Codex 会话头信息。"
+  },
+  "config": {
+    "editor_id_empty": "请选择编辑器。",
+    "editor_not_detected": "未检测到 {{editor_id}}，或 Claudepot 无法访问它。",
+    "no_anchor_effective_mcp": "请先选择项目——生效的 MCP 服务器按项目合并。",
+    "no_anchor_effective_settings": "请先选择项目——生效设置按项目合并。",
+    "no_editor_available": "没有可用的编辑器，请在设置中指定。",
+    "node_not_found": "该文件已不在扫描结果中，请重新扫描后再试。",
+    "path_empty": "没有要打开的路径。",
+    "preview_open_failed": "无法打开 {{path}}：{{detail}}",
+    "preview_stat_failed": "无法读取文件大小：{{detail}}",
+    "search_id_empty": "搜索无法启动（缺少 ID）。",
+    "search_registry_lock_poisoned": "搜索状态已损坏，请重启 Claudepot。",
+    "tree_not_scanned": "请先扫描配置树。",
+    "unknown_kind": "未知的文件类型 {{kind}}。",
+    "watch_start_failed": "无法启动配置文件变更监视，配置树将不会自动刷新：{{detail}}",
+    "watch_state_lock_poisoned": "配置监视器处于异常状态。请重启 Claudepot 以清除。"
+  },
+  "config_launcher": {
+    "empty_path": "没有要打开的路径。",
+    "no_binary": "该编辑器没有记录可执行文件路径。",
+    "no_env_editor": "未设置 `$EDITOR`。",
+    "spawn": "编辑器无法启动：{{detail}}",
+    "unknown_editor": "Claudepot 不认识名为 {{editor_id}} 的编辑器。"
+  },
+  "config_view": {
+    "bad_query": "搜索表达式无效：{{detail}}",
+    "io": "无法读取 {{path}}：{{detail}}",
+    "manifest_not_found": "{{path}} 中没有插件清单。",
+    "parse": "{{path}} 不是有效 JSON：{{detail}}"
+  },
+  "corpus": {
+    "db": "语料库数据库出错：{{detail}}",
+    "io": "无法读写语料库：{{detail}}"
+  },
+  "desktop": {
+    "no_live_identity": "没有可绑定的 Desktop 会话——请先通过 Claude Desktop 登录。",
+    "not_supported_on_platform": "Claudepot 在本平台不支持 Claude Desktop。",
+    "resolve_target_failed": "{{detail}}"
+  },
+  "desktop_adopt": {
+    "data_dir_unreadable": "Claude Desktop 的数据目录缺失或不可读。",
+    "identity_mismatch": "Claude Desktop 当前登录的是 {{actual}}，而不是 {{expected}}。若继续接管，会把一个身份的会话归到另一个身份名下。",
+    "lock": "另一项 Desktop 操作正在进行中：{{detail}}",
+    "not_found": "该账号已不在注册列表中。",
+    "profile_exists": "该账号已有保存的 Desktop 配置。若确实要覆盖，请选择替换。",
+    "sidecar": "配置已捕获，但随附文件未能写入：{{detail}}",
+    "store": "无法查询目标账号：{{detail}}",
+    "swap": "Desktop 切换失败：{{detail}}",
+    "unsupported": "Claudepot 在此平台上不支持 Claude Desktop。"
+  },
+  "desktop_backend": {
+    "desktop_still_running": "Claude Desktop 未能及时退出。请退出后重试。",
+    "dpapi_invalidated": "该 Desktop 会话由另一个 Windows 账户加密。请重新登录 Claude Desktop，然后重新绑定。",
+    "file_copy_failed": "无法复制 Desktop 会话文件：{{detail}}",
+    "io": "文件系统出错：{{detail}}",
+    "lock": "另一项 Desktop 操作正在进行：{{detail}}",
+    "no_stored_profile": "该账号没有已保存的 Desktop 会话。",
+    "not_installed": "本机未安装 Claude Desktop。"
+  },
+  "desktop_clear": {
+    "data_dir_missing": "Claude Desktop 已处于登出状态，没有需要清理的内容。",
+    "fs": "无法删除会话文件：{{detail}}",
+    "lock": "另一项 Desktop 操作正在进行中：{{detail}}",
+    "store": "无法读取当前的 Desktop 账号：{{detail}}",
+    "swap": "Desktop 切换失败：{{detail}}",
+    "unsupported": "Claudepot 在此平台上不支持 Claude Desktop。"
+  },
+  "desktop_crypto": {
+    "aes": "无法解密 Claude Desktop 的会话——它已损坏，或密钥已更换。",
+    "bad_format": "Claude Desktop 保存的会话格式无法识别：{{detail}}",
+    "base64": "Claude Desktop 保存的会话已损坏：{{detail}}",
+    "kdf": "无法推导 Claude Desktop 的解密密钥：{{detail}}",
+    "unknown_version": "Claude Desktop 使用了 Claudepot 不认识的加密版本（{{tag}}）。请更新 Claudepot。"
+  },
+  "desktop_identity": {
+    "config_parse": "Claude Desktop 的配置文件无法读取：{{detail}}",
+    "data_dir_unreadable": "无法读取 Claude Desktop 的数据目录：{{detail}}",
+    "decrypt": "无法解密 Claude Desktop 的会话：{{detail}}",
+    "key": "无法获取 Claude Desktop 的密钥：{{detail}}",
+    "no_config": "Claude Desktop 还没有启动过。",
+    "no_data_dir": "Claudepot 不知道本平台上 Claude Desktop 的数据目录位置。",
+    "not_signed_in": "Claude Desktop 已退出登录。",
+    "profile_fetch": "无法向 Anthropic 确认该 Desktop 账号：{{detail}}",
+    "token_parse": "Claude Desktop 的会话数据格式有误：{{detail}}",
+    "unsupported": "本平台不支持验证 Desktop 账号。"
+  },
+  "desktop_key": {
+    "dpapi_failed": "Windows 无法解锁 Claude Desktop 的密钥：{{detail}}",
+    "keychain_read": "无法从钥匙串读取 Claude Desktop 的密钥：{{detail}}",
+    "local_state": "无法读取 Claude Desktop 的 Local State 文件：{{detail}}",
+    "unsupported": "本平台不支持读取 Claude Desktop 的密钥。"
+  },
+  "desktop_lock": {
+    "held": "另一项 Desktop 操作正在进行——请稍后重试。",
+    "open": "无法打开 Desktop 操作锁：{{detail}}",
+    "timeout": "等待另一项 Desktop 操作 {{timeout_secs}} 秒后放弃。"
+  },
+  "desktop_switch": {
+    "no_snapshot": "{{email}} 还没有保存的 Desktop 配置。请先在 Claude Desktop 中以 {{email}} 登录，并接管那个会话。",
+    "not_found": "该账号已不在注册列表中。",
+    "store": "无法查询目标账号：{{detail}}",
+    "unsupported": "Claudepot 在此平台上不支持 Claude Desktop。"
+  },
+  "desktop_token_cache": {
+    "empty": "Claude Desktop 的会话数据为空——请先通过 Desktop 登录。",
+    "json": "Claude Desktop 的会话数据无法读取：{{detail}}"
+  },
+  "env_file": {
+    "already_active": "“{{key}}”已处于启用状态。",
+    "already_commented": "“{{key}}”已被注释。",
+    "dir_entry_failed": "无法读取目录条目：{{detail}}",
+    "invalid_dotenv_path": "{{path}} 不是可用的 `.env` 路径。",
+    "invalid_encoding": "{{path}} 不是有效的 UTF-8 文本。",
+    "invalid_key_name": "“{{key}}”不是有效的环境变量名。",
+    "invalid_project_path": "该项目路径不可用：{{detail}}",
+    "key_missing_in_file": "{{file_name}} 中没有“{{key}}”。",
+    "key_not_found": "该文件中没有“{{key}}”对应的行。",
+    "lock_failed": "{{path}} 正在别处被编辑：{{detail}}",
+    "lock_open_failed": "无法打开锁文件 {{path}}：{{detail}}",
+    "name_empty": "必须填写文件名。",
+    "name_not_dotenv": "“{{file_name}}”不是 `.env` 文件。",
+    "name_unsafe": "“{{file_name}}”不是安全的文件名。",
+    "read_dir_failed": "无法列出项目目录：{{detail}}",
+    "read_failed": "无法读取 {{path}}：{{detail}}",
+    "stat_entry_failed": "无法检查目录条目：{{detail}}",
+    "too_large": "{{path}} 超过 {{max_bytes}} 字节的编辑上限。",
+    "value_has_newline": "“{{key}}”的值包含换行符，`.env` 无法表示。",
+    "write_failed": "无法写入 {{path}}：{{detail}}"
+  },
+  "env_vault": {
+    "duplicate_name": "保险库中已存在名为“{{name}}”的密钥。",
+    "invalid_name": "“{{name}}”不是有效的环境变量名。",
+    "io": "无法读写保险库：{{detail}}",
+    "not_found": "保险库中没有名为“{{name}}”的密钥。",
+    "sql": "保险库数据库出错：{{detail}}"
+  },
+  "github_pr": {
+    "bad_output": "无法解析 {{tool}} 的输出：{{detail}}",
+    "io": "无法运行 {{tool}}：{{detail}}",
+    "missing_cli": "{{tool}} 不在 PATH 中。",
+    "subprocess": "{{tool}} 退出码 {{code}}：{{stderr}}",
+    "timeout": "{{tool}} 超时已被终止。"
+  },
+  "keys": {
+    "api_key_not_found": "该 API 密钥已不在存储中。",
+    "bad_uuid": "该密钥 ID 无效。",
+    "clipboard_write_failed": "无法写入剪贴板：{{detail}}",
+    "io": "无法读写密钥存储：{{detail}}",
+    "keychain": "钥匙串出错：{{detail}}",
+    "label_required": "必须填写标签。",
+    "not_an_api_key": "这不是 API key —— 值必须以 {{prefix}} 开头。",
+    "not_an_oauth_token": "这不是 OAuth token —— 值必须以 {{prefix}} 开头。",
+    "not_found": "该密钥已不在存储中。",
+    "oauth_token_not_found": "该 OAuth 令牌已不在存储中。",
+    "probe_rate_limited": "已被限流——请在 {{retry_after_secs}} 秒后重试。",
+    "probe_rejected": "已拒绝——密钥无效。",
+    "sql": "密钥数据库出错：{{detail}}"
+  },
+  "launcher": {
+    "corrupt_blob": "保存的凭据无法读取：{{detail}}",
+    "credential_read": "无法读取 Claude Code 凭据：{{detail}}",
+    "no_command": "没有要执行的命令。",
+    "no_stored_credentials": "该账号没有保存的凭据。",
+    "refresh_failed": "无法刷新访问令牌：{{detail}}",
+    "save_failed": "无法保存刷新后的凭据：{{detail}}",
+    "spawn_failed": "无法启动命令：{{detail}}"
+  },
+  "lesson": {
+    "accept_failed": "无法采纳这条经验：{{detail}}",
+    "bad_state": "「{{state}}」不是有效的审阅状态——请使用 proposed、accepted、rejected、suspect 或 all。",
+    "counts_by_project_failed": "无法加载各项目的覆盖情况：{{detail}}",
+    "counts_failed": "无法统计经验条目：{{detail}}",
+    "list_failed": "无法加载经验条目：{{detail}}",
+    "reject_failed": "无法驳回这条经验：{{detail}}"
+  },
+  "live_activity": {
+    "already_subscribed": "该会话已有一个实时数据流。",
+    "not_started": "活动运行时未启动。请在设置中启用「活动」。"
+  },
+  "mcp_probe": {
+    "cli_not_found": "在 {{exe_dir}} 中未找到与应用同级的 Claudepot CLI。",
+    "spawn": "无法启动 {{bin}}：{{detail}}"
+  },
+  "mcp_snippet": {
+    "create_parent": "无法为 {{path}} 创建目录：{{detail}}",
+    "missing_project_path": "项目级安装需要提供项目路径。",
+    "no_home_dir": "无法定位主目录。",
+    "project_path_not_absolute": "项目路径必须是绝对路径。",
+    "project_path_not_dir": "{{path}} 不是已存在的目录。",
+    "write": "无法写入 {{path}}：{{detail}}"
+  },
+  "memory": {
+    "auto_memory_clear_failed": "无法清除自动记忆设置：{{detail}}",
+    "auto_memory_write_failed": "无法保存自动记忆设置：{{detail}}",
+    "enumerate_failed": "无法列出该项目的记忆文件：{{detail}}",
+    "project_root_empty": "未选择项目。",
+    "unknown_scope": "Claudepot 不会写入 {{scope}} 这一设置层。"
+  },
+  "memory_health": {
+    "audit_failed": "无法体检你的记忆文件：{{detail}}"
+  },
+  "memory_log": {
+    "io": "无法读写记忆日志：{{detail}}",
+    "sql": "记忆日志数据库出错：{{detail}}"
+  },
+  "memory_view": {
+    "io": "无法读取记忆文件：{{detail}}",
+    "path_outside_scope": "{{path}} 不在该项目的记忆文件范围内。"
+  },
+  "migrate": {
+    "configuration": "这些选项无法同时使用：{{detail}}",
+    "conflict": "导入冲突：{{detail}}",
+    "integrity_violation": "迁移包完整性校验失败：{{detail}}",
+    "io": "迁移过程中文件系统出错：{{detail}}",
+    "live_session": "{{path}} 中有会话正在运行。请先退出 Claude Code 再导入。",
+    "not_implemented": "暂不支持：{{detail}}",
+    "passphrase_required": "该打包文件已加密。请输入口令后再查看。",
+    "project_not_in_bundle": "迁移包中没有该项目：{{detail}}",
+    "serialize": "无法写入迁移包：{{detail}}",
+    "trust_gate": "被 {{gate}} 检查拦截：{{reason}}",
+    "unknown_conflict_mode": "“{{mode}}”不是有效的冲突处理方式。请选择「跳过」「合并」或「替换」。",
+    "unknown_merge_preference": "“{{prefer}}”不是有效的合并偏好。请选择「以导入方为准」或「以目标方为准」。",
+    "unsupported_schema_version": "该迁移包版本为 {{found}}，本版本仅支持 {{expected}}。"
+  },
+  "notification": {
+    "host_activate_failed": "无法将该应用切换到前台：{{detail}}",
+    "log_append_failed": "无法记录该通知：{{detail}}",
+    "log_append_routed_failed": "无法记录该通知：{{detail}}",
+    "log_clear_failed": "无法清空通知记录：{{detail}}",
+    "log_mark_all_read_failed": "无法将通知标记为已读：{{detail}}",
+    "log_mark_delivered_failed": "无法记录送达状态：{{detail}}"
+  },
+  "oauth": {
+    "auth_failed": "认证失败：{{detail}}",
+    "http_error": "无法连接 Anthropic：{{detail}}",
+    "rate_limited": "已被限流——请在 {{retry_after_secs}} 秒后重试。",
+    "refresh_failed": "登录已过期且无法续期：{{detail}}",
+    "server_error": "Anthropic 返回错误：{{detail}}"
+  },
+  "onboard": {
+    "auth_login_cancelled": "已取消登录。",
+    "auth_login_failed": "浏览器登录失败（退出码 {{exit_code}}）。",
+    "cli_binary_not_found": "在 {{path}} 找不到 claude CLI。",
+    "import_failed": "登录已完成，但没有可导入的凭据。",
+    "io": "文件系统出错：{{detail}}",
+    "swap": "{{detail}}"
+  },
+  "permission": {
+    "duration_out_of_range": "请选择 {{min}} 到 {{max}} 秒之间的时长。",
+    "grants_load_failed": "无法加载权限授权记录：{{detail}}",
+    "invalid_project_path": "该项目路径不可用：{{detail}}",
+    "no_active_grant": "Claudepot 未管理该项目的权限。",
+    "read_settings_for_project_failed": "无法读取 {{project_path}} 的权限设置：{{detail}}",
+    "unknown_mode": "Claudepot 无法授予 {{mode}} 模式。"
+  },
+  "permission_grants": {
+    "duplicate_project": "{{project_path}} 存在多条授权。",
+    "empty_project_path": "授权必须指定项目路径。",
+    "non_positive_duration": "{{project_path}} 的授权在生效前就已过期。",
+    "project_layer_not_allowed": "Claudepot 不会写入 {{project_path}} 已提交的项目设置。",
+    "unsupported_schema_version": "授权文件版本为 {{found}}，本版本仅支持 {{expected}}。"
+  },
+  "permission_settings": {
+    "contended": "其他程序正在写入 {{path}}，请重试。",
+    "io": "无法读写权限设置：{{detail}}",
+    "json_parse": "设置文件不是有效 JSON：{{detail}}",
+    "not_a_json_object": "{{path}} 不是 JSON 对象。",
+    "permissions_not_an_object": "{{path}} 中的 `permissions` 不是对象。",
+    "unsupported_layer": "Claudepot 不会写入 {{layer}} 设置层。"
+  },
+  "permission_store": {
+    "io": "无法读写授权文件：{{detail}}",
+    "serde": "授权文件不是有效 JSON：{{detail}}",
+    "validation": "授权文件无效：{{detail}}"
+  },
+  "preferences": {
+    "lock_poisoned": "之前的失败导致偏好设置卡住。请重启 Claudepot。",
+    "save_failed": "无法保存偏好设置：{{detail}}",
+    "set_activation_policy_failed": "无法更改 Dock 图标设置：{{detail}}",
+    "unsupported_locale": "Claudepot 没有 “{{locale}}” 的翻译。"
+  },
+  "pricing_history": {
+    "bad_date": "第 {{index}} 条记录的日期超出范围。",
+    "empty_model_id": "第 {{index}} 条记录缺少模型 ID。",
+    "negative_rate": "第 {{index}} 条记录的费率为负。",
+    "unsupported_schema_version": "价格历史版本为 {{found}}，本版本仅支持 {{expected}}。"
+  },
+  "pricing_history_store": {
+    "io": "无法读写价格历史：{{detail}}",
+    "validation": "价格历史无效：{{detail}}"
+  },
+  "project": {
+    "ambiguous": "无法继续：{{detail}}",
+    "claude_running": "Claude Code 正在 {{path}} 中运行。请先退出，或强制继续。",
+    "clean_blocked_by_journals": "还有 {{count}} 个重命名未修复完成，请先在「修复」中处理。",
+    "dry_run_superseded": "（不会显示——协议哨兵值）",
+    "io": "文件系统出错：{{detail}}",
+    "not_found": "在 {{path}} 找不到项目。",
+    "remove_blocked_by_journals": "还有 {{count}} 个重命名未修复完成，请先在「修复」中处理。",
+    "same_path": "新旧路径相同。"
+  },
+  "project_trash": {
+    "entry_not_found": "该已回收的项目已不存在。",
+    "invalid_slug": "该项目目录名无效。",
+    "io": "无法读写 {{path}}：{{detail}}",
+    "manifest_parse": "回收站清单 {{path}} 无法解析：{{detail}}",
+    "restore_collision": "{{path}} 已存在——恢复会覆盖它。",
+    "serialize": "无法写入回收站清单 {{path}}：{{detail}}",
+    "source_missing": "{{path}} 处没有可移入回收站的内容。"
+  },
+  "protected_paths": {
+    "duplicate": "{{path}} 已在保护列表中。",
+    "empty": "请输入路径。",
+    "invalid_json": "{{path}} 不是有效 JSON：{{detail}}",
+    "io": "无法读写受保护路径列表：{{detail}}",
+    "not_absolute": "请使用绝对路径，或以 `~` 开头的路径。",
+    "not_found": "{{path}} 不在保护列表中。"
+  },
+  "recurrence": {
+    "confirm_failed": "无法确认这条复发：{{detail}}",
+    "confirmed_count_failed": "无法统计已确认的复发数：{{detail}}",
+    "dismiss_failed": "无法忽略这个候选项：{{detail}}",
+    "list_failed": "无法加载复发候选项：{{detail}}",
+    "pending_count_failed": "无法统计待处理的候选项：{{detail}}"
+  },
+  "release_update": {
+    "builder_failed": "无法启动更新器：{{detail}}",
+    "check_failed": "检查更新失败：{{detail}}",
+    "endpoint_config_failed": "无法将更新器指向该发布通道：{{detail}}",
+    "install_failed": "更新未安装成功。Claudepot 未被改动，请重试：{{detail}}",
+    "invalid_endpoint": "更新清单地址格式有误：{{endpoint}}",
+    "not_staged": "没有待安装的更新，请先检查更新。",
+    "state_lock_poisoned": "更新检查在此前的失败后卡住了。请重启 Claudepot。",
+    "unknown_channel": "Claudepot 没有名为 {{channel}} 的发布通道，请使用 stable 或 beta。"
+  },
+  "repair": {
+    "journal_not_found": "该修复记录已不存在。",
+    "lock_file_not_found": "{{path}} 上没有锁。"
+  },
+  "resolve": {
+    "ambiguous": "“{{input}}” 匹配到多个账号。",
+    "no_match": "没有匹配 “{{input}}” 的账号。",
+    "store_error": "无法读取账号列表：{{detail}}"
+  },
+  "rotation": {
+    "apply_failed": "切换未成功：{{detail}}",
+    "bad_rule_dto": "该轮换规则无效：{{detail}}",
+    "rules_load_failed": "无法加载轮换规则：{{detail}}",
+    "snapshot_parse_failed": "用量快照无法读取，无法试运行：{{detail}}"
+  },
+  "rotation_breaker": {
+    "io": "无法读写熔断记录：{{detail}}",
+    "serde": "熔断记录不是有效 JSON：{{detail}}",
+    "unsupported_schema_version": "熔断记录版本为 {{found}}，本版本仅支持 {{expected}}。"
+  },
+  "rotation_rules": {
+    "bad_threshold": "阈值须在 1 到 100 之间，{{pct}} 不符合。",
+    "duplicate_candidate": "{{email}} 重复出现。",
+    "duplicate_id": "已有规则使用 ID {{rule_id}}。",
+    "empty_candidates": "请至少选择一个可轮换的账号。",
+    "empty_explicit_email": "请选择要轮换到的账号。",
+    "empty_id": "请为规则填写 ID。",
+    "least_used_window_mismatch": "「最少使用」必须与触发窗口一致（{{selector}} 与 {{trigger}} 不符）。",
+    "unsupported_schema_version": "规则文件版本为 {{found}}，本版本仅支持 {{expected}}。",
+    "zero_max_swaps": "每个窗口至少允许一次切换。"
+  },
+  "rotation_store": {
+    "io": "无法读写轮换规则：{{detail}}",
+    "serde": "轮换规则文件不是有效 JSON：{{detail}}",
+    "validation": "轮换规则无效：{{detail}}"
+  },
+  "route_save": {
+    "not_found": "该供应商已不存在。",
+    "secrets": "存储密钥失败：{{detail}}",
+    "store": "保存供应商失败：{{detail}}"
+  },
+  "routes": {
+    "bedrock_auth_required": "Bedrock 需要 bearer token、AWS profile，或勾选“跳过 AWS 认证”。",
+    "bedrock_config_missing": "缺少 Bedrock 配置。",
+    "bedrock_region_required": "必须填写 AWS 区域。",
+    "desktop_not_supported": "当前平台不支持 Claude Desktop。",
+    "duplicate_name": "已存在名为“{{name}}”的供应商。",
+    "duplicate_wrapper_name": "另一个供应商已使用命令“{{wrapper}}”。",
+    "edit_store_failed": "保存失败：{{detail}} 之前保存的供应商仍在生效；若其失效，请重新输入密钥并再次保存。",
+    "foundry_config_missing": "缺少 Foundry 配置。",
+    "foundry_target_ambiguous": "Foundry 的基础 URL 与资源名只能二选一。",
+    "foundry_target_required": "Foundry 需要填写基础 URL 或资源名之一。",
+    "gateway_config_missing": "缺少 Gateway 配置。",
+    "gone_after_persist": "供应商已保存但无法读回，请重新载入列表。",
+    "invalid_base_url": "该基础 URL 不可用：{{reason}}",
+    "invalid_bedrock_base_url": "Bedrock 基础 URL 不可用：{{detail}}",
+    "invalid_foundry_base_url": "Foundry 基础 URL 不可用：{{detail}}",
+    "invalid_gateway_base_url": "Gateway 基础 URL 不可用：{{detail}}",
+    "invalid_route_id": "该供应商 ID 无效。",
+    "invalid_vertex_base_url": "Vertex 基础 URL 不可用：{{detail}}",
+    "invalid_wrapper_name": "“{{wrapper}}”不是可用的命令名：{{reason}}",
+    "io": "无法读写供应商存储：{{detail}}",
+    "json": "供应商存储不是有效的 JSON：{{detail}}",
+    "missing_field": "必须填写“{{field}}”。",
+    "no_home_dir": "无法定位主目录。",
+    "not_found": "该供应商已不存在。",
+    "remove_cleanup_failed": "已移除，但有 {{count}} 个清理步骤失败：{{steps}}",
+    "save_warnings": "已保存，但后续写入报告了问题：{{warnings}}",
+    "unknown_provider_kind": "Claudepot 不认识“{{kind}}”这种供应商。",
+    "unsupported_platform": "当前平台不支持：{{operation}}",
+    "vertex_config_missing": "缺少 Vertex 配置。",
+    "vertex_project_id_required": "必须填写 GCP 项目 ID。",
+    "wrapper_file_not_managed": "{{path}} 并非由 Claudepot 写入，不会被覆盖。",
+    "wrapper_name_rejected": "“{{name}}”不是可用的命令名：{{detail}}",
+    "wrapper_shadows_claude": "“{{wrapper}}”会遮蔽官方的 `claude` 命令。"
+  },
+  "session": {
+    "index": "会话索引出错：{{detail}}",
+    "invalid_path": "这不是可读的会话记录。",
+    "io": "文件系统出错：{{detail}}",
+    "not_found": "该会话已不存在。"
+  },
+  "session_export": {
+    "invalid_output_path": "{{path}} 不是可用的导出位置：{{detail}}",
+    "output_is_symlink": "{{path}} 是一个符号链接。请换个位置导出，或先删除该链接。",
+    "permissions_not_enforced": "{{path}} 所在的文件系统无法保证导出文件的私密权限。请改为导出到本机磁盘。",
+    "unknown_format": "Claudepot 不支持导出为 {{format}} 格式。",
+    "write_failed": "无法将导出写入 {{path}}：{{detail}}"
+  },
+  "session_export_delivery": {
+    "clipboard": "剪贴板不可用：{{detail}}",
+    "file": "无法写入导出文件：{{detail}}",
+    "gist": "Gist 上传失败：{{detail}}",
+    "harden": "无法收紧导出文件的权限：{{detail}}",
+    "keychain": "钥匙串出错：{{detail}}",
+    "no_token": "未保存 GitHub 令牌。请在设置中添加。"
+  },
+  "session_index": {
+    "io": "无法读写会话索引：{{detail}}",
+    "json": "会话记录中有一行无法解析：{{detail}}",
+    "migration_validation_failed": "会话索引升级到 v{{target_version}} 失败——{{expected}} 个对象中仅存在 {{found}} 个，缺少 {{missing}}。旧索引未受影响；可在 设置 → 清理 中重建。",
+    "session": "会话记录扫描失败：{{detail}}",
+    "sql": "会话索引数据库出错：{{detail}}"
+  },
+  "session_live_bus": {
+    "already_subscribed": "该会话已有一个实时数据流。",
+    "subscriber_gone": "该会话的实时数据流已结束。"
+  },
+  "session_live_metrics": {
+    "io": "无法读写活动指标存储：{{detail}}",
+    "sqlite": "活动指标数据库出错：{{detail}}"
+  },
+  "session_move": {
+    "invalid_config_dir": "无法读取 {{path}}。",
+    "invalid_session_id": "该会话 ID 无效：{{detail}}",
+    "invalid_slug": "项目目录名无效：{{reason}}",
+    "io": "文件系统出错：{{detail}}",
+    "live_session": "该会话似乎正在运行。请先退出 Claude Code，或强制移动。",
+    "same_cwd": "新旧路径相同。",
+    "session_not_found": "该会话不在 {{path}} 之下。",
+    "sidecar_collision": "{{path}} 已存在——移动会覆盖它。",
+    "sync_conflict_present": "该会话旁存在同步冲突副本。请先处理，或强制移动。",
+    "target_collision": "目标项目中已存在该会话。",
+    "target_cwd_missing": "{{path}} 不存在，没有可以接收这些会话的目录。",
+    "trash_failed": "无法移入回收站：{{detail}}",
+    "worktree_sibling_still_live": "{{path}} 仍是活跃的 git worktree——Claude Code 本就支持跨 worktree 恢复，无需移动。"
+  },
+  "session_prune": {
+    "empty_filter": "请先至少选择一个清理条件。",
+    "list": "无法列出待清理的会话：{{detail}}",
+    "trash": "无法将会话记录移入回收站：{{detail}}"
+  },
+  "session_redact": {
+    "io": "无法读写 {{path}}：{{detail}}",
+    "json": "会话记录第 {{line}} 行无法解析：{{detail}}",
+    "live_write_detected": "脱敏过程中会话记录发生变化，已中止且未写入。",
+    "no_patterns": "请至少选择一项要脱敏的内容。",
+    "not_found": "{{path}} 处没有会话记录。",
+    "trash": "无法将原文件移入回收站：{{detail}}"
+  },
+  "session_share": {
+    "auth": "GitHub 拒绝了该令牌。请在设置中检查。",
+    "http": "GitHub 返回 {{status}}：{{body}}",
+    "network": "无法连接 GitHub：{{detail}}",
+    "oversized": "GitHub 拒绝了本次上传：{{detail}}",
+    "parse": "无法解析 GitHub 的响应：{{detail}}",
+    "token_empty": "请先粘贴 GitHub 令牌。"
+  },
+  "session_slim": {
+    "empty_filter": "批量瘦身前请至少选择一个条件。",
+    "io": "无法读写 {{path}}：{{detail}}",
+    "json": "会话记录第 {{line}} 行无法解析：{{detail}}",
+    "live_write_detected": "瘦身过程中会话记录发生变化，已中止且未写入。",
+    "not_found": "{{path}} 处没有会话记录。",
+    "session": "无法列出待瘦身的会话：{{detail}}",
+    "trash": "无法将原文件移入回收站：{{detail}}"
+  },
+  "settings_write": {
+    "contended": "此刻有别的程序正在写入 {{path}}。本次没有做任何改动——请重试。",
+    "io": "无法写入 Claude Code 的设置文件：{{detail}}",
+    "json_parse": "Claude Code 的设置文件不是有效的 JSON：{{detail}}",
+    "not_a_json_object": "{{path}} 中不是一个 JSON 对象，Claudepot 不会修改它。",
+    "unsupported_layer": "Claudepot 不写入 {{layer}} 这一层设置——它要么已提交进仓库，要么由管理员托管。"
+  },
+  "shared_memory": {
+    "archive_decision_failed": "无法归档这条决策：{{detail}}",
+    "archive_memory_failed": "无法归档这条记忆：{{detail}}",
+    "create_memory_failed": "无法保存这条记忆：{{detail}}",
+    "current_exe_failed": "无法定位正在运行的 Claudepot 可执行文件：{{detail}}",
+    "current_exe_no_parent": "无法定位 Claudepot 可执行文件所在的目录。",
+    "excerpt_unavailable": "这段对话已不可用——记录可能已被移动或清理掉了。",
+    "index_unavailable": "知识索引无法打开。请重启 Claudepot，或在「设置 → 清理」中重建索引。",
+    "invalid_install_scope": "「{{scope}}」不是有效的安装范围——请使用 user 或 project。",
+    "invalid_kind": "「{{kind}}」不是有效的记忆类型——请使用 fact、preference、pattern、constraint 或 summary。",
+    "invalid_scope": "「{{scope}}」不是有效的记忆作用域——请使用 global 或 project。",
+    "link_target_required": "请先选择一条记忆、决策或证据，再查看它的关联。",
+    "links_failed": "无法加载关联记录：{{detail}}",
+    "list_decisions_failed": "无法加载决策记录：{{detail}}",
+    "list_evidence_failed": "无法加载证据记录：{{detail}}",
+    "list_memories_failed": "无法加载记忆条目：{{detail}}",
+    "list_projects_failed": "无法列出已索引的项目：{{detail}}",
+    "list_sessions_failed": "无法列出已索引的会话：{{detail}}",
+    "log_decision_failed": "无法记录这条决策：{{detail}}",
+    "out_path_not_absolute": "输出路径必须是绝对路径，{{path}} 是相对路径。",
+    "read_failed": "无法读取该片段：{{detail}}",
+    "search_failed": "搜索未能执行：{{detail}}"
+  },
+  "templates": {
+    "instantiate_failed": "Claudepot 无法根据该模板生成 Agent：{{detail}}",
+    "invalid_schedule": "该计划无效：{{detail}}",
+    "no_sample_report": "该模板未附带示例报告。",
+    "placeholder_type_mismatch": "“{{placeholder}}”需要 {{expected}} 类型的值。",
+    "platform_unsupported": "该模板不支持 {{platform}}。",
+    "registry_load_failed": "内置模板库加载失败：{{detail}}",
+    "report_not_a_file": "{{path}} 不是文件。",
+    "report_path_outside_root": "只能从 {{root}} 中读取报告。",
+    "report_path_unresolvable": "无法解析 {{path}}：{{detail}}",
+    "report_read_failed": "无法读取 {{path}}：{{detail}}",
+    "report_stat_failed": "无法检查 {{path}}：{{detail}}",
+    "report_too_large": "该报告有 {{bytes}} 字节，过大无法显示。",
+    "unique_name_exhausted": "“{{name}}”的所有编号变体都已被占用——请改名。",
+    "unknown_id": "该模板已不存在。"
+  },
+  "trash": {
+    "entry_not_found": "该已回收的会话记录已不存在。",
+    "io": "无法读写 {{path}}：{{detail}}",
+    "manifest_parse": "回收站清单 {{path}} 无法解析：{{detail}}",
+    "manifest_serialize": "无法写入回收站清单：{{detail}}",
+    "restore_collision": "{{path}} 已存在——恢复会覆盖它。",
+    "source_missing": "{{path}} 处没有可移入回收站的内容。"
+  },
+  "updates": {
+    "channel_write_failed": "无法保存 Claude Code 的发布通道：{{detail}}",
+    "cli_install_failed": "Claude Code 更新未完成：{{detail}}",
+    "desktop_install_failed": "Claude Desktop 更新未完成：{{detail}}",
+    "minimum_version_write_failed": "无法保存 Claude Code 的最低版本：{{detail}}",
+    "operation_in_progress": "已有一个更新正在进行，请稍后再试。",
+    "state_lock_poisoned": "更新状态在此前的失败后卡住了。请重启 Claudepot。",
+    "unknown_channel": "Claude Code 没有名为 {{channel}} 的发布通道，请使用 latest 或 stable。"
+  },
+  "usage_local": {
+    "unknown_pricing_tier": "Claudepot 不认识“{{tier}}”这个计价档位。你已保存的档位未被修改。",
+    "unknown_window_kind": "Claudepot 不认识“{{kind}}”这个时间窗口。请从范围选择器中挑一个。",
+    "window_days_required": "“最近 N 天”窗口需要指定天数。"
+  },
+  "wake": {
+    "identity_unverified": "{{email}} 未通过身份验证（{{status}}），因此未发出任何请求。请先完成验证。",
+    "no_credentials": "{{email}} 没有已存储的凭据，因此未发出任何请求。",
+    "not_found": "该账号已不在注册列表中。",
+    "request": "唤醒请求失败：{{detail}}",
+    "store": "无法读取该账号：{{detail}}",
+    "token": "无法获取访问令牌，因此未发出任何请求：{{detail}}"
+  },
+  "wrapper_name": {
+    "empty": "必须填写命令名。",
+    "invalid_chars": "“{{name}}”在 shell 中不安全——请使用字母、数字、`-`、`_`。",
+    "reserved": "“{{name}}”为保留名称。"
+  }
+}

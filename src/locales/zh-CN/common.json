@@ -1,0 +1,259 @@
+{
+  "language": {
+    "label": "语言",
+    "hint": "界面语言。「跟随系统」使用操作系统的语言设置。",
+    "system": "跟随系统",
+    "en": "English",
+    "zh-CN": "简体中文",
+    "changeFailed": "语言切换失败"
+  },
+  "ui": {
+    "undo": "撤销",
+    "unknown": "未知",
+    "unknownError": "出了点问题。"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "now": "现在",
+    "seconds": "{{n}}秒",
+    "minutes": "{{n}}分钟",
+    "hours": "{{n}}小时",
+    "days": "{{n}}天",
+    "secondsAgo": "{{n}}秒前",
+    "minutesAgo": "{{n}}分钟前",
+    "hoursAgo": "{{n}}小时前",
+    "daysAgo": "{{n}}天前"
+  },
+  "platform": {
+    "fileManager": {
+      "macos": "访达",
+      "windows": "文件资源管理器",
+      "linux": "文件",
+      "generic": "文件管理器"
+    }
+  },
+  "cost": {
+    "estimatedRateHint": "估算值：该模型尚未列入价目表，因此按其系列当前费率计算。"
+  },
+  "rotation": {
+    "window": {
+      "fiveHour": "5 小时窗口",
+      "sevenDay": "7 天窗口",
+      "sevenDayOpus": "7 天 Opus 窗口",
+      "sevenDaySonnet": "7 天 Sonnet 窗口"
+    },
+    "outcome": {
+      "applied": "已执行",
+      "suggested": "已建议",
+      "skippedGuard": "已跳过（护栏）",
+      "skippedCcRunning": "已跳过（CC 运行中）",
+      "noCandidate": "无可用候选",
+      "failed": "失败",
+      "quarantined": "已隔离"
+    },
+    "event": {
+      "suggestedTitle": "建议自动轮换",
+      "suggestedBody": "{{summary}} — {{window}}用量已达 {{pct}}%",
+      "triggerWindowFallback": "触发窗口",
+      "switch": "切换",
+      "swapFailedTitle": "轮换切换失败",
+      "appliedTitle": "已执行自动轮换",
+      "appliedBody": "已切换到 {{email}}（规则 {{ruleId}}）",
+      "appliedBodyRestart": "已切换到 {{email}}（规则 {{ruleId}}）— 重启 Claude Code 后生效",
+      "stalledTitle": "自动轮换受阻",
+      "stalledBody": "规则「{{ruleId}}」无法轮换 — {{window}}上每个候选账户的用量都已达到或超过 {{pct}}%。没有安全的切换目标。",
+      "stalledWindowFallback": "触发窗口",
+      "failedTitle": "自动轮换失败",
+      "failedBody": "{{email}}：{{error}}",
+      "breakerTitle": "自动轮换规则已暂停",
+      "breakerBody": "规则「{{ruleId}}」连续 {{failures}} 次切换失败后已暂停，冷却结束后会自动重试。"
+    }
+  },
+  "serviceStatus": {
+    "tier": {
+      "ok": "所有服务运行正常",
+      "degraded": "部分服务性能下降",
+      "down": "服务中断",
+      "unknown": "状态未知"
+    }
+  },
+  "permission": {
+    "mode": {
+      "default": "手动",
+      "manual": "手动",
+      "acceptEdits": "接受编辑",
+      "plan": "计划",
+      "dontAsk": "不再询问",
+      "bypassPermissions": "跳过权限确认"
+    },
+    "duration": {
+      "minutes30": "30 分钟",
+      "hours2": "2 小时",
+      "hours8": "8 小时",
+      "never": "永不"
+    }
+  },
+  "palette": {
+    "category": {
+      "switch": "快速切换",
+      "navigate": "导航",
+      "action": "操作"
+    },
+    "switchCli": "将 CLI 切换到 {{email}}",
+    "switchDesktop": "将 Desktop 切换到 {{email}}",
+    "personal": "个人",
+    "openMaintenance": "打开项目 → 维护",
+    "maintenanceDetail": "清理 + 修复",
+    "openSettingsPane": "打开设置 → {{pane}}",
+    "openGlobalTab": "打开全局 → {{tab}}",
+    "addAccount": "添加账户",
+    "refreshAll": "全部刷新",
+    "toggleTheme": "切换主题",
+    "toggleThemeDetail": "浅色 / 深色",
+    "showShortcuts": "显示键盘快捷键",
+    "launchDesktop": "启动 Claude Desktop",
+    "bindDesktop": "将当前 Desktop 会话绑定到 {{email}}",
+    "signDesktopOut": "退出 Desktop 登录",
+    "removeAccount": "移除 {{email}}"
+  },
+  "account": {
+    "cliSwitched": "CLI 已切换到 {{email}}",
+    "ccRunningOverride": "Claude Code 正在运行 — 它的令牌刷新可能会撤销本次切换。请先退出 CC，或强制覆盖。",
+    "override": "强制覆盖",
+    "cliSwitchFailed": "CLI 切换失败",
+    "cancelFailed": "取消失败",
+    "openingBrowser": "正在打开浏览器 — 请以 {{email}} 登录…",
+    "reloginTitle": "重新登录：{{email}}",
+    "cancelLogin": "取消登录",
+    "signedIn": "已登录为 {{email}}",
+    "loginCancelled": "登录已取消。",
+    "loginFailed": "登录失败",
+    "loginInProgress": "已有一个登录流程正在进行。",
+    "desktopSetNoLaunch": "Desktop 已设为 {{email}}（未启动）",
+    "desktopSwitched": "Desktop 已切换到 {{email}}",
+    "desktopSwitchFailed": "Desktop 切换失败",
+    "desktopBound": "已将 Desktop 会话绑定到 {{email}}（{{items}} 项）。",
+    "desktopBindFailed": "Desktop 绑定失败",
+    "activeSessionFallback": "当前会话",
+    "desktopSignedOutKept": "已退出 Desktop 登录（{{who}}）；快照已保留。",
+    "desktopSignedOutDiscarded": "已退出 Desktop 登录（{{who}}）；快照已丢弃。",
+    "desktopClearFailed": "Desktop 清除失败",
+    "removed": "已移除 {{email}}",
+    "removeWarnings": "注意：{{warnings}}",
+    "removeFailed": "移除失败",
+    "removing": "正在移除 {{email}}…"
+  },
+  "tray": {
+    "cliSwitchedTitle": "CLI → {{email}}",
+    "cliSwitchedTitleRestart": "CLI → {{email}} — 重启 Claude Code 后生效",
+    "cliSwitchedBodyRestart": "重启 Claude Code 后生效。打开 Claudepot 可撤销。",
+    "cliSwitchedBodyUndo": "10 秒内打开 Claudepot 可撤销。",
+    "undoFailed": "撤销失败：未找到 {{email}}"
+  },
+  "status": {
+    "keychain": {
+      "label": "钥匙串已锁定",
+      "detailMac": "点击「解锁」并输入 macOS 登录密码。",
+      "detailOther": "请先解锁系统钥匙串，然后点击「刷新」。",
+      "action": "解锁"
+    },
+    "drift": {
+      "label": "检测到账户漂移",
+      "detailItem": "{{email}} 实际认证身份为 {{verified}}",
+      "action": "打开"
+    },
+    "authRejected": {
+      "label": "Claude Code 需要重新登录",
+      "detail": "已保存的登录凭据不再有效。请打开对应账户并点击「登录」。",
+      "action": "登录"
+    },
+    "ccDrift": {
+      "label": "CC 槽位漂移 — CC 的认证身份是 {{ccEmail}}，而 Claudepot 期望 {{expectedEmail}}",
+      "openMatch": "打开匹配的账户",
+      "relogin": "重新登录当前账户"
+    },
+    "desktop": {
+      "signedInAs": "Claude Desktop 当前登录身份为 {{email}}",
+      "adoptDetail": "将该会话绑定到匹配的已注册账户，Claudepot 之后才能为其切换。",
+      "bind": "绑定",
+      "strangerDetail": "该邮箱尚未在 Claudepot 中注册。导入后即可开始管理这个会话。",
+      "candidateLabel": "无法确认 Claude Desktop 的当前账户",
+      "candidateDetail": "最可能匹配的是 {{email}}。打开一次 Claude Desktop 即可刷新。"
+    },
+    "syncErrorLabel": "无法与 Claude Code 同步",
+    "importEmail": "导入 {{email}}",
+    "unlockFailed": "解锁失败",
+    "noActiveCli": "没有可重新登录的活动 CLI 账户。",
+    "imported": "已导入 {{email}}",
+    "importFailed": "导入失败",
+    "noMatchingAccount": "没有与 {{email}} 匹配的已注册账户。"
+  },
+  "menu": {
+    "synced": "已从 CC 同步 {{email}}。",
+    "nothingToSync": "没有可同步的内容。",
+    "syncFailed": "同步失败",
+    "verifyAllComplete": "已完成全部验证。",
+    "verifyFailed": "验证失败",
+    "copyDiagHint": "打开「设置 → 诊断」并点击「复制」。"
+  },
+  "maintenance": {
+    "gcPreviewFailed": "GC 预览失败",
+    "gcDone": "GC：已删除 {{journals}} 个日志、{{snapshots}} 个快照，释放 {{size}}",
+    "gcFailed": "GC 失败",
+    "lockBroken": "锁已强制解除 — PID {{pid}}（{{host}}）。审计记录：{{auditPath}}",
+    "breakLockFailed": "强制解锁失败"
+  },
+  "shortcuts": {
+    "devModeOn": "开发者模式已开启",
+    "devModeOff": "开发者模式已关闭",
+    "boardsShown": "已显示面板",
+    "boardsHidden": "已隐藏面板"
+  },
+  "banner": {
+    "resolved": "已解决：{{what}}",
+    "category": {
+      "accountAuth": "账户认证",
+      "keychainAccess": "钥匙串访问",
+      "ccSlotDrift": "CC 槽位漂移",
+      "desktopDrift": "Desktop 漂移",
+      "repairConflict": "修复冲突"
+    }
+  },
+  "backgroundChange": {
+    "created": "已创建",
+    "deleted": "已删除",
+    "edited": "已编辑",
+    "scopeProject": "项目（{{slug}}）",
+    "scopeGlobal": "全局",
+    "memoryTitle": "{{verb}} CLAUDE.md — {{scope}}",
+    "configTitle": "配置文件已变更（{{parts}}）"
+  },
+  "agentEvents": {
+    "fireFailedTitle": "代理触发失败",
+    "fireFailedBody": "{{agent}} 于会话 {{session}} — {{error}}",
+    "burstCappedTitle": "已应用代理首轮触发上限",
+    "burstCappedBody_other": "有 {{count}} 个已结束的会话在新代理首次参与时被暂缓（上限 {{cap}}），它们会在后续轮次触发。"
+  },
+  "op": {
+    "failedTitle": "操作失败：{{label}}",
+    "errorFallbackBody": "详情请查看运行中操作的标记。",
+    "doneBody": "已完成。"
+  },
+  "activity": {
+    "errorBurst": "最近一分钟内出现多次错误",
+    "stuck": "可能已卡住（工具调用超过 {{minutes}} 分钟）",
+    "taskFinished": "任务已完成（{{minutes}} 分钟）",
+    "needsAnswer": "等待你的回复",
+    "bodyWithProject": "{{body}} @ {{project}}"
+  },
+  "usage": {
+    "accountFallback": "账户",
+    "thresholdTitle": "{{account}} — {{window}}用量已达 {{pct}}%",
+    "utilization": "已达 {{pct}}%",
+    "resetsNow": "{{base}} · 即将重置",
+    "resetsInMinutes": "{{base}} · {{minutes}} 分钟后重置",
+    "resetsInHours": "{{base}} · {{hours}} 小时后重置",
+    "resetsInHoursMinutes": "{{base}} · {{hours}} 小时 {{minutes}} 分钟后重置",
+    "resetsInDays": "{{base}} · {{days}} 天后重置"
+  }
+}

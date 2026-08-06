@@ -1,0 +1,786 @@
+{
+  "account_register": {
+    "already_registered": "{{email}} is already registered.",
+    "auth_rejected": "Claude Code's stored login has expired and couldn't be refreshed. Sign in again to recover it.",
+    "cc_changed_during_refresh": "Claude Code changed its stored login while Claudepot was refreshing it. Nothing was lost — try again.",
+    "cc_live_refresh_skipped": "A Claude Code session is running, so the token refresh was skipped rather than signing it out. It clears itself once that session refreshes — nothing to do.",
+    "credential_read": "Couldn't read Claude Code's stored credentials: {{detail}}",
+    "credential_write": "Couldn't write the credentials back: {{detail}}",
+    "no_credentials": "Claude Code isn't signed in, so there are no credentials to import. Sign in there first, then add the account.",
+    "not_found": "That account is no longer registered.",
+    "profile_fetch": "Couldn't confirm which account this login belongs to: {{detail}}",
+    "store": "The account store rejected the write: {{detail}}"
+  },
+  "account_verify": {
+    "account_not_found": "That account is no longer registered.",
+    "corrupt_blob": "The stored credentials couldn't be parsed: {{detail}}",
+    "no_blob": "This account has no stored credentials to verify. Re-add it to restore them.",
+    "store": "Verification ran, but the result couldn't be saved: {{detail}}"
+  },
+  "accounts": {
+    "invalid_uuid": "That account id isn't valid.",
+    "list_failed": "Couldn't read the account list: {{detail}}",
+    "login_in_progress": "A sign-in is already running.",
+    "login_state_lock_poisoned": "Sign-in is stuck after an earlier failure. Restart Claudepot.",
+    "lookup_failed": "Couldn't re-read the account: {{detail}}",
+    "reconcile_failed": "Couldn't reconcile the account list: {{detail}}",
+    "remove_failed": "{{detail}}",
+    "store_open_failed": "Couldn't open the account store: {{detail}}",
+    "unknown_uuid": "No registered account matches that id.",
+    "verify_all_in_progress": "A verification run is already going."
+  },
+  "activity": {
+    "prefs_lock_poisoned": "Preferences are temporarily unavailable: {{detail}}"
+  },
+  "activity_cards": {
+    "body_read_failed": "Couldn't read this card's source line from the transcript: {{detail}}",
+    "invalid_query": "That filter isn't one Claudepot recognizes: {{detail}}"
+  },
+  "activity_index": {
+    "io": "Couldn't read or write the activity store: {{detail}}",
+    "serde": "An activity card couldn't be parsed: {{detail}}",
+    "sql": "Activity database error: {{detail}}"
+  },
+  "agent": {
+    "cron_too_dense": "That schedule fires {{slots}} times — the limit is {{limit}}.",
+    "duplicate_name": "An agent named \"{{name}}\" already exists.",
+    "invalid_cron": "That schedule isn't valid: {{reason}}",
+    "invalid_env": "An environment entry was rejected: {{detail}}",
+    "invalid_name": "\"{{name}}\" isn't a usable agent name: {{reason}}",
+    "invalid_path": "{{path}} can't be used: {{reason}}",
+    "io": "Couldn't read or write the agent store: {{detail}}",
+    "json": "The agent store isn't valid JSON: {{detail}}",
+    "missing_field": "\"{{field}}\" is required.",
+    "no_home_dir": "Couldn't locate your home directory.",
+    "not_found": "That agent no longer exists.",
+    "not_managed": "{{path}} wasn't written by Claudepot — it won't be overwritten.",
+    "unsupported_platform": "This isn't supported on your platform: {{operation}}"
+  },
+  "agent_events": {
+    "io": "Couldn't read or write the agent event ledger: {{detail}}",
+    "serde": "The agent event ledger isn't valid JSON: {{detail}}",
+    "unsupported_schema_version": "The agent event ledger is version {{found}}; this build reads {{expected}}."
+  },
+  "agents": {
+    "bypass_requires_allowed_tools": "Bypassing permissions requires an explicit list of allowed tools.",
+    "draft_not_runnable": "\"{{name}}\" is still a draft, so nothing was run. Open Review & install to arm it first.",
+    "invalid_id": "That agent id isn't valid.",
+    "invalid_max_budget": "The budget must be a finite, non-negative number (got {{value}}).",
+    "invalid_output_format": "\"{{format}}\" isn't an output format Claudepot knows.",
+    "invalid_permission_mode": "\"{{mode}}\" isn't a permission mode Claudepot knows.",
+    "linger_linux_only": "Linger is a Linux-only setting.",
+    "name_taken": "An agent named \"{{name}}\" already exists.",
+    "no_artifact_dir": "This scheduler keeps no files to show.",
+    "no_scheduler_adapter": "Claudepot has no scheduler for your platform.",
+    "not_found": "That agent no longer exists.",
+    "open_artifact_dir_failed": "Couldn't open {{dir}}: {{detail}}",
+    "route_binary_id_required": "Pick a provider for this agent to run through.",
+    "template_name_taken": "An agent named \"{{name}}\" already exists — rename or remove it before installing this template again.",
+    "unknown_binary_kind": "\"{{kind}}\" isn't a binary kind Claudepot knows.",
+    "unknown_event_kind": "\"{{event}}\" isn't an event this build can trigger on."
+  },
+  "app": {
+    "keychain_unlock_unsupported": "Unlocking the keychain is only available on macOS.",
+    "log_dir_create_failed": "Couldn't create the log directory: {{detail}}",
+    "reveal_failed": "The file manager couldn't show that item: {{detail}}",
+    "reveal_path_empty": "No path was given to reveal.",
+    "reveal_path_not_found": "Nothing exists at that path any more: {{path}}",
+    "reveal_spawn_failed": "Couldn't start the file manager: {{detail}}",
+    "task_join_failed": "A background task failed: {{detail}}"
+  },
+  "artifact": {
+    "invalid_relative_path": "That path isn't usable: {{detail}}",
+    "not_disabled": "{{path}} isn't a disabled artifact.",
+    "preview_open_failed": "Couldn't open the disabled file: {{detail}}",
+    "preview_read_failed": "Couldn't read the disabled file: {{detail}}",
+    "scope_root_not_active": "{{scope_root}} isn't one of the folders Claudepot is managing.",
+    "unknown_kind": "{{detail}}",
+    "unknown_on_conflict": "Unknown conflict strategy {{value}}."
+  },
+  "artifact_lifecycle": {
+    "conflict": "{{path}} already exists.",
+    "invalid_trash_id": "That isn't a valid trash id.",
+    "io": "{{op}} failed: {{detail}}",
+    "manifest_parse": "The trash manifest is unreadable: {{detail}}",
+    "recovery_ambiguous": "Claudepot can't tell what this was: {{detail}}",
+    "scope_root_missing": "The original location {{path}} is gone.",
+    "source_missing": "Nothing at {{path}} any more.",
+    "trash_entry_not_found": "That trash entry is gone.",
+    "wrong_trash_state": "That trash entry can't be {{action}}ed in its current state."
+  },
+  "artifact_refused": {
+    "managed_policy": "Your organization's policy manages this — it's read-only in Claudepot.",
+    "out_of_scope": "{{path}} is outside the folders Claudepot manages.",
+    "plugin": "This belongs to the {{plugin_id}} plugin — manage it from the plugin manager.",
+    "symlink_loop": "{{path}} is a symlink loop.",
+    "wrong_kind": "{{path}} isn't a Skill, Agent, or Slash command."
+  },
+  "artifact_usage": {
+    "unknown_kind": "That isn't an artifact type Claudepot tracks: {{detail}}"
+  },
+  "attribution": {
+    "unknown_mode": "“{{mode}}” isn't an attribution mode. Choose Default, Off, or Custom."
+  },
+  "auto_dream": {
+    "unknown_mode": "“{{mode}}” isn't a consolidation mode. Choose Default, On, or Off."
+  },
+  "available_models": {
+    "contains_whitespace": "Entry {{index}} contains spaces: {{entry}}",
+    "empty_entry": "Entry {{index}} is empty."
+  },
+  "base_url": {
+    "bad_scheme": "The URL must start with http:// or https://.",
+    "empty": "A URL is required.",
+    "invalid_chars": "The URL contains whitespace or control characters.",
+    "malformed": "The URL is malformed: {{detail}}",
+    "no_host": "The URL has no host."
+  },
+  "board": {
+    "board_not_found": "That board no longer exists.",
+    "cap_exceeded": "{{what}} is capped at {{limit}}; this was {{actual}}.",
+    "column_count_mismatch": "\"{{series}}\" expects {{expected}} columns per row but got {{actual}}.",
+    "column_type_mismatch": "Column \"{{column}}\" of \"{{series}}\" expects {{expected}} but got {{actual}}.",
+    "corrupt_row": "A stored row in \"{{series}}\" is corrupt: {{what}}",
+    "duplicate_series": "Board \"{{board}}\" already has a series named \"{{series}}\".",
+    "export_create_failed": "Couldn't create {{path}}: {{detail}}",
+    "export_path_exists": "{{path}} already exists.",
+    "export_path_not_absolute": "Pick a destination for the export first.",
+    "invalid_envelope": "That export file couldn't be read: {{reason}}",
+    "invalid_name": "\"{{name}}\" isn't a usable name — use 1–64 characters of A–Z, a–z, 0–9, `.`, `_`, `-`.",
+    "invalid_spec": "That board layout isn't valid: {{detail}}",
+    "invalid_timestamp": "Timestamps must be RFC 3339 with an explicit offset.",
+    "io": "Couldn't read or write the board store: {{detail}}",
+    "json": "Board data isn't valid JSON: {{detail}}",
+    "revision_conflict": "Someone else changed \"{{board}}\" (now revision {{current}}, you had {{base}}). Reload and retry.",
+    "schema_too_new": "boards.db is version {{found}} and this build reads {{supported}} — update Claudepot.",
+    "sequence_out_of_range": "Sequence {{seq}} can't be stored for a {{rows}}-row push.",
+    "sequence_replay": "A writer reporting itself as \"{{reported_writer}}\" reused sequence {{seq}} on \"{{series}}\" with different rows.",
+    "series_not_found": "Board \"{{board}}\" has no series named \"{{series}}\".",
+    "sql": "Board database error: {{detail}}",
+    "unsupported_export_version": "That export is version {{found}}; this build reads {{expected}}."
+  },
+  "cc_doctor": {
+    "cache_lock_poisoned": "The diagnostics cache is in a bad state. Restart Claudepot to clear it."
+  },
+  "cc_env": {
+    "contended": "Something else is writing {{path}}. Try again.",
+    "env_not_an_object": "The `env` block in {{path}} is a {{found}}, not an object. Fix it by hand — rewriting it would destroy what you meant by it.",
+    "invalid_enum_value": "{{name}} accepts {{allowed}} — not {{value}}.",
+    "invalid_number": "{{name}} takes a whole number — {{value}} isn't one.",
+    "io": "Couldn't read or write Claude Code's settings: {{detail}}",
+    "json_parse": "Claude Code's settings file isn't valid JSON: {{detail}}",
+    "malformed_spec": "Claudepot's built-in environment-variable list is unusable: {{detail}}",
+    "not_a_json_object": "{{path}} isn't a JSON object.",
+    "not_editable": "{{name}} can't be edited here.",
+    "not_set": "{{name}} isn't set, so there's nothing to clear.",
+    "unknown_variable": "{{name}} isn't a documented Claude Code environment variable."
+  },
+  "cc_retention": {
+    "non_positive": "{{days}} isn't a retention window. To stop Claude Code writing transcripts at all, use Disable persistence — it also deletes the transcripts you already have.",
+    "write": "Couldn't save the retention setting: {{detail}} **Never** \"restore the default\" — see above."
+  },
+  "cc_tips": {
+    "binary_not_found": "No Claude Code binary at {{path}}.",
+    "binary_read": "Couldn't read the Claude Code binary at {{path}}: {{detail}}",
+    "catalog_io": "Tips cache error at {{path}}: {{detail}}",
+    "catalog_parse": "The tips cache isn't valid JSON: {{detail}}",
+    "config_parse": "Claude Code's global config at {{path}} isn't valid JSON: {{detail}}",
+    "config_read": "Couldn't read Claude Code's global config at {{path}}: {{detail}}",
+    "no_home": "Couldn't work out your home directory.",
+    "snapshot_read": "Couldn't read the tips snapshot at {{path}}: {{detail}}",
+    "snapshot_write": "Couldn't write the tips snapshot at {{path}}: {{detail}}"
+  },
+  "cli": {
+    "resolve_target_failed": "Couldn't work out which account you meant: {{detail}}"
+  },
+  "cli_backend": {
+    "corrupt_blob": "The saved credential is unreadable: {{detail}}",
+    "file_error": "Filesystem error: {{detail}}",
+    "identity_mismatch": "{{stored_email}} is holding credentials for {{actual_email}}. Remove the account and add it again.",
+    "identity_verification_failed": "Couldn't confirm who this login belongs to: {{detail}}",
+    "keychain_error": "Keychain error: {{detail}}",
+    "live_session_conflict": "Claude Code is running — its next token refresh would undo this switch.",
+    "no_default_credentials": "Claude Code isn't signed in, so there's nothing to import.",
+    "no_stored_credentials": "Claudepot has no saved login for that account.",
+    "refresh_failed": "Couldn't renew the session: {{detail}}",
+    "write_failed": "Couldn't save the credentials: {{detail}}"
+  },
+  "codex_session": {
+    "io": "Couldn't read the Codex rollout at {{path}}: {{detail}}",
+    "missing_session_id": "The Codex session header in {{path}} has no id.",
+    "missing_session_meta": "{{path}} carries no Codex session header."
+  },
+  "config": {
+    "editor_id_empty": "Pick an editor.",
+    "editor_not_detected": "{{editor_id}} isn't installed, or Claudepot can't see it.",
+    "no_anchor_effective_mcp": "Pick a project first — effective MCP servers are merged per project.",
+    "no_anchor_effective_settings": "Pick a project first — effective settings are merged per project.",
+    "no_editor_available": "No editor available. Set one in Settings.",
+    "node_not_found": "That file is no longer in the scanned tree — rescan and try again.",
+    "path_empty": "No path to open.",
+    "preview_open_failed": "Couldn't open {{path}}: {{detail}}",
+    "preview_stat_failed": "Couldn't read the file's size: {{detail}}",
+    "search_id_empty": "Search couldn't start (missing id).",
+    "search_registry_lock_poisoned": "Search state is broken; restart Claudepot.",
+    "tree_not_scanned": "Scan the config tree first.",
+    "unknown_kind": "Unknown file kind {{kind}}.",
+    "watch_start_failed": "Couldn't start watching your config files for changes, so the tree won't refresh on its own: {{detail}}",
+    "watch_state_lock_poisoned": "The config watcher is in a bad state. Restart Claudepot to clear it."
+  },
+  "config_launcher": {
+    "empty_path": "No path to open.",
+    "no_binary": "That editor has no executable path recorded.",
+    "no_env_editor": "`$EDITOR` isn't set.",
+    "spawn": "The editor wouldn't start: {{detail}}",
+    "unknown_editor": "Claudepot doesn't know an editor called {{editor_id}}."
+  },
+  "config_view": {
+    "bad_query": "That search pattern isn't valid: {{detail}}",
+    "io": "Couldn't read {{path}}: {{detail}}",
+    "manifest_not_found": "No plugin manifest in {{path}}.",
+    "parse": "{{path}} isn't valid JSON: {{detail}}"
+  },
+  "corpus": {
+    "db": "Corpus database error: {{detail}}",
+    "io": "Couldn't read or write the corpus: {{detail}}"
+  },
+  "desktop": {
+    "no_live_identity": "No Desktop session to bind — sign in through Claude Desktop first.",
+    "not_supported_on_platform": "Claudepot doesn't support Claude Desktop on this platform.",
+    "resolve_target_failed": "{{detail}}"
+  },
+  "desktop_adopt": {
+    "data_dir_unreadable": "Claude Desktop's data folder is missing or unreadable.",
+    "identity_mismatch": "Claude Desktop is signed in as {{actual}}, not {{expected}}. Adopting would file one identity's session under the other.",
+    "lock": "Another Desktop operation is in progress: {{detail}}",
+    "not_found": "That account is no longer registered.",
+    "profile_exists": "That account already has a saved Desktop profile. Choose to replace it if you mean to overwrite it.",
+    "sidecar": "The profile was captured, but its sidecar file couldn't be written: {{detail}}",
+    "store": "Couldn't look up the target account: {{detail}}",
+    "swap": "The Desktop swap failed: {{detail}}",
+    "unsupported": "Claudepot doesn't support Claude Desktop on this platform."
+  },
+  "desktop_backend": {
+    "desktop_still_running": "Claude Desktop didn't quit in time. Quit it and try again.",
+    "dpapi_invalidated": "This Desktop session was encrypted by a different Windows account. Sign in to Claude Desktop again, then re-bind.",
+    "file_copy_failed": "Couldn't copy the Desktop session files: {{detail}}",
+    "io": "Filesystem error: {{detail}}",
+    "lock": "Another Desktop operation is in the way: {{detail}}",
+    "no_stored_profile": "That account has no saved Desktop session.",
+    "not_installed": "Claude Desktop isn't installed on this machine."
+  },
+  "desktop_clear": {
+    "data_dir_missing": "Claude Desktop is already signed out — there was nothing to clear.",
+    "fs": "Couldn't remove the session files: {{detail}}",
+    "lock": "Another Desktop operation is in progress: {{detail}}",
+    "store": "Couldn't read the active Desktop account: {{detail}}",
+    "swap": "The Desktop swap failed: {{detail}}",
+    "unsupported": "Claudepot doesn't support Claude Desktop on this platform."
+  },
+  "desktop_crypto": {
+    "aes": "Couldn't decrypt Claude Desktop's session — it's corrupt, or the key changed.",
+    "bad_format": "Claude Desktop's stored session isn't in a shape Claudepot recognizes: {{detail}}",
+    "base64": "Claude Desktop's stored session is corrupt: {{detail}}",
+    "kdf": "Couldn't derive Claude Desktop's decryption key: {{detail}}",
+    "unknown_version": "Claude Desktop uses an encryption version Claudepot doesn't know ({{tag}}). Update Claudepot."
+  },
+  "desktop_identity": {
+    "config_parse": "Claude Desktop's config file is unreadable: {{detail}}",
+    "data_dir_unreadable": "Couldn't read Claude Desktop's data folder: {{detail}}",
+    "decrypt": "Couldn't decrypt Claude Desktop's session: {{detail}}",
+    "key": "Couldn't get Claude Desktop's key: {{detail}}",
+    "no_config": "Claude Desktop hasn't been launched yet.",
+    "no_data_dir": "Claudepot doesn't know where Claude Desktop stores data on this platform.",
+    "not_signed_in": "Claude Desktop is signed out.",
+    "profile_fetch": "Couldn't confirm the Desktop account with Anthropic: {{detail}}",
+    "token_parse": "Claude Desktop's session data is malformed: {{detail}}",
+    "unsupported": "Verifying the Desktop account isn't supported on this platform."
+  },
+  "desktop_key": {
+    "dpapi_failed": "Windows couldn't unlock Claude Desktop's key: {{detail}}",
+    "keychain_read": "Couldn't read Claude Desktop's key from the keychain: {{detail}}",
+    "local_state": "Couldn't read Claude Desktop's Local State file: {{detail}}",
+    "unsupported": "Reading Claude Desktop's key isn't supported on this platform."
+  },
+  "desktop_lock": {
+    "held": "Another Desktop operation is running — try again in a moment.",
+    "open": "Couldn't open the Desktop operation lock: {{detail}}",
+    "timeout": "Waited {{timeout_secs}}s for the other Desktop operation and gave up."
+  },
+  "desktop_switch": {
+    "no_snapshot": "{{email}} has no saved Desktop profile yet. Sign in to Claude Desktop as {{email}} and adopt that session first.",
+    "not_found": "That account is no longer registered.",
+    "store": "Couldn't look up the target account: {{detail}}",
+    "unsupported": "Claudepot doesn't support Claude Desktop on this platform."
+  },
+  "desktop_token_cache": {
+    "empty": "Claude Desktop's session data is empty — sign in through Desktop first.",
+    "json": "Claude Desktop's session data is unreadable: {{detail}}"
+  },
+  "env_file": {
+    "already_active": "\"{{key}}\" is already active.",
+    "already_commented": "\"{{key}}\" is already commented out.",
+    "dir_entry_failed": "Couldn't read a folder entry: {{detail}}",
+    "invalid_dotenv_path": "{{path}} isn't a usable `.env` path.",
+    "invalid_encoding": "{{path}} isn't valid UTF-8.",
+    "invalid_key_name": "\"{{key}}\" isn't a valid environment key name.",
+    "invalid_project_path": "That project path can't be used: {{detail}}",
+    "key_missing_in_file": "\"{{key}}\" isn't in {{file_name}}.",
+    "key_not_found": "No line for \"{{key}}\" in that file.",
+    "lock_failed": "{{path}} is being edited elsewhere: {{detail}}",
+    "lock_open_failed": "Couldn't open the lock file at {{path}}: {{detail}}",
+    "name_empty": "A file name is required.",
+    "name_not_dotenv": "\"{{file_name}}\" isn't a `.env` file.",
+    "name_unsafe": "\"{{file_name}}\" isn't a safe file name.",
+    "read_dir_failed": "Couldn't list the project folder: {{detail}}",
+    "read_failed": "Couldn't read {{path}}: {{detail}}",
+    "stat_entry_failed": "Couldn't inspect a folder entry: {{detail}}",
+    "too_large": "{{path}} is larger than the {{max_bytes}}-byte editing limit.",
+    "value_has_newline": "The value for \"{{key}}\" contains a newline, which `.env` can't represent.",
+    "write_failed": "Couldn't write {{path}}: {{detail}}"
+  },
+  "env_vault": {
+    "duplicate_name": "A vault secret named \"{{name}}\" already exists.",
+    "invalid_name": "\"{{name}}\" isn't a valid environment key name.",
+    "io": "Couldn't read or write the vault: {{detail}}",
+    "not_found": "No vault secret named \"{{name}}\".",
+    "sql": "Vault database error: {{detail}}"
+  },
+  "github_pr": {
+    "bad_output": "Couldn't read {{tool}}'s output: {{detail}}",
+    "io": "Couldn't run {{tool}}: {{detail}}",
+    "missing_cli": "{{tool}} isn't on your PATH.",
+    "subprocess": "{{tool}} exited {{code}}: {{stderr}}",
+    "timeout": "{{tool}} took too long and was stopped."
+  },
+  "keys": {
+    "api_key_not_found": "That API key is no longer in the store.",
+    "bad_uuid": "That key id isn't valid.",
+    "clipboard_write_failed": "Couldn't write to the clipboard: {{detail}}",
+    "io": "Couldn't read or write the key store: {{detail}}",
+    "keychain": "Keychain error: {{detail}}",
+    "label_required": "A label is required.",
+    "not_an_api_key": "That isn't an API key — the value must start with {{prefix}}",
+    "not_an_oauth_token": "That isn't an OAuth token — the value must start with {{prefix}}",
+    "not_found": "That key is no longer in the store.",
+    "oauth_token_not_found": "That OAuth token is no longer in the store.",
+    "probe_rate_limited": "Rate limited — try again in {{retry_after_secs}}s.",
+    "probe_rejected": "Rejected — the key is invalid.",
+    "sql": "Key database error: {{detail}}"
+  },
+  "launcher": {
+    "corrupt_blob": "The stored credential is unreadable: {{detail}}",
+    "credential_read": "Couldn't read Claude Code's credentials: {{detail}}",
+    "no_command": "No command to run.",
+    "no_stored_credentials": "That account has no stored credentials.",
+    "refresh_failed": "Couldn't refresh the access token: {{detail}}",
+    "save_failed": "Couldn't save the refreshed credentials: {{detail}}",
+    "spawn_failed": "Couldn't start the command: {{detail}}"
+  },
+  "lesson": {
+    "accept_failed": "Couldn't accept the lesson: {{detail}}",
+    "bad_state": "“{{state}}” isn't a review state — use proposed, accepted, rejected, suspect, or all.",
+    "counts_by_project_failed": "Couldn't load the per-project coverage: {{detail}}",
+    "counts_failed": "Couldn't count the lessons: {{detail}}",
+    "list_failed": "Couldn't load the lessons: {{detail}}",
+    "reject_failed": "Couldn't reject the lesson: {{detail}}"
+  },
+  "live_activity": {
+    "already_subscribed": "This session already has a live stream open.",
+    "not_started": "The Activity runtime isn't running. Enable Activity in Settings."
+  },
+  "mcp_probe": {
+    "cli_not_found": "No Claudepot CLI next to the app in {{exe_dir}}.",
+    "spawn": "Couldn't start {{bin}}: {{detail}}"
+  },
+  "mcp_snippet": {
+    "create_parent": "Couldn't create the folder for {{path}}: {{detail}}",
+    "missing_project_path": "Project scope needs a project path.",
+    "no_home_dir": "Couldn't locate your home directory.",
+    "project_path_not_absolute": "The project path must be absolute.",
+    "project_path_not_dir": "{{path}} isn't an existing directory.",
+    "write": "Couldn't write {{path}}: {{detail}}"
+  },
+  "memory": {
+    "auto_memory_clear_failed": "Couldn't clear the auto-memory setting: {{detail}}",
+    "auto_memory_write_failed": "Couldn't save the auto-memory setting: {{detail}}",
+    "enumerate_failed": "Couldn't list this project's memory files: {{detail}}",
+    "project_root_empty": "No project selected.",
+    "unknown_scope": "{{scope}} isn't a settings layer Claudepot writes."
+  },
+  "memory_health": {
+    "audit_failed": "Couldn't audit your memory files: {{detail}}"
+  },
+  "memory_log": {
+    "io": "Couldn't read or write the memory log: {{detail}}",
+    "sql": "Memory log database error: {{detail}}"
+  },
+  "memory_view": {
+    "io": "Couldn't read the memory file: {{detail}}",
+    "path_outside_scope": "{{path}} is outside this project's memory files."
+  },
+  "migrate": {
+    "configuration": "Those options don't work together: {{detail}}",
+    "conflict": "Import conflict: {{detail}}",
+    "integrity_violation": "The bundle failed its integrity check: {{detail}}",
+    "io": "Filesystem error during migration: {{detail}}",
+    "live_session": "A session is live in {{path}}. Quit Claude Code before importing.",
+    "not_implemented": "Not supported yet: {{detail}}",
+    "passphrase_required": "This bundle is encrypted. Enter its passphrase to inspect it.",
+    "project_not_in_bundle": "That project isn't in the bundle: {{detail}}",
+    "serialize": "Couldn't write the bundle: {{detail}}",
+    "trust_gate": "Blocked by the {{gate}} check: {{reason}}",
+    "unknown_conflict_mode": "“{{mode}}” isn't a conflict mode. Choose Skip, Merge, or Replace.",
+    "unknown_merge_preference": "“{{prefer}}” isn't a merge preference. Choose Imported or Target.",
+    "unsupported_schema_version": "This bundle is version {{found}}; this build reads version {{expected}}."
+  },
+  "notification": {
+    "host_activate_failed": "Couldn't bring that app forward: {{detail}}",
+    "log_append_failed": "Couldn't record that notification: {{detail}}",
+    "log_append_routed_failed": "Couldn't record that notification: {{detail}}",
+    "log_clear_failed": "Couldn't clear the notification log: {{detail}}",
+    "log_mark_all_read_failed": "Couldn't mark notifications read: {{detail}}",
+    "log_mark_delivered_failed": "Couldn't record delivery: {{detail}}"
+  },
+  "oauth": {
+    "auth_failed": "Authentication failed: {{detail}}",
+    "http_error": "Couldn't reach Anthropic: {{detail}}",
+    "rate_limited": "Rate limited — try again in {{retry_after_secs}}s.",
+    "refresh_failed": "The session expired and couldn't be renewed: {{detail}}",
+    "server_error": "Anthropic returned an error: {{detail}}"
+  },
+  "onboard": {
+    "auth_login_cancelled": "Sign-in cancelled.",
+    "auth_login_failed": "Browser sign-in failed (exit {{exit_code}}).",
+    "cli_binary_not_found": "No claude CLI at {{path}}.",
+    "import_failed": "The sign-in finished but left no credentials to import.",
+    "io": "Filesystem error: {{detail}}",
+    "swap": "{{detail}}"
+  },
+  "permission": {
+    "duration_out_of_range": "Pick a duration between {{min}} and {{max}} seconds.",
+    "grants_load_failed": "Couldn't load the permission grants: {{detail}}",
+    "invalid_project_path": "That project path can't be used: {{detail}}",
+    "no_active_grant": "Claudepot isn't managing permissions for this project.",
+    "read_settings_for_project_failed": "Couldn't read the permission settings for {{project_path}}: {{detail}}",
+    "unknown_mode": "Claudepot can't grant the mode {{mode}}."
+  },
+  "permission_grants": {
+    "duplicate_project": "{{project_path}} has more than one grant.",
+    "empty_project_path": "A grant needs a project path.",
+    "non_positive_duration": "The grant for {{project_path}} expires before it starts.",
+    "project_layer_not_allowed": "Claudepot won't write the committed project settings for {{project_path}}.",
+    "unsupported_schema_version": "The grants file is version {{found}}; this build reads {{expected}}."
+  },
+  "permission_settings": {
+    "contended": "Something else is writing {{path}}. Try again.",
+    "io": "Couldn't read or write the permission settings: {{detail}}",
+    "json_parse": "The settings file isn't valid JSON: {{detail}}",
+    "not_a_json_object": "{{path}} isn't a JSON object.",
+    "permissions_not_an_object": "The `permissions` block in {{path}} isn't an object.",
+    "unsupported_layer": "Claudepot won't write the {{layer}} settings layer."
+  },
+  "permission_store": {
+    "io": "Couldn't read or write the grants file: {{detail}}",
+    "serde": "The grants file isn't valid JSON: {{detail}}",
+    "validation": "The grants file is invalid: {{detail}}"
+  },
+  "preferences": {
+    "lock_poisoned": "Preferences are stuck after an earlier failure. Restart Claudepot.",
+    "save_failed": "Couldn't save preferences: {{detail}}",
+    "set_activation_policy_failed": "Couldn't change the Dock icon setting: {{detail}}",
+    "unsupported_locale": "Claudepot has no \"{{locale}}\" translation."
+  },
+  "pricing_history": {
+    "bad_date": "Observation {{index}} has an out-of-range date.",
+    "empty_model_id": "Observation {{index}} has no model id.",
+    "negative_rate": "Observation {{index}} has a negative rate.",
+    "unsupported_schema_version": "The pricing history is version {{found}}; this build reads {{expected}}."
+  },
+  "pricing_history_store": {
+    "io": "Couldn't read or write the pricing history: {{detail}}",
+    "validation": "The pricing history is invalid: {{detail}}"
+  },
+  "project": {
+    "ambiguous": "Can't proceed: {{detail}}",
+    "claude_running": "Claude Code is running in {{path}}. Quit it first, or force the move.",
+    "clean_blocked_by_journals": "{{count}} rename(s) are still mid-repair. Finish them in Repair first.",
+    "dry_run_superseded": "(never rendered — protocol sentinel)",
+    "io": "Filesystem error: {{detail}}",
+    "not_found": "No project at {{path}}.",
+    "remove_blocked_by_journals": "{{count}} rename(s) are still mid-repair. Finish them in Repair first.",
+    "same_path": "The old and new paths are the same."
+  },
+  "project_trash": {
+    "entry_not_found": "That trashed project is no longer there.",
+    "invalid_slug": "That project folder name isn't valid.",
+    "io": "Couldn't read or write {{path}}: {{detail}}",
+    "manifest_parse": "The trash manifest at {{path}} is unreadable: {{detail}}",
+    "restore_collision": "{{path}} already exists — restore would overwrite it.",
+    "serialize": "Couldn't write the trash manifest at {{path}}: {{detail}}",
+    "source_missing": "Nothing to trash at {{path}}."
+  },
+  "protected_paths": {
+    "duplicate": "{{path}} is already protected.",
+    "empty": "Enter a path.",
+    "invalid_json": "{{path}} isn't valid JSON: {{detail}}",
+    "io": "Couldn't read or write the protected-paths list: {{detail}}",
+    "not_absolute": "Use an absolute path, or one starting with `~`.",
+    "not_found": "{{path}} isn't in the protected list."
+  },
+  "recurrence": {
+    "confirm_failed": "Couldn't confirm the recurrence: {{detail}}",
+    "confirmed_count_failed": "Couldn't count confirmed recurrences: {{detail}}",
+    "dismiss_failed": "Couldn't dismiss the candidate: {{detail}}",
+    "list_failed": "Couldn't load the recurrence candidates: {{detail}}",
+    "pending_count_failed": "Couldn't count pending candidates: {{detail}}"
+  },
+  "release_update": {
+    "builder_failed": "Couldn't start the updater: {{detail}}",
+    "check_failed": "Couldn't check for updates: {{detail}}",
+    "endpoint_config_failed": "Couldn't point the updater at the release channel: {{detail}}",
+    "install_failed": "The update didn't install. Claudepot is untouched — try again: {{detail}}",
+    "invalid_endpoint": "The update manifest address is malformed: {{endpoint}}",
+    "not_staged": "No update is ready to install — run a check first.",
+    "state_lock_poisoned": "The update check is stuck after an earlier failure. Restart Claudepot.",
+    "unknown_channel": "Claudepot has no release channel called {{channel}} — use stable or beta."
+  },
+  "repair": {
+    "journal_not_found": "That repair entry is no longer there.",
+    "lock_file_not_found": "No lock is held for {{path}}."
+  },
+  "resolve": {
+    "ambiguous": "\"{{input}}\" matches more than one account.",
+    "no_match": "No account matches \"{{input}}\".",
+    "store_error": "Couldn't read the account list: {{detail}}"
+  },
+  "rotation": {
+    "apply_failed": "The swap didn't go through: {{detail}}",
+    "bad_rule_dto": "That rotation rule isn't valid: {{detail}}",
+    "rules_load_failed": "Couldn't load the rotation rules: {{detail}}",
+    "snapshot_parse_failed": "The usage snapshot is unreadable, so the dry run can't run: {{detail}}"
+  },
+  "rotation_breaker": {
+    "io": "Couldn't read or write the circuit-breaker ledger: {{detail}}",
+    "serde": "The circuit-breaker ledger isn't valid JSON: {{detail}}",
+    "unsupported_schema_version": "The circuit-breaker ledger is version {{found}}; this build reads {{expected}}."
+  },
+  "rotation_rules": {
+    "bad_threshold": "The threshold must be between 1 and 100 — {{pct}} isn't.",
+    "duplicate_candidate": "{{email}} is listed twice.",
+    "duplicate_id": "Another rule already uses the id {{rule_id}}.",
+    "empty_candidates": "Pick at least one account to rotate to.",
+    "empty_explicit_email": "Pick the account to rotate to.",
+    "empty_id": "Give the rule an id.",
+    "least_used_window_mismatch": "\"Least used\" has to measure the same window the rule triggers on ({{selector}} vs {{trigger}}).",
+    "unsupported_schema_version": "The rules file is version {{found}}; this build reads {{expected}}.",
+    "zero_max_swaps": "Allow at least one swap per window."
+  },
+  "rotation_store": {
+    "io": "Couldn't read or write the rotation rules: {{detail}}",
+    "serde": "The rotation rules file isn't valid JSON: {{detail}}",
+    "validation": "The rotation rules are invalid: {{detail}}"
+  },
+  "route_save": {
+    "not_found": "That provider no longer exists.",
+    "secrets": "Storing the secret failed: {{detail}}",
+    "store": "Saving the provider failed: {{detail}}"
+  },
+  "routes": {
+    "bedrock_auth_required": "Bedrock needs a bearer token, an AWS profile, or \"skip AWS auth\".",
+    "bedrock_config_missing": "Bedrock settings are missing.",
+    "bedrock_region_required": "An AWS region is required.",
+    "desktop_not_supported": "Claude Desktop isn't supported on your platform.",
+    "duplicate_name": "A provider named \"{{name}}\" already exists.",
+    "duplicate_wrapper_name": "Another provider already uses the command \"{{wrapper}}\".",
+    "edit_store_failed": "Saving failed: {{detail}} The previously-saved provider is still active; if it stops working, re-enter the secret and save again.",
+    "foundry_config_missing": "Foundry settings are missing.",
+    "foundry_target_ambiguous": "Choose a base URL or a resource name for Foundry, not both.",
+    "foundry_target_required": "Foundry needs either a base URL or a resource name.",
+    "gateway_config_missing": "Gateway settings are missing.",
+    "gone_after_persist": "The provider was saved but couldn't be read back. Reload the list.",
+    "invalid_base_url": "That base URL isn't usable: {{reason}}",
+    "invalid_bedrock_base_url": "The Bedrock base URL isn't usable: {{detail}}",
+    "invalid_foundry_base_url": "The Foundry base URL isn't usable: {{detail}}",
+    "invalid_gateway_base_url": "The gateway base URL isn't usable: {{detail}}",
+    "invalid_route_id": "That provider id isn't valid.",
+    "invalid_vertex_base_url": "The Vertex base URL isn't usable: {{detail}}",
+    "invalid_wrapper_name": "\"{{wrapper}}\" isn't a usable command name: {{reason}}",
+    "io": "Couldn't read or write the provider store: {{detail}}",
+    "json": "The provider store isn't valid JSON: {{detail}}",
+    "missing_field": "\"{{field}}\" is required.",
+    "no_home_dir": "Couldn't locate your home directory.",
+    "not_found": "That provider no longer exists.",
+    "remove_cleanup_failed": "Removed, but {{count}} cleanup step(s) failed: {{steps}}",
+    "save_warnings": "Saved, but follow-up writes reported problems: {{warnings}}",
+    "unknown_provider_kind": "\"{{kind}}\" isn't a provider Claudepot knows.",
+    "unsupported_platform": "This isn't supported on your platform: {{operation}}",
+    "vertex_config_missing": "Vertex settings are missing.",
+    "vertex_project_id_required": "A GCP project ID is required.",
+    "wrapper_file_not_managed": "{{path}} wasn't written by Claudepot — it won't be overwritten.",
+    "wrapper_name_rejected": "\"{{name}}\" isn't a usable command name: {{detail}}",
+    "wrapper_shadows_claude": "\"{{wrapper}}\" would shadow the first-party `claude` command."
+  },
+  "session": {
+    "index": "Session index error: {{detail}}",
+    "invalid_path": "That isn't a readable session transcript.",
+    "io": "Filesystem error: {{detail}}",
+    "not_found": "That session is no longer there."
+  },
+  "session_export": {
+    "invalid_output_path": "{{path}} isn't a usable destination: {{detail}}",
+    "output_is_symlink": "{{path}} is a symlink. Export somewhere else, or delete the link first.",
+    "permissions_not_enforced": "{{path}} is on a filesystem that can't keep the export private. Export to your home disk instead.",
+    "unknown_format": "{{format}} isn't an export format Claudepot writes.",
+    "write_failed": "Couldn't write the export to {{path}}: {{detail}}"
+  },
+  "session_export_delivery": {
+    "clipboard": "The clipboard isn't available: {{detail}}",
+    "file": "Couldn't write the export file: {{detail}}",
+    "gist": "The gist upload failed: {{detail}}",
+    "harden": "Couldn't restrict the export file's permissions: {{detail}}",
+    "keychain": "Keychain error: {{detail}}",
+    "no_token": "No GitHub token saved. Add one in Settings."
+  },
+  "session_index": {
+    "io": "Couldn't read or write the session index: {{detail}}",
+    "json": "A transcript line couldn't be parsed: {{detail}}",
+    "migration_validation_failed": "The session index couldn't upgrade to v{{target_version}} — {{found}} of {{expected}} objects present, missing {{missing}}. The old index is intact; rebuild it from Settings → Cleanup.",
+    "session": "A transcript couldn't be scanned: {{detail}}",
+    "sql": "Session index database error: {{detail}}"
+  },
+  "session_live_bus": {
+    "already_subscribed": "This session already has a live stream open.",
+    "subscriber_gone": "The live stream for this session ended."
+  },
+  "session_live_metrics": {
+    "io": "Couldn't read or write the activity metrics store: {{detail}}",
+    "sqlite": "Activity metrics database error: {{detail}}"
+  },
+  "session_move": {
+    "invalid_config_dir": "Can't read {{path}}.",
+    "invalid_session_id": "That session id isn't valid: {{detail}}",
+    "invalid_slug": "That project folder name isn't valid: {{reason}}",
+    "io": "Filesystem error: {{detail}}",
+    "live_session": "This session looks live. Quit Claude Code first, or move anyway.",
+    "same_cwd": "The old and new paths are the same.",
+    "session_not_found": "That session isn't under {{path}}.",
+    "sidecar_collision": "{{path}} already exists — moving would overwrite it.",
+    "sync_conflict_present": "This session has a sync-conflict copy beside it. Resolve it first, or move anyway.",
+    "target_collision": "The target project already holds this session.",
+    "target_cwd_missing": "{{path}} doesn't exist, so there's nothing to adopt the sessions into.",
+    "trash_failed": "Couldn't move it to the trash: {{detail}}",
+    "worktree_sibling_still_live": "{{path}} is still a live git worktree — Claude Code already resumes across worktrees, so no move is needed."
+  },
+  "session_prune": {
+    "empty_filter": "Choose at least one condition before pruning.",
+    "list": "Couldn't list sessions to prune: {{detail}}",
+    "trash": "Couldn't move a transcript to the trash: {{detail}}"
+  },
+  "session_redact": {
+    "io": "Couldn't read or write {{path}}: {{detail}}",
+    "json": "Line {{line}} of the transcript couldn't be parsed: {{detail}}",
+    "live_write_detected": "The transcript changed while it was being redacted; nothing was written.",
+    "no_patterns": "Choose at least one thing to redact.",
+    "not_found": "No transcript at {{path}}.",
+    "trash": "Couldn't move the original to the trash: {{detail}}"
+  },
+  "session_share": {
+    "auth": "GitHub rejected the token. Check it in Settings.",
+    "http": "GitHub returned {{status}}: {{body}}",
+    "network": "Couldn't reach GitHub: {{detail}}",
+    "oversized": "GitHub rejected the upload: {{detail}}",
+    "parse": "GitHub's response couldn't be read: {{detail}}",
+    "token_empty": "Paste a GitHub token first."
+  },
+  "session_slim": {
+    "empty_filter": "Choose at least one condition before slimming everything.",
+    "io": "Couldn't read or write {{path}}: {{detail}}",
+    "json": "Line {{line}} of the transcript couldn't be parsed: {{detail}}",
+    "live_write_detected": "The transcript changed while it was being slimmed; nothing was written.",
+    "not_found": "No transcript at {{path}}.",
+    "session": "Couldn't list sessions to slim: {{detail}}",
+    "trash": "Couldn't move the original to the trash: {{detail}}"
+  },
+  "settings_write": {
+    "contended": "Something else is writing {{path}} right now. Nothing was changed — try again.",
+    "io": "Couldn't write Claude Code's settings file: {{detail}}",
+    "json_parse": "Claude Code's settings file isn't valid JSON: {{detail}}",
+    "not_a_json_object": "{{path}} doesn't hold a JSON object, so Claudepot won't edit it.",
+    "unsupported_layer": "Claudepot doesn't write the {{layer}} settings layer — it's committed to the repo or managed by an administrator."
+  },
+  "shared_memory": {
+    "archive_decision_failed": "Couldn't archive the decision: {{detail}}",
+    "archive_memory_failed": "Couldn't archive the memory: {{detail}}",
+    "create_memory_failed": "Couldn't save the memory: {{detail}}",
+    "current_exe_failed": "Couldn't locate the running Claudepot binary: {{detail}}",
+    "current_exe_no_parent": "Couldn't locate the folder the Claudepot binary runs from.",
+    "excerpt_unavailable": "This exchange is no longer available — the transcript may have moved or been pruned.",
+    "index_unavailable": "The knowledge index couldn't be opened. Restart Claudepot, or rebuild it from Settings → Cleanup.",
+    "invalid_install_scope": "“{{scope}}” isn't an install scope — use user or project.",
+    "invalid_kind": "“{{kind}}” isn't a memory kind — use fact, preference, pattern, constraint, or summary.",
+    "invalid_scope": "“{{scope}}” isn't a memory scope — use global or project.",
+    "link_target_required": "Pick a memory, decision, or evidence entry to read links for.",
+    "links_failed": "Couldn't load the links: {{detail}}",
+    "list_decisions_failed": "Couldn't load the decisions: {{detail}}",
+    "list_evidence_failed": "Couldn't load the evidence log: {{detail}}",
+    "list_memories_failed": "Couldn't load the memories: {{detail}}",
+    "list_projects_failed": "Couldn't list the indexed projects: {{detail}}",
+    "list_sessions_failed": "Couldn't list the indexed sessions: {{detail}}",
+    "log_decision_failed": "Couldn't record the decision: {{detail}}",
+    "out_path_not_absolute": "The output path must be absolute. {{path}} is relative.",
+    "read_failed": "Couldn't read that excerpt: {{detail}}",
+    "search_failed": "The search couldn't run: {{detail}}"
+  },
+  "templates": {
+    "instantiate_failed": "Claudepot couldn't build an agent from this template: {{detail}}",
+    "invalid_schedule": "That schedule isn't valid: {{detail}}",
+    "no_sample_report": "This template ships no sample report.",
+    "placeholder_type_mismatch": "\"{{placeholder}}\" needs a value of type {{expected}}.",
+    "platform_unsupported": "This template doesn't support {{platform}}.",
+    "registry_load_failed": "The bundled template library wouldn't load: {{detail}}",
+    "report_not_a_file": "{{path}} isn't a file.",
+    "report_path_outside_root": "Reports can only be read from {{root}}.",
+    "report_path_unresolvable": "Couldn't resolve {{path}}: {{detail}}",
+    "report_read_failed": "Couldn't read {{path}}: {{detail}}",
+    "report_stat_failed": "Couldn't inspect {{path}}: {{detail}}",
+    "report_too_large": "That report is {{bytes}} bytes — too large to display.",
+    "unique_name_exhausted": "Every numbered variant of \"{{name}}\" is taken — rename it.",
+    "unknown_id": "That template no longer exists."
+  },
+  "trash": {
+    "entry_not_found": "That trashed transcript is no longer there.",
+    "io": "Couldn't read or write {{path}}: {{detail}}",
+    "manifest_parse": "The trash manifest at {{path}} is unreadable: {{detail}}",
+    "manifest_serialize": "Couldn't write the trash manifest: {{detail}}",
+    "restore_collision": "{{path}} already exists — restore would overwrite it.",
+    "source_missing": "Nothing to trash at {{path}}."
+  },
+  "updates": {
+    "channel_write_failed": "Couldn't save the Claude Code release channel: {{detail}}",
+    "cli_install_failed": "The Claude Code update didn't complete: {{detail}}",
+    "desktop_install_failed": "The Claude Desktop update didn't complete: {{detail}}",
+    "minimum_version_write_failed": "Couldn't save the minimum Claude Code version: {{detail}}",
+    "operation_in_progress": "Another update is already running — try again in a moment.",
+    "state_lock_poisoned": "Update state is stuck after an earlier failure. Restart Claudepot.",
+    "unknown_channel": "Claude Code has no release channel called {{channel}} — use latest or stable."
+  },
+  "usage_local": {
+    "unknown_pricing_tier": "“{{tier}}” isn't a pricing tier Claudepot knows. Your saved tier is unchanged.",
+    "unknown_window_kind": "“{{kind}}” isn't a time window Claudepot knows. Pick one from the range selector.",
+    "window_days_required": "A “last N days” window needs a day count."
+  },
+  "wake": {
+    "identity_unverified": "{{email}} hasn't passed identity verification ({{status}}), so nothing was sent. Verify it first.",
+    "no_credentials": "{{email}} has no stored credentials, so nothing was sent.",
+    "not_found": "That account is no longer registered.",
+    "request": "The wake request failed: {{detail}}",
+    "store": "Couldn't read the account: {{detail}}",
+    "token": "Couldn't get an access token, so nothing was sent: {{detail}}"
+  },
+  "wrapper_name": {
+    "empty": "A command name is required.",
+    "invalid_chars": "\"{{name}}\" isn't shell-safe — use letters, digits, `-`, `_`.",
+    "reserved": "\"{{name}}\" is reserved."
+  }
+}

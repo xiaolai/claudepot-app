@@ -9,6 +9,7 @@ const GOLDEN: Record<string, string> = {
   SECTION_START_KEY: "claudepot.startSection",
   SECTION_SUBROUTE_KEY_PREFIX: "claudepot.subRoute.",
   THEME_KEY: "cp-theme",
+  LOCALE_KEY: "claudepot.locale",
   DEV_MODE_KEY: "cp-dev-mode",
   SIDEBAR_COLLAPSED_KEY: "cp-sidebar-collapsed",
   DISMISSED_ISSUES_KEY: "claudepot.dismissedIssues",

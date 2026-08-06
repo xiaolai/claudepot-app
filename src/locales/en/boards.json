@@ -1,0 +1,63 @@
+{
+  "list": {
+    "title": "Boards",
+    "emptySubtitle": "Durable surfaces agents write into",
+    "noBoards": "No boards yet.",
+    "emptyHint": "An agent or script creates one by writing to it. Boards are on trial — see <code>{{cmd}}</code>.",
+    "boards_one": "{{count}} board",
+    "boards_other": "{{count}} boards",
+    "rows_one": "{{count}} row",
+    "rows_other": "{{count}} rows",
+    "backTitle": "Back to the board list",
+    "colName": "Name",
+    "colState": "State",
+    "colLastUpdate": "Last update",
+    "colReportedWriter": "Reported writer",
+    "reportedWriterTitle": "Self-declared by the writer; Claudepot does not verify it",
+    "colRows": "Rows"
+  },
+  "state": {
+    "live": "Live",
+    "idle": "Idle",
+    "stale": "Stale"
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesAgo": "{{n}}m ago",
+    "hoursAgo": "{{n}}h ago",
+    "daysAgo": "{{n}}d ago"
+  },
+  "provenance": {
+    "reportedBy": "Reported by: {{writer}}",
+    "selfDeclaredTitle": "Self-declared; not verified"
+  },
+  "banner": {
+    "updatesArrived": "New updates arrived while you were reading",
+    "jumpToLatest": "Jump to latest"
+  },
+  "detail": {
+    "updated": "updated {{when}}",
+    "imported": "imported",
+    "export": "Export",
+    "exportFilterName": "Board export",
+    "exportFailed": "Export failed: {{error}}",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deletePermanently": "Delete permanently",
+    "deleteFailed": "Delete failed: {{error}}",
+    "deleteWarning": "Boards are user data and nothing backs them up. Export first — this cannot be undone.",
+    "colSeries": "Series",
+    "colColumns": "Columns",
+    "colRows": "Rows"
+  },
+  "widget": {
+    "logUnavailable": "log axis unavailable — {{reason}}",
+    "rangePadded": "every value is identical; range padded to stay readable",
+    "downsampled": "showing {{shown}} of {{total}} points",
+    "collapsedCategories": "{{n}} smaller categories grouped",
+    "overValues_one": "over {{count}} value",
+    "overValues_other": "over {{count}} values",
+    "tableTruncated": "showing {{shown}} of {{total}} rows",
+    "sparkAria": "{{n}} points from {{min}} to {{max}}"
+  }
+}

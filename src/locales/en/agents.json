@@ -1,0 +1,235 @@
+{
+  "loading": "Loading…",
+  "actions": {
+    "cancel": "Cancel",
+    "close": "Close"
+  },
+  "section": {
+    "title": "Agents",
+    "subtitle": "Scheduled and manual claude -p runs · {{scheduler}}",
+    "noScheduler": "no scheduler",
+    "refresh": "Refresh",
+    "fromTemplate": "From template…",
+    "sessionNarrator": "Session Narrator",
+    "sessionNarratorTitle": "Add a built-in Session Narrator draft. The draft is inert until you review and install it.",
+    "addAgent": "Add agent",
+    "removeTitle": "Delete agent?",
+    "removeBody": "'{{name}}' will be unregistered from the OS scheduler and its run history removed.",
+    "removeConfirm": "Delete",
+    "emptyTitle": "Schedule a claude -p run",
+    "emptyBody": "Project commands and agents in the chosen folder are picked up automatically. Use a slash-command for the prompt to keep complex jobs versioned in your repo."
+  },
+  "toasts": {
+    "created": "Agent created.",
+    "updated": "Agent updated.",
+    "installed": "Agent installed.",
+    "removed": "Agent removed.",
+    "enabled": "Agent enabled.",
+    "disabled": "Agent disabled.",
+    "templateInstalled": "Template installed.",
+    "narratorDraftCreated": "Session Narrator draft created. Open Review & install to arm it.",
+    "runFailed": "Run failed."
+  },
+  "card": {
+    "status": {
+      "draft": "draft",
+      "enabled": "enabled",
+      "disabled": "disabled"
+    },
+    "draftNote": "This agent is a draft — it is inert and will not run. Review the spec and install it to arm it.",
+    "labels": {
+      "cron": "cron",
+      "cwd": "cwd",
+      "binary": "binary",
+      "permissions": "permissions",
+      "budget": "budget"
+    },
+    "binaryFirstParty": "claude (first-party)",
+    "binaryRoute": "route ({{id}})",
+    "actions": {
+      "reviewInstall": "Review & install",
+      "runNow": "Run now",
+      "edit": "Edit",
+      "enable": "Enable",
+      "disable": "Disable",
+      "delete": "Delete",
+      "showRuns": "Show runs",
+      "hideRuns": "Hide runs"
+    }
+  },
+  "form": {
+    "groups": {
+      "identity": "Identity",
+      "what": "What it runs",
+      "how": "How it runs",
+      "spec": "Agent spec",
+      "when": "When it runs",
+      "platform": "Platform behavior ({{scheduler}})"
+    },
+    "fields": {
+      "name": "Name (a-z, 0-9, dash; 1-64; permanent)",
+      "displayName": "Display name (optional)",
+      "description": "Description (optional)",
+      "binary": "Binary",
+      "binaryLocked": "Binary (locked in edit mode)",
+      "cwd": "Working directory (cwd)",
+      "prompt": "Prompt",
+      "systemPrompt": "System prompt (optional, replaces default)",
+      "appendSystemPrompt": "Append to system prompt (optional)",
+      "model": "Model",
+      "fallbackModel": "Fallback model (when default is overloaded)",
+      "permissionMode": "Permission mode",
+      "allowedTools": "Allowed tools (comma- or space-separated)",
+      "maxBudget": "Max budget (USD per run; empty = unlimited)",
+      "outputFormat": "Output format",
+      "bareMode": "Minimal mode (--bare)",
+      "bareToggle": "Skip hooks, plugin sync, attribution, auto-memory, keychain reads, CLAUDE.md auto-discovery",
+      "disallowedTools": "Disallowed tools (comma- or space-separated; optional)",
+      "mcpServers": "MCP servers",
+      "runAs": "Run as (account email; empty = active account)",
+      "taskBudget": "Task budget (tokens per run; empty = no ceiling)",
+      "rateMin": "Rate limit — minimum seconds between runs (optional)",
+      "rateMax": "Rate limit — maximum runs per day (optional)",
+      "lifecycle": "Lifecycle",
+      "triggerType": "Trigger type",
+      "debounce": "Debounce — seconds of session inactivity before firing"
+    },
+    "options": {
+      "binaryFirstParty": "First-party `claude`",
+      "binaryRoute": "Provider route",
+      "selectRoute": "— select a route —",
+      "triggerCron": "Cron schedule",
+      "triggerEvent": "Event — session settled (reactive)",
+      "triggerManual": "Manual — Run-Now only"
+    },
+    "lifecycle": {
+      "draft": "draft",
+      "installed": "installed"
+    },
+    "mcp": {
+      "attach": "Attach Claudepot memory",
+      "detach": "Detach Claudepot memory",
+      "customTitle": "Custom MCP server"
+    },
+    "hints": {
+      "cwd": "CC discovers .claude (commands, agents, skills) from cwd up to git-root. Set this to your project root for slash-commands to work.",
+      "binaryLocked": "Binary cannot change in edit mode — the scheduler registration and helper shim are tied to the original binary. Delete and re-create to switch.",
+      "permissionMode": "Unattended runs typically need bypassPermissions with a tight allowed-tools whitelist below.",
+      "disallowedTools": "Prefer the allowed-tools whitelist above. Use this only to carve specific tools out of an otherwise broad grant.",
+      "mcp": "Attaching Claudepot memory passes a stdio MCP server running `claudepot mcp memory-server` to the agent. Custom MCP servers carried on this agent are preserved but not editable here.",
+      "runAs": "Phase 1 records this but still runs as the CLI-active account; per-run credential pinning lands in a later release.",
+      "lifecycle": "Read-only. A draft is inert until armed; the GUI Add Agent flow arms agents on create.",
+      "triggerCron": "Five-field cron expression; an IANA timezone is optional.",
+      "triggerEvent": "Fires when a CC session in this agent's cwd has been idle for the debounce window. Requires a rate-limit (set below) to bound cost.",
+      "triggerManual": "No scheduler artifact is created. The agent only runs when you click Run Now.",
+      "debounceDefault": "Default {{secs}}s (10 min). A session quiet for this long has almost certainly ended."
+    },
+    "errors": {
+      "invalidName": "invalid name",
+      "bypassNeedsTools": "bypassPermissions requires a non-empty whitelist.",
+      "budget": "Budget must be a finite non-negative number.",
+      "taskBudget": "Task budget must be a positive whole number of tokens.",
+      "rateMin": "Minimum interval must be a positive whole number of seconds.",
+      "rateMax": "Maximum runs per day must be a positive whole number.",
+      "debounce": "Debounce must be a positive whole number of seconds.",
+      "eventNeedsRateLimit": "Event-triggered agents must carry a rate-limit (above): set a minimum interval and/or a maximum runs-per-day. Without one, a busy project could fire dozens of billed runs an hour."
+    },
+    "platform": {
+      "wake": "Wake the computer to run this",
+      "catchUp": "Catch up if a run was missed",
+      "runLoggedOut": "Run while logged out",
+      "notSupported": " (not supported on this OS)"
+    },
+    "placeholders": {
+      "prompt": "summarize today's PRs..."
+    }
+  },
+  "cron": {
+    "label": "Cron expression (5 fields: min hour dom mon dow)",
+    "nextRuns": "Next 5 runs (UTC):"
+  },
+  "add": {
+    "title": "Add agent",
+    "submit": "Create"
+  },
+  "template": {
+    "title": "Add {{name}} draft",
+    "body": "Creates a {{name}} draft. The agent is inert until you review and install it. Pick the project directory the narrator should watch — the `session-settled` trigger only fires for sessions inside this path.",
+    "cwdLabel": "Working directory",
+    "cwdRequired": "Working directory is required.",
+    "submit": "Create draft",
+    "creating": "Creating…"
+  },
+  "edit": {
+    "title": "Edit {{name}}",
+    "submit": "Save"
+  },
+  "review": {
+    "title": "Review & install {{name}}",
+    "intro": "This agent is a draft. Installing it arms the agent — Claudepot will materialize a scheduler artifact and the agent can run unattended. Review the spec below before you install.",
+    "introDrafted": "This agent is a draft (drafted by {{name}}). Installing it arms the agent — Claudepot will materialize a scheduler artifact and the agent can run unattended. Review the spec below before you install.",
+    "origin": {
+      "aria": "Origin warning",
+      "aiDrafted": "AI-drafted",
+      "templateDrafted": "template-drafted",
+      "notGui": "Not authored in the GUI",
+      "bodyCli": "This record was produced by the AI-drafting CLI verb, not by the Add Agent form. The `drafted_by` value above is advisory and can be set by the caller — scrutinize the prompt, working directory, MCP servers, and allowed-tools list below before arming.",
+      "bodyTemplate": "This record was produced by the built-in template flow, not by the Add Agent form. The `drafted_by` value above is advisory and can be set by the caller — scrutinize the prompt, working directory, MCP servers, and allowed-tools list below before arming."
+    },
+    "bypassBody": "This agent runs with permission prompts disabled. Installing it consents to an unattended, elevated run scoped only by the allowed-tools whitelist below. Make sure that list is tight.",
+    "rows": {
+      "prompt": "Prompt",
+      "systemPrompt": "System prompt",
+      "model": "Model",
+      "workingDir": "Working dir",
+      "permissionMode": "Permission mode",
+      "allowedTools": "Allowed tools",
+      "disallowedTools": "Disallowed tools",
+      "trigger": "Trigger",
+      "runAs": "Run as",
+      "taskBudget": "Task budget",
+      "rateLimit": "Rate limit",
+      "mcpServers": "MCP servers"
+    },
+    "values": {
+      "cliDefault": "(CLI default)",
+      "none": "none",
+      "triggerCron": "cron {{value}}",
+      "triggerManual": "manual (Run-Now only)",
+      "activeAccount": "active account at fire time",
+      "runAsWarning": "Per-run credential injection is not yet wired — this run will use whichever account is CLI-active at fire time, not the pinned email above.",
+      "tokensPerRun": "{{tokens}} tokens/run",
+      "noCeiling": "no ceiling",
+      "rateNone": "none",
+      "rateMin": "min {{secs}}s between runs",
+      "rateMax": "max {{perDay}}/day"
+    },
+    "install": "Install",
+    "installing": "Installing…"
+  },
+  "runs": {
+    "loading": "Loading runs…",
+    "empty": "No runs yet.",
+    "emptyResult": "Structured result was empty.",
+    "table": {
+      "status": "status",
+      "started": "started",
+      "dur": "dur",
+      "cost": "cost",
+      "turns": "turns",
+      "trigger": "trigger",
+      "details": "details",
+      "ok": "ok",
+      "err": "ERR"
+    },
+    "report": "report",
+    "show": "show",
+    "hide": "hide",
+    "openReportAria": "Open report for run started {{startedAt}}",
+    "showResultAria": "Show structured result for run {{id}}",
+    "hideResultAria": "Hide structured result for run {{id}}"
+  },
+  "report": {
+    "readError": "Couldn’t read report: {{error}}"
+  }
+}
