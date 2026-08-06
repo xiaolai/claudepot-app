@@ -6,6 +6,38 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.4.0 — beta (unreleased)
+
+### Added
+
+- **Claudepot speaks Simplified Chinese.** Settings → General carries a
+  language picker; leaving it on "System default" follows the OS. The
+  whole surface moves together — every section, the ⌘K palette, the
+  app menu, the tray, OS notification banners, and the text of every
+  error the backend can raise.
+- **CJK typography.** Sarasa Mono SC ships alongside JetBrains Mono,
+  `unicode-range`-gated so an English-only session never downloads it.
+  It also fixes Chinese *project names* in the English UI, which used
+  to fall back to a proportional system face.
+
+### Changed
+
+- Dates, times, and numbers now follow the UI language rather than the
+  OS locale. Currency stays USD in every language — a cost figure
+  answers "what would pay-per-call have cost", which is a
+  dollar-denominated question.
+- Errors crossing from Rust to the UI now carry a stable code plus the
+  values their sentence interpolates, so a message is re-composed in
+  your language instead of translated phrase-by-phrase. English is
+  still what renders if a code has no translation yet.
+
+### Fixed
+
+- Retention warnings read "1 transcripts on this machine" at a count of
+  one. They now agree with their number in both languages.
+- ⌘⇧L (focus the live-sessions strip) stopped working in any non-English
+  UI, because the shortcut looked the strip up by its visible label.
+
 ## 0.3.7 — beta (unreleased)
 
 ### Added
