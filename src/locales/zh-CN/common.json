@@ -61,12 +61,12 @@
       "appliedBody": "已切换到 {{email}}（规则 {{ruleId}}）",
       "appliedBodyRestart": "已切换到 {{email}}（规则 {{ruleId}}）— 重启 Claude Code 后生效",
       "stalledTitle": "自动轮换受阻",
-      "stalledBody": "规则「{{ruleId}}」无法轮换 — {{window}}上每个候选账户的用量都已达到或超过 {{pct}}%。没有安全的切换目标。",
+      "stalledBody": "规则“{{ruleId}}”无法轮换 — {{window}}上每个候选账户的用量都已达到或超过 {{pct}}%。没有安全的切换目标。",
       "stalledWindowFallback": "触发窗口",
       "failedTitle": "自动轮换失败",
       "failedBody": "{{email}}：{{error}}",
       "breakerTitle": "自动轮换规则已暂停",
-      "breakerBody": "规则「{{ruleId}}」连续 {{failures}} 次切换失败后已暂停，冷却结束后会自动重试。"
+      "breakerBody": "规则“{{ruleId}}”连续 {{failures}} 次切换失败后已暂停，冷却结束后会自动重试。"
     }
   },
   "serviceStatus": {

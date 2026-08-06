@@ -201,3 +201,40 @@ describe("trash terminology maps to the right store", () => {
     expect(destination).toContain(term);
   });
 });
+
+// The zh catalogs use two quote marks with different jobs: 「」 names a UI
+// affordance the reader can go and click (「刷新」, 「审阅」, 「设置 → 清理」),
+// and “” quotes data — a value they typed, a name they chose, a mode that
+// failed to parse. That split is worth keeping because it tells the reader
+// which words are navigation and which are their own content.
+//
+// Thirteen strings had it backwards, wrapping an interpolated value in the
+// brackets that mean "button" — so a user's artifact name rendered as though
+// it were something to click. Same drift shape as the trash terms: one
+// feature, two surfaces, two answers. Config said 已把 {{kind}}「{{name}}」移入回收站
+// where Settings said 已把 {{kind}}“{{name}}”移入回收站, from one English source.
+describe("zh quote marks separate UI affordances from data", () => {
+  it("no interpolated value is wrapped in 「」", () => {
+    const namespaces = (i18n.options.ns ?? []) as string[];
+    const offenders: string[] = [];
+
+    const walk = (obj: unknown, ns: string, prefix = ""): void => {
+      if (typeof obj === "string") {
+        // 「」 directly around a placeholder — the reader cannot click a value.
+        if (/「\{\{[a-zA-Z_]+\}\}」/.test(obj)) offenders.push(`${ns}:${prefix}`);
+        return;
+      }
+      if (!obj || typeof obj !== "object") return;
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        walk(v, ns, prefix ? `${prefix}.${k}` : k);
+      }
+    };
+
+    for (const ns of namespaces) walk(i18n.getResourceBundle("zh-CN", ns), ns);
+
+    expect(
+      offenders,
+      "these quote data with 「」, which this catalog reserves for clickable UI names",
+    ).toEqual([]);
+  });
+});
