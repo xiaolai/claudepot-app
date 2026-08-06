@@ -6,7 +6,19 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.0 — beta (unreleased)
+## 0.4.1 — beta (unreleased)
+
+### Fixed
+
+- The "abandon journal" confirmation asked you to type `ABANDON` even
+  when the rest of the dialog was in Chinese — a word the dialog never
+  showed you. It now asks for the same verb it uses on the button.
+- The env-variable row that means "settings.json sets no override here"
+  could be read in Chinese as "settings.json failed to overwrite". That
+  row is the one place the distinction matters, since the value you are
+  actually getting may come from a file Claudepot cannot see.
+
+## 0.4.0 — beta (released 2026-08-06)
 
 ### Added
 
@@ -38,7 +50,7 @@ Versioning scheme:
 - ⌘⇧L (focus the live-sessions strip) stopped working in any non-English
   UI, because the shortcut looked the strip up by its visible label.
 
-## 0.3.7 — beta (unreleased)
+## 0.3.7 — beta (released 2026-07-31)
 
 ### Added
 
@@ -72,7 +84,7 @@ Versioning scheme:
 
 - `~/.claudepot/boards.db` is a new store. User data, not a cache.
 
-## 0.3.6 — beta (unreleased)
+## 0.3.6 — beta (released 2026-07-29)
 
 ### Fixed
 
