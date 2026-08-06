@@ -6,6 +6,7 @@
 //! in `tray::rebuild` wire them together.
 
 use crate::dto::AccountSummary;
+use crate::i18n::{tr, tr1};
 use crate::tray_icons::{
     MenuGlyph, ICON_BAR_CHART, ICON_BOLT, ICON_CHECK, ICON_CIRCLE_DOT, ICON_CIRCLE_PAUSE,
     ICON_CIRCLE_PLAY, ICON_CIRCLE_USER, ICON_DESKTOP, ICON_REFRESH, ICON_TERMINAL,
@@ -82,7 +83,7 @@ pub fn build_active_items(
         // column alignment is preserved by the IconMenuItem with no
         // image; see comment in tray.rs).
         (None, None) => {
-            let item = IconMenuItemBuilder::with_id(ID_ACTIVE_DISPLAY, "No accounts active")
+            let item = IconMenuItemBuilder::with_id(ID_ACTIVE_DISPLAY, tr("tray.noAccountsActive"))
                 .enabled(false)
                 .build(app)
                 .map_err(|e| format!("active item: {e}"))?;
@@ -98,7 +99,7 @@ fn active_label(a: &AccountSummary, surface: Option<&str>) -> String {
         None => a.email.clone(),
     };
     if !a.credentials_healthy {
-        format!("{base} — re-auth needed")
+        tr1("tray.activeReauth", "label", &base)
     } else {
         base
     }
@@ -117,7 +118,7 @@ pub fn build_cli_submenu(
     app: &AppHandle,
     summaries: &[AccountSummary],
 ) -> Result<Submenu<Wry>, String> {
-    let mut builder = SubmenuBuilder::new(app, "Switch CLI");
+    let mut builder = SubmenuBuilder::new(app, tr("tray.switchCli"));
     if let Ok(img) = ICON_TERMINAL.image() {
         builder = builder.submenu_icon(img);
     }
@@ -130,7 +131,7 @@ pub fn build_cli_submenu(
         let label = if s.credentials_healthy {
             s.email.clone()
         } else {
-            format!("{} (re-auth needed)", s.email)
+            tr1("tray.itemReauth", "email", &s.email)
         };
         let item = MenuItemBuilder::with_id(format!("{PREFIX_CLI}{}", s.uuid), label)
             .enabled(s.credentials_healthy)
@@ -139,7 +140,7 @@ pub fn build_cli_submenu(
         builder = builder.item(&item);
     }
     if !any {
-        let empty = MenuItemBuilder::with_id("tray:cli-switch:empty", "No other accounts")
+        let empty = MenuItemBuilder::with_id("tray:cli-switch:empty", tr("tray.noOtherAccounts"))
             .enabled(false)
             .build(app)
             .map_err(|e| format!("cli empty: {e}"))?;
@@ -152,7 +153,7 @@ pub fn build_desktop_submenu(
     app: &AppHandle,
     summaries: &[AccountSummary],
 ) -> Result<Submenu<Wry>, String> {
-    let mut builder = SubmenuBuilder::new(app, "Set Desktop");
+    let mut builder = SubmenuBuilder::new(app, tr("tray.setDesktop"));
     if let Ok(img) = ICON_DESKTOP.image() {
         builder = builder.submenu_icon(img);
     }
@@ -168,25 +169,26 @@ pub fn build_desktop_submenu(
     //                               of the utility group, above the
     //                               separator that divides utilities
     //                               from the per-account switch list.
-    let launch_item = MenuItemBuilder::with_id(ID_DESKTOP_LAUNCH, "Launch Claude Desktop")
+    let launch_item = MenuItemBuilder::with_id(ID_DESKTOP_LAUNCH, tr("tray.launchDesktop"))
         .enabled(true)
         .build(app)
         .map_err(|e| format!("desktop launch: {e}"))?;
-    let bind_item = MenuItemBuilder::with_id(ID_DESKTOP_BIND, "Bind current Desktop session…")
+    let bind_item = MenuItemBuilder::with_id(ID_DESKTOP_BIND, tr("tray.bindDesktop"))
         .enabled(true)
         .build(app)
         .map_err(|e| format!("desktop bind: {e}"))?;
-    let reconcile_item = MenuItemBuilder::with_id(ID_DESKTOP_RECONCILE, "Refresh Desktop status")
-        .enabled(true)
-        .build(app)
-        .map_err(|e| format!("desktop reconcile: {e}"))?;
+    let reconcile_item =
+        MenuItemBuilder::with_id(ID_DESKTOP_RECONCILE, tr("tray.refreshDesktopStatus"))
+            .enabled(true)
+            .build(app)
+            .map_err(|e| format!("desktop reconcile: {e}"))?;
     // Sign-out only makes sense when a Desktop account is currently
     // bound. Disabling the row when nothing is bound prevents a
     // destructive-looking action from advertising a no-op path
     // (would route to ConfirmDialog, then fall through with no
     // effect) and gives the user a passive cue about state.
     let has_desktop_active = summaries.iter().any(|s| s.is_desktop_active);
-    let clear_item = MenuItemBuilder::with_id(ID_DESKTOP_CLEAR, "Sign Desktop out")
+    let clear_item = MenuItemBuilder::with_id(ID_DESKTOP_CLEAR, tr("tray.signDesktopOut"))
         .enabled(has_desktop_active)
         .build(app)
         .map_err(|e| format!("desktop clear: {e}"))?;
@@ -210,7 +212,7 @@ pub fn build_desktop_submenu(
         let label = if s.desktop_profile_on_disk {
             s.email.clone()
         } else {
-            format!("{} (no profile)", s.email)
+            tr1("tray.noProfile", "email", &s.email)
         };
         let item = MenuItemBuilder::with_id(format!("{PREFIX_DESKTOP}{}", s.uuid), label)
             .enabled(s.desktop_profile_on_disk)
@@ -219,10 +221,11 @@ pub fn build_desktop_submenu(
         builder = builder.item(&item);
     }
     if !any {
-        let empty = MenuItemBuilder::with_id("tray:desktop-switch:empty", "No eligible accounts")
-            .enabled(false)
-            .build(app)
-            .map_err(|e| format!("desktop empty: {e}"))?;
+        let empty =
+            MenuItemBuilder::with_id("tray:desktop-switch:empty", tr("tray.noEligibleAccounts"))
+                .enabled(false)
+                .build(app)
+                .map_err(|e| format!("desktop empty: {e}"))?;
         builder = builder.item(&empty);
     }
     builder.build().map_err(|e| format!("desktop submenu: {e}"))
@@ -241,7 +244,7 @@ pub fn build_usage_submenu(
     app: &AppHandle,
     snapshots: &[(AccountSummary, Option<UsageResponse>)],
 ) -> Result<Submenu<Wry>, String> {
-    let mut builder = SubmenuBuilder::new(app, "Usage");
+    let mut builder = SubmenuBuilder::new(app, tr("tray.usage"));
     if let Ok(img) = ICON_BAR_CHART.image() {
         builder = builder.submenu_icon(img);
     }
@@ -285,7 +288,7 @@ pub fn build_usage_submenu(
     }
 
     if !any {
-        let empty = MenuItemBuilder::with_id("tray:usage:empty", "No accounts with credentials")
+        let empty = MenuItemBuilder::with_id("tray:usage:empty", tr("tray.noCredAccounts"))
             .enabled(false)
             .build(app)
             .map_err(|e| format!("usage empty: {e}"))?;
@@ -296,7 +299,7 @@ pub fn build_usage_submenu(
         let refresh_img = ICON_REFRESH
             .image()
             .map_err(|e| format!("usage refresh icon: {e}"))?;
-        let refresh_item = IconMenuItemBuilder::with_id(ID_USAGE_REFRESH, "Refresh")
+        let refresh_item = IconMenuItemBuilder::with_id(ID_USAGE_REFRESH, tr("tray.refresh"))
             .icon(refresh_img)
             .build(app)
             .map_err(|e| format!("usage refresh: {e}"))?;
@@ -320,7 +323,7 @@ pub fn build_live_submenu(app: &AppHandle) -> Result<Option<Submenu<Wry>>, Strin
     if list.is_empty() {
         return Ok(None);
     }
-    let label = format!("Active: {}", list.len());
+    let label = tr1("tray.activeCount", "n", &list.len().to_string());
     let mut builder = SubmenuBuilder::new(app, &label);
     if let Ok(img) = ICON_BOLT.image() {
         builder = builder.submenu_icon(img);
@@ -330,13 +333,13 @@ pub fn build_live_submenu(app: &AppHandle) -> Result<Option<Submenu<Wry>>, Strin
         let action = s.current_action.clone().unwrap_or_else(|| match s.status {
             Status::Waiting => {
                 if let Some(w) = &s.waiting_for {
-                    format!("waiting — {w}")
+                    tr1("tray.waitingFor", "w", w)
                 } else {
-                    "waiting".to_string()
+                    tr("tray.waiting")
                 }
             }
-            Status::Idle => "idle".to_string(),
-            Status::Busy => "working".to_string(),
+            Status::Idle => tr("tray.idle"),
+            Status::Busy => tr("tray.working"),
         });
         let line = format_live_row(&s.cwd, s.model.as_deref(), &action, s.idle_ms);
         let id = format!("{}{}", PREFIX_LIVE, s.session_id);
@@ -431,7 +434,7 @@ const USAGE_TIGHT_PCT: i64 = 90;
 /// doesn't pretend to have information.
 fn format_usage_line(email: &str, snap: Option<&UsageResponse>) -> String {
     let Some(u) = snap else {
-        return format!("{email} — (no data — click Refresh)");
+        return tr1("tray.usageNoData", "email", email);
     };
     let mut parts: Vec<String> = Vec::new();
     if let Some(w) = u.five_hour.as_ref() {
@@ -451,22 +454,23 @@ fn format_usage_line(email: &str, snap: Option<&UsageResponse>) -> String {
                 .map(|p| p.round() as i64);
             match pct {
                 Some(p) => parts.push(usage_fragment("Extra", p)),
-                None => parts.push("Extra on".to_string()),
+                None => parts.push(tr("tray.extraOn")),
             }
         } else {
-            parts.push("Extra off".to_string());
+            parts.push(tr("tray.extraOff"));
         }
     }
     if parts.is_empty() {
-        format!("{email} — (no windows reported)")
+        tr1("tray.usageNoWindows", "email", email)
     } else {
         format!("{email} — {}", parts.join(" · "))
     }
 }
 
+// `label` is a window name ("5h" / "7d" / "Extra") — data, untranslated.
 fn usage_fragment(label: &str, pct: i64) -> String {
     if pct >= USAGE_TIGHT_PCT {
-        format!("{label} {pct}% (tight)")
+        tr1("tray.usageTight", "frag", &format!("{label} {pct}%"))
     } else {
         format!("{label} {pct}%")
     }

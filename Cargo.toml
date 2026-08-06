@@ -95,6 +95,15 @@ filetime = "0.2"
 # System info
 whoami = "1"
 
+# OS UI-language detection for the GUI's "follow system" locale
+# (src-tauri/src/i18n.rs). Queries the real per-user OS preference
+# (CFLocaleCopyPreferredLanguages on macOS, GetUserPreferredUILanguages
+# on Windows, LC_ALL/LC_MESSAGES/LANG on Linux) — chosen over reusing
+# `whoami`'s language surface, which reads env vars that are empty for
+# Dock-launched GUI processes on macOS. Zero transitive deps on desktop
+# targets.
+sys-locale = "0.3"
+
 # Process inspection
 sysinfo = "0.32"
 

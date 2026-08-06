@@ -23,12 +23,13 @@
 //! `cc_retention::RetentionWarning`'s docs for why gating on the
 //! condition is both simpler and safer than persisting a suppression.
 
-use claudepot_core::cc_retention::{report, warning, DEFAULT_RISK_HORIZON_DAYS};
+use claudepot_core::cc_retention::{report, warning, RetentionWarning, DEFAULT_RISK_HORIZON_DAYS};
 use claudepot_core::notification_log::NotificationKind;
 use claudepot_core::notifications::{Category, Priority, Surface};
 use tauri::{AppHandle, Manager};
 
 use crate::commands::notification::NotificationLogState;
+use crate::i18n::{tr, tr1, tr_n, tr_n_args};
 
 /// Run the check off the setup thread. Scanning the transcript tree is
 /// filesystem-bound (thousands of `stat` calls on a real corpus), so it
@@ -94,8 +95,8 @@ fn run(app: &AppHandle) -> Result<(), String> {
     // `surfaces_requested` never records a request we knowingly
     // ignored.
     let mut delivered: Vec<Surface> = Vec::new();
-    let title = "Saved conversations are expiring".to_string();
-    let body = w.message();
+    let title = tr("retention.title");
+    let body = warning_body(&w);
     if os_surfaces.contains(&Surface::OsBanner) {
         use tauri_plugin_notification::NotificationExt;
         match app
@@ -140,4 +141,74 @@ fn run(app: &AppHandle) -> Result<(), String> {
         "retention_boot_check: warned about pending transcript deletion"
     );
     Ok(())
+}
+
+/// Localized banner body composed from [`RetentionWarning`]'s
+/// structured fields. Mirrors `RetentionWarning::message()` — which
+/// stays the CLI's English surface — branch for branch; under the `en`
+/// locale the two are byte-identical (locked by the tests below).
+fn warning_body(w: &RetentionWarning) -> String {
+    if w.already_deletable == 0 && w.at_risk_within_horizon == 0 {
+        // Only reachable via `scan_incomplete` — say what we don't
+        // know rather than inventing a count.
+        return tr("retention.scanIncomplete");
+    }
+    let head = if w.already_deletable > 0 {
+        tr_n("retention.headDelete", w.already_deletable)
+    } else {
+        tr_n_args(
+            "retention.headAtRisk",
+            w.at_risk_within_horizon,
+            &[("horizon", &w.horizon_days.to_string())],
+        )
+    };
+    let why = if w.is_cc_default {
+        tr1(
+            "retention.whyDefault",
+            "days",
+            &w.effective_days.to_string(),
+        )
+    } else {
+        String::new()
+    };
+    format!("{head}{why}{}", tr("retention.tail"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn warning_fixture(
+        already_deletable: u64,
+        at_risk_within_horizon: u64,
+        is_cc_default: bool,
+        scan_incomplete: bool,
+    ) -> RetentionWarning {
+        RetentionWarning {
+            already_deletable,
+            at_risk_within_horizon,
+            effective_days: 30,
+            is_cc_default,
+            horizon_days: 7,
+            scan_incomplete,
+        }
+    }
+
+    /// The en composition must not drift from core's `message()` —
+    /// that method remains the canonical English text (CLI surface),
+    /// and this crate's tests run with the i18n global at its `En`
+    /// default (no test calls `set_locale`).
+    #[test]
+    fn warning_body_matches_core_message_in_en() {
+        let cases = [
+            warning_fixture(0, 0, false, true),
+            warning_fixture(1, 0, false, false),
+            warning_fixture(3, 0, true, false),
+            warning_fixture(0, 1, false, false),
+            warning_fixture(0, 5, true, false),
+        ];
+        for w in &cases {
+            assert_eq!(warning_body(w), w.message(), "fixture: {w:?}");
+        }
+    }
 }

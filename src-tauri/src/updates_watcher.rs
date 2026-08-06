@@ -236,13 +236,14 @@ fn compute_signals(app: &AppHandle, outcome: &CheckCycleOutcome) -> CycleSignals
         badge_count += 1;
     }
 
+    use crate::i18n::{tr, tr1};
     let cli_notification = if outcome.cli_update_available && cli_os_notify && !cli_already_notified
     {
         Some(NotificationPayload {
-            title: "Claude Code update available".into(),
+            title: tr("updates.cliTitle"),
             body: match outcome.cli_latest.as_deref() {
-                Some(v) => format!("Version {v} is available. Open Claudepot to install."),
-                None => "A new version is available.".into(),
+                Some(v) => tr1("updates.cliBody", "v", v),
+                None => tr("updates.genericBody"),
             },
         })
     } else {
@@ -251,10 +252,10 @@ fn compute_signals(app: &AppHandle, outcome: &CheckCycleOutcome) -> CycleSignals
     let desktop_notification =
         if outcome.desktop_update_available && desktop_os_notify && !desktop_already_notified {
             Some(NotificationPayload {
-                title: "Claude Desktop update available".into(),
+                title: tr("updates.desktopTitle"),
                 body: match outcome.desktop_latest.as_deref() {
-                    Some(v) => format!("Version {v} is available. Quit Desktop to auto-install."),
-                    None => "A new version is available.".into(),
+                    Some(v) => tr1("updates.desktopBody", "v", v),
+                    None => tr("updates.genericBody"),
                 },
             })
         } else {
