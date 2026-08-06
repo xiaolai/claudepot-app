@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 
 import { api } from "../../api";
 import {
@@ -11,6 +12,7 @@ import {
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Button } from "../../components/primitives/Button";
 import { NF } from "../../icons";
+import { renderError } from "../../lib/i18n-error";
 import type { AccountSummary } from "../../types";
 import {
   AuditTable,
@@ -29,6 +31,7 @@ interface Props {
  * crosses a threshold. See `dev-docs/auto-rotation.md`.
  */
 export function RotationPane({ pushToast }: Props) {
+  const { t } = useTranslation("settings");
   const [file, setFile] = useState<RotationRulesFile | null>(null);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [audit, setAudit] = useState<RotationAuditEntry[]>([]);
@@ -50,9 +53,9 @@ export function RotationPane({ pushToast }: Props) {
       setAccounts(accts);
       setAudit(a);
     } catch (e) {
-      pushToast("error", `Rotation load failed: ${e}`);
+      pushToast("error", renderError(e, t("rotation.loadFailed")));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     refresh();
@@ -73,11 +76,11 @@ export function RotationPane({ pushToast }: Props) {
         const a = await api.rotationAuditGet(50);
         setAudit(a);
       } catch (e) {
-        pushToast("error", `Rotation save failed: ${e}`);
+        pushToast("error", renderError(e, t("rotation.saveFailed")));
         throw e;
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   const handleSaveRule = useCallback(
@@ -92,9 +95,9 @@ export function RotationPane({ pushToast }: Props) {
       await saveRules(next);
       setEditingRule(null);
       setAdding(false);
-      pushToast("info", `Rotation rule "${rule.id}" saved`);
+      pushToast("info", t("rotation.ruleSaved", { id: rule.id }));
     },
-    [file, pushToast, saveRules],
+    [file, pushToast, saveRules, t],
   );
 
   const handleToggleEnabled = useCallback(
@@ -113,13 +116,15 @@ export function RotationPane({ pushToast }: Props) {
       if (!file) return;
       const nextRules = file.rules.filter((r) => r.id !== id);
       await saveRules({ ...file, rules: nextRules });
-      pushToast("info", `Rotation rule "${id}" deleted`);
+      pushToast("info", t("rotation.ruleDeleted", { id }));
     },
-    [file, pushToast, saveRules],
+    [file, pushToast, saveRules, t],
   );
 
   if (!file) {
-    return <div style={{ color: "var(--fg-faint)" }}>Loading rotation rules…</div>;
+    return (
+      <div style={{ color: "var(--fg-faint)" }}>{t("rotation.loadingRules")}</div>
+    );
   }
 
   return (
@@ -138,12 +143,11 @@ export function RotationPane({ pushToast }: Props) {
           maxWidth: "var(--content-cap-md)",
         }}
       >
-        Auto-switch the active CLI account when an Anthropic usage
-        window crosses a threshold you set. Triggers fire from
-        Anthropic's <code>/api/oauth/usage</code> data, polled every 5
-        minutes. The default <strong>Confirm</strong> mode shows a
-        toast and waits for your click; switch to <strong>Auto</strong>
-        once you trust the rule.
+        <Trans
+          ns="settings"
+          i18nKey="rotation.intro"
+          components={{ code: <code />, strong: <strong /> }}
+        />
       </p>
 
       <section>
@@ -163,7 +167,7 @@ export function RotationPane({ pushToast }: Props) {
               letterSpacing: "var(--ls-tight)",
             }}
           >
-            Rules
+            {t("rotation.rules")}
           </h3>
           <Button
             glyph={NF.plus}
@@ -171,7 +175,7 @@ export function RotationPane({ pushToast }: Props) {
             onClick={() => setAdding(true)}
             disabled={candidateEmails.length === 0}
           >
-            Add rule
+            {t("rotation.addRule")}
           </Button>
         </header>
 
@@ -219,7 +223,7 @@ export function RotationPane({ pushToast }: Props) {
               letterSpacing: "var(--ls-tight)",
             }}
           >
-            Recent activity
+            {t("rotation.recentActivity")}
           </h3>
           {audit.length > 0 && (
             <label
@@ -231,7 +235,7 @@ export function RotationPane({ pushToast }: Props) {
                 color: "var(--fg-muted)",
               }}
             >
-              Filter
+              {t("rotation.filter")}
               <select
                 value={auditFilter}
                 onChange={(e) =>
@@ -247,7 +251,7 @@ export function RotationPane({ pushToast }: Props) {
                   fontSize: "var(--fs-xs)",
                 }}
               >
-                <option value="all">All outcomes</option>
+                <option value="all">{t("rotation.allOutcomes")}</option>
                 {(Object.keys(ROTATION_OUTCOME_LABEL) as RotationOutcomeId[]).map(
                   (k) => (
                     <option key={k} value={k}>
@@ -261,7 +265,7 @@ export function RotationPane({ pushToast }: Props) {
         </header>
         {audit.length === 0 ? (
           <p style={{ margin: 0, color: "var(--fg-faint)", fontSize: "var(--fs-sm)" }}>
-            No rotation activity yet.
+            {t("rotation.noActivity")}
           </p>
         ) : (
           <AuditTable
@@ -289,14 +293,16 @@ export function RotationPane({ pushToast }: Props) {
 
       {confirmDeleteId && (
         <ConfirmDialog
-          title="Delete rotation rule?"
+          title={t("rotation.deleteConfirm.title")}
           body={
-            <>
-              Rule <code>{confirmDeleteId}</code> will be removed.
-              You can re-add it later.
-            </>
+            <Trans
+              ns="settings"
+              i18nKey="rotation.deleteConfirm.body"
+              components={{ code: <code /> }}
+              values={{ id: confirmDeleteId }}
+            />
           }
-          confirmLabel="Delete"
+          confirmLabel={t("rotation.deleteConfirm.confirm")}
           confirmDanger
           onCancel={() => setConfirmDeleteId(null)}
           onConfirm={() => {

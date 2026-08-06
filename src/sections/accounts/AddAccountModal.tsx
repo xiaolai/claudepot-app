@@ -1,6 +1,8 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { NfIcon } from "../../icons";
 import { api } from "../../api";
+import { i18n } from "../../lib/i18n";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import {
@@ -12,6 +14,7 @@ import {
 import { Tag } from "../../components/primitives/Tag";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { useOperations } from "../../hooks/useOperations";
+import { extractMessage, renderError } from "../../lib/i18n-error";
 import { redactSecrets } from "../../lib/redactSecrets";
 import { useAppState } from "../../providers/AppStateProvider";
 import { NF } from "../../icons";
@@ -61,6 +64,7 @@ export function AddAccountModal({
   accounts,
   onAdoptDesktop,
 }: AddAccountModalProps) {
+  const { t } = useTranslation("accounts");
   const { pushToast } = useAppState();
   const [importing, setImporting] = useState(false);
   const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
@@ -125,10 +129,9 @@ export function AddAccountModal({
       } catch (e) {
         if (cancelled) return;
         // Backend errors can interpolate user input or token bodies;
-        // run them through the UI redactor before they reach the DOM
-        // or the toast pipeline.
-        const raw = e instanceof Error ? e.message : String(e);
-        setPreflight({ kind: "error", message: redactSecrets(raw) });
+        // run them through the UI renderer (which redacts) before they
+        // reach the DOM or the toast pipeline.
+        setPreflight({ kind: "error", message: renderError(e) });
       }
     })();
 
@@ -144,8 +147,7 @@ export function AddAccountModal({
       onAdded(outcome.email);
       onClose();
     } catch (e) {
-      const raw = e instanceof Error ? e.message : String(e);
-      pushToast("error", redactSecrets(raw));
+      pushToast("error", renderError(e));
     } finally {
       setImporting(false);
     }
@@ -174,12 +176,12 @@ export function AddAccountModal({
       const opId = await api.accountRegisterFromBrowserStart();
       openOpModal({
         opId,
-        title: "Add account: browser login",
+        title: t("addModal.browserLoginOpTitle"),
         phases: LOGIN_PHASES,
         fetchStatus: api.accountLoginStatus,
         renderResult: renderLoginResult,
         onCancel: handleCancelBrowserLogin,
-        cancelLabel: "Cancel login",
+        cancelLabel: t("addModal.cancelLogin"),
         onComplete: () => {
           // We don't know the new email yet (the synchronous return
           // value is gone); the parent's refresh will pick it up. Pass
@@ -189,7 +191,10 @@ export function AddAccountModal({
         onError: (detail) => {
           const msg = detail ?? "";
           if (!/cancel/i.test(msg)) {
-            pushToast("error", msg ? redactSecrets(msg) : "register failed");
+            pushToast(
+              "error",
+              msg ? renderError(msg) : t("addModal.registerFailed"),
+            );
           }
         },
       });
@@ -198,9 +203,11 @@ export function AddAccountModal({
       // Cancelled flows produce `register failed: claude auth login was
       // cancelled by the user` from core. Suppress the toast in that
       // case — the user just clicked Cancel, they don't need a warning.
-      const msg = e instanceof Error ? e.message : String(e);
+      // Raw (untruncated) text — this is a control-flow test, not a
+      // display string; `renderError` handles the toast below.
+      const msg = extractMessage(e);
       if (!/cancel/i.test(msg)) {
-        pushToast("error", redactSecrets(msg));
+        pushToast("error", renderError(e));
       }
     } finally {
       setBrowserLoggingIn(false);
@@ -233,7 +240,7 @@ export function AddAccountModal({
       <div ref={trapRef} style={{ display: "contents" }}>
         <ModalHeader
           glyph={NF.plus}
-          title="Add account"
+          title={t("addModal.title")}
           onClose={handleRequestClose}
           id={titleId}
         />
@@ -269,13 +276,13 @@ export function AddAccountModal({
           {/* Action 1 — Import from Claude Code */}
           <ActionCard
             glyph={NF.download}
-            title="Import from Claude Code"
+            title={t("addModal.importTitle")}
             subtitle={importSubtitle(preflight)}
             command="account_add_from_current"
             accent
             disabled={preflight.kind !== "new" || importing}
             onClick={handleImport}
-            cta={importing ? "Importing…" : "Import"}
+            cta={importing ? t("addModal.importing") : t("addModal.import")}
             ctaGlyph={importing ? NF.clock : NF.download}
           >
             {preflight.kind === "new" && (
@@ -291,7 +298,7 @@ export function AddAccountModal({
                 subscription={preflight.knownAccount.subscription_type}
                 orgName={preflight.knownAccount.org_name}
                 dimmed
-                badge={<Tag tone="neutral">already managed</Tag>}
+                badge={<Tag tone="neutral">{t("addModal.alreadyManaged")}</Tag>}
               />
             )}
           </ActionCard>
@@ -314,7 +321,7 @@ export function AddAccountModal({
                 background: "var(--line)",
               }}
             />
-            <span className="mono-cap">or add a different account</span>
+            <span className="mono-cap">{t("addModal.orDivider")}</span>
             <div
               style={{
                 flex: 1,
@@ -333,16 +340,16 @@ export function AddAccountModal({
               this modal closes and Cancel lives there. */}
           <ActionCard
             glyph={NF.user}
-            title="Log in with a new account…"
+            title={t("addModal.loginTitle")}
             subtitle={
               browserLoggingIn
-                ? "Opening browser…"
-                : "Open a browser, complete OAuth, then register the result as a fresh account."
+                ? t("addModal.openingBrowser")
+                : t("addModal.loginSubtitle")
             }
             command="account_register_from_browser"
             disabled={browserLoggingIn || importing}
             onClick={handleBrowserLogin}
-            cta={browserLoggingIn ? "Opening…" : "Log in"}
+            cta={browserLoggingIn ? t("addModal.opening") : t("addModal.logIn")}
             ctaGlyph={browserLoggingIn ? NF.clock : NF.arrowUpR}
           />
 
@@ -364,7 +371,7 @@ export function AddAccountModal({
 
         <ModalFooter>
           <Button variant="ghost" onClick={handleRequestClose}>
-            Close
+            {t("addModal.close")}
           </Button>
         </ModalFooter>
       </div>
@@ -382,20 +389,21 @@ function summaryFor(p: Preflight): {
       return {
         glyph: NF.clock,
         tone: "var(--fg-faint)",
-        text: "Checking Claude Code's current session…",
+        text: i18n.t("addModal.summary.checking", { ns: "accounts" }),
       };
     case "new":
       return {
         glyph: NF.check,
         tone: "var(--ok)",
         text: (
-          <>
-            Claude Code is signed in as{" "}
-            <span style={{ color: "var(--fg)", fontWeight: 600 }}>
-              {p.email}
-            </span>
-            .
-          </>
+          <Trans
+            i18nKey="addModal.summary.signedIn"
+            ns="accounts"
+            values={{ email: p.email }}
+            components={{
+              emph: <span style={{ color: "var(--fg)", fontWeight: 600 }} />,
+            }}
+          />
         ),
       };
     case "known":
@@ -403,26 +411,30 @@ function summaryFor(p: Preflight): {
         glyph: NF.info,
         tone: "var(--fg-muted)",
         text: (
-          <>
-            Claude Code is signed in as{" "}
-            <span style={{ color: "var(--fg)", fontWeight: 600 }}>
-              {p.email}
-            </span>{" "}
-            — already managed.
-          </>
+          <Trans
+            i18nKey="addModal.summary.signedInKnown"
+            ns="accounts"
+            values={{ email: p.email }}
+            components={{
+              emph: <span style={{ color: "var(--fg)", fontWeight: 600 }} />,
+            }}
+          />
         ),
       };
     case "empty":
       return {
         glyph: NF.warn,
         tone: "var(--warn)",
-        text: "Claude Code has no saved credentials.",
+        text: i18n.t("addModal.summary.empty", { ns: "accounts" }),
       };
     case "error":
       return {
         glyph: NF.warn,
         tone: "var(--warn)",
-        text: <>Couldn't read Claude Code session: {p.message}</>,
+        text: i18n.t("addModal.summary.error", {
+          ns: "accounts",
+          message: p.message,
+        }),
       };
   }
 }
@@ -430,15 +442,15 @@ function summaryFor(p: Preflight): {
 function importSubtitle(p: Preflight): string {
   switch (p.kind) {
     case "new":
-      return "Copy the current credential blob into a new managed slot.";
+      return i18n.t("addModal.importSubtitle.new", { ns: "accounts" });
     case "known":
-      return "Nothing new to import — that account is already managed.";
+      return i18n.t("addModal.importSubtitle.known", { ns: "accounts" });
     case "empty":
-      return "No credentials to import. Sign in with Claude Code first.";
+      return i18n.t("addModal.importSubtitle.empty", { ns: "accounts" });
     case "error":
-      return "Preflight failed. Resolve the error above and retry.";
+      return i18n.t("addModal.importSubtitle.error", { ns: "accounts" });
     case "checking":
-      return "Waiting on Claude Code session check…";
+      return i18n.t("addModal.importSubtitle.checking", { ns: "accounts" });
   }
 }
 

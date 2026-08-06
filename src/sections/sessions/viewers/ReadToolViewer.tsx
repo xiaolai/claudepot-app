@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
@@ -42,9 +43,10 @@ function parseNumberedLines(body: string): NumberedLine[] | null {
  * split by newline and preserve the original numbering.
  */
 export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
+  const { t } = useTranslation("sessions");
   const parsedInput = parseToolInput<ReadInput>(tool.input_preview);
   const input = parsedInput.ok ? parsedInput.value : {};
-  const path = input.file_path ?? "(unknown file)";
+  const path = input.file_path ?? t("viewer.unknownFile");
 
   const body = redactSecrets(tool.result_content ?? "");
   // CC's Read tool already prefixes each line with its 1-based line
@@ -109,8 +111,10 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
         </span>
         {typeof input.offset === "number" && (
           <span style={{ color: "var(--fg-ghost)" }}>
-            from {input.offset}
-            {typeof input.limit === "number" ? ` · ${input.limit} lines` : ""}
+            {t("viewer.read.fromOffset", { offset: input.offset })}
+            {typeof input.limit === "number"
+              ? ` · ${t("viewer.read.limitLines", { n: input.limit })}`
+              : ""}
           </span>
         )}
         {tool.is_error && (
@@ -122,11 +126,11 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
               letterSpacing: "var(--ls-wide)",
             }}
           >
-            error
+            {t("viewer.error")}
           </span>
         )}
         {copyText.length > 0 && (
-          <CopyButton text={copyText} ariaLabel="Copy file contents" />
+          <CopyButton text={copyText} ariaLabel={t("viewer.copyFileContents")} />
         )}
       </header>
       {body.length === 0 ? (
@@ -138,7 +142,7 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
             fontStyle: "italic",
           }}
         >
-          (no result yet)
+          {t("viewer.read.noResultYet")}
         </div>
       ) : (
         <div
@@ -172,7 +176,7 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
                 marginTop: "var(--sp-4)",
               }}
             >
-              … {hidden} more line{hidden === 1 ? "" : "s"} hidden
+              {t("viewer.read.moreLinesHidden", { count: hidden })}
             </div>
           )}
         </div>

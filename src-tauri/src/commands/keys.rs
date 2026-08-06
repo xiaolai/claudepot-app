@@ -11,15 +11,36 @@
 //! Every handler is `async fn` for the same reason the rest of the
 //! command surface is — blocking I/O on Tauri's main thread freezes
 //! the webview. See `commands.rs` header for the full rationale.
+//!
+//! This is the reference implementation for the `ErrorDto` error shape
+//! (i18n plan §2.5). Two things changed and both are deliberate:
+//! the English operation prefixes (`"keys store open failed: "`,
+//! `"list api keys: "`) are gone — the UI knows what it was attempting
+//! and says so in its own language — and every rejection now carries a
+//! `code` the renderer can translate, with the underlying English still
+//! in `message`.
+//!
+//! The `legacy_string` bridge that held `key_api_add`, `key_oauth_add`
+//! and `key_oauth_usage_cached` on `Result<T, String>` is gone with it.
+//! Its reason was renderer-side — `AddKeyModal.tsx` and
+//! `OAuthUsageModal.tsx` rendered the rejection with `` `${e}` ``,
+//! which prints `[object Object]` for a DTO. Both now call
+//! `renderError(e)`, so the whole file is one shape.
+//!
+//! One rule this file holds harder than any other: **no `params` here
+//! may carry a secret.** A label, a row uuid or a retry window is fine;
+//! the pasted token is not, and neither is its preview. The token
+//! leaves Rust through the OS clipboard and nowhere else.
 
-use super::open_store;
-use crate::dto::{ApiKeySummaryDto, OauthTokenSummaryDto};
+use crate::dto::{ApiKeySummaryDto, ErrorDto, OauthTokenSummaryDto};
+use crate::dto_error::codes;
 use claudepot_core::account::AccountStore;
 use claudepot_core::keys::{
     classify_token, token_preview, KeyPrefix, KeyStore, OAUTH_TOKEN_VALIDITY_DAYS,
 };
 use claudepot_core::paths;
 use claudepot_core::services::usage_cache::UsageCache;
+use serde_json::json;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
@@ -34,24 +55,62 @@ use zeroize::Zeroize;
 /// `pub(crate)` so the env-secret copy path shares one deadline.
 pub(crate) const CLIPBOARD_CLEAR_MS: u64 = 30_000;
 
-fn open_keys_store() -> Result<KeyStore, String> {
+fn open_keys_store() -> Result<KeyStore, ErrorDto> {
     let db = paths::claudepot_data_dir().join("keys.db");
-    KeyStore::open(&db).map_err(|e| format!("keys store open failed: {e}"))
+    KeyStore::open(&db).map_err(ErrorDto::from)
 }
+
+use super::open_account_store;
 
 /// Build `uuid → email` from a single `accounts.list()` call so N-row
 /// key tables don't fire N SELECTs when rendering the Keys section.
-fn account_email_map(store: &AccountStore) -> Result<HashMap<Uuid, String>, String> {
-    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+fn account_email_map(store: &AccountStore) -> Result<HashMap<Uuid, String>, ErrorDto> {
+    let accounts = store
+        .list()
+        .map_err(|e| ErrorDto::detail(codes::ACCOUNTS_LIST_FAILED, e))?;
     Ok(accounts.into_iter().map(|a| (a.uuid, a.email)).collect())
 }
 
-fn parse_account_uuid(s: &str, email_map: &HashMap<Uuid, String>) -> Result<Uuid, String> {
-    let id = Uuid::parse_str(s).map_err(|_| format!("invalid account uuid: {s}"))?;
+fn parse_account_uuid(s: &str, email_map: &HashMap<Uuid, String>) -> Result<Uuid, ErrorDto> {
+    let id = Uuid::parse_str(s).map_err(|_| {
+        ErrorDto::with_params(
+            codes::ACCOUNTS_INVALID_UUID,
+            json!({ "uuid": s }),
+            format!("invalid account uuid: {s}"),
+        )
+    })?;
     if !email_map.contains_key(&id) {
-        return Err(format!("no registered account with uuid {s}"));
+        return Err(ErrorDto::with_params(
+            codes::ACCOUNTS_UNKNOWN_UUID,
+            json!({ "uuid": s }),
+            format!("no registered account with uuid {s}"),
+        ));
     }
     Ok(id)
+}
+
+/// Renderer-supplied row id. `bad uuid: {e}` is kept verbatim as the
+/// English fallback; `params.uuid` is what a localized sentence names.
+fn parse_row_uuid(s: &str) -> Result<Uuid, ErrorDto> {
+    Uuid::parse_str(s).map_err(|e| {
+        ErrorDto::with_params(
+            codes::KEYS_BAD_UUID,
+            json!({ "uuid": s }),
+            format!("bad uuid: {e}"),
+        )
+    })
+}
+
+/// The add and rename verbs reject an empty label. Shared so the four
+/// cannot drift into four codes for one rule.
+fn require_label(label: &str) -> Result<(), ErrorDto> {
+    if label.is_empty() {
+        return Err(ErrorDto::new(
+            codes::KEYS_LABEL_REQUIRED,
+            "label is required",
+        ));
+    }
+    Ok(())
 }
 
 fn oauth_summary(
@@ -109,42 +168,38 @@ fn api_summary(
 /// `key_oauth_list` and `account_list` via `Promise.all`, so a
 /// blocking call here would serialize the whole mount.
 #[tauri::command]
-pub async fn key_api_list() -> Result<Vec<ApiKeySummaryDto>, String> {
+pub async fn key_api_list() -> Result<Vec<ApiKeySummaryDto>, ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let keys = open_keys_store()?;
-        let accounts = open_store()?;
+        let accounts = open_account_store()?;
         let email_map = account_email_map(&accounts)?;
-        let rows = keys
-            .list_api_keys()
-            .map_err(|e| format!("list api keys: {e}"))?;
-        Ok::<_, String>(
+        let rows = keys.list_api_keys().map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|k| api_summary(k, &email_map))
                 .collect(),
         )
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Sibling to `key_api_list` — same `spawn_blocking` rationale.
 #[tauri::command]
-pub async fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, String> {
+pub async fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let keys = open_keys_store()?;
-        let accounts = open_store()?;
+        let accounts = open_account_store()?;
         let email_map = account_email_map(&accounts)?;
-        let rows = keys
-            .list_oauth_tokens()
-            .map_err(|e| format!("list oauth tokens: {e}"))?;
-        Ok::<_, String>(
+        let rows = keys.list_oauth_tokens().map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|t| oauth_summary(t, &email_map))
                 .collect(),
         )
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Add an `ANTHROPIC_API_KEY`. `account_uuid` is required — every key
@@ -163,14 +218,16 @@ pub async fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, String> {
 /// **zeroized** on every exit path — success and error alike. The
 /// originally-deserialized `token` argument also has its bytes
 /// scrubbed before drop. `KeyError` Display impl never interpolates
-/// the secret (audit `keys/error.rs`), so error paths returning
-/// `format!("insert: {e}")` cannot leak it.
+/// the secret (audit `keys/error.rs`), so lifting its rejection with
+/// `ErrorDto::from` cannot leak it — neither `message` nor `params`
+/// can reach the value. The two prefix rejections below carry an empty
+/// `params` for the same reason.
 #[tauri::command]
 pub async fn key_api_add(
     label: String,
     mut token: String,
     account_uuid: String,
-) -> Result<ApiKeySummaryDto, String> {
+) -> Result<ApiKeySummaryDto, ErrorDto> {
     let result = key_api_add_inner(&label, token.trim(), &account_uuid).await;
     // Scrub the IPC-bridge `String` regardless of outcome. The trimmed
     // slice above is a borrow of these bytes — once `inner` returned,
@@ -184,16 +241,18 @@ async fn key_api_add_inner(
     label: &str,
     token: &str,
     account_uuid: &str,
-) -> Result<ApiKeySummaryDto, String> {
+) -> Result<ApiKeySummaryDto, ErrorDto> {
     let label = label.trim();
-    if label.is_empty() {
-        return Err("label is required".to_string());
-    }
+    require_label(label)?;
     if !matches!(classify_token(token), Some(KeyPrefix::ApiKey)) {
-        return Err("not an API key — expected a value starting with `sk-ant-api03-`".to_string());
+        return Err(ErrorDto::with_params(
+            codes::KEYS_NOT_AN_API_KEY,
+            json!({ "prefix": "sk-ant-api03-" }),
+            "not an API key — expected a value starting with `sk-ant-api03-`",
+        ));
     }
 
-    let accounts = open_store()?;
+    let accounts = open_account_store()?;
     let email_map = account_email_map(&accounts)?;
     let account_id = parse_account_uuid(account_uuid, &email_map)?;
 
@@ -206,7 +265,7 @@ async fn key_api_add_inner(
     let outcome = keys
         .insert_api_key(label, &preview, account_id, &secret_buf)
         .map(|row| api_summary(row, &email_map))
-        .map_err(|e| format!("insert: {e}"));
+        .map_err(ErrorDto::from);
     secret_buf.zeroize();
     outcome
 }
@@ -221,7 +280,7 @@ pub async fn key_oauth_add(
     label: String,
     mut token: String,
     account_uuid: String,
-) -> Result<OauthTokenSummaryDto, String> {
+) -> Result<OauthTokenSummaryDto, ErrorDto> {
     let result = key_oauth_add_inner(&label, token.trim(), &account_uuid).await;
     token.zeroize();
     result
@@ -231,18 +290,18 @@ async fn key_oauth_add_inner(
     label: &str,
     token: &str,
     account_uuid: &str,
-) -> Result<OauthTokenSummaryDto, String> {
+) -> Result<OauthTokenSummaryDto, ErrorDto> {
     let label = label.trim();
-    if label.is_empty() {
-        return Err("label is required".to_string());
-    }
+    require_label(label)?;
     if !matches!(classify_token(token), Some(KeyPrefix::OauthToken)) {
-        return Err(
-            "not an OAuth token — expected a value starting with `sk-ant-oat01-`".to_string(),
-        );
+        return Err(ErrorDto::with_params(
+            codes::KEYS_NOT_AN_OAUTH_TOKEN,
+            json!({ "prefix": "sk-ant-oat01-" }),
+            "not an OAuth token — expected a value starting with `sk-ant-oat01-`",
+        ));
     }
 
-    let accounts = open_store()?;
+    let accounts = open_account_store()?;
     let email_map = account_email_map(&accounts)?;
     let account_id = parse_account_uuid(account_uuid, &email_map)?;
 
@@ -252,7 +311,7 @@ async fn key_oauth_add_inner(
     let outcome = keys
         .insert_oauth_token(label, &preview, account_id, &secret_buf)
         .map(|row| oauth_summary(row, &email_map))
-        .map_err(|e| format!("insert: {e}"));
+        .map_err(ErrorDto::from);
     secret_buf.zeroize();
     outcome
 }
@@ -260,45 +319,40 @@ async fn key_oauth_add_inner(
 /// `async fn` — SQLite row delete (the plaintext secret column goes
 /// with the row; there is no separate encrypted blob). See `key_api_list`.
 #[tauri::command]
-pub async fn key_api_remove(uuid: String) -> Result<(), String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+pub async fn key_api_remove(uuid: String) -> Result<(), ErrorDto> {
+    let id = parse_row_uuid(&uuid)?;
     let keys = open_keys_store()?;
-    keys.remove_api_key(id).map_err(|e| format!("{e}"))
+    keys.remove_api_key(id).map_err(ErrorDto::from)
 }
 
 /// `async fn` — sibling to `key_api_remove`.
 #[tauri::command]
-pub async fn key_oauth_remove(uuid: String) -> Result<(), String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+pub async fn key_oauth_remove(uuid: String) -> Result<(), ErrorDto> {
+    let id = parse_row_uuid(&uuid)?;
     let keys = open_keys_store()?;
-    keys.remove_oauth_token(id).map_err(|e| format!("{e}"))
+    keys.remove_oauth_token(id).map_err(ErrorDto::from)
 }
 
 /// Rename an API key. Label is user-owned metadata — resolution and
 /// lookup key off `uuid`, never the label, so renames are a pure
 /// display-layer change.
 #[tauri::command]
-pub async fn key_api_rename(uuid: String, label: String) -> Result<(), String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+pub async fn key_api_rename(uuid: String, label: String) -> Result<(), ErrorDto> {
+    let id = parse_row_uuid(&uuid)?;
     let label = label.trim();
-    if label.is_empty() {
-        return Err("label is required".to_string());
-    }
+    require_label(label)?;
     let keys = open_keys_store()?;
-    keys.rename_api_key(id, label).map_err(|e| format!("{e}"))
+    keys.rename_api_key(id, label).map_err(ErrorDto::from)
 }
 
 /// Rename an OAuth token. See `key_api_rename`.
 #[tauri::command]
-pub async fn key_oauth_rename(uuid: String, label: String) -> Result<(), String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+pub async fn key_oauth_rename(uuid: String, label: String) -> Result<(), ErrorDto> {
+    let id = parse_row_uuid(&uuid)?;
     let label = label.trim();
-    if label.is_empty() {
-        return Err("label is required".to_string());
-    }
+    require_label(label)?;
     let keys = open_keys_store()?;
-    keys.rename_oauth_token(id, label)
-        .map_err(|e| format!("{e}"))
+    keys.rename_oauth_token(id, label).map_err(ErrorDto::from)
 }
 
 /// Receipt returned to the renderer after a successful `key_*_copy*`
@@ -382,36 +436,48 @@ async fn key_copy_inner(
     uuid: String,
     kind: CopyKind,
     app: AppHandle,
-) -> Result<KeyCopyReceiptDto, String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+) -> Result<KeyCopyReceiptDto, ErrorDto> {
+    let id = parse_row_uuid(&uuid)?;
 
     // SQLite + decrypt off the IPC worker. Returns the secret + the
     // metadata we need for the receipt — a single round-trip so the
     // store doesn't have to be re-opened on the IPC thread.
     let (mut secret, label, preview) =
-        tokio::task::spawn_blocking(move || -> Result<(String, String, String), String> {
+        tokio::task::spawn_blocking(move || -> Result<(String, String, String), ErrorDto> {
             let keys = open_keys_store()?;
             match kind {
                 CopyKind::Api => {
                     let row = keys
                         .find_api_key(id)
-                        .map_err(|e| format!("{e}"))?
-                        .ok_or_else(|| format!("api key {id} not found"))?;
-                    let secret = keys.find_api_secret(id).map_err(|e| format!("{e}"))?;
+                        .map_err(ErrorDto::from)?
+                        .ok_or_else(|| {
+                            ErrorDto::with_params(
+                                codes::KEYS_API_KEY_NOT_FOUND,
+                                json!({ "uuid": id.to_string() }),
+                                format!("api key {id} not found"),
+                            )
+                        })?;
+                    let secret = keys.find_api_secret(id).map_err(ErrorDto::from)?;
                     Ok((secret, row.label, row.token_preview))
                 }
                 CopyKind::Oauth | CopyKind::OauthShell => {
                     let row = keys
                         .find_oauth_token(id)
-                        .map_err(|e| format!("{e}"))?
-                        .ok_or_else(|| format!("oauth token {id} not found"))?;
-                    let secret = keys.find_oauth_secret(id).map_err(|e| format!("{e}"))?;
+                        .map_err(ErrorDto::from)?
+                        .ok_or_else(|| {
+                            ErrorDto::with_params(
+                                codes::KEYS_OAUTH_TOKEN_NOT_FOUND,
+                                json!({ "uuid": id.to_string() }),
+                                format!("oauth token {id} not found"),
+                            )
+                        })?;
+                    let secret = keys.find_oauth_secret(id).map_err(ErrorDto::from)?;
                     Ok((secret, row.label, row.token_preview))
                 }
             }
         })
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+        .map_err(ErrorDto::task_join)??;
 
     let mut payload = format_payload(kind, &secret);
     // The `secret` `String` is no longer needed past this point — every
@@ -423,7 +489,11 @@ async fn key_copy_inner(
     // bubbling up; the renderer never sees these bytes.
     if let Err(e) = app.clipboard().write_text(payload.clone()) {
         payload.zeroize();
-        return Err(format!("clipboard: {e}"));
+        return Err(ErrorDto::with_params(
+            codes::KEYS_CLIPBOARD_WRITE_FAILED,
+            json!({ "detail": e.to_string() }),
+            format!("clipboard: {e}"),
+        ));
     }
 
     let clears_at = now_unix_ms() + CLIPBOARD_CLEAR_MS;
@@ -445,14 +515,14 @@ async fn key_copy_inner(
 /// can toast verbatim. Self-clears after 30s if the clipboard still
 /// holds our payload.
 #[tauri::command]
-pub async fn key_api_copy(uuid: String, app: AppHandle) -> Result<KeyCopyReceiptDto, String> {
+pub async fn key_api_copy(uuid: String, app: AppHandle) -> Result<KeyCopyReceiptDto, ErrorDto> {
     key_copy_inner(uuid, CopyKind::Api, app).await
 }
 
 /// Copy a `CLAUDE_CODE_OAUTH_TOKEN` to the OS clipboard. Sibling of
 /// `key_api_copy`. See that function for the secret-handling contract.
 #[tauri::command]
-pub async fn key_oauth_copy(uuid: String, app: AppHandle) -> Result<KeyCopyReceiptDto, String> {
+pub async fn key_oauth_copy(uuid: String, app: AppHandle) -> Result<KeyCopyReceiptDto, ErrorDto> {
     key_copy_inner(uuid, CopyKind::Oauth, app).await
 }
 
@@ -464,7 +534,7 @@ pub async fn key_oauth_copy(uuid: String, app: AppHandle) -> Result<KeyCopyRecei
 pub async fn key_oauth_copy_shell(
     uuid: String,
     app: AppHandle,
-) -> Result<KeyCopyReceiptDto, String> {
+) -> Result<KeyCopyReceiptDto, ErrorDto> {
     key_copy_inner(uuid, CopyKind::OauthShell, app).await
 }
 
@@ -477,24 +547,33 @@ pub async fn key_oauth_copy_shell(
 /// `key_copy_inner`) and **zeroized** after the probe on every exit
 /// path — the error mapping below never interpolates it.
 #[tauri::command]
-pub async fn key_api_probe(uuid: String) -> Result<(), String> {
+pub async fn key_api_probe(uuid: String) -> Result<(), ErrorDto> {
     use claudepot_core::error::OAuthError;
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
-    let mut secret = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let id = parse_row_uuid(&uuid)?;
+    let mut secret = tokio::task::spawn_blocking(move || -> Result<String, ErrorDto> {
         let keys = open_keys_store()?;
-        keys.find_api_secret(id).map_err(|e| format!("{e}"))
+        keys.find_api_secret(id).map_err(ErrorDto::from)
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))??;
+    .map_err(ErrorDto::task_join)??;
     let probe = claudepot_core::keys::probe_api_key(&secret).await;
     secret.zeroize();
     match probe {
         Ok(()) => Ok(()),
-        Err(OAuthError::AuthFailed(_)) => Err("rejected (invalid key)".into()),
-        Err(OAuthError::RateLimited { retry_after_secs }) => {
-            Err(format!("rate-limited (retry in {retry_after_secs}s)"))
-        }
-        Err(e) => Err(format!("{e}")),
+        // Probe-specific copy, not the OAuth wording: the user is
+        // looking at one key's row, so these two say what that row
+        // means. The remaining variants have no probe-specific reading
+        // and travel under their own `oauth.*` codes.
+        Err(OAuthError::AuthFailed(_)) => Err(ErrorDto::new(
+            codes::KEYS_PROBE_REJECTED,
+            "rejected (invalid key)",
+        )),
+        Err(OAuthError::RateLimited { retry_after_secs }) => Err(ErrorDto::with_params(
+            codes::KEYS_PROBE_RATE_LIMITED,
+            json!({ "retry_after_secs": retry_after_secs }),
+            format!("rate-limited (retry in {retry_after_secs}s)"),
+        )),
+        Err(e) => Err(ErrorDto::from(e)),
     }
 }
 
@@ -509,18 +588,24 @@ pub async fn key_api_probe(uuid: String) -> Result<(), String> {
 pub async fn key_oauth_usage_cached(
     uuid: String,
     cache: tauri::State<'_, UsageCache>,
-) -> Result<Option<crate::dto::AccountUsageDto>, String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+) -> Result<Option<crate::dto::AccountUsageDto>, ErrorDto> {
+    let id = parse_row_uuid(&uuid)?;
     // SQLite open/read off the IPC worker — same policy as
     // `key_copy_inner` / `key_api_probe` in this file.
-    let token = tokio::task::spawn_blocking(move || {
+    let token = tokio::task::spawn_blocking(move || -> Result<_, ErrorDto> {
         let keys = open_keys_store()?;
         keys.find_oauth_token(id)
-            .map_err(|e| format!("{e}"))?
-            .ok_or_else(|| format!("oauth token {id} not found"))
+            .map_err(ErrorDto::from)?
+            .ok_or_else(|| {
+                ErrorDto::with_params(
+                    codes::KEYS_OAUTH_TOKEN_NOT_FOUND,
+                    json!({ "uuid": id.to_string() }),
+                    format!("oauth token {id} not found"),
+                )
+            })
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))??;
+    .map_err(ErrorDto::task_join)??;
     let snapshot = cache.peek_cached(token.account_uuid).await;
     Ok(snapshot
         .as_ref()

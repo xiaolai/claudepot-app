@@ -13,6 +13,7 @@
 //   4. Recurrence — the headline once Phase 3 lands; a placeholder here.
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type {
   LessonCounts,
@@ -23,7 +24,6 @@ import type {
 import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { basename } from "../../lib/paths";
-import { toUserError } from "../../lib/errors";
 import type { QueueTarget } from "../SharedMemorySection";
 import {
   StatCard,
@@ -32,6 +32,7 @@ import {
   trustTotal,
 } from "./dashboard-primitives";
 import type { StatCardProps, TrustMix } from "./dashboard-primitives";
+import { renderError } from "../../lib/i18n-error";
 
 /** A merged coverage row: a project, its session count, and its trust
  *  mix. Either half can be absent (a project with memories but no indexed
@@ -59,6 +60,7 @@ export function KnowledgeDashboard({
   onOpenProject: (projectPath: string) => void;
   onOpenReview: (queue?: QueueTarget) => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const [rollup, setRollup] = useState<LessonCounts | null>(null);
   const [rows, setRows] = useState<CoverageRow[]>([]);
   const [recurrence, setRecurrence] = useState<RecurrenceCounts | null>(null);
@@ -102,12 +104,12 @@ export function KnowledgeDashboard({
       (r): r is PromiseRejectedResult => r.status === "rejected",
     );
     if (failures.length === results.length) {
-      setErr(toUserError(failures[0]!.reason));
+      setErr(renderError(failures[0]!.reason));
     } else if (failures.length > 0) {
-      setPartial("Part of the dashboard couldn't load — showing what's available.");
+      setPartial(t("dashboard.partial"));
     }
     setLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -135,37 +137,41 @@ export function KnowledgeDashboard({
   const attention: StatCardProps[] = [];
   if (pendingRec > 0)
     attention.push({
-      label: pendingRec === 1 ? "Recurrence" : "Recurrences",
+      label: t("dashboard.recurrenceLabel", { count: pendingRec }),
       value: pendingRec,
       tone: "warn",
-      hint: "already-learned failures seen again — confirm in Review",
+      hint: t("dashboard.recurrenceHint"),
       onClick: () => onOpenReview("proposed"),
     });
   if (suspect > 0)
     attention.push({
-      label: "Suspect",
+      label: t("dashboard.suspectLabel"),
       value: suspect,
       tone: "warn",
-      hint: "accepted lessons whose code moved — re-review",
+      hint: t("dashboard.suspectHint"),
       onClick: () => onOpenReview("suspect"),
     });
   if (proposed > 0)
     attention.push({
-      label: "Proposals",
+      label: t("dashboard.proposalsLabel"),
       value: proposed,
       tone: "accent",
-      hint: "waiting on your yes / no",
+      hint: t("dashboard.proposalsHint"),
       onClick: () => onOpenReview("proposed"),
     });
 
   // Secondary context — the trust scoreboard, deliberately NOT a hero here
   // (Review's Gazette owns the scoreboard framing). Render-if-nonzero.
   const context: string[] = [];
-  if (enforced > 0) context.push(`${enforced} enforced`);
-  if (documented > 0) context.push(`${documented} documented`);
+  if (enforced > 0) context.push(t("dashboard.enforcedCount", { value: enforced }));
+  if (documented > 0)
+    context.push(t("dashboard.documentedCount", { value: documented }));
   if (confirmedRec > 0)
     context.push(
-      `${confirmedRec} confirmed repeat${confirmedRec === 1 ? "" : "s"} (${windowDays}d)`,
+      t("dashboard.confirmedRepeats", {
+        count: confirmedRec,
+        days: windowDays,
+      }),
     );
 
   // ── every call failed: never render a fake-healthy zero dashboard ──
@@ -177,7 +183,7 @@ export function KnowledgeDashboard({
       >
         <p style={{ margin: 0, color: "var(--danger)", fontSize: "var(--fs-base)" }}>{err}</p>
         <Button variant="subtle" onClick={() => void refresh()} disabled={loading}>
-          {loading ? "Retrying…" : "Retry"}
+          {loading ? t("dashboard.retrying") : t("dashboard.retry")}
         </Button>
       </div>
     );
@@ -185,7 +191,11 @@ export function KnowledgeDashboard({
 
   // ── first load, nothing yet: hold rather than flash all-zero green ──
   if (loading && rollup === null && recurrence === null && rows.length === 0) {
-    return <p style={{ margin: 0, color: "var(--fg-muted)" }}>Loading…</p>;
+    return (
+      <p style={{ margin: 0, color: "var(--fg-muted)" }}>
+        {t("dashboard.loading")}
+      </p>
+    );
   }
 
   return (
@@ -194,7 +204,7 @@ export function KnowledgeDashboard({
         <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", fontSize: "var(--fs-sm)", color: "var(--warn)" }}>
           <span>{partial}</span>
           <Button variant="ghost" onClick={() => void refresh()} disabled={loading}>
-            {loading ? "…" : "Retry"}
+            {loading ? "…" : t("dashboard.retry")}
           </Button>
         </div>
       )}
@@ -207,7 +217,7 @@ export function KnowledgeDashboard({
           failed we drop the "no failure has recurred" clause. */}
       {attention.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
-          <SectionLabel>Needs attention</SectionLabel>
+          <SectionLabel>{t("dashboard.needsAttention")}</SectionLabel>
           <div
             style={{
               display: "grid",
@@ -224,17 +234,17 @@ export function KnowledgeDashboard({
         <EmptyDashboard />
       ) : totalKnowledge === 0 ? (
         <div style={{ ...calloutStyle(), color: "var(--fg-muted)" }}>
-          <p style={{ margin: 0 }}>
-            No lessons yet — harvest a busy project below to begin.
-          </p>
+          <p style={{ margin: 0 }}>{t("dashboard.coldStart")}</p>
         </div>
       ) : (
         <div style={calloutStyle()}>
-          <p style={{ margin: 0, color: "var(--ok)", fontWeight: 500 }}>All caught up.</p>
+          <p style={{ margin: 0, color: "var(--ok)", fontWeight: 500 }}>
+            {t("dashboard.allCaughtUp")}
+          </p>
           <p style={{ margin: "var(--sp-6) 0 0", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
             {recFailed
-              ? "Nothing awaiting review. Recurrence status couldn't be loaded — retry above."
-              : "Nothing awaiting review, and no known failure has recurred."}
+              ? t("dashboard.caughtUpRecFailed")
+              : t("dashboard.caughtUpQuiet")}
           </p>
         </div>
       )}
@@ -249,7 +259,7 @@ export function KnowledgeDashboard({
       {/* Trust signal: the roll-up mix across every project. */}
       {rollupMix && trustTotal(rollupMix) > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
-          <SectionLabel>Across all projects</SectionLabel>
+          <SectionLabel>{t("dashboard.acrossAllProjects")}</SectionLabel>
           <TrustBar mix={rollupMix} height={10} showLegend />
         </div>
       )}
@@ -258,7 +268,7 @@ export function KnowledgeDashboard({
           worth harvesting float to the top. */}
       {rows.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
-          <SectionLabel>Projects</SectionLabel>
+          <SectionLabel>{t("dashboard.projects")}</SectionLabel>
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
             {rows.map((row) => (
               <CoverageRowItem key={row.projectPath} row={row} onOpen={onOpenProject} />
@@ -289,6 +299,7 @@ function CoverageRowItem({
   row: CoverageRow;
   onOpen: (projectPath: string) => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const name = basename(row.projectPath);
   return (
     <li>
@@ -326,10 +337,10 @@ function CoverageRowItem({
             {name}
           </span>
           <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
-            {row.sessionCount} session{row.sessionCount === 1 ? "" : "s"}
+            {t("dashboard.sessions", { count: row.sessionCount })}
             {row.curated > 0
-              ? ` · ${row.curated} lesson${row.curated === 1 ? "" : "s"}`
-              : " · no lessons yet"}
+              ? ` · ${t("dashboard.lessons", { count: row.curated })}`
+              : ` · ${t("dashboard.noLessonsBadge")}`}
           </span>
         </span>
         <TrustBar mix={row.mix} />
@@ -339,6 +350,7 @@ function CoverageRowItem({
 }
 
 function EmptyDashboard() {
+  const { t } = useTranslation("knowledge");
   return (
     <div
       style={{
@@ -349,9 +361,9 @@ function EmptyDashboard() {
         color: "var(--fg-muted)",
       }}
     >
-      <p style={{ margin: 0 }}>No projects with indexed sessions yet.</p>
+      <p style={{ margin: 0 }}>{t("dashboard.emptyTitle")}</p>
       <p style={{ margin: "var(--sp-8) 0 0", fontSize: "var(--fs-sm)" }}>
-        Harvest lessons from your sessions: <code>claudepot lesson harvest</code>
+        {t("dashboard.harvestHint")} <code>claudepot lesson harvest</code>
       </p>
     </div>
   );

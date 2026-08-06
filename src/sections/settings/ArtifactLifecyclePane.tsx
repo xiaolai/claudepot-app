@@ -3,7 +3,9 @@
 // files so each shard stays under the loc-guardian limit.
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type { DisabledRecordDto, TrashEntryDto } from "../../types";
 import { ArtifactTrashList, PURGE_AFTER_DAYS } from "./ArtifactTrashList";
 import { DisabledArtifactList } from "./DisabledArtifactList";
@@ -19,6 +21,7 @@ export function ArtifactLifecyclePane({
    * surface alongside user-scoped ones. */
   projectRoot: string | null;
 }) {
+  const { t } = useTranslation("settings");
   const [disabled, setDisabled] = useState<DisabledRecordDto[] | null>(null);
   const [trash, setTrash] = useState<TrashEntryDto[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -40,7 +43,7 @@ export function ArtifactLifecyclePane({
       })
       .catch((err) => {
         if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadError(renderError(err));
       });
     return () => {
       cancelled = true;
@@ -57,7 +60,7 @@ export function ArtifactLifecyclePane({
         if (cancelled || n === 0) return;
         pushToast(
           "info",
-          `Auto-purged ${n} trash entr${n === 1 ? "y" : "ies"} older than ${PURGE_AFTER_DAYS} days`,
+          t("artifacts.autoPurged", { count: n, days: PURGE_AFTER_DAYS }),
         );
         refresh();
       })
@@ -73,8 +76,8 @@ export function ArtifactLifecyclePane({
 
   if (loadError) {
     return (
-      <Section title="Artifacts">
-        <Empty danger>Couldn't load artifact lifecycle: {loadError}</Empty>
+      <Section title={t("artifacts.sectionTitle")}>
+        <Empty danger>{t("artifacts.loadError", { error: loadError })}</Empty>
       </Section>
     );
   }

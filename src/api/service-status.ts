@@ -10,6 +10,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { i18n } from "../lib/i18n";
 import type { Preferences } from "../types";
 
 export type StatusTier = "ok" | "degraded" | "down" | "unknown";
@@ -155,12 +156,12 @@ export function tierColor(tier: StatusTier): string {
 export function tierLabel(tier: StatusTier): string {
   switch (tier) {
     case "ok":
-      return "All systems operational";
+      return i18n.t("serviceStatus.tier.ok");
     case "degraded":
-      return "Some services degraded";
+      return i18n.t("serviceStatus.tier.degraded");
     case "down":
-      return "Services down";
+      return i18n.t("serviceStatus.tier.down");
     case "unknown":
-      return "Status unknown";
+      return i18n.t("serviceStatus.tier.unknown");
   }
 }

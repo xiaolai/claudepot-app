@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "./primitives/Button";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "./primitives/Modal";
 
@@ -39,6 +40,7 @@ export function ConfirmDangerousAction({
   /** Render Confirm in danger style. Defaults to true. */
   danger?: boolean;
 }) {
+  const { t } = useTranslation("components");
   const [typed, setTyped] = useState("");
   const headingId = useId();
   const confirmDisabled =
@@ -72,22 +74,30 @@ export function ConfirmDangerousAction({
                 textTransform: "uppercase",
               }}
             >
-              Type{" "}
-              <code
-                style={{
-                  fontFamily: "var(--font-mono, var(--font))",
-                  color: "var(--fg)",
-                  textTransform: "none",
-                  letterSpacing: 0,
-                  padding: "0 var(--sp-4)",
-                  background: "var(--bg-sunken)",
-                  border: "var(--bw-hair) solid var(--line)",
-                  borderRadius: "var(--r-1)",
+              {/* Genuine mid-sentence element: the required token is a
+                  behavioral value the user must type verbatim, so it
+                  stays untranslated inside a translated sentence. */}
+              <Trans
+                ns="components"
+                i18nKey="modals.typeToConfirm"
+                values={{ token: typeToConfirm }}
+                components={{
+                  token: (
+                    <code
+                      style={{
+                        fontFamily: "var(--font-mono, var(--font))",
+                        color: "var(--fg)",
+                        textTransform: "none",
+                        letterSpacing: 0,
+                        padding: "0 var(--sp-4)",
+                        background: "var(--bg-sunken)",
+                        border: "var(--bw-hair) solid var(--line)",
+                        borderRadius: "var(--r-1)",
+                      }}
+                    />
+                  ),
                 }}
-              >
-                {typeToConfirm}
-              </code>{" "}
-              to confirm
+              />
             </label>
             <input
               id="type-to-confirm-input"
@@ -116,7 +126,7 @@ export function ConfirmDangerousAction({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t("modals.cancel")}
         </Button>
         <Button
           variant="solid"

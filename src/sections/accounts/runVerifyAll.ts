@@ -1,6 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { api } from "../../api";
 import { USAGE_REFETCH_EVENT } from "../../lib/events";
+import { renderError } from "../../lib/i18n-error";
 import type {
   AccountSummary,
   OperationProgressEvent,
@@ -150,7 +151,7 @@ export async function runVerifyAll(
       .catch((err) => {
         // listen failed — surface as a terminal error so the caller can
         // decrement its busy counter.
-        void finalize(`subscribe failed: ${err}`);
+        void finalize(renderError(err, "subscribe failed"));
       });
   });
 }

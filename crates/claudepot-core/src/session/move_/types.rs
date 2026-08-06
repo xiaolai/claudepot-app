@@ -106,6 +106,67 @@ pub enum MoveSessionError {
     Io(#[from] std::io::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Several messages name a `force_*` argument the GUI never shows;
+/// those stay frozen in the English text and the code exposes the
+/// session id instead, so a localized sentence can name the session and
+/// offer a button. Paths go in raw — `Path::display()` only.
+impl crate::error_code::ErrorCode for MoveSessionError {
+    fn code(&self) -> &'static str {
+        match self {
+            MoveSessionError::SessionNotFound(_, _) => "session_move.session_not_found",
+            MoveSessionError::InvalidSlug(_, _) => "session_move.invalid_slug",
+            MoveSessionError::SyncConflictPresent(_) => "session_move.sync_conflict_present",
+            MoveSessionError::LiveSession(_) => "session_move.live_session",
+            MoveSessionError::TargetCollision(_) => "session_move.target_collision",
+            MoveSessionError::SidecarCollision(_) => "session_move.sidecar_collision",
+            MoveSessionError::SameCwd => "session_move.same_cwd",
+            MoveSessionError::WorktreeSiblingStillLive(_) => {
+                "session_move.worktree_sibling_still_live"
+            }
+            MoveSessionError::InvalidConfigDir(_) => "session_move.invalid_config_dir",
+            MoveSessionError::TrashFailed(_) => "session_move.trash_failed",
+            MoveSessionError::Io(_) => "session_move.io",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            MoveSessionError::SessionNotFound(session_id, path) => serde_json::json!({
+                "session_id": session_id.to_string(),
+                "path": path.display().to_string(),
+            }),
+            MoveSessionError::InvalidSlug(slug, reason) => serde_json::json!({
+                "slug": slug,
+                "reason": reason,
+            }),
+            MoveSessionError::SyncConflictPresent(session_id) => serde_json::json!({
+                "session_id": session_id.to_string(),
+            }),
+            MoveSessionError::LiveSession(session_id) => serde_json::json!({
+                "session_id": session_id.to_string(),
+            }),
+            MoveSessionError::TargetCollision(session_id) => serde_json::json!({
+                "session_id": session_id.to_string(),
+            }),
+            MoveSessionError::SidecarCollision(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            MoveSessionError::SameCwd => serde_json::json!({}),
+            MoveSessionError::WorktreeSiblingStillLive(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            MoveSessionError::InvalidConfigDir(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            MoveSessionError::TrashFailed(detail) => serde_json::json!({ "detail": detail }),
+            MoveSessionError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 /// A project directory whose internal `cwd` refers to a non-existent
 /// directory and has no live-worktree escape hatch. The user's primary
 /// cue that a move / adopt is warranted.

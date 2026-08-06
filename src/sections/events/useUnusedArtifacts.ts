@@ -22,6 +22,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type { UnusedArtifactDto, UnusedReportDto } from "../../types";
 
 export interface UnusedArtifactsResult {
@@ -72,7 +73,7 @@ export function useUnusedArtifacts(enabled: boolean): UnusedArtifactsResult {
         // Fail closed: surface the error rather than rendering an empty
         // list, which would read as "nothing is unused" — a confident
         // wrong answer instead of an honest failure.
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(renderError(e));
       } finally {
         if (!cancelled) setLoading(false);
       }

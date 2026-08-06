@@ -149,6 +149,106 @@ pub enum BoardError {
     CorruptRow { series: String, what: &'static str },
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Every identifier below reaches its variant already run through
+/// [`redact_identifier`] at the construction site, so `params` echoes
+/// the same masked, bounded, control-free string the message does — it
+/// widens nothing. A new constructor that skips the redactor would
+/// leak here as well as into the log.
+impl crate::error_code::ErrorCode for BoardError {
+    fn code(&self) -> &'static str {
+        match self {
+            BoardError::Sql(_) => "board.sql",
+            BoardError::Io(_) => "board.io",
+            BoardError::Json(_) => "board.json",
+            BoardError::BoardNotFound(_) => "board.board_not_found",
+            BoardError::SeriesNotFound { .. } => "board.series_not_found",
+            BoardError::DuplicateSeries { .. } => "board.duplicate_series",
+            BoardError::RevisionConflict { .. } => "board.revision_conflict",
+            BoardError::ColumnTypeMismatch { .. } => "board.column_type_mismatch",
+            BoardError::ColumnCountMismatch { .. } => "board.column_count_mismatch",
+            BoardError::InvalidName(_) => "board.invalid_name",
+            BoardError::InvalidTimestamp => "board.invalid_timestamp",
+            BoardError::SequenceReplay { .. } => "board.sequence_replay",
+            BoardError::CapExceeded { .. } => "board.cap_exceeded",
+            BoardError::InvalidSpec(_) => "board.invalid_spec",
+            BoardError::UnsupportedExportVersion { .. } => "board.unsupported_export_version",
+            BoardError::SchemaTooNew { .. } => "board.schema_too_new",
+            BoardError::SequenceOutOfRange { .. } => "board.sequence_out_of_range",
+            BoardError::InvalidEnvelope(_) => "board.invalid_envelope",
+            BoardError::CorruptRow { .. } => "board.corrupt_row",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            BoardError::Sql(e) => json!({ "detail": e.to_string() }),
+            BoardError::Io(e) => json!({ "detail": e.to_string() }),
+            BoardError::Json(e) => json!({ "detail": e.to_string() }),
+            BoardError::BoardNotFound(board_id) => json!({ "board_id": board_id }),
+            BoardError::SeriesNotFound { board, series } => {
+                json!({ "board": board, "series": series })
+            }
+            BoardError::DuplicateSeries { board, series } => {
+                json!({ "board": board, "series": series })
+            }
+            BoardError::RevisionConflict {
+                board,
+                base,
+                current,
+            } => json!({ "board": board, "base": base, "current": current }),
+            BoardError::ColumnTypeMismatch {
+                series,
+                column,
+                expected,
+                actual,
+            } => json!({
+                "series": series,
+                "column": column,
+                "expected": expected,
+                "actual": actual,
+            }),
+            BoardError::ColumnCountMismatch {
+                series,
+                expected,
+                actual,
+            } => json!({ "series": series, "expected": expected, "actual": actual }),
+            BoardError::InvalidName(name) => json!({ "name": name }),
+            BoardError::InvalidTimestamp => json!({}),
+            // `reported_writer`, not `writer`: boards.db has no IPC
+            // channel between its writers, so `writer_id` is whatever
+            // the writing session called itself. The param name has to
+            // carry that, because a localized sentence composed from it
+            // would otherwise assert an identity nothing verified.
+            BoardError::SequenceReplay {
+                writer,
+                series,
+                seq,
+            } => json!({ "reported_writer": writer, "series": series, "seq": seq }),
+            BoardError::CapExceeded {
+                what,
+                limit,
+                actual,
+            } => json!({ "what": what, "limit": limit, "actual": actual }),
+            BoardError::InvalidSpec(detail) => json!({ "detail": detail }),
+            BoardError::UnsupportedExportVersion { found, expected } => {
+                json!({ "found": found, "expected": expected })
+            }
+            BoardError::SchemaTooNew { found, supported } => {
+                json!({ "found": found, "supported": supported })
+            }
+            BoardError::SequenceOutOfRange { seq, rows } => json!({ "seq": seq, "rows": rows }),
+            // A fixed reason string, never serde's text — see the
+            // variant's own doc comment for why.
+            BoardError::InvalidEnvelope(reason) => json!({ "reason": reason }),
+            BoardError::CorruptRow { series, what } => json!({ "series": series, "what": what }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

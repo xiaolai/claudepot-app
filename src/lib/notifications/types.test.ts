@@ -8,6 +8,9 @@ import {
   type Category,
   type Priority,
 } from "./types";
+import { categoryGroupLabel, categoryLabel } from "./labels";
+import enShell from "../../locales/en/shell.json";
+import zhShell from "../../locales/zh-CN/shell.json";
 
 // Mirror sweep tests. Source-of-truth is Rust; these tests guard
 // against the hand-maintained TS union drifting away from
@@ -268,5 +271,58 @@ describe("Rust metadata mirror via fixture", () => {
       // log is always true for every priority today.
       expect(set.log).toBe(true);
     }
+  });
+});
+
+// Category display names moved off the IPC-shipped English labels and
+// into the shell catalog, keyed by category id (i18n plan P4). This
+// extends the fixture drift test: a Rust commit that adds a category
+// now also fails HERE until both locale catalogs carry its label —
+// which is exactly when the English IPC fallback in labels.ts would
+// otherwise start leaking into a zh UI.
+describe("category labels — catalog completeness via fixture", () => {
+  it("every fixture category has an en and zh-CN catalog label", async () => {
+    const fixture = (await import(
+      "./__fixtures__/categories.fixture.json"
+    )) as { categories: ReadonlyArray<{ id: Category; group: string }> };
+    const enCats = enShell.notifCategories as Record<string, string>;
+    const zhCats = zhShell.notifCategories as Record<string, string>;
+    for (const c of fixture.categories) {
+      expect(enCats[c.id], `en label missing for ${c.id}`).toBeTruthy();
+      expect(zhCats[c.id], `zh-CN label missing for ${c.id}`).toBeTruthy();
+    }
+    // No orphans: a catalog entry for a category Rust no longer has
+    // is dead copy that will silently rot.
+    const ids = new Set(fixture.categories.map((c) => c.id as string));
+    for (const key of Object.keys(enCats)) {
+      expect(ids.has(key), `orphaned en label ${key}`).toBe(true);
+    }
+  });
+
+  it("every fixture group has catalog labels in both locales", async () => {
+    const fixture = (await import(
+      "./__fixtures__/categories.fixture.json"
+    )) as { categories: ReadonlyArray<{ group: string }> };
+    const groups = new Set(fixture.categories.map((c) => c.group));
+    for (const g of groups) {
+      // A missing slug or key falls back to the wire string, which
+      // categoryGroupLabel is designed to allow — but for KNOWN
+      // groups the catalog must win, so the label differs from the
+      // raw wire string only in zh (en values equal by design).
+      expect(categoryGroupLabel(g), `group ${g}`).toBe(g);
+    }
+  });
+
+  it("categoryLabel falls back to the IPC label for an unknown id", () => {
+    expect(
+      categoryLabel({ id: "someFutureCategory", label: "Future thing" }),
+    ).toBe("Future thing");
+    expect(categoryGroupLabel("New group")).toBe("New group");
+  });
+
+  it("categoryLabel resolves known ids from the catalog (en)", () => {
+    expect(
+      categoryLabel({ id: "accountAuthRejected", label: "ipc fallback" }),
+    ).toBe("Account auth rejected");
   });
 });

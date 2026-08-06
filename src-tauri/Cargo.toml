@@ -81,6 +81,10 @@ notify-debouncer-mini.workspace = true
 # stores so a process restart can reuse persisted hashes.
 sha2.workspace = true
 hex.workspace = true
+# "Follow system" locale resolution for the Rust-side i18n catalog
+# (`src/i18n.rs`) — see the workspace manifest for why this and not
+# an env-var-based source.
+sys-locale.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Override the macOS Dock icon at runtime via NSApplication's

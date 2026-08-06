@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
+import { renderError } from "../lib/i18n-error";
 import type { AccountSummary } from "../types";
 import type { OpHandle } from "./useOperations";
 import {
@@ -45,11 +47,11 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
     withBusy(`cli-${a.uuid}`, async () => {
       try {
         await api.cliUse(a.email, force);
-        pushToast("info", `CLI switched to ${a.email}`);
+        pushToast("info", i18n.t("account.cliSwitched", { email: a.email }));
         await refresh();
         rebuildTray();
       } catch (e) {
-        const msg = `${e}`;
+        const msg = renderError(e);
         // LiveSessionConflict from swap.rs — offer a force retry as an
         // Undo affordance on the error toast. Declining (letting the
         // toast expire) leaves the swap uncommitted; clicking Undo is
@@ -57,13 +59,13 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
         if (msg.toLowerCase().includes("claude code process is running")) {
           pushToast(
             "error",
-            `Claude Code is running — its token refresh can revert the swap. Quit CC first, or override.`,
+            i18n.t("account.ccRunningOverride"),
             () => useCli(a, true),
-            { undoLabel: "Override" },
+            { undoLabel: i18n.t("account.override") },
           );
           return;
         }
-        pushToast("error", `CLI switch failed: ${msg}`);
+        pushToast("error", renderError(e, i18n.t("account.cliSwitchFailed")));
       }
     });
 
@@ -71,7 +73,7 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
     try {
       await api.accountLoginCancel();
     } catch (e) {
-      pushToast("error", `Cancel failed: ${e}`);
+      pushToast("error", renderError(e, i18n.t("account.cancelFailed")));
     }
   };
 
@@ -85,37 +87,46 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
         // carries the canonical Cancel button via `onCancel`. A short
         // info toast tells the user the browser is opening so the
         // attention shift to the browser tab is expected.
-        pushToast("info", `Opening browser — sign in as ${a.email}…`);
+        pushToast(
+          "info",
+          i18n.t("account.openingBrowser", { email: a.email }),
+        );
         openOpModal({
           opId,
-          title: `Re-login: ${a.email}`,
+          title: i18n.t("account.reloginTitle", { email: a.email }),
           phases: LOGIN_PHASES,
           fetchStatus: api.accountLoginStatus,
           renderResult: renderLoginResult,
           onCancel: cancelLogin,
-          cancelLabel: "Cancel login",
+          cancelLabel: i18n.t("account.cancelLogin"),
           onComplete: () => {
-            pushToast("info", `Signed in as ${a.email}`);
+            pushToast("info", i18n.t("account.signedIn", { email: a.email }));
             void refresh();
             rebuildTray();
           },
           onError: (detail) => {
             const msg = detail ?? "";
             if (msg.toLowerCase().includes("cancel")) {
-              pushToast("info", "Login cancelled.");
+              pushToast("info", i18n.t("account.loginCancelled"));
             } else {
-              pushToast("error", `Login failed: ${msg || "unknown"}`);
+              pushToast(
+                "error",
+                renderError(
+                  msg || i18n.t("ui.unknown"),
+                  i18n.t("account.loginFailed"),
+                ),
+              );
             }
           },
         });
       } catch (e) {
-        const msg = `${e}`;
+        const msg = renderError(e);
         if (msg.toLowerCase().includes("already in progress")) {
-          pushToast("error", "A login is already in progress.");
+          pushToast("error", i18n.t("account.loginInProgress"));
         } else if (msg.toLowerCase().includes("cancelled")) {
-          pushToast("info", "Login cancelled.");
+          pushToast("info", i18n.t("account.loginCancelled"));
         } else {
-          pushToast("error", `Login failed: ${msg}`);
+          pushToast("error", renderError(e, i18n.t("account.loginFailed")));
         }
       }
     });
@@ -127,13 +138,16 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
         pushToast(
           "info",
           noLaunch
-            ? `Desktop set to ${a.email} (not launched)`
-            : `Desktop switched to ${a.email}`,
+            ? i18n.t("account.desktopSetNoLaunch", { email: a.email })
+            : i18n.t("account.desktopSwitched", { email: a.email }),
         );
         await refresh();
         rebuildTray();
       } catch (e) {
-        pushToast("error", `Desktop switch failed: ${e}`);
+        pushToast(
+          "error",
+          renderError(e, i18n.t("account.desktopSwitchFailed")),
+        );
       }
     });
 
@@ -161,13 +175,16 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
         const r = await api.desktopAdopt(a.uuid, overwrite);
         pushToast(
           "info",
-          `Bound Desktop session to ${r.account_email} (${r.captured_items} item(s)).`,
+          i18n.t("account.desktopBound", {
+            email: r.account_email,
+            items: r.captured_items,
+          }),
         );
         await refresh();
         rebuildTray();
         return true;
       } catch (e) {
-        pushToast("error", `Desktop bind failed: ${e}`);
+        pushToast("error", renderError(e, i18n.t("account.desktopBindFailed")));
         return false;
       }
     });
@@ -179,17 +196,20 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
     withBusy("desktop-clear", async () => {
       try {
         const r = await api.desktopClear(keepSnapshot);
-        const who = r.email ?? "the active session";
+        const who = r.email ?? i18n.t("account.activeSessionFallback");
         pushToast(
           "info",
           r.snapshot_kept
-            ? `Signed Desktop out (${who}); snapshot preserved.`
-            : `Signed Desktop out (${who}); snapshot discarded.`,
+            ? i18n.t("account.desktopSignedOutKept", { who })
+            : i18n.t("account.desktopSignedOutDiscarded", { who }),
         );
         await refresh();
         rebuildTray();
       } catch (e) {
-        pushToast("error", `Desktop clear failed: ${e}`);
+        pushToast(
+          "error",
+          renderError(e, i18n.t("account.desktopClearFailed")),
+        );
       }
     });
 
@@ -201,17 +221,22 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
     withBusy(`rm-${a.uuid}`, async () => {
       try {
         const r = await api.accountRemove(a.uuid);
-        pushToast("info", `Removed ${r.email}`);
+        pushToast("info", i18n.t("account.removed", { email: r.email }));
         if (r.warnings.length) {
           // Cleanup warnings are non-fatal (stale Desktop profile file,
           // etc.) — the account row was still removed successfully.
           // Use info tone so the surface matches the severity.
-          pushToast("info", `Note: ${r.warnings.join(", ")}`);
+          pushToast(
+            "info",
+            i18n.t("account.removeWarnings", {
+              warnings: r.warnings.join(", "),
+            }),
+          );
         }
         await refresh();
         rebuildTray();
       } catch (e) {
-        pushToast("error", `Remove failed: ${e}`);
+        pushToast("error", renderError(e, i18n.t("account.removeFailed")));
       }
     });
 
@@ -226,13 +251,13 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
     let undone = false;
     pushToast(
       "info",
-      `Removing ${a.email}…`,
+      i18n.t("account.removing", { email: a.email }),
       () => {
         undone = true;
       },
       {
         undoMs: 5000,
-        undoLabel: "Undo",
+        undoLabel: i18n.t("ui.undo"),
         dedupeKey: `rm-${a.uuid}`,
         onCommit: () => {
           if (undone) return;

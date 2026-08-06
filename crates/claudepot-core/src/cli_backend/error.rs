@@ -3,6 +3,8 @@
 //! next to its boundary per rust-conventions ("one enum per module
 //! boundary"). `crate::error::SwapError` remains a re-export.
 
+use crate::error_code::ErrorCode;
+use serde_json::{json, Value};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -47,4 +49,50 @@ pub enum SwapError {
 
     #[error("identity verification failed: {0}")]
     IdentityVerificationFailed(String),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Module segment is `cli_backend` — the owning module, which is also
+/// the `cli` noun's credential slot.
+impl ErrorCode for SwapError {
+    fn code(&self) -> &'static str {
+        match self {
+            SwapError::NoStoredCredentials(_) => "cli_backend.no_stored_credentials",
+            SwapError::NoDefaultCredentials => "cli_backend.no_default_credentials",
+            SwapError::WriteFailed(_) => "cli_backend.write_failed",
+            SwapError::KeychainError(_) => "cli_backend.keychain_error",
+            SwapError::FileError(_) => "cli_backend.file_error",
+            SwapError::CorruptBlob(_) => "cli_backend.corrupt_blob",
+            SwapError::RefreshFailed(_) => "cli_backend.refresh_failed",
+            SwapError::IdentityMismatch { .. } => "cli_backend.identity_mismatch",
+            SwapError::LiveSessionConflict => "cli_backend.live_session_conflict",
+            SwapError::IdentityVerificationFailed(_) => "cli_backend.identity_verification_failed",
+        }
+    }
+
+    fn params(&self) -> Value {
+        match self {
+            // The account row's uuid, never a credential.
+            SwapError::NoStoredCredentials(uuid) => json!({ "uuid": uuid.to_string() }),
+            SwapError::NoDefaultCredentials => json!({}),
+            SwapError::WriteFailed(detail) => json!({ "detail": detail }),
+            SwapError::KeychainError(detail) => json!({ "detail": detail }),
+            SwapError::FileError(e) => json!({ "detail": e.to_string() }),
+            // Every constructor passes a serde/JSON parse message or a
+            // `.claude.json:`-prefixed one — a shape complaint, never
+            // the blob's contents. Re-check that before widening.
+            SwapError::CorruptBlob(detail) => json!({ "detail": detail }),
+            SwapError::RefreshFailed(detail) => json!({ "detail": detail }),
+            // Two emails, both already first-class UI data (the account
+            // noun's name is its email). No token material.
+            SwapError::IdentityMismatch {
+                stored_email,
+                actual_email,
+            } => json!({ "stored_email": stored_email, "actual_email": actual_email }),
+            SwapError::LiveSessionConflict => json!({}),
+            SwapError::IdentityVerificationFailed(detail) => json!({ "detail": detail }),
+        }
+    }
 }

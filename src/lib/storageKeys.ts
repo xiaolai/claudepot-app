@@ -43,6 +43,11 @@ export const SECTION_SUBROUTE_KEY_PREFIX = "claudepot.subRoute.";
 // --- Shell chrome ---------------------------------------------------
 /** Explicit theme override (owner: src/hooks/useTheme.ts). */
 export const THEME_KEY = "cp-theme";
+/** Boot mirror of `Preferences.locale` so first paint renders in the
+ *  right language without waiting for IPC (owner: src/lib/i18n.ts —
+ *  preferences.json is authoritative; this is a cache of the
+ *  preference, absent = follow system). */
+export const LOCALE_KEY = "claudepot.locale";
 /** Developer-mode toggle (owner: src/hooks/useDevMode.ts). */
 export const DEV_MODE_KEY = "cp-dev-mode";
 /** Sidebar collapse state (owner: src/hooks/useSidebarCollapsed.ts). */

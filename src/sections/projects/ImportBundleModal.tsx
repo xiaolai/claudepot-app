@@ -1,9 +1,11 @@
 import { useId, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   migrateApi,
   type ImportPlan,
   type ImportReceipt,
 } from "../../api/migrate";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import {
   Modal,
@@ -35,6 +37,7 @@ export function ImportBundleModal({
   onCompleted: (receipt: ImportReceipt) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const headingId = useId();
   const bundleId = useId();
   const passId = useId();
@@ -53,6 +56,13 @@ export function ImportBundleModal({
 
   const isEncrypted = bundlePath.endsWith(".age");
 
+  const modeLabel = (m: "skip" | "merge" | "replace"): string =>
+    m === "skip"
+      ? t("import.modeSkip")
+      : m === "merge"
+        ? t("import.modeMerge")
+        : t("import.modeReplace");
+
   async function handleInspect() {
     if (!bundlePath) return;
     setInspecting(true);
@@ -65,7 +75,7 @@ export function ImportBundleModal({
       );
       setPlan(p);
     } catch (e) {
-      setPlanError(String(e));
+      setPlanError(renderError(e));
     } finally {
       setInspecting(false);
     }
@@ -84,7 +94,7 @@ export function ImportBundleModal({
       });
       onCompleted(receipt);
     } catch (e) {
-      onError(String(e));
+      onError(renderError(e));
     } finally {
       setSubmitting(false);
       setPassphrase("");
@@ -93,9 +103,9 @@ export function ImportBundleModal({
 
   return (
     <Modal open onClose={onClose} aria-labelledby={headingId}>
-      <ModalHeader title="Import bundle" id={headingId} onClose={onClose} />
+      <ModalHeader title={t("import.title")} id={headingId} onClose={onClose} />
       <ModalBody>
-        <label htmlFor={bundleId}>Bundle file</label>
+        <label htmlFor={bundleId}>{t("import.bundleLabel")}</label>
         <input
           id={bundleId}
           type="text"
@@ -108,7 +118,7 @@ export function ImportBundleModal({
         {isEncrypted && (
           <>
             <label htmlFor={passId} style={{ display: "block", marginTop: "var(--sp-8)" }}>
-              Passphrase
+              {t("import.passphraseLabel")}
             </label>
             <input
               id={passId}
@@ -123,7 +133,7 @@ export function ImportBundleModal({
 
         <div style={{ marginTop: "var(--sp-12)" }}>
           <Button onClick={handleInspect} disabled={inspecting || !bundlePath}>
-            {inspecting ? "Inspecting…" : "Inspect"}
+            {inspecting ? t("import.inspecting") : t("import.inspect")}
           </Button>
         </div>
 
@@ -142,29 +152,36 @@ export function ImportBundleModal({
               padding: "var(--sp-12)",
             }}
           >
-            <h3 style={{ margin: 0, marginBottom: "var(--sp-8)" }}>Bundle manifest</h3>
+            <h3 style={{ margin: 0, marginBottom: "var(--sp-8)" }}>{t("import.manifestTitle")}</h3>
             <p style={{ margin: 0, marginBottom: "var(--sp-4)" }}>
-              schema {plan.schemaVersion} · claudepot {plan.claudepotVersion} ·{" "}
-              {plan.sourceOs}/{plan.sourceArch}
+              {t("import.manifestMeta", {
+                schema: plan.schemaVersion,
+                version: plan.claudepotVersion,
+                os: plan.sourceOs,
+                arch: plan.sourceArch,
+              })}
             </p>
             <p style={{ margin: 0, marginBottom: "var(--sp-4)" }}>
-              Created: {plan.createdAt}
+              {t("import.createdAt", { date: plan.createdAt })}
             </p>
             <p style={{ margin: 0, marginBottom: "var(--sp-8)" }}>
-              Flags: global={String(plan.flags.includeGlobal)} · worktree=
-              {String(plan.flags.includeWorktree)} · live=
-              {String(plan.flags.includeLive)} · state=
-              {String(plan.flags.includeClaudepotState)} · enc=
-              {String(plan.flags.encrypted)} · sig=
-              {String(plan.flags.signed)}
+              {t("import.flagsLine", {
+                global: String(plan.flags.includeGlobal),
+                worktree: String(plan.flags.includeWorktree),
+                live: String(plan.flags.includeLive),
+                state: String(plan.flags.includeClaudepotState),
+                enc: String(plan.flags.encrypted),
+                sig: String(plan.flags.signed),
+              })}
             </p>
             <p style={{ margin: 0, marginBottom: "var(--sp-4)" }}>
-              Projects ({plan.projects.length}):
+              {t("import.projectsCount", { n: plan.projects.length })}
             </p>
             <ul style={{ marginTop: "var(--sp-4)" }}>
               {plan.projects.map((p) => (
                 <li key={p.id}>
-                  <code>{p.sourceCwd}</code> ({p.sessionCount} sessions)
+                  <code>{p.sourceCwd}</code>{" "}
+                  {t("import.sessionsSuffix", { n: p.sessionCount })}
                 </li>
               ))}
             </ul>
@@ -172,7 +189,7 @@ export function ImportBundleModal({
         )}
 
         <fieldset style={{ marginTop: "var(--sp-16)", border: 0, padding: 0 }}>
-          <legend style={{ marginBottom: "var(--sp-6)" }}>Conflict mode</legend>
+          <legend style={{ marginBottom: "var(--sp-6)" }}>{t("import.conflictLegend")}</legend>
           {(["skip", "merge", "replace"] as const).map((m) => (
             <label
               key={m}
@@ -184,21 +201,24 @@ export function ImportBundleModal({
                 checked={mode === m}
                 onChange={() => setMode(m)}
               />{" "}
-              {m}
+              {modeLabel(m)}
             </label>
           ))}
         </fieldset>
 
         <fieldset style={{ marginTop: "var(--sp-12)", border: 0, padding: 0 }}>
-          <legend style={{ marginBottom: "var(--sp-6)" }}>Trust gates</legend>
+          <legend style={{ marginBottom: "var(--sp-6)" }}>{t("import.trustLegend")}</legend>
           <label style={{ display: "block" }}>
             <input
               type="checkbox"
               checked={acceptHooks}
               onChange={(e) => setAcceptHooks(e.target.checked)}
             />{" "}
-            Accept all bundled hooks (default: write{" "}
-            <code>proposed-hooks.json</code> for review)
+            <Trans
+              ns="projects"
+              i18nKey="import.acceptHooks"
+              components={{ f: <code>proposed-hooks.json</code> }}
+            />
           </label>
           <label style={{ display: "block" }}>
             <input
@@ -206,7 +226,7 @@ export function ImportBundleModal({
               checked={acceptMcp}
               onChange={(e) => setAcceptMcp(e.target.checked)}
             />{" "}
-            Accept all needs-resolution MCP entries
+            {t("import.acceptMcp")}
           </label>
         </fieldset>
 
@@ -216,19 +236,23 @@ export function ImportBundleModal({
             checked={dryRun}
             onChange={(e) => setDryRun(e.target.checked)}
           />{" "}
-          Dry run (don't apply yet)
+          {t("import.dryRun")}
         </label>
       </ModalBody>
       <ModalFooter>
         <Button onClick={onClose} disabled={submitting}>
-          Cancel
+          {t("shared.cancel")}
         </Button>
         <Button
           variant="solid"
           onClick={handleImport}
           disabled={submitting || !bundlePath || !plan}
         >
-          {submitting ? "Importing…" : dryRun ? "Plan import" : "Import"}
+          {submitting
+            ? t("import.importing")
+            : dryRun
+              ? t("import.planImport")
+              : t("import.submit")}
         </Button>
       </ModalFooter>
     </Modal>

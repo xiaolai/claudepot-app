@@ -1,0 +1,641 @@
+{
+  "comment": [
+    "Shared memory / Knowledge commands, plus the services::* orchestration",
+    "enums and settings_writer.",
+    "",
+    "Schema and rules: see 00-foundation.json. One file per domain so the",
+    "registry can be appended to in parallel; a duplicate code across two",
+    "files is a hard error in the loader.",
+    "",
+    "Two groups live here, and they are not the same kind of thing.",
+    "",
+    "1. owner: \"core\" — the seven enums that were the last ones still",
+    "   riding generic {{detail}}-only command codes (accounts.login_failed,",
+    "   desktop.switch_failed, and friends, all now deleted). Three",
+    "   distinctions in this group are load-bearing and a translator must",
+    "   not smooth them over:",
+    "",
+    "     account_register.cc_live_refresh_skipped is a REFUSAL, not a",
+    "       failure. Claudepot declined to spend the single-use refresh",
+    "       token because a live `claude` session is running and rotating",
+    "       it would sign that session out. It is strictly transient — the",
+    "       next pass succeeds. A sentence that reads as a re-login prompt",
+    "       is actively harmful.",
+    "",
+    "     account_register.auth_rejected IS the re-login case, and the only",
+    "       one. Both the access token and its refresh token were refused.",
+    "       account_register.cc_changed_during_refresh sits between them:",
+    "       nothing was lost, retry.",
+    "",
+    "     wake.no_credentials / wake.identity_unverified mean NOTHING WAS",
+    "       BILLED; wake.token / wake.request mean a request may have gone",
+    "       out. The user's question is \"did that cost me anything\", and",
+    "       one shared sentence would answer it wrong half the time.",
+    "",
+    "   desktop_clear.data_dir_missing is a success in disguise — Desktop",
+    "   was already signed out. Keep that framing.",
+    "",
+    "   settings_write.contended means another writer (Claude Code, or the",
+    "   user's editor) kept moving the file while we rebased onto it.",
+    "   Nothing was written and nothing was lost; the remedy is \"try",
+    "   again\", never a repair or a restore.",
+    "",
+    "2. owner: \"command\" — ad-hoc rejections raised in",
+    "   src-tauri/src/commands/shared_memory.rs. Their English carries the",
+    "   internal command label the old frontend regex layer used to strip",
+    "   (\"list: \", \"counts_by_project: \"); the code is what replaces that",
+    "   guesswork, and `message` keeps the label so the untranslated",
+    "   fallback still says exactly what it always said.",
+    "",
+    "   shared_memory.index_unavailable and shared_memory.excerpt_unavailable",
+    "   are the two that inherited real remediation copy from the deleted",
+    "   src/lib/errors.ts regex layer. The first is \"restart, or rebuild",
+    "   from Settings -> Cleanup\"; the second is \"the transcript moved or",
+    "   was pruned\". excerpt_unavailable is raised only for a locator that",
+    "   is unknown to the index or whose file is NotFound on disk — a",
+    "   permission error is shared_memory.read_failed, because telling a",
+    "   user their transcript is gone when it is merely unreadable would",
+    "   send them looking for a backup they do not need."
+  ],
+  "codes": [
+    {
+      "code": "account_register.no_credentials",
+      "owner": "core",
+      "params": [],
+      "message": "no CC credentials found — log in with `claude auth login` first"
+    },
+    {
+      "code": "account_register.credential_read",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "failed to read credentials: keychain item did not decode"
+    },
+    {
+      "code": "account_register.credential_write",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "failed to write credentials: keychain item did not read back"
+    },
+    {
+      "code": "account_register.profile_fetch",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "profile fetch failed: /profile returned 503"
+    },
+    {
+      "code": "account_register.already_registered",
+      "owner": "core",
+      "params": [
+        "email",
+        "uuid"
+      ],
+      "message": "already registered: a@example.com (uuid: 00000000-0000-0000-0000-000000000000)"
+    },
+    {
+      "code": "account_register.store",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "store error: no such table: accounts"
+    },
+    {
+      "code": "account_register.not_found",
+      "owner": "core",
+      "params": [],
+      "message": "account not found"
+    },
+    {
+      "code": "account_register.auth_rejected",
+      "owner": "core",
+      "params": [],
+      "message": "CC's stored login is no longer valid — sign in again to Claude Code"
+    },
+    {
+      "code": "account_register.cc_changed_during_refresh",
+      "owner": "core",
+      "params": [],
+      "message": "CC credentials changed during refresh — retry sync"
+    },
+    {
+      "code": "account_register.cc_live_refresh_skipped",
+      "owner": "core",
+      "params": [],
+      "message": "a live Claude Code session is running — skipped token refresh to avoid signing it out"
+    },
+    {
+      "code": "account_verify.account_not_found",
+      "owner": "core",
+      "params": [
+        "uuid"
+      ],
+      "message": "no account with uuid 00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "code": "account_verify.no_blob",
+      "owner": "core",
+      "params": [],
+      "message": "no credential blob stored for this account"
+    },
+    {
+      "code": "account_verify.corrupt_blob",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "stored blob is not valid JSON: expected value at line 1 column 2"
+    },
+    {
+      "code": "account_verify.store",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "store update failed: database is locked"
+    },
+    {
+      "code": "wake.not_found",
+      "owner": "core",
+      "params": [],
+      "message": "account not found"
+    },
+    {
+      "code": "wake.no_credentials",
+      "owner": "core",
+      "params": [
+        "email"
+      ],
+      "message": "no credentials stored for a@example.com"
+    },
+    {
+      "code": "wake.identity_unverified",
+      "owner": "core",
+      "params": [
+        "email",
+        "status"
+      ],
+      "message": "a@example.com failed identity verification (status: drift) — run `claudepot account verify` to reconcile"
+    },
+    {
+      "code": "wake.store",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "store error: database is locked"
+    },
+    {
+      "code": "wake.token",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "could not obtain an access token: no stored credentials for this account"
+    },
+    {
+      "code": "wake.request",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "wake request failed: /v1/messages returned 429"
+    },
+    {
+      "code": "desktop_switch.no_snapshot",
+      "owner": "core",
+      "params": [
+        "email"
+      ],
+      "message": "a@example.com has no Desktop profile yet — sign in via the Desktop app first"
+    },
+    {
+      "code": "desktop_switch.not_found",
+      "owner": "core",
+      "params": [
+        "uuid"
+      ],
+      "message": "target account 00000000-0000-0000-0000-000000000000 is not registered"
+    },
+    {
+      "code": "desktop_switch.unsupported",
+      "owner": "core",
+      "params": [],
+      "message": "Desktop is not supported on this platform"
+    },
+    {
+      "code": "desktop_switch.store",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "store: no such table: accounts"
+    },
+    {
+      "code": "desktop_adopt.identity_mismatch",
+      "owner": "core",
+      "params": [
+        "expected",
+        "actual"
+      ],
+      "message": "live Desktop identity is b@example.com, not a@example.com"
+    },
+    {
+      "code": "desktop_adopt.not_found",
+      "owner": "core",
+      "params": [
+        "uuid"
+      ],
+      "message": "target account 00000000-0000-0000-0000-000000000000 is not registered"
+    },
+    {
+      "code": "desktop_adopt.profile_exists",
+      "owner": "core",
+      "params": [],
+      "message": "target already has a profile; pass overwrite=true to replace"
+    },
+    {
+      "code": "desktop_adopt.unsupported",
+      "owner": "core",
+      "params": [],
+      "message": "Desktop is not supported on this platform"
+    },
+    {
+      "code": "desktop_adopt.data_dir_unreadable",
+      "owner": "core",
+      "params": [],
+      "message": "data_dir missing or unreadable"
+    },
+    {
+      "code": "desktop_adopt.swap",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "swap error: Claude Desktop is still running after quit timeout"
+    },
+    {
+      "code": "desktop_adopt.store",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "store: no such table: accounts"
+    },
+    {
+      "code": "desktop_adopt.lock",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "lock: desktop operation already in progress — retry in a moment"
+    },
+    {
+      "code": "desktop_adopt.sidecar",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "sidecar write failed: permission denied"
+    },
+    {
+      "code": "desktop_clear.unsupported",
+      "owner": "core",
+      "params": [],
+      "message": "Desktop is not supported on this platform"
+    },
+    {
+      "code": "desktop_clear.data_dir_missing",
+      "owner": "core",
+      "params": [],
+      "message": "data_dir missing — Desktop is already signed out"
+    },
+    {
+      "code": "desktop_clear.swap",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "swap error: Claude Desktop is still running after quit timeout"
+    },
+    {
+      "code": "desktop_clear.fs",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "filesystem: permission denied"
+    },
+    {
+      "code": "desktop_clear.store",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "store: no such table: accounts"
+    },
+    {
+      "code": "desktop_clear.lock",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "lock: desktop operation already in progress — retry in a moment"
+    },
+    {
+      "code": "settings_write.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io: permission denied"
+    },
+    {
+      "code": "settings_write.json_parse",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "json parse: invalid type: string \"nope\", expected u32 at line 1 column 6"
+    },
+    {
+      "code": "settings_write.not_a_json_object",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "settings file is not a JSON object at /Users/me/.claude/settings.json"
+    },
+    {
+      "code": "settings_write.unsupported_layer",
+      "owner": "core",
+      "params": [
+        "layer"
+      ],
+      "message": "write to Project is not supported (commit-bound or admin-managed)"
+    },
+    {
+      "code": "settings_write.contended",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "/Users/me/.claude/settings.json is being written by something else; try again"
+    },
+    {
+      "code": "shared_memory.index_unavailable",
+      "owner": "command",
+      "params": [],
+      "message": "session index unavailable (open failed at startup)"
+    },
+    {
+      "code": "shared_memory.search_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "search: no such column: exchanges.snippet"
+    },
+    {
+      "code": "shared_memory.read_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "read: sqlite error: database is locked"
+    },
+    {
+      "code": "shared_memory.excerpt_unavailable",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "read: locator references unknown file_path: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
+    },
+    {
+      "code": "shared_memory.list_memories_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "list: sqlite error: database is locked"
+    },
+    {
+      "code": "shared_memory.invalid_scope",
+      "owner": "command",
+      "params": [
+        "scope"
+      ],
+      "message": "invalid scope"
+    },
+    {
+      "code": "shared_memory.invalid_kind",
+      "owner": "command",
+      "params": [
+        "kind"
+      ],
+      "message": "invalid kind"
+    },
+    {
+      "code": "shared_memory.create_memory_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "create: invalid scope/project combination: scope=Global project_path=Some(\"/Users/me/proj\")"
+    },
+    {
+      "code": "shared_memory.archive_memory_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "archive: sqlite error: database is locked"
+    },
+    {
+      "code": "shared_memory.list_decisions_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "list: sqlite error: database is locked"
+    },
+    {
+      "code": "shared_memory.log_decision_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "log: decision not found: 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "shared_memory.archive_decision_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "archive: sqlite error: database is locked"
+    },
+    {
+      "code": "shared_memory.list_evidence_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "list_evidence: sqlite error: database is locked"
+    },
+    {
+      "code": "shared_memory.link_target_required",
+      "owner": "command",
+      "params": [],
+      "message": "one of memory_id / decision_id / evidence_id is required"
+    },
+    {
+      "code": "shared_memory.links_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "links: sqlite error: database is locked"
+    },
+    {
+      "code": "shared_memory.list_sessions_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "list: no such column: sessions.tokens_input"
+    },
+    {
+      "code": "shared_memory.list_projects_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "list: no such column: sessions.project_path"
+    },
+    {
+      "code": "shared_memory.invalid_install_scope",
+      "owner": "command",
+      "params": [
+        "scope"
+      ],
+      "message": "invalid scope: \"both\" (expected \"user\" or \"project\")"
+    },
+    {
+      "code": "shared_memory.out_path_not_absolute",
+      "owner": "command",
+      "params": [
+        "path"
+      ],
+      "message": "out path must be absolute: relative/dir"
+    },
+    {
+      "code": "shared_memory.current_exe_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "current_exe: permission denied"
+    },
+    {
+      "code": "shared_memory.current_exe_no_parent",
+      "owner": "command",
+      "params": [],
+      "message": "current_exe has no parent"
+    },
+    {
+      "code": "lesson.bad_state",
+      "owner": "command",
+      "params": [
+        "state"
+      ],
+      "message": "bad state \"pending\""
+    },
+    {
+      "code": "lesson.list_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "lesson list: sqlite error: database is locked"
+    },
+    {
+      "code": "lesson.counts_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "counts: sqlite error: database is locked"
+    },
+    {
+      "code": "lesson.counts_by_project_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "counts_by_project: sqlite error: database is locked"
+    },
+    {
+      "code": "lesson.accept_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "accept: sqlite error: database is locked"
+    },
+    {
+      "code": "lesson.reject_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "reject: sqlite error: database is locked"
+    },
+    {
+      "code": "recurrence.list_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "recurrence list: sqlite error: database is locked"
+    },
+    {
+      "code": "recurrence.confirm_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "confirm: sqlite error: database is locked"
+    },
+    {
+      "code": "recurrence.dismiss_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "dismiss: sqlite error: database is locked"
+    },
+    {
+      "code": "recurrence.confirmed_count_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "confirmed count: sqlite error: database is locked"
+    },
+    {
+      "code": "recurrence.pending_count_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "pending count: sqlite error: database is locked"
+    }
+  ]
+}

@@ -10,7 +10,27 @@
 //! Mirrors the `commands_preferences.rs` pattern: `Option<T>` per
 //! settable field so the UI can flip one toggle without re-sending
 //! the others.
+//!
+//! # Error shape
+//!
+//! Rejections use `ErrorDto` (i18n plan §2.5; `commands/keys.rs` is the
+//! reference). `claudepot_core::updates::UpdateError` does not carry an
+//! `ErrorCode` yet, so its rejections ride an `updates.*` command code
+//! with **core's own English unchanged in `message`** — the same
+//! interim shape `templates.instantiate_failed` carries. Promote these
+//! to `ErrorDto::from_core` when that enum converts.
+//!
+//! Two distinctions a translator must keep:
+//!
+//! - `updates.operation_in_progress` is a **refusal**, not a failure.
+//!   Nothing was downloaded, nothing was replaced, and the retry is
+//!   immediate — the `PollerGate` exists so a manual click cannot spawn
+//!   a second `claude update` beside the poller's.
+//! - `updates.unknown_channel` is about **CC's** channel pair
+//!   (`latest` / `stable`). Claudepot's own updater has a separate pair
+//!   (`stable` / `beta`) under `release_update.unknown_channel`.
 
+use crate::dto_error::{codes, ErrorDto};
 use crate::dto_updates::{
     AutoInstallOutcome, CliInstallResultDto, CliStatusDto, DesktopInstallResultDto,
     DesktopStatusDto, UpdatesStatusDto,
@@ -24,6 +44,7 @@ use claudepot_core::updates::{
     state::{UpdateSettings, UpdateStateMutex},
     Channel,
 };
+use serde_json::json;
 use std::sync::Arc;
 
 /// Resolve the channel setting from CC's settings.json. CC's setting
@@ -36,12 +57,32 @@ fn resolve_channel(cc: &settings_bridge::CcUpdateSettings) -> Channel {
         .unwrap_or(Channel::Latest)
 }
 
+/// `UpdateStateMutex` is a `std::sync::Mutex`, so a panic under it
+/// poisons the lock for every later reader. One spelling for the four
+/// call sites that would otherwise each write their own.
+fn state_lock_poisoned(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::UPDATES_STATE_LOCK_POISONED,
+        json!({ "detail": e.to_string() }),
+        format!("updates state lock: {e}"),
+    )
+}
+
+/// The `PollerGate` single-flight refusal. Three call sites shared one
+/// English string already; this keeps them sharing one code too.
+fn operation_in_progress() -> ErrorDto {
+    ErrorDto::new(
+        codes::UPDATES_OPERATION_IN_PROGRESS,
+        "another update operation is in progress; try again in a moment",
+    )
+}
+
 /// Read the current snapshot. Pure — no network calls. Safe to call
 /// often from the UI for badge refresh.
 #[tauri::command]
 pub async fn updates_status_get(
     state: tauri::State<'_, UpdateStateMutex>,
-) -> Result<UpdatesStatusDto, String> {
+) -> Result<UpdatesStatusDto, ErrorDto> {
     let cc = settings_bridge::read().unwrap_or_default();
     let channel = resolve_channel(&cc);
     let installs = detect_cli_installs();
@@ -49,11 +90,7 @@ pub async fn updates_status_get(
     let running = is_desktop_running();
     let running_count = count_running_cli_locks();
 
-    let snapshot = state
-        .0
-        .lock()
-        .map_err(|e| format!("updates state lock: {e}"))?
-        .clone();
+    let snapshot = state.0.lock().map_err(state_lock_poisoned)?.clone();
 
     let cli = CliStatusDto {
         channel: channel.as_str().to_string(),
@@ -104,11 +141,9 @@ pub async fn updates_status_get(
 pub async fn updates_check_now(
     state: tauri::State<'_, UpdateStateMutex>,
     gate: tauri::State<'_, Arc<PollerGate>>,
-) -> Result<UpdatesStatusDto, String> {
+) -> Result<UpdatesStatusDto, ErrorDto> {
     let arc_gate: Arc<PollerGate> = (*gate).clone();
-    let _lease = arc_gate.try_acquire().ok_or_else(|| {
-        "another update operation is in progress; try again in a moment".to_string()
-    })?;
+    let _lease = arc_gate.try_acquire().ok_or_else(operation_in_progress)?;
 
     let outcome = run_one_check_cycle(&state).await;
     save_state(&state).await;
@@ -127,7 +162,7 @@ pub async fn updates_check_now(
 /// Build the status DTO from current state without going through
 /// the IPC entrypoint. Lets `updates_check_now` reuse
 /// `updates_status_get`'s shape without recursive State borrow.
-fn build_status(state: &UpdateStateMutex) -> Result<UpdatesStatusDto, String> {
+fn build_status(state: &UpdateStateMutex) -> Result<UpdatesStatusDto, ErrorDto> {
     let cc = settings_bridge::read().unwrap_or_default();
     let channel = resolve_channel(&cc);
     let installs = detect_cli_installs();
@@ -135,11 +170,7 @@ fn build_status(state: &UpdateStateMutex) -> Result<UpdatesStatusDto, String> {
     let running = is_desktop_running();
     let running_count = count_running_cli_locks();
 
-    let snapshot = state
-        .0
-        .lock()
-        .map_err(|e| format!("updates state lock: {e}"))?
-        .clone();
+    let snapshot = state.0.lock().map_err(state_lock_poisoned)?.clone();
 
     let cli = CliStatusDto {
         channel: channel.as_str().to_string(),
@@ -177,12 +208,12 @@ fn build_status(state: &UpdateStateMutex) -> Result<UpdatesStatusDto, String> {
 #[tauri::command]
 pub async fn updates_cli_install(
     gate: tauri::State<'_, Arc<PollerGate>>,
-) -> Result<CliInstallResultDto, String> {
+) -> Result<CliInstallResultDto, ErrorDto> {
     let arc_gate: Arc<PollerGate> = (*gate).clone();
-    let _lease = arc_gate.try_acquire().ok_or_else(|| {
-        "another update operation is in progress; try again in a moment".to_string()
-    })?;
-    let outcome = run_claude_update().await.map_err(|e| e.to_string())?;
+    let _lease = arc_gate.try_acquire().ok_or_else(operation_in_progress)?;
+    let outcome = run_claude_update()
+        .await
+        .map_err(|e| ErrorDto::detail(codes::UPDATES_CLI_INSTALL_FAILED, e))?;
     Ok(CliInstallResultDto {
         stdout: outcome.stdout,
         stderr: outcome.stderr,
@@ -195,12 +226,12 @@ pub async fn updates_cli_install(
 #[tauri::command]
 pub async fn updates_desktop_install(
     gate: tauri::State<'_, Arc<PollerGate>>,
-) -> Result<DesktopInstallResultDto, String> {
+) -> Result<DesktopInstallResultDto, ErrorDto> {
     let arc_gate: Arc<PollerGate> = (*gate).clone();
-    let _lease = arc_gate.try_acquire().ok_or_else(|| {
-        "another update operation is in progress; try again in a moment".to_string()
-    })?;
-    let outcome = install_desktop_latest().await.map_err(|e| e.to_string())?;
+    let _lease = arc_gate.try_acquire().ok_or_else(operation_in_progress)?;
+    let outcome = install_desktop_latest()
+        .await
+        .map_err(|e| ErrorDto::detail(codes::UPDATES_DESKTOP_INSTALL_FAILED, e))?;
     Ok(DesktopInstallResultDto {
         method: outcome.method,
         version_after: outcome.version_after,
@@ -214,11 +245,11 @@ pub async fn updates_desktop_install(
 #[tauri::command]
 pub async fn updates_settings_get(
     state: tauri::State<'_, UpdateStateMutex>,
-) -> Result<UpdateSettings, String> {
+) -> Result<UpdateSettings, ErrorDto> {
     Ok(state
         .0
         .lock()
-        .map_err(|e| format!("updates state lock: {e}"))?
+        .map_err(state_lock_poisoned)?
         .settings
         .clone())
 }
@@ -247,12 +278,9 @@ pub async fn updates_settings_set(
     desktop_notify_os_on_available: Option<bool>,
     desktop_auto_install_when_quit: Option<bool>,
     poll_interval_minutes: Option<Option<u32>>,
-) -> Result<UpdateSettings, String> {
+) -> Result<UpdateSettings, ErrorDto> {
     let settings = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("updates state lock: {e}"))?;
+        let mut guard = state.0.lock().map_err(state_lock_poisoned)?;
         if let Some(v) = cli_notify_on_available {
             guard.settings.cli.notify_on_available = v;
         }
@@ -297,15 +325,27 @@ pub async fn updates_settings_set(
 pub async fn updates_channel_set(
     channel: Option<String>,
     allow_downgrade: Option<bool>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
+    // Clearing the channel is one transition over two keys, so both
+    // writes carry the same code — the user pressed one button, and a
+    // failure in either half leaves the same half-applied state.
     let target = match channel.as_deref() {
         None => {
-            settings_bridge::write_minimum_version(None).map_err(|e| e.to_string())?;
-            return settings_bridge::write_channel(None).map_err(|e| e.to_string());
+            settings_bridge::write_minimum_version(None).map_err(channel_write_failed)?;
+            return settings_bridge::write_channel(None).map_err(channel_write_failed);
         }
         Some(c) => c,
     };
-    target.parse::<Channel>().map_err(|e| e.to_string())?;
+    // Core's `Display` is kept verbatim; `params.channel` is what a
+    // localized sentence names instead of re-parsing the quotes back
+    // out of the English.
+    target.parse::<Channel>().map_err(|e| {
+        ErrorDto::with_params(
+            codes::UPDATES_UNKNOWN_CHANNEL,
+            json!({ "channel": target, "detail": e.to_string() }),
+            e.to_string(),
+        )
+    })?;
 
     let installed = detect_cli_installs()
         .into_iter()
@@ -316,12 +356,19 @@ pub async fn updates_channel_set(
         installed.as_deref(),
         allow_downgrade.unwrap_or(false),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(channel_write_failed)?;
     Ok(())
+}
+
+/// One code for every write that moves CC's `autoUpdatesChannel` —
+/// including the `minimumVersion` half of the same transition.
+fn channel_write_failed(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::detail(codes::UPDATES_CHANNEL_WRITE_FAILED, e)
 }
 
 /// Set CC's `minimumVersion` floor. Writes to `~/.claude/settings.json`.
 #[tauri::command]
-pub async fn updates_minimum_version_set(version: Option<String>) -> Result<(), String> {
-    settings_bridge::write_minimum_version(version.as_deref()).map_err(|e| e.to_string())
+pub async fn updates_minimum_version_set(version: Option<String>) -> Result<(), ErrorDto> {
+    settings_bridge::write_minimum_version(version.as_deref())
+        .map_err(|e| ErrorDto::detail(codes::UPDATES_MINIMUM_VERSION_WRITE_FAILED, e))
 }

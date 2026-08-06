@@ -40,6 +40,48 @@ pub enum PermissionSettingsError {
     Contended { path: PathBuf },
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for PermissionSettingsError {
+    fn code(&self) -> &'static str {
+        match self {
+            PermissionSettingsError::Io(_) => "permission_settings.io",
+            PermissionSettingsError::JsonParse(_) => "permission_settings.json_parse",
+            PermissionSettingsError::NotAJsonObject(_) => "permission_settings.not_a_json_object",
+            PermissionSettingsError::PermissionsNotAnObject(_) => {
+                "permission_settings.permissions_not_an_object"
+            }
+            PermissionSettingsError::UnsupportedLayer { .. } => {
+                "permission_settings.unsupported_layer"
+            }
+            PermissionSettingsError::Contended { .. } => "permission_settings.contended",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            PermissionSettingsError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            PermissionSettingsError::JsonParse(e) => serde_json::json!({ "detail": e.to_string() }),
+            // Settings-file paths. This module reads and rewrites one
+            // nested string key; no setting *value* is ever quoted into
+            // an error, which is what keeps these safe to structure.
+            PermissionSettingsError::NotAJsonObject(path)
+            | PermissionSettingsError::PermissionsNotAnObject(path) => {
+                serde_json::json!({ "path": path.display().to_string() })
+            }
+            // `layer` is the `SettingsLayer` variant name, matching the
+            // `{layer:?}` the English message prints — a stable token a
+            // catalog can switch on.
+            PermissionSettingsError::UnsupportedLayer { layer } => {
+                serde_json::json!({ "layer": format!("{layer:?}") })
+            }
+            PermissionSettingsError::Contended { path } => {
+                serde_json::json!({ "path": path.display().to_string() })
+            }
+        }
+    }
+}
+
 /// Grants land in the same `settings.local.json` that `settings_writer`
 /// edits, so this module writes through the shared mutation boundary too;
 /// map its failures onto the shape callers already match on.

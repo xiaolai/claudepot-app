@@ -11,6 +11,7 @@
 // so it never adds chrome to a quiet queue.
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type { RecurrenceEvent } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
@@ -18,7 +19,7 @@ import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
 import { CopyButton } from "../../components/CopyButton";
 import { basename } from "../../lib/paths";
-import { toUserError } from "../../lib/errors";
+import { renderError } from "../../lib/i18n-error";
 
 export function RecurrencePanel({
   onOpenMemory,
@@ -26,6 +27,7 @@ export function RecurrencePanel({
   /** Deep-link the matched lesson into the Know view. */
   onOpenMemory?: (projectPath: string, memoryId: string) => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const [rows, setRows] = useState<RecurrenceEvent[]>([]);
   // `err` = a real, unexpected failure (red; the row stays). `note` = a
   // benign "already handled elsewhere" reconcile (neutral; the row leaves).
@@ -44,7 +46,7 @@ export function RecurrencePanel({
     try {
       setRows(await sharedMemoryApi.recurrenceList());
     } catch (e) {
-      setErr(toUserError(e));
+      setErr(renderError(e));
     }
   }, []);
 
@@ -65,16 +67,16 @@ export function RecurrencePanel({
         // Whether it took now or was already resolved elsewhere, the backend
         // no longer has it pending — drop the row. Only the second case
         // leaves a neutral note; neither is an error.
-        if (!ok) setNote("That recurrence was already handled elsewhere.");
+        if (!ok) setNote(t("recurrence.handledElsewhere"));
         setRows((prev) => prev.filter((r) => r.id !== row.id));
       } catch (e) {
         // A true failure — the row stays so the user can retry.
-        setErr(toUserError(e));
+        setErr(renderError(e));
       } finally {
         setBusyId(null);
       }
     },
-    [],
+    [t],
   );
 
   // Once nothing is pending, the panel disappears entirely (a lingering note
@@ -84,12 +86,12 @@ export function RecurrencePanel({
 
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
-      <SectionLabel>Recurrences — you learned this, and it happened again</SectionLabel>
+      <SectionLabel>{t("recurrence.heading")}</SectionLabel>
       {err && (
         <div role="alert" style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", flexWrap: "wrap" }}>
           <span style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>{err}</span>
           <Button variant="ghost" onClick={() => void refresh()}>
-            Retry
+            {t("recurrence.retry")}
           </Button>
         </div>
       )}
@@ -114,7 +116,7 @@ export function RecurrencePanel({
                 <Tag tone="warn">recurrence</Tag>
                 {row.matched_state && <Tag>{row.matched_state}</Tag>}
                 <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
-                  matched by {row.detected_by}
+                  {t("recurrence.matchedBy", { name: row.detected_by })}
                 </span>
                 <div style={{ flex: 1 }} />
                 {row.new_file_path && (
@@ -122,7 +124,9 @@ export function RecurrencePanel({
                     style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}
                     title={row.new_file_path}
                   >
-                    seen again in {basename(row.new_file_path)}
+                    {t("recurrence.seenAgainIn", {
+                      file: basename(row.new_file_path),
+                    })}
                   </span>
                 )}
               </header>
@@ -132,7 +136,9 @@ export function RecurrencePanel({
               </p>
               {row.matched_content && (
                 <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-                  already learned: {row.matched_content}
+                  {t("recurrence.alreadyLearned", {
+                    content: row.matched_content,
+                  })}
                 </p>
               )}
 
@@ -142,14 +148,14 @@ export function RecurrencePanel({
                   disabled={busyId === row.id}
                   onClick={() => void act(row, "confirm")}
                 >
-                  {busyId === row.id ? "…" : "Confirm — still a risk"}
+                  {busyId === row.id ? "…" : t("recurrence.confirm")}
                 </Button>
                 <Button
                   variant="ghost"
                   disabled={busyId === row.id}
                   onClick={() => void act(row, "dismiss")}
                 >
-                  Dismiss
+                  {t("recurrence.dismiss")}
                 </Button>
                 {onOpenMemory && row.matched_memory_id && (
                   <Button
@@ -157,7 +163,7 @@ export function RecurrencePanel({
                     disabled={busyId === row.id}
                     onClick={() => onOpenMemory(row.project_path, row.matched_memory_id)}
                   >
-                    Open in Know
+                    {t("recurrence.openInKnow")}
                   </Button>
                 )}
               </div>
@@ -169,19 +175,18 @@ export function RecurrencePanel({
                   malformed row must not hand over `compile null --write`. */}
               {row.matched_state === "accepted" && row.matched_memory_id ? (
                 <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)", flexWrap: "wrap", fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
-                  <span>Stop it recurring — enforce the lesson as a guard:</span>
+                  <span>{t("recurrence.enforceHint")}</span>
                   <code style={{ fontSize: "var(--fs-2xs)" }}>
                     claudepot lesson compile … --write
                   </code>
                   <CopyButton
                     text={`claudepot lesson compile ${row.matched_memory_id} --write`}
-                    ariaLabel="Copy compile command"
+                    ariaLabel={t("recurrence.copyCompileAria")}
                   />
                 </div>
               ) : row.matched_state === "suspect" ? (
                 <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
-                  The matched lesson is suspect — re-review it in the queue below
-                  before it can be enforced.
+                  {t("recurrence.suspectNote")}
                 </span>
               ) : null}
             </div>

@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SplitBrainConfirm } from "../sections/accounts/SplitBrainConfirm";
 import { DesktopConfirmDialog } from "../sections/accounts/DesktopConfirmDialog";
@@ -11,6 +12,7 @@ import { useAppState } from "../providers/AppStateProvider";
  * parks a pending request.
  */
 export function AccountConfirmModals() {
+  const { t } = useTranslation("components");
   const {
     splitBrainPending,
     dismissSplitBrain,
@@ -43,19 +45,22 @@ export function AccountConfirmModals() {
 
       {removeConfirmPending && (
         <ConfirmDialog
-          title="Remove account?"
-          confirmLabel="Remove"
+          title={t("modals.removeAccountTitle")}
+          confirmLabel={t("modals.removeAccountConfirm")}
           confirmDanger
           body={
             <>
               <p>
-                Remove <strong>{removeConfirmPending.email}</strong>?
+                {/* Genuine mid-sentence element — the email is bolded
+                    inside the question. */}
+                <Trans
+                  ns="components"
+                  i18nKey="modals.removeAccountBody"
+                  values={{ email: removeConfirmPending.email }}
+                  components={{ b: <strong /> }}
+                />
               </p>
-              <p className="muted small">
-                Deletes credentials and Desktop profile. Active
-                CLI/Desktop pointers will be cleared. You'll have a few
-                seconds to undo from the toast.
-              </p>
+              <p className="muted small">{t("modals.removeAccountNote")}</p>
             </>
           }
           onCancel={dismissRemoveConfirm}

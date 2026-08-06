@@ -1,6 +1,7 @@
 import { enabledSectionIds } from "../lib/optionalSections";
 import { api } from "../api";
-import { toastError } from "../lib/toastError";
+import { i18n } from "../lib/i18n";
+import { toastError } from "../lib/i18n-error";
 import { triggerSettingsTab } from "../lib/networkPanelDeepLink";
 import { useTauriEvent } from "./useTauriEvent";
 
@@ -61,25 +62,27 @@ export function useAppMenuRouter(args: {
         .then((email) =>
           pushToast(
             "info",
-            email ? `Synced ${email} from CC.` : "Nothing to sync.",
+            email
+              ? i18n.t("menu.synced", { email })
+              : i18n.t("menu.nothingToSync"),
           ),
         )
-        .catch((e) => toastError(pushToast, "Sync failed", e));
+        .catch((e) => toastError(pushToast, i18n.t("menu.syncFailed"), e));
       return;
     }
     if (cmd === "app-menu:account:verify-all") {
       api
         .verifyAllAccounts()
         .then(() => {
-          pushToast("info", "Verify all complete.");
+          pushToast("info", i18n.t("menu.verifyAllComplete"));
           void refreshAccounts();
         })
-        .catch((e) => toastError(pushToast, "Verify failed", e));
+        .catch((e) => toastError(pushToast, i18n.t("menu.verifyFailed"), e));
       return;
     }
     if (cmd === "app-menu:help:copy-diag") {
       setSection("settings");
-      pushToast("info", "Open Settings → Diagnostics and press Copy.");
+      pushToast("info", i18n.t("menu.copyDiagHint"));
       return;
     }
   });

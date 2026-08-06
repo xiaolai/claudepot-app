@@ -40,6 +40,28 @@ pub enum McpProbeError {
     Spawn { bin: String, source: std::io::Error },
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for McpProbeError {
+    fn code(&self) -> &'static str {
+        match self {
+            McpProbeError::CliNotFound { .. } => "mcp_probe.cli_not_found",
+            McpProbeError::Spawn { .. } => "mcp_probe.spawn",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            McpProbeError::CliNotFound { exe_dir, tried } => {
+                serde_json::json!({ "exe_dir": exe_dir, "tried": tried })
+            }
+            McpProbeError::Spawn { bin, source } => {
+                serde_json::json!({ "bin": bin, "detail": source.to_string() })
+            }
+        }
+    }
+}
+
 /// Candidate binary names for the `claudepot` CLI sitting next to
 /// the GUI executable, in probe order. The GUI binary itself doesn't
 /// have the `mcp memory-server` subcommand — that's only on the CLI

@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "./Glyph";
 import { NF } from "../../icons";
 
@@ -33,7 +34,9 @@ export function BackAffordance({
   title,
   style,
 }: BackAffordanceProps) {
-  const accessibleTitle = title ?? `Back to ${label.toLowerCase()}`;
+  const { t } = useTranslation("components");
+  const accessibleTitle =
+    title ?? t("primitives.backTo", { label: label.toLowerCase() });
   return (
     <button
       type="button"

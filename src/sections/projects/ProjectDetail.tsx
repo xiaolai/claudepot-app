@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { CopyButton } from "../../components/CopyButton";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import {
@@ -25,7 +27,7 @@ import { MoveSessionModal } from "./MoveSessionModal";
 import { PermissionPanel } from "./PermissionPanel";
 import { ProjectEnvPanel } from "./ProjectEnvPanel";
 import {
-  ESTIMATED_RATE_HINT,
+  estimatedRateHint,
   formatCost,
   formatUsd,
   sessionCostEstimate,
@@ -105,6 +107,7 @@ export function ProjectDetail({
    * as detail-first (the surrounding layout is already a split). */
   onBack?: () => void;
 }) {
+  const { t } = useTranslation("projects");
   const [detail, setDetail] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -153,7 +156,7 @@ export function ProjectDetail({
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(String(e));
+          setError(renderError(e));
           setLoading(false);
         }
       });
@@ -284,7 +287,7 @@ export function ProjectDetail({
     return (
       <main className="content">
         <div className="empty">
-          <h2>Couldn't load project</h2>
+          <h2>{t("detail.loadErrorTitle")}</h2>
           <p className="muted mono">{error}</p>
         </div>
       </main>
@@ -305,8 +308,8 @@ export function ProjectDetail({
               type="button"
               className="icon-btn"
               onClick={onBack}
-              aria-label="Back to project list"
-              title="Back to project list"
+              aria-label={t("detail.backToList")}
+              title={t("detail.backToList")}
             >
               <Icon name="arrow-left" size={14} />
             </button>
@@ -320,8 +323,11 @@ export function ProjectDetail({
               onClick={() => {
                 if (info.pr) void openUrl(info.pr.url).catch(() => {});
               }}
-              title={`PR #${info.pr.number} — ${info.pr.state}`}
-              aria-label={`Open pull request #${info.pr.number}`}
+              title={t("detail.prTitle", {
+                number: info.pr.number,
+                state: info.pr.state,
+              })}
+              aria-label={t("detail.prAria", { number: info.pr.number })}
               style={{
                 background: "transparent",
                 border: "none",
@@ -341,18 +347,18 @@ export function ProjectDetail({
             </button>
           )}
           {status === "orphan" && (
-            <span className="project-tag orphan" title="source directory does not exist">
-              orphan
+            <span className="project-tag orphan" title={t("detail.orphanTitle")}>
+              {t("status.orphan")}
             </span>
           )}
           {status === "unreachable" && (
-            <span className="project-tag unreachable" title="source lives on an unmounted volume or permission-denied path">
-              unreachable
+            <span className="project-tag unreachable" title={t("detail.unreachableTitle")}>
+              {t("status.unreachable")}
             </span>
           )}
           {status === "empty" && (
-            <span className="project-tag empty" title="CC project dir has no sessions or memory files">
-              empty
+            <span className="project-tag empty" title={t("detail.emptyTitle")}>
+              {t("status.empty")}
             </span>
           )}
         </div>
@@ -360,10 +366,12 @@ export function ProjectDetail({
           <button
             type="button"
             className="btn"
-            title={`Reveal this project's directory in ${fileManagerName(appStatus?.platform)}`}
+            title={t("detail.revealTitle", {
+              name: fileManagerName(appStatus?.platform),
+            })}
             onClick={() => {
               api.revealInFinder(info.original_path).catch((e) => {
-                const msg = `Couldn't reveal: ${e}`;
+                const msg = t("detail.revealFailed", { error: renderError(e) });
                 if (onError) onError(msg);
                 else console.error(msg);
               });
@@ -371,18 +379,18 @@ export function ProjectDetail({
           >
             <Icon name="folder-open" />{fileManagerName(appStatus?.platform)}
           </button>
-          <button type="button" className="btn" title="Rename this project"
+          <button type="button" className="btn" title={t("detail.renameTitle")}
             onClick={() => onRename(info.original_path)}>
-            <Icon name="pencil" />Rename…
+            <Icon name="pencil" />{t("detail.rename")}
           </button>
           {onOpenInConfig && status !== "unreachable" && status !== "orphan" && (
             <button
               type="button"
               className="btn"
-              title="View this project's Claude Code config — merged settings, MCP, agents, memory"
+              title={t("detail.configTitle")}
               onClick={() => onOpenInConfig(info.original_path)}
             >
-              <Icon name="file-code" />Config
+              <Icon name="file-code" />{t("detail.config")}
             </button>
           )}
         </div>
@@ -392,23 +400,21 @@ export function ProjectDetail({
         <div className="project-hint unreachable" role="status">
           <Icon name="wifi-off" size={14} />
           <span>
-            Source path can't be checked right now (unmounted volume or
-            permission-denied ancestor). Mount the drive and click Refresh
-            to re-classify.
+            {t("detail.unreachableHint")}
           </span>
         </div>
       )}
 
       <section className="detail-grid">
-        <span className="detail-label">Path</span>
+        <span className="detail-label">{t("detail.labelPath")}</span>
         <span className="detail-value mono selectable">
           {info.original_path} <CopyButton text={info.original_path} />
         </span>
-        <span className="detail-label">Size</span>
+        <span className="detail-label">{t("detail.labelSize")}</span>
         <span className="detail-value">{formatSize(info.total_size_bytes)}</span>
         {info.last_modified_ms != null && (
           <>
-            <span className="detail-label">Last touched</span>
+            <span className="detail-label">{t("detail.labelLastTouched")}</span>
             <span className="detail-value">
               {formatRelativeTime(info.last_modified_ms)}
             </span>
@@ -416,15 +422,15 @@ export function ProjectDetail({
         )}
         {info.session_count > 0 && (
           <>
-            <span className="detail-label">Sessions</span>
+            <span className="detail-label">{t("detail.labelSessions")}</span>
             <span className="detail-value">{info.session_count}</span>
           </>
         )}
         {info.memory_file_count > 0 && (
           <>
-            <span className="detail-label">Memory</span>
+            <span className="detail-label">{t("detail.labelMemory")}</span>
             <span className="detail-value">
-              {info.memory_file_count} file{info.memory_file_count === 1 ? "" : "s"}
+              {t("detail.memoryFiles", { count: info.memory_file_count })}
             </span>
           </>
         )}
@@ -451,15 +457,15 @@ export function ProjectDetail({
       {noContent && status !== "alive" && status !== "unreachable" && (
         <div className="project-hint cleanup" role="status">
           <Icon name="info" size={14} />
-          <span>No sessions or memory. This project is a cleanup candidate.</span>
+          <span>{t("detail.cleanupHint")}</span>
           {onOpenMaintenance && (
             <button
               type="button"
               className="btn"
               onClick={onOpenMaintenance}
-              title="Open Maintenance to clean orphan projects"
+              title={t("detail.goMaintenanceTitle")}
             >
-              Go to Maintenance
+              {t("detail.goMaintenance")}
             </button>
           )}
         </div>
@@ -502,14 +508,14 @@ export function ProjectDetail({
             classifyProject(info) !== "unreachable";
           const items: ContextMenuItem[] = [
             {
-              label: "Move to another project…",
+              label: t("detail.menuMoveSession"),
               onClick: () => setMoveTarget(ctxMenu.sessionId),
             },
             ...(canOpenInConfig
               ? [
                   { label: "", separator: true, onClick: () => {} },
                   {
-                    label: "Open project in Config",
+                    label: t("detail.menuOpenConfig"),
                     onClick: () => onOpenInConfig!(info.original_path),
                   },
                 ] as ContextMenuItem[]
@@ -518,17 +524,19 @@ export function ProjectDetail({
               ? ([
                   { label: "", separator: true, onClick: () => {} },
                   {
-                    label: "Reveal session in Finder",
+                    label: t("detail.menuRevealSession"),
                     onClick: () => {
                       api.revealInFinder(transcriptPath).catch((e) => {
-                        const msg = `Couldn't reveal: ${e}`;
+                        const msg = t("detail.revealFailed", {
+                          error: renderError(e),
+                        });
                         if (onError) onError(msg);
                         else console.error(msg);
                       });
                     },
                   },
                   {
-                    label: "Copy session file path",
+                    label: t("detail.menuCopyPath"),
                     onClick: () => {
                       navigator.clipboard.writeText(transcriptPath);
                     },
@@ -537,7 +545,7 @@ export function ProjectDetail({
               : []),
             { label: "", separator: true, onClick: () => {} },
             {
-              label: "Copy session ID",
+              label: t("detail.menuCopyId"),
               onClick: () => {
                 navigator.clipboard.writeText(ctxMenu.sessionId);
               },
@@ -640,6 +648,7 @@ function SessionListPane({
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
   onMenuButton: (e: React.MouseEvent, sid: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE_SIZE);
 
@@ -685,7 +694,7 @@ function SessionListPane({
     <section className="detail-section">
       <div className="session-list-header">
         <h3>
-          Sessions · {sessions.length}
+          {t("detail.sessionsHeading", { n: sessions.length })}
           {typeof totalCost === "number" && totalCost > 0 && (
             <>
               {" · "}
@@ -693,12 +702,14 @@ function SessionListPane({
                 className="muted"
                 title={
                   totalEstimated
-                    ? `Sum of hypothetical Anthropic API cost across every session in this project. Real billing depends on your plan. ${ESTIMATED_RATE_HINT}`
-                    : "Sum of hypothetical Anthropic API cost across every session in this project. Real billing depends on your plan."
+                    ? t("detail.costTotalTitleEst", {
+                        hint: estimatedRateHint(),
+                      })
+                    : t("detail.costTotalTitle")
                 }
               >
                 {totalEstimated ? "≈ " : ""}
-                {formatUsd(totalCost)} at API rates
+                {t("shared.atApiRates", { amount: formatUsd(totalCost) })}
               </span>
             </>
           )}
@@ -706,19 +717,19 @@ function SessionListPane({
         <input
           type="search"
           className="session-filter mono"
-          placeholder="Search prompt, id, branch, model"
+          placeholder={t("detail.searchPlaceholder")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             setLimit(PAGE_SIZE);
           }}
-          aria-label="Search sessions by prompt, id, branch, or model"
+          aria-label={t("detail.searchAria")}
         />
       </div>
       {filtered.length === 0 ? (
-        <p className="muted small">No sessions match that filter.</p>
+        <p className="muted small">{t("detail.noSessionsMatch")}</p>
       ) : (
-        <ul className="session-list" role="listbox" aria-label="Sessions">
+        <ul className="session-list" role="listbox" aria-label={t("detail.sessionsAria")}>
           {visible.map((s) => {
             const cost = costBySessionId?.get(s.session_id);
             const live = liveBySessionId.get(s.session_id);
@@ -761,7 +772,7 @@ function SessionListPane({
                           status={live.status}
                           errored={live.errored}
                           title={verb}
-                          aria-label={`Session ${verb}`}
+                          aria-label={t("status.liveSessionAria", { verb })}
                         />
                       );
                     })()}
@@ -792,7 +803,7 @@ function SessionListPane({
                       <span
                         title={
                           cost.confidence === "family_estimate"
-                            ? ESTIMATED_RATE_HINT
+                            ? estimatedRateHint()
                             : undefined
                         }
                       >
@@ -805,8 +816,8 @@ function SessionListPane({
               <button
                 type="button"
                 className="session-row-menu-btn"
-                aria-label="Session actions"
-                title="Actions"
+                aria-label={t("detail.sessionActionsAria")}
+                title={t("detail.actionsTitle")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onMenuButton(e, s.session_id);
@@ -826,14 +837,13 @@ function SessionListPane({
             className="btn"
             onClick={() => setLimit((n) => n + PAGE_SIZE)}
           >
-            Show {Math.min(hiddenCount, PAGE_SIZE)} more
+            {t("detail.showMore", { n: Math.min(hiddenCount, PAGE_SIZE) })}
           </button>
           <span className="muted small">
-            {hiddenCount} more hidden
+            {t("detail.moreHidden", { n: hiddenCount })}
           </span>
         </div>
       )}
     </section>
   );
 }
-

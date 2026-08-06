@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { AutoMemoryStateDto } from "../../api/memory";
+import { renderError } from "../../lib/i18n-error";
 import { useAppState } from "../../providers/AppStateProvider";
 
 // Global → Memory.
@@ -14,6 +16,7 @@ import { useAppState } from "../../providers/AppStateProvider";
 // but for the global pane we only show the user-settings value —
 // per-project overrides live in Projects → Memory.
 export function AutoMemoryGlobalCard() {
+  const { t } = useTranslation("global");
   const { pushToast } = useAppState();
   const [state, setState] = useState<AutoMemoryStateDto | null>(null);
   const [busy, setBusy] = useState(false);
@@ -23,9 +26,9 @@ export function AutoMemoryGlobalCard() {
       const next = await api.autoMemoryStateGlobal();
       setState(next);
     } catch (e) {
-      pushToast("error", `Auto-memory state load failed: ${e}`);
+      pushToast("error", renderError(e, t("memory.auto.loadFailed")));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     void refresh();
@@ -52,20 +55,22 @@ export function AutoMemoryGlobalCard() {
       setState(updated);
       pushToast(
         "info",
-        next ? "Auto-memory enabled globally." : "Auto-memory disabled globally.",
+        next
+          ? t("memory.auto.enabledToast")
+          : t("memory.auto.disabledToast"),
       );
     } catch (e) {
-      pushToast("error", `Toggle failed: ${e}`);
+      pushToast("error", renderError(e, t("memory.auto.toggleFailed")));
     } finally {
       setBusy(false);
     }
   };
 
   const description = !state
-    ? "Loading…"
+    ? t("memory.auto.loading")
     : overridden
-    ? `Overridden by ${state.decided_label}. Clear the env var to control this from here.`
-    : "Lets CC build a per-project memory directory and auto-write topic files at session end. Per-project overrides live in Projects → Memory.";
+    ? t("memory.auto.overridden", { label: state.decided_label })
+    : t("memory.auto.description");
 
   const disabled = !state || busy || overridden;
 
@@ -90,7 +95,7 @@ export function AutoMemoryGlobalCard() {
             color: "var(--fg)",
           }}
         >
-          Auto-memory
+          {t("memory.auto.title")}
         </div>
         <div
           style={{
@@ -106,7 +111,7 @@ export function AutoMemoryGlobalCard() {
         type="button"
         role="switch"
         aria-checked={globalEffective}
-        aria-label="Auto-memory"
+        aria-label={t("memory.auto.title")}
         aria-disabled={disabled || undefined}
         disabled={disabled}
         onClick={

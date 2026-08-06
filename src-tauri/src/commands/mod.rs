@@ -2,7 +2,22 @@
 //!
 //! Per `.claude/rules/architecture.md`, NO business logic lives here. Each
 //! command opens the store, calls a core function, and serializes the result.
-//! Errors become user-facing strings at this boundary.
+//!
+//! # Error shape
+//!
+//! Every `#[tauri::command]` in this file rejects with [`ErrorDto`]
+//! (i18n plan §2.5; `commands/keys.rs` is the reference). The English
+//! operation prefixes this file used to compose (`"list failed: "`,
+//! `"reconcile failed: "`) are gone — the UI knows what it was
+//! attempting and frames it in the user's language, while `message`
+//! carries core's own text unchanged.
+//!
+//! Two helpers here deliberately keep their `String` error:
+//! [`open_store`] and [`resolve_target`] are called from the tray, the
+//! usage poller, and the orchestrators, none of which cross the IPC
+//! bridge. [`open_account_store`] is the coded wrapper the command
+//! surface uses; it is the promotion of the copy `commands/account.rs`,
+//! `commands/desktop.rs` and `commands/keys.rs` each carried.
 //!
 //! # Threading policy
 //!
@@ -70,10 +85,12 @@ pub mod updates;
 pub mod usage_local;
 
 use crate::dto::{AccountSummary, AccountSummaryBasic, AppStatus, ReconcileReportDto};
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::desktop_backend;
 use claudepot_core::paths;
 use claudepot_core::services;
+use serde_json::json;
 use uuid::Uuid;
 
 pub(crate) fn resolve_target(store: &AccountStore, email: &str) -> Result<Account, String> {
@@ -97,9 +114,30 @@ pub(crate) fn active_id<E>(
 
 /// Open the production store (single instance per command). Cheap: a sqlite
 /// open + schema check. Keeps the command layer stateless.
+///
+/// Still `Result<_, String>`: the tray, the usage poller and the
+/// orchestrators all call this off the IPC bridge, where a DTO would
+/// only have to be flattened again for `tracing`. Command handlers go
+/// through [`open_account_store`] instead.
 pub(crate) fn open_store() -> Result<AccountStore, String> {
     let db = paths::claudepot_data_dir().join("accounts.db");
     AccountStore::open(&db).map_err(|e| format!("store open failed: {e}"))
+}
+
+/// [`open_store`] under a stable code, for the command surface.
+///
+/// `AccountStore`'s failures are raw `rusqlite` ones and converting
+/// them is the services slice's job, so the English `open_store`
+/// composes rides through verbatim in `message`.
+pub(crate) fn open_account_store() -> Result<AccountStore, ErrorDto> {
+    open_store().map_err(|m| ErrorDto::detail(codes::ACCOUNTS_STORE_OPEN_FAILED, m))
+}
+
+/// `AccountStore::list` — the one query four commands in this file
+/// share. One spelling so they cannot drift into four codes for one
+/// failure.
+fn list_failed(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::detail(codes::ACCOUNTS_LIST_FAILED, e)
 }
 
 /// Validate a renderer-supplied project root before it reaches a
@@ -139,11 +177,11 @@ pub(crate) fn validate_project_path(project_path: &str) -> Result<(), String> {
 /// [`accounts_reconcile`] (called once at startup in `lib.rs::run`
 /// and on user request). `account_list` never writes to the store.
 #[tauri::command]
-pub async fn account_list() -> Result<Vec<AccountSummary>, String> {
-    let store = open_store()?;
+pub async fn account_list() -> Result<Vec<AccountSummary>, ErrorDto> {
+    let store = open_account_store()?;
     let views = services::account_summary::list_summaries(&store)
         .await
-        .map_err(|e| format!("list failed: {e}"))?;
+        .map_err(list_failed)?;
     Ok(views.iter().map(AccountSummary::from).collect())
 }
 
@@ -158,11 +196,11 @@ pub async fn account_list() -> Result<Vec<AccountSummary>, String> {
 /// [`account_list`] — the inner `token_health` calls do macOS
 /// Keychain syscalls and must stay off async workers.
 #[tauri::command]
-pub async fn accounts_reconcile() -> Result<ReconcileReportDto, String> {
-    let store = open_store()?;
+pub async fn accounts_reconcile() -> Result<ReconcileReportDto, ErrorDto> {
+    let store = open_account_store()?;
     let report = services::account_service::reconcile_all(&store)
         .await
-        .map_err(|e| format!("reconcile failed: {e}"))?;
+        .map_err(|e| ErrorDto::detail(codes::ACCOUNTS_RECONCILE_FAILED, e))?;
     Ok(ReconcileReportDto::from(&report))
 }
 
@@ -177,16 +215,16 @@ pub async fn accounts_reconcile() -> Result<ReconcileReportDto, String> {
 /// tab / status bar / tray continue to use the full `account_list`
 /// since they actually render token health.
 #[tauri::command]
-pub async fn account_list_basic() -> Result<Vec<AccountSummaryBasic>, String> {
-    let store = open_store()?;
-    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+pub async fn account_list_basic() -> Result<Vec<AccountSummaryBasic>, ErrorDto> {
+    let store = open_account_store()?;
+    let accounts = store.list().map_err(list_failed)?;
     Ok(accounts.iter().map(AccountSummaryBasic::from).collect())
 }
 
 #[tauri::command]
-pub async fn app_status() -> Result<AppStatus, String> {
-    let store = open_store()?;
-    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+pub async fn app_status() -> Result<AppStatus, ErrorDto> {
+    let store = open_account_store()?;
+    let accounts = store.list().map_err(list_failed)?;
 
     let email_for = |id: Option<Uuid>| -> Option<String> {
         id.and_then(|u| {
@@ -226,7 +264,7 @@ pub async fn app_status() -> Result<AppStatus, String> {
 /// only reason the modal exists; once the user confirms, we exit
 /// directly — no second gate, no second event.
 #[tauri::command]
-pub async fn quit_now(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn quit_now(app: tauri::AppHandle) -> Result<(), ErrorDto> {
     app.exit(0);
     Ok(())
 }
@@ -235,16 +273,22 @@ pub async fn quit_now(app: tauri::AppHandle) -> Result<(), String> {
 /// Body lives in `claudepot_core::cli_backend::keychain::unlock_login_keychain`
 /// so all `/usr/bin/security` invocations stay co-located.
 #[tauri::command]
-pub async fn unlock_keychain() -> Result<(), String> {
+pub async fn unlock_keychain() -> Result<(), ErrorDto> {
     #[cfg(target_os = "macos")]
     {
+        // `SwapError` carries its own code, so the rejection lifts
+        // whole — the previous `e.to_string()` is exactly what
+        // `from_core` puts in `message`.
         claudepot_core::cli_backend::keychain::unlock_login_keychain()
             .await
-            .map_err(|e| e.to_string())
+            .map_err(ErrorDto::from)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Err("keychain unlock is macOS-only".to_string())
+        Err(ErrorDto::new(
+            codes::APP_KEYCHAIN_UNLOCK_UNSUPPORTED,
+            "keychain unlock is macOS-only",
+        ))
     }
 }
 
@@ -253,9 +297,9 @@ pub async fn unlock_keychain() -> Result<(), String> {
 /// Accepts an absolute path; returns an error if the path is empty or
 /// does not exist.
 #[tauri::command]
-pub async fn reveal_in_finder(path: String) -> Result<(), String> {
+pub async fn reveal_in_finder(path: String) -> Result<(), ErrorDto> {
     if path.is_empty() {
-        return Err("empty path".to_string());
+        return Err(ErrorDto::new(codes::APP_REVEAL_PATH_EMPTY, "empty path"));
     }
     let p = std::path::PathBuf::from(&path);
     if !p.exists() {
@@ -270,7 +314,11 @@ pub async fn reveal_in_finder(path: String) -> Result<(), String> {
             }
         };
         let Some(target) = fallback else {
-            return Err(format!("path does not exist: {path}"));
+            return Err(ErrorDto::with_params(
+                codes::APP_REVEAL_PATH_NOT_FOUND,
+                json!({ "path": path }),
+                format!("path does not exist: {path}"),
+            ));
         };
         return spawn_reveal(&target).await;
     }
@@ -283,15 +331,30 @@ pub async fn reveal_in_finder(path: String) -> Result<(), String> {
 /// where logging hasn't fired). Reuses the same per-OS reveal
 /// commands as `reveal_in_finder`.
 #[tauri::command]
-pub async fn logs_dir_reveal() -> Result<(), String> {
+pub async fn logs_dir_reveal() -> Result<(), ErrorDto> {
     let dir = claudepot_core::paths::log_dir();
     if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir failed: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            ErrorDto::detail(
+                codes::APP_LOG_DIR_CREATE_FAILED,
+                format!("mkdir failed: {e}"),
+            )
+        })?;
     }
     spawn_reveal(&dir).await
 }
 
-async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
+/// The file manager would not start. One code across the three
+/// platforms — the opener's name is part of `detail`, and "no file
+/// manager on PATH" is the same condition everywhere.
+fn reveal_spawn_failed(tool: &str, e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::detail(
+        codes::APP_REVEAL_SPAWN_FAILED,
+        format!("{tool} spawn failed: {e}"),
+    )
+}
+
+async fn spawn_reveal(p: &std::path::Path) -> Result<(), ErrorDto> {
     use tokio::process::Command;
     #[cfg(target_os = "macos")]
     {
@@ -300,10 +363,13 @@ async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
             .arg(p)
             .output()
             .await
-            .map_err(|e| format!("open spawn failed: {e}"))?;
+            .map_err(|e| reveal_spawn_failed("open", e))?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("open exited: {}", stderr.trim()));
+            return Err(ErrorDto::detail(
+                codes::APP_REVEAL_FAILED,
+                format!("open exited: {}", stderr.trim()),
+            ));
         }
     }
     #[cfg(target_os = "linux")]
@@ -317,10 +383,13 @@ async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
             .arg(&target)
             .output()
             .await
-            .map_err(|e| format!("xdg-open spawn failed: {e}"))?;
+            .map_err(|e| reveal_spawn_failed("xdg-open", e))?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("xdg-open exited: {}", stderr.trim()));
+            return Err(ErrorDto::detail(
+                codes::APP_REVEAL_FAILED,
+                format!("xdg-open exited: {}", stderr.trim()),
+            ));
         }
     }
     #[cfg(target_os = "windows")]
@@ -334,13 +403,16 @@ async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
             .arg(format!("/select,{}", p.display()))
             .output()
             .await
-            .map_err(|e| format!("explorer spawn failed: {e}"))?;
+            .map_err(|e| reveal_spawn_failed("explorer", e))?;
         let code = out.status.code().unwrap_or(0);
         // Only bail on known-fatal exit codes. Explorer commonly returns
         // 1 on success.
         if code > 1 {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("explorer exited {code}: {}", stderr.trim()));
+            return Err(ErrorDto::detail(
+                codes::APP_REVEAL_FAILED,
+                format!("explorer exited {code}: {}", stderr.trim()),
+            ));
         }
     }
     Ok(())
@@ -464,7 +536,7 @@ pub async fn tray_set_alert_count(
     app: tauri::AppHandle,
     state: tauri::State<'_, crate::state::TrayAlertState>,
     count: u32,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     state.set(count);
     crate::tray::refresh_alert_chrome(&app);
     Ok(())

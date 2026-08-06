@@ -1,0 +1,178 @@
+{
+  "tabs": {
+    "ariaLabel": "全局视图",
+    "config": "配置",
+    "memory": "记忆",
+    "tips": "提示",
+    "updates": "更新"
+  },
+  "updates": {
+    "title": "更新",
+    "loading": "正在加载更新状态…",
+    "installedVersion": "已安装：{{version}}",
+    "notInstalled": "未安装",
+    "networkProbeFailed": "网络探测失败",
+    "checkedRelative": "检查于 {{relative}}",
+    "installActive": "使用中",
+    "editEnvVars": "在环境变量中编辑",
+    "row": {
+      "latest": "最新版",
+      "channel": "通道",
+      "autoUpdate": "自动更新",
+      "floor": "下限",
+      "running": "运行中",
+      "installs": "安装位置",
+      "source": "来源",
+      "status": "状态",
+      "autoInstall": "自动安装",
+      "cliNotify": "CLI 通知",
+      "desktopNotify": "桌面版通知",
+      "pin": "锁定"
+    },
+    "action": {
+      "updateNow": "立即更新",
+      "reinstall": "重新安装",
+      "checkNow": "立即检查"
+    },
+    "badge": {
+      "updateAvailable": "有可用更新",
+      "upToDate": "已是最新",
+      "newerThanChannel": "比通道版本更新",
+      "unknown": "未知"
+    },
+    "time": {
+      "never": "从未",
+      "justNow": "刚刚",
+      "minAgo": "{{n}} 分钟前",
+      "hAgo": "{{n}} 小时前",
+      "dAgo": "{{n}} 天前"
+    },
+    "outcome": {
+      "reinstalled": "已重新安装 {{surface}}（{{version}}）",
+      "updated": "{{surface}} 已从 {{before}} 更新到 {{after}}",
+      "installed": "{{surface}} 已安装为 {{version}}",
+      "completed": "{{surface}} 安装已完成"
+    },
+    "cli": {
+      "blockedInSettings": "~/.claude/settings.json 中已设置 DISABLE_UPDATES=1",
+      "noActiveBinary": "PATH 上没有生效的 `claude` 可执行文件",
+      "blockedByFlag": "被 DISABLE_UPDATES=1 阻止",
+      "autoUpdateHint": "检测到新版本时自动运行 `claude update`",
+      "warnAutoupdaterOff": "已设置 DISABLE_AUTOUPDATER=1 — 后台自动更新已关闭",
+      "warnUpdatesBlocked": "已设置 DISABLE_UPDATES=1 — 手动更新同样被阻止",
+      "runningProcesses_other": "有 {{count}} 个 CC 进程在运行 — 符号链接切换是安全的（旧进程仍保留各自的版本）"
+    },
+    "desktop": {
+      "noInstall": "未检测到 Claude Desktop 安装",
+      "notManageable": "Claude Desktop 由 {{source}} 管理 — Claudepot 无法在此驱动更新",
+      "isRunning": "Claude Desktop 正在运行 — 请先退出再更新",
+      "statusRunning": "运行中",
+      "statusNotRunning": "未运行",
+      "autoInstallHint": "当 Claude Desktop 未运行时"
+    },
+    "settings": {
+      "title": "设置",
+      "subtitle": "通知与版本锁定",
+      "trayBadgeHint": "有新版本时显示托盘角标",
+      "osNotifyHint": "有新版本时发送系统通知（横幅）",
+      "clear": "清除",
+      "sourceNote": "通道与 DISABLE_* 键位于 <code>~/.claude/settings.json</code>（CC 自己的文件）。通知开关与检查频率位于 <code>~/.claudepot/updates.json</code>。"
+    },
+    "channel": {
+      "pinHonored": "将遵循 minimumVersion={{version}} 的锁定"
+    },
+    "source": {
+      "homebrew": "Homebrew Cask",
+      "directDmg": "直接下载",
+      "setapp": "Setapp",
+      "macAppStore": "Mac App Store",
+      "userLocal": "用户目录安装"
+    },
+    "installKind": {
+      "nativeCurl": "原生（curl）",
+      "unknown": "未知"
+    },
+    "auto": {
+      "installed": "已自动更新 {{surface}}。",
+      "installedVersion": "已自动更新 {{surface}} 至 {{version}}。",
+      "skipped": "{{surface}} 自动更新已跳过：{{reason}}",
+      "failed": "{{surface}} 自动更新失败：{{error}}"
+    },
+    "info": {
+      "saved": "已保存",
+      "wroteChannel": "已将 autoUpdatesChannel={{channel}} 写入 ~/.claude/settings.json",
+      "clearedMinimumVersion": "已清除 ~/.claude/settings.json 中的 minimumVersion"
+    }
+  },
+  "memory": {
+    "auto": {
+      "title": "自动记忆",
+      "loading": "加载中…",
+      "description": "让 CC 为每个项目建立记忆目录，并在会话结束时自动写入主题文件。按项目的覆盖设置位于「项目 → 记忆」。",
+      "overridden": "已被 {{label}} 覆盖。清除该环境变量后才能在此处控制。",
+      "enabledToast": "已全局启用自动记忆。",
+      "disabledToast": "已全局停用自动记忆。",
+      "loadFailed": "自动记忆状态加载失败",
+      "toggleFailed": "切换失败"
+    },
+    "health": {
+      "title": "记忆健康度",
+      "subtitle": "对 CLAUDE.md 与 MEMORY.md 的静态分析。",
+      "cutoffNote": " CC 会截断全局记忆中第 <strong>{{line}}</strong> 行之后的内容。",
+      "loadingLower": "加载中…",
+      "refresh": "刷新",
+      "claudeMdSubtitle": "全局指令",
+      "memoryMdSubtitle": "按账户的记忆索引",
+      "fileMissing": "文件不存在 — 无内容可审查。",
+      "lines": "行数",
+      "estTokens": "估算 token",
+      "kb": "{{kb}} KB",
+      "pastLine": "超出第 {{line}} 行",
+      "kbInvisible": "{{kb}} KB 不可见",
+      "allVisible": "全部可见"
+    }
+  },
+  "dream": {
+    "title": "后台记忆整合",
+    "loading": "加载中…",
+    "description": "让 Claude Code 在后台回顾近期会话，并将其提炼进记忆。默认跟随 Claude Code 自己的灰度节奏；可在此覆盖。",
+    "requiresAutoMemory": "依赖自动记忆，而它当前已关闭 — 在上方启用之前，整合不会运行。",
+    "modeDefault": "默认",
+    "modeOn": "开启",
+    "modeOff": "关闭",
+    "followsDefaultToast": "整合跟随 Claude Code 的默认设置。",
+    "onToast": "后台整合已开启。",
+    "offToast": "后台整合已关闭。",
+    "loadFailed": "整合状态加载失败",
+    "toggleFailed": "切换失败"
+  },
+  "tips": {
+    "title": "CC 提示",
+    "headerSummary": "已从 CC <strong>{{version}}</strong> 提取 {{extracted}} 条提示，共 {{known}} 条已知提示{{partial}} · 当前启动次数 #{{startup}}",
+    "partialSuffix": "（部分提取 — 格式可能已变动）",
+    "loadingCatalog": "正在加载提示目录…",
+    "refresh": "刷新",
+    "refreshing": "正在刷新…",
+    "privacyNote": "提示文案读取自你本机的 CC 可执行文件。历史与时间来自 <code>~/.claude.json</code> 以及 Claudepot 的本地快照日志。不会上传任何内容。",
+    "readingBinary": "正在读取 CC 可执行文件…",
+    "unavailable": "提示目录不可用。",
+    "installHint": "请先安装或更新 CC，然后点按「刷新」。",
+    "filterPlaceholder": "按文案、id 或触发条件筛选提示…",
+    "filterAll": "全部 {{n}}",
+    "filterSeen": "已看过 {{n}}",
+    "filterNeverSeen": "从未看过 {{n}}",
+    "filterExperiments": "实验 {{n}}",
+    "noMatch": "没有提示符合当前筛选条件。",
+    "seen": "已看过",
+    "neverSeen": "从未看过",
+    "seenRelative": "看过于 {{relative}}",
+    "cooldown": "冷却 {{n}}",
+    "experiment": "实验：{{flag}}",
+    "variantA": "变体 A",
+    "variantB": "变体 B",
+    "lastSeenAt": "上次出现于第 #{{n}} 次启动",
+    "beforeSnapshot": "（早于快照历史）",
+    "relativeParen": "（{{relative}}）",
+    "showTriggerLogic": "显示高级触发逻辑"
+  }
+}

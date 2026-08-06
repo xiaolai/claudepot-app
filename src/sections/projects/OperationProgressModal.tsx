@@ -1,4 +1,5 @@
 import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { Button } from "../../components/primitives/Button";
 import { NF } from "../../icons";
@@ -43,7 +44,7 @@ export function OperationProgressModal({
   onError,
   onOpenRepair,
   onCancel,
-  cancelLabel = "Cancel",
+  cancelLabel,
 }: {
   opId: string;
   title: string;
@@ -74,6 +75,7 @@ export function OperationProgressModal({
    *  flows pass "Cancel login" for clarity. */
   cancelLabel?: string;
 }) {
+  const { t } = useTranslation("projects");
   const channel = `op-progress::${opId}`;
   const phaseIds = useMemo(() => phases.map((p) => p.id), [phases]);
   const [phaseStates, setPhaseStates] = useState<Record<string, PhaseState>>(
@@ -184,12 +186,23 @@ export function OperationProgressModal({
         <ul className="phase-list">
           {phases.map((p) => {
             const state = phaseStates[p.id] ?? "pending";
+            const stateLabel =
+              state === "pending"
+                ? t("op.statePending")
+                : state === "running"
+                  ? t("op.stateRunning")
+                  : state === "complete"
+                    ? t("op.stateComplete")
+                    : t("op.stateError");
             return (
               <li key={p.id} className={`phase phase-${state}`}>
-                <span className="phase-tag" title={`Internal id: ${p.id}`}>
+                <span
+                  className="phase-tag"
+                  title={t("op.internalId", { id: p.id })}
+                >
                   {p.label}
                 </span>
-                <span className="phase-label">{state}</span>
+                <span className="phase-label">{stateLabel}</span>
                 {sub && sub.phase === p.id && (
                   <span className="phase-progress mono small muted">
                     {" "}({sub.done}/{sub.total})
@@ -202,22 +215,24 @@ export function OperationProgressModal({
 
         {terminal?.kind === "complete" && (
           <div className="op-terminal ok">
-            <strong>✓ Complete.</strong>
+            <strong>{t("op.complete")}</strong>
             {renderResult ? renderResult(terminal.info) : null}
           </div>
         )}
         {terminal?.kind === "error" && (
           isCancelled(terminal.detail) ? (
             <div className="op-terminal info">
-              <strong>Cancelled.</strong>
+              <strong>{t("op.cancelled")}</strong>
             </div>
           ) : (
             <div className="op-terminal bad">
-              <strong>Error.</strong>{" "}
-              <span className="mono small">{terminal.detail ?? "unknown"}</span>
+              <strong>{t("op.error")}</strong>{" "}
+              <span className="mono small">
+                {terminal.detail ?? t("op.unknown")}
+              </span>
               {terminal.failedJournalId && (
                 <p className="small muted">
-                  Journal id:{" "}
+                  {t("op.journalId")}{" "}
                   <code className="mono">{terminal.failedJournalId}</code>
                 </p>
               )}
@@ -228,16 +243,16 @@ export function OperationProgressModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose}>
-          {terminal ? "Close" : "Run in background"}
+          {terminal ? t("shared.close") : t("op.runInBackground")}
         </Button>
         {!terminal && onCancel && (
           <Button
             variant="solid"
             glyph={NF.x}
             onClick={onCancel}
-            aria-label={cancelLabel}
+            aria-label={cancelLabel ?? t("shared.cancel")}
           >
-            {cancelLabel}
+            {cancelLabel ?? t("shared.cancel")}
           </Button>
         )}
         {terminal?.kind === "error" &&
@@ -247,7 +262,7 @@ export function OperationProgressModal({
               variant="solid"
               onClick={() => onOpenRepair(terminal.failedJournalId)}
             >
-              Open Repair
+              {t("op.openRepair")}
             </Button>
           )}
       </ModalFooter>

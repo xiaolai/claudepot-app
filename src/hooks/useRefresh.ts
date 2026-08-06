@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { requestIdle, cancelIdle } from "../lib/idle";
+import { errorCode, renderError } from "../lib/i18n-error";
 import { runVerifyAll } from "../sections/accounts/runVerifyAll";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
@@ -28,9 +29,14 @@ import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 export function useRefresh(pushToast: (kind: "info" | "error", text: string) => void) {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [keychainIssue, setKeychainIssue] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  // These hold the RAW thrown value, not a rendered sentence. A string
+  // rendered here freezes the language it was rendered in: this hook has
+  // no i18n subscription, so a banner already on screen kept its old
+  // wording after a language switch until the next refresh. Consumers
+  // call `renderError` at paint time, and they DO re-render on a switch.
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [keychainIssue, setKeychainIssue] = useState<unknown>(null);
+  const [syncError, setSyncError] = useState<unknown>(null);
   const [authRejectedAt, setAuthRejectedAt] = useState<number | null>(null);
   const [ccIdentity, setCcIdentity] = useState<CcIdentity | null>(null);
   // Audit H10: `verifying` used to be a plain boolean cleared by the
@@ -132,12 +138,23 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
             })
             .catch((e) => {
               if (gen !== refreshGenRef.current) return;
-              const msg = `${e}`;
+              const msg = renderError(e);
+              // Classify on the code where one exists. `keychain is
+              // locked` has no variant of its own — it is a
+              // `{{detail}}` inside `account_register.credential_read`,
+              // and that detail is core's English on every locale — so
+              // it stays a substring test. `auth rejected` does have a
+              // variant, and its sentence is translated, so matching
+              // the rendered text would stop firing in zh-CN.
+              const code = errorCode(e);
               if (msg.toLowerCase().includes("keychain is locked")) {
-                setKeychainIssue(msg);
+                setKeychainIssue(e);
                 setSyncError(null);
                 setAuthRejectedAt(null);
-              } else if (msg.toLowerCase().includes("auth rejected")) {
+              } else if (
+                code === "account_register.auth_rejected" ||
+                msg.toLowerCase().includes("auth rejected")
+              ) {
                 // Terminal: refresh_token refused. Don't route to the
                 // generic sync-warning banner — useStatusIssues keys
                 // off authRejectedAt to render a "Sign in again" CTA.
@@ -146,7 +163,7 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
                 setAuthRejectedAt(Date.now());
               } else {
                 setKeychainIssue(null);
-                setSyncError(msg);
+                setSyncError(e);
                 setAuthRejectedAt(null);
                 // eslint-disable-next-line no-console
                 console.warn("sync_from_current_cc failed:", msg);
@@ -240,9 +257,8 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
         });
       }
     } catch (e) {
-      const msg = `${e}`;
-      setLoadError(msg);
-      pushToast("error", `refresh failed: ${msg}`);
+      setLoadError(e);
+      pushToast("error", renderError(e, "refresh failed"));
     } finally {
       refreshingRef.current = false;
       // Drain the pending bit. If anyone called `refresh()` while

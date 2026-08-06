@@ -1,0 +1,60 @@
+{
+  "list": {
+    "title": "面板",
+    "emptySubtitle": "供代理写入的持久化面板",
+    "noBoards": "还没有面板。",
+    "emptyHint": "代理或脚本通过写入来创建面板。面板功能处于试用阶段 — 参见 <code>{{cmd}}</code>。",
+    "boards_other": "{{count}} 个面板",
+    "rows_other": "{{count}} 行",
+    "backTitle": "返回面板列表",
+    "colName": "名称",
+    "colState": "状态",
+    "colLastUpdate": "最近更新",
+    "colReportedWriter": "自报写入者",
+    "reportedWriterTitle": "由写入者自行申报；Claudepot 不作核实",
+    "colRows": "行数"
+  },
+  "state": {
+    "live": "实时",
+    "idle": "空闲",
+    "stale": "陈旧"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{n}} 分钟前",
+    "hoursAgo": "{{n}} 小时前",
+    "daysAgo": "{{n}} 天前"
+  },
+  "provenance": {
+    "reportedBy": "自报身份：{{writer}}",
+    "selfDeclaredTitle": "自行申报，未经核实"
+  },
+  "banner": {
+    "updatesArrived": "你阅读期间有新的更新到达",
+    "jumpToLatest": "跳到最新"
+  },
+  "detail": {
+    "updated": "更新于 {{when}}",
+    "imported": "已导入",
+    "export": "导出",
+    "exportFilterName": "面板导出",
+    "exportFailed": "导出失败：{{error}}",
+    "cancel": "取消",
+    "delete": "删除",
+    "deletePermanently": "永久删除",
+    "deleteFailed": "删除失败：{{error}}",
+    "deleteWarning": "面板是用户数据，没有任何备份机制。请先导出 — 此操作无法撤销。",
+    "colSeries": "序列",
+    "colColumns": "列",
+    "colRows": "行数"
+  },
+  "widget": {
+    "logUnavailable": "无法使用对数坐标 — {{reason}}",
+    "rangePadded": "所有值都相同；已扩展范围以保持可读",
+    "downsampled": "显示 {{total}} 个点中的 {{shown}} 个",
+    "collapsedCategories": "已合并 {{n}} 个较小的类别",
+    "overValues_other": "基于 {{count}} 个值",
+    "tableTruncated": "显示 {{total}} 行中的 {{shown}} 行",
+    "sparkAria": "{{n}} 个数据点，范围从 {{min}} 到 {{max}}"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "sections": {
+    "accounts": "账户",
+    "events": "活动",
+    "projects": "项目",
+    "shared-memory": "知识",
+    "keys": "密钥",
+    "third-party": "服务商",
+    "automations": "代理",
+    "global": "全局",
+    "boards": "面板",
+    "settings": "设置"
+  },
+  "sidebar": {
+    "swapTargets": "切换目标",
+    "targetCli": "CLI",
+    "targetDesktop": "桌面版",
+    "synced": "已同步",
+    "syncing": "同步中…",
+    "expand": "展开侧栏",
+    "collapse": "收起侧栏",
+    "expandTitle": "展开侧栏 (⌘\\)",
+    "collapseTitle": "收起侧栏 (⌘\\)"
+  },
+  "chrome": {
+    "openSection": "打开{{section}}",
+    "openPalette": "打开命令面板",
+    "jumpToAnything": "随处跳转",
+    "toggleTheme": "切换主题",
+    "switchToLight": "切换到浅色模式",
+    "switchToDark": "切换到深色模式"
+  },
+  "notifGroups": {
+    "setup": "初始设置",
+    "liveWork": "进行中",
+    "actions": "操作",
+    "background": "后台"
+  },
+  "notifCategories": {
+    "accountAuthRejected": "账户认证被拒",
+    "keychainLocked": "钥匙串已锁定",
+    "ccSlotDrift": "CC 槽位漂移",
+    "desktopDrift": "桌面版漂移",
+    "repairConflict": "修复冲突",
+    "sessionWaiting": "会话等待输入",
+    "sessionStuck": "会话卡住",
+    "sessionErrorBurst": "会话错误激增",
+    "opDoneUnfocused": "后台操作完成",
+    "rotationSuggested": "建议轮换账户",
+    "usageThreshold": "用量接近上限",
+    "updateInstallReady": "更新已就绪",
+    "transcriptsExpiring": "保存的对话即将过期",
+    "accountVerified": "账户已验证",
+    "accountSwitched": "账户已切换",
+    "projectRenamed": "项目已重命名",
+    "projectRepaired": "项目已修复",
+    "sessionPruned": "会话已清理",
+    "keyCopied": "密钥已复制",
+    "keyAdded": "密钥已添加",
+    "keyRemoved": "密钥已移除",
+    "configEdited": "配置已编辑",
+    "automationRan": "代理已运行",
+    "rotationApplied": "账户轮换已执行",
+    "rotationFailed": "账户轮换失败",
+    "agentEventFailed": "代理触发失败",
+    "agentEventBurstCapped": "代理事件已限流",
+    "bannerResolved": "提示已解除",
+    "memoryChanged": "CLAUDE.md 被外部修改",
+    "configTreePatched": "配置文件被外部修改",
+    "serviceStatusChanged": "anthropic.com 状态变化",
+    "updateAvailable": "有可用更新"
+  },
+  "statusbar": {
+    "projects_other": "{{count}} 个项目",
+    "projectsTitle_other": "~/.claude/projects 中已索引 {{count}} 个 CC 项目",
+    "sessions_other": "{{count}} 个会话",
+    "sessionsTitle_other": "磁盘上有 {{count}} 份会话记录",
+    "live": "● {{count}} 进行中",
+    "liveTip": "Claude Code 正在写入的会话。后缀按模型家族分组。",
+    "liveTipClick": "Claude Code 正在写入的会话。后缀按模型家族分组。点击打开 活动 → 实时。"
+  }
+}

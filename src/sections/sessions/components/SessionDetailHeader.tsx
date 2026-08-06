@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/primitives/Button";
 import { IconButton } from "../../../components/primitives/IconButton";
 import {
@@ -59,6 +60,7 @@ export function SessionDetailHeader({
   /** Optional error sink for the export pipeline. */
   onError?: (message: string) => void;
 }) {
+  const { t } = useTranslation("sessions");
   // Redact the first prompt before deriving the title so an
   // `sk-ant-…` token in the user's first message can't surface in the
   // window header. The redactor is idempotent, so passing it through
@@ -67,7 +69,9 @@ export function SessionDetailHeader({
   const cleanTitle = deriveSessionTitle(safeFirstPrompt);
   const title =
     cleanTitle ??
-    (row.is_sidechain ? "Agent subsession" : "(untitled session)");
+    (row.is_sidechain
+      ? t("detail.agentSubsession")
+      : t("detail.untitledSession"));
 
   // Price table is fetched once at this orchestrator level and
   // shared with the full layout via prop. Rendering it inside the
@@ -92,25 +96,25 @@ export function SessionDetailHeader({
 
   const menuItems: ContextMenuItem[] = [
     {
-      label: "Move to project…",
+      label: t("detail.menuMoveToProject"),
       disabled: !row.project_from_transcript,
       disabledReason: row.project_from_transcript
         ? undefined
-        : "no cwd recorded",
+        : t("detail.noCwdRecorded"),
       onClick: onMoveClick,
     },
     ...(row.first_user_prompt
-      ? [{ label: "Copy first prompt", onClick: onCopyFirstPrompt }]
+      ? [{ label: t("detail.menuCopyFirstPrompt"), onClick: onCopyFirstPrompt }]
       : []),
     { separator: true, label: "", onClick: () => {} },
     {
-      label: "Export as Markdown",
+      label: t("detail.menuExportMarkdown"),
       onClick: () => {
         void exportSession(row.file_path, "md", onError);
       },
     },
     {
-      label: "Export as JSON",
+      label: t("detail.menuExportJson"),
       onClick: () => {
         void exportSession(row.file_path, "json", onError);
       },
@@ -119,13 +123,18 @@ export function SessionDetailHeader({
     ...(chunks !== null
       ? [
           {
-            label: viewMode === "chunks" ? "Raw events" : "Chunked view",
+            label:
+              viewMode === "chunks"
+                ? t("detail.menuRawEvents")
+                : t("detail.menuChunkedView"),
             onClick: onToggleViewMode,
           },
         ]
       : []),
     {
-      label: contextOpen ? "Hide context" : "Show context",
+      label: contextOpen
+        ? t("detail.menuHideContext")
+        : t("detail.menuShowContext"),
       onClick: onToggleContext,
     },
   ];
@@ -150,8 +159,8 @@ export function SessionDetailHeader({
       glyph={NF.ellipsis}
       size="sm"
       onClick={openMenu}
-      title="More actions"
-      aria-label="More session actions"
+      title={t("detail.moreActions")}
+      aria-label={t("detail.moreSessionActions")}
       aria-haspopup="menu"
       aria-expanded={menu !== null}
     />
@@ -164,7 +173,7 @@ export function SessionDetailHeader({
       glyphColor="var(--fg-muted)"
       onClick={onReveal}
     >
-      Reveal
+      {t("detail.reveal")}
     </Button>
   );
 

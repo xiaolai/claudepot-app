@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Glyph } from "./primitives/Glyph";
 import { NF } from "../icons";
 import type { StatusIssue } from "../hooks/useStatusIssues";
@@ -14,6 +15,7 @@ interface Props {
  * CC-slot-drift are visible on every section, not just Accounts.
  */
 export function StatusIssuesBanner({ issues, onDismiss }: Props) {
+  const { t } = useTranslation("components");
   if (issues.length === 0) return null;
   // Errors first so the first thing the user sees is the most urgent.
   const sorted = [...issues].sort((a, b) => severity(a) - severity(b));
@@ -27,7 +29,7 @@ export function StatusIssuesBanner({ issues, onDismiss }: Props) {
         padding: "var(--sp-10) var(--sp-16) 0",
       }}
       role="region"
-      aria-label="Account status alerts"
+      aria-label={t("banners.statusAlerts")}
     >
       {sorted.map((issue) => (
         <BannerRow
@@ -51,6 +53,7 @@ function BannerRow({
   issue: StatusIssue;
   onDismiss?: () => void;
 }) {
+  const { t } = useTranslation("components");
   const tone =
     issue.severity === "error"
       ? "var(--warn)"
@@ -141,8 +144,8 @@ function BannerRow({
         <button
           type="button"
           onClick={onDismiss}
-          aria-label="Dismiss for 24 hours"
-          title="Dismiss for 24 hours"
+          aria-label={t("banners.dismiss24h")}
+          title={t("banners.dismiss24h")}
           style={{
             width: "var(--icon-btn-sm)",
             height: "var(--icon-btn-sm)",

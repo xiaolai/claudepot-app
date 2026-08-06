@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Icon } from "./Icon";
 import type { Toast } from "../hooks/useToasts";
 
@@ -26,6 +27,7 @@ export function ToastContainer({
    */
   onDismiss: (id: number, opts?: { skipCommit?: boolean }) => void;
 }) {
+  const { t: tr } = useTranslation("components");
   return (
     <div className="toasts">
       {toasts.map((t) => (
@@ -44,14 +46,14 @@ export function ToastContainer({
                 onDismiss(t.id, { skipCommit: true });
               }}
             >
-              {t.undoLabel ?? "Undo"}
+              {t.undoLabel ?? tr("toasts.undo")}
             </button>
           )}
           <button
             className="toast-close"
             onClick={() => onDismiss(t.id)}
-            aria-label="Dismiss"
-            title="Dismiss"
+            aria-label={tr("toasts.dismiss")}
+            title={tr("toasts.dismiss")}
           >
             <Icon name="x" size={14} />
           </button>

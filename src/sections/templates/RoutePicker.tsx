@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { TemplateRouteSummaryDto } from "../../types";
 
 interface Props {
@@ -29,6 +30,7 @@ export function RoutePicker({
   privacyClass,
   onOpenThirdParties,
 }: Props) {
+  const { t } = useTranslation("projects");
   const capable = routes.filter((r) => r.is_capable);
   const ineligible = routes.filter((r) => !r.is_capable);
 
@@ -63,8 +65,7 @@ export function RoutePicker({
           fontSize: "var(--fs-sm)",
         }}
       >
-        This template runs only on a local route, but you don&rsquo;t have one
-        configured.{" "}
+        {t("templates.localOnlyNotice")}{" "}
         <button
           type="button"
           onClick={onOpenThirdParties}
@@ -78,7 +79,7 @@ export function RoutePicker({
             padding: 0,
           }}
         >
-          Set one up in Providers.
+          {t("templates.setupProviders")}
         </button>
       </div>
     );
@@ -98,7 +99,7 @@ export function RoutePicker({
           fontSize: "var(--fs-2xs)",
         }}
       >
-        Run with
+        {t("templates.runWith")}
       </span>
       <select
         value={selectedRouteId ?? "__default__"}
@@ -115,15 +116,15 @@ export function RoutePicker({
           fontSize: "var(--fs-sm)",
         }}
       >
-        <option value="__default__">Default — claude (your CLI account)</option>
+        <option value="__default__">{t("templates.defaultRoute")}</option>
         {capable.map((r) => (
           <option key={r.id} value={r.id}>
             {r.name} · {r.model}
-            {r.is_local ? " · local" : ""}
+            {r.is_local ? ` · ${t("templates.local")}` : ""}
           </option>
         ))}
         {ineligible.length > 0 && (
-          <optgroup label="Not eligible">
+          <optgroup label={t("templates.notEligible")}>
             {ineligible.map((r) => (
               <option key={r.id} value={r.id} disabled>
                 {r.name} · {r.model} — {r.ineligibility_reason}

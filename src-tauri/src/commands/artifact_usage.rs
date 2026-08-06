@@ -13,11 +13,17 @@
 //!
 //! The handlers do not contain business logic — they are thin
 //! adapters over the core API per `architecture.md`.
+//!
+//! Rejections cross as `ErrorDto`. The `open session index: ` /
+//! `refresh session index: ` / `query: ` prefixes are gone —
+//! `SessionIndexError` names what failed and the UI names what it was
+//! attempting. See `crate::dto_error`.
 
 use crate::dto_artifact_usage::{
     parse_kind, ArtifactEverFiredDto, ArtifactUsageBatchEntryDto, ArtifactUsageRowDto,
     ArtifactUsageStatsDto, UnusedReportDto,
 };
+use crate::dto_error::{codes, ErrorDto};
 use chrono::Utc;
 use claudepot_core::paths;
 use claudepot_core::session_index::SessionIndex;
@@ -25,20 +31,22 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-fn join_blocking_err(e: tokio::task::JoinError) -> String {
-    format!("blocking task failed: {e}")
+/// `ArtifactKind::parse` rejected a wire kind. `parse_kind` returns a
+/// pre-composed English string ("unknown artifact kind: skil"), carried
+/// verbatim — this layer has nothing to add to it.
+fn unknown_kind(m: String) -> ErrorDto {
+    ErrorDto::detail(codes::ARTIFACT_USAGE_UNKNOWN_KIND, m)
 }
 
 /// Open the index at `<data>/sessions.db` and run a refresh against
 /// `<config>/projects/`. Centralized here so every usage command
 /// applies the same freshness contract.
-fn open_and_refresh() -> Result<SessionIndex, String> {
+fn open_and_refresh() -> Result<SessionIndex, ErrorDto> {
     let data_dir = paths::claudepot_data_dir();
     let db_path = data_dir.join("sessions.db");
-    let idx = SessionIndex::open(&db_path).map_err(|e| format!("open session index: {e}"))?;
+    let idx = SessionIndex::open(&db_path)?;
     let cfg = paths::claude_config_dir();
-    idx.refresh(&cfg)
-        .map_err(|e| format!("refresh session index: {e}"))?;
+    idx.refresh(&cfg)?;
     Ok(idx)
 }
 
@@ -49,18 +57,16 @@ fn open_and_refresh() -> Result<SessionIndex, String> {
 pub async fn artifact_usage_for(
     kind: String,
     artifact_key: String,
-) -> Result<ArtifactUsageStatsDto, String> {
+) -> Result<ArtifactUsageStatsDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
-        let kind = parse_kind(&kind)?;
+        let kind = parse_kind(&kind).map_err(unknown_kind)?;
         let idx = open_and_refresh()?;
         let now_ms = Utc::now().timestamp_millis();
-        let stats = idx
-            .usage_for_artifact(kind, &artifact_key, now_ms)
-            .map_err(|e| format!("query: {e}"))?;
-        Ok::<_, String>(stats.into())
+        let stats = idx.usage_for_artifact(kind, &artifact_key, now_ms)?;
+        Ok::<_, ErrorDto>(stats.into())
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Batch fetch — used by the Config-tree renderer to populate badges
@@ -73,7 +79,7 @@ pub async fn artifact_usage_for(
 #[tauri::command]
 pub async fn artifact_usage_batch(
     keys: Vec<(String, String)>,
-) -> Result<Vec<ArtifactUsageBatchEntryDto>, String> {
+) -> Result<Vec<ArtifactUsageBatchEntryDto>, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         // Resolve kinds up-front so the core batch sees only valid pairs.
         let parsed: Vec<(claudepot_core::artifact_usage::ArtifactKind, String)> = keys
@@ -81,14 +87,12 @@ pub async fn artifact_usage_batch(
             .filter_map(|(k, v)| parse_kind(&k).ok().map(|kind| (kind, v)))
             .collect();
         if parsed.is_empty() {
-            return Ok::<_, String>(Vec::new());
+            return Ok::<_, ErrorDto>(Vec::new());
         }
         let idx = open_and_refresh()?;
         let now_ms = Utc::now().timestamp_millis();
-        let rows = idx
-            .usage_batch(&parsed, now_ms)
-            .map_err(|e| format!("query: {e}"))?;
-        Ok::<_, String>(
+        let rows = idx.usage_batch(&parsed, now_ms)?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|((kind, key), stats)| ArtifactUsageBatchEntryDto {
                     kind: kind.as_str().to_string(),
@@ -99,7 +103,7 @@ pub async fn artifact_usage_batch(
         )
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// How long a built server→plugin map stays fresh.
@@ -151,17 +155,15 @@ fn needs_mcp_attribution(rows: &[claudepot_core::artifact_usage::UsageListRow]) 
 pub async fn artifact_usage_top(
     kind: Option<String>,
     limit: u32,
-) -> Result<Vec<ArtifactUsageRowDto>, String> {
+) -> Result<Vec<ArtifactUsageRowDto>, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let kind = match kind.as_deref() {
-            Some(s) => Some(parse_kind(s)?),
+            Some(s) => Some(parse_kind(s).map_err(unknown_kind)?),
             None => None,
         };
         let idx = open_and_refresh()?;
         let now_ms = Utc::now().timestamp_millis();
-        let mut rows = idx
-            .usage_top(kind, limit as usize, now_ms)
-            .map_err(|e| format!("query: {e}"))?;
+        let mut rows = idx.usage_top(kind, limit as usize, now_ms)?;
         // MCP events carry no plugin_id (the extractor is pure JSONL and
         // can't read a plugin's .mcp.json). Attribute them here so a
         // plugin whose value is a bundled MCP server groups under that
@@ -175,10 +177,10 @@ pub async fn artifact_usage_top(
         if needs_mcp_attribution(&rows) {
             claudepot_core::artifact_usage::attribute_mcp_plugins(&mut rows, &mcp_plugin_map());
         }
-        Ok::<_, String>(rows.into_iter().map(ArtifactUsageRowDto::from).collect())
+        Ok::<_, ErrorDto>(rows.into_iter().map(ArtifactUsageRowDto::from).collect())
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Every artifact Claudepot has ever observed fire. Backs the Usage
@@ -195,12 +197,11 @@ pub async fn artifact_usage_top(
 /// decremented when a transcript is pruned, so an artifact the user
 /// runs weekly would read as never-fired after a session cleanup.
 #[tauri::command]
-pub async fn artifact_usage_ever_fired() -> Result<Vec<ArtifactEverFiredDto>, String> {
+pub async fn artifact_usage_ever_fired() -> Result<Vec<ArtifactEverFiredDto>, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let idx = open_and_refresh()?;
         let rows = idx
-            .usage_ever_fired()
-            .map_err(|e| format!("query: {e}"))?
+            .usage_ever_fired()?
             .into_iter()
             .map(
                 |(kind, artifact_key, first_seen_ms, last_seen_ms)| ArtifactEverFiredDto {
@@ -211,10 +212,10 @@ pub async fn artifact_usage_ever_fired() -> Result<Vec<ArtifactEverFiredDto>, St
                 },
             )
             .collect();
-        Ok::<_, String>(rows)
+        Ok::<_, ErrorDto>(rows)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Flatten a `ConfigTree` node list into the shape `unused` consumes.
@@ -257,15 +258,14 @@ fn collect_files(
 /// writes `userSettings:x`, and every user-scope artifact would be
 /// reported unused.
 #[tauri::command]
-pub async fn artifact_usage_unused() -> Result<UnusedReportDto, String> {
+pub async fn artifact_usage_unused() -> Result<UnusedReportDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         use claudepot_core::artifact_usage::unused;
         use std::collections::HashSet;
 
         let idx = open_and_refresh()?;
         let ever_fired: HashSet<(String, String)> = idx
-            .usage_ever_fired()
-            .map_err(|e| format!("query: {e}"))?
+            .usage_ever_fired()?
             .into_iter()
             .map(|(kind, key, _, _)| (kind.as_str().to_string(), key))
             .collect();
@@ -289,10 +289,10 @@ pub async fn artifact_usage_unused() -> Result<UnusedReportDto, String> {
             now_ms,
             unused::RECENTLY_MODIFIED_GRACE_DAYS,
         );
-        Ok::<_, String>(UnusedReportDto::from(report))
+        Ok::<_, ErrorDto>(UnusedReportDto::from(report))
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // Historical note: `artifact_usage_known_keys` was a stub for an

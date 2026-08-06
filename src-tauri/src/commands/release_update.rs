@@ -37,9 +37,31 @@
 //! the channel → endpoint mapping is pure logic in
 //! `claudepot_core::release_channel`; this module only bridges it to
 //! the Tauri updater runtime.
+//!
+//! # Error shape
+//!
+//! Rejections use `ErrorDto` (i18n plan §2.5; `commands/keys.rs` is the
+//! reference), under the `release_update.*` segment. That segment is
+//! deliberately **not** `updates.*`: this file updates *Claudepot's own
+//! bundle* on the `stable` / `beta` pair, while `commands/updates.rs`
+//! updates *CC and Claude Desktop* on CC's `latest` / `stable` pair.
+//! One shared segment would make every sentence open by saying which
+//! application it meant.
+//!
+//! `release_update.not_staged` is the one code here that reports that
+//! **nothing happened**: no download ran and no bundle was replaced.
+//! `release_update.install_failed` also leaves the running app intact
+//! and puts the stashed handle back, so its remedy is "retry", never
+//! "reinstall".
+//!
+//! The preferences mutex and the preferences write share
+//! `commands/preferences.rs`'s codes rather than minting a second pair
+//! — it is the same lock and the same file.
 
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::release_channel::ReleaseChannel;
 use serde::Serialize;
+use serde_json::json;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -133,23 +155,52 @@ pub enum DownloadProgress {
 /// Read the persisted release channel from the preferences state.
 fn channel_from_prefs(
     prefs: &tauri::State<'_, PreferencesState>,
-) -> Result<ReleaseChannel, String> {
-    Ok(prefs
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock: {e}"))?
-        .release_channel)
+) -> Result<ReleaseChannel, ErrorDto> {
+    Ok(prefs.0.lock().map_err(prefs_lock_poisoned)?.release_channel)
+}
+
+/// The `PreferencesState` mutex. Same lock and same English as
+/// `commands/preferences.rs`'s helper, so it carries the same code
+/// rather than minting a `release_update.*` twin.
+fn prefs_lock_poisoned(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::PREFERENCES_LOCK_POISONED,
+        json!({ "detail": e.to_string() }),
+        format!("preferences lock: {e}"),
+    )
+}
+
+/// The stashed-`Update` mutex. Distinct from the preferences lock
+/// above: this one guards the checked handle, and a poisoned one means
+/// a retry needs a fresh check.
+fn update_state_lock_poisoned(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::RELEASE_UPDATE_STATE_LOCK_POISONED,
+        json!({ "detail": e.to_string() }),
+        format!("update state lock: {e}"),
+    )
 }
 
 /// Resolve a [`ReleaseChannel`] to the parsed `Url` list the
 /// `UpdaterBuilder` expects. The channel module returns `&str`
 /// endpoints (it stays free of the `url` crate); parsing happens
 /// here at the Tauri boundary.
-fn channel_endpoints(channel: ReleaseChannel) -> Result<Vec<Url>, String> {
+fn channel_endpoints(channel: ReleaseChannel) -> Result<Vec<Url>, ErrorDto> {
     channel
         .endpoints()
         .into_iter()
-        .map(|s| Url::parse(s).map_err(|e| format!("invalid updater endpoint {s:?}: {e}")))
+        .map(|s| {
+            // `s` is a compiled-in constant from
+            // `claudepot_core::release_channel`, never user input —
+            // `params.endpoint` is a build artifact, not a secret.
+            Url::parse(s).map_err(|e| {
+                ErrorDto::with_params(
+                    codes::RELEASE_UPDATE_INVALID_ENDPOINT,
+                    json!({ "endpoint": s, "detail": e.to_string() }),
+                    format!("invalid updater endpoint {s:?}: {e}"),
+                )
+            })
+        })
         .collect()
 }
 
@@ -157,7 +208,7 @@ fn channel_endpoints(channel: ReleaseChannel) -> Result<Vec<Url>, String> {
 #[tauri::command]
 pub async fn release_channel_get(
     prefs: tauri::State<'_, PreferencesState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     Ok(channel_from_prefs(&prefs)?.as_str().to_string())
 }
 
@@ -179,17 +230,23 @@ pub async fn release_channel_set(
     prefs: tauri::State<'_, PreferencesState>,
     state: tauri::State<'_, ReleaseUpdateState>,
     channel: String,
-) -> Result<String, String> {
-    let parsed: ReleaseChannel = channel.parse()?;
+) -> Result<String, ErrorDto> {
+    // `ReleaseChannel::from_str` rejects with a plain `String`; it is
+    // kept verbatim as the English fallback, with `params.channel`
+    // carrying the rejected value for a localized sentence.
+    let parsed: ReleaseChannel = channel.parse().map_err(|m: String| {
+        ErrorDto::with_params(
+            codes::RELEASE_UPDATE_UNKNOWN_CHANNEL,
+            json!({ "channel": channel, "detail": m }),
+            m.clone(),
+        )
+    })?;
     // Mutate the in-memory snapshot under the std::sync guard, drop
     // the guard, then persist on a blocking task — the mutex must not
     // be held across the disk write (every other preferences reader
     // contends for it). Same discipline as `preferences_set_*`.
     let (snapshot, changed) = {
-        let mut p = prefs
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock: {e}"))?;
+        let mut p = prefs.0.lock().map_err(prefs_lock_poisoned)?;
         let changed = p.release_channel != parsed;
         p.release_channel = parsed;
         (p.clone(), changed)
@@ -199,14 +256,15 @@ pub async fn release_channel_set(
         // fails, the in-memory preference (which every check reads)
         // already carries the new channel, so the old stash is stale
         // either way.
-        *state
-            .0
-            .lock()
-            .map_err(|e| format!("update state lock: {e}"))? = None;
+        *state.0.lock().map_err(update_state_lock_poisoned)? = None;
     }
+    // `Preferences::save` returns a pre-composed English string
+    // ("preferences: mkdir …"). Carried verbatim under the same code
+    // `commands/preferences.rs` uses for the same write.
     tokio::task::spawn_blocking(move || snapshot.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+        .map_err(ErrorDto::task_join)?
+        .map_err(|m| ErrorDto::detail(codes::PREFERENCES_SAVE_FAILED, m))?;
     Ok(parsed.as_str().to_string())
 }
 
@@ -226,7 +284,7 @@ pub async fn release_update_check(
     app: tauri::AppHandle,
     prefs: tauri::State<'_, PreferencesState>,
     state: tauri::State<'_, ReleaseUpdateState>,
-) -> Result<ReleaseUpdateCheckDto, String> {
+) -> Result<ReleaseUpdateCheckDto, ErrorDto> {
     let channel = channel_from_prefs(&prefs)?;
     let endpoints = channel_endpoints(channel)?;
 
@@ -246,10 +304,12 @@ pub async fn release_update_check(
     // tauri.conf.json; `.endpoints(...)` overrides only the endpoint
     // list, leaving the pubkey (and thus signature verification)
     // intact.
-    let mut builder = app
-        .updater_builder()
-        .endpoints(endpoints)
-        .map_err(|e| format!("updater endpoint config failed: {e}"))?;
+    let mut builder = app.updater_builder().endpoints(endpoints).map_err(|e| {
+        ErrorDto::detail(
+            codes::RELEASE_UPDATE_ENDPOINT_CONFIG_FAILED,
+            format!("updater endpoint config failed: {e}"),
+        )
+    })?;
     if stranded_probe {
         let flag = Arc::clone(&remote_newer);
         builder = builder.version_comparator(move |current, release| {
@@ -262,24 +322,26 @@ pub async fn release_update_check(
             release.version != current
         });
     }
-    let updater = builder
-        .build()
-        .map_err(|e| format!("updater build failed: {e}"))?;
+    let updater = builder.build().map_err(|e| {
+        ErrorDto::detail(
+            codes::RELEASE_UPDATE_BUILDER_FAILED,
+            format!("updater build failed: {e}"),
+        )
+    })?;
 
-    let maybe_update = updater
-        .check()
-        .await
-        .map_err(|e| format!("update check failed: {e}"))?;
+    let maybe_update = updater.check().await.map_err(|e| {
+        ErrorDto::detail(
+            codes::RELEASE_UPDATE_CHECK_FAILED,
+            format!("update check failed: {e}"),
+        )
+    })?;
 
     match maybe_update {
         None => {
             // Up to date. Clear any previously-stashed handle so a
             // stale install can't fire against an outdated check.
             let current = app.package_info().version.to_string();
-            *state
-                .0
-                .lock()
-                .map_err(|e| format!("update state lock: {e}"))? = None;
+            *state.0.lock().map_err(update_state_lock_poisoned)? = None;
             Ok(ReleaseUpdateCheckDto {
                 update_available: false,
                 version: None,
@@ -296,10 +358,7 @@ pub async fn release_update_check(
             // this running prerelease — the user is stranded, not up
             // to date. Don't stash the handle: installing it would
             // sidegrade to an older build the user never asked for.
-            *state
-                .0
-                .lock()
-                .map_err(|e| format!("update state lock: {e}"))? = None;
+            *state.0.lock().map_err(update_state_lock_poisoned)? = None;
             Ok(ReleaseUpdateCheckDto {
                 update_available: false,
                 version: None,
@@ -327,10 +386,7 @@ pub async fn release_update_check(
                 stranded_on_prerelease: false,
                 stable_version: None,
             };
-            *state
-                .0
-                .lock()
-                .map_err(|e| format!("update state lock: {e}"))? = Some(update);
+            *state.0.lock().map_err(update_state_lock_poisoned)? = Some(update);
             Ok(dto)
         }
     }
@@ -364,7 +420,7 @@ fn is_stranded(stranded_probe: bool, remote_newer: Option<bool>) -> bool {
 #[tauri::command]
 pub async fn release_relaunch_busy_ops(
     ops: tauri::State<'_, crate::ops::RunningOps>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, ErrorDto> {
     Ok(ops
         .list()
         .into_iter()
@@ -386,21 +442,21 @@ pub async fn release_relaunch_busy_ops(
 pub async fn release_update_install(
     app: tauri::AppHandle,
     state: tauri::State<'_, ReleaseUpdateState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     // Take the stashed `Update` out of the mutex. `Update` is `Clone`
     // but we MOVE it out rather than clone-and-keep: a successful
     // install invalidates the handle, and a second install attempt
     // against a consumed handle must fail loudly, not silently
     // re-download. On error below we put it back so a retry works.
     let update = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("update state lock: {e}"))?;
+        let mut guard = state.0.lock().map_err(update_state_lock_poisoned)?;
         guard.take()
     };
     let Some(update) = update else {
-        return Err("no update is staged — run a check first (release_update_check)".to_string());
+        return Err(ErrorDto::new(
+            codes::RELEASE_UPDATE_NOT_STAGED,
+            "no update is staged — run a check first (release_update_check)",
+        ));
     };
 
     // `app.emit` is best-effort — a failed emit only loses one
@@ -446,11 +502,11 @@ pub async fn release_update_install(
         Err(e) => {
             // Put the handle back so the renderer can retry the
             // install without re-running the check.
-            *state
-                .0
-                .lock()
-                .map_err(|e| format!("update state lock: {e}"))? = Some(update);
-            Err(format!("update install failed: {e}"))
+            *state.0.lock().map_err(update_state_lock_poisoned)? = Some(update);
+            Err(ErrorDto::detail(
+                codes::RELEASE_UPDATE_INSTALL_FAILED,
+                format!("update install failed: {e}"),
+            ))
         }
     }
 }

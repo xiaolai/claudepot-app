@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 
 interface CronInputProps {
   value: string;
@@ -20,6 +22,7 @@ export function CronInput({
   onValidityChange,
   disabled,
 }: CronInputProps) {
+  const { t } = useTranslation("agents");
   const [valid, setValid] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nextRuns, setNextRuns] = useState<string[]>([]);
@@ -45,7 +48,7 @@ export function CronInput({
       } catch (e) {
         if (cancelled) return;
         setValid(false);
-        setError(String(e));
+        setError(renderError(e));
         setNextRuns([]);
         onValidityChange?.(false);
       }
@@ -75,7 +78,7 @@ export function CronInput({
           color: "var(--fg-2)",
         }}
       >
-        <span>Cron expression (5 fields: min hour dom mon dow)</span>
+        <span>{t("cron.label")}</span>
         <input
           type="text"
           value={value}
@@ -117,7 +120,7 @@ export function CronInput({
             fontFamily: "var(--ff-mono)",
           }}
         >
-          <span style={{ color: "var(--fg-3)" }}>Next 5 runs (UTC):</span>
+          <span style={{ color: "var(--fg-3)" }}>{t("cron.nextRuns")}</span>
           {nextRuns.map((iso) => (
             <span key={iso}>{formatIso(iso)}</span>
           ))}

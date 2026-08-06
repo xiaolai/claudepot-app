@@ -1,4 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { applyLocalePreference } from "./lib/i18n";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
 import { NetworkUnreachablePanel } from "./components/NetworkUnreachablePanel";
 import { useNetworkGate } from "./hooks/useNetworkGate";
@@ -77,6 +79,25 @@ function labelFor(op: RunningOpInfo): string {
  * the state those concerns share and the layout that renders them.
  */
 function AppShell() {
+  // Root i18n subscription: a language change re-renders the shell
+  // and everything below it, so plain functions that read `i18n.t`
+  // (formatLiveSegment, palette row builders) re-evaluate too.
+  const { t } = useTranslation("shell");
+
+  // Reconcile the boot-mirror locale (localStorage, applied at module
+  // load for a correct first paint) with the authoritative
+  // preferences.json value. Divergence happens when preferences were
+  // edited outside this webview — another machine, a reset, a hand
+  // edit.
+  useEffect(() => {
+    api
+      .preferencesGet()
+      .then((p) => applyLocalePreference(p.locale ?? null))
+      .catch(() => {
+        // Preferences unreachable at boot — keep the mirror's locale.
+      });
+  }, []);
+
   // The ENABLED sections, not the whole registry: a switched-off
   // section must not be reachable by ⌘ number, by a saved launch
   // preference, or by a deep link. Filtering only the sidebar would
@@ -248,8 +269,9 @@ function AppShell() {
     [enabled, section],
   );
 
-  // Breadcrumb tail mirrors the active section.
-  const cwd = activeSection?.label.toLowerCase() ?? section;
+  // Breadcrumb tail mirrors the active section (localized — the
+  // breadcrumb is UI, not a real path).
+  const cwd = activeSection ? t(activeSection.labelKey).toLowerCase() : section;
 
   /** Shell-owned state handed to the registry's per-section render
    *  functions. Each section picks the subset it accepts. */
@@ -389,7 +411,9 @@ function AppShell() {
               {activeSection && (
                 <ErrorBoundary
                   key={activeSection.id}
-                  label={activeSection.label}
+                  // The id, not the localized label: this string tags
+                  // console logs, which stay English (i18n plan §3).
+                  label={activeSection.id}
                 >
                   {activeSection.render(sectionHostProps)}
                 </ErrorBoundary>

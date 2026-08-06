@@ -194,6 +194,33 @@ pub enum TokenParseError {
     Empty,
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Segment is `desktop_token_cache` — see the note on
+/// [`super::error::DesktopSwapError`]'s impl for why `desktop_backend`'s
+/// four enums are namespaced by concern.
+impl crate::error_code::ErrorCode for TokenParseError {
+    fn code(&self) -> &'static str {
+        match self {
+            TokenParseError::Json(_) => "desktop_token_cache.json",
+            TokenParseError::Empty => "desktop_token_cache.empty",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // `serde_json::Error`'s Display is a position complaint
+            // ("expected value at line 1 column 2") — it never echoes
+            // the input, which matters here because the input IS the
+            // decrypted token cache. Never widen this to carry the
+            // document.
+            TokenParseError::Json(detail) => serde_json::json!({ "detail": detail }),
+            TokenParseError::Empty => serde_json::json!({}),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

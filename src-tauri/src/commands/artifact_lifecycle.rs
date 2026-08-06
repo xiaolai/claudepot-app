@@ -10,28 +10,31 @@ use crate::dto_artifact_lifecycle::{
     parse_kind, ClassifyPathDto, DisabledRecordDto, RestoredArtifactDto, TrackableDto,
     TrashEntryDto,
 };
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::artifact_lifecycle::{
     self,
     disable::OnConflict,
     paths::{classify_path, ActiveRoots, ArtifactKind, Trackable},
-    LifecycleError,
 };
 use claudepot_core::paths;
 use std::path::{Component, PathBuf};
 
-fn join_blocking_err(e: tokio::task::JoinError) -> String {
-    format!("blocking task failed: {e}")
+/// Lift `dto_artifact_lifecycle::parse_kind`'s `String`. The helper is
+/// shared with `artifact_usage`, so it keeps its shape and the code is
+/// attached here.
+fn kind_err(detail: String) -> ErrorDto {
+    ErrorDto::detail(codes::ARTIFACT_UNKNOWN_KIND, detail)
 }
 
-fn err_to_string(e: LifecycleError) -> String {
-    e.to_string()
-}
-
-fn parse_on_conflict(s: &str) -> Result<OnConflict, String> {
+fn parse_on_conflict(s: &str) -> Result<OnConflict, ErrorDto> {
     match s {
         "refuse" => Ok(OnConflict::Refuse),
         "suffix" => Ok(OnConflict::Suffix),
-        other => Err(format!("unknown on_conflict value: {other}")),
+        other => Err(ErrorDto::with_params(
+            codes::ARTIFACT_UNKNOWN_ON_CONFLICT,
+            serde_json::json!({ "value": other }),
+            format!("unknown on_conflict value: {other}"),
+        )),
     }
 }
 
@@ -125,31 +128,46 @@ fn is_valid_project_root(candidate: &std::path::Path, user_root: &std::path::Pat
 /// The renderer is our own code, but the IPC trust model puts the
 /// validation here so a future caller (a CLI, a third-party plugin
 /// that issues invokes) can't smuggle traversal segments through.
-fn validate_relative_path(relative_path: &str) -> Result<(), String> {
+fn validate_relative_path(relative_path: &str) -> Result<(), ErrorDto> {
+    // One code, `detail` carrying which rule fired: every case here is
+    // the same stake (a caller that is not our renderer) with the same
+    // remedy, so five catalog sentences would say one thing five times.
+    let reject = |message: String| {
+        ErrorDto::with_params(
+            codes::ARTIFACT_INVALID_RELATIVE_PATH,
+            serde_json::json!({
+                "relative_path": relative_path,
+                "detail": message.clone(),
+            }),
+            message,
+        )
+    };
     if relative_path.is_empty() {
-        return Err("relative_path is empty".into());
+        return Err(reject("relative_path is empty".to_string()));
     }
     if relative_path.contains('\\') {
-        return Err("relative_path must use forward slashes only".into());
+        return Err(reject(
+            "relative_path must use forward slashes only".to_string(),
+        ));
     }
     let p = std::path::Path::new(relative_path);
     for c in p.components() {
         match c {
             Component::Normal(_) => {}
             Component::ParentDir => {
-                return Err(format!(
+                return Err(reject(format!(
                     "relative_path must not contain `..`: {relative_path}"
-                ));
+                )));
             }
             Component::CurDir => {
-                return Err(format!(
+                return Err(reject(format!(
                     "relative_path must not contain `.`: {relative_path}"
-                ));
+                )));
             }
             Component::RootDir | Component::Prefix(_) => {
-                return Err(format!(
+                return Err(reject(format!(
                     "relative_path must be relative (no root): {relative_path}"
-                ));
+                )));
             }
         }
     }
@@ -161,11 +179,15 @@ fn validate_relative_path(relative_path: &str) -> Result<(), String> {
 /// could ask the backend to operate on an arbitrary directory shaped
 /// like `<scope_root>/agents/...`. Plugin / managed-policy paths
 /// stay refused at `classify_path` regardless.
-fn validate_scope_root(scope_root: &str, roots: &ActiveRoots) -> Result<PathBuf, String> {
+fn validate_scope_root(scope_root: &str, roots: &ActiveRoots) -> Result<PathBuf, ErrorDto> {
     let p = PathBuf::from(scope_root);
     let ok = roots.iter_scoped().any(|(_, root)| root == p.as_path());
     if !ok {
-        return Err(format!("scope_root not in active roots: {}", p.display()));
+        return Err(ErrorDto::with_params(
+            codes::ARTIFACT_SCOPE_ROOT_NOT_ACTIVE,
+            serde_json::json!({ "scope_root": p.display().to_string() }),
+            format!("scope_root not in active roots: {}", p.display()),
+        ));
     }
     Ok(p)
 }
@@ -179,8 +201,8 @@ fn rebuild_trackable(
     kind: &str,
     relative_path: &str,
     roots: &ActiveRoots,
-) -> Result<Trackable, String> {
-    let kind = parse_kind(kind)?;
+) -> Result<Trackable, ErrorDto> {
+    let kind = parse_kind(kind).map_err(kind_err)?;
     validate_relative_path(relative_path)?;
     let scope_root_path = validate_scope_root(scope_root, roots)?;
     let abs = scope_root_path.join(kind.subdir()).join(relative_path);
@@ -193,7 +215,9 @@ fn rebuild_trackable(
                 .join(relative_path);
             classify_path(&disabled, roots)
         })
-        .map_err(|reason| reason.to_string())
+        // `RefuseReason` carries its own code — the GUI hides the
+        // action per reason, so it must not collapse into one string.
+        .map_err(ErrorDto::from)
 }
 
 /// Read-only helper: take an absolute path and report whether it's
@@ -204,11 +228,11 @@ fn rebuild_trackable(
 pub async fn artifact_classify_path(
     abs_path: String,
     project_root: Option<String>,
-) -> Result<ClassifyPathDto, String> {
+) -> Result<ClassifyPathDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let roots = build_roots(project_root);
         match classify_path(std::path::Path::new(&abs_path), &roots) {
-            Ok(t) => Ok::<_, String>(ClassifyPathDto {
+            Ok(t) => Ok::<_, ErrorDto>(ClassifyPathDto {
                 already_disabled: t.already_disabled,
                 trackable: Some(TrackableDto::from(&t)),
                 refused: None,
@@ -221,7 +245,7 @@ pub async fn artifact_classify_path(
         }
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -231,17 +255,17 @@ pub async fn artifact_disable(
     relative_path: String,
     on_conflict: String,
     project_root: Option<String>,
-) -> Result<DisabledRecordDto, String> {
+) -> Result<DisabledRecordDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let roots = build_roots(project_root);
         let trackable = rebuild_trackable(&scope_root, &kind, &relative_path, &roots)?;
         let policy = parse_on_conflict(&on_conflict)?;
         artifact_lifecycle::disable_at(&trackable, policy, &roots)
             .map(DisabledRecordDto::from)
-            .map_err(err_to_string)
+            .map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -251,31 +275,31 @@ pub async fn artifact_enable(
     relative_path: String,
     on_conflict: String,
     project_root: Option<String>,
-) -> Result<DisabledRecordDto, String> {
+) -> Result<DisabledRecordDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let roots = build_roots(project_root);
         let trackable = rebuild_trackable(&scope_root, &kind, &relative_path, &roots)?;
         let policy = parse_on_conflict(&on_conflict)?;
         artifact_lifecycle::enable_at(&trackable, policy, &roots)
             .map(DisabledRecordDto::from)
-            .map_err(err_to_string)
+            .map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn artifact_list_disabled(
     project_root: Option<String>,
-) -> Result<Vec<DisabledRecordDto>, String> {
+) -> Result<Vec<DisabledRecordDto>, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let roots = build_roots(project_root);
         artifact_lifecycle::list_disabled(&roots)
             .map(|rows| rows.into_iter().map(DisabledRecordDto::from).collect())
-            .map_err(err_to_string)
+            .map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -284,45 +308,45 @@ pub async fn artifact_trash(
     kind: String,
     relative_path: String,
     project_root: Option<String>,
-) -> Result<TrashEntryDto, String> {
+) -> Result<TrashEntryDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let roots = build_roots(project_root);
         let trackable = rebuild_trackable(&scope_root, &kind, &relative_path, &roots)?;
         let trash_root = artifact_lifecycle::default_trash_root();
         artifact_lifecycle::trash_at(&trackable, &trash_root, &roots)
             .map(TrashEntryDto::from)
-            .map_err(err_to_string)
+            .map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn artifact_list_trash() -> Result<Vec<TrashEntryDto>, String> {
+pub async fn artifact_list_trash() -> Result<Vec<TrashEntryDto>, ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let trash_root = artifact_lifecycle::default_trash_root();
         artifact_lifecycle::list_trash_at(&trash_root)
             .map(|rows| rows.into_iter().map(TrashEntryDto::from).collect())
-            .map_err(err_to_string)
+            .map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn artifact_restore_from_trash(
     trash_id: String,
     on_conflict: String,
-) -> Result<RestoredArtifactDto, String> {
+) -> Result<RestoredArtifactDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let trash_root = artifact_lifecycle::default_trash_root();
         let policy = parse_on_conflict(&on_conflict)?;
         artifact_lifecycle::restore_at(&trash_root, &trash_id, policy)
             .map(RestoredArtifactDto::from)
-            .map_err(err_to_string)
+            .map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -332,11 +356,11 @@ pub async fn artifact_recover_trash(
     confirmed_kind: String,
     on_conflict: String,
     project_root: Option<String>,
-) -> Result<RestoredArtifactDto, String> {
+) -> Result<RestoredArtifactDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let trash_root = artifact_lifecycle::default_trash_root();
         let policy = parse_on_conflict(&on_conflict)?;
-        let kind = parse_kind(&confirmed_kind)?;
+        let kind = parse_kind(&confirmed_kind).map_err(kind_err)?;
         let target = PathBuf::from(confirmed_target_path);
         // Audit gate (artifact_lifecycle/trash.rs:253): the renderer
         // is restricted to ActiveRoots — user_root + already-known
@@ -345,20 +369,20 @@ pub async fn artifact_recover_trash(
         let roots = build_roots(project_root);
         artifact_lifecycle::recover_at(&trash_root, &trash_id, &target, kind, policy, &roots)
             .map(RestoredArtifactDto::from)
-            .map_err(err_to_string)
+            .map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn artifact_forget_trash(trash_id: String) -> Result<(), String> {
+pub async fn artifact_forget_trash(trash_id: String) -> Result<(), ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let trash_root = artifact_lifecycle::default_trash_root();
-        artifact_lifecycle::forget_at(&trash_root, &trash_id).map_err(err_to_string)
+        artifact_lifecycle::forget_at(&trash_root, &trash_id).map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Read the contents of a disabled artifact. The Config tree's
@@ -375,9 +399,9 @@ pub async fn artifact_disabled_preview(
     kind: String,
     relative_path: String,
     project_root: Option<String>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     tokio::task::spawn_blocking(move || {
-        let kind = parse_kind(&kind)?;
+        let kind = parse_kind(&kind).map_err(kind_err)?;
         validate_relative_path(&relative_path)?;
         let roots = build_roots(project_root);
         let scope_root_path = validate_scope_root(&scope_root, &roots)?;
@@ -387,9 +411,13 @@ pub async fn artifact_disabled_preview(
             .join(kind.subdir())
             .join(&relative_path);
         let trackable = claudepot_core::artifact_lifecycle::paths::classify_path(&abs, &roots)
-            .map_err(|reason| reason.to_string())?;
+            .map_err(ErrorDto::from)?;
         if !trackable.already_disabled {
-            return Err(format!("not a disabled artifact: {}", abs.display()));
+            return Err(ErrorDto::with_params(
+                codes::ARTIFACT_NOT_DISABLED,
+                serde_json::json!({ "path": abs.display().to_string() }),
+                format!("not a disabled artifact: {}", abs.display()),
+            ));
         }
         // For File payloads read the file itself; for Directory
         // payloads (Skill dir) read the SKILL.md inside.
@@ -406,34 +434,44 @@ pub async fn artifact_disabled_preview(
         // the spawn_blocking worker pool.
         const PREVIEW_HEAD_BYTES: usize = 256 * 1024;
         use std::io::Read;
-        let file = std::fs::File::open(&read_path).map_err(|e| format!("read open failed: {e}"))?;
+        let file = std::fs::File::open(&read_path).map_err(|e| {
+            ErrorDto::detail(
+                codes::ARTIFACT_PREVIEW_OPEN_FAILED,
+                format!("read open failed: {e}"),
+            )
+        })?;
         let mut bytes = Vec::with_capacity(PREVIEW_HEAD_BYTES.min(64 * 1024));
         file.take(PREVIEW_HEAD_BYTES as u64 + 1)
             .read_to_end(&mut bytes)
-            .map_err(|e| format!("read failed: {e}"))?;
+            .map_err(|e| {
+                ErrorDto::detail(
+                    codes::ARTIFACT_PREVIEW_READ_FAILED,
+                    format!("read failed: {e}"),
+                )
+            })?;
         let truncated = bytes.len() > PREVIEW_HEAD_BYTES;
         if truncated {
             bytes.truncate(PREVIEW_HEAD_BYTES);
         }
         let body = String::from_utf8_lossy(&bytes).into_owned();
-        Ok::<_, String>(if truncated {
+        Ok::<_, ErrorDto>(if truncated {
             format!("{body}\n\n…(truncated)")
         } else {
             body
         })
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn artifact_purge_trash(older_than_days: u32) -> Result<u32, String> {
+pub async fn artifact_purge_trash(older_than_days: u32) -> Result<u32, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let trash_root = artifact_lifecycle::default_trash_root();
-        artifact_lifecycle::purge_older_than(&trash_root, older_than_days).map_err(err_to_string)
+        artifact_lifecycle::purge_older_than(&trash_root, older_than_days).map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // Suppress unused-import warning when ArtifactKind isn't used directly

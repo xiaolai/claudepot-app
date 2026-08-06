@@ -159,6 +159,24 @@ pub enum CorpusError {
     Io(#[from] std::io::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for CorpusError {
+    fn code(&self) -> &'static str {
+        match self {
+            CorpusError::Db(_) => "corpus.db",
+            CorpusError::Io(_) => "corpus.io",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            CorpusError::Db(e) => serde_json::json!({ "detail": e.to_string() }),
+            CorpusError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 /// What one `index_root` pass did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexStats {

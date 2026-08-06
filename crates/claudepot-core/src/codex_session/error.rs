@@ -28,3 +28,33 @@ pub enum CodexError {
     #[error("session_meta in {path} is missing payload.id")]
     MissingSessionId { path: PathBuf },
 }
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Every variant names the rollout file it failed on, so `path` is
+/// carried raw (`Path::display()`, no normalization) on all three.
+impl crate::error_code::ErrorCode for CodexError {
+    fn code(&self) -> &'static str {
+        match self {
+            CodexError::Io { .. } => "codex_session.io",
+            CodexError::MissingSessionMeta { .. } => "codex_session.missing_session_meta",
+            CodexError::MissingSessionId { .. } => "codex_session.missing_session_id",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            CodexError::Io { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            CodexError::MissingSessionMeta { path } => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            CodexError::MissingSessionId { path } => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+        }
+    }
+}

@@ -341,15 +341,14 @@ fn corruption_notice(
     prior_corrupt_copies: bool,
     elevated_bypass_projects: &[String],
 ) -> Option<(String, String)> {
+    use crate::i18n::{tr, tr1, tr_args};
     let stale_copies_worth_notice = prior_corrupt_copies && !elevated_bypass_projects.is_empty();
     if !recovered_now && !stale_copies_worth_notice {
         return None;
     }
-    let title = "Permission grants file was unreadable".to_string();
+    let title = tr("permission.corruptTitle");
     let body = if elevated_bypass_projects.is_empty() {
-        "The permission-grants file was corrupt and has been moved aside. \
-         No project currently holds bypassPermissions."
-            .to_string()
+        tr("permission.corruptBodyClean")
     } else {
         let shown: Vec<&str> = elevated_bypass_projects
             .iter()
@@ -358,15 +357,14 @@ fn corruption_notice(
             .collect();
         let more = elevated_bypass_projects.len() - shown.len();
         let list = if more > 0 {
-            format!("{} and {more} more", shown.join(", "))
+            tr_args(
+                "permission.listMore",
+                &[("shown", &shown.join(", ")), ("more", &more.to_string())],
+            )
         } else {
             shown.join(", ")
         };
-        format!(
-            "The permission-grants file was corrupt and has been moved aside. \
-             These projects hold bypassPermissions and will NOT auto-revert: \
-             {list}. Re-grant or revert them by hand."
-        )
+        tr1("permission.corruptBodyElevated", "list", &list)
     };
     Some((title, body))
 }

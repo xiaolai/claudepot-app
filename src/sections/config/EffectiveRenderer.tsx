@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import type { ConfigEffectiveSettingsDto } from "../../types";
 
 /**
@@ -13,6 +16,7 @@ import type { ConfigEffectiveSettingsDto } from "../../types";
  * see which containers got clobbered by a higher-priority null/scalar.
  */
 export function EffectiveRenderer({ cwd }: { cwd: string | null }) {
+  const { t } = useTranslation("config");
   const [data, setData] = useState<ConfigEffectiveSettingsDto | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,7 +30,7 @@ export function EffectiveRenderer({ cwd }: { cwd: string | null }) {
         if (!cancelled) setData(d);
       })
       .catch((e) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(renderError(e));
       });
     return () => {
       cancelled = true;
@@ -57,14 +61,14 @@ export function EffectiveRenderer({ cwd }: { cwd: string | null }) {
           fontSize: "var(--fs-sm)",
         }}
       >
-        Couldn't compute effective settings: {error}
+        {t("effective.settingsFailed", { error })}
       </div>
     );
   }
   if (!data) {
     return (
       <div style={{ padding: "var(--sp-20)", color: "var(--fg-faint)" }}>
-        Computing…
+        {t("state.computing")}
       </div>
     );
   }
@@ -117,9 +121,11 @@ function DivergenceBanner() {
         color: "var(--accent)",
       }}
     >
-      <strong>Attribution may be unreliable:</strong> the merge engine
-      diverged from the reference merge for this project. Merged values
-      are correct, but the per-key source labels below may be wrong.
+      <Trans
+        ns="config"
+        i18nKey="effective.divergence"
+        components={{ b: <strong /> }}
+      />
     </div>
   );
 }
@@ -131,6 +137,7 @@ function PolicyBanner({
   winner: string | null;
   errors: ConfigEffectiveSettingsDto["policy_errors"];
 }) {
+  const { t } = useTranslation("config");
   if (!winner && errors.length === 0) return null;
   return (
     <div
@@ -144,13 +151,12 @@ function PolicyBanner({
     >
       {winner && (
         <div>
-          <strong>Policy active:</strong> {winner}
+          <strong>{t("effective.policyActive")}</strong> {winner}
         </div>
       )}
       {errors.length > 0 && (
         <div style={{ marginTop: "var(--sp-4)" }}>
-          {errors.length} rejected source
-          {errors.length === 1 ? "" : "s"}:{" "}
+          {t("effective.rejectedSources", { count: errors.length })}:{" "}
           {errors.map((e) => `${e.origin} (${e.message})`).join("; ")}
         </div>
       )}
@@ -247,10 +253,18 @@ function Leaf({
   const contribList = (p?.contributors ?? [])
     .filter((c) => c !== winner)
     .join(", ");
+  // Non-component helper path: `i18n.t` rather than a hook, because
+  // `Leaf` renders once per primitive leaf and the title is a plain
+  // string, not markup.
   const title = winner
-    ? `winner: ${winner}${contribList ? `; also contributors: ${contribList}` : ""}${
-        suppressed ? " — suppressed" : ""
-      }`
+    ? `${i18n.t("effective.winnerTitle", { ns: "config", winner })}${
+        contribList
+          ? i18n.t("effective.alsoContributors", {
+              ns: "config",
+              list: contribList,
+            })
+          : ""
+      }${suppressed ? i18n.t("effective.suppressed", { ns: "config" }) : ""}`
     : undefined;
   return (
     <span

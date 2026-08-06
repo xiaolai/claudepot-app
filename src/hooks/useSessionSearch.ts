@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { renderError } from "../lib/i18n-error";
 import { MIN_SEARCH_QUERY } from "../lib/paletteScore";
 import type { SearchHit } from "../types";
 
@@ -57,7 +58,7 @@ export function useSessionSearch(
         })
         .catch((e) => {
           if (mySeq !== requestSeqRef.current) return;
-          setError(String(e));
+          setError(renderError(e));
           setLoading(false);
         });
     }, 250);

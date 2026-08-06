@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { Table, Th, Td } from "../../components/primitives";
 import type { AgentRunDto, OutputArtifactDto, RunResultDto } from "../../types";
 import { ReportViewer } from "./reports/ReportViewer";
@@ -26,6 +28,7 @@ function hasStructuredResult(run: AgentRunDto): boolean {
 }
 
 export function RunHistoryPanel({ agentId, refreshKey }: Props) {
+  const { t } = useTranslation("agents");
   const [runs, setRuns] = useState<AgentRunDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reportPath, setReportPath] = useState<string | null>(null);
@@ -42,7 +45,7 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
           setError(null);
         }
       } catch (e) {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(renderError(e));
       }
     })();
     return () => {
@@ -72,14 +75,14 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
   if (runs === null) {
     return (
       <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-xs)" }}>
-        Loading runs…
+        {t("runs.loading")}
       </div>
     );
   }
   if (runs.length === 0) {
     return (
       <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-xs)" }}>
-        No runs yet.
+        {t("runs.empty")}
       </div>
     );
   }
@@ -92,19 +95,19 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
       >
         <thead>
           <tr>
-            <Th>status</Th>
-            <Th>started</Th>
-            <Th>dur</Th>
-            <Th>cost</Th>
-            <Th>turns</Th>
-            <Th>trigger</Th>
-            <Th align="right">details</Th>
+            <Th>{t("runs.table.status")}</Th>
+            <Th>{t("runs.table.started")}</Th>
+            <Th>{t("runs.table.dur")}</Th>
+            <Th>{t("runs.table.cost")}</Th>
+            <Th>{t("runs.table.turns")}</Th>
+            <Th>{t("runs.table.trigger")}</Th>
+            <Th align="right">{t("runs.table.details")}</Th>
           </tr>
         </thead>
         <tbody>
           {runs.map((run) => {
             const ok = !run.result?.is_error && run.exit_code === 0;
-            const symbol = ok ? "ok" : "ERR";
+            const symbol = ok ? t("runs.table.ok") : t("runs.table.err");
             const report = reportArtifact(run);
             const structured = hasStructuredResult(run);
             const isOpen = expanded.has(run.id);
@@ -135,9 +138,11 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
                           type="button"
                           onClick={() => setReportPath(report.path)}
                           style={reportLinkStyle}
-                          aria-label={`Open report for run started ${run.started_at}`}
+                          aria-label={t("runs.openReportAria", {
+                            startedAt: run.started_at,
+                          })}
                         >
-                          report
+                          {t("runs.report")}
                         </button>
                       ) : null}
                       {structured ? (
@@ -147,9 +152,13 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
                           style={reportLinkStyle}
                           aria-expanded={isOpen}
                           aria-controls={`run-${run.id}-details`}
-                          aria-label={`${isOpen ? "Hide" : "Show"} structured result for run ${run.id}`}
+                          aria-label={
+                            isOpen
+                              ? t("runs.hideResultAria", { id: run.id })
+                              : t("runs.showResultAria", { id: run.id })
+                          }
                         >
-                          {isOpen ? "hide" : "show"}
+                          {isOpen ? t("runs.hide") : t("runs.show")}
                         </button>
                       ) : null}
                       {!structured && !report ? (
@@ -188,6 +197,7 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
  * "render-if-nonzero" rule from design.md).
  */
 function StructuredResultPanel({ result }: { result: RunResultDto }) {
+  const { t } = useTranslation("agents");
   const rows: Array<[string, string]> = [];
   if (result.subtype) rows.push(["subtype", result.subtype]);
   if (result.is_error !== null) {
@@ -205,7 +215,7 @@ function StructuredResultPanel({ result }: { result: RunResultDto }) {
   if (rows.length === 0 && result.errors.length === 0) {
     return (
       <div style={{ color: "var(--fg-3)", fontStyle: "italic" }}>
-        Structured result was empty.
+        {t("runs.emptyResult")}
       </div>
     );
   }

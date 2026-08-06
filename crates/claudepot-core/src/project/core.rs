@@ -23,6 +23,34 @@ pub enum ProjectError {
     Io(#[from] std::io::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for ProjectError {
+    fn code(&self) -> &'static str {
+        match self {
+            ProjectError::NotFound(_) => "project.not_found",
+            ProjectError::SamePath => "project.same_path",
+            ProjectError::Ambiguous(_) => "project.ambiguous",
+            ProjectError::ClaudeRunning(_) => "project.claude_running",
+            ProjectError::Io(_) => "project.io",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ProjectError::NotFound(path) => serde_json::json!({ "path": path }),
+            ProjectError::SamePath => serde_json::json!({}),
+            ProjectError::Ambiguous(detail) => serde_json::json!({ "detail": detail }),
+            // The message bakes in `--force` because the CLI owns that
+            // text and it is frozen English. The GUI has no such flag,
+            // so the path is exposed here for a sentence that names the
+            // project and offers a button instead.
+            ProjectError::ClaudeRunning(path) => serde_json::json!({ "path": path }),
+            ProjectError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 // Re-export public API from submodules
 pub use crate::project_display::format_size;
 pub use crate::project_sanitize::{sanitize_path, unsanitize_path};

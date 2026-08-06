@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   LinkedTool,
   SessionChunk,
@@ -11,6 +12,7 @@ import { useActivityPrefs } from "../../hooks/useActivityPrefs";
 import { Body, Divider, FoldableBubble } from "./components/transcriptAtoms";
 import { ToolExecutionView } from "./viewers";
 import { redactSecrets } from "../../lib/redactSecrets";
+import { formatDateTime, formatNumber } from "../../lib/intl";
 import { formatTokens, modelBadge } from "./format";
 import { stripLocalCommandStdout } from "./localCommandStdout";
 import { CopyButton } from "../../components/CopyButton";
@@ -35,6 +37,7 @@ export function SessionChunkView({
   events: SessionEvent[];
   searchTerm: string;
 }) {
+  const { t } = useTranslation("sessions");
   switch (chunk.chunkType) {
     case "user": {
       const ev = events[chunk.event_index];
@@ -48,9 +51,12 @@ export function SessionChunkView({
           foldText={copyText}
           searchTerm={searchTerm}
           header={renderHeader(
-            "You",
+            t("viewer.you"),
             ts,
-            <CopyButton text={copyText} ariaLabel="Copy your message" />,
+            <CopyButton
+              text={copyText}
+              ariaLabel={t("viewer.copyYourMessage")}
+            />,
           )}
         >
           <Body
@@ -74,9 +80,9 @@ export function SessionChunkView({
           foldText={text}
           searchTerm={searchTerm}
           header={renderHeader(
-            "System output",
+            t("viewer.systemOutput"),
             ts,
-            <CopyButton text={text} ariaLabel="Copy system output" />,
+            <CopyButton text={text} ariaLabel={t("viewer.copySystemOutput")} />,
           )}
         >
           <Body
@@ -96,9 +102,12 @@ export function SessionChunkView({
       return (
         <Divider>
           <Tag tone="accent" glyph={NF.archive}>
-            Compacted
+            {t("viewer.compacted")}
           </Tag>
-          <CopyButton text={copyText} ariaLabel="Copy compaction summary" />
+          <CopyButton
+            text={copyText}
+            ariaLabel={t("viewer.copyCompactionSummary")}
+          />
           <Body
             text={copyText}
             searchTerm={searchTerm}
@@ -128,6 +137,7 @@ function AiChunkView({
   events: SessionEvent[];
   searchTerm: string;
 }) {
+  const { t } = useTranslation("sessions");
   const toolsByCallIdx = new Map<number, LinkedTool>(
     chunk.tool_executions.map((t) => [t.call_index, t]),
   );
@@ -140,15 +150,16 @@ function AiChunkView({
   const tokens = chunk.metrics.tokens;
   const tokenTotal =
     tokens.input + tokens.output + tokens.cache_creation + tokens.cache_read;
-  if (tokenTotal > 0) usageBits.push(`${formatTokens(tokenTotal)} tok`);
+  if (tokenTotal > 0)
+    usageBits.push(t("viewer.tok", { tokens: formatTokens(tokenTotal) }));
   if (chunk.metrics.tool_call_count > 0) {
     usageBits.push(
-      `${chunk.metrics.tool_call_count} tool${chunk.metrics.tool_call_count === 1 ? "" : "s"}`,
+      t("viewer.tools", { count: chunk.metrics.tool_call_count }),
     );
   }
   if (chunk.metrics.thinking_count > 0) {
     usageBits.push(
-      `${chunk.metrics.thinking_count} think${chunk.metrics.thinking_count === 1 ? "" : "s"}`,
+      t("viewer.thinks", { count: chunk.metrics.thinking_count }),
     );
   }
   // Concatenated text payload for the chunk-level copy button. We
@@ -179,7 +190,7 @@ function AiChunkView({
       foldText={copyText}
       searchTerm={searchTerm}
       header={renderHeader(
-        "Claude",
+        t("viewer.claude"),
         chunk.start_ts,
         <>
           {usageBits.length > 0 && (
@@ -188,7 +199,7 @@ function AiChunkView({
             </span>
           )}
           {copyText.length > 0 && (
-            <CopyButton text={copyText} ariaLabel="Copy Claude's turn" />
+            <CopyButton text={copyText} ariaLabel={t("viewer.copyClaudesTurn")} />
           )}
         </>,
       )}
@@ -218,6 +229,7 @@ function EventInlineView({
   event: SessionEvent;
   searchTerm: string;
 }) {
+  const { t } = useTranslation("sessions");
   switch (event.kind) {
     case "assistantText": {
       const model = event.model;
@@ -258,7 +270,7 @@ function EventInlineView({
             color: "var(--fg-muted)",
           }}
         >
-          <Glyph g={NF.wrench} /> {redactSecrets(event.tool_name)} <span className="mono">{event.tool_use_id.slice(0, 8)}</span> · (no result)
+          <Glyph g={NF.wrench} /> {redactSecrets(event.tool_name)} <span className="mono">{event.tool_use_id.slice(0, 8)}</span> · {t("viewer.noResult")}
         </div>
       );
     case "userToolResult":
@@ -281,7 +293,10 @@ function EventInlineView({
     case "malformed":
       return (
         <div style={{ color: "var(--warn)", fontSize: "var(--fs-xs)" }}>
-          Malformed line {event.line_number}: {redactSecrets(event.error)}
+          {t("viewer.malformedLine", {
+            line: event.line_number,
+            error: redactSecrets(event.error),
+          })}
         </div>
       );
     case "attachment":
@@ -295,7 +310,10 @@ function EventInlineView({
             borderRadius: "var(--r-2)",
           }}
         >
-          <Glyph g={NF.paperclip} /> Attachment {event.name ? redactSecrets(event.name) : "(unnamed)"}
+          <Glyph g={NF.paperclip} />{" "}
+          {t("viewer.attachment", {
+            name: event.name ? redactSecrets(event.name) : t("viewer.unnamed"),
+          })}
           {event.mime ? ` · ${redactSecrets(event.mime)}` : ""}
         </div>
       );
@@ -347,7 +365,7 @@ function renderHeader(
       <span style={{ whiteSpace: "nowrap" }}>{label}</span>
       {ts && (
         <span title={ts} style={{ whiteSpace: "nowrap" }}>
-          {new Date(ts).toLocaleString()}
+          {formatDateTime(new Date(ts))}
         </span>
       )}
       {extra && (
@@ -382,6 +400,7 @@ export function ThinkingDetails({
   text: string;
   searchTerm: string;
 }) {
+  const { t } = useTranslation("sessions");
   const { hideThinking } = useActivityPrefs();
   const [revealedByUser, setRevealedByUser] = useState(false);
   const shown = revealedByUser || !hideThinking;
@@ -406,9 +425,11 @@ export function ThinkingDetails({
           cursor: "pointer",
           fontFamily: "var(--font)",
         }}
-        aria-label={`Reveal thinking block (${text.length} characters)`}
+        aria-label={t("viewer.revealThinkingAria", { chars: text.length })}
       >
-        Thinking · {text.length.toLocaleString()} chars — click to reveal
+        {t("viewer.thinkingReveal", {
+          chars: formatNumber(text.length),
+        })}
       </button>
     );
   }
@@ -430,7 +451,7 @@ export function ThinkingDetails({
           letterSpacing: "var(--ls-wide)",
         }}
       >
-        Thinking
+        {t("viewer.thinking")}
       </summary>
       <div style={{ marginTop: "var(--sp-4)" }}>
         <Body

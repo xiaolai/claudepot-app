@@ -11,7 +11,27 @@
 // index ever grows past 50k, swap in a server-side aggregate
 // command).
 
+import { useTranslation } from "react-i18next";
 import type { ActivityCard, CardKindLabel, SeverityLabel } from "../../types";
+import { formatNumber } from "../../lib/intl";
+
+/** Catalog key for a severity's display label. Exhaustive over
+ *  `SeverityLabel` so a new wire value is a compile error here, not a
+ *  silently-raw chip. Shared with EventsSection's SeverityChip. */
+export function severityLabelKey(
+  s: SeverityLabel,
+): "severity.info" | "severity.notice" | "severity.warn" | "severity.error" {
+  switch (s) {
+    case "INFO":
+      return "severity.info";
+    case "NOTICE":
+      return "severity.notice";
+    case "WARN":
+      return "severity.warn";
+    case "ERROR":
+      return "severity.error";
+  }
+}
 
 // ── Types + aggregation ─────────────────────────────────────────
 
@@ -80,6 +100,7 @@ function isoDayFromDate(d: Date): string {
 /** Small horizontal bar chart of cards by day. Bars use currentColor
  *  so they inherit text color from the surrounding card. */
 export function Sparkbars({ data }: { data: number[] }) {
+  const { t } = useTranslation("activities");
   const max = Math.max(1, ...data);
   const w = 8;
   const gap = 2;
@@ -87,7 +108,7 @@ export function Sparkbars({ data }: { data: number[] }) {
   return (
     <svg
       role="img"
-      aria-label={`Cards per day, last ${data.length} days`}
+      aria-label={t("charts.sparkbarsAria", { days: data.length })}
       width="100%"
       height={h}
       viewBox={`0 0 ${data.length * (w + gap)} ${h}`}
@@ -115,6 +136,7 @@ export function Sparkbars({ data }: { data: number[] }) {
 /** Stacked horizontal bar — proportions of ERROR / WARN / NOTICE /
  *  INFO. Counts shown as a small legend underneath. */
 export function SeverityMix({ agg }: { agg: Aggregates }) {
+  const { t } = useTranslation("activities");
   const order: { sev: SeverityLabel; color: string }[] = [
     { sev: "ERROR", color: "var(--danger)" },
     { sev: "WARN", color: "var(--warn)" },
@@ -141,7 +163,10 @@ export function SeverityMix({ agg }: { agg: Aggregates }) {
             <div
               key={sev}
               style={{ width: `${(n / total) * 100}%`, background: color }}
-              title={`${sev}: ${n}`}
+              title={t("charts.severityCount", {
+                label: t(severityLabelKey(sev)),
+                value: n,
+              })}
             />
           );
         })}
@@ -170,7 +195,7 @@ export function SeverityMix({ agg }: { agg: Aggregates }) {
                 background: color,
               }}
             />
-            {sev} {agg.bySeverity.get(sev) ?? 0}
+            {t(severityLabelKey(sev))} {agg.bySeverity.get(sev) ?? 0}
           </span>
         ))}
       </div>
@@ -189,11 +214,12 @@ export function TopKinds({
   limit: number;
   labelFor: (k: CardKindLabel) => string;
 }) {
+  const { t } = useTranslation("activities");
   const data = topN(agg.byKind, limit);
   if (data.length === 0) {
     return (
       <div style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
-        No cards.
+        {t("charts.noCards")}
       </div>
     );
   }
@@ -222,7 +248,7 @@ export function TopKinds({
               {labelFor(k)}
             </span>
             <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--fg-muted)" }}>
-              {v.toLocaleString()}
+              {formatNumber(v)}
             </span>
           </div>
           <div

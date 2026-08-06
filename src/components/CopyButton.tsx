@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "./Icon";
 
 /**
@@ -17,6 +18,7 @@ export function CopyButton({
   text: string;
   ariaLabel?: string;
 }) {
+  const { t } = useTranslation("components");
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -49,8 +51,9 @@ export function CopyButton({
   };
 
   return (
-    <button className="copy-btn" onClick={copy} title="Copy to clipboard"
-      aria-label={ariaLabel ?? `Copy ${text}`}>
+    <button className="copy-btn" onClick={copy}
+      title={t("primitives.copyToClipboard")}
+      aria-label={ariaLabel ?? t("primitives.copyValue", { text })}>
       {state === "copied" ? <Icon name="check" size={13} /> :
        state === "failed" ? <Icon name="alert-triangle" size={13} /> :
        <Icon name="copy" size={13} />}

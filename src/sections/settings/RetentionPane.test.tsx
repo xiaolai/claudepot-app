@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { RetentionReport } from "../../api/cc-retention";
+import { i18n } from "../../lib/i18n";
 
 const retentionReportMock = vi.fn();
 const retentionSetMock = vi.fn();
@@ -232,5 +233,54 @@ describe("RetentionPane", () => {
     await waitFor(() =>
       expect(push).toHaveBeenCalledWith("error", expect.stringContaining("boom")),
     );
+  });
+});
+
+// The risk lines state how much history is about to be destroyed, so a
+// grammar or resolution bug here is not cosmetic. All three keys used to
+// pass `num` alone: `deletable` has `_one`/`_other`, and i18next selects
+// plurals on `count`, so it never resolved and rendered the literal key
+// `retention.risk.deletable` to the user — in English too. `horizon` and
+// `totalOnMachine` had no plural forms at all ("1 transcripts on this
+// machine"). `count` must be the raw number; `num` carries the grouped
+// display form.
+describe("retention risk lines — plural resolution", () => {
+  const t = i18n.getFixedT("en", "settings");
+
+  it("never renders a raw key", () => {
+    for (const key of [
+      "retention.risk.deletable",
+      "retention.risk.horizon",
+      "retention.risk.totalOnMachine",
+    ] as const) {
+      for (const n of [0, 1, 2]) {
+        const out = t(key, { count: n, num: String(n), days: 30 });
+        expect(out, `${key} @ ${n}`).not.toContain("retention.risk");
+      }
+    }
+  });
+
+  it("agrees with its count in English", () => {
+    expect(t("retention.risk.deletable", { count: 1, num: "1" })).toContain(
+      "1 transcript will",
+    );
+    expect(t("retention.risk.deletable", { count: 2, num: "2" })).toContain(
+      "2 transcripts will",
+    );
+    expect(t("retention.risk.totalOnMachine", { count: 1, num: "1" })).toBe(
+      "1 transcript on this machine.",
+    );
+    expect(t("retention.risk.horizon", { count: 1, num: "1", days: 30 })).toContain(
+      "1 more crosses",
+    );
+  });
+
+  it("resolves in zh-CN too", () => {
+    const zh = i18n.getFixedT("zh-CN", "settings");
+    for (const n of [1, 5]) {
+      expect(zh("retention.risk.deletable", { count: n, num: String(n) })).toContain(
+        "对话记录",
+      );
+    }
   });
 });

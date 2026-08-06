@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../lib/i18n";
 import { useSessionLive } from "../hooks/useSessionLive";
 import { useAppState } from "../providers/AppStateProvider";
 import { RunningOpsChip } from "../components/RunningOpsChip";
@@ -78,6 +80,7 @@ export function AppStatusBar({
   sidebarCollapsed,
   onToggleSidebar,
 }: AppStatusBarProps) {
+  const { t } = useTranslation("shell");
   const live = useSessionLive();
   const liveSegment = formatLiveSegment(live);
   const { lastDismissed, clearLastDismissed, toasts } = useAppState();
@@ -111,14 +114,14 @@ export function AppStatusBar({
   const countSegments: { text: string; title: string }[] = [];
   if (stats.projects != null && stats.projects > 0) {
     countSegments.push({
-      text: `${stats.projects} project${stats.projects === 1 ? "" : "s"}`,
-      title: `${stats.projects} CC project${stats.projects === 1 ? "" : "s"} indexed in ~/.claude/projects`,
+      text: t("statusbar.projects", { count: stats.projects }),
+      title: t("statusbar.projectsTitle", { count: stats.projects }),
     });
   }
   if (stats.sessions != null && stats.sessions > 0) {
     countSegments.push({
-      text: `${stats.sessions} session${stats.sessions === 1 ? "" : "s"}`,
-      title: `${stats.sessions} session transcript${stats.sessions === 1 ? "" : "s"} on disk`,
+      text: t("statusbar.sessions", { count: stats.sessions }),
+      title: t("statusbar.sessionsTitle", { count: stats.sessions }),
     });
   }
 
@@ -162,11 +165,11 @@ export function AppStatusBar({
           onClick={onToggleSidebar}
           title={
             sidebarCollapsed
-              ? "Expand sidebar (⌘\\)"
-              : "Collapse sidebar (⌘\\)"
+              ? t("sidebar.expandTitle")
+              : t("sidebar.collapseTitle")
           }
           aria-label={
-            sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+            sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")
           }
           aria-pressed={sidebarCollapsed === true}
           className="pm-focus"
@@ -324,8 +327,8 @@ function LiveSegment({
   // The live segment text reads as opaque jargon to a new user
   // ("● 3 live · OPUS 2, SON 1"). Tooltips spell out what the dot
   // means and that the right-hand cluster groups by model family.
-  const tip =
-    "Sessions Claude Code is currently writing to. Suffix groups by model family.";
+  const { t } = useTranslation("shell");
+  const tip = t("statusbar.liveTip");
   if (!onClick) {
     return (
       <span
@@ -345,8 +348,8 @@ function LiveSegment({
     <button
       type="button"
       onClick={onClick}
-      title={`${tip} Click to open Activities → Live.`}
-      aria-label={`${tip} Click to open Activities → Live.`}
+      title={t("statusbar.liveTipClick")}
+      aria-label={t("statusbar.liveTipClick")}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -378,11 +381,15 @@ export function formatLiveSegment(
   sessions: LiveSessionSummary[],
 ): string | null {
   if (sessions.length === 0) return null;
+  // Plain function, not a component — reads the global i18n instance
+  // directly. The rendering component re-renders on language change
+  // (its useTranslation subscription), re-invoking this.
+  const label = i18n.t("shell:statusbar.live", { count: sessions.length });
   const mix = modelMix(sessions);
   if (mix.length === 0) {
-    return `● ${sessions.length} live`;
+    return label;
   }
-  return `● ${sessions.length} live · ${mix.join(", ")}`;
+  return `${label} · ${mix.join(", ")}`;
 }
 
 /** Group live sessions by 3-letter model family and format as

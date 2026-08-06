@@ -5,35 +5,57 @@
 //! to run on every tick). `verified_desktop_identity` runs the slow
 //! Decrypted path and is the only method whose email the UI can trust
 //! for mutation. Plan v2 §D6 / §VerifiedIdentity.
+//!
+//! Errors use the `ErrorDto` shape (i18n plan §2.5; `commands/keys.rs`
+//! is the reference). `DesktopSwapError` and `DesktopIdentityError`
+//! carry their own codes, so those lift with `ErrorDto::from`. The
+//! `services::desktop_service` errors (`SwitchError` / `AdoptError` /
+//! `ClearError`) do not yet, so they ride a command code with core's
+//! own English in `message` — promote them to `from_core` when the
+//! services slice converts them.
 
-use super::open_store;
+use super::open_account_store;
 use crate::dto;
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::desktop_backend;
 use claudepot_core::services;
+use serde_json::json;
 use uuid::Uuid;
+
+/// `create_platform()` returned `None`. Three call sites share one
+/// English string already; this keeps them sharing one code.
+fn desktop_unsupported() -> ErrorDto {
+    ErrorDto::new(
+        codes::DESKTOP_NOT_SUPPORTED_ON_PLATFORM,
+        "Desktop not supported on this platform",
+    )
+}
 
 #[tauri::command]
 pub async fn desktop_use(
     email: String,
     no_launch: bool,
     lock: tauri::State<'_, crate::state::DesktopOpState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     // Codex follow-up review: desktop_use was bypassing the operation
     // lock, letting switch race with adopt/clear across GUI + tray +
     // CLI. The async mutex guards in-process; the core flock guards
     // cross-process (CLI vs GUI running simultaneously).
     let _guard = lock.0.lock().await;
 
-    let store = open_store()?;
-    let target = super::resolve_target(&store, &email)?;
+    let store = open_account_store()?;
+    // `resolve_target` lives in `commands/mod.rs` and still composes its
+    // own English ("resolve failed: …" / "account not found: …"). Not
+    // this file's prefix to drop, so it rides through unchanged.
+    let target = super::resolve_target(&store, &email)
+        .map_err(|m| ErrorDto::detail(codes::DESKTOP_RESOLVE_TARGET_FAILED, m))?;
 
-    let platform = desktop_backend::create_platform()
-        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
+    let platform = desktop_backend::create_platform().ok_or_else(desktop_unsupported)?;
 
     services::desktop_service::switch(&*platform, &store, target.uuid, no_launch)
         .await
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(ErrorDto::from)
 }
 
 /// Ground-truth "who is Claude Desktop signed in as right now".
@@ -48,7 +70,7 @@ pub async fn desktop_use(
 /// `Decrypted` (Phase 2+) is authoritative for mutation. See
 /// `desktop_identity` module docs for the rationale.
 #[tauri::command]
-pub async fn current_desktop_identity() -> Result<dto::DesktopIdentity, String> {
+pub async fn current_desktop_identity() -> Result<dto::DesktopIdentity, ErrorDto> {
     let now = chrono::Utc::now();
     let Some(platform) = desktop_backend::create_platform() else {
         return Ok(dto::DesktopIdentity {
@@ -59,7 +81,7 @@ pub async fn current_desktop_identity() -> Result<dto::DesktopIdentity, String> 
             error: Some("Desktop not supported on this platform".to_string()),
         });
     };
-    let store = open_store()?;
+    let store = open_account_store()?;
 
     match claudepot_core::desktop_identity::probe_live_identity(
         &*platform,
@@ -104,8 +126,13 @@ pub async fn current_desktop_identity() -> Result<dto::DesktopIdentity, String> 
 /// valid source for those actions because it returns
 /// `OrgUuidCandidate` only and the UI must not light up
 /// mutation affordances from candidates.
+///
+/// Note the two shapes of failure this command reports, which are not
+/// interchangeable: opening `accounts.db` rejects the call, while a
+/// *probe* that fails resolves `Ok` with the text in `error` — the card
+/// needs to keep rendering its identity row either way.
 #[tauri::command]
-pub async fn verified_desktop_identity() -> Result<dto::DesktopIdentity, String> {
+pub async fn verified_desktop_identity() -> Result<dto::DesktopIdentity, ErrorDto> {
     let now = chrono::Utc::now();
     let Some(platform) = desktop_backend::create_platform() else {
         return Ok(dto::DesktopIdentity {
@@ -116,7 +143,7 @@ pub async fn verified_desktop_identity() -> Result<dto::DesktopIdentity, String>
             error: Some("Desktop not supported on this platform".to_string()),
         });
     };
-    let store = open_store()?;
+    let store = open_account_store()?;
     let fetcher = claudepot_core::desktop_identity::DefaultProfileFetcher;
 
     match claudepot_core::desktop_identity::probe_live_identity_async(
@@ -168,23 +195,36 @@ pub async fn desktop_adopt(
     overwrite: bool,
     lock: tauri::State<'_, crate::state::DesktopOpState>,
     app: tauri::AppHandle,
-) -> Result<dto::DesktopAdoptOutcome, String> {
+) -> Result<dto::DesktopAdoptOutcome, ErrorDto> {
     use tauri::Emitter;
 
     let _guard = lock.0.lock().await;
 
-    let target_uuid = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
-    let store = open_store()?;
-    let platform = claudepot_core::desktop_backend::create_platform()
-        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
+    let target_uuid = Uuid::parse_str(&uuid).map_err(|e| {
+        ErrorDto::with_params(
+            codes::ACCOUNTS_INVALID_UUID,
+            json!({ "uuid": uuid }),
+            format!("bad uuid: {e}"),
+        )
+    })?;
+    let store = open_account_store()?;
+    let platform =
+        claudepot_core::desktop_backend::create_platform().ok_or_else(desktop_unsupported)?;
 
     // Verify identity: the authoritative Decrypted path. Fails here
     // if the live session isn't signed in, if the keychain secret
     // can't be read, or if /profile rejects the token.
+    // `DesktopIdentityError` carries its own code — the "identity probe
+    // failed: " prefix this site used to add is the UI's to write.
     let verified = claudepot_core::desktop_identity::verify_live_identity(&*platform, &store)
         .await
-        .map_err(|e| format!("identity probe failed: {e}"))?
-        .ok_or_else(|| "no live Desktop identity — sign in via Desktop first".to_string())?;
+        .map_err(ErrorDto::from)?
+        .ok_or_else(|| {
+            ErrorDto::new(
+                codes::DESKTOP_NO_LIVE_IDENTITY,
+                "no live Desktop identity — sign in via Desktop first",
+            )
+        })?;
 
     let outcome = services::desktop_service::adopt_current(
         &*platform,
@@ -194,7 +234,7 @@ pub async fn desktop_adopt(
         overwrite,
     )
     .await
-    .map_err(|e| format!("desktop adopt failed: {e}"))?;
+    .map_err(ErrorDto::from)?;
 
     let _ = app.emit(crate::events::DESKTOP_ADOPTED, &outcome.account_email);
     Ok(dto::DesktopAdoptOutcome {
@@ -212,18 +252,18 @@ pub async fn desktop_clear(
     keep_snapshot: bool,
     lock: tauri::State<'_, crate::state::DesktopOpState>,
     app: tauri::AppHandle,
-) -> Result<dto::DesktopClearOutcome, String> {
+) -> Result<dto::DesktopClearOutcome, ErrorDto> {
     use tauri::Emitter;
 
     let _guard = lock.0.lock().await;
 
-    let store = open_store()?;
-    let platform = claudepot_core::desktop_backend::create_platform()
-        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
+    let store = open_account_store()?;
+    let platform =
+        claudepot_core::desktop_backend::create_platform().ok_or_else(desktop_unsupported)?;
 
     let outcome = services::desktop_service::clear_session(&*platform, &store, keep_snapshot)
         .await
-        .map_err(|e| format!("desktop clear failed: {e}"))?;
+        .map_err(ErrorDto::from)?;
 
     let _ = app.emit(crate::events::DESKTOP_CLEARED, &outcome.email);
     Ok(dto::DesktopClearOutcome {
@@ -241,17 +281,19 @@ pub async fn desktop_clear(
 #[tauri::command]
 pub async fn sync_from_current_desktop(
     lock: tauri::State<'_, crate::state::DesktopOpState>,
-) -> Result<dto::DesktopSyncOutcome, String> {
+) -> Result<dto::DesktopSyncOutcome, ErrorDto> {
     let _guard = lock.0.lock().await;
 
-    let store = open_store()?;
+    let store = open_account_store()?;
     let platform = match claudepot_core::desktop_backend::create_platform() {
         Some(p) => p,
         None => return Ok(dto::DesktopSyncOutcome::NoLive),
     };
+    // `sync_from_current` returns `DesktopIdentityError`, which carries
+    // its own code; the "sync failed: " framing belongs to the UI.
     let outcome = services::desktop_service::sync_from_current(&*platform, &store)
         .await
-        .map_err(|e| format!("sync failed: {e}"))?;
+        .map_err(ErrorDto::from)?;
     Ok(match outcome {
         services::desktop_service::SyncOutcome::NoLive => dto::DesktopSyncOutcome::NoLive,
         services::desktop_service::SyncOutcome::Verified { email } => {
@@ -273,15 +315,13 @@ pub async fn sync_from_current_desktop(
 pub async fn desktop_launch(
     lock: tauri::State<'_, crate::state::DesktopOpState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     use tauri::Emitter;
     let _guard = lock.0.lock().await;
-    let platform = claudepot_core::desktop_backend::create_platform()
-        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
-    platform
-        .launch()
-        .await
-        .map_err(|e| format!("launch failed: {e}"))?;
+    let platform =
+        claudepot_core::desktop_backend::create_platform().ok_or_else(desktop_unsupported)?;
+    // `DesktopSwapError` carries its own code.
+    platform.launch().await.map_err(ErrorDto::from)?;
     let _ = app.emit(crate::events::DESKTOP_RUNNING_CHANGED, true);
     Ok(())
 }

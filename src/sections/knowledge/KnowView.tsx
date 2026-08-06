@@ -7,6 +7,7 @@
 // authoring is a deliberately secondary affordance here.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type { Decision, Evidence, LessonRow } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
@@ -18,7 +19,6 @@ import { basename } from "../../lib/paths";
 import { AddMemoryForm } from "./AddMemoryForm";
 import { TrustBar } from "./dashboard-primitives";
 import type { TrustMix } from "./dashboard-primitives";
-import { toUserError } from "../../lib/errors";
 import {
   isEnforced,
   KnowItemCard,
@@ -26,10 +26,20 @@ import {
   decisionStateBadge,
 } from "./knowledge-items";
 import type { KnowItem } from "./knowledge-items";
+import { renderError } from "../../lib/i18n-error";
 
 const GLOBAL_KEY = "(global)";
 /** Per-type row cap. A list at this length is flagged as truncated. */
 const LIMIT = 500;
+
+/** The three capped lists. The map holds catalog keys, not labels, so the
+ *  truncation note is composed at render time and follows a locale switch. */
+const TRUNCATED_TYPE_KEYS = {
+  memories: "know.typeMemories",
+  decisions: "know.typeDecisions",
+  evidence: "know.typeEvidence",
+} as const;
+type TruncatedType = keyof typeof TRUNCATED_TYPE_KEYS;
 
 type StateFilter =
   | "all"
@@ -62,13 +72,14 @@ export function KnowView({
   /** Route to the Review tab, optionally targeting a sub-queue. */
   onReview: (queue?: "proposed" | "suspect") => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const [memories, setMemories] = useState<LessonRow[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [partial, setPartial] = useState<string | null>(null);
-  const [truncated, setTruncated] = useState<string[]>([]);
+  const [truncated, setTruncated] = useState<TruncatedType[]>([]);
 
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -115,18 +126,17 @@ export function KnowView({
         mR.status === "fulfilled" && mR.value.length >= LIMIT ? "memories" : null,
         dR.status === "fulfilled" && dR.value.length >= LIMIT ? "decisions" : null,
         eR.status === "fulfilled" && eR.value.length >= LIMIT ? "evidence" : null,
-      ].filter((x): x is string => x !== null),
+      ].filter((x): x is TruncatedType => x !== null),
     );
 
     const results = [mR, dR, eR];
     const failures = results.filter(
       (r): r is PromiseRejectedResult => r.status === "rejected",
     );
-    if (failures.length === results.length) setErr(toUserError(failures[0]!.reason));
-    else if (failures.length > 0)
-      setPartial("Part of the base couldn't load — showing what's available.");
+    if (failures.length === results.length) setErr(renderError(failures[0]!.reason));
+    else if (failures.length > 0) setPartial(t("know.partial"));
     setLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -323,7 +333,7 @@ export function KnowView({
         >
           <span style={{ color: "var(--danger)", fontSize: "var(--fs-base)" }}>{err}</span>
           <Button variant="subtle" onClick={() => void refresh()} disabled={loading}>
-            {loading ? "Retrying…" : "Retry"}
+            {loading ? t("know.retrying") : t("know.retry")}
           </Button>
         </div>
       )}
@@ -332,15 +342,19 @@ export function KnowView({
         <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", fontSize: "var(--fs-sm)", color: "var(--warn)" }}>
           <span>{partial}</span>
           <Button variant="ghost" onClick={() => void refresh()} disabled={loading}>
-            {loading ? "…" : "Retry"}
+            {loading ? "…" : t("know.retry")}
           </Button>
         </div>
       )}
 
       {truncated.length > 0 && (
         <p style={{ margin: 0, fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
-          Showing the {LIMIT} most recent {truncated.join(" and ")}; older ones
-          may be hidden — narrow with filters or search to see them.
+          {t("know.truncatedNote", {
+            limit: LIMIT,
+            lists: truncated
+              .map((k) => t(TRUNCATED_TYPE_KEYS[k]))
+              .join(t("know.listJoin")),
+          })}
         </p>
       )}
 
@@ -389,9 +403,11 @@ export function KnowView({
 
       {visible.length > 0 && (
         <p style={{ margin: 0, fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
-          <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>enter</kbd> opens the source
-          exchange for a memory learned from a transcript. The pipeline
-          (Review) is the intake — you judge, never author.
+          <Trans
+            ns="knowledge"
+            i18nKey="know.kbdHint"
+            components={{ kbd: <kbd /> }}
+          />
         </p>
       )}
     </div>
@@ -428,8 +444,9 @@ function ProjectGroup({
   onArchived: () => void;
   onReview: (queue?: "proposed" | "suspect") => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const name =
-    group.projectPath == null ? "Global" : basename(group.projectPath);
+    group.projectPath == null ? t("know.globalGroup") : basename(group.projectPath);
   const panelId = `know-group-${group.key}`;
 
   return (
@@ -468,18 +485,18 @@ function ProjectGroup({
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}
-            title={group.projectPath ?? "Global memories"}
+            title={group.projectPath ?? t("know.globalMemoriesTitle")}
           >
             {name}
           </span>
           <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-muted)" }}>
-            {group.items.length} item{group.items.length === 1 ? "" : "s"}
+            {t("know.items", { count: group.items.length })}
           </span>
         </button>
         {group.projectPath && (
           <CopyButton
             text={group.projectPath}
-            ariaLabel={`Copy project path ${group.projectPath}`}
+            ariaLabel={t("know.copyProjectPathAria", { path: group.projectPath })}
           />
         )}
         <div style={{ width: "12rem", maxWidth: "40%" }}>
@@ -547,6 +564,7 @@ function FilterBar({
   onProject: (p: string) => void;
   onToggleAdd: () => void;
 }) {
+  const { t } = useTranslation("knowledge");
   // A deep-linked project (from the Dashboard's coverage grid) may hold no
   // curated items yet, so it isn't in `projects` — inject it as an option so
   // the control shows the truth ("<name> — uncurated") instead of silently
@@ -561,52 +579,54 @@ function FilterBar({
       <Input
         value={query}
         onChange={(e) => onQuery(e.currentTarget.value)}
-        placeholder="Filter this base…"
-        aria-label="Search knowledge"
+        placeholder={t("know.filters.placeholder")}
+        aria-label={t("know.filters.searchAria")}
         style={{ minWidth: "12rem", flex: "0 1 16rem" }}
       />
       <select
         value={stateFilter}
         onChange={(e) => onState(e.currentTarget.value as StateFilter)}
-        aria-label="State filter"
+        aria-label={t("know.filters.stateAria")}
         style={selectStyle()}
       >
-        <option value="all">All states</option>
-        <option value="proposed">Proposed</option>
-        <option value="accepted">Accepted (incl. enforced)</option>
-        <option value="enforced">Enforced</option>
-        <option value="suspect">Suspect</option>
-        <option value="active">Active (decisions)</option>
-        <option value="superseded">Superseded (decisions)</option>
+        <option value="all">{t("know.filters.stateAll")}</option>
+        <option value="proposed">{t("know.filters.stateProposed")}</option>
+        <option value="accepted">{t("know.filters.stateAccepted")}</option>
+        <option value="enforced">{t("know.filters.stateEnforced")}</option>
+        <option value="suspect">{t("know.filters.stateSuspect")}</option>
+        <option value="active">{t("know.filters.stateActive")}</option>
+        <option value="superseded">{t("know.filters.stateSuperseded")}</option>
       </select>
       <select
         value={kindFilter}
         onChange={(e) => onKind(e.currentTarget.value as KindFilter)}
-        aria-label="Kind filter"
+        aria-label={t("know.filters.kindAria")}
         style={selectStyle()}
       >
-        <option value="all">All kinds</option>
-        <option value="fact">Fact</option>
-        <option value="preference">Preference</option>
-        <option value="pattern">Pattern</option>
-        <option value="constraint">Constraint</option>
-        <option value="summary">Summary</option>
-        <option value="decision">Decision</option>
-        <option value="evidence">Evidence</option>
+        <option value="all">{t("know.filters.kindAll")}</option>
+        <option value="fact">{t("know.filters.kindFact")}</option>
+        <option value="preference">{t("know.filters.kindPreference")}</option>
+        <option value="pattern">{t("know.filters.kindPattern")}</option>
+        <option value="constraint">{t("know.filters.kindConstraint")}</option>
+        <option value="summary">{t("know.filters.kindSummary")}</option>
+        <option value="decision">{t("know.filters.kindDecision")}</option>
+        <option value="evidence">{t("know.filters.kindEvidence")}</option>
       </select>
       <select
         value={projectFilter}
         onChange={(e) => onProject(e.currentTarget.value)}
-        aria-label="Project filter"
+        aria-label={t("know.filters.projectAria")}
         style={{ ...selectStyle(), maxWidth: "16rem" }}
       >
-        <option value="all">All projects</option>
+        <option value="all">{t("know.filters.allProjects")}</option>
         {injectProject && (
-          <option value={projectFilter}>{basename(projectFilter)} — uncurated</option>
+          <option value={projectFilter}>
+            {t("know.filters.uncurated", { name: basename(projectFilter) })}
+          </option>
         )}
         {projects.map((p) => (
           <option key={p} value={p}>
-            {p === GLOBAL_KEY ? "Global" : basename(p)}
+            {p === GLOBAL_KEY ? t("know.globalGroup") : basename(p)}
           </option>
         ))}
       </select>
@@ -614,7 +634,7 @@ function FilterBar({
       {/* Secondary intake — the pipeline (Review) is the primary way
           knowledge enters the base, so "Add" stays a ghost affordance. */}
       <Button variant="ghost" glyph={NF.plus} onClick={onToggleAdd}>
-        {addOpen ? "Cancel" : "Add"}
+        {addOpen ? t("know.filters.cancel") : t("know.filters.add")}
       </Button>
     </div>
   );
@@ -646,6 +666,7 @@ function KnowEmptyState({
   onClearSearch: () => void;
   onClearAll: () => void;
 }) {
+  const { t } = useTranslation("knowledge");
   const evidenceStateClash = kindFilter === "evidence" && stateFilter !== "all";
   const searching = query.trim().length > 0;
   const otherFilterActive = kindFilter !== "all" || stateFilter !== "all";
@@ -666,49 +687,53 @@ function KnowEmptyState({
   if (projectScoped) {
     const cmd = `claudepot lesson harvest --project ${shellQuote(projectFilter)}`;
     title = (
-      <>
-        Nothing curated in <strong>{basename(projectFilter)}</strong> yet.
-      </>
+      <Trans
+        ns="knowledge"
+        i18nKey="know.empty.projectTitle"
+        values={{ name: basename(projectFilter) }}
+        components={{ strong: <strong /> }}
+      />
     );
     detail = (
       <>
-        Harvest this project’s sessions, then judge what surfaces in Review:
+        {t("know.empty.projectDetail")}
         <br />
         <code style={{ wordBreak: "break-all" }}>{cmd}</code>{" "}
-        <CopyButton text={cmd} ariaLabel="Copy harvest command" />
+        <CopyButton text={cmd} ariaLabel={t("know.empty.copyHarvestAria")} />
       </>
     );
     action = (
       <Button variant="ghost" onClick={onClearProject}>
-        Clear project filter
+        {t("know.empty.clearProject")}
       </Button>
     );
   } else if (evidenceStateClash) {
-    title = <>Evidence has no lifecycle state.</>;
-    detail = <>Clear the State filter to see evidence records.</>;
+    title = <>{t("know.empty.evidenceTitle")}</>;
+    detail = <>{t("know.empty.evidenceDetail")}</>;
     action = (
       <Button variant="ghost" onClick={onClearState}>
-        Clear state filter
+        {t("know.empty.clearState")}
       </Button>
     );
   } else if (searching) {
-    title = <>No curated records match “{query.trim()}”.</>;
+    title = <>{t("know.empty.searchTitle", { query: query.trim() })}</>;
     action = (
       <Button variant="ghost" onClick={onClearSearch}>
-        Clear search
+        {t("know.empty.clearSearch")}
       </Button>
     );
   } else {
-    title = <>Nothing curated matches these filters.</>;
+    title = <>{t("know.empty.filtersTitle")}</>;
     detail = (
-      <>
-        The pipeline is the intake — accept lessons in Review, or harvest more
-        with <code>claudepot lesson harvest</code>.
-      </>
+      <Trans
+        ns="knowledge"
+        i18nKey="know.empty.filtersDetail"
+        components={{ code: <code /> }}
+      />
     );
     action = otherFilterActive ? (
       <Button variant="ghost" onClick={onClearAll}>
-        Clear filters
+        {t("know.empty.clearFilters")}
       </Button>
     ) : null;
   }

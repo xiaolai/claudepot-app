@@ -93,6 +93,50 @@ pub enum DesktopIdentityError {
     Unsupported,
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for DesktopIdentityError {
+    fn code(&self) -> &'static str {
+        match self {
+            DesktopIdentityError::DataDirUnreadable(_) => "desktop_identity.data_dir_unreadable",
+            DesktopIdentityError::NoDataDir => "desktop_identity.no_data_dir",
+            DesktopIdentityError::NoConfig => "desktop_identity.no_config",
+            DesktopIdentityError::ConfigParse(_) => "desktop_identity.config_parse",
+            DesktopIdentityError::NotSignedIn => "desktop_identity.not_signed_in",
+            DesktopIdentityError::Key(_) => "desktop_identity.key",
+            DesktopIdentityError::Decrypt(_) => "desktop_identity.decrypt",
+            DesktopIdentityError::TokenParse(_) => "desktop_identity.token_parse",
+            DesktopIdentityError::ProfileFetch(_) => "desktop_identity.profile_fetch",
+            DesktopIdentityError::Unsupported => "desktop_identity.unsupported",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            DesktopIdentityError::DataDirUnreadable(detail) => {
+                serde_json::json!({ "detail": detail })
+            }
+            DesktopIdentityError::NoDataDir => serde_json::json!({}),
+            DesktopIdentityError::NoConfig => serde_json::json!({}),
+            DesktopIdentityError::ConfigParse(detail) => serde_json::json!({ "detail": detail }),
+            DesktopIdentityError::NotSignedIn => serde_json::json!({}),
+            // The two wrapped enums carry their own codes; a GUI that
+            // wants to branch on the inner cause matches on the inner
+            // enum before it reaches this boundary. Here the message
+            // interpolates only the inner Display, so `detail` is what
+            // the sentence needs.
+            DesktopIdentityError::Key(e) => serde_json::json!({ "detail": e.to_string() }),
+            DesktopIdentityError::Decrypt(e) => serde_json::json!({ "detail": e.to_string() }),
+            DesktopIdentityError::TokenParse(detail) => serde_json::json!({ "detail": detail }),
+            // Status lines from `/profile`, never a bearer token — the
+            // probe sends the token in a header and reads only the
+            // status and the email field back.
+            DesktopIdentityError::ProfileFetch(detail) => serde_json::json!({ "detail": detail }),
+            DesktopIdentityError::Unsupported => serde_json::json!({}),
+        }
+    }
+}
+
 /// Type-level proof that a Desktop identity was obtained via the
 /// authoritative decrypted+`/profile` path. Construction is private
 /// to this module (via [`probe_live_identity`] on the slow path), so

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
+import { renderError } from "../lib/i18n-error";
 import { useAppState } from "../providers/AppStateProvider";
 import type { PathStatus, RouteSettingsDto, RouteSummaryDto } from "../types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -31,9 +33,15 @@ import {
  *     `~/Library/Application Support/Claude-3p/`.
  */
 export function ThirdPartySection() {
+  const { t } = useTranslation("providers");
   const { pushToast } = useAppState();
   const [routes, setRoutes] = useState<RouteSummaryDto[] | null>(null);
   const [settings, setSettings] = useState<RouteSettingsDto | null>(null);
+  // Raw backend message, not the composed sentence — the "Load
+  // failed: …" wrapper is applied at render time so a language
+  // switch re-renders an error that is already on screen, and so
+  // `refresh` stays free of a `t` dependency (it feeds a mount
+  // effect; adding `t` would refetch on every language change).
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   // Cold-mount path: read the sessionStorage hint set by the
@@ -71,7 +79,7 @@ export function ThirdPartySection() {
       setSettings(s);
       setLoadError(null);
     } catch (e) {
-      setLoadError(`Load failed: ${e instanceof Error ? e.message : e}`);
+      setLoadError(renderError(e));
     }
     setPathStatus(await pathStatusP);
   }, []);
@@ -107,9 +115,12 @@ export function ThirdPartySection() {
       await refresh();
       // The PATH banner (below) carries setup guidance when the
       // wrapper dir isn't reachable — keep the toast to the fact.
-      pushToast("info", `Wrapper installed: \`${r.wrapper_name}\`.`);
+      pushToast(
+        "info",
+        t("section.wrapperInstalled", { name: r.wrapper_name }),
+      );
     } catch (e) {
-      pushToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", renderError(e, t("section.useCliFailed")));
     } finally {
       setBusy(id, false);
     }
@@ -119,10 +130,7 @@ export function ThirdPartySection() {
     setAddingToPath(true);
     try {
       const rc = await api.routesAddToPath();
-      pushToast(
-        "info",
-        `Added ~/.claudepot/bin to PATH in ${rc}. Restart your terminal (or run \`source ${rc}\`) for open shells to pick it up.`,
-      );
+      pushToast("info", t("section.addedToPath", { rc }));
       // Re-probe to refresh the indicator. Best-effort: a probe
       // failure here does not undo the successful rc write, so it
       // must not surface as "Add to PATH failed".
@@ -132,10 +140,7 @@ export function ThirdPartySection() {
         setPathStatus("unknown");
       }
     } catch (e) {
-      pushToast(
-        "error",
-        `Add to PATH failed: ${e instanceof Error ? e.message : e}`,
-      );
+      pushToast("error", renderError(e, t("section.addToPathFailed")));
     } finally {
       setAddingToPath(false);
     }
@@ -146,9 +151,9 @@ export function ThirdPartySection() {
     try {
       await api.routesUnuseCli(id);
       await refresh();
-      pushToast("info", "Wrapper removed.");
+      pushToast("info", t("section.wrapperRemoved"));
     } catch (e) {
-      pushToast("error", `Uninstall CLI failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", renderError(e, t("section.uninstallCliFailed")));
     } finally {
       setBusy(id, false);
     }
@@ -174,9 +179,9 @@ export function ThirdPartySection() {
       await api.routesUseDesktop(id);
       await refresh();
       await flagRestartIfRunning();
-      pushToast("info", "Active on Desktop.");
+      pushToast("info", t("section.activeOnDesktopToast"));
     } catch (e) {
-      pushToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", renderError(e, t("section.useDesktopFailed")));
     } finally {
       setBusy(id, false);
     }
@@ -188,9 +193,9 @@ export function ThirdPartySection() {
       await api.routesUnuseDesktop();
       await refresh();
       await flagRestartIfRunning();
-      pushToast("info", "Desktop activation cleared.");
+      pushToast("info", t("section.desktopActivationCleared"));
     } catch (e) {
-      pushToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", renderError(e, t("section.deactivateDesktopFailed")));
     } finally {
       setBusy(id, false);
     }
@@ -201,12 +206,9 @@ export function ThirdPartySection() {
     try {
       await api.routesDesktopRestart();
       setRestartHint("applied");
-      pushToast("info", "Claude Desktop restarted.");
+      pushToast("info", t("section.desktopRestarted"));
     } catch (e) {
-      pushToast(
-        "error",
-        `Restart failed: ${e instanceof Error ? e.message : e}`,
-      );
+      pushToast("error", renderError(e, t("section.restartFailed")));
     } finally {
       setRestartingDesktop(false);
     }
@@ -225,9 +227,9 @@ export function ThirdPartySection() {
       if (route.active_on_desktop) {
         await flagRestartIfRunning();
       }
-      pushToast("info", "Route deleted.");
+      pushToast("info", t("section.routeDeleted"));
     } catch (e) {
-      pushToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", renderError(e, t("section.deleteFailed")));
     } finally {
       setBusy(route.id, false);
     }
@@ -241,7 +243,7 @@ export function ThirdPartySection() {
       });
       setSettings(next);
     } catch (e) {
-      pushToast("error", `Settings update failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", renderError(e, t("section.settingsUpdateFailed")));
     }
   };
 
@@ -255,16 +257,16 @@ export function ThirdPartySection() {
       }}
     >
       <ScreenHeader
-        title="Providers"
-        subtitle="Run Claude Code and Claude Desktop with non-Anthropic LLMs"
+        title={t("section.title")}
+        subtitle={t("section.subtitle")}
         actions={
           <Button
             variant="solid"
             glyph={NF.plus}
             onClick={() => setShowAdd(true)}
-            title="Configure a new provider route"
+            title={t("section.addRouteTitle")}
           >
-            Add route
+            {t("section.addRoute")}
           </Button>
         }
       />
@@ -279,7 +281,7 @@ export function ThirdPartySection() {
           gap: "var(--sp-20)",
         }}
       >
-        {loadError && (
+        {loadError !== null && (
           <div
             role="alert"
             style={{
@@ -290,7 +292,7 @@ export function ThirdPartySection() {
               fontSize: "var(--fs-sm)",
             }}
           >
-            {loadError}
+            {t("section.loadFailed", { message: loadError })}
           </div>
         )}
 
@@ -310,10 +312,7 @@ export function ThirdPartySection() {
               fontSize: "var(--fs-sm)",
             }}
           >
-            <span>
-              Claude Desktop is running. Restart it to apply the new
-              configuration.
-            </span>
+            <span>{t("section.desktopRunningBanner")}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -322,8 +321,8 @@ export function ThirdPartySection() {
               glyph={NF.refresh}
             >
               {restartingDesktop
-                ? "Restarting…"
-                : "Quit & relaunch Claude Desktop"}
+                ? t("section.restarting")
+                : t("section.quitRelaunch")}
             </Button>
           </div>
         )}
@@ -346,8 +345,11 @@ export function ThirdPartySection() {
               }}
             >
               <span>
-                Installed CLI wrappers won&rsquo;t resolve —{" "}
-                <code>~/.claudepot/bin</code> is not on your shell PATH.
+                <Trans
+                  ns="providers"
+                  i18nKey="section.notOnPathBanner"
+                  components={{ code: <code /> }}
+                />
               </span>
               <Button
                 variant="ghost"
@@ -356,7 +358,9 @@ export function ThirdPartySection() {
                 disabled={addingToPath}
                 glyph={NF.terminal}
               >
-                {addingToPath ? "Adding…" : "Add to PATH"}
+                {addingToPath
+                  ? t("section.addingToPath")
+                  : t("section.addToPath")}
               </Button>
             </div>
           )}
@@ -370,14 +374,14 @@ export function ThirdPartySection() {
               fontSize: "var(--fs-sm)",
               color: "var(--fg-faint)",
             }}
-            title="When enabled, Claude Desktop skips the launch-time chooser and commits to the active mode."
+            title={t("section.hideChooserTitle")}
           >
             <input
               type="checkbox"
               checked={settings.disable_deployment_mode_chooser}
               onChange={toggleChooser}
             />
-            Hide the deployment-mode chooser at Claude Desktop launch
+            {t("section.hideChooserLabel")}
           </label>
         )}
 
@@ -423,7 +427,7 @@ export function ThirdPartySection() {
         }}
         onCreated={() => {
           void refresh();
-          pushToast("info", "Route added.");
+          pushToast("info", t("section.routeAdded"));
         }}
       />
       <EditRouteModal
@@ -432,19 +436,22 @@ export function ThirdPartySection() {
         onClose={() => setEditTarget(null)}
         onSaved={() => {
           void refresh();
-          pushToast("info", "Route updated.");
+          pushToast("info", t("section.routeUpdated"));
         }}
       />
       {removeTarget && (
         <ConfirmDialog
-          title="Delete route?"
-          confirmLabel="Delete route"
+          title={t("removeDialog.title")}
+          confirmLabel={t("removeDialog.confirm")}
           confirmDanger
           body={
             <p style={{ margin: 0, lineHeight: "var(--lh-body)" }}>
-              <code>{removeTarget.name}</code>'s CLI wrapper will be
-              removed and its Desktop activation cleared. The route
-              definition cannot be recovered without recreating it.
+              <Trans
+                ns="providers"
+                i18nKey="removeDialog.body"
+                values={{ name: removeTarget.name }}
+                components={{ code: <code /> }}
+              />
             </p>
           }
           onCancel={() => setRemoveTarget(null)}
@@ -460,6 +467,7 @@ export function ThirdPartySection() {
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useTranslation("providers");
   return (
     <div
       style={{
@@ -474,26 +482,21 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         lineHeight: "var(--lh-loose)",
       }}
     >
+      <p style={{ margin: 0 }}>{t("empty.intro")}</p>
       <p style={{ margin: 0 }}>
-        No routes yet. Add a route to run Claude Code or Claude Desktop
-        against a non-Anthropic backend — Bedrock, Vertex, Foundry, or
-        any Anthropic-Messages-compatible gateway (Ollama, vLLM,
-        OpenRouter, Kimi, DeepSeek, GLM, LiteLLM, …).
-      </p>
-      <p style={{ margin: 0 }}>
-        Each route installs a wrapper command on PATH —{" "}
-        <code style={{ color: "var(--fg-strong)" }}>claude-llama3</code>,{" "}
-        <code style={{ color: "var(--fg-strong)" }}>claude-kimi</code>,{" "}
-        <code style={{ color: "var(--fg-strong)" }}>
-          claude-bedrock-prod
-        </code>{" "}
-        — and (optionally) a profile in Claude Desktop&rsquo;s native
-        configuration registry. The first-party{" "}
-        <code style={{ color: "var(--fg-strong)" }}>claude</code> binary
-        and your Anthropic account are never touched.
+        {/* The four wrapper names are examples, not data the user
+            supplied — they stay inside the sentence so a translator
+            can move them, and all four share one <code> mapping. */}
+        <Trans
+          ns="providers"
+          i18nKey="empty.wrappers"
+          components={{
+            code: <code style={{ color: "var(--fg-strong)" }} />,
+          }}
+        />
       </p>
       <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
-        Add your first route
+        {t("empty.addFirst")}
       </Button>
     </div>
   );

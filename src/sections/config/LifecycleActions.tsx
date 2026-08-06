@@ -5,11 +5,14 @@
 // trackable triple.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
+import { i18n } from "../../lib/i18n";
+import { extractMessage, renderError } from "../../lib/i18n-error";
 import type { ClassifyPathDto, ConfigFileNodeDto } from "../../types";
 
 export interface LifecycleActionsProps {
@@ -90,6 +93,7 @@ function Actions({
   onActed: () => void;
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("config");
   const [busy, setBusy] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
   const [confirmSuffix, setConfirmSuffix] = useState(false);
@@ -104,21 +108,27 @@ function Actions({
         "refuse",
         projectRoot,
       );
-      pushToast("info", `Disabled ${rec.kind} "${rec.name}"`);
+      pushToast(
+        "info",
+        t("lifecycle.disabledToast", { kind: rec.kind, name: rec.name }),
+      );
       onActed();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Raw (untruncated, unredacted) text — this is a control-flow
+      // test, not a display string. `renderError` would cap it at 240
+      // chars and could push the marker out of range.
+      const msg = extractMessage(err);
       if (/already exists/i.test(msg)) {
         // Surface the suffix-retry confirm via a real Modal — see
         // ConfirmDialog mount below.
         setConfirmSuffix(true);
       } else {
-        pushToast("error", `Disable failed: ${msg}`);
+        pushToast("error", renderError(err, t("errors.disable")));
       }
     } finally {
       setBusy(false);
     }
-  }, [trackable, projectRoot, onActed, pushToast]);
+  }, [trackable, projectRoot, onActed, pushToast, t]);
 
   const onDisableWithSuffix = useCallback(async () => {
     setConfirmSuffix(false);
@@ -131,17 +141,17 @@ function Actions({
         "suffix",
         projectRoot,
       );
-      pushToast("info", `Disabled ${rec.kind} as "${rec.name}"`);
+      pushToast(
+        "info",
+        t("lifecycle.disabledAsToast", { kind: rec.kind, name: rec.name }),
+      );
       onActed();
     } catch (err) {
-      pushToast(
-        "error",
-        `Disable failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      pushToast("error", renderError(err, t("errors.disable")));
     } finally {
       setBusy(false);
     }
-  }, [trackable, projectRoot, onActed, pushToast]);
+  }, [trackable, projectRoot, onActed, pushToast, t]);
 
   const onEnable = useCallback(async () => {
     setBusy(true);
@@ -153,15 +163,17 @@ function Actions({
         "refuse",
         projectRoot,
       );
-      pushToast("info", `Re-enabled ${rec.kind} "${rec.name}"`);
+      pushToast(
+        "info",
+        t("lifecycle.reenabledToast", { kind: rec.kind, name: rec.name }),
+      );
       onActed();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pushToast("error", `Re-enable failed: ${msg}`);
+      pushToast("error", renderError(err, t("errors.reenable")));
     } finally {
       setBusy(false);
     }
-  }, [trackable, projectRoot, onActed, pushToast]);
+  }, [trackable, projectRoot, onActed, pushToast, t]);
 
   const doTrash = useCallback(async () => {
     setConfirmTrash(false);
@@ -173,15 +185,17 @@ function Actions({
         trackable.relative_path,
         projectRoot,
       );
-      pushToast("info", `Moved to trash (${entry.id.slice(0, 8)}…)`);
+      pushToast(
+        "info",
+        t("lifecycle.trashedToast", { id: entry.id.slice(0, 8) }),
+      );
       onActed();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pushToast("error", `Trash failed: ${msg}`);
+      pushToast("error", renderError(err, t("errors.trash")));
     } finally {
       setBusy(false);
     }
-  }, [trackable, projectRoot, onActed, pushToast]);
+  }, [trackable, projectRoot, onActed, pushToast, t]);
 
   return (
     <>
@@ -198,9 +212,9 @@ function Actions({
             glyph={NF.refresh}
             onClick={onEnable}
             disabled={busy}
-            title="Move back to the active scope"
+            title={t("lifecycle.reenableTitle")}
           >
-            Re-enable
+            {t("lifecycle.reenable")}
           </Button>
         ) : (
           <Button
@@ -208,9 +222,9 @@ function Actions({
             glyph={NF.eyeSlash}
             onClick={onDisable}
             disabled={busy}
-            title={`Hide from Claude Code without deleting (file ${file.display_path})`}
+            title={t("lifecycle.disableTitle", { path: file.display_path })}
           >
-            Disable
+            {t("lifecycle.disable")}
           </Button>
         )}
         <Button
@@ -219,16 +233,18 @@ function Actions({
           glyph={NF.trash}
           onClick={() => setConfirmTrash(true)}
           disabled={busy}
-          title="Move to trash (recoverable from Settings → Cleanup for ~30 days)"
+          title={t("lifecycle.trashTitle")}
         >
-          Trash
+          {t("lifecycle.trash")}
         </Button>
       </div>
       {confirmTrash && (
         <ConfirmDialog
-          title={`Move ${trackable.kind} to trash?`}
-          body={`"${trackable.relative_path}" will move to trash. You can restore it from Settings → Cleanup for ~30 days.`}
-          confirmLabel="Move to trash"
+          title={t("lifecycle.trashConfirmTitle", { kind: trackable.kind })}
+          body={t("lifecycle.trashConfirmBody", {
+            path: trackable.relative_path,
+          })}
+          confirmLabel={t("lifecycle.moveToTrash")}
           confirmDanger
           onConfirm={doTrash}
           onCancel={() => setConfirmTrash(false)}
@@ -236,9 +252,9 @@ function Actions({
       )}
       {confirmSuffix && (
         <ConfirmDialog
-          title="Name already taken in disabled"
-          body={`A disabled ${trackable.kind} with that name already exists. Disable as "<name>-N" instead?`}
-          confirmLabel="Use a -N suffix"
+          title={t("lifecycle.suffixTitle")}
+          body={t("lifecycle.suffixBody", { kind: trackable.kind })}
+          confirmLabel={t("lifecycle.suffixConfirm")}
           onConfirm={onDisableWithSuffix}
           onCancel={() => setConfirmSuffix(false)}
         />
@@ -251,8 +267,16 @@ function Actions({
  * Backend already includes the explanation — we keep it brief here
  * (the full text is in the title attribute as a tooltip). */
 function refusedShort(text: string): string {
-  if (text.startsWith("plugin-owned")) return "PLUGIN-OWNED";
-  if (text.startsWith("managed by")) return "MANAGED";
-  if (text.startsWith("outside")) return "OUT OF SCOPE";
-  return "READ-ONLY";
+  // `text` is the backend's RefuseReason wire string — matched, never
+  // rendered; only the short label it maps to is display copy.
+  if (text.startsWith("plugin-owned")) {
+    return i18n.t("lifecycle.refusedPlugin", { ns: "config" });
+  }
+  if (text.startsWith("managed by")) {
+    return i18n.t("lifecycle.refusedManaged", { ns: "config" });
+  }
+  if (text.startsWith("outside")) {
+    return i18n.t("lifecycle.refusedOutOfScope", { ns: "config" });
+  }
+  return i18n.t("lifecycle.refusedReadOnly", { ns: "config" });
 }

@@ -1,0 +1,666 @@
+{
+  "header": {
+    "title": "Settings",
+    "subtitle": "Preferences, data, and diagnostics.",
+    "advanced": "Advanced"
+  },
+  "panes": {
+    "general": "General",
+    "appearance": "Appearance",
+    "notifications": "Notifications",
+    "network": "Network",
+    "rotation": "Rotation",
+    "retention": "Retention",
+    "health": "Health",
+    "mcp": "MCP",
+    "cleanup": "Cleanup",
+    "protected": "Protected paths",
+    "github": "GitHub",
+    "locks": "Locks",
+    "diagnostics": "Diagnostics",
+    "about": "About"
+  },
+  "shared": {
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "refresh": "Refresh",
+    "toggleFailed": "Toggle failed",
+    "saveFailed": "Save failed",
+    "copyFailed": "Copy failed",
+    "prefsLoadFailed": "Preferences load failed"
+  },
+  "general": {
+    "groupStartupDesc": "Behavior that runs when Claudepot starts up, plus the diagnostic overlays you can opt into.",
+    "groupCcDesc": "Claude Code behavior. Written to ~/.claude/settings.json and shared by every account that uses Claude Code's config.",
+    "openOnLaunch": "Open on launch",
+    "openOnLaunchToast": "Open on launch: {{value}}",
+    "showBoards": {
+      "label": "Show Boards",
+      "hint": "Durable surfaces agents write into. On trial and off by default — toggle any time with ⌃⌥⌘B."
+    },
+    "launchAtLogin": {
+      "label": "Launch at login",
+      "hint": "Claudepot starts automatically when you log in.",
+      "error": "Launch-at-login toggle failed"
+    },
+    "showWindow": {
+      "label": "Show window on startup",
+      "hint": "Off: Claudepot launches into the tray with no window. Click the tray icon to open it."
+    },
+    "hideDock": {
+      "label": "Hide dock icon",
+      "hint": "Tray-only mode: no dock icon, no Cmd+Tab, no app menu bar. The window still opens from the tray.",
+      "hiddenToast": "Dock icon hidden — tray-only mode.",
+      "restoredToast": "Dock icon restored."
+    }
+  },
+  "appearance": {
+    "groupDesc": "Theme controls flow through CSS variables on the html element; no component code is aware of the active mode.",
+    "theme": "Theme",
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark",
+    "active": {
+      "label": "Active",
+      "hint": "Which palette the app is rendering right now."
+    },
+    "resolvedLight": "light",
+    "resolvedDark": "dark"
+  },
+  "locks": {
+    "desc": "Force-break a stale lock file left behind by a crashed rename. Generates an audit trail.",
+    "pathLabel": "Lock file path",
+    "breakButton": "Break lock",
+    "breakTitle": "Force-break the lock file and create an audit trail",
+    "breaking": "Breaking lock…",
+    "enterPath": "Enter a lock file path"
+  },
+  "diagnostics": {
+    "groupDesc": "Read-only view of platform, active slots, and the identity Claude Code is currently authenticated as.",
+    "loadFailed": "Diagnostics failed",
+    "copied": "Diagnostics copied.",
+    "platform": "Platform",
+    "cliActive": "CLI active",
+    "desktopActive": "Desktop active",
+    "desktopInstalled": "Desktop installed",
+    "accounts": "Accounts",
+    "dataDir": "Data dir",
+    "ccIdentity": "CC identity",
+    "ccError": "CC error",
+    "yes": "yes",
+    "no": "no",
+    "notSignedIn": "(not signed in)",
+    "copy": "Copy"
+  },
+  "about": {
+    "app": "App",
+    "version": "Version",
+    "website": "Website",
+    "author": "Author",
+    "publisher": "Publisher",
+    "design": "Design",
+    "githubAria": "GitHub",
+    "signingNote": "HANDO K.K. is the Apple Developer–registered entity that code-signs and notarizes Claudepot. macOS shows this name in <em>System Settings → General → Login Items & Extensions → App Background Activity</em> when “Launch at login” is enabled, and in occasional “ran in the background” notifications. It’s the legal name behind the Developer ID certificate — not a third-party process."
+  },
+  "updates": {
+    "unsupportedDesc": "In-app updates aren't available on this install — your package manager owns this binary. Check the Releases page for new versions.",
+    "rowLabel": "Updates",
+    "groupDesc": "Claudepot checks an authenticated, minisign-signed manifest hosted on GitHub Releases. Your install only updates to versions signed by the project's release key.",
+    "checkNow": "Check now",
+    "skipped": {
+      "label": "Skipped",
+      "hint": "Version {{version}} won't prompt again."
+    },
+    "showAgain": "Show again",
+    "auto": {
+      "label": "Check automatically",
+      "hint": "Background checks run after the chosen interval has elapsed since the last successful check."
+    },
+    "frequency": {
+      "label": "Frequency",
+      "hint": "Enable auto-check to set.",
+      "startup": "On every launch",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "manual": "Only when I click Check now"
+    },
+    "channel": {
+      "label": "Release channel",
+      "aria": "Release channel",
+      "betaHint": "Beta: you'll be offered prereleases (vX.Y.Z-beta.N) as well as stable releases. Earlier access, less tested. Switch back to Stable any time — it applies on the next check.",
+      "stableHint": "Stable: you're only offered fully-released versions. Choose Beta to also receive prereleases and try new features early.",
+      "stable": "Stable",
+      "beta": "Beta — include prereleases"
+    },
+    "lastChecked": "Last checked",
+    "never": "Never",
+    "allReleases": {
+      "label": "All releases",
+      "hint": "Browse the changelog and download installers for any platform."
+    },
+    "status": {
+      "idle": "Idle",
+      "checking": "Checking…",
+      "strandedVersioned": "You're on a prerelease newer than the current stable (v{{version}}) — you'll be offered the next stable release",
+      "stranded": "You're on a prerelease newer than the current stable — you'll be offered the next stable release",
+      "latest": "You're on the latest version",
+      "skippedVersion": "v{{version}} skipped",
+      "available": "Update available — v{{version}}",
+      "ready": "Ready to install — restart Claudepot",
+      "checkFailedDetail": "Check failed: {{error}}",
+      "checkFailed": "Check failed"
+    },
+    "downloading": "Downloading…",
+    "card": {
+      "current": "current v{{version}}",
+      "download": "Download",
+      "skip": "Skip this version",
+      "downloadingPct": "Downloading… {{pct}}%",
+      "restart": "Restart to update"
+    }
+  },
+  "logs": {
+    "title": "Diagnostic logs",
+    "desc": "Every <code>tracing</code> event and any panic the app emits is written to a rolling daily log file. Open the folder to attach the most recent file when reporting an unexpected quit. Files older than 7 days are pruned at startup.",
+    "reveal": "Reveal logs folder",
+    "openFailed": "Open log folder"
+  },
+  "notifications": {
+    "groupActivityDesc": "The live Activity feature watches the transcript files Claude Code already writes, so you can see which of your sessions are busy, waiting, or idle at a glance. Nothing is sent anywhere; all data stays on this Mac.",
+    "groupAlertsDesc": "OS notifications when a live session or long-running operation crosses one of these thresholds. 'Waiting for you' and the 90% usage threshold default on; the rest are opt-in. OS notifications only fire when the Claudepot window is unfocused — the bell icon in the top bar shows the in-app history either way.",
+    "activityOn": "Activity feature enabled.",
+    "activityOff": "Activity feature disabled.",
+    "enable": {
+      "label": "Enable Activity",
+      "hint": "Start the live runtime. Turning this off stops all polling and clears the LIVE strip."
+    },
+    "hideThinking": {
+      "label": "Hide thinking by default",
+      "hint": "Thinking blocks render as 'redacted · N chars' until you click to reveal. Privacy-forward."
+    },
+    "errorBurst": {
+      "label": "Alert on error burst",
+      "hint": "At least two tool results with is_error=true inside a 60-second window."
+    },
+    "waiting": {
+      "label": "Alert when waiting for you",
+      "hint": "A session paused for permission, plan-mode approval, or a clarifying answer."
+    },
+    "taskDone": {
+      "label": "Alert when task finished",
+      "hint": "A session busy for 2+ minutes returned to idle. The 2-minute gate filters out drive-by edits."
+    },
+    "stuck": {
+      "label": "Alert when stuck",
+      "hint": "Empty = off. Fires 10 minutes after the last tool result; this value is shown in the toast copy only.",
+      "off": "off"
+    },
+    "usage": {
+      "label": "Alert at usage thresholds",
+      "hint": "Fires once per (5h / 7d window × threshold) per reset cycle for the CLI-active account. Polled every 5 min. When utilization jumps past two thresholds in one poll, only the higher one fires. Click any chip to toggle; empty = feature off."
+    },
+    "subWindows": {
+      "label": "Include 7-day Opus / Sonnet sub-windows",
+      "hint": "The umbrella 7-day window is always checked. Per-model sub-quotas usually track it for users near cap, so leaving them off avoids triple-firing for what reads as one cap. Turn on if you watch each model's quota separately."
+    },
+    "opDone": {
+      "label": "Alert when long operations complete",
+      "hint": "Verify-all, project rename, session prune/slim/share/move, account login, or clean projects — fires an OS notification when any of these terminate while the window is unfocused."
+    },
+    "test": {
+      "label": "Send test notification",
+      "hint": "Fire a sample OS notification to verify permissions and that the runtime path is wired. Doesn't toggle any preference.",
+      "button": "Send test",
+      "title": "Claudepot test",
+      "body": "If you see this, notifications are working.",
+      "sent": "Test notification sent.",
+      "denied": "OS notification permission denied. Open System Settings to re-enable.",
+      "notGranted": "Notification permission was not granted. Click Request to retry.",
+      "unreachable": "Couldn't reach the OS notification system. Try again, or check that Claudepot has Notification permission in System Settings.",
+      "sendFailed": "Couldn't send notification"
+    },
+    "categories": {
+      "loadFailed": "Notification categories failed to load",
+      "loadingDesc": "More notification categories — loading…",
+      "desc": "More notification categories. Categories already covered by the toggles above (Error, Stuck, Waiting, Op done, Usage, Service status) are hidden by default — flip the bottom toggle to reveal them.",
+      "alsoAbove": "(also above)",
+      "showAll": "Show all categories",
+      "showAllHint": "Include those already covered by the toggles above."
+    },
+    "permission": {
+      "label": "OS notification permission",
+      "grantedHint": "Granted. Claudepot can post system-level alerts when the window is unfocused.",
+      "deniedHint": "Denied. Re-enable Claudepot in System Settings → Notifications to receive alerts.",
+      "notRequestedHint": "Not yet requested. Click Request to enable system-level alerts.",
+      "probingHint": "Probing OS permission state…",
+      "grantedTag": "Granted",
+      "deniedTag": "Denied",
+      "unknownTag": "Unknown",
+      "request": "Request",
+      "enabled": "Notifications enabled.",
+      "deniedToast": "Notification permission denied. Open System Settings to re-enable."
+    }
+  },
+  "github": {
+    "desc": "Personal Access Token for publishing session exports as gists. Stored in the Keychain; only the last four characters are ever shown.",
+    "status": "Status",
+    "noToken": "No token stored",
+    "override": "Override",
+    "envNote": "GITHUB_TOKEN env var is set — it overrides the stored token for uploads. Unset the env var if you want Save/Clear to take effect.",
+    "token": "Token",
+    "tokenAria": "GitHub token",
+    "save": "Save",
+    "replace": "Replace",
+    "clear": "Clear",
+    "saved": "GitHub token saved.",
+    "cleared": "GitHub token cleared.",
+    "loadFailed": "GitHub token load failed",
+    "saveFailed": "GitHub token save failed",
+    "clearFailed": "GitHub token clear failed"
+  },
+  "network": {
+    "loadingPrefs": "Loading preferences…",
+    "intro": "Surface upstream incidents from <code>status.claude.com</code> and measure round-trip latency to the hosts Claude Code actually hits. See <link>xiaolai/anthropic-claude-surge-rules-set</link> for the curated registry the host list is seeded from.",
+    "serviceStatus": "Service status",
+    "poll": {
+      "label": "Check status.claude.com",
+      "detail": "One small request every {{minutes}} minutes. Indicates when Anthropic itself is degraded.",
+      "every": "Poll every",
+      "minutes": "minutes (2–60)"
+    },
+    "osNotify": {
+      "label": "Show OS notification on status change",
+      "detail": "Off by default — false positives from Anthropic blips can train you to ignore real signals. The bell-icon log gets every transition regardless."
+    },
+    "latency": {
+      "title": "Path latency",
+      "label": "Probe latency when window opens",
+      "detail": "HEAD request to each Claude host. On-demand only — no continuous background polling, by design."
+    },
+    "current": {
+      "title": "Current",
+      "checked": "· checked {{when}}",
+      "noData": "· no data yet",
+      "lastPollFailed": "Last poll failed: {{error}}",
+      "incidents": "Active incidents",
+      "probing": "Probing…",
+      "probeNow": "Probe now",
+      "probedAt": "Latency probed {{when}}",
+      "timeout": "timeout",
+      "error": "error"
+    }
+  },
+  "rotation": {
+    "loadFailed": "Rotation load failed",
+    "saveFailed": "Rotation save failed",
+    "ruleSaved": "Rotation rule \"{{id}}\" saved",
+    "ruleDeleted": "Rotation rule \"{{id}}\" deleted",
+    "loadingRules": "Loading rotation rules…",
+    "intro": "Auto-switch the active CLI account when an Anthropic usage window crosses a threshold you set. Triggers fire from Anthropic's <code>/api/oauth/usage</code> data, polled every 5 minutes. The default <strong>Confirm</strong> mode shows a toast and waits for your click; switch to <strong>Auto</strong> once you trust the rule.",
+    "rules": "Rules",
+    "addRule": "Add rule",
+    "recentActivity": "Recent activity",
+    "filter": "Filter",
+    "allOutcomes": "All outcomes",
+    "noActivity": "No rotation activity yet.",
+    "deleteConfirm": {
+      "title": "Delete rotation rule?",
+      "body": "Rule <code>{{id}}</code> will be removed. You can re-add it later.",
+      "confirm": "Delete"
+    },
+    "modeAuto": "Auto",
+    "modeConfirm": "Confirm",
+    "disabledTag": "Disabled",
+    "selectorLeastUsed": "least-used among {{count}} accounts",
+    "selectorRoundRobin": "round-robin across {{count}} accounts",
+    "selectorExplicit": "swap to {{email}}",
+    "disable": "Disable",
+    "enable": "Enable",
+    "editRule": "Edit rule",
+    "deleteRule": "Delete rule",
+    "emptyWithAccounts": "No rotation rules yet. Add one to auto-switch accounts when usage thresholds trip.",
+    "emptyNoAccounts": "Add at least one Anthropic account before creating rotation rules — the candidate picker reads the account list.",
+    "thWhen": "When",
+    "thRule": "Rule",
+    "thFromTo": "From → To",
+    "thOutcome": "Outcome",
+    "thReason": "Reason",
+    "bgWorkers_one": "{{count}} bg worker active",
+    "bgWorkers_other": "{{count}} bg workers active"
+  },
+  "rotationModal": {
+    "titleEdit": "Edit rule: {{id}}",
+    "titleNew": "New rotation rule",
+    "ruleId": {
+      "label": "Rule id",
+      "hint": "Short, unique identifier — appears in the audit log."
+    },
+    "fireWhen": {
+      "label": "Fire when",
+      "hint": "Anthropic's per-account utilization for the active CLI account."
+    },
+    "rotateTo": "Then rotate to",
+    "selector": {
+      "leastUsed": "Least used",
+      "leastUsedHint": "Pick the candidate with the lowest utilization on the chosen window.",
+      "roundRobin": "Round robin",
+      "roundRobinHint": "Pick the next candidate after the active one in list order.",
+      "explicit": "Explicit",
+      "explicitHint": "Always swap to one specific account."
+    },
+    "pickAccount": "Pick an account…",
+    "mode": {
+      "label": "Mode",
+      "hint": "Confirm shows a toast before swapping. Auto swaps immediately.",
+      "confirm": "Confirm (recommended)",
+      "auto": "Auto"
+    },
+    "advanced": "Advanced (guards)",
+    "minInterval": {
+      "label": "Min interval between swaps (seconds)",
+      "hint": "Across all rules. Stops cascade swaps from a single tick."
+    },
+    "maxSwaps": {
+      "label": "Max swaps per cycle",
+      "hint": "Per-rule cap inside the trigger window's reset cycle."
+    },
+    "skipWhenCc": "Skip when CC is running",
+    "testNow": "Test now",
+    "testing": "Testing…",
+    "runDryTest": "Run dry test",
+    "dryHint": "Evaluates this rule against the current usage snapshot — answers \"would this fire right now?\"",
+    "wouldFire": "Would fire",
+    "wouldNotFire": "Would not fire",
+    "dryRunFailed": "dry-run failed: {{error}}",
+    "idExists": "Rule id \"{{id}}\" already exists",
+    "save": "Save",
+    "create": "Create rule",
+    "noAccounts": "No accounts registered yet."
+  },
+  "retention": {
+    "loadFailed": "Retention load failed",
+    "changeFailed": "Change retention",
+    "loadErrorLead": "Couldn’t read Claude Code’s retention setting, so this pane cannot tell you what is scheduled for deletion.",
+    "tryAgain": "Try again",
+    "modeDefault": "{{days}} days — Claude Code's default, not a choice you made",
+    "modeDisabled": "Transcripts are not being saved at all",
+    "modeInvalid": "Invalid value ({{days}}) — Claude Code's settings schema rejects it",
+    "modeDays": "{{days}} days",
+    "sectionTitle": "Transcript retention",
+    "risk": {
+      "deletable_one": "{{num}} transcript will be deleted the next time Claude Code starts.",
+      "deletable_other": "{{num}} transcripts will be deleted the next time Claude Code starts.",
+      "horizon_one": "{{num}} more crosses the cutoff within {{days}} days.",
+      "horizon_other": "{{num}} more cross the cutoff within {{days}} days.",
+      "nothing": "Nothing is scheduled for deletion.",
+      "oldest": "Oldest surviving conversation: {{date}}.",
+      "scanIncomplete": "Part of Claude Code’s transcript folder couldn’t be read, so these counts are a floor, not a total.",
+      "silent": "Claude Code does this silently — it never reports what it deleted.",
+      "suppressed": "Claude Code is skipping cleanup entirely because this value makes its settings file invalid. That is protecting your transcripts by accident — correct the value rather than restoring the default, which would re-arm deletion.",
+      "totalOnMachine_one": "{{num}} transcript on this machine.",
+      "totalOnMachine_other": "{{num}} transcripts on this machine."
+    },
+    "nestedNote": "Cleanup only removes the {{total}} top-level session transcripts. {{nested}} nested files (subagent runs, tool results) are never removed, so the folder keeps growing while conversations are deleted — disk usage cannot reveal this loss.",
+    "keepFor": "Keep transcripts for",
+    "preset30": "30 days",
+    "preset90": "90 days",
+    "preset365": "1 year",
+    "preset3650": "10 years",
+    "keepToast": "Claude Code will keep transcripts for {{label}}.",
+    "savingNote": "Saving retention…",
+    "bufferNote": "A longer window buys time; it is not a backup. These files still live in Claude Code's cache directory under Claude Code's rules, and they grow by roughly a gigabyte a week on heavy use.",
+    "dangerZone": "Danger zone",
+    "restoreDefaultBtn": "Restore Claude Code's default",
+    "stopSavingBtn": "Stop saving transcripts entirely",
+    "dangerNote": "Both re-enable deletion. Neither can be undone for transcripts already removed.",
+    "confirmRestore": {
+      "title": "Restore Claude Code's default retention?",
+      "bodyCount": "Retention returns to <strong>30 days</strong>. Claude Code will delete every transcript older than that the next time it starts — {{num}} transcripts are currently kept. This cannot be undone.",
+      "body": "Retention returns to <strong>30 days</strong>. Claude Code will delete every transcript older than that the next time it starts. This cannot be undone.",
+      "confirm": "Restore default"
+    },
+    "restoredToast": "Retention restored to Claude Code's 30-day default.",
+    "confirmDisable": {
+      "title": "Stop saving transcripts entirely?",
+      "intro": "This writes <code>cleanupPeriodDays: 0</code>, which does two things:",
+      "li1": "Claude Code stops writing transcripts for new sessions.",
+      "li2": "Every existing transcript is deleted the next time Claude Code starts.",
+      "li2Count": "Every existing transcript ({{num}} on this machine) is deleted the next time Claude Code starts.",
+      "outro": "Session resume, search, and every Claudepot surface built on transcripts stop working. This cannot be undone.",
+      "confirm": "Stop saving and delete",
+      "phrase": "delete my transcripts"
+    },
+    "disabledToast": "Transcript persistence disabled."
+  },
+  "health": {
+    "refreshFailed": "Health refresh failed",
+    "openLogFailed": "Could not open log",
+    "desc": "Read-only summary of <code>claude doctor</code>. Captured by spawning Claude Code in a pty and parsing its output; cached for 60 s. Distinct from Settings → Diagnostics, which shows Claudepot’s own self-check.",
+    "unmeasured": "Couldn’t read claude doctor",
+    "capturedRetry": "Captured {{time}} · refresh to retry",
+    "capturedBytes": "Captured {{time}} · {{bytes}} B",
+    "refreshing": "Refreshing…",
+    "parserFailed": "Parser failed",
+    "partialParse": "Partial parse",
+    "failedNote": "The pill in the chrome falls back to the last-known-good snapshot. ",
+    "partialNote": "Some sections may be missing. ",
+    "rawRecorded": "Raw output is recorded for review.",
+    "openParseLog": "Open parse-failures log",
+    "noEntries": "(no entries)",
+    "noSections": "No sections parsed from the doctor output.",
+    "running": "Running <code>claude doctor</code>… (first call per minute takes 6–10 s)"
+  },
+  "mcp": {
+    "serverHealth": "Server health",
+    "toolVisibleCount": "tool_visible · {{count}} tools",
+    "toolVisibleFailed": "tool_visible · failed",
+    "unknown": "unknown",
+    "healthDesc": "Spawns <code>claudepot mcp memory-server</code>, runs <code>initialize</code> + <code>tools/list</code>, counts the tools.",
+    "checking": "Checking…",
+    "check": "Check",
+    "agentInstructions": "Agent instructions",
+    "introDesc": "Configuring an MCP entry alone isn't enough — agents have to be told <em>when</em> to call the tools. This snippet does that. Pick a scope, install it once, then paste the <code>@include</code> line into the target file Claudepot names. Future regenerations refresh the file in place; the <code>@include</code> line never changes.",
+    "scope": "Scope",
+    "scopeUser": "User",
+    "scopeUserDesc": "— writes <code>~/.claude/claudepot-mcp-instructions.md</code>; paste <code>@include</code> into <code>~/.claude/CLAUDE.md</code>, <code>~/.codex/AGENTS.md</code>, <code>~/.gemini/GEMINI.md</code>. Loads in every project.",
+    "scopeProject": "Project",
+    "scopeProjectDesc": "— writes <code>{{path}}</code>; paste <code>@include</code> into the project's <code>AGENTS.md</code> (the canonical source per <code>/init-workspace</code>). Loads only in that project.",
+    "projectAria": "Project",
+    "selectProject": "Select project…",
+    "installing": "Installing…",
+    "installSnippet": "Install snippet",
+    "copyInclude": "Copy @include line",
+    "wroteToast": "Wrote {{path}} ({{bytes}} bytes)",
+    "installFailed": "Install failed",
+    "snippetLoadFailed": "Failed to load snippet preview",
+    "projectsLoadFailed": "Failed to load projects",
+    "includeCopied": "@include line copied to clipboard",
+    "wroteLine": "Wrote ({{scope}}): {{path}}",
+    "pasteInto": "Paste the line above into:",
+    "preview": "Preview snippet content"
+  },
+  "protected": {
+    "errEmpty": "Path cannot be empty.",
+    "errParent": "Path cannot contain '..' segments.",
+    "errUncRoot": "Path cannot be a UNC root.",
+    "errBareDrive": "Path cannot be a bare drive letter; specify a directory under the drive.",
+    "errNotAbsolute": "Path must be absolute (start with '/', '~', a drive letter, or '\\\\').",
+    "errFsRoot": "Path cannot be a filesystem root.",
+    "errDriveRoot": "Path cannot be a drive root; specify a directory under the drive.",
+    "desc": "Cleaning will not strip <code>~/.claude.json</code> entries or <code>history.jsonl</code> lines for these paths. The CC artifact directory under <code>~/.claude/projects/</code> is still removable — only sibling state is preserved.",
+    "listAria": "Protected paths",
+    "empty": "No protected paths.",
+    "sourceDefaultTitle": "Built-in default",
+    "sourceUserTitle": "Added by you",
+    "sourceDefault": "default",
+    "sourceUser": "user",
+    "removeAria": "Remove {{path}}",
+    "placeholder": "/path/to/protect or ~/path",
+    "add": "Add",
+    "addTitle": "Add this path to the protected list",
+    "addHint": "Enter an absolute path (or one starting with <code>~</code>) to enable Add.",
+    "reset": "Reset to defaults",
+    "resetTitle": "Discard your additions and removals — restore the built-in defaults",
+    "working": "Working…",
+    "resetDone": "Protected paths reset to defaults.",
+    "loadFailed": "Load failed",
+    "removeFailed": "Remove failed",
+    "resetFailed": "Reset failed"
+  },
+  "artifacts": {
+    "sectionTitle": "Artifacts",
+    "loadError": "Couldn't load artifact lifecycle: {{error}}",
+    "autoPurged_one": "Auto-purged {{count}} trash entry older than {{days}} days",
+    "autoPurged_other": "Auto-purged {{count}} trash entries older than {{days}} days",
+    "disabledTitle": "Disabled artifacts",
+    "disabledTitleCount": "Disabled artifacts ({{count}})",
+    "noneDisabled": "Nothing disabled. Use the <em>Disable</em> action in the Config tree to hide an artifact from Claude Code without deleting it.",
+    "thKind": "Kind",
+    "thName": "Name",
+    "thScope": "Scope",
+    "thTrashed": "Trashed",
+    "thState": "State",
+    "thActions": "Actions",
+    "scopeUser": "User",
+    "scopeProject": "Project",
+    "reenabled": "Re-enabled {{kind}} \"{{name}}\"",
+    "reenableFailed": "Re-enable failed",
+    "movedToTrash": "Moved {{kind}} \"{{name}}\" to trash",
+    "trashFailed": "Trash failed",
+    "reenable": "Re-enable",
+    "moveToTrash": "Move to trash",
+    "confirmTrash": {
+      "title": "Move {{kind}} to trash?",
+      "body": "\"{{name}}\" will move to trash. You can restore it within ~30 days.",
+      "confirm": "Move to trash"
+    }
+  },
+  "trash": {
+    "title": "Artifact trash",
+    "titleCount": "Artifact trash ({{count}})",
+    "empty": "Trash is empty. Trashed artifacts are restorable here for ~{{days}} days.",
+    "unrecoverable": "(unrecoverable: {{state}})",
+    "restoredTo": "Restored to {{path}}",
+    "restoreFailed": "Restore failed",
+    "forgotten": "Trash entry forgotten",
+    "forgetFailed": "Forget failed",
+    "recoveredTo": "Recovered to {{path}}",
+    "recoverFailed": "Recover failed",
+    "unknown": "unknown",
+    "restore": "Restore",
+    "recover": "Recover…",
+    "forgetTitle": "Forget — remove from disk, no further undo",
+    "confirmForget": {
+      "title": "Forget this trash entry?",
+      "body": "This entry will be removed from disk. There's no further undo.",
+      "confirm": "Forget"
+    },
+    "confirmSuffix": {
+      "title": "Original location is occupied",
+      "body": "Restore \"{{name}}\" with a \"-N\" suffix instead?",
+      "confirm": "Restore with suffix"
+    },
+    "purgeTitle": "Purge Healthy entries older than {{days}} days",
+    "emptyOld": "Empty old",
+    "confirmPurge": {
+      "title": "Purge old trash entries?",
+      "body": "Healthy entries older than {{days}} days will be removed. Corrupt entries are kept until manually forgotten.",
+      "confirm": "Purge"
+    },
+    "purged_one": "Purged {{count}} entry",
+    "purged_other": "Purged {{count}} entries",
+    "purgeFailed": "Purge failed",
+    "tamperedTitle": "Payload differs from the byte count / sha256 the manifest recorded — restore refused; investigate or forget.",
+    "state": {
+      "healthy": "healthy",
+      "missing_manifest": "missing manifest",
+      "missing_payload": "missing payload",
+      "orphan_payload": "orphan payload",
+      "abandoned_staging": "abandoned staging",
+      "tampered": "tampered"
+    }
+  },
+  "recover": {
+    "title": "Recover trash entry",
+    "intro": "This entry doesn't have a complete manifest. Confirm where it should be restored and what kind of artifact it is. The entry's payload contents are kept intact — only the destination is synthesized.",
+    "targetLabel": "Absolute target path",
+    "pathError": "Path must be absolute (starts with <code>/</code> or <code>C:\\</code>).",
+    "kindLabel": "Artifact kind",
+    "abandoned": "Abandoned staging — last interrupted op",
+    "submit": "Recover"
+  },
+  "attribution": {
+    "loadFailed": "Attribution setting load failed",
+    "applyFailed": "Set attribution",
+    "resetToast": "Attribution reset to Claude Code's default.",
+    "offToast": "Attribution off — commits and PRs carry none.",
+    "customToast": "Custom attribution saved.",
+    "default": "Default",
+    "off": "Off",
+    "custom": "Custom",
+    "label": "Commit & PR attribution",
+    "hint": "Whether Claude's attribution appears on git commits and pull requests, and what it says. Off removes the “Co-Authored-By” trailer and the “Generated with Claude Code” line everywhere.",
+    "modeAria": "Attribution mode",
+    "commitLabel": "Commit trailer",
+    "prLabel": "Pull-request body",
+    "save": "Save custom attribution",
+    "bothEmpty": "Both fields empty — use Off instead."
+  },
+  "models": {
+    "loadFailed": "Model allowlist load failed",
+    "saveFailed": "Save model allowlist",
+    "saved_one": "Model allowlist saved — {{count}} entry.",
+    "saved_other": "Model allowlist saved — {{count}} entries.",
+    "cleared": "Model allowlist cleared — every model is selectable again.",
+    "label": "Selectable models",
+    "hintRestricts": "Only these models can be chosen in /model, --model, and fallback chains. Order matters: with enforcement on, Default becomes the first entry.",
+    "hintEmpty": "Empty — every model your account can reach is selectable. Add a family alias, a version prefix, or a full model id.",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Remove",
+    "moveUpAria": "Move {{entry}} up",
+    "moveDownAria": "Move {{entry}} down",
+    "removeAria": "Remove {{entry}}",
+    "inputAria": "Model to allow",
+    "add": "Add",
+    "enforceLabel": "Apply the list to the Default model",
+    "enforceInert": "Set, but inert: Claude Code ignores it while the list is empty, so Default stays unrestricted. Add at least one model above. Needs Claude Code {{version}} or later.",
+    "enforceHint": "Without this, picking \"Default\" in /model bypasses the list entirely and resolves to your account's default model. With it, Default becomes the first allowed entry. Needs Claude Code {{version}} or later."
+  },
+  "companion": {
+    "loadFailed": "Artifact setting load failed",
+    "toggleFailed": "Toggle companion output",
+    "keptLocal": "Companion output kept local — cloud Artifacts off.",
+    "reenabled": "Cloud Artifacts re-enabled.",
+    "label": "Keep companion output local",
+    "lockedHint": "Overridden by the CLAUDE_CODE_DISABLE_ARTIFACT environment variable. Unset it to control this here.",
+    "hint": "Off by default: Claude Code publishes charts and mini-apps as private pages in the signed-in account's claude.ai gallery. Turn on to keep that output as a local file — it then belongs to no account and survives account switches."
+  },
+  "thinking": {
+    "loadFailed": "Thinking setting load failed",
+    "toggleFailed": "Toggle extended thinking",
+    "onToast": "Extended thinking on by default for new sessions.",
+    "offToast": "Extended thinking off by default — new sessions skip it.",
+    "label": "Extended thinking by default",
+    "lockedHint": "Overridden by the MAX_THINKING_TOKENS environment variable. Unset it to control this here.",
+    "hint": "On by default: Claude thinks before responding on supported models — better quality, more latency and tokens. Turn off to make new sessions skip thinking by default. Only affects new sessions; per-session flags still win."
+  },
+  "fastMode": {
+    "loadFailed": "Fast mode setting load failed",
+    "toggleFailed": "Toggle fast mode",
+    "perSessionFailed": "Toggle per-session opt-in",
+    "onToast": "Fast mode on — new Opus sessions run faster and bill to usage credits.",
+    "offToast": "Fast mode off — new sessions run at standard Opus speed and rates.",
+    "perSessionOnToast": "Fast mode now resets each session — re-enable it with /fast.",
+    "perSessionOffToast": "Fast mode preference now persists across sessions.",
+    "joinAnd": " and ",
+    "rate": "${{input}}/${{output}} per MTok",
+    "label": "Fast mode",
+    "lockedHint": "Overridden by the CLAUDE_CODE_DISABLE_FAST_MODE environment variable. Unset it to control this here.",
+    "hint": "Runs {{models}} up to 2.5× faster at {{rate}} instead of the standard rate — same model, same quality. Charged to usage credits, not your plan's included usage, from the first token. Needs usage credits enabled on the account; Team and Enterprise also need an owner to turn it on.",
+    "perSessionLabel": "Require per-session opt-in",
+    "perSessionOnHint": "Every new session starts with fast mode off; re-enable it with /fast. Your saved preference is kept.",
+    "perSessionOffHint": "Fast mode persists across sessions once turned on. Enable this to make each session start with it off instead."
+  }
+}

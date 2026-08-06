@@ -25,6 +25,7 @@ mod dto_cc_doctor;
 mod dto_cc_tips;
 mod dto_desktop;
 mod dto_env;
+mod dto_error;
 mod dto_keys;
 mod dto_memory;
 mod dto_migrate;
@@ -42,6 +43,10 @@ mod dto_templates;
 mod dto_updates;
 mod dto_usage;
 mod events;
+// `pub` like `commands`: the catalog API (`tr` / `set_locale` /
+// `current_locale`) is a deliberate crate surface, and `current_locale`
+// has no internal caller yet (the webview resolves its own locale).
+pub mod i18n;
 mod invalidation_orchestrator;
 mod live_activity_bridge;
 mod memory_watch;
@@ -229,6 +234,10 @@ pub fn run() {
     // `set_activation_policy()` inside the very first `setup()` tick to
     // avoid a visible dock-icon flash on cold launch.
     let prefs = preferences::Preferences::load();
+    // Apply the persisted locale (None = follow OS) before anything
+    // renders a Rust-authored string — the app menu and tray are built
+    // in `setup()` below and read the i18n global at build time.
+    i18n::set_locale(prefs.locale.as_deref());
     // Load update settings + cached probe state alongside prefs so the
     // first `updates_status_get` call from the webview is a pure clone
     // off the mutex (no disk I/O on the hot UI render path).
@@ -1133,6 +1142,7 @@ pub fn run() {
             commands::preferences::preferences_category_prefs_get,
             commands::preferences::preferences_category_pref_set,
             commands::preferences::preferences_set_hide_dock_icon,
+            commands::preferences::preferences_set_locale,
             commands::preferences::preferences_set_show_window_on_startup,
             commands::board::board_list,
             commands::board::board_detail,

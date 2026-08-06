@@ -1,0 +1,198 @@
+{
+  "comment": [
+    "The core command surface (commands/mod.rs) plus the two Keys",
+    "add-form gates, CC/Desktop updates (commands/updates.rs), and",
+    "Claudepot's own self-updater (commands/release_update.rs).",
+    "",
+    "Schema and rules: see 00-foundation.json. One file per domain so the",
+    "registry can be appended to in parallel; a duplicate code across two",
+    "files is a hard error in the loader.",
+    "",
+    "Everything here is owner: \"command\". Four distinctions are",
+    "load-bearing and a translator must not smooth them over.",
+    "",
+    "  updates.operation_in_progress is a REFUSAL, not a failure. The",
+    "    PollerGate single-flight exists so a manual click cannot spawn a",
+    "    second `claude update` beside the background poller's. Nothing",
+    "    was downloaded, nothing was replaced, and the retry is immediate.",
+    "    A sentence that reads as a broken install is actively wrong.",
+    "",
+    "  release_update.not_staged means NOTHING RAN. Install was called",
+    "    with no checked handle stashed; the remedy is to run a check",
+    "    first, not to reinstall. release_update.install_failed also",
+    "    leaves the running app intact — the handle is put back, so its",
+    "    remedy is \"retry\", never \"download it by hand\".",
+    "",
+    "  updates.unknown_channel is CC's channel pair (latest / stable).",
+    "    release_update.unknown_channel is CLAUDEPOT's (stable / beta).",
+    "    The two vocabularies do not overlap and the segments are split",
+    "    for exactly that reason; a shared code could only say \"unknown",
+    "    channel\" and leave the user guessing which app it meant.",
+    "",
+    "  app.reveal_spawn_failed means no file manager started;",
+    "    app.reveal_failed means one started and refused the path. Same",
+    "    surface, different remedies.",
+    "",
+    "Secret direction. keys.not_an_api_key / keys.not_an_oauth_token are",
+    "the only rows here raised while a pasted token is in scope, and",
+    "neither carries it: `prefix` is the public product constant",
+    "(`sk-ant-api03-` / `sk-ant-oat01-`), which is why it can ride in",
+    "params at all. It is a param rather than a literal in the catalog so",
+    "the sentence itself never carries a token-shaped string — the Vitest",
+    "leak guard in src/lib/errorCodes.test.ts scans catalog copy, and a",
+    "hardcoded prefix there would trip it for the right reason.",
+    "",
+    "UpdateError has no ErrorCode yet, so updates.cli_install_failed,",
+    "updates.desktop_install_failed, updates.channel_write_failed and",
+    "updates.minimum_version_write_failed carry core's own English",
+    "unchanged in `message`. Promote them to ErrorDto::from_core when",
+    "that enum converts; the codes then disappear rather than being",
+    "renamed."
+  ],
+  "codes": [
+    {
+      "code": "accounts.reconcile_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "store: no such table: accounts"
+    },
+    {
+      "code": "app.keychain_unlock_unsupported",
+      "owner": "command",
+      "params": [],
+      "message": "keychain unlock is macOS-only"
+    },
+    {
+      "code": "app.reveal_path_empty",
+      "owner": "command",
+      "params": [],
+      "message": "empty path"
+    },
+    {
+      "code": "app.reveal_path_not_found",
+      "owner": "command",
+      "params": ["path"],
+      "message": "path does not exist: /Users/me/gone/proj"
+    },
+    {
+      "code": "app.reveal_spawn_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "xdg-open spawn failed: No such file or directory (os error 2)"
+    },
+    {
+      "code": "app.reveal_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "open exited: The file /Users/me/gone/proj does not exist."
+    },
+    {
+      "code": "app.log_dir_create_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "mkdir failed: permission denied (os error 13)"
+    },
+    {
+      "code": "keys.not_an_api_key",
+      "owner": "command",
+      "params": ["prefix"],
+      "message": "not an API key — expected a value starting with `sk-ant-api03-`"
+    },
+    {
+      "code": "keys.not_an_oauth_token",
+      "owner": "command",
+      "params": ["prefix"],
+      "message": "not an OAuth token — expected a value starting with `sk-ant-oat01-`"
+    },
+    {
+      "code": "updates.state_lock_poisoned",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "updates state lock: poisoned lock: another task failed inside"
+    },
+    {
+      "code": "updates.operation_in_progress",
+      "owner": "command",
+      "params": [],
+      "message": "another update operation is in progress; try again in a moment"
+    },
+    {
+      "code": "updates.cli_install_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "refused: DISABLE_UPDATES is set in ~/.claude/settings.json — manual update path is blocked"
+    },
+    {
+      "code": "updates.desktop_install_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "refused: Claude Desktop is currently running — quit it first or wait for the next periodic check"
+    },
+    {
+      "code": "updates.unknown_channel",
+      "owner": "command",
+      "params": ["channel", "detail"],
+      "message": "parse: unknown channel: \"nightly\" (expected 'latest' or 'stable')"
+    },
+    {
+      "code": "updates.channel_write_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "io: permission denied (os error 13)"
+    },
+    {
+      "code": "updates.minimum_version_write_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "io: permission denied (os error 13)"
+    },
+    {
+      "code": "release_update.unknown_channel",
+      "owner": "command",
+      "params": ["channel", "detail"],
+      "message": "unknown release channel \"nightly\" (expected 'stable' or 'beta')"
+    },
+    {
+      "code": "release_update.state_lock_poisoned",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "update state lock: poisoned lock: another task failed inside"
+    },
+    {
+      "code": "release_update.invalid_endpoint",
+      "owner": "command",
+      "params": ["endpoint", "detail"],
+      "message": "invalid updater endpoint \"claudepot.com/updater-manifest.json\": relative URL without a base"
+    },
+    {
+      "code": "release_update.endpoint_config_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "updater endpoint config failed: invalid updater endpoint"
+    },
+    {
+      "code": "release_update.builder_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "updater build failed: signature verification is enabled but no public key was configured"
+    },
+    {
+      "code": "release_update.check_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "update check failed: error sending request for url"
+    },
+    {
+      "code": "release_update.not_staged",
+      "owner": "command",
+      "params": [],
+      "message": "no update is staged — run a check first (release_update_check)"
+    },
+    {
+      "code": "release_update.install_failed",
+      "owner": "command",
+      "params": ["detail"],
+      "message": "update install failed: signature verification failed"
+    }
+  ]
+}

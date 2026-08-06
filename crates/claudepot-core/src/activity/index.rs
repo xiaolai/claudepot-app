@@ -35,6 +35,26 @@ pub enum ActivityIndexError {
     Serde(#[from] serde_json::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for ActivityIndexError {
+    fn code(&self) -> &'static str {
+        match self {
+            ActivityIndexError::Sql(_) => "activity_index.sql",
+            ActivityIndexError::Io(_) => "activity_index.io",
+            ActivityIndexError::Serde(_) => "activity_index.serde",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ActivityIndexError::Sql(e) => serde_json::json!({ "detail": e.to_string() }),
+            ActivityIndexError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            ActivityIndexError::Serde(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 /// Handle to the `activity_cards` table. Wraps a single
 /// `Mutex<Connection>` so it can cross `await` points in Tauri
 /// command handlers, mirroring `SessionIndex`'s thread model.

@@ -20,9 +20,12 @@
 // honesty signals on the figure.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Table, Th, ThSort, Tr, Td } from "../../components/primitives";
 import { formatRelative } from "../../lib/formatRelative";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import type {
   LocalUsageReport,
   PriceTierId,
@@ -44,28 +47,30 @@ export { cacheHitRate, formatHitRate, shortModelId };
  *  into the per-session detail for more. */
 const TOP_PROMPTS_LIMIT = 5;
 
-/** Picker options for the pricing tier — keeps the labels stable
+/** Picker options for the pricing tier — keeps the label keys stable
  *  alongside the wire-form ids. Order mirrors the Rust
- *  `PriceTier::all()` so the default lands at the top. */
-const TIER_OPTIONS: { value: PriceTierId; label: string }[] = [
-  { value: "anthropic_api", label: "Anthropic API" },
-  { value: "vertex_global", label: "Vertex Global" },
-  { value: "vertex_regional", label: "Vertex Regional" },
-  { value: "aws_bedrock", label: "AWS Bedrock" },
-];
+ *  `PriceTier::all()` so the default lands at the top. Labels resolve
+ *  at render time so a language switch takes effect immediately. */
+const TIER_OPTIONS = [
+  { value: "anthropic_api", labelKey: "cost.tiers.anthropicApi" },
+  { value: "vertex_global", labelKey: "cost.tiers.vertexGlobal" },
+  { value: "vertex_regional", labelKey: "cost.tiers.vertexRegional" },
+  { value: "aws_bedrock", labelKey: "cost.tiers.awsBedrock" },
+] as const satisfies readonly { value: PriceTierId; labelKey: string }[];
 
-function labelForTier(t: PriceTierId): string {
-  return TIER_OPTIONS.find((o) => o.value === t)?.label ?? t;
+function labelForTier(tier: PriceTierId): string {
+  const opt = TIER_OPTIONS.find((o) => o.value === tier);
+  return opt ? i18n.t(opt.labelKey, { ns: "activities" }) : tier;
 }
 
 type WindowChoice = "7d" | "30d" | "90d" | "all";
 
-const WINDOW_OPTIONS: { value: WindowChoice; label: string }[] = [
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "90d", label: "Last 90 days" },
-  { value: "all", label: "All time" },
-];
+const WINDOW_OPTIONS = [
+  { value: "7d", labelKey: "cost.window7d" },
+  { value: "30d", labelKey: "cost.window30d" },
+  { value: "90d", labelKey: "cost.window90d" },
+  { value: "all", labelKey: "cost.windowAll" },
+] as const satisfies readonly { value: WindowChoice; labelKey: string }[];
 
 function toSpec(c: WindowChoice): UsageWindowSpec {
   if (c === "all") return { kind: "all" };
@@ -125,7 +130,7 @@ export function CostTab() {
         // "couldn't load."
         setReport(null);
         setTopPrompts(null);
-        setError(e instanceof Error ? e.message : String(e));
+        setError(renderError(e));
       } finally {
         if (seq === seqRef.current) setLoading(false);
       }
@@ -183,7 +188,7 @@ export function CostTab() {
       await api.pricingRefresh();
       await fetchReport(choice);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(renderError(e));
     }
   }, [choice, fetchReport]);
 
@@ -197,7 +202,7 @@ export function CostTab() {
         // cross-checks our local state on the way back.
         await fetchReport(choice);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(renderError(e));
       }
     },
     [choice, fetchReport],
@@ -280,6 +285,7 @@ function Controls({
   onTier: (t: PriceTierId) => void;
   loading: boolean;
 }) {
+  const { t } = useTranslation("activities");
   return (
     <div
       style={{
@@ -296,7 +302,7 @@ function Controls({
           color: "var(--fg-muted)",
         }}
       >
-        Window
+        {t("cost.window")}
       </label>
       <select
         id="cost-tab-window"
@@ -314,7 +320,7 @@ function Controls({
       >
         {WINDOW_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
-            {o.label}
+            {t(o.labelKey)}
           </option>
         ))}
       </select>
@@ -325,13 +331,13 @@ function Controls({
           color: "var(--fg-muted)",
         }}
       >
-        Tier
+        {t("cost.tier")}
       </label>
       <select
         id="cost-tab-tier"
         value={pricingTier ?? "anthropic_api"}
         onChange={(e) => onTier(e.target.value as PriceTierId)}
-        title="Platform you're billed through. Drives the cost label and (where verified) the rate multiplier."
+        title={t("cost.tierTitle")}
         style={{
           fontSize: "var(--fs-xs)",
           padding: "var(--sp-3) var(--sp-8)",
@@ -344,13 +350,15 @@ function Controls({
       >
         {TIER_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
-            {o.label}
+            {t(o.labelKey)}
           </option>
         ))}
       </select>
       {pricingSource && (
         <span
-          title={pricingError ?? `Price table source: ${pricingSource}`}
+          title={
+            pricingError ?? t("cost.priceSourceTitle", { source: pricingSource })
+          }
           style={{
             fontSize: "var(--fs-2xs)",
             color: pricingError ? "var(--warn)" : "var(--fg-faint)",
@@ -364,7 +372,7 @@ function Controls({
         >
           {pricingTier ? `${labelForTier(pricingTier)} · ` : ""}
           {pricingSource}
-          {pricingError ? " · stale" : ""}
+          {pricingError ? ` · ${t("cost.stale")}` : ""}
         </span>
       )}
       {loading && (
@@ -374,7 +382,7 @@ function Controls({
             color: "var(--fg-faint)",
           }}
         >
-          loading…
+          {t("cost.loading")}
         </span>
       )}
     </div>
@@ -390,7 +398,8 @@ function SummaryTiles({
   report: LocalUsageReport | null;
   loading: boolean;
 }) {
-  const t = report?.totals;
+  const { t } = useTranslation("activities");
+  const tot = report?.totals;
   const dash = "—";
   return (
     <div
@@ -407,48 +416,48 @@ function SummaryTiles({
       }}
     >
       <Tile
-        label="Total cost"
+        label={t("cost.tileTotalCost")}
         value={
-          t && t.cost_usd != null
-            ? `${t.estimated_sessions > 0 ? "≈ " : ""}$${t.cost_usd.toFixed(2)}`
+          tot && tot.cost_usd != null
+            ? `${tot.estimated_sessions > 0 ? "≈ " : ""}$${tot.cost_usd.toFixed(2)}`
             : loading
               ? dash
-              : t
-                ? "n/a"
+              : tot
+                ? t("cost.na")
                 : dash
         }
         // A family-estimated session's dollars are inside this total,
         // so the total is not a clean quote and must not read as one.
         sub={
-          t && t.estimated_sessions > 0
-            ? `install-wide · ${t.estimated_sessions} estimated`
-            : "install-wide"
+          tot && tot.estimated_sessions > 0
+            ? t("cost.installWideEstimated", { value: tot.estimated_sessions })
+            : t("cost.installWide")
         }
       />
       <Tile
-        label="Tokens in"
-        value={renderTokens(t?.tokens_input)}
+        label={t("cost.tileTokensIn")}
+        value={renderTokens(tot?.tokens_input)}
         sub={
-          t
-            ? `cache hit ${formatHitRate(cacheHitRate(t))}`
-            : renderTokens(undefined, "cache read")
+          tot
+            ? t("cost.cacheHit", { rate: formatHitRate(cacheHitRate(tot)) })
+            : renderTokens(undefined, t("cost.cacheRead"))
         }
       />
       <Tile
-        label="Tokens out"
-        value={renderTokens(t?.tokens_output)}
-        sub={renderTokens(t?.tokens_cache_creation, "cache write")}
+        label={t("cost.tileTokensOut")}
+        value={renderTokens(tot?.tokens_output)}
+        sub={renderTokens(tot?.tokens_cache_creation, t("cost.cacheWrite"))}
       />
       <Tile
-        label="Sessions"
+        label={t("cost.tileSessions")}
         // Render `—` for zero so the empty-window state matches the
         // project-wide "render-if-nonzero" rule. A literal `0` reads
         // as a real value and competes with the "no sessions in this
         // window" notice in the table below.
-        value={t && t.session_count > 0 ? String(t.session_count) : dash}
+        value={tot && tot.session_count > 0 ? String(tot.session_count) : dash}
         sub={
-          t && t.unpriced_sessions > 0
-            ? `${t.unpriced_sessions} unpriced`
+          tot && tot.unpriced_sessions > 0
+            ? t("cost.unpricedCount", { value: tot.unpriced_sessions })
             : undefined
         }
       />
@@ -530,6 +539,7 @@ function CostTable({
   sortDir: SortDir;
   onSort: (k: SortKey) => void;
 }) {
+  const { t } = useTranslation("activities");
   if (rows.length === 0) {
     return (
       <div
@@ -540,7 +550,7 @@ function CostTable({
           textAlign: "center",
         }}
       >
-        No sessions in this window.
+        {t("cost.noSessions")}
       </div>
     );
   }
@@ -555,7 +565,7 @@ function CostTable({
             onSort={onSort}
             align="left"
           >
-            Project
+            {t("cost.colProject")}
           </ThSort>
           <ThSort
             value="sessions"
@@ -564,7 +574,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Sess
+            {t("cost.colSessions")}
           </ThSort>
           <ThSort
             value="last"
@@ -573,7 +583,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Last active
+            {t("cost.colLastActive")}
           </ThSort>
           <ThSort
             value="input"
@@ -582,7 +592,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Input
+            {t("cost.colInput")}
           </ThSort>
           <ThSort
             value="output"
@@ -591,7 +601,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Output
+            {t("cost.colOutput")}
           </ThSort>
           <ThSort
             value="cache_hit"
@@ -600,9 +610,9 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Cache hit
+            {t("cost.colCacheHit")}
           </ThSort>
-          <Th align="left">Models</Th>
+          <Th align="left">{t("cost.colModels")}</Th>
           <ThSort
             value="cost"
             current={sortKey}
@@ -610,7 +620,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Cost
+            {t("cost.colCost")}
           </ThSort>
           <Th align="center">⚠</Th>
         </tr>
@@ -625,6 +635,7 @@ function CostTable({
 }
 
 function Row({ row }: { row: ProjectUsageRow }) {
+  const { t } = useTranslation("activities");
   // Mark a row whose total includes family-estimated sessions. The
   // dollars are real enough to sum, but the rate behind some of them
   // was inferred from the model's family, so `≈` keeps it from
@@ -632,7 +643,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
   const estimated = row.estimated_sessions > 0;
   const cost =
     row.cost_usd == null
-      ? "n/a"
+      ? t("cost.na")
       : `${estimated ? "≈ " : ""}$${row.cost_usd.toFixed(2)}`;
   const last =
     row.last_active_ms != null
@@ -667,8 +678,15 @@ function Row({ row }: { row: ProjectUsageRow }) {
         align="right"
         title={
           hit == null
-            ? "no input-side tokens"
-            : `${formatCompact(row.tokens_cache_read)} cache-read of ${formatCompact(row.tokens_input + row.tokens_cache_creation + row.tokens_cache_read)} prompt tokens`
+            ? t("cost.noInputTokens")
+            : t("cost.cacheHitTitle", {
+                read: formatCompact(row.tokens_cache_read),
+                total: formatCompact(
+                  row.tokens_input +
+                    row.tokens_cache_creation +
+                    row.tokens_cache_read,
+                ),
+              })
         }
       >
         {formatHitRate(hit)}
@@ -680,7 +698,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
       <Td align="center">
         {warn != null ? (
           <span
-            title={`${warn} session(s) had no priced model`}
+            title={t("cost.unpricedWarnTitle", { value: warn })}
             style={{ color: "var(--warn)" }}
           >
             ⚠
@@ -696,6 +714,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
  *  Renders nothing for empty mixes — keeps the column quiet on
  *  user-only sessions. */
 function ModelBadges({ mix }: { mix: Record<string, number> }) {
+  const { t } = useTranslation("activities");
   const entries = Object.entries(mix).sort(
     (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
   );
@@ -717,7 +736,7 @@ function ModelBadges({ mix }: { mix: Record<string, number> }) {
       {entries.map(([model, count]) => (
         <span
           key={model}
-          title={`${model} · ${count} session${count === 1 ? "" : "s"}`}
+          title={t("cost.modelBadgeTitle", { model, count })}
           style={{
             display: "inline-flex",
             alignItems: "baseline",
@@ -749,6 +768,7 @@ function UnpricedFooter({
   report: LocalUsageReport | null;
   onRefreshPrices: () => void;
 }) {
+  const { t } = useTranslation("activities");
   if (!report || report.totals.unpriced_sessions === 0) return null;
   const u = report.totals.unpriced_sessions;
   const total = report.totals.session_count;
@@ -769,9 +789,7 @@ function UnpricedFooter({
       }}
     >
       <span>
-        ⚠ {u} of {total} session{total === 1 ? "" : "s"} used a model not
-        in the price table — token counts above include them; cost
-        excludes them.
+        {t("cost.unpricedFooter", { unpriced: u, count: total })}
       </span>
       <button
         type="button"
@@ -788,7 +806,7 @@ function UnpricedFooter({
           fontFamily: "inherit",
         }}
       >
-        Refresh prices
+        {t("cost.refreshPrices")}
       </button>
     </div>
   );

@@ -21,6 +21,7 @@
 //! abandoned. Window close handlers must NOT call `attempt_quit`
 //! or `app.exit`, otherwise this surface stops being tray-resident.
 
+use crate::i18n::{tr, tr_args, tr_n};
 use crate::ops::{OpKind, OpStatus, RunningOps};
 use serde::Serialize;
 use tauri::menu::{
@@ -29,6 +30,11 @@ use tauri::menu::{
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// Build the app menu and set it on the given app handle.
+///
+/// Re-runnable: `app.set_menu` replaces the previous menu wholesale, so
+/// a locale change re-installs by calling this again (see
+/// `preferences_set_locale`). Labels resolve through `i18n::tr` at
+/// build time — never cache them across a locale switch.
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // ---- Claudepot submenu --------------------------------------------------
     let about_md = AboutMetadataBuilder::new()
@@ -39,21 +45,21 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .website_label(Some("GitHub"))
         .build();
 
-    let about = PredefinedMenuItem::about(app, Some("About Claudepot"), Some(about_md))
+    let about = PredefinedMenuItem::about(app, Some(&tr("menu.about")), Some(about_md))
         .map_err(|e| format!("about: {e}"))?;
 
-    let settings = MenuItemBuilder::with_id("app-menu:settings", "Settings…")
+    let settings = MenuItemBuilder::with_id("app-menu:settings", tr("menu.settings"))
         .accelerator("Cmd+,")
         .build(app)
         .map_err(|e| format!("settings: {e}"))?;
 
-    let services = PredefinedMenuItem::services(app, Some("Services"))
+    let services = PredefinedMenuItem::services(app, Some(&tr("menu.services")))
         .map_err(|e| format!("services: {e}"))?;
     let hide =
-        PredefinedMenuItem::hide(app, Some("Hide Claudepot")).map_err(|e| format!("hide: {e}"))?;
-    let hide_others = PredefinedMenuItem::hide_others(app, Some("Hide Others"))
+        PredefinedMenuItem::hide(app, Some(&tr("menu.hide"))).map_err(|e| format!("hide: {e}"))?;
+    let hide_others = PredefinedMenuItem::hide_others(app, Some(&tr("menu.hideOthers")))
         .map_err(|e| format!("hide_others: {e}"))?;
-    let show_all = PredefinedMenuItem::show_all(app, Some("Show All"))
+    let show_all = PredefinedMenuItem::show_all(app, Some(&tr("menu.showAll")))
         .map_err(|e| format!("show_all: {e}"))?;
     // ⌘Q is rebound to "Close Window" so the app behaves as a tray-
     // resident background worker: the gesture users press to dismiss
@@ -66,12 +72,12 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     //
     // The actual process-terminating Quit lives in the tray dropdown
     // — see `tray.rs::handle_menu_event` (id `quit`) → `attempt_quit`.
-    let quit = MenuItemBuilder::with_id("app-menu:quit", "Close Window")
+    let quit = MenuItemBuilder::with_id("app-menu:quit", tr("menu.closeWindow"))
         .accelerator("CmdOrCtrl+Q")
         .build(app)
         .map_err(|e| format!("quit: {e}"))?;
 
-    let claudepot = SubmenuBuilder::new(app, "Claudepot")
+    let claudepot = SubmenuBuilder::new(app, tr("menu.claudepot"))
         .item(&about)
         .separator()
         .item(&settings)
@@ -91,15 +97,20 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // items in an Edit menu, WebKit `<input>` fields don't receive ⌘C/⌘V/
     // ⌘X/⌘A keyboard shortcuts. `app.set_menu()` replaces the default menu
     // entirely, so we have to put these back by hand.
-    let undo = PredefinedMenuItem::undo(app, Some("Undo")).map_err(|e| format!("undo: {e}"))?;
-    let redo = PredefinedMenuItem::redo(app, Some("Redo")).map_err(|e| format!("redo: {e}"))?;
-    let cut = PredefinedMenuItem::cut(app, Some("Cut")).map_err(|e| format!("cut: {e}"))?;
-    let copy = PredefinedMenuItem::copy(app, Some("Copy")).map_err(|e| format!("copy: {e}"))?;
-    let paste = PredefinedMenuItem::paste(app, Some("Paste")).map_err(|e| format!("paste: {e}"))?;
-    let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))
+    let undo =
+        PredefinedMenuItem::undo(app, Some(&tr("menu.undo"))).map_err(|e| format!("undo: {e}"))?;
+    let redo =
+        PredefinedMenuItem::redo(app, Some(&tr("menu.redo"))).map_err(|e| format!("redo: {e}"))?;
+    let cut =
+        PredefinedMenuItem::cut(app, Some(&tr("menu.cut"))).map_err(|e| format!("cut: {e}"))?;
+    let copy =
+        PredefinedMenuItem::copy(app, Some(&tr("menu.copy"))).map_err(|e| format!("copy: {e}"))?;
+    let paste = PredefinedMenuItem::paste(app, Some(&tr("menu.paste")))
+        .map_err(|e| format!("paste: {e}"))?;
+    let select_all = PredefinedMenuItem::select_all(app, Some(&tr("menu.selectAll")))
         .map_err(|e| format!("select_all: {e}"))?;
 
-    let edit = SubmenuBuilder::new(app, "Edit")
+    let edit = SubmenuBuilder::new(app, tr("menu.edit"))
         .item(&undo)
         .item(&redo)
         .separator()
@@ -116,17 +127,17 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // (the router strips the `:manage` suffix), which is the same target
     // as View → Accounts. One nav target, one menu item.
     let login_browser =
-        MenuItemBuilder::with_id("app-menu:account:login-browser", "Sign in from browser…")
+        MenuItemBuilder::with_id("app-menu:account:login-browser", tr("menu.signInBrowser"))
             .build(app)
             .map_err(|e| format!("login-browser: {e}"))?;
-    let sync_cc = MenuItemBuilder::with_id("app-menu:account:sync-cc", "Sync from current CC")
+    let sync_cc = MenuItemBuilder::with_id("app-menu:account:sync-cc", tr("menu.syncFromCc"))
         .build(app)
         .map_err(|e| format!("sync-cc: {e}"))?;
-    let verify_all = MenuItemBuilder::with_id("app-menu:account:verify-all", "Verify all")
+    let verify_all = MenuItemBuilder::with_id("app-menu:account:verify-all", tr("menu.verifyAll"))
         .build(app)
         .map_err(|e| format!("verify-all: {e}"))?;
 
-    let account = SubmenuBuilder::new(app, "Account")
+    let account = SubmenuBuilder::new(app, tr("menu.account"))
         .item(&login_browser)
         .item(&sync_cc)
         .item(&verify_all)
@@ -139,41 +150,43 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // (`sectionIds.includes(sub)`), so a typo here = dead menu item.
     // Note: Activities's section id is `events` for localStorage
     // back-compat; the label is "Activities".
-    let nav_accounts = MenuItemBuilder::with_id("app-menu:nav:accounts", "Accounts")
+    let nav_accounts = MenuItemBuilder::with_id("app-menu:nav:accounts", tr("menu.navAccounts"))
         .build(app)
         .map_err(|e| format!("nav-accounts: {e}"))?;
-    let nav_activities = MenuItemBuilder::with_id("app-menu:nav:events", "Activities")
+    let nav_activities = MenuItemBuilder::with_id("app-menu:nav:events", tr("menu.navActivities"))
         .build(app)
         .map_err(|e| format!("nav-activities: {e}"))?;
-    let nav_projects = MenuItemBuilder::with_id("app-menu:nav:projects", "Projects")
+    let nav_projects = MenuItemBuilder::with_id("app-menu:nav:projects", tr("menu.navProjects"))
         .build(app)
         .map_err(|e| format!("nav-projects: {e}"))?;
-    let nav_keys = MenuItemBuilder::with_id("app-menu:nav:keys", "Keys")
+    let nav_keys = MenuItemBuilder::with_id("app-menu:nav:keys", tr("menu.navKeys"))
         .build(app)
         .map_err(|e| format!("nav-keys: {e}"))?;
-    let nav_third_party = MenuItemBuilder::with_id("app-menu:nav:third-party", "Third-parties")
-        .build(app)
-        .map_err(|e| format!("nav-third-party: {e}"))?;
-    let nav_agents = MenuItemBuilder::with_id("app-menu:nav:agents", "Agents")
+    let nav_third_party =
+        MenuItemBuilder::with_id("app-menu:nav:third-party", tr("menu.navThirdParty"))
+            .build(app)
+            .map_err(|e| format!("nav-third-party: {e}"))?;
+    let nav_agents = MenuItemBuilder::with_id("app-menu:nav:agents", tr("menu.navAgents"))
         .build(app)
         .map_err(|e| format!("nav-agents: {e}"))?;
-    let nav_global = MenuItemBuilder::with_id("app-menu:nav:global", "Global")
+    let nav_global = MenuItemBuilder::with_id("app-menu:nav:global", tr("menu.navGlobal"))
         .build(app)
         .map_err(|e| format!("nav-global: {e}"))?;
-    let nav_settings = MenuItemBuilder::with_id("app-menu:nav:settings", "Settings")
+    let nav_settings = MenuItemBuilder::with_id("app-menu:nav:settings", tr("menu.navSettings"))
         .build(app)
         .map_err(|e| format!("nav-settings: {e}"))?;
-    let toggle_theme = MenuItemBuilder::with_id("app-menu:view:toggle-theme", "Toggle theme")
-        .build(app)
-        .map_err(|e| format!("toggle-theme: {e}"))?;
+    let toggle_theme =
+        MenuItemBuilder::with_id("app-menu:view:toggle-theme", tr("menu.toggleTheme"))
+            .build(app)
+            .map_err(|e| format!("toggle-theme: {e}"))?;
     // Honest label: the handler in App.tsx only refreshes the Accounts
     // section. A section-aware refresh contract doesn't exist yet, so
     // don't promise one in the label.
-    let reload = MenuItemBuilder::with_id("app-menu:view:reload", "Refresh Accounts")
+    let reload = MenuItemBuilder::with_id("app-menu:view:reload", tr("menu.refreshAccounts"))
         .build(app)
         .map_err(|e| format!("reload: {e}"))?;
 
-    let view = SubmenuBuilder::new(app, "View")
+    let view = SubmenuBuilder::new(app, tr("menu.view"))
         .item(&nav_accounts)
         .item(&nav_activities)
         .item(&nav_projects)
@@ -194,16 +207,16 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // *hide* it so the tray-resident model holds (the only Quit lives
     // in the tray dropdown — see the `quit` item above for full
     // rationale). Same handler as `app-menu:quit`; same intent.
-    let minimize = PredefinedMenuItem::minimize(app, Some("Minimize"))
+    let minimize = PredefinedMenuItem::minimize(app, Some(&tr("menu.minimize")))
         .map_err(|e| format!("minimize: {e}"))?;
-    let maximize =
-        PredefinedMenuItem::maximize(app, Some("Zoom")).map_err(|e| format!("maximize: {e}"))?;
-    let close_window = MenuItemBuilder::with_id("app-menu:close-window", "Close Window")
+    let maximize = PredefinedMenuItem::maximize(app, Some(&tr("menu.zoom")))
+        .map_err(|e| format!("maximize: {e}"))?;
+    let close_window = MenuItemBuilder::with_id("app-menu:close-window", tr("menu.closeWindow"))
         .accelerator("CmdOrCtrl+W")
         .build(app)
         .map_err(|e| format!("close_window: {e}"))?;
 
-    let window = SubmenuBuilder::new(app, "Window")
+    let window = SubmenuBuilder::new(app, tr("menu.window"))
         .item(&minimize)
         .item(&maximize)
         .separator()
@@ -212,18 +225,18 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| format!("window submenu: {e}"))?;
 
     // ---- Help submenu ------------------------------------------------------
-    let help_github = MenuItemBuilder::with_id("app-menu:help:github", "Open GitHub")
+    let help_github = MenuItemBuilder::with_id("app-menu:help:github", tr("menu.openGithub"))
         .build(app)
         .map_err(|e| format!("help-github: {e}"))?;
-    let help_diag = MenuItemBuilder::with_id("app-menu:help:copy-diag", "Copy diagnostics")
+    let help_diag = MenuItemBuilder::with_id("app-menu:help:copy-diag", tr("menu.copyDiagnostics"))
         .build(app)
         .map_err(|e| format!("help-diag: {e}"))?;
     let help_data =
-        MenuItemBuilder::with_id("app-menu:help:reveal-data-dir", "Reveal data dir in Finder")
+        MenuItemBuilder::with_id("app-menu:help:reveal-data-dir", tr("menu.revealDataDir"))
             .build(app)
             .map_err(|e| format!("help-data: {e}"))?;
 
-    let help = SubmenuBuilder::new(app, "Help")
+    let help = SubmenuBuilder::new(app, tr("menu.help"))
         .item(&help_github)
         .item(&help_diag)
         .item(&help_data)
@@ -379,18 +392,10 @@ pub fn attempt_quit<R: Runtime>(app: &AppHandle<R>) {
 fn show_native_quit_dialog<R: Runtime>(app: &AppHandle<R>, in_flight: &[QuitGateOp]) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-    let count = in_flight.len();
-    let heading = if count == 1 {
-        "1 operation in progress".to_string()
-    } else {
-        format!("{count} operations in progress")
-    };
+    let heading = tr_n("quit.opsInProgress", in_flight.len() as u64);
     let body = {
-        let mut lines = String::from(
-            "Quitting now will abandon the work below. \
-             Repairable operations leave a journal entry you can resume \
-             later; one-shot operations will need to be restarted.\n\n",
-        );
+        let mut lines = tr("quit.body");
+        lines.push_str("\n\n");
         for op in in_flight {
             lines.push_str("• ");
             lines.push_str(&op.label);
@@ -405,8 +410,8 @@ fn show_native_quit_dialog<R: Runtime>(app: &AppHandle<R>, in_flight: &[QuitGate
         .title(heading)
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "Quit anyway".to_string(),
-            "Stay".to_string(),
+            tr("quit.quitAnyway"),
+            tr("quit.stay"),
         ))
         .show(move |ok| {
             if ok {
@@ -422,25 +427,26 @@ fn show_native_quit_dialog<R: Runtime>(app: &AppHandle<R>, in_flight: &[QuitGate
 pub(crate) fn inflight_label(op: &crate::ops::RunningOpInfo) -> String {
     let from = basename(&op.old_path);
     let to = basename(&op.new_path);
+    let from_to: [(&str, &str); 2] = [("from", from), ("to", to)];
     match op.kind {
-        OpKind::CleanProjects => "Cleaning projects".to_string(),
-        OpKind::SessionPrune => "Pruning sessions".to_string(),
+        OpKind::CleanProjects => tr("ops.cleaningProjects"),
+        OpKind::SessionPrune => tr("ops.pruningSessions"),
         OpKind::SessionSlim => {
             if from.is_empty() {
-                "Slimming session".to_string()
+                tr("ops.slimmingSession")
             } else {
-                format!("Slimming {from}")
+                tr_args("ops.slimming", &[("from", from)])
             }
         }
-        OpKind::SessionShare => "Sharing session".to_string(),
-        OpKind::SessionMove => format!("Moving session {from} → {to}"),
-        OpKind::MoveProject => format!("Renaming {from} → {to}"),
-        OpKind::RepairResume => format!("Resuming {from} → {to}"),
-        OpKind::RepairRollback => format!("Rolling back {from} → {to}"),
-        OpKind::AccountLogin => "Account login".to_string(),
-        OpKind::AccountRegister => "Adding account".to_string(),
-        OpKind::VerifyAll => "Verifying accounts".to_string(),
-        OpKind::AgentRun => "Running agent".to_string(),
+        OpKind::SessionShare => tr("ops.sharingSession"),
+        OpKind::SessionMove => tr_args("ops.movingSession", &from_to),
+        OpKind::MoveProject => tr_args("ops.renaming", &from_to),
+        OpKind::RepairResume => tr_args("ops.resuming", &from_to),
+        OpKind::RepairRollback => tr_args("ops.rollingBack", &from_to),
+        OpKind::AccountLogin => tr("ops.accountLogin"),
+        OpKind::AccountRegister => tr("ops.addingAccount"),
+        OpKind::VerifyAll => tr("ops.verifyingAccounts"),
+        OpKind::AgentRun => tr("ops.runningAgent"),
     }
 }
 

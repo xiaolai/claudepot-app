@@ -12,6 +12,7 @@
 // when given `null` (haven't fetched yet) — the calling component is
 // responsible for distinguishing "loading" from "never used".
 
+import { useTranslation } from "react-i18next";
 import { formatRelative } from "../../lib/formatRelative";
 import type { ArtifactUsageStatsDto } from "../../types";
 
@@ -20,15 +21,23 @@ export function UsageMicroBadge({
 }: {
   stats: ArtifactUsageStatsDto | null | undefined;
 }) {
+  const { t } = useTranslation("config");
   if (!stats || stats.count_30d === 0) return null;
   const errBadge = stats.error_count_30d > 0;
   return (
     <span
-      aria-label={`${stats.count_30d} invocations in last 30 days${errBadge ? `, ${stats.error_count_30d} errors` : ""}`}
+      aria-label={`${t("usage.invocationsAria", { n: stats.count_30d })}${
+        errBadge
+          ? t("usage.errorsAriaSuffix", { n: stats.error_count_30d })
+          : ""
+      }`}
       title={
         errBadge
-          ? `${stats.count_30d} fires · ${stats.error_count_30d} errors (30d)`
-          : `${stats.count_30d} fires (30d)`
+          ? t("usage.microTitleErrors", {
+              n: stats.count_30d,
+              errors: stats.error_count_30d,
+            })
+          : t("usage.microTitle", { n: stats.count_30d })
       }
       style={{
         display: "inline-flex",
@@ -52,6 +61,7 @@ export function UsageStrip({
 }: {
   stats: ArtifactUsageStatsDto | null | undefined;
 }) {
+  const { t } = useTranslation("config");
   if (!stats) return null;
   if (stats.count_30d === 0) {
     return (
@@ -69,28 +79,32 @@ export function UsageStrip({
           textTransform: "uppercase",
         }}
       >
-        Never invoked in the last 30 days
+        {t("usage.neverInvoked30d")}
       </div>
     );
   }
   const parts: string[] = [];
-  parts.push(`${stats.count_30d} ${stats.count_30d === 1 ? "fire" : "fires"} (30d)`);
+  parts.push(t("usage.fires", { count: stats.count_30d }));
   if (stats.count_7d > 0 && stats.count_7d !== stats.count_30d) {
-    parts.push(`${stats.count_7d} (7d)`);
+    parts.push(t("usage.window7d", { n: stats.count_7d }));
   }
   if (stats.count_24h > 0 && stats.count_24h !== stats.count_7d) {
-    parts.push(`${stats.count_24h} (24h)`);
+    parts.push(t("usage.window24h", { n: stats.count_24h }));
   }
   if (stats.last_seen_ms != null) {
-    parts.push(`last ${formatRelative(stats.last_seen_ms, { ago: true })}`);
+    parts.push(
+      t("usage.last", {
+        when: formatRelative(stats.last_seen_ms, { ago: true }),
+      }),
+    );
   }
   if (stats.error_count_30d > 0) {
-    parts.push(`${stats.error_count_30d} errors`);
+    parts.push(t("usage.errors", { n: stats.error_count_30d }));
   }
   if (stats.p50_ms_24h != null) {
-    parts.push(`p50 ${stats.p50_ms_24h}ms`);
+    parts.push(t("usage.p50", { ms: stats.p50_ms_24h }));
   } else if (stats.avg_ms_30d != null) {
-    parts.push(`avg ${stats.avg_ms_30d}ms`);
+    parts.push(t("usage.avg", { ms: stats.avg_ms_30d }));
   }
   const errBadge = stats.error_count_30d > 0;
   return (

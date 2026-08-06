@@ -93,6 +93,101 @@ pub enum CcEnvError {
     MalformedSpec(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// This impl is where the module header's "secrets never reach a
+/// message" rule has to hold a second time. `params` crosses the IPC
+/// bridge and lands in the JS heap, where a DevTools snapshot outlives
+/// the toast that a `Display` string dies with — so a leak here is
+/// *worse* than a leak in the message, not equal to it.
+///
+/// Three things follow, all deliberate:
+///
+/// - **Only `value` is ever a user-supplied env value**, and its sole
+///   constructor ([`crate::cc_env::settings::validate`]) stores it
+///   already passed through [`redacted`]. `params` re-runs
+///   [`looks_like_a_credential`] over it anyway. The module already
+///   argues that one gate is not enough ("either alone leaks"); a
+///   constructor added later that forgets `redacted` would otherwise
+///   turn this impl into the leak.
+/// - **`name` is an env var *name*, never a value.**
+///   `ANTHROPIC_CUSTOM_HEADERS` is safe to name and is marked
+///   `secret: true` in the spec precisely so its value is redacted —
+///   it is pre-trust-safe *and* able to carry `Authorization: Bearer …`,
+///   and those are orthogonal axes, not tiers.
+/// - **`reason` and `allowed` cross as structured values, not English.**
+///   The message renders `describe_blocked(reason)` — a whole English
+///   sentence — and joins `allowed` with " or ". A translator needs the
+///   `Blocked` discriminant and the raw list, or the localized sentence
+///   is a translation of a translation.
+impl crate::error_code::ErrorCode for CcEnvError {
+    fn code(&self) -> &'static str {
+        match self {
+            CcEnvError::Io(_) => "cc_env.io",
+            CcEnvError::JsonParse(_) => "cc_env.json_parse",
+            CcEnvError::NotAJsonObject(_) => "cc_env.not_a_json_object",
+            CcEnvError::EnvNotAnObject { .. } => "cc_env.env_not_an_object",
+            CcEnvError::UnknownVariable(_) => "cc_env.unknown_variable",
+            CcEnvError::NotEditable { .. } => "cc_env.not_editable",
+            CcEnvError::InvalidEnumValue { .. } => "cc_env.invalid_enum_value",
+            CcEnvError::InvalidNumber { .. } => "cc_env.invalid_number",
+            CcEnvError::NotSet(_) => "cc_env.not_set",
+            CcEnvError::Contended { .. } => "cc_env.contended",
+            CcEnvError::MalformedSpec(_) => "cc_env.malformed_spec",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        /// The second gate. `value` arrives already redacted from its
+        /// one constructor; this refuses to forward a token even if
+        /// some future constructor does not.
+        fn safe_value(value: &str) -> &str {
+            if looks_like_a_credential(value) {
+                "<redacted>"
+            } else {
+                value
+            }
+        }
+        match self {
+            CcEnvError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            CcEnvError::JsonParse(e) => serde_json::json!({ "detail": e.to_string() }),
+            CcEnvError::NotAJsonObject(path) | CcEnvError::Contended { path } => {
+                serde_json::json!({ "path": path.display().to_string() })
+            }
+            // `found` is a JSON type name (`array`, `string`, …) — the
+            // shape of the value, never the value.
+            CcEnvError::EnvNotAnObject { path, found } => serde_json::json!({
+                "path": path.display().to_string(),
+                "found": found,
+            }),
+            CcEnvError::UnknownVariable(name) | CcEnvError::NotSet(name) => {
+                serde_json::json!({ "name": name })
+            }
+            CcEnvError::NotEditable { name, reason } => serde_json::json!({
+                "name": name,
+                // `Blocked` serializes snake_case, so this is a stable
+                // discriminant a catalog can switch on.
+                "reason": serde_json::to_value(reason).unwrap_or(serde_json::Value::Null),
+            }),
+            CcEnvError::InvalidEnumValue {
+                name,
+                value,
+                allowed,
+            } => serde_json::json!({
+                "name": name,
+                "value": safe_value(value),
+                "allowed": allowed,
+            }),
+            CcEnvError::InvalidNumber { name, value } => serde_json::json!({
+                "name": name,
+                "value": safe_value(value),
+            }),
+            CcEnvError::MalformedSpec(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 fn describe_blocked(reason: Blocked) -> &'static str {
     match reason {
         Blocked::BootstrapSplitBrain => {

@@ -12,7 +12,13 @@
 //! `pricing_refresh` forces a refresh and joins the in-flight task if
 //! one exists, so a button-mash on "Refresh rates" can no longer
 //! spawn N concurrent scrapes.
+//!
+//! Neither command rejects: a failed scrape returns the bundled table
+//! tagged with `last_fetch_error`, because a cost figure the user can
+//! see and distrust beats no figure at all. The `Result<_, ErrorDto>`
+//! shape is kept so a future rejection has somewhere to go.
 
+use crate::dto_error::ErrorDto;
 use claudepot_core::pricing::{ModelRates, PriceSource, PriceTable, PricingCacheService};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -168,7 +174,7 @@ fn to_table_dto(table: &PriceTable) -> PriceTableDto {
 #[tauri::command]
 pub async fn pricing_get(
     svc: State<'_, Arc<PricingCacheService>>,
-) -> Result<PriceTableDto, String> {
+) -> Result<PriceTableDto, ErrorDto> {
     let table = svc.get_or_refresh_async();
     Ok(to_table_dto(table.as_ref()))
 }
@@ -181,7 +187,7 @@ pub async fn pricing_get(
 #[tauri::command]
 pub async fn pricing_refresh(
     svc: State<'_, Arc<PricingCacheService>>,
-) -> Result<PriceTableDto, String> {
+) -> Result<PriceTableDto, ErrorDto> {
     let table = svc.refresh_now().await;
     Ok(to_table_dto(table.as_ref()))
 }

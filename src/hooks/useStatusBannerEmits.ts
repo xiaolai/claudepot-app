@@ -10,6 +10,7 @@
 // acceptable (and the plan doc walked through this exact decision).
 
 import { useEffect, useRef } from "react";
+import { i18n } from "../lib/i18n";
 import { useEmit } from "../providers/AppStateProvider";
 import type { Category } from "../lib/notifications/types";
 import type { StatusIssue } from "./useStatusIssues";
@@ -82,7 +83,9 @@ export function useStatusBannerEmits(issues: StatusIssue[]): void {
       if (!category) continue;
       void emit({
         category: "bannerResolved",
-        title: `Resolved: ${humanizeCategory(category)}`,
+        title: i18n.t("banner.resolved", {
+          what: humanizeCategory(category),
+        }),
         body: "",
         dedupeKey: `banner-resolved:${id}`,
       });
@@ -95,15 +98,15 @@ export function useStatusBannerEmits(issues: StatusIssue[]): void {
 function humanizeCategory(category: Category): string {
   switch (category) {
     case "accountAuthRejected":
-      return "account auth";
+      return i18n.t("banner.category.accountAuth");
     case "keychainLocked":
-      return "keychain access";
+      return i18n.t("banner.category.keychainAccess");
     case "ccSlotDrift":
-      return "CC slot drift";
+      return i18n.t("banner.category.ccSlotDrift");
     case "desktopDrift":
-      return "Desktop drift";
+      return i18n.t("banner.category.desktopDrift");
     case "repairConflict":
-      return "repair conflict";
+      return i18n.t("banner.category.repairConflict");
     default:
       return String(category);
   }

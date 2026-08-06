@@ -138,6 +138,54 @@ impl From<SettingsMutexError> for SettingsWriteError {
     }
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Three notes specific to this enum:
+///
+/// - **`Contended` is not a generic write failure.** It means another
+///   writer — Claude Code itself, or the user's editor — kept moving the
+///   file while we rebased onto it (see [`crate::settings_mutex`]). Its
+///   remediation is "try again", and it must never be phrased as
+///   corruption: nothing was written and nothing was lost.
+/// - **`UnsupportedLayer` is a refusal, not a failure.** The committed
+///   Project layer is read-only from Claudepot's side on purpose. The
+///   layer crosses as a discriminant string rather than a translated
+///   noun so a sentence can name it without re-parsing the English.
+/// - **`NotAJsonObject` carries the path raw** (`rules/paths.md`): a
+///   localized sentence places the same bytes the user's filesystem
+///   uses, Windows separators and all.
+impl crate::error_code::ErrorCode for SettingsWriteError {
+    fn code(&self) -> &'static str {
+        match self {
+            SettingsWriteError::Io(_) => "settings_write.io",
+            SettingsWriteError::JsonParse(_) => "settings_write.json_parse",
+            SettingsWriteError::NotAJsonObject(_) => "settings_write.not_a_json_object",
+            SettingsWriteError::UnsupportedLayer { .. } => "settings_write.unsupported_layer",
+            SettingsWriteError::Contended { .. } => "settings_write.contended",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            SettingsWriteError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            SettingsWriteError::JsonParse(e) => serde_json::json!({ "detail": e.to_string() }),
+            SettingsWriteError::NotAJsonObject(path) => {
+                serde_json::json!({ "path": path.display().to_string() })
+            }
+            // `{layer:?}` is what the English interpolates, so the
+            // param is that exact discriminant — not a prettified name
+            // a translator would have to map back.
+            SettingsWriteError::UnsupportedLayer { layer } => {
+                serde_json::json!({ "layer": format!("{layer:?}") })
+            }
+            SettingsWriteError::Contended { path } => {
+                serde_json::json!({ "path": path.display().to_string() })
+            }
+        }
+    }
+}
+
 /// Truthy/falsy parser matching CC's `isEnvTruthy` / `isEnvDefinedFalsy`
 /// (`utils/envUtils.ts`) — we accept the same `1/true/yes/on` and
 /// `0/false/no/off` forms.

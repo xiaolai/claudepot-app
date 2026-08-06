@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { Button } from "./primitives/Button";
 import { Glyph } from "./primitives/Glyph";
@@ -33,6 +34,7 @@ type QuitGateOp = {
  * on which section is mounted.
  */
 export function QuitConfirm() {
+  const { t } = useTranslation("components");
   const [ops, setOps] = useState<QuitGateOp[] | null>(null);
   const titleId = useId();
 
@@ -63,8 +65,7 @@ export function QuitConfirm() {
   };
 
   const count = ops.length;
-  const heading =
-    count === 1 ? "1 operation in progress" : `${count} operations in progress`;
+  const heading = t("quit.title", { count });
 
   return (
     <Modal
@@ -80,12 +81,7 @@ export function QuitConfirm() {
         onClose={onCancel}
       />
       <ModalBody>
-        <p style={{ marginTop: 0 }}>
-          Quitting now will abandon the work below. Repairable operations
-          (project rename, repair) leave a journal entry you can resume
-          later from Projects → Repair; one-shot operations (verify,
-          login, share) will need to be restarted.
-        </p>
+        <p style={{ marginTop: 0 }}>{t("quit.body")}</p>
         <ul
           style={{
             listStyle: "none",
@@ -117,10 +113,10 @@ export function QuitConfirm() {
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onCancel} autoFocus>
-          Stay
+          {t("quit.stay")}
         </Button>
         <Button variant="solid" danger onClick={onConfirm}>
-          Quit anyway
+          {t("quit.quitAnyway")}
         </Button>
       </ModalFooter>
     </Modal>

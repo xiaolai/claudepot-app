@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { api } from "../api";
-import { toastError } from "../lib/toastError";
+import { i18n } from "../lib/i18n";
+import { toastError } from "../lib/i18n-error";
 import { useAppState } from "../providers/AppStateProvider";
 import { useStatusIssues, type StatusIssue } from "./useStatusIssues";
 import { useStatusBannerEmits } from "./useStatusBannerEmits";
@@ -64,14 +65,14 @@ export function useShellStatusIssues(setSection: (id: string) => void): {
       await api.unlockKeychain();
       await refreshAccounts();
     } catch (e) {
-      toastError(pushToast, "Unlock failed", e);
+      toastError(pushToast, i18n.t("status.unlockFailed"), e);
     }
   }, [pushToast, refreshAccounts]);
 
   const onReloginActive = useCallback(() => {
     const active = accounts.find((a) => a.is_cli_active);
     if (!active) {
-      pushToast("error", "No active CLI account to re-login.");
+      pushToast("error", i18n.t("status.noActiveCli"));
       return;
     }
     // Shared login helper owns the busy keyring, cancel affordance,
@@ -87,10 +88,10 @@ export function useShellStatusIssues(setSection: (id: string) => void): {
     async (email: string) => {
       try {
         const outcome = await api.accountAddFromCurrent();
-        pushToast("info", `Imported ${outcome.email}`);
+        pushToast("info", i18n.t("status.imported", { email: outcome.email }));
         await refreshAccounts();
       } catch (e) {
-        toastError(pushToast, "Import failed", e);
+        toastError(pushToast, i18n.t("status.importFailed"), e);
       }
       // `email` is intentionally unused — supplied by the hook so the
       // button label can show the address, but the backend reads CC's
@@ -106,7 +107,7 @@ export function useShellStatusIssues(setSection: (id: string) => void): {
         (a) => a.email.toLowerCase() === email.toLowerCase(),
       );
       if (!match) {
-        pushToast("error", `No registered account matches ${email}.`);
+        pushToast("error", i18n.t("status.noMatchingAccount", { email }));
         return;
       }
       // Banner action never implicitly overwrites — if the match

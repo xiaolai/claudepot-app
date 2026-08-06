@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type {
   ArtifactUsageStatsDto,
   ConfigEffectiveSettingsDto,
@@ -27,6 +29,7 @@ export { countHooksInMergedSettings } from "./hooksData";
  */
 
 export function HooksRenderer({ cwd }: { cwd: string | null }) {
+  const { t } = useTranslation("config");
   const [data, setData] = useState<ConfigEffectiveSettingsDto | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +43,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
         if (!cancelled) setData(d);
       })
       .catch((e) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(renderError(e));
       });
     return () => {
       cancelled = true;
@@ -103,7 +106,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
           fontSize: "var(--fs-sm)",
         }}
       >
-        Couldn't load hooks: {error}
+        {t("hooks.loadFailed", { error })}
       </div>
     );
   }
@@ -117,7 +120,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
           fontSize: "var(--fs-sm)",
         }}
       >
-        Loading…
+        {t("state.loading")}
       </div>
     );
   }
@@ -132,7 +135,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
           textAlign: "center",
         }}
       >
-        No hooks registered for this project.
+        {t("hooks.empty")}
       </div>
     );
   }
@@ -176,8 +179,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
               {event}
             </h3>
             <span style={{ fontSize: "var(--fs-2xs)", color: "var(--fg-faint)" }}>
-              {byEvent.get(event)!.length} hook
-              {byEvent.get(event)!.length === 1 ? "" : "s"}
+              {t("hooks.count", { count: byEvent.get(event)!.length })}
             </span>
           </div>
           <ol
@@ -212,14 +214,16 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
                     color: "var(--fg-muted)",
                   }}
                 >
-                  <span style={{ fontFamily: "var(--font-mono)" }}>matcher</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>
+                    {t("hooks.matcher")}
+                  </span>
                   <code
                     style={{
                       fontFamily: "var(--font-mono)",
                       color: "var(--fg)",
                     }}
                   >
-                    {row.matcher || "(any)"}
+                    {row.matcher || t("hooks.anyMatcher")}
                   </code>
                   {row.winner && (
                     <span
@@ -228,7 +232,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
                         fontSize: "var(--fs-2xs)",
                         color: "var(--fg-faint)",
                       }}
-                      title="Winning scope for this hook entry"
+                      title={t("hooks.winnerTitle")}
                     >
                       {row.winner}
                     </span>
@@ -261,7 +265,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
                       color: "var(--fg-faint)",
                     }}
                   >
-                    timeout {row.timeoutMs} ms
+                    {t("hooks.timeout", { ms: row.timeoutMs })}
                   </div>
                 )}
               </li>

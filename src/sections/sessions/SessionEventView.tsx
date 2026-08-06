@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
@@ -7,6 +8,7 @@ import type { SessionEvent } from "../../types";
 import { useActivityPrefs } from "../../hooks/useActivityPrefs";
 import { Body, Bubble, Divider } from "./components/transcriptAtoms";
 import { formatTokens, modelBadge } from "./format";
+import { formatDateTime, formatNumber } from "../../lib/intl";
 import { redactSecrets } from "../../lib/redactSecrets";
 import { CopyButton } from "../../components/CopyButton";
 
@@ -31,6 +33,7 @@ export function SessionEventView({
   event: SessionEvent;
   searchTerm: string;
 }) {
+  const { t } = useTranslation("sessions");
   const ts = event.kind === "malformed" ? null : event.ts;
   const prefs = useActivityPrefs();
 
@@ -48,7 +51,7 @@ export function SessionEventView({
       }}
     >
       <span>{label}</span>
-      {ts && <span title={ts}>{new Date(ts).toLocaleString()}</span>}
+      {ts && <span title={ts}>{formatDateTime(new Date(ts))}</span>}
       {extra && <span style={{ marginLeft: "auto" }}>{extra}</span>}
     </div>
   );
@@ -63,8 +66,8 @@ export function SessionEventView({
       return (
         <Bubble side="left" tone="sunken">
           {header(
-            "You",
-            <CopyButton text={copyText} ariaLabel="Copy your message" />,
+            t("viewer.you"),
+            <CopyButton text={copyText} ariaLabel={t("viewer.copyYourMessage")} />,
           )}
           <Body
             text={copyText}
@@ -80,7 +83,9 @@ export function SessionEventView({
       return (
         <Bubble side="left" tone="faint" mono>
           {header(
-            event.is_error ? "Tool result · error" : "Tool result",
+            event.is_error
+              ? t("viewer.toolResultError")
+              : t("viewer.toolResult"),
             <span
               style={{
                 display: "inline-flex",
@@ -91,7 +96,7 @@ export function SessionEventView({
               <span className="mono" style={{ color: "var(--fg-ghost)" }}>
                 {event.tool_use_id.slice(0, 8)}
               </span>
-              <CopyButton text={copyText} ariaLabel="Copy tool result" />
+              <CopyButton text={copyText} ariaLabel={t("viewer.copyToolResult")} />
             </span>,
           )}
           <Body
@@ -108,8 +113,9 @@ export function SessionEventView({
     case "assistantText": {
       const usageBits: string[] = [];
       if (event.usage) {
-        const t = event.usage.total;
-        if (t > 0) usageBits.push(`${formatTokens(t)} tok`);
+        const total = event.usage.total;
+        if (total > 0)
+          usageBits.push(t("viewer.tok", { tokens: formatTokens(total) }));
       }
       if (event.stop_reason && event.stop_reason !== "end_turn") {
         usageBits.push(event.stop_reason);
@@ -118,7 +124,7 @@ export function SessionEventView({
       return (
         <Bubble side="right" tone="accent">
           {header(
-            "Claude",
+            t("viewer.claude"),
             <span
               style={{
                 display: "inline-flex",
@@ -136,7 +142,10 @@ export function SessionEventView({
                   {usageBits.join(" · ")}
                 </span>
               )}
-              <CopyButton text={copyText} ariaLabel="Copy assistant message" />
+              <CopyButton
+                text={copyText}
+                ariaLabel={t("viewer.copyAssistantMessage")}
+              />
             </span>,
           )}
           <Body
@@ -153,7 +162,7 @@ export function SessionEventView({
       return (
         <Bubble side="right" tone="faint" mono>
           {header(
-            `Tool call · ${event.tool_name}`,
+            t("viewer.toolCall", { name: event.tool_name }),
             <span
               style={{
                 display: "inline-flex",
@@ -164,7 +173,10 @@ export function SessionEventView({
               <span className="mono" style={{ color: "var(--fg-ghost)" }}>
                 {event.tool_use_id.slice(0, 8)}
               </span>
-              <CopyButton text={copyText} ariaLabel="Copy tool call input" />
+              <CopyButton
+                text={copyText}
+                ariaLabel={t("viewer.copyToolCallInput")}
+              />
             </span>,
           )}
           <Body
@@ -182,8 +194,11 @@ export function SessionEventView({
       return (
         <Bubble side="right" tone="ghost">
           {header(
-            "Thinking",
-            <CopyButton text={copyText} ariaLabel="Copy thinking block" />,
+            t("viewer.thinking"),
+            <CopyButton
+              text={copyText}
+              ariaLabel={t("viewer.copyThinkingBlock")}
+            />,
           )}
           <ThinkingBody
             text={copyText}
@@ -199,9 +214,12 @@ export function SessionEventView({
       return (
         <Divider>
           <Tag tone="accent" glyph={NF.archive}>
-            Compacted
+            {t("viewer.compacted")}
           </Tag>
-          <CopyButton text={copyText} ariaLabel="Copy compaction summary" />
+          <CopyButton
+            text={copyText}
+            ariaLabel={t("viewer.copyCompactionSummary")}
+          />
           <Body
             text={copyText}
             searchTerm={searchTerm}
@@ -215,14 +233,16 @@ export function SessionEventView({
     case "system":
       return (
         <MiniLine glyph={NF.info} tone="ghost">
-          {event.subtype ?? "system"} · {event.detail || "(no detail)"}
+          {event.subtype ?? "system"} · {event.detail || t("viewer.noDetail")}
         </MiniLine>
       );
 
     case "attachment":
       return (
         <MiniLine glyph={NF.file} tone="muted">
-          Attachment {event.name ?? "(unnamed)"}
+          {t("viewer.attachment", {
+            name: event.name ?? t("viewer.unnamed"),
+          })}
           {event.mime ? ` · ${event.mime}` : ""}
         </MiniLine>
       );
@@ -230,8 +250,7 @@ export function SessionEventView({
     case "fileSnapshot":
       return (
         <MiniLine glyph={NF.archive} tone="ghost">
-          File-history snapshot · {event.file_count} file
-          {event.file_count === 1 ? "" : "s"}
+          {t("viewer.fileSnapshot", { count: event.file_count })}
         </MiniLine>
       );
 
@@ -243,7 +262,7 @@ export function SessionEventView({
       // kind above — both are end-of-arc markers visually.
       return (
         <MiniLine glyph={NF.book} tone="ghost">
-          Task summary · {redactSecrets(event.summary)}
+          {t("viewer.taskSummary", { summary: redactSecrets(event.summary) })}
         </MiniLine>
       );
 
@@ -257,7 +276,10 @@ export function SessionEventView({
     case "malformed":
       return (
         <MiniLine glyph={NF.warn} tone="warn">
-          Malformed JSONL line {event.line_number}: {redactSecrets(event.error)}
+          {t("viewer.malformedJsonlLine", {
+            line: event.line_number,
+            error: redactSecrets(event.error),
+          })}
         </MiniLine>
       );
   }
@@ -295,6 +317,7 @@ function ThinkingBody({
   searchTerm: string;
   hideByDefault: boolean;
 }) {
+  const { t } = useTranslation("sessions");
   const [revealedByUser, setRevealedByUser] = useState(false);
   const shown = revealedByUser || !hideByDefault;
 
@@ -319,9 +342,11 @@ function ThinkingBody({
           cursor: "pointer",
           fontFamily: "var(--font)",
         }}
-        aria-label={`Reveal thinking block (${text.length} characters)`}
+        aria-label={t("viewer.revealThinkingAria", { chars: text.length })}
       >
-        Thinking · {text.length.toLocaleString()} chars — click to reveal
+        {t("viewer.thinkingReveal", {
+          chars: formatNumber(text.length),
+        })}
       </button>
     );
   }

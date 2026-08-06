@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
+import { renderError } from "../lib/i18n-error";
 import { useOperations } from "../hooks/useOperations";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useCompactHeader } from "../hooks/useWindowWidth";
@@ -84,6 +86,7 @@ export function ProjectsSection({
    *  can clear state and avoid re-applying on every prop change. */
   onPendingConsumed?: () => void;
 }) {
+  const { t } = useTranslation("projects");
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [orphans, setOrphans] = useState<OrphanedProject[]>([]);
   /**
@@ -254,7 +257,7 @@ export function ProjectsSection({
       })
       .catch((e) => {
         if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
-        setError(String(e));
+        setError(renderError(e));
         setLoading(false);
       });
     api
@@ -335,16 +338,16 @@ export function ProjectsSection({
       <>
         <ScreenHeader
           crumbs={["claudepot", "projects", "maintenance"]}
-          title="Maintenance"
-          subtitle="Clean orphaned projects and resume pending rename journals."
+          title={t("section.maintTitle")}
+          subtitle={t("section.maintSubtitle")}
           actions={
             <Button
               variant="ghost"
               glyph={NF.arrowR}
               onClick={() => onSubRouteChange(null)}
-              title="Back to project list"
+              title={t("section.backToListTitle")}
             >
-              Back to list
+              {t("section.backToList")}
             </Button>
           }
         />
@@ -355,33 +358,40 @@ export function ProjectsSection({
   const subtitle = (() => {
     const total = projects.length;
     if (total === 0) {
-      return "No CC projects yet — run `claude` in any directory to create one.";
+      return t("section.emptySubtitle");
     }
     const costTrailer =
       typeof totalCost === "number" && totalCost > 0
-        ? ` · ${formatUsd(totalCost)} at API rates`
+        ? ` · ${t("shared.atApiRates", { amount: formatUsd(totalCost) })}`
         : "";
     const narrowed =
       (nameFilter.trim() !== "" || filter !== "all") &&
       shownProjects.length !== total;
     if (narrowed) {
-      return `${shownProjects.length} of ${total} project${total === 1 ? "" : "s"} shown${costTrailer}`;
+      return `${t("section.subtitleNarrowed", {
+        shown: shownProjects.length,
+        count: total,
+      })}${costTrailer}`;
     }
     const actionable = counts.orphan + counts.unreachable + counts.empty;
     if (actionable === 0) {
-      return `${total} project${total === 1 ? "" : "s"} · all healthy${costTrailer}`;
+      return `${t("section.subtitleHealthy", { count: total })}${costTrailer}`;
     }
     const pieces: string[] = [];
-    if (counts.orphan) pieces.push(`${counts.orphan} orphan`);
-    if (counts.unreachable) pieces.push(`${counts.unreachable} offline`);
-    if (counts.empty) pieces.push(`${counts.empty} empty`);
-    return `${total} project${total === 1 ? "" : "s"} · ${pieces.join(" · ")}${costTrailer}`;
+    if (counts.orphan) pieces.push(t("section.countOrphan", { n: counts.orphan }));
+    if (counts.unreachable)
+      pieces.push(t("section.countOffline", { n: counts.unreachable }));
+    if (counts.empty) pieces.push(t("section.countEmpty", { n: counts.empty }));
+    return `${t("section.subtitleCounts", {
+      count: total,
+      pieces: pieces.join(" · "),
+    })}${costTrailer}`;
   })();
 
   return (
     <>
       <ScreenHeader
-        title="Projects"
+        title={t("section.title")}
         subtitle={subtitle}
         actions={
           compact ? (
@@ -389,20 +399,20 @@ export function ProjectsSection({
               <IconButton
                 glyph={NF.download}
                 onClick={() => setImportOpen(true)}
-                title="Import bundle"
-                aria-label="Import bundle"
+                title={t("section.importBundle")}
+                aria-label={t("section.importBundle")}
               />
               <IconButton
                 glyph={NF.wrench}
                 onClick={() => onSubRouteChange("maintenance")}
-                title="Maintenance — clean + repair"
-                aria-label="Maintenance"
+                title={t("section.maintCompactTitle")}
+                aria-label={t("section.maintenance")}
               />
               <IconButton
                 glyph={NF.refresh}
                 onClick={refresh}
-                title="Refresh (⌘R)"
-                aria-label="Refresh projects"
+                title={t("section.refreshCompactTitle")}
+                aria-label={t("section.refreshProjects")}
               />
             </>
           ) : (
@@ -412,27 +422,27 @@ export function ProjectsSection({
                 glyph={NF.download}
                 glyphColor="var(--fg-muted)"
                 onClick={() => setImportOpen(true)}
-                title="Import a *.claudepot.tar.zst bundle"
+                title={t("section.importTitle")}
               >
-                Import bundle
+                {t("section.importBundle")}
               </Button>
               <Button
                 variant="ghost"
                 glyph={NF.wrench}
                 glyphColor="var(--fg-muted)"
                 onClick={() => onSubRouteChange("maintenance")}
-                title="Maintenance: clean + repair"
+                title={t("section.maintFullTitle")}
               >
-                Maintenance
+                {t("section.maintenance")}
               </Button>
               <Button
                 variant="ghost"
                 glyph={NF.refresh}
                 glyphColor="var(--fg-muted)"
                 onClick={refresh}
-                title="Refresh project list (⌘R)"
+                title={t("section.refreshTitle")}
               >
-                Refresh projects
+                {t("section.refreshProjects")}
               </Button>
             </>
           )
@@ -462,7 +472,7 @@ export function ProjectsSection({
           }}
         >
           <h2 style={{ fontSize: "var(--fs-lg)", margin: 0 }}>
-            Couldn't load projects
+            {t("section.loadErrorTitle")}
           </h2>
           <p
             style={{
@@ -474,7 +484,7 @@ export function ProjectsSection({
             {error}
           </p>
           <Button variant="solid" onClick={refresh}>
-            Retry
+            {t("section.retry")}
           </Button>
         </div>
       ) : (
@@ -605,8 +615,7 @@ export function ProjectsSection({
                   padding: "var(--sp-32)",
                 }}
               >
-                Select a project from the list to see its sessions and
-                config.
+                {t("section.selectHint")}
               </div>
             )}
           </div>
@@ -637,18 +646,24 @@ export function ProjectsSection({
               const base = (p: string) => projectBasename(p) || p;
               openOpModal({
                 opId,
-                title: `Renaming ${base(args.oldPath)} → ${base(args.newPath)}`,
+                title: t("rename.progressTitle", {
+                  from: base(args.oldPath),
+                  to: base(args.newPath),
+                }),
                 onComplete: () => {
-                  pushToast("info", "Rename complete.");
+                  pushToast("info", t("rename.completeToast"));
                   refresh();
                 },
                 onError: (detail) => {
-                  pushToast("error", `Rename failed: ${detail ?? "unknown"}`);
+                  pushToast(
+                    "error",
+                    renderError(detail ?? t("op.unknown"), t("rename.failedScope")),
+                  );
                   refresh();
                 },
               });
             } catch (e) {
-              pushToast("error", `Couldn't start rename: ${e}`);
+              pushToast("error", renderError(e, t("rename.startFailedScope")));
             }
           }}
         />
@@ -668,14 +683,14 @@ export function ProjectsSection({
             pushToast(
               "info",
               result.trash_id
-                ? `Removed ${result.slug}. Restore via project trash if needed.`
-                : `Removed config entries for ${result.slug} (no session directory existed).`,
+                ? t("remove.removedToast", { slug: result.slug })
+                : t("remove.configOnlyToast", { slug: result.slug }),
             );
             refresh();
           }}
           onError={(msg) => {
             setRemoveTarget(null);
-            pushToast("error", `Couldn't remove: ${msg}`);
+            pushToast("error", renderError(msg, t("remove.failedScope")));
           }}
         />
       )}
@@ -688,12 +703,15 @@ export function ProjectsSection({
             setExportTarget(null);
             pushToast(
               "info",
-              `Exported ${receipt.projectCount} project(s) to ${receipt.bundlePath}`,
+              t("export.toastDone", {
+                n: receipt.projectCount,
+                path: receipt.bundlePath,
+              }),
             );
           }}
           onError={(msg) => {
             setExportTarget(null);
-            pushToast("error", `Export failed: ${msg}`);
+            pushToast("error", renderError(msg, t("export.failedScope")));
           }}
         />
       )}
@@ -703,12 +721,19 @@ export function ProjectsSection({
           onClose={() => setImportOpen(false)}
           onCompleted={(receipt) => {
             setImportOpen(false);
-            const verb = receipt.dryRun ? "Plan" : "Imported";
+            const verb = receipt.dryRun
+              ? t("import.verbPlan")
+              : t("import.verbImported");
             pushToast(
               "info",
-              `${verb}: ${receipt.projectsImported.length} project(s)${
+              `${t("import.toastResult", {
+                verb,
+                n: receipt.projectsImported.length,
+              })}${
                 receipt.projectsRefused.length
-                  ? ` (${receipt.projectsRefused.length} refused)`
+                  ? t("import.refusedSuffix", {
+                      n: receipt.projectsRefused.length,
+                    })
                   : ""
               }`,
             );
@@ -717,7 +742,7 @@ export function ProjectsSection({
           }}
           onError={(msg) => {
             setImportOpen(false);
-            pushToast("error", `Import failed: ${msg}`);
+            pushToast("error", renderError(msg, t("import.failedScope")));
           }}
         />
       )}
@@ -730,17 +755,17 @@ export function ProjectsSection({
             status !== "orphan" && status !== "unreachable";
           const items: ContextMenuItem[] = [
             {
-              label: "Open in Finder",
+              label: t("section.menuOpenFinder"),
               onClick: () => {
                 api.revealInFinder(p.original_path).catch((e) => {
-                  pushToast("error", `Couldn't reveal: ${e}`);
+                  pushToast("error", renderError(e, t("section.revealFailedScope")));
                 });
               },
             },
             ...(canOpenInConfig
               ? [
                   {
-                    label: "Open in Config",
+                    label: t("section.menuOpenConfig"),
                     onClick: () => {
                       // Right-click on a row → select it + flip the
                       // shell's tab to Config. Everything happens in
@@ -753,42 +778,48 @@ export function ProjectsSection({
               : []),
             { label: "", separator: true, onClick: () => {} },
             {
-              label: "Rename…",
+              label: t("section.menuRename"),
               onClick: () => setRenameTarget(p.original_path),
             },
             {
-              label: "Export bundle…",
+              label: t("section.menuExport"),
               onClick: () => setExportTarget(p.original_path),
             },
             {
-              label: "Remove project…",
+              label: t("section.menuRemove"),
               onClick: () =>
                 setRemoveTarget(p.original_path || p.sanitized_name),
             },
             {
-              label: "Clean orphans…",
+              label: t("section.menuCleanOrphans"),
               onClick: () => onSubRouteChange("maintenance"),
             },
             { label: "", separator: true, onClick: () => {} },
             {
-              label: "Copy path",
+              label: t("section.menuCopyPath"),
               onClick: () => {
                 navigator.clipboard
                   .writeText(p.original_path)
-                  .then(() => pushToast("info", "Copied path."))
+                  .then(() => pushToast("info", t("section.toastCopiedPath")))
                   .catch((e) =>
-                    pushToast("error", `Couldn't copy path: ${e}`),
+                    pushToast(
+                      "error",
+                      renderError(e, t("section.copyPathFailedScope")),
+                    ),
                   );
               },
             },
             {
-              label: "Copy key",
+              label: t("section.menuCopyKey"),
               onClick: () => {
                 navigator.clipboard
                   .writeText(p.sanitized_name)
-                  .then(() => pushToast("info", "Copied key."))
+                  .then(() => pushToast("info", t("section.toastCopiedKey")))
                   .catch((e) =>
-                    pushToast("error", `Couldn't copy key: ${e}`),
+                    pushToast(
+                      "error",
+                      renderError(e, t("section.copyKeyFailedScope")),
+                    ),
                   );
               },
             },
@@ -821,11 +852,12 @@ function ProjectsListFilterBar({
   counts: { all: number; orphan: number; unreachable: number; empty: number };
   loading: boolean;
 }) {
+  const { t } = useTranslation("projects");
   const chips: { id: ProjectFilter; label: string; n: number }[] = [
-    { id: "all", label: "All", n: counts.all },
-    { id: "orphan", label: "Missing", n: counts.orphan },
-    { id: "unreachable", label: "Offline", n: counts.unreachable },
-    { id: "empty", label: "Empty", n: counts.empty },
+    { id: "all", label: t("section.chipAll"), n: counts.all },
+    { id: "orphan", label: t("section.chipMissing"), n: counts.orphan },
+    { id: "unreachable", label: t("section.chipOffline"), n: counts.unreachable },
+    { id: "empty", label: t("section.chipEmpty"), n: counts.empty },
   ];
   return (
     <div
@@ -840,14 +872,14 @@ function ProjectsListFilterBar({
     >
       <Input
         glyph={NF.search}
-        placeholder="Filter by name or path"
+        placeholder={t("section.filterPlaceholder")}
         value={nameFilter}
         onChange={(e) => onNameFilter(e.target.value)}
-        aria-label="Filter projects by name or path"
+        aria-label={t("section.filterAria")}
       />
       <div
         role="tablist"
-        aria-label="Project status filter"
+        aria-label={t("section.filterTablistAria")}
         style={{
           display: "flex",
           flexWrap: "wrap",
@@ -910,10 +942,11 @@ function ProjectTabBar({
   active: ProjectTab;
   onChange: (next: ProjectTab) => void;
 }) {
+  const { t } = useTranslation("projects");
   return (
     <div
       role="tablist"
-      aria-label="Project view"
+      aria-label={t("section.tabsAria")}
       style={{
         display: "flex",
         gap: "var(--sp-6)",
@@ -926,21 +959,21 @@ function ProjectTabBar({
       <SectionTab
         id="project-tab-sessions"
         panelId="project-panel-sessions"
-        label="Sessions"
+        label={t("section.tabSessions")}
         active={active === "sessions"}
         onSelect={() => onChange("sessions")}
       />
       <SectionTab
         id="project-tab-config"
         panelId="project-panel-config"
-        label="Config"
+        label={t("section.tabConfig")}
         active={active === "config"}
         onSelect={() => onChange("config")}
       />
       <SectionTab
         id="project-tab-memory"
         panelId="project-panel-memory"
-        label="Memory"
+        label={t("section.tabMemory")}
         active={active === "memory"}
         onSelect={() => onChange("memory")}
       />

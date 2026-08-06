@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
 import type { DoctorSeverity, DoctorSnapshot } from "../api/cc-doctor";
+import { i18n } from "../lib/i18n";
 import { triggerSettingsTab } from "../lib/networkPanelDeepLink";
 
 /**
@@ -43,6 +45,7 @@ interface HealthPillProps {
 const POLL_INTERVAL_MS = 60_000;
 
 export function HealthPill({ onMouseDown }: HealthPillProps) {
+  const { t } = useTranslation("components");
   const [snapshot, setSnapshot] = useState<DoctorSnapshot | null>(null);
   // Cache the last successful (non-failed) snapshot so a transient
   // parse failure doesn't blank the dot.
@@ -92,17 +95,17 @@ export function HealthPill({ onMouseDown }: HealthPillProps) {
 
   const tooltip = useMemo(() => buildTooltip(display, snapshot), [display, snapshot]);
   const ariaLabel = useMemo(() => {
-    if (!display) return "Checking Claude CLI health…";
+    if (!display) return t("health.checking");
     const lvl =
       display.severity === "healthy"
-        ? "healthy"
+        ? t("health.levelHealthy")
         : display.severity === "warning"
-          ? "has warnings"
+          ? t("health.levelWarnings")
           : display.severity === "error"
-            ? "has errors"
-            : "status unknown";
-    return `Claude CLI health: ${lvl}`;
-  }, [display]);
+            ? t("health.levelErrors")
+            : t("health.levelUnknown");
+    return t("health.aria", { level: lvl });
+  }, [display, t]);
 
   const onClick = useCallback(() => {
     // Navigate to Settings → Health. Fire the section swap first
@@ -163,11 +166,15 @@ function dotColor(severity: DoctorSeverity | "loading"): string {
   }
 }
 
+/** Plain helper, not a component — reads the global i18n instance.
+ *  `HealthPill` subscribes via `useTranslation`, so a language switch
+ *  re-renders it and re-invokes this. */
 function buildTooltip(
   display: DoctorSnapshot | null,
   current: DoctorSnapshot | null,
 ): string {
-  if (!current) return "Checking Claude CLI health…";
+  const ns = { ns: "components" } as const;
+  if (!current) return i18n.t("health.checking", ns);
 
   // Special-case a stale "we're showing the last-known-good"
   // tooltip — the user should know the freshness story.
@@ -184,7 +191,7 @@ function buildTooltip(
       const t = display.installType ? ` (${display.installType})` : "";
       lines.push(`claude ${display.ccVersion}${t}`);
     } else {
-      lines.push("Couldn’t read claude doctor");
+      lines.push(i18n.t("health.cantRead", ns));
     }
 
     const flagged = display.sections.filter(
@@ -196,9 +203,9 @@ function buildTooltip(
     // means we never measured the issues, not that there are none.
     const parseOk = display.parseStatus.kind === "ok";
     if (display.ccVersion && parseOk && flagged.length === 0) {
-      lines.push("No issues reported.");
+      lines.push(i18n.t("health.noIssues", ns));
     } else if (!parseOk && flagged.length === 0) {
-      lines.push("(health check incomplete — refresh to retry)");
+      lines.push(i18n.t("health.incomplete", ns));
     } else {
       for (const s of flagged) {
         const dot = s.severity === "error" ? "✘" : "⚠";
@@ -208,7 +215,7 @@ function buildTooltip(
   }
 
   if (isStale) {
-    lines.push("(latest scrape failed to parse; showing last-known-good)");
+    lines.push(i18n.t("health.stale", ns));
   }
 
   return lines.join("\n");

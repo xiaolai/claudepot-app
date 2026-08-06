@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
 import {
   useToasts,
   type DismissedToast,
@@ -54,9 +55,10 @@ interface AppStateValue {
   // round per tick.
   status: AppStatus | null;
   accounts: AccountSummary[];
-  loadError: string | null;
-  keychainIssue: string | null;
-  syncError: string | null;
+  /** Raw thrown value — render with `renderError` at paint time. */
+  loadError: unknown;
+  keychainIssue: unknown;
+  syncError: unknown;
   /**
    * Epoch-ms timestamp of the last `sync_from_current_cc` result that
    * came back with `auth rejected:` — CC's refresh_token is dead, the
@@ -183,7 +185,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         dedupeKey: opts?.dedupeKey,
         toastAction: onUndo
           ? {
-              label: opts?.undoLabel ?? "Undo",
+              // Read at dispatch time from the global instance rather
+              // than via `useTranslation`: `pushToast`'s identity is
+              // threaded into `useActions`/`useRefresh`, and a `t` dep
+              // would churn it (and the whole context value) on every
+              // language switch. Dispatch time is always current.
+              label:
+                opts?.undoLabel ??
+                i18n.t("toasts.undo", { ns: "components" }),
               onPress: onUndo,
               onCommit: opts?.onCommit,
               timeoutMs: opts?.undoMs,

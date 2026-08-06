@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../../api";
+import { renderError } from "../../../lib/i18n-error";
 import type { TipsRender } from "../../../types/cc-tips";
 
 interface State {
@@ -28,7 +29,7 @@ export function useTipsCatalog() {
       setState((s) => ({
         ...s,
         loading: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: renderError(e),
       }));
     }
   }, []);
@@ -41,7 +42,7 @@ export function useTipsCatalog() {
     } catch (e) {
       setState((s) => ({
         ...s,
-        error: e instanceof Error ? e.message : String(e),
+        error: renderError(e),
       }));
     } finally {
       setState((s) => ({ ...s, refreshing: false }));

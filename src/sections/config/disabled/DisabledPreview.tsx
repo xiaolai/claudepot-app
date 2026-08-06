@@ -4,7 +4,9 @@
 // design — the active discovery deny-list excludes them).
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
+import { renderError } from "../../../lib/i18n-error";
 import type { DisabledRecordDto, LifecycleKind } from "../../../types";
 
 export function DisabledPreview({
@@ -14,6 +16,7 @@ export function DisabledPreview({
   row: DisabledRecordDto | null;
   projectRoot: string | null;
 }) {
+  const { t } = useTranslation("config");
   const [body, setBody] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +42,7 @@ export function DisabledPreview({
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(renderError(err));
       });
     return () => {
       cancelled = true;
@@ -57,11 +60,13 @@ export function DisabledPreview({
       }}
     >
       {!row ? (
-        <PreviewEmpty>Select a disabled artifact to preview.</PreviewEmpty>
+        <PreviewEmpty>{t("disabled.previewEmpty")}</PreviewEmpty>
       ) : error ? (
-        <PreviewEmpty danger>Couldn't load preview: {error}</PreviewEmpty>
+        <PreviewEmpty danger>
+          {t("disabled.previewFailed", { error })}
+        </PreviewEmpty>
       ) : body === null ? (
-        <PreviewEmpty>Loading…</PreviewEmpty>
+        <PreviewEmpty>{t("state.loading")}</PreviewEmpty>
       ) : (
         <>
           <header

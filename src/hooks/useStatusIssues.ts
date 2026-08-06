@@ -1,4 +1,7 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../lib/i18n";
+import { errorCode, renderError } from "../lib/i18n-error";
 import type {
   AccountSummary,
   AppStatus,
@@ -38,7 +41,8 @@ export interface StatusIssue {
 export function useStatusIssues(opts: {
   ccIdentity: CcIdentity | null;
   status: AppStatus | null;
-  syncError: string | null;
+  /** Raw thrown value; rendered here so it follows the UI language. */
+  syncError: unknown;
   /**
    * Non-null when the last `sync_from_current_cc` returned
    * `auth rejected:` — CC's stored refresh_token is terminally dead
@@ -49,7 +53,7 @@ export function useStatusIssues(opts: {
    * (which predate auto-refresh) keep working without a fixture churn.
    */
   authRejectedAt?: number | null;
-  keychainIssue: string | null;
+  keychainIssue: unknown;
   accounts: AccountSummary[];
   onUnlock: () => void;
   /**
@@ -107,6 +111,13 @@ export function useStatusIssues(opts: {
     onImportDesktop,
   } = opts;
 
+  // Banner copy is resolved inside the memo, so the active locale is
+  // one of its inputs — without it a language switch would leave the
+  // already-derived banners in the previous language until some other
+  // dependency happened to change.
+  const { i18n: runtimeI18n } = useTranslation();
+  const language = runtimeI18n.language;
+
   return useMemo(() => {
     const issues: StatusIssue[] = [];
 
@@ -118,11 +129,13 @@ export function useStatusIssues(opts: {
       issues.push({
         id: "keychain",
         severity: "error",
-        label: "Keychain locked",
+        label: i18n.t("status.keychain.label"),
         detail: isMac
-          ? "Click Unlock to enter your macOS password."
-          : "Unlock the system keychain, then click Refresh.",
-        action: isMac ? { label: "Unlock", onClick: onUnlock } : undefined,
+          ? i18n.t("status.keychain.detailMac")
+          : i18n.t("status.keychain.detailOther"),
+        action: isMac
+          ? { label: i18n.t("status.keychain.action"), onClick: onUnlock }
+          : undefined,
       });
     }
 
@@ -135,13 +148,21 @@ export function useStatusIssues(opts: {
       issues.push({
         id: "drift",
         severity: "error",
-        label: "Account drift detected",
+        label: i18n.t("status.drift.label"),
         detail: driftAccounts
-          .map((a) => `${a.email} authenticates as ${a.verified_email}`)
+          .map((a) =>
+            i18n.t("status.drift.detailItem", {
+              email: a.email,
+              verified: a.verified_email,
+            }),
+          )
           .join("; "),
         action:
           onSelectAccount && primary
-            ? { label: "Open", onClick: () => onSelectAccount(primary.uuid) }
+            ? {
+                label: i18n.t("status.drift.action"),
+                onClick: () => onSelectAccount(primary.uuid),
+              }
             : undefined,
       });
     }
@@ -154,22 +175,30 @@ export function useStatusIssues(opts: {
       issues.push({
         id: "auth-rejected",
         severity: "error",
-        label: "Claude Code needs to sign in again",
-        detail:
-          "The stored login is no longer valid. Open the matching account and click Log in.",
+        label: i18n.t("status.authRejected.label"),
+        detail: i18n.t("status.authRejected.detail"),
         action: onReloginActive
-          ? { label: "Sign in", onClick: onReloginActive }
+          ? {
+              label: i18n.t("status.authRejected.action"),
+              onClick: onReloginActive,
+            }
           : undefined,
       });
     } else if (syncError) {
+      // Rendered here, not upstream: `useRefresh` holds the raw thrown
+      // value so this sentence is produced in whatever language is
+      // active at paint time.
+      const detail = renderError(syncError);
       // Key by the specific error payload so snoozing one sync failure
-      // doesn't suppress a later, genuinely different failure. The
-      // dismissedIssues store's 24 h expiry still applies per key.
+      // doesn't suppress a later, genuinely different failure. The key
+      // prefers the stable error code over the rendered sentence — a
+      // localized key would re-arm every snooze on a language switch.
+      const key = errorCode(syncError) ?? detail;
       issues.push({
-        id: `sync:${syncError}`,
+        id: `sync:${key}`,
         severity: "warning",
-        label: "Couldn't sync with Claude Code",
-        detail: syncError,
+        label: i18n.t("status.syncErrorLabel"),
+        detail,
         dismissable: true,
       });
     }
@@ -232,7 +261,7 @@ export function useStatusIssues(opts: {
       if (target) {
         if (onSelectAccount) {
           action = {
-            label: "Open matching account",
+            label: i18n.t("status.ccDrift.openMatch"),
             onClick: () => onSelectAccount(target.uuid),
           };
         }
@@ -240,12 +269,15 @@ export function useStatusIssues(opts: {
         if (onImportCurrent) {
           const email = ccIdentity.email;
           action = {
-            label: `Import ${email}`,
+            label: i18n.t("status.importEmail", { email }),
             onClick: () => onImportCurrent(email),
           };
         }
         if (onReloginActive) {
-          action2 = { label: "Re-login active", onClick: onReloginActive };
+          action2 = {
+            label: i18n.t("status.ccDrift.relogin"),
+            onClick: onReloginActive,
+          };
         }
         // If only re-login is wired, promote it to primary so the
         // banner still has a primary-weight action.
@@ -260,7 +292,10 @@ export function useStatusIssues(opts: {
         // email comparison above.
         id: `cc-drift:${ccIdentity.email.toLowerCase()}:${status.cli_active_email.toLowerCase()}`,
         severity: "warning",
-        label: `CC slot drift — CC authenticates as ${ccIdentity.email}, Claudepot expects ${status.cli_active_email}`,
+        label: i18n.t("status.ccDrift.label", {
+          ccEmail: ccIdentity.email,
+          expectedEmail: status.cli_active_email,
+        }),
         action,
         action2,
         dismissable: true,
@@ -279,11 +314,13 @@ export function useStatusIssues(opts: {
           issues.push({
             id: `desktop-adopt:${email.toLowerCase()}`,
             severity: "info",
-            label: `Claude Desktop is signed in as ${email}`,
-            detail:
-              "Bind this session to the matching registered account so Claudepot can swap in later.",
+            label: i18n.t("status.desktop.signedInAs", { email }),
+            detail: i18n.t("status.desktop.adoptDetail"),
             action: onAdoptLiveDesktop
-              ? { label: "Bind", onClick: () => onAdoptLiveDesktop(email) }
+              ? {
+                  label: i18n.t("status.desktop.bind"),
+                  onClick: () => onAdoptLiveDesktop(email),
+                }
               : undefined,
             dismissable: true,
           });
@@ -294,12 +331,11 @@ export function useStatusIssues(opts: {
           issues.push({
             id: `desktop-stranger:${email.toLowerCase()}`,
             severity: "info",
-            label: `Claude Desktop is signed in as ${email}`,
-            detail:
-              "This email isn't registered with Claudepot yet. Import it to start managing this session.",
+            label: i18n.t("status.desktop.signedInAs", { email }),
+            detail: i18n.t("status.desktop.strangerDetail"),
             action: onImportDesktop
               ? {
-                  label: `Import ${email}`,
+                  label: i18n.t("status.importEmail", { email }),
                   onClick: () => onImportDesktop(email),
                 }
               : undefined,
@@ -318,8 +354,8 @@ export function useStatusIssues(opts: {
           issues.push({
             id: `desktop-candidate:${email.toLowerCase()}`,
             severity: "info",
-            label: "Couldn't confirm Claude Desktop's current account",
-            detail: `The most likely match is ${email}. Open Claude Desktop once to refresh this.`,
+            label: i18n.t("status.desktop.candidateLabel"),
+            detail: i18n.t("status.desktop.candidateDetail", { email }),
             dismissable: true,
           });
           break;
@@ -346,5 +382,6 @@ export function useStatusIssues(opts: {
     desktopSync,
     onAdoptLiveDesktop,
     onImportDesktop,
+    language,
   ]);
 }

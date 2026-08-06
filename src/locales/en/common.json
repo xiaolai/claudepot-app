@@ -1,0 +1,260 @@
+{
+  "language": {
+    "label": "Language",
+    "hint": "Interface language. \"System default\" follows the OS language.",
+    "system": "System default",
+    "en": "English",
+    "zh-CN": "简体中文",
+    "changeFailed": "Language change failed"
+  },
+  "ui": {
+    "undo": "Undo",
+    "unknown": "unknown",
+    "unknownError": "Something went wrong."
+  },
+  "time": {
+    "justNow": "just now",
+    "now": "now",
+    "seconds": "{{n}}s",
+    "minutes": "{{n}}m",
+    "hours": "{{n}}h",
+    "days": "{{n}}d",
+    "secondsAgo": "{{n}}s ago",
+    "minutesAgo": "{{n}}m ago",
+    "hoursAgo": "{{n}}h ago",
+    "daysAgo": "{{n}}d ago"
+  },
+  "platform": {
+    "fileManager": {
+      "macos": "Finder",
+      "windows": "File Explorer",
+      "linux": "Files",
+      "generic": "File Manager"
+    }
+  },
+  "cost": {
+    "estimatedRateHint": "Estimated: this model isn't in the rate table yet, so its family's current rate was used."
+  },
+  "rotation": {
+    "window": {
+      "fiveHour": "5-hour window",
+      "sevenDay": "7-day window",
+      "sevenDayOpus": "7-day Opus window",
+      "sevenDaySonnet": "7-day Sonnet window"
+    },
+    "outcome": {
+      "applied": "Applied",
+      "suggested": "Suggested",
+      "skippedGuard": "Skipped (guard)",
+      "skippedCcRunning": "Skipped (CC running)",
+      "noCandidate": "No candidate",
+      "failed": "Failed",
+      "quarantined": "Quarantined"
+    },
+    "event": {
+      "suggestedTitle": "Auto-rotation suggested",
+      "suggestedBody": "{{summary}} — utilization {{pct}}% on {{window}}",
+      "triggerWindowFallback": "trigger window",
+      "switch": "Switch",
+      "swapFailedTitle": "Rotation swap failed",
+      "appliedTitle": "Auto-rotation applied",
+      "appliedBody": "Switched to {{email}} (rule {{ruleId}})",
+      "appliedBodyRestart": "Switched to {{email}} (rule {{ruleId}}) — restart Claude Code to apply",
+      "stalledTitle": "Auto-rotation stalled",
+      "stalledBody": "Rule \"{{ruleId}}\" can't rotate — every candidate is at or above {{pct}}% on {{window}}. No safe target.",
+      "stalledWindowFallback": "the trigger window",
+      "failedTitle": "Auto-rotation failed",
+      "failedBody": "{{email}}: {{error}}",
+      "breakerTitle": "Auto-rotation rule paused",
+      "breakerBody": "Rule \"{{ruleId}}\" was paused after {{failures}} consecutive failed swaps. It will retry automatically after a cooldown."
+    }
+  },
+  "serviceStatus": {
+    "tier": {
+      "ok": "All systems operational",
+      "degraded": "Some services degraded",
+      "down": "Services down",
+      "unknown": "Status unknown"
+    }
+  },
+  "permission": {
+    "mode": {
+      "default": "Manual",
+      "manual": "Manual",
+      "acceptEdits": "Accept edits",
+      "plan": "Plan",
+      "dontAsk": "Don't ask",
+      "bypassPermissions": "Bypass permissions"
+    },
+    "duration": {
+      "minutes30": "30 minutes",
+      "hours2": "2 hours",
+      "hours8": "8 hours",
+      "never": "Never"
+    }
+  },
+  "palette": {
+    "category": {
+      "switch": "Quick Switch",
+      "navigate": "Navigate",
+      "action": "Actions"
+    },
+    "switchCli": "Switch CLI to {{email}}",
+    "switchDesktop": "Switch Desktop to {{email}}",
+    "personal": "personal",
+    "openMaintenance": "Open Projects → Maintenance",
+    "maintenanceDetail": "Clean + Repair",
+    "openSettingsPane": "Open Settings → {{pane}}",
+    "openGlobalTab": "Open Global → {{tab}}",
+    "addAccount": "Add account",
+    "refreshAll": "Refresh all",
+    "toggleTheme": "Toggle theme",
+    "toggleThemeDetail": "Light / dark",
+    "showShortcuts": "Show keyboard shortcuts",
+    "launchDesktop": "Launch Claude Desktop",
+    "bindDesktop": "Bind current Desktop session to {{email}}",
+    "signDesktopOut": "Sign Desktop out",
+    "removeAccount": "Remove {{email}}"
+  },
+  "account": {
+    "cliSwitched": "CLI switched to {{email}}",
+    "ccRunningOverride": "Claude Code is running — its token refresh can revert the swap. Quit CC first, or override.",
+    "override": "Override",
+    "cliSwitchFailed": "CLI switch failed",
+    "cancelFailed": "Cancel failed",
+    "openingBrowser": "Opening browser — sign in as {{email}}…",
+    "reloginTitle": "Re-login: {{email}}",
+    "cancelLogin": "Cancel login",
+    "signedIn": "Signed in as {{email}}",
+    "loginCancelled": "Login cancelled.",
+    "loginFailed": "Login failed",
+    "loginInProgress": "A login is already in progress.",
+    "desktopSetNoLaunch": "Desktop set to {{email}} (not launched)",
+    "desktopSwitched": "Desktop switched to {{email}}",
+    "desktopSwitchFailed": "Desktop switch failed",
+    "desktopBound": "Bound Desktop session to {{email}} ({{items}} item(s)).",
+    "desktopBindFailed": "Desktop bind failed",
+    "activeSessionFallback": "the active session",
+    "desktopSignedOutKept": "Signed Desktop out ({{who}}); snapshot preserved.",
+    "desktopSignedOutDiscarded": "Signed Desktop out ({{who}}); snapshot discarded.",
+    "desktopClearFailed": "Desktop clear failed",
+    "removed": "Removed {{email}}",
+    "removeWarnings": "Note: {{warnings}}",
+    "removeFailed": "Remove failed",
+    "removing": "Removing {{email}}…"
+  },
+  "tray": {
+    "cliSwitchedTitle": "CLI → {{email}}",
+    "cliSwitchedTitleRestart": "CLI → {{email}} — restart Claude Code to apply",
+    "cliSwitchedBodyRestart": "Restart Claude Code to apply. Open Claudepot to undo.",
+    "cliSwitchedBodyUndo": "Open Claudepot within 10 s to undo.",
+    "undoFailed": "Undo failed: {{email}} not found"
+  },
+  "status": {
+    "keychain": {
+      "label": "Keychain locked",
+      "detailMac": "Click Unlock to enter your macOS password.",
+      "detailOther": "Unlock the system keychain, then click Refresh.",
+      "action": "Unlock"
+    },
+    "drift": {
+      "label": "Account drift detected",
+      "detailItem": "{{email}} authenticates as {{verified}}",
+      "action": "Open"
+    },
+    "authRejected": {
+      "label": "Claude Code needs to sign in again",
+      "detail": "The stored login is no longer valid. Open the matching account and click Log in.",
+      "action": "Sign in"
+    },
+    "ccDrift": {
+      "label": "CC slot drift — CC authenticates as {{ccEmail}}, Claudepot expects {{expectedEmail}}",
+      "openMatch": "Open matching account",
+      "relogin": "Re-login active"
+    },
+    "desktop": {
+      "signedInAs": "Claude Desktop is signed in as {{email}}",
+      "adoptDetail": "Bind this session to the matching registered account so Claudepot can swap in later.",
+      "bind": "Bind",
+      "strangerDetail": "This email isn't registered with Claudepot yet. Import it to start managing this session.",
+      "candidateLabel": "Couldn't confirm Claude Desktop's current account",
+      "candidateDetail": "The most likely match is {{email}}. Open Claude Desktop once to refresh this."
+    },
+    "syncErrorLabel": "Couldn't sync with Claude Code",
+    "importEmail": "Import {{email}}",
+    "unlockFailed": "Unlock failed",
+    "noActiveCli": "No active CLI account to re-login.",
+    "imported": "Imported {{email}}",
+    "importFailed": "Import failed",
+    "noMatchingAccount": "No registered account matches {{email}}."
+  },
+  "menu": {
+    "synced": "Synced {{email}} from CC.",
+    "nothingToSync": "Nothing to sync.",
+    "syncFailed": "Sync failed",
+    "verifyAllComplete": "Verify all complete.",
+    "verifyFailed": "Verify failed",
+    "copyDiagHint": "Open Settings → Diagnostics and press Copy."
+  },
+  "maintenance": {
+    "gcPreviewFailed": "GC preview failed",
+    "gcDone": "GC: removed {{journals}} journals, {{snapshots}} snapshots, freed {{size}}",
+    "gcFailed": "GC failed",
+    "lockBroken": "Lock broken — PID {{pid}} ({{host}}). Audit: {{auditPath}}",
+    "breakLockFailed": "Break lock failed"
+  },
+  "shortcuts": {
+    "devModeOn": "Developer mode on",
+    "devModeOff": "Developer mode off",
+    "boardsShown": "Boards shown",
+    "boardsHidden": "Boards hidden"
+  },
+  "banner": {
+    "resolved": "Resolved: {{what}}",
+    "category": {
+      "accountAuth": "account auth",
+      "keychainAccess": "keychain access",
+      "ccSlotDrift": "CC slot drift",
+      "desktopDrift": "Desktop drift",
+      "repairConflict": "repair conflict"
+    }
+  },
+  "backgroundChange": {
+    "created": "Created",
+    "deleted": "Deleted",
+    "edited": "Edited",
+    "scopeProject": "project ({{slug}})",
+    "scopeGlobal": "global",
+    "memoryTitle": "{{verb}} CLAUDE.md — {{scope}}",
+    "configTitle": "Config file changed ({{parts}})"
+  },
+  "agentEvents": {
+    "fireFailedTitle": "Agent fire failed",
+    "fireFailedBody": "{{agent}} on session {{session}} — {{error}}",
+    "burstCappedTitle": "Agent first-tick cap applied",
+    "burstCappedBody_one": "{{count}} settled session were held back on a fresh agent's first contact (cap {{cap}}). They will fire on later ticks.",
+    "burstCappedBody_other": "{{count}} settled sessions were held back on a fresh agent's first contact (cap {{cap}}). They will fire on later ticks."
+  },
+  "op": {
+    "failedTitle": "Operation failed: {{label}}",
+    "errorFallbackBody": "See the running-ops chip for details.",
+    "doneBody": "Done."
+  },
+  "activity": {
+    "errorBurst": "multiple errors in the last minute",
+    "stuck": "possibly stuck (tool call > {{minutes}} min)",
+    "taskFinished": "task finished ({{minutes}}m)",
+    "needsAnswer": "needs your answer",
+    "bodyWithProject": "{{body}} @ {{project}}"
+  },
+  "usage": {
+    "accountFallback": "Account",
+    "thresholdTitle": "{{account}} — {{window}} at {{pct}}%",
+    "utilization": "at {{pct}}%",
+    "resetsNow": "{{base}} · resets now",
+    "resetsInMinutes": "{{base}} · resets in {{minutes}}m",
+    "resetsInHours": "{{base}} · resets in {{hours}}h",
+    "resetsInHoursMinutes": "{{base}} · resets in {{hours}}h {{minutes}}m",
+    "resetsInDays": "{{base}} · resets in {{days}}d"
+  }
+}

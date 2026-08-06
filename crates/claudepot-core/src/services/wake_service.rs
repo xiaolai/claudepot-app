@@ -50,6 +50,50 @@ pub enum WakeError {
     Request(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The split this enum's own doc comment draws — "we refused to spend"
+/// versus "we tried and it broke" — is exactly what the codes have to
+/// preserve. `NoCredentials` and `IdentityUnverified` mean **nothing was
+/// billed**; `Token` and `Request` mean a request may have been made.
+/// Collapsing them into one code would let a translator write a single
+/// sentence for two opposite answers to "did that cost me anything".
+///
+/// `IdentityUnverified` crosses `status` as CC's raw discriminant
+/// (`drift` / `rejected`) rather than a translated phrase: the English
+/// message names `claudepot account verify` because the CLI prints it
+/// verbatim, and a GUI sentence needs the discriminant to route the
+/// user to the right pane instead.
+impl crate::error_code::ErrorCode for WakeError {
+    fn code(&self) -> &'static str {
+        match self {
+            WakeError::NotFound => "wake.not_found",
+            WakeError::NoCredentials(_) => "wake.no_credentials",
+            WakeError::IdentityUnverified(_, _) => "wake.identity_unverified",
+            WakeError::Store(_) => "wake.store",
+            WakeError::Token(_) => "wake.token",
+            WakeError::Request(_) => "wake.request",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            WakeError::NotFound => serde_json::json!({}),
+            WakeError::NoCredentials(email) => serde_json::json!({ "email": email }),
+            WakeError::IdentityUnverified(email, status) => {
+                serde_json::json!({ "email": email, "status": status })
+            }
+            // `Token` wraps the access-token *acquisition* failure, never
+            // the token: the swap layer's errors carry reasons, not
+            // credential material (`rules/rust-conventions.md`).
+            WakeError::Store(detail) | WakeError::Token(detail) | WakeError::Request(detail) => {
+                serde_json::json!({ "detail": detail })
+            }
+        }
+    }
+}
+
 /// What a successful wake spent, plus who it was spent on.
 #[derive(Debug, Clone)]
 pub struct WakeReceipt {

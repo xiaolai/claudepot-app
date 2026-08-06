@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { AvailableModelsState } from "../../api/availableModels";
 import { Button } from "../../components/primitives/Button";
 import { IconButton } from "../../components/primitives/IconButton";
 import { NF } from "../../icons";
-import { toastError } from "../../lib/toastError";
+import { toastError } from "../../lib/i18n-error";
 import { SettingToggleRow } from "./SettingToggleRow";
 
 // Settings → General → Claude Code behavior.
@@ -34,6 +35,7 @@ export function AvailableModelsPane({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [state, setState] = useState<AvailableModelsState | null>(null);
   const [entries, setEntries] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
@@ -46,9 +48,9 @@ export function AvailableModelsPane({
       setState(s);
       setEntries(s.entries);
     } catch (e) {
-      toastError(pushToast, "Model allowlist load failed", e);
+      toastError(pushToast, t("models.loadFailed"), e);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     void refresh();
@@ -71,11 +73,11 @@ export function AvailableModelsPane({
       pushToast(
         "info",
         s.restricts_models
-          ? `Model allowlist saved — ${s.entries.length} entr${s.entries.length === 1 ? "y" : "ies"}.`
-          : "Model allowlist cleared — every model is selectable again.",
+          ? t("models.saved", { count: s.entries.length })
+          : t("models.cleared"),
       );
     } catch (e) {
-      toastError(pushToast, "Save model allowlist", e);
+      toastError(pushToast, t("models.saveFailed"), e);
     } finally {
       setBusy(false);
     }
@@ -119,7 +121,7 @@ export function AvailableModelsPane({
       >
         <div>
           <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-            Selectable models
+            {t("models.label")}
           </div>
           <div
             style={{
@@ -130,10 +132,10 @@ export function AvailableModelsPane({
             }}
           >
             {state == null
-              ? "Loading…"
+              ? t("shared.loading")
               : state.restricts_models
-                ? "Only these models can be chosen in /model, --model, and fallback chains. Order matters: with enforcement on, Default becomes the first entry."
-                : "Empty — every model your account can reach is selectable. Add a family alias, a version prefix, or a full model id."}
+                ? t("models.hintRestricts")
+                : t("models.hintEmpty")}
           </div>
         </div>
 
@@ -173,24 +175,24 @@ export function AvailableModelsPane({
                   <IconButton
                     glyph={NF.chevronU}
                     size="sm"
-                    title="Move up"
-                    aria-label={`Move ${entry} up`}
+                    title={t("models.moveUp")}
+                    aria-label={t("models.moveUpAria", { entry })}
                     disabled={busy || i === 0}
                     onClick={() => move(i, -1)}
                   />
                   <IconButton
                     glyph={NF.chevronD}
                     size="sm"
-                    title="Move down"
-                    aria-label={`Move ${entry} down`}
+                    title={t("models.moveDown")}
+                    aria-label={t("models.moveDownAria", { entry })}
                     disabled={busy || i === entries.length - 1}
                     onClick={() => move(i, 1)}
                   />
                   <IconButton
                     glyph={NF.trash}
                     size="sm"
-                    title="Remove"
-                    aria-label={`Remove ${entry}`}
+                    title={t("models.remove")}
+                    aria-label={t("models.removeAria", { entry })}
                     disabled={busy}
                     onClick={() => removeAt(i)}
                   />
@@ -205,7 +207,7 @@ export function AvailableModelsPane({
               type="text"
               value={draft}
               placeholder={ENTRY_EXAMPLES}
-              aria-label="Model to allow"
+              aria-label={t("models.inputAria")}
               disabled={busy || state == null}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -222,20 +224,24 @@ export function AvailableModelsPane({
               disabled={busy || state == null || !draft.trim()}
               onClick={addDraft}
             >
-              Add
+              {t("models.add")}
             </Button>
           </div>
         </div>
       </div>
 
       <SettingToggleRow
-        label="Apply the list to the Default model"
+        label={t("models.enforceLabel")}
         hint={
           state == null
-            ? "Loading…"
+            ? t("shared.loading")
             : enforce && !state.enforce_is_effective
-              ? `Set, but inert: Claude Code ignores it while the list is empty, so Default stays unrestricted. Add at least one model above. Needs Claude Code ${state.enforce_min_cc_version} or later.`
-              : `Without this, picking "Default" in /model bypasses the list entirely and resolves to your account's default model. With it, Default becomes the first allowed entry. Needs Claude Code ${state.enforce_min_cc_version} or later.`
+              ? t("models.enforceInert", {
+                  version: state.enforce_min_cc_version,
+                })
+              : t("models.enforceHint", {
+                  version: state.enforce_min_cc_version,
+                })
         }
         hintTone={enforce && state != null && !state.enforce_is_effective ? "warn" : "muted"}
         checked={enforce}

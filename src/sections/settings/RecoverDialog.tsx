@@ -6,6 +6,7 @@
 // `.claude/rules/design.md` ("Never use window.confirm/alert/prompt").
 
 import { useId, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Input } from "../../components/primitives/Input";
 import {
@@ -27,6 +28,7 @@ export function RecoverDialog({
   onCancel: () => void;
   onSubmit: (target: string, kind: LifecycleKind) => void;
 }) {
+  const { t } = useTranslation("settings");
   const titleId = useId();
   const m = entry.manifest;
   const [target, setTarget] = useState<string>(m?.original_path ?? "");
@@ -48,7 +50,7 @@ export function RecoverDialog({
   const submittable = trimmed.length > 0 && isAbsolute;
   return (
     <Modal open onClose={onCancel} aria-labelledby={titleId}>
-      <ModalHeader title="Recover trash entry" id={titleId} onClose={onCancel} />
+      <ModalHeader title={t("recover.title")} id={titleId} onClose={onCancel} />
       <ModalBody>
         <p
           style={{
@@ -57,9 +59,7 @@ export function RecoverDialog({
             color: "var(--fg-muted)",
           }}
         >
-          This entry doesn't have a complete manifest. Confirm where it should
-          be restored and what kind of artifact it is. The entry's payload
-          contents are kept intact — only the destination is synthesized.
+          {t("recover.intro")}
         </p>
         <div
           style={{
@@ -69,7 +69,7 @@ export function RecoverDialog({
           }}
         >
           <label style={fieldLabelStyle()}>
-            <span>Absolute target path</span>
+            <span>{t("recover.targetLabel")}</span>
             <Input
               value={target}
               onChange={(e) => setTarget(e.currentTarget.value)}
@@ -86,12 +86,16 @@ export function RecoverDialog({
                   marginTop: "var(--sp-2)",
                 }}
               >
-                Path must be absolute (starts with <code>/</code> or <code>C:\</code>).
+                <Trans
+                  ns="settings"
+                  i18nKey="recover.pathError"
+                  components={{ code: <code /> }}
+                />
               </span>
             )}
           </label>
           <label style={fieldLabelStyle()}>
-            <span>Artifact kind</span>
+            <span>{t("recover.kindLabel")}</span>
             <select
               value={kind}
               onChange={(e) => setKind(e.currentTarget.value as LifecycleKind)}
@@ -121,14 +125,14 @@ export function RecoverDialog({
                 textTransform: "uppercase",
               }}
             >
-              Abandoned staging — last interrupted op
+              {t("recover.abandoned")}
             </p>
           )}
         </div>
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t("shared.cancel")}
         </Button>
         <Button
           variant="solid"
@@ -136,7 +140,7 @@ export function RecoverDialog({
           disabled={!submittable}
           autoFocus
         >
-          Recover
+          {t("recover.submit")}
         </Button>
       </ModalFooter>
     </Modal>

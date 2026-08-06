@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../../components/primitives/Glyph";
 import type { NfIcon } from "../../icons";
 import { NF } from "../../icons";
@@ -45,12 +46,14 @@ function count(
 }
 
 interface ChipDef {
+  /** Stable id — React key; never translated. */
+  id: string;
   glyph: NfIcon;
   tone: string;
   count: number;
   title: string;
-  /** Label for screen readers — paired with the numeric count. */
-  aria: string;
+  /** Full label for screen readers, count included. */
+  ariaLabel: string;
 }
 
 interface Props {
@@ -63,10 +66,11 @@ interface Props {
  * replacing the earlier prose ("3 accounts · 1 needs attention").
  */
 export function HealthChips({ accounts }: Props) {
+  const { t } = useTranslation("accounts");
   if (accounts.length === 0) {
     return (
       <span style={{ color: "var(--fg-muted)" }}>
-        No accounts registered yet.
+        {t("chips.none")}
       </span>
     );
   }
@@ -78,48 +82,53 @@ export function HealthChips({ accounts }: Props) {
   // counts read before warnings.
   const chips: ChipDef[] = [
     {
+      id: "total",
       glyph: NF.users,
       tone: "var(--fg-muted)",
       count: accounts.length,
-      title: `${accounts.length} account${accounts.length === 1 ? "" : "s"} total`,
-      aria: "accounts total",
+      title: t("chips.totalTitle", { count: accounts.length }),
+      ariaLabel: t("chips.totalAria", { n: accounts.length }),
     },
   ];
 
   if (buckets.ok > 0) {
     chips.push({
+      id: "verified",
       glyph: NF.check,
       tone: "var(--ok)",
       count: buckets.ok,
-      title: `${buckets.ok} verified recently`,
-      aria: "verified",
+      title: t("chips.verifiedTitle", { n: buckets.ok }),
+      ariaLabel: t("chips.verifiedAria", { n: buckets.ok }),
     });
   }
   if (buckets.unverified > 0) {
     chips.push({
+      id: "unverified",
       glyph: NF.circle,
       tone: "var(--fg-faint)",
       count: buckets.unverified,
-      title: `${buckets.unverified} not yet verified`,
-      aria: "unverified",
+      title: t("chips.unverifiedTitle", { n: buckets.unverified }),
+      ariaLabel: t("chips.unverifiedAria", { n: buckets.unverified }),
     });
   }
   if (buckets.drift > 0) {
     chips.push({
+      id: "drift",
       glyph: NF.warn,
       tone: "var(--warn)",
       count: buckets.drift,
-      title: `${buckets.drift} drift — slot misfiled, re-login or remove`,
-      aria: "drift",
+      title: t("chips.driftTitle", { n: buckets.drift }),
+      ariaLabel: t("chips.driftAria", { n: buckets.drift }),
     });
   }
   if (buckets.broken > 0) {
     chips.push({
+      id: "broken",
       glyph: NF.ban,
       tone: "var(--warn)",
       count: buckets.broken,
-      title: `${buckets.broken} broken — credentials rejected or unreadable`,
-      aria: "broken",
+      title: t("chips.brokenTitle", { n: buckets.broken }),
+      ariaLabel: t("chips.brokenAria", { n: buckets.broken }),
     });
   }
 
@@ -133,14 +142,14 @@ export function HealthChips({ accounts }: Props) {
         fontVariantNumeric: "tabular-nums",
       }}
       role="list"
-      aria-label="Account health summary"
+      aria-label={t("chips.summaryAria")}
     >
       {chips.map((chip) => (
         <span
-          key={chip.aria}
+          key={chip.id}
           role="listitem"
           title={chip.title}
-          aria-label={`${chip.count} ${chip.aria}`}
+          aria-label={chip.ariaLabel}
           style={{
             display: "inline-flex",
             alignItems: "center",

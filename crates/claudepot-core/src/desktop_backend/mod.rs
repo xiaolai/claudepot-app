@@ -61,6 +61,36 @@ pub enum DesktopKeyError {
     Unsupported,
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Segment is `desktop_key`, not `desktop_backend` — see the note on
+/// [`error::DesktopSwapError`]'s impl for why this module's four enums
+/// are namespaced by concern.
+impl crate::error_code::ErrorCode for DesktopKeyError {
+    fn code(&self) -> &'static str {
+        match self {
+            DesktopKeyError::KeychainRead(_) => "desktop_key.keychain_read",
+            DesktopKeyError::DpapiFailed(_) => "desktop_key.dpapi_failed",
+            DesktopKeyError::LocalState(_) => "desktop_key.local_state",
+            DesktopKeyError::Unsupported => "desktop_key.unsupported",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // These carry `security`/DPAPI failure text and filesystem
+            // messages. The safeStorage secret itself is returned on the
+            // Ok path and never reaches an error string — keep it that
+            // way when adding a variant.
+            DesktopKeyError::KeychainRead(detail) => serde_json::json!({ "detail": detail }),
+            DesktopKeyError::DpapiFailed(detail) => serde_json::json!({ "detail": detail }),
+            DesktopKeyError::LocalState(detail) => serde_json::json!({ "detail": detail }),
+            DesktopKeyError::Unsupported => serde_json::json!({}),
+        }
+    }
+}
+
 pub fn create_platform() -> Option<Box<dyn DesktopPlatform>> {
     #[cfg(target_os = "macos")]
     {

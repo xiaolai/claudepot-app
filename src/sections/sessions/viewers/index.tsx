@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../../lib/i18n";
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
@@ -34,6 +36,7 @@ export function ToolExecutionView({ tool }: { tool: LinkedTool }) {
 }
 
 function GenericToolView({ tool }: { tool: LinkedTool }) {
+  const { t } = useTranslation("sessions");
   // Clipboard payload: input on top, result below, separated by a
   // visual rule. Mirrors what's rendered in the card so the user gets
   // the same content they can read.
@@ -80,7 +83,7 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
               letterSpacing: "var(--ls-wide)",
             }}
           >
-            error
+            {t("viewer.error")}
           </span>
         )}
         {tool.result_content == null && (
@@ -92,11 +95,11 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
               textTransform: "uppercase",
             }}
           >
-            orphan
+            {t("viewer.generic.orphan")}
           </span>
         )}
         {copyText.length > 0 && (
-          <CopyButton text={copyText} ariaLabel="Copy tool input and result" />
+          <CopyButton text={copyText} ariaLabel={t("viewer.generic.copyAria")} />
         )}
       </header>
       <div
@@ -107,12 +110,12 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
           color: "var(--fg-muted)",
         }}
       >
-        <div style={{ color: "var(--fg-ghost)" }}>input</div>
+        <div style={{ color: "var(--fg-ghost)" }}>{t("viewer.generic.input")}</div>
         <ClampedPre text={redactSecrets(tool.input_preview)} />
         {tool.result_content != null && (
           <>
             <div style={{ color: "var(--fg-ghost)", marginTop: "var(--sp-6)" }}>
-              result
+              {t("viewer.generic.result")}
             </div>
             <ClampedPre text={redactSecrets(tool.result_content)} />
           </>
@@ -129,6 +132,7 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
  * and let the user opt-in to the full body.
  */
 function ClampedPre({ text }: { text: string }) {
+  const { t } = useTranslation("sessions");
   const [expanded, setExpanded] = useState(false);
   const clamp = text.length > GENERIC_CLAMP && !expanded;
   const shown = clamp ? text.slice(0, GENERIC_CLAMP) : text;
@@ -145,7 +149,7 @@ function ClampedPre({ text }: { text: string }) {
         }}
       >
         {shown}
-        {clamp && `\n… ${hidden} chars hidden`}
+        {clamp && `\n${t("viewer.charsHidden", { n: hidden })}`}
       </pre>
       {text.length > GENERIC_CLAMP && (
         <button
@@ -164,19 +168,34 @@ function ClampedPre({ text }: { text: string }) {
             textTransform: "uppercase",
           }}
         >
-          {expanded ? "Collapse" : `Show ${hidden} more chars`}
+          {expanded
+            ? t("viewer.collapse")
+            : t("viewer.showMoreChars", { n: hidden })}
         </button>
       )}
     </div>
   );
 }
 
+// Render-time lookup via the shared i18n instance (this is a plain
+// helper, not a component) so language switches take effect on the
+// next render.
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
+  if (ms < 1000) {
+    return i18n.t("viewer.generic.durationMs", { ns: "sessions", n: ms });
+  }
   const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)} s`;
+  if (s < 60) {
+    return i18n.t("viewer.generic.durationSec", {
+      ns: "sessions",
+      n: s.toFixed(1),
+    });
+  }
   const m = s / 60;
-  return `${m.toFixed(1)} min`;
+  return i18n.t("viewer.generic.durationMin", {
+    ns: "sessions",
+    n: m.toFixed(1),
+  });
 }
 
 export { EditToolViewer, ReadToolViewer, WriteToolViewer, BashToolViewer };

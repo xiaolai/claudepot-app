@@ -1,4 +1,5 @@
 import { type ReactNode, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 
@@ -13,6 +14,7 @@ import { NF } from "../../icons";
  * `mask_bytes` in core — rendering is display-only.
  */
 export function JsonTreeRenderer({ body }: { body: string }) {
+  const { t } = useTranslation("config");
   const parsed = useMemo(() => tryParse(body), [body]);
 
   if (parsed.kind === "error") {
@@ -41,7 +43,7 @@ export function JsonTreeRenderer({ body }: { body: string }) {
           }}
         >
           <Glyph g={NF.warn} color="var(--danger)" />
-          <span>JSON parse failed: {parsed.message}</span>
+          <span>{t("json.parseFailed", { error: parsed.message })}</span>
         </div>
         <pre
           style={{
@@ -103,6 +105,7 @@ function Node({
   initiallyOpen?: boolean;
   label?: string;
 }): ReactNode {
+  const { t } = useTranslation("config");
   // Primitive leaf
   if (
     value === null ||
@@ -124,7 +127,7 @@ function Node({
       <Line depth={depth}>
         {label && <Key k={label} />}
         <span style={{ color: "var(--fg-faint)" }}>
-          {Array.isArray(value) ? "[…]" : "{…}"} (max depth)
+          {Array.isArray(value) ? "[…]" : "{…}"} {t("json.maxDepth")}
         </span>
       </Line>
     );
@@ -188,6 +191,7 @@ function Collapsible({
   // freeze the pane (audit 2026-04-24, T3 H2).
   renderChildren: () => ReactNode;
 }) {
+  const { t } = useTranslation("config");
   const [open, setOpen] = useState(initiallyOpen);
   return (
     <div>
@@ -217,7 +221,7 @@ function Collapsible({
           <span style={{ color: "var(--fg-muted)" }}>{openBracket}</span>
           {!open && (
             <span style={{ color: "var(--fg-faint)" }}>
-              {count} {count === 1 ? "entry" : "entries"}
+              {t("json.entries", { count })}
             </span>
           )}
           {!open && (

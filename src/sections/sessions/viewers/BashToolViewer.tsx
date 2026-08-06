@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
@@ -19,6 +20,7 @@ const OUTPUT_CLAMP = 4000;
  * stdout bodies render into a single block.
  */
 export function BashToolViewer({ tool }: { tool: LinkedTool }) {
+  const { t } = useTranslation("sessions");
   const parsed = parseToolInput<BashInput>(tool.input_preview);
   const input: BashInput = parsed.ok ? parsed.value : {};
   const cmd = bashCommand(input);
@@ -74,7 +76,7 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
           }}
           title={cmd}
         >
-          $ {cmd || "(no command)"}
+          $ {cmd || t("viewer.bash.noCommand")}
         </span>
         {typeof exit === "number" && (
           <span
@@ -85,7 +87,7 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
               textTransform: "uppercase",
             }}
           >
-            exit {exit}
+            {t("viewer.bash.exit", { code: exit })}
           </span>
         )}
         {interrupted && (
@@ -97,7 +99,7 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
               textTransform: "uppercase",
             }}
           >
-            interrupted
+            {t("viewer.bash.interrupted")}
           </span>
         )}
         {tool.is_error && (
@@ -109,11 +111,11 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
               letterSpacing: "var(--ls-wide)",
             }}
           >
-            error
+            {t("viewer.error")}
           </span>
         )}
         {copyText.length > 0 && (
-          <CopyButton text={copyText} ariaLabel="Copy command and output" />
+          <CopyButton text={copyText} ariaLabel={t("viewer.bash.copyAria")} />
         )}
       </header>
       {input.description && (
@@ -129,10 +131,10 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
         </div>
       )}
       {stdout.length > 0 && (
-        <Block label="stdout" text={stdout} tone="default" />
+        <Block label={t("viewer.bash.stdout")} text={stdout} tone="default" />
       )}
       {stderr.length > 0 && (
-        <Block label="stderr" text={stderr} tone="warn" />
+        <Block label={t("viewer.bash.stderr")} text={stderr} tone="warn" />
       )}
       {stdout.length === 0 && stderr.length === 0 && (
         <div
@@ -143,7 +145,7 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
             fontStyle: "italic",
           }}
         >
-          (no output yet)
+          {t("viewer.bash.noOutputYet")}
         </div>
       )}
     </div>
@@ -159,6 +161,7 @@ function Block({
   text: string;
   tone: "default" | "warn";
 }) {
+  const { t } = useTranslation("sessions");
   const shown = text.slice(0, OUTPUT_CLAMP);
   const hidden = Math.max(0, text.length - shown.length);
   return (
@@ -190,7 +193,7 @@ function Block({
         }}
       >
         {shown}
-        {hidden > 0 && `\n… ${hidden} chars hidden`}
+        {hidden > 0 && `\n${t("viewer.charsHidden", { n: hidden })}`}
       </pre>
     </section>
   );

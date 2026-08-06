@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 
 interface Props {
   templateId: string;
@@ -12,6 +14,7 @@ interface Props {
  * like before they install; readability beats prettiness.
  */
 export function TemplateSampleReport({ templateId }: Props) {
+  const { t } = useTranslation("projects");
   const [md, setMd] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +28,7 @@ export function TemplateSampleReport({ templateId }: Props) {
         if (!cancelled) setMd(s);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(renderError(e));
       });
     return () => {
       cancelled = true;
@@ -43,7 +46,7 @@ export function TemplateSampleReport({ templateId }: Props) {
           fontSize: "var(--fs-sm)",
         }}
       >
-        No sample available: {error}
+        {t("templates.noSample", { error })}
       </div>
     );
   }
@@ -56,7 +59,7 @@ export function TemplateSampleReport({ templateId }: Props) {
           fontSize: "var(--fs-sm)",
         }}
       >
-        Loading sample…
+        {t("templates.loadingSample")}
       </div>
     );
   }

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
 import type { TrashListing } from "../../types";
@@ -10,6 +12,7 @@ import type { TrashListing } from "../../types";
  * the trash only on mount + after each action.
  */
 export function TrashDrawer({ onChange }: { onChange?: () => void }) {
+  const { t } = useTranslation("sessions");
   const [listing, setListing] = useState<TrashListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -22,7 +25,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
     try {
       setListing(await api.sessionTrashList());
     } catch (e) {
-      setErr(String(e));
+      setErr(renderError(e));
     } finally {
       setLoading(false);
     }
@@ -41,7 +44,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
         onChange?.();
         await refresh();
       } catch (e) {
-        setErr(String(e));
+        setErr(renderError(e));
       } finally {
         setBusy(null);
       }
@@ -57,7 +60,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
       onChange?.();
       await refresh();
     } catch (e) {
-      setErr(String(e));
+      setErr(renderError(e));
     } finally {
       setBusy(null);
       setConfirming(false);
@@ -66,7 +69,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
 
   return (
     <aside
-      aria-label="Trash"
+      aria-label={t("trash.title")}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -85,14 +88,14 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
           className="mono-cap"
           style={{ color: "var(--fg-faint)" }}
         >
-          Trash
+          {t("trash.title")}
         </span>
         {listing && listing.entries.length > 0 && (
           <Tag tone="neutral">{listing.entries.length}</Tag>
         )}
         <div style={{ flex: 1 }} />
         <Button variant="ghost" onClick={refresh} disabled={loading}>
-          Refresh
+          {t("trash.refresh")}
         </Button>
         {listing && listing.entries.length > 0 && (
           <>
@@ -103,7 +106,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
                   onClick={() => setConfirming(false)}
                   disabled={busy === "empty"}
                 >
-                  Cancel
+                  {t("trash.cancel")}
                 </Button>
                 <Button
                   variant="solid"
@@ -111,12 +114,12 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
                   disabled={busy === "empty"}
                   data-testid="confirm-empty"
                 >
-                  {busy === "empty" ? "Emptying…" : "Empty trash — confirm"}
+                  {busy === "empty" ? t("trash.emptying") : t("trash.emptyConfirm")}
                 </Button>
               </>
             ) : (
               <Button variant="ghost" onClick={() => setConfirming(true)}>
-                Empty trash…
+                {t("trash.emptyTrash")}
               </Button>
             )}
           </>
@@ -141,7 +144,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
             textAlign: "center",
           }}
         >
-          Trash is empty.
+          {t("trash.isEmpty")}
         </div>
       )}
 
@@ -185,7 +188,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
                 disabled={busy === e.id}
                 onClick={() => restore(e.id)}
               >
-                {busy === e.id ? "Restoring…" : "Restore"}
+                {busy === e.id ? t("trash.restoring") : t("trash.restore")}
               </Button>
             </li>
           ))}

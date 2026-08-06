@@ -7,6 +7,11 @@
 //! Frontend consumes `local_usage_aggregate` to render the
 //! Activities → Cost tab. The CLI's `claudepot usage report`
 //! consumes the same core API directly.
+//!
+//! Rejections cross as `ErrorDto`. The `session index: ` /
+//! `top_costly_turns: ` prefixes are gone — `SessionError` and
+//! `SessionIndexError` name what failed and the UI names what it was
+//! attempting. See `crate::dto_error`.
 
 use claudepot_core::pricing::{self, PriceTier};
 use claudepot_core::session::list_all_sessions;
@@ -16,9 +21,23 @@ use claudepot_core::usage_local::{
     ReportWindow, TimeWindow, UsageTotals,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tauri::State;
 
+use crate::dto_error::{codes, ErrorDto};
 use crate::preferences::PreferencesState;
+
+/// The `PreferencesState` mutex is `std::sync`, so a panic anywhere
+/// under it poisons the lock for every later reader. One spelling for
+/// the four call sites in this file — and the same code + English the
+/// Preferences and Activity surfaces already use for the same mutex.
+fn prefs_lock_poisoned(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::PREFERENCES_LOCK_POISONED,
+        json!({ "detail": e.to_string() }),
+        format!("preferences lock: {e}"),
+    )
+}
 
 /// Wire shape for the time window. The frontend constructs one of
 /// these and ships it across IPC; the backend translates to the
@@ -39,19 +58,26 @@ pub struct WindowSpec {
 }
 
 impl WindowSpec {
-    fn into_time_window(self, now_ms: i64) -> Result<TimeWindow, String> {
+    fn into_time_window(self, now_ms: i64) -> Result<TimeWindow, ErrorDto> {
         match self.kind.as_str() {
             "all" => Ok(TimeWindow::open()),
             "last_days" => {
-                let days = self
-                    .days
-                    .ok_or_else(|| "last_days requires `days`".to_string())?;
+                let days = self.days.ok_or_else(|| {
+                    ErrorDto::new(
+                        codes::USAGE_LOCAL_WINDOW_DAYS_REQUIRED,
+                        "last_days requires `days`",
+                    )
+                })?;
                 if days == 0 {
                     return Ok(TimeWindow::open());
                 }
                 Ok(TimeWindow::last_days(days, now_ms))
             }
-            other => Err(format!("unknown window kind: {other}")),
+            other => Err(ErrorDto::with_params(
+                codes::USAGE_LOCAL_UNKNOWN_WINDOW_KIND,
+                json!({ "kind": other }),
+                format!("unknown window kind: {other}"),
+            )),
         }
     }
 }
@@ -246,21 +272,18 @@ fn relative_when(unix_secs: u64) -> String {
 pub async fn local_usage_aggregate(
     spec: WindowSpec,
     prefs: State<'_, PreferencesState>,
-) -> Result<LocalUsageReportDto, String> {
+) -> Result<LocalUsageReportDto, ErrorDto> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
     let tier = {
-        let guard = prefs
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+        let guard = prefs.0.lock().map_err(prefs_lock_poisoned)?;
         guard.pricing_tier
     };
     let tier_str = tier.as_str().to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
         let config_dir = claudepot_core::paths::claude_config_dir();
-        let sessions = list_all_sessions(&config_dir).map_err(|e| format!("session index: {e}"))?;
+        let sessions = list_all_sessions(&config_dir)?;
         let bundled = pricing::load();
         let table = bundled.with_tier(tier);
         let pricing_source = format_pricing_source(&table);
@@ -270,7 +293,7 @@ pub async fn local_usage_aggregate(
         // day a given session ran.
         let book = pricing::PriceBook::load().with_tier(tier);
         let report = aggregate_from_rows(sessions, &book, window);
-        Ok(report_to_dto(
+        Ok::<_, ErrorDto>(report_to_dto(
             report,
             tier_str,
             pricing_source,
@@ -278,7 +301,7 @@ pub async fn local_usage_aggregate(
         ))
     })
     .await
-    .map_err(|e| format!("local_usage_aggregate join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Update the user's pricing tier. The wire form is the lowercase
@@ -291,8 +314,14 @@ pub async fn local_usage_aggregate(
 pub async fn pricing_tier_set(
     tier: String,
     prefs: State<'_, PreferencesState>,
-) -> Result<(), String> {
-    let parsed = PriceTier::parse(&tier).ok_or_else(|| format!("unknown pricing tier: {tier}"))?;
+) -> Result<(), ErrorDto> {
+    let parsed = PriceTier::parse(&tier).ok_or_else(|| {
+        ErrorDto::with_params(
+            codes::USAGE_LOCAL_UNKNOWN_PRICING_TIER,
+            json!({ "tier": tier }),
+            format!("unknown pricing tier: {tier}"),
+        )
+    })?;
     // Save first; only commit to in-memory state on success. If the
     // disk write fails (out-of-space, permission revoked between
     // launch and now), the in-memory pricing_tier stays at its
@@ -302,19 +331,18 @@ pub async fn pricing_tier_set(
     // lock so the save's blocking I/O doesn't serialize unrelated
     // preference reads.
     let candidate = {
-        let guard = prefs
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+        let guard = prefs.0.lock().map_err(prefs_lock_poisoned)?;
         let mut snapshot = guard.clone();
         snapshot.pricing_tier = parsed;
         snapshot
     };
-    candidate.save()?;
-    let mut guard = prefs
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+    // `Preferences::save` returns a pre-composed English string
+    // ("preferences: mkdir …"). Carried verbatim — this layer has
+    // nothing to add to it. Same code the Preferences pane mints.
+    candidate
+        .save()
+        .map_err(|m| ErrorDto::detail(codes::PREFERENCES_SAVE_FAILED, m))?;
+    let mut guard = prefs.0.lock().map_err(prefs_lock_poisoned)?;
     guard.pricing_tier = parsed;
     Ok(())
 }
@@ -324,11 +352,8 @@ pub async fn pricing_tier_set(
 /// `local_usage_aggregate` round-trip lands, so the picker doesn't
 /// flicker from the default value to the saved value.
 #[tauri::command]
-pub fn pricing_tier_get(prefs: State<'_, PreferencesState>) -> Result<String, String> {
-    let guard = prefs
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+pub fn pricing_tier_get(prefs: State<'_, PreferencesState>) -> Result<String, ErrorDto> {
+    let guard = prefs.0.lock().map_err(prefs_lock_poisoned)?;
     Ok(guard.pricing_tier.as_str().to_string())
 }
 
@@ -404,15 +429,12 @@ pub async fn top_costly_prompts(
     final_n: usize,
     refresh_index: Option<bool>,
     prefs: State<'_, PreferencesState>,
-) -> Result<TopCostlyPromptsDto, String> {
+) -> Result<TopCostlyPromptsDto, ErrorDto> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
     let n = final_n.min(50);
     let tier = {
-        let guard = prefs
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+        let guard = prefs.0.lock().map_err(prefs_lock_poisoned)?;
         guard.pricing_tier
     };
     let refresh_index = refresh_index.unwrap_or(true);
@@ -422,21 +444,18 @@ pub async fn top_costly_prompts(
         let book = pricing::PriceBook::load().with_tier(tier);
         let config_dir = claudepot_core::paths::claude_config_dir();
         let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
-        let index = SessionIndex::open(&db_path).map_err(|e| format!("session index open: {e}"))?;
+        let index = SessionIndex::open(&db_path)?;
         if refresh_index {
-            index
-                .refresh(&config_dir)
-                .map_err(|e| format!("session index refresh: {e}"))?;
+            index.refresh(&config_dir)?;
         }
-        let turns = top_costly_turns(&index, &book, window, n)
-            .map_err(|e| format!("top_costly_turns: {e}"))?;
-        Ok(TopCostlyPromptsDto {
+        let turns = top_costly_turns(&index, &book, window, n)?;
+        Ok::<_, ErrorDto>(TopCostlyPromptsDto {
             turns: turns.into_iter().map(Into::into).collect(),
             pricing_tier,
         })
     })
     .await
-    .map_err(|e| format!("top_costly_prompts join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[cfg(test)]
@@ -490,7 +509,12 @@ mod tests {
         }
         .into_time_window(0)
         .unwrap_err();
-        assert!(err.contains("last_days"));
+        // Assert the code, not the sentence: `message` is the English
+        // fallback and the GUI renders a translated sentence off `code`.
+        // A test that only checked the English would keep passing while
+        // the identity the renderer branches on drifted.
+        assert_eq!(err.code, codes::USAGE_LOCAL_WINDOW_DAYS_REQUIRED);
+        assert!(err.message.contains("last_days"), "{}", err.message);
     }
 
     #[test]
@@ -501,7 +525,15 @@ mod tests {
         }
         .into_time_window(0)
         .unwrap_err();
-        assert!(err.contains("unknown window kind"));
+        assert_eq!(err.code, codes::USAGE_LOCAL_UNKNOWN_WINDOW_KIND);
+        // The rejected value rides in `params` under its own name so a
+        // localized sentence can quote it without parsing the English.
+        assert_eq!(err.params["kind"], "yesterday");
+        assert!(
+            err.message.contains("unknown window kind"),
+            "{}",
+            err.message
+        );
     }
 
     #[test]

@@ -1,0 +1,485 @@
+{
+  "comment": [
+    "Accounts / auth / desktop domain — the P5 slice behind the Accounts",
+    "section and the Desktop slot.",
+    "",
+    "Schema and rules: see 00-foundation.json. This file is additive; the",
+    "loaders in crates/claudepot-core/src/error_code.rs and",
+    "src-tauri/src/dto_error.rs read every *.json in this directory and",
+    "reject a code claimed by two files.",
+    "",
+    "Module segments in this slice:",
+    "  cli_backend          SwapError            cli_backend/error.rs",
+    "  desktop_backend      DesktopSwapError     desktop_backend/error.rs",
+    "  desktop_key          DesktopKeyError      desktop_backend/mod.rs",
+    "  desktop_crypto       DecryptError         desktop_backend/crypto.rs",
+    "  desktop_token_cache  TokenParseError      desktop_backend/token_cache.rs",
+    "  desktop_identity     DesktopIdentityError desktop_identity.rs",
+    "  desktop_lock         DesktopLockError     desktop_lock.rs",
+    "  resolve              ResolveError         resolve.rs",
+    "  onboard              OnboardError         onboard.rs",
+    "",
+    "desktop_backend owns four enums rather than the one",
+    "rules/rust-conventions.md asks for. Only its boundary error takes",
+    "the bare module segment; the other three are namespaced by the",
+    "concern they carry, so a translator reading `desktop_key.*` knows",
+    "it is about retrieving the safeStorage secret and not about a swap."
+  ],
+  "codes": [
+    {
+      "code": "cli_backend.no_stored_credentials",
+      "owner": "core",
+      "params": [
+        "uuid"
+      ],
+      "message": "no stored credentials for account 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "cli_backend.no_default_credentials",
+      "owner": "core",
+      "params": [],
+      "message": "no default credentials found in CC storage"
+    },
+    {
+      "code": "cli_backend.write_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "failed to write credentials: keychain item did not read back"
+    },
+    {
+      "code": "cli_backend.keychain_error",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "keychain operation failed: keychain is locked"
+    },
+    {
+      "code": "cli_backend.file_error",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "file operation failed: no such file or directory"
+    },
+    {
+      "code": "cli_backend.corrupt_blob",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "corrupt credential blob: missing field accessToken"
+    },
+    {
+      "code": "cli_backend.refresh_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "token refresh failed: token endpoint returned 401"
+    },
+    {
+      "code": "cli_backend.identity_mismatch",
+      "owner": "core",
+      "params": [
+        "stored_email",
+        "actual_email"
+      ],
+      "message": "identity mismatch: account a@example.com holds credentials for b@example.com. Run `claudepot account remove a@example.com` and re-add to re-seed."
+    },
+    {
+      "code": "cli_backend.live_session_conflict",
+      "owner": "core",
+      "params": [],
+      "message": "a Claude Code process is running — its next token refresh will overwrite this swap"
+    },
+    {
+      "code": "cli_backend.identity_verification_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "identity verification failed: /profile returned 503"
+    },
+    {
+      "code": "desktop_backend.desktop_still_running",
+      "owner": "core",
+      "params": [],
+      "message": "Claude Desktop is still running after quit timeout"
+    },
+    {
+      "code": "desktop_backend.no_stored_profile",
+      "owner": "core",
+      "params": [
+        "uuid"
+      ],
+      "message": "no desktop profile stored for account 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "desktop_backend.file_copy_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "file copy failed: destination is read-only"
+    },
+    {
+      "code": "desktop_backend.not_installed",
+      "owner": "core",
+      "params": [],
+      "message": "desktop not installed on this platform"
+    },
+    {
+      "code": "desktop_backend.dpapi_invalidated",
+      "owner": "core",
+      "params": [],
+      "message": "Desktop profile encrypted under different Windows credentials (different machine, different user, or password reset) — sign in to Claude Desktop fresh, then re-bind."
+    },
+    {
+      "code": "desktop_backend.lock",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "desktop lock: desktop operation already in progress — retry in a moment"
+    },
+    {
+      "code": "desktop_backend.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "no such file or directory"
+    },
+    {
+      "code": "desktop_key.keychain_read",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "macOS keychain lookup failed: user canceled the operation"
+    },
+    {
+      "code": "desktop_key.dpapi_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "Windows DPAPI unprotect failed: key not valid for use in specified state"
+    },
+    {
+      "code": "desktop_key.local_state",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "Windows Local State missing or unreadable: no such file or directory"
+    },
+    {
+      "code": "desktop_key.unsupported",
+      "owner": "core",
+      "params": [],
+      "message": "platform does not implement Desktop safeStorage"
+    },
+    {
+      "code": "desktop_crypto.bad_format",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "ciphertext format: ciphertext shorter than 3 bytes"
+    },
+    {
+      "code": "desktop_crypto.unknown_version",
+      "owner": "core",
+      "params": [
+        "tag"
+      ],
+      "message": "unsupported version tag: expected v10 or v11, got [118, 57, 57]"
+    },
+    {
+      "code": "desktop_crypto.base64",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "base64 decode failed: Invalid symbol 33, offset 2"
+    },
+    {
+      "code": "desktop_crypto.aes",
+      "owner": "core",
+      "params": [],
+      "message": "AES decrypt failed (corrupt ciphertext or wrong key)"
+    },
+    {
+      "code": "desktop_crypto.kdf",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "key derivation failed: invalid iteration count"
+    },
+    {
+      "code": "desktop_token_cache.json",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "decrypted token cache is not valid JSON: expected value at line 1 column 2"
+    },
+    {
+      "code": "desktop_token_cache.empty",
+      "owner": "core",
+      "params": [],
+      "message": "decrypted token cache has no bundle entries"
+    },
+    {
+      "code": "desktop_identity.data_dir_unreadable",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "Desktop data_dir missing or unreadable: permission denied"
+    },
+    {
+      "code": "desktop_identity.no_data_dir",
+      "owner": "core",
+      "params": [],
+      "message": "Desktop data_dir not set for this platform"
+    },
+    {
+      "code": "desktop_identity.no_config",
+      "owner": "core",
+      "params": [],
+      "message": "config.json is not present — Desktop has not been launched"
+    },
+    {
+      "code": "desktop_identity.config_parse",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "config.json is not valid JSON: expected value at line 1 column 2"
+    },
+    {
+      "code": "desktop_identity.not_signed_in",
+      "owner": "core",
+      "params": [],
+      "message": "no oauth:tokenCache present — Desktop is signed out"
+    },
+    {
+      "code": "desktop_identity.key",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "key retrieval failed: platform does not implement Desktop safeStorage"
+    },
+    {
+      "code": "desktop_identity.decrypt",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "decryption failed: AES decrypt failed (corrupt ciphertext or wrong key)"
+    },
+    {
+      "code": "desktop_identity.token_parse",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "decrypted token cache is malformed: no access token found in decrypted bundles"
+    },
+    {
+      "code": "desktop_identity.profile_fetch",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "/profile returned error: OAuth server error: /profile returned 503"
+    },
+    {
+      "code": "desktop_identity.unsupported",
+      "owner": "core",
+      "params": [],
+      "message": "slow-path identity probe unsupported on this platform"
+    },
+    {
+      "code": "desktop_lock.open",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "desktop lock file open failed: permission denied"
+    },
+    {
+      "code": "desktop_lock.held",
+      "owner": "core",
+      "params": [],
+      "message": "desktop operation already in progress — retry in a moment"
+    },
+    {
+      "code": "desktop_lock.timeout",
+      "owner": "core",
+      "params": [
+        "timeout_secs"
+      ],
+      "message": "desktop lock wait timed out after 5s"
+    },
+    {
+      "code": "resolve.no_match",
+      "owner": "core",
+      "params": [
+        "input"
+      ],
+      "message": "no account matching 'nobody'"
+    },
+    {
+      "code": "resolve.ambiguous",
+      "owner": "core",
+      "params": [
+        "input",
+        "candidates"
+      ],
+      "message": "'x' is ambiguous: xa@example.com, xb@example.com"
+    },
+    {
+      "code": "resolve.store_error",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "store error: no such table: accounts"
+    },
+    {
+      "code": "onboard.cli_binary_not_found",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "claude CLI not found at /usr/local/bin/claude"
+    },
+    {
+      "code": "onboard.auth_login_failed",
+      "owner": "core",
+      "params": [
+        "exit_code",
+        "stderr_tail"
+      ],
+      "message": "`claude auth login` exited with code 1"
+    },
+    {
+      "code": "onboard.auth_login_cancelled",
+      "owner": "core",
+      "params": [],
+      "message": "login cancelled"
+    },
+    {
+      "code": "onboard.import_failed",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "import failed: no credentials at hashed service name for /tmp/claudepot-onboard-xyz"
+    },
+    {
+      "code": "onboard.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "no such file or directory"
+    },
+    {
+      "code": "accounts.login_state_lock_poisoned",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "login state lock poisoned: poisoned lock: another task failed inside"
+    },
+    {
+      "code": "accounts.login_in_progress",
+      "owner": "command",
+      "params": [],
+      "message": "a login is already in progress"
+    },
+    {
+      "code": "accounts.verify_all_in_progress",
+      "owner": "command",
+      "params": [],
+      "message": "verify_all is already in progress"
+    },
+    {
+      "code": "accounts.remove_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "no stored credentials for account 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "accounts.lookup_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "no such table: accounts"
+    },
+    {
+      "code": "desktop.not_supported_on_platform",
+      "owner": "command",
+      "params": [],
+      "message": "Desktop not supported on this platform"
+    },
+    {
+      "code": "desktop.no_live_identity",
+      "owner": "command",
+      "params": [],
+      "message": "no live Desktop identity — sign in via Desktop first"
+    },
+    {
+      "code": "desktop.resolve_target_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "resolve failed: no account matching 'nobody'"
+    },
+    {
+      "code": "preferences.lock_poisoned",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "preferences lock: poisoned lock: another task failed inside"
+    },
+    {
+      "code": "preferences.save_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "preferences: mkdir /Users/me/.claudepot: permission denied"
+    },
+    {
+      "code": "preferences.unsupported_locale",
+      "owner": "command",
+      "params": [
+        "locale"
+      ],
+      "message": "unsupported locale: fr"
+    },
+    {
+      "code": "preferences.set_activation_policy_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "set_activation_policy: unsupported on this platform"
+    }
+  ]
+}

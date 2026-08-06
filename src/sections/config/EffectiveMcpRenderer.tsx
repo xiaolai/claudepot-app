@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import type {
   ConfigEffectiveMcpDto,
   ConfigEffectiveMcpServerDto,
@@ -11,20 +14,21 @@ import { SegmentedControl } from "../../components/SegmentedControl";
 // Display labels for the simulation segmented control. Kept short so
 // all three fit at any reasonable pane width (the longest, `non-int`,
 // matches `skip-perm` for visual balance). Hover surfaces the full
-// command-line equivalent via `MODE_TITLES`.
-const MODES: readonly { id: McpSimulationMode; label: string }[] = [
-  { id: "interactive", label: "interactive" },
-  { id: "non_interactive", label: "non-interactive" },
-  { id: "skip_permissions", label: "skip-perms" },
-] as const;
+// command-line equivalent via `MODE_TITLE_KEYS`.
+//
+// Catalog keys, not literals — resolved where the control renders so a
+// language switch reaches a segmented control already on screen.
+const MODE_KEYS = [
+  { id: "interactive", labelKey: "mcp.modeInteractive" },
+  { id: "non_interactive", labelKey: "mcp.modeNonInteractive" },
+  { id: "skip_permissions", labelKey: "mcp.modeSkipPerms" },
+] as const satisfies readonly { id: McpSimulationMode; labelKey: string }[];
 
-const MODE_TITLES: Record<McpSimulationMode, string> = {
-  interactive: "Default — approval prompts shown on startup.",
-  non_interactive:
-    "SDK / `claude -p` / piped input. Auto-approves project servers when projectSettings is enabled.",
-  skip_permissions:
-    "--dangerously-skip-permissions. Auto-approves project servers when projectSettings is enabled.",
-};
+const MODE_TITLE_KEYS = {
+  interactive: "mcp.titleInteractive",
+  non_interactive: "mcp.titleNonInteractive",
+  skip_permissions: "mcp.titleSkipPerms",
+} as const satisfies Record<McpSimulationMode, string>;
 
 /**
  * Effective MCP view — shows every MCP server CC would consider, the
@@ -35,6 +39,7 @@ const MODE_TITLES: Record<McpSimulationMode, string> = {
  * it re-requests the server list.
  */
 export function EffectiveMcpRenderer({ cwd }: { cwd: string | null }) {
+  const { t } = useTranslation("config");
   const [mode, setMode] = useState<McpSimulationMode>("interactive");
   const [data, setData] = useState<ConfigEffectiveMcpDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +54,7 @@ export function EffectiveMcpRenderer({ cwd }: { cwd: string | null }) {
         if (!cancelled) setData(d);
       })
       .catch((e) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(renderError(e));
       });
     return () => {
       cancelled = true;
@@ -76,11 +81,11 @@ export function EffectiveMcpRenderer({ cwd }: { cwd: string | null }) {
               fontSize: "var(--fs-sm)",
             }}
           >
-            Couldn't compute effective MCP: {error}
+            {t("mcp.loadFailed", { error })}
           </div>
         ) : !data ? (
           <div style={{ padding: "var(--sp-20)", color: "var(--fg-faint)" }}>
-            Loading…
+            {t("state.loading")}
           </div>
         ) : data.servers.length === 0 ? (
           <div
@@ -91,7 +96,7 @@ export function EffectiveMcpRenderer({ cwd }: { cwd: string | null }) {
               fontSize: "var(--fs-sm)",
             }}
           >
-            No MCP servers configured at any scope.
+            {t("mcp.empty")}
           </div>
         ) : (
           <ServerTable servers={data.servers} />
@@ -108,6 +113,8 @@ function ModeBar({
   mode: McpSimulationMode;
   onChange: (m: McpSimulationMode) => void;
 }) {
+  const { t } = useTranslation("config");
+  const options = MODE_KEYS.map((m) => ({ id: m.id, label: t(m.labelKey) }));
   return (
     <div
       style={{
@@ -117,7 +124,7 @@ function ModeBar({
         padding: "var(--sp-8) var(--sp-16)",
         borderBottom: "var(--bw-hair) solid var(--line)",
       }}
-      title={MODE_TITLES[mode]}
+      title={t(MODE_TITLE_KEYS[mode])}
     >
       <span
         className="mono-cap"
@@ -128,9 +135,9 @@ function ModeBar({
           textTransform: "uppercase",
         }}
       >
-        Simulate
+        {t("mcp.simulate")}
       </span>
-      <SegmentedControl options={MODES} value={mode} onChange={onChange} />
+      <SegmentedControl options={options} value={mode} onChange={onChange} />
     </div>
   );
 }
@@ -147,8 +154,11 @@ function EnterpriseBanner() {
         fontSize: "var(--fs-xs)",
       }}
     >
-      <strong>Enterprise policy in effect.</strong> User / project / local
-      MCP servers are suppressed — only enterprise servers are active.
+      <Trans
+        ns="config"
+        i18nKey="mcp.enterprise"
+        components={{ b: <strong /> }}
+      />
     </div>
   );
 }
@@ -158,6 +168,7 @@ function ServerTable({
 }: {
   servers: ConfigEffectiveMcpServerDto[];
 }) {
+  const { t } = useTranslation("config");
   return (
     <table
       style={{
@@ -185,16 +196,16 @@ function ServerTable({
           }}
         >
           <th style={{ padding: "var(--sp-6) var(--sp-12)", fontWeight: 500 }}>
-            Server
+            {t("mcp.colServer")}
           </th>
           <th style={{ padding: "var(--sp-6) var(--sp-12)", fontWeight: 500 }}>
-            Source
+            {t("mcp.colSource")}
           </th>
           <th style={{ padding: "var(--sp-6) var(--sp-12)", fontWeight: 500 }}>
-            Command
+            {t("mcp.colCommand")}
           </th>
           <th style={{ padding: "var(--sp-6) var(--sp-12)", fontWeight: 500 }}>
-            Approval
+            {t("mcp.colApproval")}
           </th>
         </tr>
       </thead>
@@ -346,12 +357,14 @@ function ApprovalBadge({
         : approval === "rejected"
           ? "danger"
           : "neutral";
+  // Wire value rendered raw — the backend's approval discriminator, not
+  // display copy.
   const label = approval.replace(/_/g, " ");
   const title =
     blockedBy != null
-      ? `blocked: ${blockedBy}`
+      ? i18n.t("mcp.blockedTitle", { ns: "config", by: blockedBy })
       : reason != null
-        ? `reason: ${reason}`
+        ? i18n.t("mcp.reasonTitle", { ns: "config", reason })
         : undefined;
   return (
     <Tag tone={tone} title={title}>

@@ -4,17 +4,16 @@
 // point, not decoration — which is why the list measures dynamically
 // rather than assuming the Config tree's fixed row height.
 
+import { Trans, useTranslation } from "react-i18next";
 import { Glyph } from "../../../components/primitives";
 import { NF } from "../../../icons";
 import type { EnvVarState } from "../../../types/ccEnv";
 import { EnvVarControl, type ControlHandlers } from "./EnvVarControl";
-import { hasUnnamedHazard, HAZARD_WARNING, namedHazards } from "./hazards";
+import { hasUnnamedHazard, hazardWarning, namedHazards } from "./hazards";
 
-const BLOCKED_TEXT = {
-  bootstrap_split_brain:
-    "Claude Code reads this before it loads settings, so a value here would leave one run resolving paths against two different directories. Set it in your shell instead.",
-  host_injected:
-    "Injected per run by whatever launches Claude Code. A value written here is overwritten immediately.",
+const BLOCKED_TEXT_KEYS = {
+  bootstrap_split_brain: "envvars.blockedBootstrap",
+  host_injected: "envvars.blockedHostInjected",
 } as const;
 
 export function EnvVarRow({
@@ -26,6 +25,7 @@ export function EnvVarRow({
   busy: boolean;
   handlers: ControlHandlers;
 }) {
+  const { t } = useTranslation("config");
   const { spec, settings_value: value, legacy_global, resolved_source } = state;
   const blocked = spec.safety.blocked_reason;
   const hazards = namedHazards(spec.safety.hazards);
@@ -39,17 +39,17 @@ export function EnvVarRow({
         <div className="envvar-tags">
           {isSet ? (
             <span className="envvar-badge" data-tone="set">
-              modified
+              {t("envvars.badgeModified")}
             </span>
           ) : null}
           {spec.safety.secret ? (
             <span className="envvar-badge" data-tone="secret">
-              secret
+              {t("envvars.badgeSecret")}
             </span>
           ) : null}
           {spec.safety.provider_managed ? (
             <span className="envvar-badge" data-tone="muted">
-              provider-managed
+              {t("envvars.badgeProviderManaged")}
             </span>
           ) : null}
           <span className="envvar-badge" data-tone="muted">
@@ -73,12 +73,12 @@ export function EnvVarRow({
           tooltip-as-required-disclosure as an anti-pattern. */}
       {blocked ? (
         <p className="envvar-note" data-tone="warn">
-          <Glyph g={NF.lock} /> {BLOCKED_TEXT[blocked]}
+          <Glyph g={NF.lock} /> {t(BLOCKED_TEXT_KEYS[blocked])}
         </p>
       ) : null}
       {hazards.map((h) => (
         <p key={h} className="envvar-note" data-tone="warn">
-          <Glyph g={NF.warn} /> {HAZARD_WARNING[h]}
+          <Glyph g={NF.warn} /> {hazardWarning(h)}
         </p>
       ))}
       {/* Absence from Claude Code's allowlist says something is risky
@@ -87,33 +87,41 @@ export function EnvVarRow({
           visibly different from the named hazards above. */}
       {unestablished && hazards.length === 0 && !blocked ? (
         <p className="envvar-note" data-tone="muted">
-          Not on Claude Code's pre-trust allowlist. No specific risk is
-          documented for it.
+          {t("envvars.noPreTrust")}
         </p>
       ) : null}
       {spec.safety.provider_managed ? (
         <p className="envvar-note" data-tone="muted">
-          A host-managed launch can override this regardless of what is set
-          here.
+          {t("envvars.providerManagedNote")}
         </p>
       ) : null}
       {resolved_source === "legacy_global" && legacy_global ? (
         <p className="envvar-note" data-tone="muted">
-          Also set in <code>~/.claude.json</code>, which Claude Code applies
-          first. With no settings.json override, that value is what takes
-          effect.
+          <Trans
+            ns="config"
+            i18nKey="envvars.legacyGlobalWins"
+            components={{ code: <code /> }}
+          />
         </p>
       ) : null}
       {resolved_source === "settings_override" && legacy_global ? (
         <p className="envvar-note" data-tone="muted">
-          <code>~/.claude.json</code> also sets this. Clearing here lets that
-          value surface.
+          <Trans
+            ns="config"
+            i18nKey="envvars.legacyGlobalShadowed"
+            components={{ code: <code /> }}
+          />
         </p>
       ) : null}
+      {/* "No settings.json override" is deliberately NOT "CC default" —
+          the user's shell is a source this pane cannot see. */}
       {!isSet ? (
         <p className="envvar-note" data-tone="muted">
-          No settings.json override
-          {spec.default ? ` — documented default ${spec.default}` : ""}.
+          {t("envvars.noOverride")}
+          {spec.default
+            ? t("envvars.documentedDefault", { value: spec.default })
+            : ""}
+          .
         </p>
       ) : null}
     </div>

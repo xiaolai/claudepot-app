@@ -33,6 +33,36 @@ pub enum ShareError {
     Parse(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `Auth` deliberately carries nothing: the token that was rejected must
+/// never reach `params`, and the status code alone is the whole signal.
+impl crate::error_code::ErrorCode for ShareError {
+    fn code(&self) -> &'static str {
+        match self {
+            ShareError::Auth => "session_share.auth",
+            ShareError::Oversized(_) => "session_share.oversized",
+            ShareError::Http { .. } => "session_share.http",
+            ShareError::Network(_) => "session_share.network",
+            ShareError::Parse(_) => "session_share.parse",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ShareError::Auth => serde_json::json!({}),
+            ShareError::Oversized(detail) => serde_json::json!({ "detail": detail }),
+            ShareError::Http { status, body } => serde_json::json!({
+                "status": status,
+                "body": body,
+            }),
+            ShareError::Network(detail) => serde_json::json!({ "detail": detail }),
+            ShareError::Parse(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 /// Scrubs a GitHub PAT out of arbitrary strings — used so the Display
 /// impl on any error crossing this module is token-free.
 pub fn scrub_token(s: &str, token: &str) -> String {

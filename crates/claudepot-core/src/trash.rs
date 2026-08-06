@@ -56,6 +56,49 @@ pub enum TrashError {
     RestoreCollision(PathBuf),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Sister impl to `project::trash::ProjectTrashError` — same shapes,
+/// separate codes, because the two trashes hold different things and a
+/// sentence about a single transcript is not a sentence about a whole
+/// project directory. Paths go in raw (`Path::display()`, no
+/// normalization) per `rules/paths.md`.
+impl crate::error_code::ErrorCode for TrashError {
+    fn code(&self) -> &'static str {
+        match self {
+            TrashError::Io { .. } => "trash.io",
+            TrashError::SourceMissing(_) => "trash.source_missing",
+            TrashError::EntryNotFound(_) => "trash.entry_not_found",
+            TrashError::ManifestParse { .. } => "trash.manifest_parse",
+            TrashError::ManifestSerialize(_) => "trash.manifest_serialize",
+            TrashError::RestoreCollision(_) => "trash.restore_collision",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            TrashError::Io { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            TrashError::SourceMissing(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            // A trash entry id, not a path.
+            TrashError::EntryNotFound(entry_id) => serde_json::json!({ "entry_id": entry_id }),
+            TrashError::ManifestParse { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            TrashError::ManifestSerialize(e) => serde_json::json!({ "detail": e.to_string() }),
+            TrashError::RestoreCollision(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+        }
+    }
+}
+
 impl TrashError {
     fn io(path: impl Into<PathBuf>, source: io::Error) -> Self {
         Self::Io {

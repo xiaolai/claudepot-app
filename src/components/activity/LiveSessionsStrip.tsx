@@ -4,17 +4,19 @@
 // existing live aggregate (`useSessionLive`). When no sessions
 // are live, renders a small empty-state placeholder.
 
+import { useTranslation } from "react-i18next";
 import { useSessionLive } from "../../hooks/useSessionLive";
 import { SectionLabel } from "../primitives/SectionLabel";
 import { LiveSessionCard } from "./LiveSessionCard";
 
 export function LiveSessionsStrip() {
+  const { t } = useTranslation("components");
   const sessions = useSessionLive();
 
   if (sessions.length === 0) {
     return (
       <section style={{ marginBottom: "var(--sp-24)" }}>
-        <SectionLabel>Live sessions</SectionLabel>
+        <SectionLabel>{t("liveCards.heading")}</SectionLabel>
         <div
           style={{
             marginTop: "var(--sp-8)",
@@ -26,7 +28,7 @@ export function LiveSessionsStrip() {
             textAlign: "center",
           }}
         >
-          No sessions writing right now.
+          {t("liveCards.empty")}
         </div>
       </section>
     );
@@ -35,7 +37,7 @@ export function LiveSessionsStrip() {
   return (
     <section style={{ marginBottom: "var(--sp-24)" }}>
       <SectionLabel>
-        Live sessions ({sessions.length})
+        {t("liveCards.headingCount", { n: sessions.length })}
       </SectionLabel>
       <div
         style={{

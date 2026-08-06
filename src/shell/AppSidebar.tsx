@@ -1,4 +1,5 @@
 import type React from "react";
+import { useTranslation } from "react-i18next";
 import { Divider } from "../components/primitives/Divider";
 import { Glyph } from "../components/primitives/Glyph";
 import { SectionLabel } from "../components/primitives/SectionLabel";
@@ -67,9 +68,14 @@ export function AppSidebar({
   collapsed = false,
   onToggleCollapsed,
 }: AppSidebarProps) {
+  const { t } = useTranslation("shell");
   const targets = [
-    { id: "cli" as const, label: "CLI", glyph: NF.terminal },
-    { id: "desktop" as const, label: "Desktop", glyph: NF.desktop },
+    { id: "cli" as const, label: t("sidebar.targetCli"), glyph: NF.terminal },
+    {
+      id: "desktop" as const,
+      label: t("sidebar.targetDesktop"),
+      glyph: NF.desktop,
+    },
   ];
 
   return (
@@ -101,7 +107,7 @@ export function AppSidebar({
             <SectionLabel
               style={{ padding: "0 var(--sp-4) var(--sp-6)" }}
             >
-              Swap targets
+              {t("sidebar.swapTargets")}
             </SectionLabel>
             <div
               style={{
@@ -138,12 +144,12 @@ export function AppSidebar({
           <SidebarItem
             key={s.id}
             glyph={s.glyph}
-            label={s.label}
+            label={t(s.labelKey)}
             active={active === s.id}
             badge={badges?.[s.id] ?? undefined}
             onClick={() => onSelect(s.id)}
             collapsed={collapsed}
-            title={collapsed ? s.label : undefined}
+            title={collapsed ? t(s.labelKey) : undefined}
           />
         ))}
       </div>
@@ -190,7 +196,7 @@ export function AppSidebar({
         />
         {!collapsed && (
           <>
-            <span>{synced ? "synced" : "syncing…"}</span>
+            <span>{synced ? t("sidebar.synced") : t("sidebar.syncing")}</span>
             <span style={{ flex: 1 }} />
             {version && <span>{version}</span>}
           </>
@@ -201,10 +207,12 @@ export function AppSidebar({
             onClick={onToggleCollapsed}
             title={
               collapsed
-                ? "Expand sidebar (⌘\\)"
-                : "Collapse sidebar (⌘\\)"
+                ? t("sidebar.expandTitle")
+                : t("sidebar.collapseTitle")
             }
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={
+              collapsed ? t("sidebar.expand") : t("sidebar.collapse")
+            }
             aria-expanded={!collapsed}
             className="pm-focus"
             style={{

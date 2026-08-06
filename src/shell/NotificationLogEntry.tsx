@@ -1,3 +1,8 @@
+import { useTranslation } from "react-i18next";
+import { i18n } from "../lib/i18n";
+// Aliased: this file's own `formatTime` is the relative "2m"/"14:30"
+// chooser below, of which the intl helper is one branch.
+import { formatDate, formatTime as formatTimeOfDay } from "../lib/intl";
 import type {
   NotificationEntry,
   NotificationKind,
@@ -23,6 +28,7 @@ interface EntryRowProps {
 }
 
 export function NotificationLogEntry({ entry, onClick }: EntryRowProps) {
+  const { t } = useTranslation("components");
   const clickable = entry.target != null;
   const colors = kindColors(entry.kind);
   // Keyboard activation for clickable rows. Pre-fix this was a bare
@@ -139,13 +145,19 @@ export function NotificationLogEntry({ entry, onClick }: EntryRowProps) {
             color: "var(--fg-faint)",
           }}
         >
-          <span>{entry.source === "toast" ? "in-app" : "OS"}</span>
+          <span>
+            {entry.source === "toast"
+              ? t("notifLog.entryInApp")
+              : t("notifLog.entryOs")}
+          </span>
           <span>·</span>
+          {/* `kind` is a wire value ("info" / "notice" / "error") —
+              rendered raw, deliberately not translated. */}
           <span>{entry.kind}</span>
           {clickable && (
             <>
               <span>·</span>
-              <span>click to follow</span>
+              <span>{t("notifLog.entryFollow")}</span>
             </>
           )}
         </div>
@@ -171,18 +183,27 @@ function kindColors(k: NotificationKind): { dot: string } {
  * minute) to "Nm" minutes (sub-hour) to a wall-clock time today, to
  * a Mar 4 style date past today. Keeps the UI compact in the row's
  * tight time slot.
+ *
+ * Plain function, not a component — reads the global i18n instance.
+ * The row subscribes via `useTranslation`, so a language switch
+ * re-invokes this.
  */
 function formatTime(ms: number): string {
   const d = new Date(ms);
   const now = new Date();
   const diff = (now.getTime() - ms) / 1000;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 60) return i18n.t("notifLog.justNow", { ns: "components" });
+  if (diff < 3600) {
+    return i18n.t("notifLog.minutesShort", {
+      ns: "components",
+      n: Math.floor(diff / 60),
+    });
+  }
   const sameDay = d.toDateString() === now.toDateString();
   if (sameDay) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return formatTimeOfDay(d, { hour: "2-digit", minute: "2-digit" });
   }
-  return d.toLocaleDateString([], {
+  return formatDate(d, {
     month: "short",
     day: "numeric",
   });

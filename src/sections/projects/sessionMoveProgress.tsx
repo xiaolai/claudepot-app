@@ -1,19 +1,26 @@
 import type { ReactNode } from "react";
+import { i18n } from "../../lib/i18n";
 import type { RunningOpInfo } from "../../types";
 import type { PhaseSpec } from "./OperationProgressModal";
+
+/** Namespace-bound t — language still resolves at call time. */
+const t = i18n.getFixedT(null, "projects");
 
 /**
  * Phase ids + labels emitted by
  * `claudepot_core::session_move::move_session_with_progress`. The
  * S-prefix is intentionally distinct from project-move's P-prefix so
  * mixed event streams can be filtered cleanly.
+ *
+ * `label` is a getter so the lookup happens where the row is rendered,
+ * not at module load — see `projectMoveProgress.tsx`.
  */
 export const SESSION_MOVE_PHASES: PhaseSpec[] = [
-  { id: "S1", label: "Rewriting primary transcript" },
-  { id: "S2", label: "Moving sidecar dirs" },
-  { id: "S3", label: "Updating history.jsonl" },
-  { id: "S4", label: "Clearing .claude.json pointers" },
-  { id: "S5", label: "Cleaning up source dir" },
+  { id: "S1", get label() { return t("move.phaseS1"); } },
+  { id: "S2", get label() { return t("move.phaseS2"); } },
+  { id: "S3", get label() { return t("move.phaseS3"); } },
+  { id: "S4", get label() { return t("move.phaseS4"); } },
+  { id: "S5", get label() { return t("move.phaseS5"); } },
 ];
 
 /**
@@ -26,42 +33,42 @@ export function renderSessionMoveResult(info: RunningOpInfo | null): ReactNode {
   if (!r) return null;
   return (
     <dl className="detail-grid">
-      <dt>Transcript lines rewritten</dt>
+      <dt>{t("move.resultLines")}</dt>
       <dd>{r.jsonlLinesRewritten}</dd>
       {r.subagentFilesMoved > 0 && (
         <>
-          <dt>Subagent files moved</dt>
+          <dt>{t("move.resultSubagent")}</dt>
           <dd>{r.subagentFilesMoved}</dd>
         </>
       )}
       {r.remoteAgentFilesMoved > 0 && (
         <>
-          <dt>Remote-agent files moved</dt>
+          <dt>{t("move.resultRemote")}</dt>
           <dd>{r.remoteAgentFilesMoved}</dd>
         </>
       )}
-      <dt>History entries followed</dt>
+      <dt>{t("move.resultHistory")}</dt>
       <dd>
         {r.historyEntriesMoved}
         {r.historyEntriesUnmapped > 0 && (
           <span style={{ color: "var(--fg-faint)" }}>
             {" · "}
-            {r.historyEntriesUnmapped} stayed (pre-sessionId)
+            {t("move.resultUnmapped", { n: r.historyEntriesUnmapped })}
           </span>
         )}
       </dd>
       {r.claudeJsonPointersCleared > 0 && (
         <>
           <dt>
-            <code className="mono">.claude.json</code> pointers cleared
+            <code className="mono">.claude.json</code> {t("move.resultPointers")}
           </dt>
           <dd>{r.claudeJsonPointersCleared}</dd>
         </>
       )}
       {r.sourceDirRemoved && (
         <>
-          <dt>Source project dir</dt>
-          <dd>removed (was empty)</dd>
+          <dt>{t("move.resultSourceDir")}</dt>
+          <dd>{t("move.resultRemoved")}</dd>
         </>
       )}
     </dl>

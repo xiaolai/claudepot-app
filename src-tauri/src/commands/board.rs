@@ -18,7 +18,10 @@
 
 use claudepot_core::board::{boards_db_path, widget, BoardStore, ResolvedWidget};
 use serde::Serialize;
+use serde_json::json;
 use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::dto_error::{codes, ErrorDto};
 
 /// One long-lived store for the whole process.
 ///
@@ -33,7 +36,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// seconds for the poll.
 static STORE: OnceLock<Mutex<Option<Arc<BoardStore>>>> = OnceLock::new();
 
-fn open() -> Result<Arc<BoardStore>, String> {
+fn open() -> Result<Arc<BoardStore>, ErrorDto> {
     let cell = STORE.get_or_init(|| Mutex::new(None));
     let mut guard = cell.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(existing) = guard.as_ref() {
@@ -42,10 +45,7 @@ fn open() -> Result<Arc<BoardStore>, String> {
     // A failed open is NOT cached: the data dir may not exist yet on a
     // first run, and caching the error would make the surface
     // permanently dead until restart.
-    let store = Arc::new(
-        BoardStore::open(&boards_db_path())
-            .map_err(|e| format!("boards store open failed: {e}"))?,
-    );
+    let store = Arc::new(BoardStore::open(&boards_db_path()).map_err(ErrorDto::from)?);
     *guard = Some(store.clone());
     Ok(store)
 }
@@ -107,10 +107,10 @@ const PROVENANCE_NOTE: &str =
 const READ_CAP: usize = 20_000;
 
 #[tauri::command]
-pub async fn board_list() -> Result<Vec<BoardSummaryDto>, String> {
+pub async fn board_list() -> Result<Vec<BoardSummaryDto>, ErrorDto> {
     let store = open()?;
     // One batched call, not `1 + boards × series` round trips.
-    let summaries = store.list_summaries().map_err(|e| e.to_string())?;
+    let summaries = store.list_summaries().map_err(ErrorDto::from)?;
     Ok(summaries
         .into_iter()
         .map(|s| BoardSummaryDto {
@@ -127,14 +127,14 @@ pub async fn board_list() -> Result<Vec<BoardSummaryDto>, String> {
 }
 
 #[tauri::command]
-pub async fn board_detail(board_id: String) -> Result<BoardDetailDto, String> {
+pub async fn board_detail(board_id: String) -> Result<BoardDetailDto, ErrorDto> {
     let store = open()?;
     // ONE transactional snapshot. Assembling this from separate reads
     // let a concurrent writer land between them, so the row count could
     // disagree with the rows shipped beside it.
     let snap = store
         .detail_snapshot(&board_id, READ_CAP)
-        .map_err(|e| e.to_string())?;
+        .map_err(ErrorDto::from)?;
 
     let mut series = Vec::with_capacity(snap.series.len());
     let mut widgets = Vec::new();
@@ -205,16 +205,16 @@ pub async fn board_detail(board_id: String) -> Result<BoardDetailDto, String> {
 /// no delta — see `board::monitor` for why a watcher is the wrong tool
 /// and why `data_version` gives no diff.
 #[tauri::command]
-pub async fn board_data_version() -> Result<i64, String> {
+pub async fn board_data_version() -> Result<i64, ErrorDto> {
     let store = open()?;
-    store.data_version().map_err(|e| e.to_string())
+    store.data_version().map_err(ErrorDto::from)
 }
 
 /// Delete a board and all its data. Explicit only — nothing prunes.
 #[tauri::command]
-pub async fn board_delete(board_id: String) -> Result<(), String> {
+pub async fn board_delete(board_id: String) -> Result<(), ErrorDto> {
     let store = open()?;
-    store.delete_board(&board_id).map_err(|e| e.to_string())
+    store.delete_board(&board_id).map_err(ErrorDto::from)
 }
 
 /// Export a board to a path chosen by the caller.
@@ -225,10 +225,13 @@ pub async fn board_delete(board_id: String) -> Result<(), String> {
 /// wherever the OS happened to launch it from. A save dialog picks the
 /// destination; this command refuses anything else rather than guessing.
 #[tauri::command]
-pub async fn board_export(board_id: String, path: String) -> Result<String, String> {
+pub async fn board_export(board_id: String, path: String) -> Result<String, ErrorDto> {
     let target = std::path::Path::new(&path);
     if !target.is_absolute() {
-        return Err("export path must be absolute — pick a destination first".to_string());
+        return Err(ErrorDto::new(
+            codes::BOARD_EXPORT_PATH_NOT_ABSOLUTE,
+            "export path must be absolute — pick a destination first",
+        ));
     }
     let store = open()?;
     // `create_new` makes "must not exist" atomic. An `exists()` check
@@ -239,10 +242,18 @@ pub async fn board_export(board_id: String, path: String) -> Result<String, Stri
         .create_new(true)
         .open(&path)
         .map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => format!("{path} already exists"),
-            _ => format!("creating {path}: {e}"),
+            std::io::ErrorKind::AlreadyExists => ErrorDto::with_params(
+                codes::BOARD_EXPORT_PATH_EXISTS,
+                json!({ "path": path }),
+                format!("{path} already exists"),
+            ),
+            _ => ErrorDto::with_params(
+                codes::BOARD_EXPORT_CREATE_FAILED,
+                json!({ "path": path, "detail": e.to_string() }),
+                format!("creating {path}: {e}"),
+            ),
         })?;
     let mut w = std::io::BufWriter::new(file);
-    claudepot_core::board::export_json(&store, &board_id, &mut w).map_err(|e| e.to_string())?;
+    claudepot_core::board::export_json(&store, &board_id, &mut w).map_err(ErrorDto::from)?;
     Ok(path)
 }

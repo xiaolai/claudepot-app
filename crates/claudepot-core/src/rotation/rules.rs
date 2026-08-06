@@ -209,6 +209,54 @@ pub enum ValidationError {
     UnsupportedSchemaVersion { found: u32, expected: u32 },
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The module segment is `rotation_rules`, not `rotation` — two sibling
+/// modules (`permission::grants`, `pricing::history`) also name an enum
+/// `ValidationError`, and one shared namespace would make the three
+/// indistinguishable to a translator.
+impl crate::error_code::ErrorCode for ValidationError {
+    fn code(&self) -> &'static str {
+        match self {
+            ValidationError::EmptyId => "rotation_rules.empty_id",
+            ValidationError::DuplicateId(_) => "rotation_rules.duplicate_id",
+            ValidationError::BadThreshold(_) => "rotation_rules.bad_threshold",
+            ValidationError::EmptyCandidates => "rotation_rules.empty_candidates",
+            ValidationError::DuplicateCandidate(_) => "rotation_rules.duplicate_candidate",
+            ValidationError::EmptyExplicitEmail => "rotation_rules.empty_explicit_email",
+            ValidationError::ZeroMaxSwaps => "rotation_rules.zero_max_swaps",
+            ValidationError::LeastUsedWindowMismatch { .. } => {
+                "rotation_rules.least_used_window_mismatch"
+            }
+            ValidationError::UnsupportedSchemaVersion { .. } => {
+                "rotation_rules.unsupported_schema_version"
+            }
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ValidationError::EmptyId
+            | ValidationError::EmptyCandidates
+            | ValidationError::EmptyExplicitEmail
+            | ValidationError::ZeroMaxSwaps => serde_json::json!({}),
+            ValidationError::DuplicateId(rule_id) => serde_json::json!({ "rule_id": rule_id }),
+            ValidationError::BadThreshold(pct) => serde_json::json!({ "pct": pct }),
+            // An account email — the app's account identity, already the
+            // `{0}` of the English message. Never a credential.
+            ValidationError::DuplicateCandidate(email) => serde_json::json!({ "email": email }),
+            // Both are `&'static str` window names (`five_hour`, …).
+            ValidationError::LeastUsedWindowMismatch { selector, trigger } => {
+                serde_json::json!({ "selector": selector, "trigger": trigger })
+            }
+            ValidationError::UnsupportedSchemaVersion { found, expected } => {
+                serde_json::json!({ "found": found, "expected": expected })
+            }
+        }
+    }
+}
+
 impl RotationRulesFile {
     /// Validate the entire file. Fails on any structural defect — the
     /// caller (typically `store::save`) refuses to persist invalid

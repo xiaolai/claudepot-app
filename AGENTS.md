@@ -400,6 +400,80 @@ focused", and `useShellShortcuts` / `useGlobalShortcuts` / the
 palette all defer to it. Forking a weaker check is how ⌘K ended up
 able to open over an already-open dialog.
 
+## Internationalization (en + zh-CN)
+
+Two locales ship: `en` and `zh-CN`. English is the source of truth
+everywhere; a missing translation falls back to English rather than
+failing, which is why the catalogs are gated in CI (see below).
+Full design in `dev-docs/i18n-plan.md`.
+
+**Three catalogs, three owners.** They are not interchangeable:
+
+- `src/locales/<locale>/<ns>.json` — the React UI, 16 namespaces
+  (`common`, `components`, `shell`, `errors`, plus one per section).
+  Loaded statically and initialized **synchronously** in
+  `src/lib/i18n.ts` (`initAsync: false`) so the first paint is already
+  localized. `src/types/i18next.d.ts` types `t()` against the *English*
+  catalogs — a key that doesn't exist is a compile error, not a runtime
+  English leak. Adding a namespace means editing both files.
+- `src-tauri/i18n/<locale>.json` — the Rust-authored surfaces: app
+  menu, tray, and the four OS-banner modules. Hand-rolled lookup in
+  `src-tauri/src/i18n.rs` (`tr` / `tr1` / `tr_args` / `tr_n`), embedded
+  with `include_str!`. Deliberately not a crate dependency: ~120 flat
+  keys and zh needs no plural rules.
+- **Nothing in `claudepot-core`.** Core's `thiserror` strings stay
+  canonical English — the CLI prints them verbatim and the GUI uses
+  them as its fallback. Localizing core would fork the CLI's output.
+
+**What stays English, permanently:** CLI stdout/stderr and `--json`,
+logs and tracing, core error `Display` text, and technical identifiers
+(paths, model ids, CC setting keys like `cleanupPeriodDays`, env var
+names, commands the user copies). Localizing a value the user must
+type or paste is a bug, not a feature — the retention pane's
+type-to-confirm gate is the one deliberate exception, because a zh
+user must be able to type the phrase they are shown.
+
+**Load-bearing rules, each learned the hard way:**
+
+- **Module-level label constants freeze the boot language.** A
+  `const X = { label: "Foo" }` evaluated at import time never follows a
+  language switch. Use a `labelKey` resolved where rendered, or a lazy
+  `get label()` — `src/sections/settings/panes.ts` and
+  `src/sections/global/tabs.ts` are the reference implementations, and
+  they stay JSX-free so the ⌘K palette can import them without
+  dragging their section chunks into the main bundle.
+- **Locale preference is `Option<String>`, and `None` means follow the
+  OS.** Never write a resolved locale back into `preferences.json`, or
+  "follow system" stops following. `localStorage` mirrors the
+  *preference* purely so first paint is correct before IPC returns;
+  `preferences.json` is authoritative.
+- **`sys-locale`, not `LANG`.** Dock-launched macOS apps inherit no
+  env, so env-var detection silently resolves everyone to English.
+- **CJK glyphs come from Sarasa Mono SC**, `unicode-range`-gated in
+  `index.html` so an English-only session never downloads ~9 MB.
+  JetBrains Mono has no CJK coverage — this also fixes Chinese
+  *project names* in the English UI, which were falling back to a
+  proportional system face.
+- **Section labels live in `shell:sections.*`, keyed by registry
+  `labelKey`.** Log tags and `ErrorBoundary` labels use the section
+  `id` instead — machine-facing strings must not move with the UI
+  language.
+- **Notification category names key off the category id**
+  (`src/lib/notifications/labels.ts`), not the English label core
+  ships over IPC. The fixture test in
+  `src/lib/notifications/types.test.ts` fails when a new core category
+  lacks catalog entries — that is the moment the English fallback
+  would start leaking into a zh UI.
+
+**The gate:** `pnpm check:catalogs` (`scripts/check-catalogs.mjs`, wired
+into `ci.yml`) enforces en↔zh key parity, `{{placeholder}}` parity,
+`<Trans>` tag parity, no orphans, no empty values, valid JSON. Plural
+parity is asserted on plural *bases*, since zh legitimately carries
+only `_other` where en carries `_one` + `_other`. Point
+`CLAUDEPOT_LOCALES_DIR` at a fixture to exercise the gate itself — a
+check nobody has watched fail is indistinguishable from one that
+cannot fail, which is precisely what `check:envvar-layout` had become.
+
 ## Settings-file mutation boundary
 
 `claudepot-core::settings_mutex::mutate_settings_file` is the **only**

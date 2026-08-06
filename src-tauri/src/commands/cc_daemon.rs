@@ -12,13 +12,18 @@
 //! the core type to a DTO.
 
 use crate::dto_cc_daemon::DaemonStatusDto;
+use crate::dto_error::ErrorDto;
 
 /// One-shot scrape. Runs on a blocking thread so the IPC worker isn't
 /// tied up for the (sub-second but synchronous) process spawn.
+///
+/// The scrape itself is infallible — `scrape_daemon_status` reports an
+/// unavailable daemon in the snapshot, not as an error — so the only
+/// rejection is the shared `spawn_blocking` join failure.
 #[tauri::command]
-pub async fn cc_daemon_status() -> Result<DaemonStatusDto, String> {
+pub async fn cc_daemon_status() -> Result<DaemonStatusDto, ErrorDto> {
     let snapshot = tokio::task::spawn_blocking(claudepot_core::cc_daemon::scrape_daemon_status)
         .await
-        .map_err(|e| format!("cc_daemon blocking-task join: {e}"))?;
+        .map_err(ErrorDto::task_join)?;
     Ok(snapshot.into())
 }

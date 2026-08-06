@@ -21,15 +21,30 @@
 //! `claudepot_core::env_vault::env_file`'s line editor (split/join
 //! intermediates) are accepted residue; scrubbing them would mean
 //! rebuilding the parser around owned-secret types.
+//!
+//! # Errors carry a code, and never a value
+//!
+//! Rejections are [`ErrorDto`] (i18n plan §2.5): a `code` the renderer
+//! translates, `params` it interpolates, and the English `Display`
+//! text in `message` as the fallback. The English operation prefixes
+//! this module used to write (`"vault add: …"`, `"env_file_set join:
+//! …"`) are gone — the UI knows what it was attempting.
+//!
+//! The scrub boundary above extends to `params`. It crosses the IPC
+//! bridge into the JS heap, so **no `.env` value and no vault secret
+//! may appear in one**: every param below is a path, a file name, or a
+//! key name. `EnvEditError`'s core `params` obey the same rule — see
+//! its `ErrorCode` impl.
 
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use claudepot_core::env_vault::env_file::{self, EnvEditError};
+use claudepot_core::env_vault::env_file;
 use claudepot_core::env_vault::store::{secret_preview, VaultStore};
 use claudepot_core::env_vault::vault_db_path;
 use claudepot_core::fs_utils::atomic_write;
+use serde_json::json;
 use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use zeroize::{Zeroize, Zeroizing};
@@ -39,11 +54,12 @@ use crate::commands::keys::{
     now_unix_ms, schedule_self_clear, KeyCopyReceiptDto, CLIPBOARD_CLEAR_MS,
 };
 use crate::dto_env::{entries_from_lines, EnvFileDto, ProjectEnvDto, VaultSecretDto};
+use crate::dto_error::{codes, ErrorDto};
 
 const MAX_ENV_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
-fn open_vault() -> Result<VaultStore, String> {
-    VaultStore::open(&vault_db_path()).map_err(|e| format!("env vault open failed: {e}"))
+fn open_vault() -> Result<VaultStore, ErrorDto> {
+    VaultStore::open(&vault_db_path()).map_err(ErrorDto::from)
 }
 
 /// Scrub the owned key/value `String`s inside parsed `.env` lines.
@@ -63,24 +79,39 @@ fn zeroize_lines(lines: &mut [env_file::EnvLine]) {
     }
 }
 
-fn edit_err(e: EnvEditError) -> String {
-    e.to_string()
+/// `read {path} failed: {e}` — the English is frozen; `params` splits
+/// it so a localized sentence can name the file without re-parsing.
+fn read_failed(path: &Path, e: &std::io::Error) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::ENV_FILE_READ_FAILED,
+        json!({ "path": path.display().to_string(), "detail": e.to_string() }),
+        format!("read {} failed: {e}", path.display()),
+    )
 }
 
-fn read_env_content(path: &Path) -> Result<Zeroizing<String>, String> {
-    let file = File::open(path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
+fn read_env_content(path: &Path) -> Result<Zeroizing<String>, ErrorDto> {
+    let file = File::open(path).map_err(|e| read_failed(path, &e))?;
     let mut bytes = Zeroizing::new(Vec::new());
     file.take(MAX_ENV_FILE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| format!("read {} failed: {e}", path.display()))?;
+        .map_err(|e| read_failed(path, &e))?;
     if bytes.len() as u64 > MAX_ENV_FILE_BYTES {
-        return Err(format!(
-            "{} is too large for the environment-file editor (maximum {MAX_ENV_FILE_BYTES} bytes)",
-            path.display()
+        return Err(ErrorDto::with_params(
+            codes::ENV_FILE_TOO_LARGE,
+            json!({ "path": path.display().to_string(), "max_bytes": MAX_ENV_FILE_BYTES }),
+            format!(
+                "{} is too large for the environment-file editor (maximum {MAX_ENV_FILE_BYTES} bytes)",
+                path.display()
+            ),
         ));
     }
-    let content = String::from_utf8(bytes.to_vec())
-        .map_err(|_| format!("{} is not valid UTF-8", path.display()))?;
+    let content = String::from_utf8(bytes.to_vec()).map_err(|_| {
+        ErrorDto::with_params(
+            codes::ENV_FILE_INVALID_ENCODING,
+            json!({ "path": path.display().to_string() }),
+            format!("{} is not valid UTF-8", path.display()),
+        )
+    })?;
     Ok(Zeroizing::new(content))
 }
 
@@ -88,11 +119,17 @@ fn read_env_content(path: &Path) -> Result<Zeroizing<String>, String> {
 /// Tauri commands and cooperating Claudepot processes. The sidecar is not a
 /// security boundary; it prevents our own concurrent editors from silently
 /// losing one another's changes.
-fn lock_env_file(path: &Path) -> Result<File, String> {
+fn lock_env_file(path: &Path) -> Result<File, ErrorDto> {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("invalid dotenv path: {}", path.display()))?;
+        .ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::ENV_FILE_INVALID_DOTENV_PATH,
+                json!({ "path": path.display().to_string() }),
+                format!("invalid dotenv path: {}", path.display()),
+            )
+        })?;
     let lock_path = path.with_file_name(format!(".{name}.claudepot.lock"));
     let file = OpenOptions::new()
         .read(true)
@@ -100,9 +137,20 @@ fn lock_env_file(path: &Path) -> Result<File, String> {
         .create(true)
         .truncate(false)
         .open(&lock_path)
-        .map_err(|e| format!("open dotenv lock {} failed: {e}", lock_path.display()))?;
-    file.lock()
-        .map_err(|e| format!("lock dotenv file {} failed: {e}", path.display()))?;
+        .map_err(|e| {
+            ErrorDto::with_params(
+                codes::ENV_FILE_LOCK_OPEN_FAILED,
+                json!({ "path": lock_path.display().to_string(), "detail": e.to_string() }),
+                format!("open dotenv lock {} failed: {e}", lock_path.display()),
+            )
+        })?;
+    file.lock().map_err(|e| {
+        ErrorDto::with_params(
+            codes::ENV_FILE_LOCK_FAILED,
+            json!({ "path": path.display().to_string(), "detail": e.to_string() }),
+            format!("lock dotenv file {} failed: {e}", path.display()),
+        )
+    })?;
     Ok(file)
 }
 
@@ -126,23 +174,42 @@ fn is_dotenv_file_name(name: &str) -> bool {
 /// `env_file_list` results carried; this rejects anything that could
 /// escape the project root (separators, `..`, NUL) or that isn't a
 /// dotenv file at all (see [`is_dotenv_file_name`]).
-fn safe_env_file_name(name: &str) -> Result<(), String> {
+fn safe_env_file_name(name: &str) -> Result<(), ErrorDto> {
     if name.is_empty() {
-        return Err("empty .env file name".to_string());
+        return Err(ErrorDto::new(
+            codes::ENV_FILE_NAME_EMPTY,
+            "empty .env file name",
+        ));
     }
     if name.contains('/') || name.contains('\\') || name.contains('\0') || name.contains("..") {
-        return Err(format!("unsafe .env file name: {name:?}"));
+        return Err(ErrorDto::with_params(
+            codes::ENV_FILE_NAME_UNSAFE,
+            json!({ "file_name": name }),
+            format!("unsafe .env file name: {name:?}"),
+        ));
     }
     if !is_dotenv_file_name(name) {
-        return Err(format!("not a .env file: {name:?}"));
+        return Err(ErrorDto::with_params(
+            codes::ENV_FILE_NAME_NOT_DOTENV,
+            json!({ "file_name": name }),
+            format!("not a .env file: {name:?}"),
+        ));
     }
     Ok(())
 }
 
+/// The shared `validate_project_path` still returns a prefixed English
+/// string — it is used by every command domain, so converting it is a
+/// fan-out slice of its own. Wrap it under a stable code meanwhile.
+fn check_project_path(project_path: &str) -> Result<(), ErrorDto> {
+    validate_project_path(project_path)
+        .map_err(|m| ErrorDto::detail(codes::ENV_FILE_INVALID_PROJECT_PATH, m))
+}
+
 /// `<project_root>/<file_name>`, after validating `file_name` is a
 /// safe bare dotenv filename.
-fn env_file_path(project_path: &str, file_name: &str) -> Result<PathBuf, String> {
-    validate_project_path(project_path)?;
+fn env_file_path(project_path: &str, file_name: &str) -> Result<PathBuf, ErrorDto> {
+    check_project_path(project_path)?;
     safe_env_file_name(file_name)?;
     Ok(Path::new(project_path).join(file_name))
 }
@@ -151,21 +218,37 @@ fn env_file_path(project_path: &str, file_name: &str) -> Result<PathBuf, String>
 /// Best-effort over directory entries, but a file that exists and
 /// can't be read is a hard error (fail loud, don't silently hide a
 /// permission problem).
-fn scan_env_files(project_path: &str) -> Result<Vec<EnvFileDto>, String> {
-    validate_project_path(project_path)?;
+fn scan_env_files(project_path: &str) -> Result<Vec<EnvFileDto>, ErrorDto> {
+    check_project_path(project_path)?;
     let root = Path::new(project_path);
     let read_dir = match std::fs::read_dir(root) {
         Ok(rd) => rd,
         // Orphan project / unreachable source → no files, not an error.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("read project dir failed: {e}")),
+        Err(e) => {
+            return Err(ErrorDto::with_params(
+                codes::ENV_FILE_READ_DIR_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("read project dir failed: {e}"),
+            ))
+        }
     };
     let mut files = Vec::new();
     for entry in read_dir {
-        let entry = entry.map_err(|e| format!("read dir entry failed: {e}"))?;
-        let file_type = entry
-            .file_type()
-            .map_err(|e| format!("stat dir entry failed: {e}"))?;
+        let entry = entry.map_err(|e| {
+            ErrorDto::with_params(
+                codes::ENV_FILE_DIR_ENTRY_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("read dir entry failed: {e}"),
+            )
+        })?;
+        let file_type = entry.file_type().map_err(|e| {
+            ErrorDto::with_params(
+                codes::ENV_FILE_STAT_ENTRY_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("stat dir entry failed: {e}"),
+            )
+        })?;
         if !file_type.is_file() {
             continue;
         }
@@ -195,7 +278,7 @@ fn scan_env_files(project_path: &str) -> Result<Vec<EnvFileDto>, String> {
     Ok(files)
 }
 
-fn project_env_dto(project_path: String) -> Result<ProjectEnvDto, String> {
+fn project_env_dto(project_path: String) -> Result<ProjectEnvDto, ErrorDto> {
     let files = scan_env_files(&project_path)?;
     Ok(ProjectEnvDto {
         project_path,
@@ -208,8 +291,8 @@ fn project_env_dto(project_path: String) -> Result<ProjectEnvDto, String> {
 fn mutate_env_file(
     project_path: String,
     file_name: String,
-    edit: impl FnOnce(&str) -> Result<String, String>,
-) -> Result<ProjectEnvDto, String> {
+    edit: impl FnOnce(&str) -> Result<String, ErrorDto>,
+) -> Result<ProjectEnvDto, ErrorDto> {
     let path = env_file_path(&project_path, &file_name)?;
     let _lock = lock_env_file(&path)?;
     // The pre-edit buffer holds every secret already in the file —
@@ -220,8 +303,13 @@ fn mutate_env_file(
         Err(e) => return Err(e),
     };
     let mut new_content = edit(&content)?;
-    let write_result = atomic_write(&path, new_content.as_bytes())
-        .map_err(|e| format!("write {} failed: {e}", path.display()));
+    let write_result = atomic_write(&path, new_content.as_bytes()).map_err(|e| {
+        ErrorDto::with_params(
+            codes::ENV_FILE_WRITE_FAILED,
+            json!({ "path": path.display().to_string(), "detail": e.to_string() }),
+            format!("write {} failed: {e}", path.display()),
+        )
+    });
     // The freshly-written content has the secret value newly placed —
     // scrub our heap copy once it's on disk.
     new_content.zeroize();
@@ -233,20 +321,20 @@ fn mutate_env_file(
 
 /// Every named secret in the local vault. No plaintext crosses.
 #[tauri::command]
-pub async fn env_vault_list() -> Result<Vec<VaultSecretDto>, String> {
+pub async fn env_vault_list() -> Result<Vec<VaultSecretDto>, ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let vault = open_vault()?;
-        let rows = vault.list().map_err(|e| format!("vault list: {e}"))?;
-        Ok::<_, String>(rows.iter().map(VaultSecretDto::from).collect())
+        let rows = vault.list().map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(rows.iter().map(VaultSecretDto::from).collect())
     })
     .await
-    .map_err(|e| format!("env_vault_list join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Add a new named secret. The `secret` arrives over the IPC bridge
 /// and is zeroized on every exit path.
 #[tauri::command]
-pub async fn env_vault_add(name: String, mut secret: String) -> Result<VaultSecretDto, String> {
+pub async fn env_vault_add(name: String, mut secret: String) -> Result<VaultSecretDto, ErrorDto> {
     let result = {
         let name = name.clone();
         let secret_copy = secret.clone();
@@ -256,12 +344,12 @@ pub async fn env_vault_add(name: String, mut secret: String) -> Result<VaultSecr
             let outcome = vault
                 .insert(&name, &buf)
                 .map(|r| VaultSecretDto::from(&r))
-                .map_err(|e| format!("vault add: {e}"));
+                .map_err(ErrorDto::from);
             buf.zeroize();
             outcome
         })
         .await
-        .map_err(|e| format!("env_vault_add join: {e}"))?
+        .map_err(ErrorDto::task_join)?
     };
     secret.zeroize();
     result
@@ -270,7 +358,10 @@ pub async fn env_vault_add(name: String, mut secret: String) -> Result<VaultSecr
 /// Replace the value of an existing named secret. `secret` zeroized
 /// on every exit path.
 #[tauri::command]
-pub async fn env_vault_update(name: String, mut secret: String) -> Result<VaultSecretDto, String> {
+pub async fn env_vault_update(
+    name: String,
+    mut secret: String,
+) -> Result<VaultSecretDto, ErrorDto> {
     let result = {
         let name = name.clone();
         let secret_copy = secret.clone();
@@ -280,12 +371,12 @@ pub async fn env_vault_update(name: String, mut secret: String) -> Result<VaultS
             let outcome = vault
                 .update(&name, &buf)
                 .map(|r| VaultSecretDto::from(&r))
-                .map_err(|e| format!("vault update: {e}"));
+                .map_err(ErrorDto::from);
             buf.zeroize();
             outcome
         })
         .await
-        .map_err(|e| format!("env_vault_update join: {e}"))?
+        .map_err(ErrorDto::task_join)?
     };
     secret.zeroize();
     result
@@ -293,15 +384,13 @@ pub async fn env_vault_update(name: String, mut secret: String) -> Result<VaultS
 
 /// Delete a named secret from the vault.
 #[tauri::command]
-pub async fn env_vault_delete(name: String) -> Result<(), String> {
+pub async fn env_vault_delete(name: String) -> Result<(), ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let vault = open_vault()?;
-        vault
-            .delete(&name)
-            .map_err(|e| format!("vault delete: {e}"))
+        vault.delete(&name).map_err(ErrorDto::from)
     })
     .await
-    .map_err(|e| format!("env_vault_delete join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Copy a vault secret to the OS clipboard. The value is fetched and
@@ -309,24 +398,28 @@ pub async fn env_vault_delete(name: String) -> Result<(), String> {
 /// only a `KeyCopyReceiptDto`. Self-clears after 30s if the clipboard
 /// still holds our payload.
 #[tauri::command]
-pub async fn env_vault_copy(name: String, app: AppHandle) -> Result<KeyCopyReceiptDto, String> {
+pub async fn env_vault_copy(name: String, app: AppHandle) -> Result<KeyCopyReceiptDto, ErrorDto> {
     let (mut secret, preview) = {
         let name = name.clone();
-        tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
+        tokio::task::spawn_blocking(move || -> Result<(String, String), ErrorDto> {
             let vault = open_vault()?;
-            let record = vault.get(&name).map_err(|e| format!("vault get: {e}"))?;
-            let secret = vault
-                .reveal(&name)
-                .map_err(|e| format!("vault reveal: {e}"))?;
+            let record = vault.get(&name).map_err(ErrorDto::from)?;
+            let secret = vault.reveal(&name).map_err(ErrorDto::from)?;
             Ok((secret, record.secret_preview))
         })
         .await
-        .map_err(|e| format!("env_vault_copy join: {e}"))??
+        .map_err(ErrorDto::task_join)??
     };
 
     if let Err(e) = app.clipboard().write_text(secret.clone()) {
         secret.zeroize();
-        return Err(format!("clipboard: {e}"));
+        // Same code and same English as `keys.rs`'s copy path — one
+        // clipboard failure, one catalog entry.
+        return Err(ErrorDto::with_params(
+            codes::KEYS_CLIPBOARD_WRITE_FAILED,
+            json!({ "detail": e.to_string() }),
+            format!("clipboard: {e}"),
+        ));
     }
     let clears_at = now_unix_ms() + CLIPBOARD_CLEAR_MS;
     schedule_self_clear(app.clone(), secret.clone());
@@ -344,10 +437,10 @@ pub async fn env_vault_copy(name: String, app: AppHandle) -> Result<KeyCopyRecei
 /// Every `.env*` file in a project root, each parsed into its
 /// active / commented-out key entries.
 #[tauri::command]
-pub async fn env_file_list(project_path: String) -> Result<ProjectEnvDto, String> {
+pub async fn env_file_list(project_path: String) -> Result<ProjectEnvDto, ErrorDto> {
     tokio::task::spawn_blocking(move || project_env_dto(project_path))
         .await
-        .map_err(|e| format!("env_file_list join: {e}"))?
+        .map_err(ErrorDto::task_join)?
 }
 
 /// Upsert `key=value` in a project `.env*` file (creates the file if
@@ -359,19 +452,19 @@ pub async fn env_file_set(
     file_name: String,
     key: String,
     mut value: String,
-) -> Result<ProjectEnvDto, String> {
+) -> Result<ProjectEnvDto, ErrorDto> {
     let result = {
         let value_copy = value.clone();
         tokio::task::spawn_blocking(move || {
             let mut buf = value_copy;
             let out = mutate_env_file(project_path, file_name, |content| {
-                env_file::set(content, &key, &buf).map_err(edit_err)
+                env_file::set(content, &key, &buf).map_err(ErrorDto::from)
             });
             buf.zeroize();
             out
         })
         .await
-        .map_err(|e| format!("env_file_set join: {e}"))?
+        .map_err(ErrorDto::task_join)?
     };
     value.zeroize();
     result
@@ -384,14 +477,14 @@ pub async fn env_file_comment(
     project_path: String,
     file_name: String,
     key: String,
-) -> Result<ProjectEnvDto, String> {
+) -> Result<ProjectEnvDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         mutate_env_file(project_path, file_name, |content| {
-            env_file::comment(content, &key).map_err(edit_err)
+            env_file::comment(content, &key).map_err(ErrorDto::from)
         })
     })
     .await
-    .map_err(|e| format!("env_file_comment join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Uncomment the commented-out line for `key`, making it active again.
@@ -400,14 +493,14 @@ pub async fn env_file_uncomment(
     project_path: String,
     file_name: String,
     key: String,
-) -> Result<ProjectEnvDto, String> {
+) -> Result<ProjectEnvDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         mutate_env_file(project_path, file_name, |content| {
-            env_file::uncomment(content, &key).map_err(edit_err)
+            env_file::uncomment(content, &key).map_err(ErrorDto::from)
         })
     })
     .await
-    .map_err(|e| format!("env_file_uncomment join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Delete `key`'s line — active or commented — from a project
@@ -417,14 +510,14 @@ pub async fn env_file_delete(
     project_path: String,
     file_name: String,
     key: String,
-) -> Result<ProjectEnvDto, String> {
+) -> Result<ProjectEnvDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         mutate_env_file(project_path, file_name, |content| {
-            env_file::delete(content, &key).map_err(edit_err)
+            env_file::delete(content, &key).map_err(ErrorDto::from)
         })
     })
     .await
-    .map_err(|e| format!("env_file_delete join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Copy a `.env*` entry's value to the OS clipboard. Reads the value
@@ -437,19 +530,22 @@ pub async fn env_file_copy_value(
     file_name: String,
     key: String,
     app: AppHandle,
-) -> Result<KeyCopyReceiptDto, String> {
+) -> Result<KeyCopyReceiptDto, ErrorDto> {
     let (mut value, preview) = {
         let key = key.clone();
-        tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
+        tokio::task::spawn_blocking(move || -> Result<(String, String), ErrorDto> {
             let path = env_file_path(&project_path, &file_name)?;
             // The read buffer and the parse hold every secret in the
             // file, not just the one being copied — scrub both before
             // this closure returns (`Zeroizing` on drop for the
             // buffer, `zeroize_lines` for the parse).
-            let content = Zeroizing::new(
-                std::fs::read_to_string(&path)
-                    .map_err(|e| format!("read {} failed: {e}", path.display()))?,
-            );
+            // `read_env_content`, not a bare `read_to_string`: the shared
+            // reader enforces the MAX_ENV_FILE_BYTES ceiling and reports
+            // invalid UTF-8 as `env_file.invalid_encoding`, which has its
+            // own remedy. Reading directly here silently dropped both —
+            // an oversized file was slurped whole, and a mis-encoded one
+            // reported the generic read failure.
+            let content = read_env_content(&path)?;
             let mut lines = env_file::parse(&content);
             // Active first, then commented — copy-out works for either.
             let value = lines
@@ -467,17 +563,28 @@ pub async fn env_file_copy_value(
                     })
                 });
             zeroize_lines(&mut lines);
-            let value = value.ok_or_else(|| format!("no `{key}` in {file_name}"))?;
+            // `key` and `file_name` — never the value that is missing.
+            let value = value.ok_or_else(|| {
+                ErrorDto::with_params(
+                    codes::ENV_FILE_KEY_MISSING_IN_FILE,
+                    json!({ "key": key, "file_name": file_name }),
+                    format!("no `{key}` in {file_name}"),
+                )
+            })?;
             let preview = secret_preview(&value);
             Ok((value, preview))
         })
         .await
-        .map_err(|e| format!("env_file_copy_value join: {e}"))??
+        .map_err(ErrorDto::task_join)??
     };
 
     if let Err(e) = app.clipboard().write_text(value.clone()) {
         value.zeroize();
-        return Err(format!("clipboard: {e}"));
+        return Err(ErrorDto::with_params(
+            codes::KEYS_CLIPBOARD_WRITE_FAILED,
+            json!({ "detail": e.to_string() }),
+            format!("clipboard: {e}"),
+        ));
     }
     let clears_at = now_unix_ms() + CLIPBOARD_CLEAR_MS;
     schedule_self_clear(app.clone(), value.clone());
@@ -499,20 +606,18 @@ pub async fn env_file_inject(
     project_path: String,
     file_name: String,
     vault_name: String,
-) -> Result<ProjectEnvDto, String> {
+) -> Result<ProjectEnvDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let vault = open_vault()?;
-        let mut secret = vault
-            .reveal(&vault_name)
-            .map_err(|e| format!("vault reveal: {e}"))?;
+        let mut secret = vault.reveal(&vault_name).map_err(ErrorDto::from)?;
         let out = mutate_env_file(project_path, file_name, |content| {
-            env_file::set(content, &vault_name, &secret).map_err(edit_err)
+            env_file::set(content, &vault_name, &secret).map_err(ErrorDto::from)
         });
         secret.zeroize();
         out
     })
     .await
-    .map_err(|e| format!("env_file_inject join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[cfg(test)]
@@ -620,6 +725,9 @@ mod tests {
         std::fs::write(&path, vec![b'x'; (MAX_ENV_FILE_BYTES + 1) as usize]).unwrap();
 
         let error = read_env_content(&path).unwrap_err();
-        assert!(error.contains("too large"));
+        // `message` is the frozen English the command used to return;
+        // `code` is the half a localized surface reads.
+        assert!(error.message.contains("too large"), "{}", error.message);
+        assert_eq!(error.code, codes::ENV_FILE_TOO_LARGE);
     }
 }

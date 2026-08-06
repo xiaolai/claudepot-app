@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { api } from "../api";
 import { formatSize } from "../lib/format";
+import { i18n } from "../lib/i18n";
+import { renderError } from "../lib/i18n-error";
 import type { GcOutcome } from "../types";
 
 export function useSettingsActions(pushToast: (kind: "info" | "error", text: string) => void) {
@@ -14,7 +16,9 @@ export function useSettingsActions(pushToast: (kind: "info" | "error", text: str
     setGcBusy(true);
     try {
       setGcResult(await api.repairGc(gcDays, true));
-    } catch (e) { pushToast("error", `GC preview failed: ${e}`); }
+    } catch (e) {
+      pushToast("error", renderError(e, i18n.t("maintenance.gcPreviewFailed")));
+    }
     finally { setGcBusy(false); }
   }, [gcDays, pushToast]);
 
@@ -23,8 +27,17 @@ export function useSettingsActions(pushToast: (kind: "info" | "error", text: str
     try {
       const r = await api.repairGc(gcDays, false);
       setGcResult(null);
-      pushToast("info", `GC: removed ${r.removed_journals} journals, ${r.removed_snapshots} snapshots, freed ${formatSize(r.bytes_freed)}`);
-    } catch (e) { pushToast("error", `GC failed: ${e}`); }
+      pushToast(
+        "info",
+        i18n.t("maintenance.gcDone", {
+          journals: r.removed_journals,
+          snapshots: r.removed_snapshots,
+          size: formatSize(r.bytes_freed),
+        }),
+      );
+    } catch (e) {
+      pushToast("error", renderError(e, i18n.t("maintenance.gcFailed")));
+    }
     finally { setGcBusy(false); }
   }, [gcDays, pushToast]);
 
@@ -33,9 +46,18 @@ export function useSettingsActions(pushToast: (kind: "info" | "error", text: str
     setLockBusy(true);
     try {
       const r = await api.repairBreakLock(lockPath.trim());
-      pushToast("info", `Lock broken — PID ${r.prior_pid} (${r.prior_hostname}). Audit: ${r.audit_path}`);
+      pushToast(
+        "info",
+        i18n.t("maintenance.lockBroken", {
+          pid: r.prior_pid,
+          host: r.prior_hostname,
+          auditPath: r.audit_path,
+        }),
+      );
       setLockPath("");
-    } catch (e) { pushToast("error", `Break lock failed: ${e}`); }
+    } catch (e) {
+      pushToast("error", renderError(e, i18n.t("maintenance.breakLockFailed")));
+    }
     finally { setLockBusy(false); }
   }, [lockPath, pushToast]);
 

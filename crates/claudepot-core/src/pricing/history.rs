@@ -125,6 +125,41 @@ pub enum ValidationError {
     NegativeRate(usize),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The module segment is `pricing_history`, not `pricing` — two sibling
+/// modules (`permission::grants`, `rotation::rules`) also name an enum
+/// `ValidationError`, and one shared namespace would make the three
+/// indistinguishable to a translator.
+impl crate::error_code::ErrorCode for ValidationError {
+    fn code(&self) -> &'static str {
+        match self {
+            ValidationError::UnsupportedSchemaVersion(_) => {
+                "pricing_history.unsupported_schema_version"
+            }
+            ValidationError::BadDate(_) => "pricing_history.bad_date",
+            ValidationError::EmptyModelId(_) => "pricing_history.empty_model_id",
+            ValidationError::NegativeRate(_) => "pricing_history.negative_rate",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // The message interpolates the build's own `SCHEMA_VERSION`
+            // as well as the file's, so both cross — a translator needs
+            // the pair, not just the number that was wrong.
+            ValidationError::UnsupportedSchemaVersion(found) => {
+                serde_json::json!({ "found": found, "expected": SCHEMA_VERSION })
+            }
+            // The index of the offending observation in the file.
+            ValidationError::BadDate(index)
+            | ValidationError::EmptyModelId(index)
+            | ValidationError::NegativeRate(index) => serde_json::json!({ "index": index }),
+        }
+    }
+}
+
 impl HistoryFile {
     pub fn validate(&self) -> Result<(), ValidationError> {
         if self.schema_version != SCHEMA_VERSION {
@@ -291,6 +326,27 @@ pub enum HistoryStoreError {
     Io(#[from] std::io::Error),
     #[error("validation: {0}")]
     Validation(#[from] ValidationError),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `Validation` does not delegate to the inner code — `Display` is the
+/// wrapper sentence `"validation: {0}"`, not the inner one.
+impl crate::error_code::ErrorCode for HistoryStoreError {
+    fn code(&self) -> &'static str {
+        match self {
+            HistoryStoreError::Io(_) => "pricing_history_store.io",
+            HistoryStoreError::Validation(_) => "pricing_history_store.validation",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            HistoryStoreError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            HistoryStoreError::Validation(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
 }
 
 /// Load the history file. A missing file is an empty history; a

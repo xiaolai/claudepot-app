@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 
@@ -38,6 +39,7 @@ export function SidebarItem({
   title,
   collapsed = false,
 }: SidebarItemProps) {
+  const { t } = useTranslation("components");
   const [hover, setHover] = useState(false);
   const indentPad = indent > 0 ? `calc(var(--sp-10) + var(--sp-14) * ${indent})` : "var(--sp-10)";
   // In collapsed mode the row centers a single glyph at rail width.
@@ -62,8 +64,8 @@ export function SidebarItem({
         collapsed
           ? hasBadge
             ? typeof badge === "string" || typeof badge === "number"
-              ? `${label} (${badge})`
-              : `${label} (badge)`
+              ? t("primitives.sidebarBadge", { label, badge })
+              : t("primitives.sidebarBadgeGeneric", { label })
             : label
           : undefined
       }

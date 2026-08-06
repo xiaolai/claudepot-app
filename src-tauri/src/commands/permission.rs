@@ -16,6 +16,7 @@ use claudepot_core::settings_writer::SettingsLayer;
 use std::path::Path;
 
 use super::validate_project_path;
+use crate::dto_error::{codes, ErrorDto};
 use crate::dto_permission::{project_permission_dto, ProjectPermissionDto};
 use crate::permission_orchestrator::revert_grant;
 
@@ -25,10 +26,18 @@ use crate::permission_orchestrator::revert_grant;
 const MIN_DURATION_SECS: u64 = 60;
 const MAX_DURATION_SECS: u64 = 24 * 60 * 60;
 
-fn validate_duration(secs: u64) -> Result<i64, String> {
+fn validate_duration(secs: u64) -> Result<i64, ErrorDto> {
     if !(MIN_DURATION_SECS..=MAX_DURATION_SECS).contains(&secs) {
-        return Err(format!(
-            "duration must be {MIN_DURATION_SECS}..={MAX_DURATION_SECS} seconds, got {secs}"
+        return Err(ErrorDto::with_params(
+            codes::PERMISSION_DURATION_OUT_OF_RANGE,
+            serde_json::json!({
+                "min": MIN_DURATION_SECS,
+                "max": MAX_DURATION_SECS,
+                "got": secs,
+            }),
+            format!(
+                "duration must be {MIN_DURATION_SECS}..={MAX_DURATION_SECS} seconds, got {secs}"
+            ),
         ));
     }
     // In-range against a 24h ceiling — the i64 cast cannot overflow.
@@ -42,7 +51,7 @@ fn validate_duration(secs: u64) -> Result<i64, String> {
 fn resolve_expires_at(
     duration_secs: Option<u64>,
     now: chrono::DateTime<Utc>,
-) -> Result<Option<chrono::DateTime<Utc>>, String> {
+) -> Result<Option<chrono::DateTime<Utc>>, ErrorDto> {
     match duration_secs {
         None => Ok(None),
         Some(secs) => {
@@ -59,17 +68,21 @@ fn resolve_expires_at(
 /// not auto-revert" notice is owned by
 /// `permission_orchestrator::tick`, which detects recoveries from
 /// any surface via `corrupt_grant_copies`.
-fn load_grants() -> Result<claudepot_core::permission::grants::GrantsFile, String> {
+fn load_grants() -> Result<claudepot_core::permission::grants::GrantsFile, ErrorDto> {
+    // `load_outcome` returns a bare `io::Error`, not
+    // `PermissionStoreError`, so the identity is minted here. The
+    // `grants load failed: ` prefix this used to prepend is gone — the
+    // operation framing belongs to the UI, which knows what the user
+    // was doing; the I/O text survives as `ErrorDto.message`.
     permission_store::load_outcome()
         .map(|loaded| loaded.value)
-        .map_err(|e| format!("grants load failed: {e}"))
+        .map_err(|e| ErrorDto::detail(codes::PERMISSION_GRANTS_LOAD_FAILED, e))
 }
 
 /// Resolve `project_path` to a `ProjectPermissionDto`, reading the
 /// current settings state and the active grant (if any) from disk.
-fn current_dto(project_path: &str) -> Result<ProjectPermissionDto, String> {
-    let state = resolve_default_mode(Path::new(project_path))
-        .map_err(|e| format!("read permission settings: {e}"))?;
+fn current_dto(project_path: &str) -> Result<ProjectPermissionDto, ErrorDto> {
+    let state = resolve_default_mode(Path::new(project_path)).map_err(ErrorDto::from)?;
     let file = permission_store::load_or_default();
     let active = eval::active_grant(&file, project_path, Utc::now());
     let active = filter_stale(&state, active);
@@ -101,10 +114,10 @@ fn filter_stale<'a>(
 /// Every CC project with its effective permission mode and any active
 /// Claudepot grant. The dashboard's data source.
 #[tauri::command]
-pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
+pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, ErrorDto> {
     tauri::async_runtime::spawn_blocking(|| {
         let cfg = claudepot_core::paths::claude_config_dir();
-        let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
+        let projects = project::list_projects(&cfg).map_err(ErrorDto::from)?;
         // `load_outcome` (not `load_or_default`) so a real I/O failure
         // surfaces instead of silently rendering every project as
         // un-granted. A corruption recovery (file moved aside, empty
@@ -116,9 +129,20 @@ pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
         let now = Utc::now();
         projects
             .iter()
-            .map(|p| -> Result<_, String> {
+            .map(|p| -> Result<_, ErrorDto> {
+                // The one place the prefix stays in Rust: it carries
+                // *which* project failed, which is data, not framing.
+                // `project_path` crosses structured so the localized
+                // sentence names it without parsing the English.
                 let state = resolve_default_mode(Path::new(&p.original_path)).map_err(|e| {
-                    format!("read permission settings for {}: {e}", p.original_path)
+                    ErrorDto::with_params(
+                        codes::PERMISSION_READ_SETTINGS_FOR_PROJECT,
+                        serde_json::json!({
+                            "project_path": p.original_path,
+                            "detail": e.to_string(),
+                        }),
+                        format!("read permission settings for {}: {e}", p.original_path),
+                    )
                 })?;
                 let active = eval::active_grant(&file, &p.original_path, now);
                 let active = filter_stale(&state, active);
@@ -131,26 +155,25 @@ pub async fn permission_list() -> Result<Vec<ProjectPermissionDto>, String> {
             .collect::<Result<Vec<_>, _>>()
     })
     .await
-    .map_err(|e| format!("permission_list join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// One project's permission state. The single-project sibling of
 /// [`permission_list`] — used by the ProjectDetail panel so opening a
 /// project doesn't trigger a full project-tree scan.
 #[tauri::command]
-pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto, String> {
+pub async fn permission_get(project_path: String) -> Result<ProjectPermissionDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         // Three-outcome load — see `load_grants` for the recovery
         // contract.
         let file = load_grants()?;
-        let state = resolve_default_mode(Path::new(&project_path))
-            .map_err(|e| format!("read permission settings: {e}"))?;
+        let state = resolve_default_mode(Path::new(&project_path)).map_err(ErrorDto::from)?;
         let active = eval::active_grant(&file, &project_path, Utc::now());
         let active = filter_stale(&state, active);
         Ok(project_permission_dto(project_path.clone(), &state, active))
     })
     .await
-    .map_err(|e| format!("permission_get join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Set `permissions.defaultMode` for a project to `mode` for
@@ -176,18 +199,24 @@ pub async fn permission_grant(
     project_path: String,
     mode: String,
     duration_secs: Option<u64>,
-) -> Result<ProjectPermissionDto, String> {
+) -> Result<ProjectPermissionDto, ErrorDto> {
     let granted_mode = PermissionMode::from_wire_str(&mode);
     if !granted_mode.is_known() {
-        return Err(format!(
-            "`{mode}` is not a permission mode Claudepot can grant"
+        return Err(ErrorDto::with_params(
+            codes::PERMISSION_UNKNOWN_MODE,
+            serde_json::json!({ "mode": mode }),
+            format!("`{mode}` is not a permission mode Claudepot can grant"),
         ));
     }
     let now = Utc::now();
     let expires_at = resolve_expires_at(duration_secs, now)?;
 
     tauri::async_runtime::spawn_blocking(move || {
-        validate_project_path(&project_path)?;
+        // `validate_project_path` is shared across command files and
+        // still speaks `String`; lift it here rather than change a
+        // helper other domains are converting in parallel.
+        validate_project_path(&project_path)
+            .map_err(|detail| ErrorDto::detail(codes::PERMISSION_INVALID_PROJECT_PATH, detail))?;
         let root = Path::new(&project_path);
         // Hold the grants-file lock across the whole load → mutate →
         // save (and the settings write that must stay consistent with
@@ -204,7 +233,7 @@ pub async fn permission_grant(
             Some(existing) => existing.previous_mode.clone(),
             None => {
                 resolve_default_mode(root)
-                    .map_err(|e| format!("read permission settings: {e}"))?
+                    .map_err(ErrorDto::from)?
                     .local_project_value
             }
         };
@@ -224,7 +253,7 @@ pub async fn permission_grant(
         // Persist the grant record FIRST. If this fails the settings
         // file is untouched — a clean failure with nothing to undo.
         file.upsert(grant);
-        permission_store::save(&file).map_err(|e| format!("grants save failed: {e}"))?;
+        permission_store::save(&file).map_err(ErrorDto::from)?;
 
         // Then write the settings. If THIS fails, roll the grant
         // record back out — otherwise the project would be left
@@ -235,13 +264,13 @@ pub async fn permission_grant(
         if let Err(e) = write_default_mode(SettingsLayer::LocalProject, root, &granted_mode) {
             file.remove(&project_path);
             let _ = permission_store::save(&file);
-            return Err(format!("settings write failed: {e}"));
+            return Err(ErrorDto::from(e));
         }
 
         current_dto(&project_path)
     })
     .await
-    .map_err(|e| format!("permission_grant join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Revert a project's grant immediately — restore `previous_mode`
@@ -249,25 +278,28 @@ pub async fn permission_grant(
 /// no active grant; a project elevated by hand-editing settings is
 /// not Claudepot-managed and is left untouched.
 #[tauri::command]
-pub async fn permission_revert(project_path: String) -> Result<ProjectPermissionDto, String> {
+pub async fn permission_revert(project_path: String) -> Result<ProjectPermissionDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         // Serialize against the orchestrator tick — see
         // `permission_orchestrator::grants_file_guard`.
         let _guard = crate::permission_orchestrator::grants_file_guard();
         let mut file = load_grants()?;
-        let grant = file
-            .find(&project_path)
-            .cloned()
-            .ok_or_else(|| format!("no active grant for {project_path}"))?;
+        let grant = file.find(&project_path).cloned().ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::PERMISSION_NO_ACTIVE_GRANT,
+                serde_json::json!({ "project_path": project_path }),
+                format!("no active grant for {project_path}"),
+            )
+        })?;
 
-        revert_grant(&grant).map_err(|e| format!("revert failed: {e}"))?;
+        revert_grant(&grant).map_err(ErrorDto::from)?;
         file.remove(&project_path);
-        permission_store::save(&file).map_err(|e| format!("grants save failed: {e}"))?;
+        permission_store::save(&file).map_err(ErrorDto::from)?;
 
         current_dto(&project_path)
     })
     .await
-    .map_err(|e| format!("permission_revert join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Update a grant's deadline. `Some(secs)` pushes the deadline out
@@ -280,7 +312,7 @@ pub async fn permission_revert(project_path: String) -> Result<ProjectPermission
 pub async fn permission_extend(
     project_path: String,
     duration_secs: Option<u64>,
-) -> Result<ProjectPermissionDto, String> {
+) -> Result<ProjectPermissionDto, ErrorDto> {
     let now = Utc::now();
     let expires_at = resolve_expires_at(duration_secs, now)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -292,14 +324,20 @@ pub async fn permission_extend(
             .grants
             .iter_mut()
             .find(|g| g.project_path == project_path)
-            .ok_or_else(|| format!("no active grant for {project_path}"))?;
+            .ok_or_else(|| {
+                ErrorDto::with_params(
+                    codes::PERMISSION_NO_ACTIVE_GRANT,
+                    serde_json::json!({ "project_path": project_path }),
+                    format!("no active grant for {project_path}"),
+                )
+            })?;
         grant.expires_at = expires_at;
-        permission_store::save(&file).map_err(|e| format!("grants save failed: {e}"))?;
+        permission_store::save(&file).map_err(ErrorDto::from)?;
 
         current_dto(&project_path)
     })
     .await
-    .map_err(|e| format!("permission_extend join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[cfg(test)]

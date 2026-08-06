@@ -1,8 +1,11 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import type { NfIcon } from "../../icons";
 import { NF } from "../../icons";
+import { i18n } from "../../lib/i18n";
+import { dateTimeFormat, numberFormat } from "../../lib/intl";
 import type { UsageEntry, UsageWindow } from "../../types";
 import { formatResetTime, formatResetTooltip } from "./format";
 
@@ -42,11 +45,12 @@ export function UsageBlock({
   onRefresh,
   onVerify,
 }: UsageBlockProps) {
+  const { t } = useTranslation("accounts");
   if (!entry || entry.status === "no_credentials") {
     if (anomalyShown) return null;
     return (
       <StatusLine glyph={NF.info} tone="muted">
-        Usage unavailable — no credentials.
+        {t("usage.noCreds")}
       </StatusLine>
     );
   }
@@ -66,8 +70,8 @@ export function UsageBlock({
                 <PendingButton
                   onClick={onVerify}
                   glyph={NF.shield}
-                  idle="Verify"
-                  busy="Verifying…"
+                  idle={t("usage.verify")}
+                  busy={t("usage.verifying")}
                 />
               )}
               {onRefresh && (
@@ -75,23 +79,25 @@ export function UsageBlock({
                   onClick={onRefresh}
                   glyph={NF.refresh}
                   glyphColor="var(--fg-muted)"
-                  idle="Refresh"
-                  busy="Refreshing…"
+                  idle={t("usage.refresh")}
+                  busy={t("usage.refreshing")}
                 />
               )}
             </>
           ) : undefined
         }
       >
-        Usage unavailable — token expired.
+        {t("usage.tokenExpired")}
       </StatusLine>
     );
   }
   if (entry.status === "rate_limited") {
     return (
       <StatusLine glyph={NF.clock} tone="muted">
-        Rate-limited by /api/oauth/usage · retry in{" "}
-        {entry.retry_after_secs ?? 60}s
+        {t("usage.rateLimited", {
+          endpoint: "/api/oauth/usage",
+          secs: entry.retry_after_secs ?? 60,
+        })}
       </StatusLine>
     );
   }
@@ -107,13 +113,15 @@ export function UsageBlock({
             <PendingButton
               onClick={onRefresh}
               glyph={NF.refresh}
-              idle="Retry"
-              busy="Retrying…"
+              idle={t("usage.retry")}
+              busy={t("usage.retrying")}
             />
           ) : undefined
         }
       >
-        Couldn't fetch usage: {entry.error_detail ?? "unknown error"}
+        {t("usage.fetchFailed", {
+          detail: entry.error_detail ?? t("usage.unknownError"),
+        })}
       </StatusLine>
     );
   }
@@ -122,7 +130,7 @@ export function UsageBlock({
   if (!usage) {
     return (
       <StatusLine glyph={NF.info} tone="muted">
-        No usage windows reported.
+        {t("usage.noWindows")}
       </StatusLine>
     );
   }
@@ -135,22 +143,21 @@ export function UsageBlock({
     emph: boolean;
     tooltip?: string;
   }[] = [
-    { label: "5h window", w: usage.five_hour!, emph: true },
-    { label: "7d all", w: usage.seven_day!, emph: false },
-    { label: "7d Sonnet", w: usage.seven_day_sonnet!, emph: false },
-    { label: "7d Opus", w: usage.seven_day_opus!, emph: false },
+    { label: t("usage.rows.fiveHour"), w: usage.five_hour!, emph: true },
+    { label: t("usage.rows.sevenDay"), w: usage.seven_day!, emph: false },
+    { label: t("usage.rows.sonnet"), w: usage.seven_day_sonnet!, emph: false },
+    { label: t("usage.rows.opus"), w: usage.seven_day_opus!, emph: false },
     {
-      label: "7d apps",
+      label: t("usage.rows.apps"),
       w: usage.seven_day_oauth_apps!,
       emph: false,
-      tooltip:
-        "Third-party OAuth apps authorized against this account (IDEs, tools, etc).",
+      tooltip: t("usage.rows.appsTooltip"),
     },
     {
-      label: "7d cowork",
+      label: t("usage.rows.cowork"),
       w: usage.seven_day_cowork!,
       emph: false,
-      tooltip: "Cowork / shared-seat pool usage.",
+      tooltip: t("usage.rows.coworkTooltip"),
     },
   ].filter((r) => r.w) as typeof rows;
 
@@ -164,10 +171,12 @@ export function UsageBlock({
           marginBottom: "var(--sp-10)",
         }}
       >
-        <span className="mono-cap">Rate-limit windows</span>
+        <span className="mono-cap">{t("usage.header")}</span>
         {entry.status === "stale" && entry.age_secs != null && (
           <span
-            title={`Cached — last fetched ${formatAgeAbsolute(entry.age_secs)}`}
+            title={t("usage.cachedTitle", {
+              time: formatAgeAbsolute(entry.age_secs),
+            })}
             style={{
               fontSize: "var(--fs-2xs)",
               color: "var(--fg-faint)",
@@ -181,7 +190,7 @@ export function UsageBlock({
                 marginRight: "var(--sp-4)",
               }}
             />
-            {formatAgeShort(entry.age_secs)} old
+            {t("usage.ageOld", { age: formatAgeShort(entry.age_secs) })}
           </span>
         )}
       </div>
@@ -223,12 +232,13 @@ export function UsageBlock({
  * USD when the server omits it (older responses).
  */
 function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["extra_usage"] }) {
+  const { t } = useTranslation("accounts");
   if (!extra) return null;
 
   if (!extra.is_enabled) {
     return (
       <div
-        title="Extras (overage billing) is disabled for this account. Enable in the Anthropic console if you need headroom past the monthly limit."
+        title={t("usage.extra.disabledTitle")}
         style={{
           marginTop: "var(--sp-12)",
           paddingTop: "var(--sp-10)",
@@ -240,8 +250,8 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
           color: "var(--fg-faint)",
         }}
       >
-        <span className="mono-cap">Extra usage</span>
-        <span className="mono-cap">off</span>
+        <span className="mono-cap">{t("usage.extra.label")}</span>
+        <span className="mono-cap">{t("usage.extra.off")}</span>
       </div>
     );
   }
@@ -279,7 +289,7 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
         fontSize: "var(--fs-xs)",
       }}
     >
-      <span className="mono-cap">Extra usage</span>
+      <span className="mono-cap">{t("usage.extra.label")}</span>
       <span
         style={{
           fontVariantNumeric: "tabular-nums",
@@ -297,7 +307,7 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
               marginRight: "var(--sp-4)",
             }}
           >
-            {pct}% used
+            {t("usage.extra.pctUsed", { pct })}
           </span>
         )}
         <b>{fmt.format(used)}</b>
@@ -306,13 +316,15 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
         </span>
         {limit > 0 && (
           <span
-            title="Remaining balance for this period (monthly limit minus spend)."
+            title={t("usage.extra.remainingTitle")}
             style={{
               color: "var(--fg-muted)",
               marginLeft: "var(--sp-4)",
             }}
           >
-            · {fmt.format(Math.max(0, limit - used))} left
+            {t("usage.extra.left", {
+              amount: fmt.format(Math.max(0, limit - used)),
+            })}
           </span>
         )}
       </span>
@@ -329,14 +341,14 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
  */
 function formatCurrency(code: string): Intl.NumberFormat {
   try {
-    return new Intl.NumberFormat(undefined, {
+    return numberFormat({
       style: "currency",
       currency: code,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
   } catch {
-    return new Intl.NumberFormat(undefined, {
+    return numberFormat({
       style: "currency",
       currency: "USD",
       minimumFractionDigits: 2,
@@ -346,16 +358,21 @@ function formatCurrency(code: string): Intl.NumberFormat {
 }
 
 function formatAgeShort(ageSecs: number): string {
-  if (ageSecs < 60) return `${Math.max(1, Math.round(ageSecs))}s`;
+  if (ageSecs < 60) {
+    return i18n.t("time.secsShort", {
+      ns: "accounts",
+      n: Math.max(1, Math.round(ageSecs)),
+    });
+  }
   const mins = Math.round(ageSecs / 60);
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return i18n.t("time.minsShort", { ns: "accounts", n: mins });
   const hrs = Math.round(mins / 60);
-  return `${hrs}h`;
+  return i18n.t("time.hoursShort", { ns: "accounts", n: hrs });
 }
 
 function formatAgeAbsolute(ageSecs: number): string {
   const date = new Date(Date.now() - ageSecs * 1000);
-  return new Intl.DateTimeFormat(undefined, {
+  return dateTimeFormat({
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",

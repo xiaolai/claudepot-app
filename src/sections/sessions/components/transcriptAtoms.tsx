@@ -1,6 +1,8 @@
 import React, { type CSSProperties, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconButton } from "../../../components/primitives/IconButton";
 import { NF } from "../../../icons";
+import { formatNumber } from "../../../lib/intl";
 import { DETAIL_QUERY_MIN_LEN } from "../sessionDetail.search";
 
 /**
@@ -119,6 +121,7 @@ export function Body({
   clamp: number;
   tone?: "ghost" | "warn";
 }) {
+  const { t } = useTranslation("sessions");
   const [expanded, setExpanded] = useState(false);
   const trimmed = text ?? "";
   const overflow = trimmed.length > clamp;
@@ -158,8 +161,8 @@ export function Body({
           }}
         >
           {expanded
-            ? "Collapse"
-            : `Show ${trimmed.length - clamp} more chars`}
+            ? t("viewer.collapse")
+            : t("viewer.showMoreChars", { n: trimmed.length - clamp })}
         </button>
       )}
     </>
@@ -229,11 +232,15 @@ function FoldPreview({
   text: string;
   onExpand: () => void;
 }) {
+  const { t } = useTranslation("sessions");
   return (
     <button type="button" onClick={onExpand} style={FOLD_PREVIEW_BUTTON}>
       <div style={FOLD_PREVIEW_LINE}>{previewLine(text)}</div>
       <div style={FOLD_PREVIEW_HINT}>
-        {text.split("\n").length} lines · {text.length.toLocaleString()} chars
+        {t("viewer.foldHint", {
+          lines: text.split("\n").length,
+          chars: formatNumber(text.length),
+        })}
       </div>
     </button>
   );
@@ -278,6 +285,7 @@ export function FoldableBubble({
   searchTerm: string;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation("sessions");
   const foldable = foldText.length > TURN_FOLD_CHARS;
   // `null` = follow the default; a boolean = the user has decided.
   const [userFolded, setUserFolded] = useState<boolean | null>(null);
@@ -322,8 +330,8 @@ export function FoldableBubble({
           glyph={folded ? NF.chevronR : NF.chevronD}
           size="sm"
           onClick={() => setUserFolded(!folded)}
-          title={folded ? "Expand turn" : "Collapse turn"}
-          aria-label={folded ? "Expand turn" : "Collapse turn"}
+          title={folded ? t("viewer.expandTurn") : t("viewer.collapseTurn")}
+          aria-label={folded ? t("viewer.expandTurn") : t("viewer.collapseTurn")}
           aria-expanded={!folded}
         />
         <div style={{ flex: 1, minWidth: 0 }}>{header}</div>

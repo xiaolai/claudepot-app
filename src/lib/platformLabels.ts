@@ -6,7 +6,13 @@
  * Inputs accept the strings emitted by `AppStatus.platform` from the
  * Rust side: "macos" | "linux" | "windows". Anything else falls back
  * to the generic label.
+ *
+ * The names below are the ENGLISH choices; each localized catalog
+ * carries the OS vendor's own name for that language (macOS ships
+ * Finder as 访达 in Simplified Chinese, for example), which is what a
+ * user actually sees in their menu bar.
  */
+import { i18n } from "./i18n";
 
 /**
  * Native file manager name for the host OS.
@@ -27,12 +33,12 @@
 export function fileManagerName(platform: string | undefined): string {
   switch (platform) {
     case "macos":
-      return "Finder";
+      return i18n.t("platform.fileManager.macos");
     case "windows":
-      return "File Explorer";
+      return i18n.t("platform.fileManager.windows");
     case "linux":
-      return "Files";
+      return i18n.t("platform.fileManager.linux");
     default:
-      return "File Manager";
+      return i18n.t("platform.fileManager.generic");
   }
 }

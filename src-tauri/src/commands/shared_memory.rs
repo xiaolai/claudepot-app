@@ -16,10 +16,12 @@
 //! hit transcript-derived rows populated by `claudepot codex index`
 //! and `claudepot session backfill-exchanges`.
 
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::redaction::{apply as redact_apply, RedactionPolicy};
 use claudepot_core::session_index::SessionIndex;
 use claudepot_core::shared_memory::{durable, read as smr, search as sms};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
 use tauri::State;
 
@@ -29,16 +31,55 @@ use tauri::State;
 /// the UI renders as a banner instead of crashing.
 pub struct SharedMemoryIndex(pub Option<Arc<SessionIndex>>);
 
-fn require_idx(state: &State<'_, SharedMemoryIndex>) -> Result<Arc<SessionIndex>, String> {
-    state
-        .0
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| "session index unavailable (open failed at startup)".to_string())
+fn require_idx(state: &State<'_, SharedMemoryIndex>) -> Result<Arc<SessionIndex>, ErrorDto> {
+    state.0.as_ref().cloned().ok_or_else(|| {
+        ErrorDto::new(
+            codes::SHARED_MEMORY_INDEX_UNAVAILABLE,
+            "session index unavailable (open failed at startup)",
+        )
+    })
 }
 
-fn join_err(e: tokio::task::JoinError) -> String {
-    format!("blocking task failed: {e}")
+/// `format!("<label>: {e}")`, kept as the DTO's `message` and mirrored
+/// into `params.detail`.
+///
+/// The label is the internal command name (`list`, `archive`,
+/// `counts_by_project`). The old frontend stripped it back off with a
+/// regex because it means nothing to a user; the code now carries that
+/// meaning properly, and the label survives only in `message` — the
+/// English fallback, which must stay byte-identical to what this
+/// command returned before.
+fn labeled(code: &'static str, label: &str, e: impl std::fmt::Display) -> ErrorDto {
+    let text = format!("{label}: {e}");
+    ErrorDto::with_params(code, json!({ "detail": text }), text)
+}
+
+/// Classify a locator read failure into "the excerpt is gone" versus
+/// "the read broke".
+///
+/// The split exists because the two need different copy and the user can
+/// only act on the first. It is drawn from the error *variant* — an
+/// unindexed locator, or an `io::ErrorKind::NotFound` — never from
+/// matching English, which is how the deleted `toExcerptError` regex
+/// (`/no such file|not found|os error 2|\bmoved\b/i`) used to do it.
+/// A permission failure reads as `read_failed`: telling someone their
+/// transcript was pruned when it is merely unreadable sends them looking
+/// for a backup they do not need.
+///
+/// `message` is `format!("read: {e}")` either way — the same string this
+/// command returned before, so the untranslated fallback is unchanged.
+fn read_error_dto(e: smr::ReadError) -> ErrorDto {
+    let gone = match &e {
+        smr::ReadError::NotIndexed(_) => true,
+        smr::ReadError::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
+        smr::ReadError::Sql(_) => false,
+    };
+    let code = if gone {
+        codes::SHARED_MEMORY_EXCERPT_UNAVAILABLE
+    } else {
+        codes::SHARED_MEMORY_READ_FAILED
+    };
+    labeled(code, "read", e)
 }
 
 /// Stricter than `RedactionPolicy::default()` — adds emails +
@@ -97,7 +138,7 @@ pub struct SearchResponseDto {
 pub async fn shared_memory_search(
     args: SearchArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<SearchResponseDto, String> {
+) -> Result<SearchResponseDto, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         // Cap at 49 (not 50): the `+1` probe below must fit within
@@ -125,7 +166,8 @@ pub async fn shared_memory_search(
             sort: sms::SearchSort::Relevance,
         };
         let policy = ui_redaction_policy();
-        let raw = sms::search(idx.as_ref(), &q, &policy).map_err(|e| format!("search: {e}"))?;
+        let raw = sms::search(idx.as_ref(), &q, &policy)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_SEARCH_FAILED, "search", e))?;
         let has_more = raw.len() as u32 > user_limit;
         let hits = raw
             .into_iter()
@@ -144,10 +186,10 @@ pub async fn shared_memory_search(
                 turn_index: h.turn_index,
             })
             .collect();
-        Ok::<_, String>(SearchResponseDto { hits, has_more })
+        Ok::<_, ErrorDto>(SearchResponseDto { hits, has_more })
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── read by locator ─────────────────────────────────────────
@@ -175,7 +217,7 @@ pub struct ConversationReadDto {
 pub async fn shared_memory_read_locator(
     args: ReadLocatorArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<ConversationReadDto, String> {
+) -> Result<ConversationReadDto, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let policy = ui_redaction_policy();
@@ -189,8 +231,8 @@ pub async fn shared_memory_read_locator(
             line_end: None,
         };
         let result = smr::read_locator_bounded(idx.as_ref(), &locator, cap, &policy)
-            .map_err(|e| format!("read: {e}"))?;
-        Ok::<_, String>(ConversationReadDto {
+            .map_err(read_error_dto)?;
+        Ok::<_, ErrorDto>(ConversationReadDto {
             file_path: result.file_path,
             exchange_id: result.exchange_id,
             line_start: result.line_start,
@@ -200,7 +242,7 @@ pub async fn shared_memory_read_locator(
         })
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── memories ────────────────────────────────────────────────
@@ -305,7 +347,7 @@ fn decision_status_str(s: durable::DecisionStatus) -> &'static str {
 pub async fn shared_memory_list_memories(
     args: ListMemoriesArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<MemoryDto>, String> {
+) -> Result<Vec<MemoryDto>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let policy = ui_redaction_policy();
@@ -320,8 +362,9 @@ pub async fn shared_memory_list_memories(
             review: durable::ReviewVisibility::All,
             limit: args.limit.unwrap_or(0),
         };
-        let rows = durable::list_memories(idx.as_ref(), &f).map_err(|e| format!("list: {e}"))?;
-        Ok::<_, String>(
+        let rows = durable::list_memories(idx.as_ref(), &f)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_LIST_MEMORIES_FAILED, "list", e))?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|m| MemoryDto {
                     id: m.id,
@@ -341,7 +384,7 @@ pub async fn shared_memory_list_memories(
         )
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -360,13 +403,26 @@ pub struct CreateMemoryArgs {
 pub async fn shared_memory_create_memory(
     args: CreateMemoryArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<MemoryDto, String> {
+) -> Result<MemoryDto, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let scope =
-            parse_scope(Some(args.scope.as_str())).ok_or_else(|| "invalid scope".to_string())?;
-        let kind = parse_memory_kind(Some(args.kind.as_str()))
-            .ok_or_else(|| "invalid kind".to_string())?;
+        let scope = parse_scope(Some(args.scope.as_str())).ok_or_else(|| {
+            // The English stays exactly "invalid scope"; the rejected
+            // value rides in `params` so a localized sentence can quote
+            // it without re-parsing a message that never named it.
+            ErrorDto::with_params(
+                codes::SHARED_MEMORY_INVALID_SCOPE,
+                json!({ "scope": args.scope }),
+                "invalid scope",
+            )
+        })?;
+        let kind = parse_memory_kind(Some(args.kind.as_str())).ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::SHARED_MEMORY_INVALID_KIND,
+                json!({ "kind": args.kind }),
+                "invalid kind",
+            )
+        })?;
         let confidence = args.confidence.map(|c| c.clamp(0, 100));
         let new = durable::NewMemory {
             scope,
@@ -377,8 +433,9 @@ pub async fn shared_memory_create_memory(
             created_by: &args.created_by,
             confidence,
         };
-        let m = durable::create_memory(idx.as_ref(), &new).map_err(|e| format!("create: {e}"))?;
-        Ok::<_, String>(MemoryDto {
+        let m = durable::create_memory(idx.as_ref(), &new)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_CREATE_MEMORY_FAILED, "create", e))?;
+        Ok::<_, ErrorDto>(MemoryDto {
             id: m.id,
             scope: scope_str(m.scope).to_string(),
             project_path: m.project_path,
@@ -394,20 +451,21 @@ pub async fn shared_memory_create_memory(
         })
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn shared_memory_archive_memory(
     id: String,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        durable::archive_memory(idx.as_ref(), &id).map_err(|e| format!("archive: {e}"))
+        durable::archive_memory(idx.as_ref(), &id)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_ARCHIVE_MEMORY_FAILED, "archive", e))
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── decisions ───────────────────────────────────────────────
@@ -440,7 +498,7 @@ pub struct DecisionDto {
 pub async fn shared_memory_list_decisions(
     args: ListDecisionsArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<DecisionDto>, String> {
+) -> Result<Vec<DecisionDto>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let policy = ui_redaction_policy();
@@ -449,8 +507,9 @@ pub async fn shared_memory_list_decisions(
             status: parse_decision_status(args.status.as_deref()),
             limit: args.limit.unwrap_or(0),
         };
-        let rows = durable::list_decisions(idx.as_ref(), &f).map_err(|e| format!("list: {e}"))?;
-        Ok::<_, String>(
+        let rows = durable::list_decisions(idx.as_ref(), &f)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_LIST_DECISIONS_FAILED, "list", e))?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|d| DecisionDto {
                     id: d.id,
@@ -468,7 +527,7 @@ pub async fn shared_memory_list_decisions(
         )
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -489,7 +548,7 @@ pub struct LogDecisionArgs {
 pub async fn shared_memory_log_decision(
     args: LogDecisionArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<DecisionDto, String> {
+) -> Result<DecisionDto, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let new = durable::NewDecision {
@@ -505,8 +564,8 @@ pub async fn shared_memory_log_decision(
         } else {
             durable::log_decision(idx.as_ref(), &new)
         }
-        .map_err(|e| format!("log: {e}"))?;
-        Ok::<_, String>(DecisionDto {
+        .map_err(|e| labeled(codes::SHARED_MEMORY_LOG_DECISION_FAILED, "log", e))?;
+        Ok::<_, ErrorDto>(DecisionDto {
             id: d.id,
             project_path: d.project_path,
             topic: d.topic,
@@ -520,20 +579,21 @@ pub async fn shared_memory_log_decision(
         })
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn shared_memory_archive_decision(
     id: String,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        durable::archive_decision(idx.as_ref(), &id).map_err(|e| format!("archive: {e}"))
+        durable::archive_decision(idx.as_ref(), &id)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_ARCHIVE_DECISION_FAILED, "archive", e))
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── evidence ────────────────────────────────────────────────
@@ -569,7 +629,7 @@ pub struct EvidenceDto {
 pub async fn shared_memory_list_evidence(
     args: ListEvidenceArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<EvidenceDto>, String> {
+) -> Result<Vec<EvidenceDto>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let policy = ui_redaction_policy();
@@ -578,8 +638,14 @@ pub async fn shared_memory_list_evidence(
             args.project_path.as_deref(),
             args.limit.unwrap_or(0),
         )
-        .map_err(|e| format!("list_evidence: {e}"))?;
-        Ok::<_, String>(
+        .map_err(|e| {
+            labeled(
+                codes::SHARED_MEMORY_LIST_EVIDENCE_FAILED,
+                "list_evidence",
+                e,
+            )
+        })?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|e| EvidenceDto {
                     id: e.id,
@@ -597,7 +663,7 @@ pub async fn shared_memory_list_evidence(
         )
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── memory links ────────────────────────────────────────────
@@ -640,7 +706,7 @@ fn link_relation_str(r: durable::LinkRelation) -> &'static str {
 pub async fn shared_memory_memory_links(
     args: MemoryLinksArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<MemoryLinkDto>, String> {
+) -> Result<Vec<MemoryLinkDto>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let q = if let Some(id) = args.memory_id.as_deref() {
@@ -650,10 +716,14 @@ pub async fn shared_memory_memory_links(
         } else if let Some(id) = args.evidence_id.as_deref() {
             durable::LinkQuery::Evidence(id)
         } else {
-            return Err("one of memory_id / decision_id / evidence_id is required".to_string());
+            return Err(ErrorDto::new(
+                codes::SHARED_MEMORY_LINK_TARGET_REQUIRED,
+                "one of memory_id / decision_id / evidence_id is required",
+            ));
         };
-        let rows = durable::links_for(idx.as_ref(), q).map_err(|e| format!("links: {e}"))?;
-        Ok::<_, String>(
+        let rows = durable::links_for(idx.as_ref(), q)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_LINKS_FAILED, "links", e))?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|l| MemoryLinkDto {
                     id: l.id,
@@ -668,7 +738,7 @@ pub async fn shared_memory_memory_links(
         )
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── discovery ───────────────────────────────────────────────
@@ -705,7 +775,7 @@ pub struct SessionSummaryDto {
 pub async fn shared_memory_list_sessions(
     args: ListSessionsArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<SessionSummaryDto>, String> {
+) -> Result<Vec<SessionSummaryDto>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let f = sms::SessionListFilter {
@@ -715,8 +785,9 @@ pub async fn shared_memory_list_sessions(
             limit: args.limit.unwrap_or(0),
             offset: args.offset.unwrap_or(0),
         };
-        let rows = sms::list_sessions(idx.as_ref(), &f).map_err(|e| format!("list: {e}"))?;
-        Ok::<_, String>(
+        let rows = sms::list_sessions(idx.as_ref(), &f)
+            .map_err(|e| labeled(codes::SHARED_MEMORY_LIST_SESSIONS_FAILED, "list", e))?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|s| SessionSummaryDto {
                     file_path: s.file_path,
@@ -734,7 +805,7 @@ pub async fn shared_memory_list_sessions(
         )
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -748,13 +819,13 @@ pub struct ProjectSummaryDto {
 pub async fn shared_memory_list_projects(
     limit: Option<u32>,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<ProjectSummaryDto>, String> {
+) -> Result<Vec<ProjectSummaryDto>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         // `None` = unconfined; see the note in shared_memory_search.
         let rows = sms::list_projects(idx.as_ref(), limit.unwrap_or(0), None)
-            .map_err(|e| format!("list: {e}"))?;
-        Ok::<_, String>(
+            .map_err(|e| labeled(codes::SHARED_MEMORY_LIST_PROJECTS_FAILED, "list", e))?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|p| ProjectSummaryDto {
                     project_path: p.project_path,
@@ -765,7 +836,7 @@ pub async fn shared_memory_list_projects(
         )
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── installer / MCP health ──────────────────────────────────
@@ -810,7 +881,7 @@ pub struct InstallSnippetArgs {
 #[tauri::command]
 pub async fn shared_memory_install_snippet(
     args: InstallSnippetArgs,
-) -> Result<SnippetInstallResultDto, String> {
+) -> Result<SnippetInstallResultDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         use claudepot_core::mcp_snippet::{install, InstallScope};
 
@@ -818,8 +889,10 @@ pub async fn shared_memory_install_snippet(
             "user" => InstallScope::User,
             "project" => InstallScope::Project,
             other => {
-                return Err(format!(
-                    "invalid scope: {other:?} (expected \"user\" or \"project\")"
+                return Err(ErrorDto::with_params(
+                    codes::SHARED_MEMORY_INVALID_INSTALL_SCOPE,
+                    json!({ "scope": other }),
+                    format!("invalid scope: {other:?} (expected \"user\" or \"project\")"),
                 ))
             }
         };
@@ -829,7 +902,13 @@ pub async fn shared_memory_install_snippet(
         let out = args.out.as_deref().map(std::path::Path::new);
         if let Some(o) = out {
             if !o.is_absolute() {
-                return Err(format!("out path must be absolute: {}", o.display()));
+                return Err(ErrorDto::with_params(
+                    codes::SHARED_MEMORY_OUT_PATH_NOT_ABSOLUTE,
+                    // Raw, per `rules/paths.md` — a localized sentence
+                    // places the same bytes the filesystem uses.
+                    json!({ "path": o.display().to_string() }),
+                    format!("out path must be absolute: {}", o.display()),
+                ));
             }
         }
         let project_root = args.project_path.as_deref().map(std::path::Path::new);
@@ -838,9 +917,9 @@ pub async fn shared_memory_install_snippet(
         // project scope), the write, and the @-import line all live
         // in `claudepot_core::mcp_snippet::install` — shared with
         // `claudepot mcp install-snippet` so the two can't drift.
-        let report = install(scope, project_root, out).map_err(|e| e.to_string())?;
+        let report = install(scope, project_root, out).map_err(ErrorDto::from)?;
 
-        Ok::<_, String>(SnippetInstallResultDto {
+        Ok::<_, ErrorDto>(SnippetInstallResultDto {
             scope: report.scope.as_str().to_string(),
             path: report.path.display().to_string(),
             bytes_written: report.bytes_written,
@@ -853,13 +932,13 @@ pub async fn shared_memory_install_snippet(
         })
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Returns the snippet body without writing. UI shows this in a
 /// preview panel so the user can copy or read before installing.
 #[tauri::command]
-pub async fn shared_memory_snippet_body() -> Result<String, String> {
+pub async fn shared_memory_snippet_body() -> Result<String, ErrorDto> {
     Ok(canonical_snippet())
 }
 
@@ -882,16 +961,20 @@ pub struct McpHealthDto {
 #[tauri::command]
 pub async fn shared_memory_mcp_health(
     claudepot_binary: Option<String>,
-) -> Result<McpHealthDto, String> {
+) -> Result<McpHealthDto, ErrorDto> {
     use claudepot_core::mcp_probe;
 
     let bin = match claudepot_binary {
         Some(p) => std::path::PathBuf::from(p),
         None => {
-            let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-            let dir = exe
-                .parent()
-                .ok_or_else(|| "current_exe has no parent".to_string())?;
+            let exe = std::env::current_exe()
+                .map_err(|e| labeled(codes::SHARED_MEMORY_CURRENT_EXE_FAILED, "current_exe", e))?;
+            let dir = exe.parent().ok_or_else(|| {
+                ErrorDto::new(
+                    codes::SHARED_MEMORY_CURRENT_EXE_NO_PARENT,
+                    "current_exe has no parent",
+                )
+            })?;
             match mcp_probe::resolve_sibling_cli(dir, cfg!(debug_assertions)) {
                 Ok(p) => p,
                 Err(e) => {
@@ -909,7 +992,7 @@ pub async fn shared_memory_mcp_health(
 
     let report = mcp_probe::probe_memory_server(&bin, std::time::Duration::from_secs(8))
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(ErrorDto::from)?;
     Ok(McpHealthDto {
         tool_visible: report.tool_visible,
         tool_count: report.tool_count,
@@ -949,13 +1032,19 @@ pub struct LessonListArgs {
 pub async fn lesson_list(
     args: LessonListArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<ReviewRow>, String> {
+) -> Result<Vec<ReviewRow>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let review_state = match args.state.as_deref() {
             None => Some(ReviewState::Proposed),
             Some("all") => None,
-            Some(s) => Some(ReviewState::parse(s).ok_or_else(|| format!("bad state {s:?}"))?),
+            Some(s) => Some(ReviewState::parse(s).ok_or_else(|| {
+                ErrorDto::with_params(
+                    codes::LESSON_BAD_STATE,
+                    json!({ "state": s }),
+                    format!("bad state {s:?}"),
+                )
+            })?),
         };
         let mut rows = review::list(
             idx.as_ref(),
@@ -963,7 +1052,7 @@ pub async fn lesson_list(
             review_state,
             args.limit.unwrap_or(50),
         )
-        .map_err(|e| format!("lesson list: {e}"))?;
+        .map_err(|e| labeled(codes::LESSON_LIST_FAILED, "lesson list", e))?;
         // Redact everything free-text before it crosses to JS — the same
         // emission discipline as list_memories. `anchor_json` is included
         // because its `evidence` field is rendered in the triage UI and
@@ -982,23 +1071,24 @@ pub async fn lesson_list(
                 r.anchor_json = Some(redact_apply(a, &policy));
             }
         }
-        Ok::<_, String>(rows)
+        Ok::<_, ErrorDto>(rows)
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn lesson_counts(
     project_path: Option<String>,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<ReviewCounts, String> {
+) -> Result<ReviewCounts, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        review::counts(idx.as_ref(), project_path.as_deref()).map_err(|e| format!("counts: {e}"))
+        review::counts(idx.as_ref(), project_path.as_deref())
+            .map_err(|e| labeled(codes::LESSON_COUNTS_FAILED, "counts", e))
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// One coverage-grid row: a project and its review counts. No redaction
@@ -1015,12 +1105,17 @@ pub struct ProjectCountsDto {
 #[tauri::command]
 pub async fn lesson_counts_by_project(
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<ProjectCountsDto>, String> {
+) -> Result<Vec<ProjectCountsDto>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        let rows = review::counts_by_project(idx.as_ref())
-            .map_err(|e| format!("counts_by_project: {e}"))?;
-        Ok::<_, String>(
+        let rows = review::counts_by_project(idx.as_ref()).map_err(|e| {
+            labeled(
+                codes::LESSON_COUNTS_BY_PROJECT_FAILED,
+                "counts_by_project",
+                e,
+            )
+        })?;
+        Ok::<_, ErrorDto>(
             rows.into_iter()
                 .map(|(project_path, counts)| ProjectCountsDto {
                     project_path,
@@ -1030,7 +1125,7 @@ pub async fn lesson_counts_by_project(
         )
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1047,7 +1142,7 @@ pub struct LessonAcceptArgs {
 pub async fn lesson_accept(
     args: LessonAcceptArgs,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         // Resolve the commit HERE, in the lesson's own project repo, so a
@@ -1062,10 +1157,10 @@ pub async fn lesson_accept(
         };
         let now = chrono::Utc::now().timestamp_millis();
         review::accept(idx.as_ref(), &args.id, commit.as_deref(), now)
-            .map_err(|e| format!("accept: {e}"))
+            .map_err(|e| labeled(codes::LESSON_ACCEPT_FAILED, "accept", e))
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// HEAD of the repo that owns the lesson `id`, or `None` if the lesson
@@ -1082,14 +1177,15 @@ fn lesson_project_head(idx: &SessionIndex, id: &str) -> Option<String> {
 pub async fn lesson_reject(
     id: String,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let now = chrono::Utc::now().timestamp_millis();
-        review::reject(idx.as_ref(), &id, now).map_err(|e| format!("reject: {e}"))
+        review::reject(idx.as_ref(), &id, now)
+            .map_err(|e| labeled(codes::LESSON_REJECT_FAILED, "reject", e))
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ─── Recurrence tracking (Phase 3 — the moat) ────────────────────
@@ -1108,11 +1204,11 @@ const RECURRENCE_WINDOW_DAYS: i64 = 30;
 pub async fn recurrence_list(
     project_path: Option<String>,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<RecurrenceEvent>, String> {
+) -> Result<Vec<RecurrenceEvent>, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let mut rows = recurrence::list_pending(idx.as_ref(), project_path.as_deref(), 0)
-            .map_err(|e| format!("recurrence list: {e}"))?;
+            .map_err(|e| labeled(codes::RECURRENCE_LIST_FAILED, "recurrence list", e))?;
         let policy = ui_redaction_policy();
         for r in &mut rows {
             r.new_content = redact_apply(&r.new_content, &policy);
@@ -1120,37 +1216,39 @@ pub async fn recurrence_list(
                 r.matched_content = Some(redact_apply(c, &policy));
             }
         }
-        Ok::<_, String>(rows)
+        Ok::<_, ErrorDto>(rows)
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn recurrence_confirm(
     id: String,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let now = chrono::Utc::now().timestamp_millis();
-        recurrence::confirm(idx.as_ref(), &id, now).map_err(|e| format!("confirm: {e}"))
+        recurrence::confirm(idx.as_ref(), &id, now)
+            .map_err(|e| labeled(codes::RECURRENCE_CONFIRM_FAILED, "confirm", e))
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn recurrence_dismiss(
     id: String,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
-        recurrence::dismiss(idx.as_ref(), &id).map_err(|e| format!("dismiss: {e}"))
+        recurrence::dismiss(idx.as_ref(), &id)
+            .map_err(|e| labeled(codes::RECURRENCE_DISMISS_FAILED, "dismiss", e))
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1165,21 +1263,96 @@ pub struct RecurrenceCountsDto {
 #[tauri::command]
 pub async fn recurrence_counts(
     state: State<'_, SharedMemoryIndex>,
-) -> Result<RecurrenceCountsDto, String> {
+) -> Result<RecurrenceCountsDto, ErrorDto> {
     let idx = require_idx(&state)?;
     tokio::task::spawn_blocking(move || {
         let now = chrono::Utc::now().timestamp_millis();
         let since = now - RECURRENCE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-        let confirmed_window = recurrence::confirmed_count_since(idx.as_ref(), since)
-            .map_err(|e| format!("confirmed count: {e}"))?;
-        let pending =
-            recurrence::pending_count(idx.as_ref()).map_err(|e| format!("pending count: {e}"))?;
-        Ok::<_, String>(RecurrenceCountsDto {
+        let confirmed_window =
+            recurrence::confirmed_count_since(idx.as_ref(), since).map_err(|e| {
+                labeled(
+                    codes::RECURRENCE_CONFIRMED_COUNT_FAILED,
+                    "confirmed count",
+                    e,
+                )
+            })?;
+        let pending = recurrence::pending_count(idx.as_ref())
+            .map_err(|e| labeled(codes::RECURRENCE_PENDING_COUNT_FAILED, "pending count", e))?;
+        Ok::<_, ErrorDto>(RecurrenceCountsDto {
             confirmed_window,
             pending,
             window_days: RECURRENCE_WINDOW_DAYS,
         })
     })
     .await
-    .map_err(join_err)?
+    .map_err(ErrorDto::task_join)?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The classification that replaced the frontend's
+    /// `/no such file|not found|os error 2|\bmoved\b/i`. It reads the
+    /// error *variant*, so it cannot be fooled by wording — and it must
+    /// not over-claim: "your transcript is gone" sends someone hunting
+    /// for a backup, and a locked database or a permissions problem is
+    /// not that.
+    #[test]
+    fn only_a_missing_transcript_reads_as_gone() {
+        let unknown = smr::ReadError::NotIndexed("/Users/me/6f9a.jsonl".to_string());
+        assert_eq!(
+            read_error_dto(unknown).code,
+            codes::SHARED_MEMORY_EXCERPT_UNAVAILABLE,
+        );
+
+        let pruned = smr::ReadError::Io {
+            path: std::path::PathBuf::from("/Users/me/6f9a.jsonl"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "no such file"),
+        };
+        assert_eq!(
+            read_error_dto(pruned).code,
+            codes::SHARED_MEMORY_EXCERPT_UNAVAILABLE,
+        );
+
+        let denied = smr::ReadError::Io {
+            path: std::path::PathBuf::from("/Users/me/6f9a.jsonl"),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        };
+        assert_eq!(
+            read_error_dto(denied).code,
+            codes::SHARED_MEMORY_READ_FAILED
+        );
+
+        // `ReadError::Sql` is deliberately absent: `rusqlite` is not a
+        // dependency of this crate, so it has no constructible sample
+        // here. The arm is exhaustive in `read_error_dto`'s match, and
+        // adding a variant fails to compile until someone classifies
+        // it — which is the guarantee that actually matters.
+    }
+
+    /// `message` is the contract the renderer's English fallback rests
+    /// on: it must stay byte-identical to the `format!("read: {e}")`
+    /// this command returned before the migration, label and all.
+    #[test]
+    fn the_english_fallback_keeps_the_command_label() {
+        let e = smr::ReadError::NotIndexed("/Users/me/6f9a.jsonl".to_string());
+        let english = format!("read: {e}");
+        let dto = read_error_dto(e);
+        assert_eq!(dto.message, english);
+        assert_eq!(dto.params["detail"], english);
+    }
+
+    /// The index-open failure is one identity, not one per command:
+    /// every command in this file short-circuits on it, and the UI
+    /// renders it as a single banner with a rebuild path.
+    #[test]
+    fn a_missing_index_reports_one_code_with_no_params() {
+        let dto = ErrorDto::new(
+            codes::SHARED_MEMORY_INDEX_UNAVAILABLE,
+            "session index unavailable (open failed at startup)",
+        );
+        assert_eq!(dto.code, "shared_memory.index_unavailable");
+        assert!(dto.params.as_object().is_some_and(|o| o.is_empty()));
+    }
 }

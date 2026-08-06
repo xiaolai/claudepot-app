@@ -1,8 +1,10 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useTranslation } from "react-i18next";
 import { Button } from "./primitives/Button";
 import { Glyph } from "./primitives/Glyph";
 import { IconButton } from "./primitives/IconButton";
 import { NF } from "../icons";
+import { i18n } from "../lib/i18n";
 import type { NetworkDiagnosis } from "../api/service-status";
 
 interface Props {
@@ -43,6 +45,7 @@ export function NetworkUnreachablePanel({
   onUseProvider,
   onConfigureProxy,
 }: Props) {
+  const { t } = useTranslation("components");
   const copy = copyForDiagnosis(diagnosis);
 
   return (
@@ -94,8 +97,8 @@ export function NetworkUnreachablePanel({
         </div>
         <IconButton
           glyph={NF.x}
-          title="Dismiss for this session"
-          aria-label="Dismiss network panel"
+          title={t("banners.networkDismissTitle")}
+          aria-label={t("banners.networkDismissAria")}
           size="sm"
           onClick={onDismiss}
         />
@@ -111,21 +114,21 @@ export function NetworkUnreachablePanel({
         }}
       >
         <Button variant="solid" glyph={NF.bolt} onClick={onUseProvider}>
-          Use a provider
+          {t("banners.useProvider")}
         </Button>
         <Button variant="ghost" glyph={NF.globe} onClick={onConfigureProxy}>
-          Configure proxy
+          {t("banners.configureProxy")}
         </Button>
         <Button
           variant="ghost"
           glyph={NF.openExternal}
           onClick={openHelpExternal}
         >
-          Network help
+          {t("banners.networkHelp")}
         </Button>
         <span style={{ flex: 1 }} />
         <Button variant="subtle" glyph={NF.refresh} onClick={onRetry}>
-          Retry
+          {t("banners.retry")}
         </Button>
       </div>
     </div>
@@ -144,33 +147,37 @@ interface DiagnosisCopy {
  * copy are constant; only the title + body shift.
  */
 function copyForDiagnosis(d: NetworkDiagnosis): DiagnosisCopy {
+  // Plain helper, not a component — reads the global i18n instance.
+  // The panel subscribes via `useTranslation`, so a language switch
+  // re-renders it and re-invokes this.
+  const ns = { ns: "components" } as const;
   switch (d) {
     case "dns_failure":
       return {
-        title: "Claudepot can't resolve api.anthropic.com",
-        body: "DNS lookup failed. This is the typical signature of a regional block (mainland China, Russia, Iran), a captive portal that hijacks DNS, or a broken local resolver. Use a provider to keep working, or fix the resolver below.",
+        title: i18n.t("banners.dnsTitle", ns),
+        body: i18n.t("banners.dnsBody", ns),
       };
     case "timeout":
     case "connection_refused":
       return {
-        title: "Claudepot can't reach api.anthropic.com",
-        body: "The path resolves but the connection is being dropped or refused. Often the result of a corporate firewall or a regional block. Use a provider, or configure a proxy your network allows.",
+        title: i18n.t("banners.unreachableTitle", ns),
+        body: i18n.t("banners.refusedBody", ns),
       };
     case "tls_error":
       return {
-        title: "TLS handshake to Anthropic failed",
-        body: "The connection started but the encrypted handshake didn't complete. Some networks intercept TLS traffic; others have outdated CA bundles. Configure your proxy if your organization manages one, or use a provider.",
+        title: i18n.t("banners.tlsTitle", ns),
+        body: i18n.t("banners.tlsBody", ns),
       };
     case "http_error":
       return {
-        title: "Anthropic responded with a service error",
-        body: "Reached api.anthropic.com but it isn't returning normal responses. This is usually an Anthropic-side issue — check status.claude.com. Retry in a moment, or use a provider if you need to keep working.",
+        title: i18n.t("banners.httpTitle", ns),
+        body: i18n.t("banners.httpBody", ns),
       };
     case "unknown":
     default:
       return {
-        title: "Claudepot can't reach api.anthropic.com",
-        body: "Anthropic's API isn't reachable from this network. This is usually a network or proxy issue, or a region where Anthropic isn't directly reachable.",
+        title: i18n.t("banners.unreachableTitle", ns),
+        body: i18n.t("banners.unknownBody", ns),
       };
   }
 }

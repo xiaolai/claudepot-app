@@ -89,6 +89,30 @@ pub enum AllowlistError {
     ContainsWhitespace(usize, String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for AllowlistError {
+    fn code(&self) -> &'static str {
+        match self {
+            AllowlistError::EmptyEntry(_) => "available_models.empty_entry",
+            AllowlistError::ContainsWhitespace(..) => "available_models.contains_whitespace",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // `index` is the row the user is editing, so a localized
+            // sentence can point at it without parsing the English.
+            AllowlistError::EmptyEntry(index) => serde_json::json!({ "index": index }),
+            // `entry` is a model id the user typed (`claude-opus-4-…`),
+            // never a credential.
+            AllowlistError::ContainsWhitespace(index, entry) => {
+                serde_json::json!({ "index": index, "entry": entry })
+            }
+        }
+    }
+}
+
 fn user_settings_path() -> PathBuf {
     claude_config_dir().join("settings.json")
 }
@@ -206,6 +230,32 @@ pub enum SetAllowlistError {
     Allowlist(#[from] AllowlistError),
     #[error(transparent)]
     Write(#[from] SettingsWriteError),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `#[error(transparent)]` means `Display` *is* the inner error's text,
+/// so the identity is the inner error's too — **both** arms delegate
+/// rather than minting a wrapper code that a translator would have to
+/// duplicate. `Write` delegated as soon as `settings_writer` grew its
+/// own `ErrorCode`; before that it rode a placeholder
+/// `available_models.write` carrying only `{{detail}}`, which said
+/// nothing a sentence could act on.
+impl crate::error_code::ErrorCode for SetAllowlistError {
+    fn code(&self) -> &'static str {
+        match self {
+            SetAllowlistError::Allowlist(e) => crate::error_code::ErrorCode::code(e),
+            SetAllowlistError::Write(e) => crate::error_code::ErrorCode::code(e),
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            SetAllowlistError::Allowlist(e) => crate::error_code::ErrorCode::params(e),
+            SetAllowlistError::Write(e) => crate::error_code::ErrorCode::params(e),
+        }
+    }
 }
 
 #[cfg(test)]

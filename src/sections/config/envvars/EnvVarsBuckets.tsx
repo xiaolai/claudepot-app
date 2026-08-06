@@ -4,6 +4,7 @@
 // `modalParts.tsx` precedent: both answer "what else is in your env
 // that this pane cannot offer a control for", and both are read-mostly.
 
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../../components/primitives";
 import type { EnvOverview } from "../../../types/ccEnv";
 
@@ -24,26 +25,31 @@ export function UnrecognizedBucket({
   busy: boolean;
   onClear: (name: string) => void;
 }) {
+  const { t } = useTranslation("config");
   if (data.unrecognized.length === 0) return null;
   return (
     <section className="envvar-bucket">
-      <h3>Set here, documented nowhere ({data.unrecognized.length})</h3>
+      <h3>
+        {t("envvars.unrecognizedTitle", { total: data.unrecognized.length })}
+      </h3>
       <p className="envvar-bucket-note">
-        These keys are in your settings file but match no documented
-        variable. Their values are not shown: an unrecognized name could be a
-        credential. To see or change one, edit{" "}
-        <code className="selectable">{data.settings_path}</code> by hand.
+        <Trans
+          ns="config"
+          i18nKey="envvars.unrecognizedNote"
+          values={{ path: data.settings_path }}
+          components={{ path: <code className="selectable" /> }}
+        />
       </p>
       <ul className="envvar-unrecognized">
         {data.unrecognized.map((u) => (
           <li key={u.name}>
             <code className="selectable">{u.name}</code>
             <span className="envvar-badge" data-tone="muted">
-              set (
+              {t("envvars.badgeSet")} (
               {u.value.state === "withheld" ? u.value.kind : u.value.state})
             </span>
             <Button variant="ghost" disabled={busy} onClick={() => onClear(u.name)}>
-              Clear
+              {t("envvars.clear")}
             </Button>
           </li>
         ))}
@@ -69,30 +75,34 @@ export function UnrecognizedBucket({
  * to open.
  */
 export function UndocumentedSection({ data }: { data: EnvOverview }) {
+  const { t } = useTranslation("config");
   const u = data.undocumented;
   return (
     <section className="envvar-bucket">
       {u.state === "available" && u.names.length === 0 ? (
         <>
-          <h3>Documented nowhere</h3>
+          <h3>{t("envvars.undocumentedTitle")}</h3>
           <p className="envvar-bucket-note">
-            Nothing undocumented was found in Claude Code {u.snapshot_version}.
+            {t("envvars.undocumentedNoneFound", {
+              version: u.snapshot_version,
+            })}
           </p>
         </>
       ) : u.state === "available" ? (
         <>
           <h3>
-            Documented nowhere — found in Claude Code {u.snapshot_version} (
-            {u.names.length})
+            {t("envvars.undocumentedFoundTitle", {
+              version: u.snapshot_version,
+              total: u.names.length,
+            })}
           </h3>
           <p className="envvar-bucket-note">
-            These names were found by scanning your installed Claude Code
-            binary. Anthropic does not document them. They can change or
-            disappear in any release, their accepted values are unknown, and
-            setting one carries no safety guarantee. Claudepot deliberately
-            offers no control for them — guessing a type or a value would be
-            worse than offering nothing. To set one anyway, edit{" "}
-            <code className="selectable">{data.settings_path}</code> by hand.
+            <Trans
+              ns="config"
+              i18nKey="envvars.undocumentedNote"
+              values={{ path: data.settings_path }}
+              components={{ path: <code className="selectable" /> }}
+            />
           </p>
           {/* The names collapse; the heading and the paragraph above do not.
               This list is the largest thing in the pane by a wide margin —
@@ -104,7 +114,9 @@ export function UndocumentedSection({ data }: { data: EnvOverview }) {
               role, and the platform's own reduced-motion behaviour without
               re-implementing any of it. */}
           <details className="envvar-undocumented-disclosure">
-            <summary>Show {u.names.length} names</summary>
+            <summary>
+              {t("envvars.showNames", { total: u.names.length })}
+            </summary>
             <ul className="envvar-undocumented">
               {u.names.map((n) => (
                 <li key={n}>
@@ -115,14 +127,16 @@ export function UndocumentedSection({ data }: { data: EnvOverview }) {
           </details>
         </>
       ) : (
+        // A version mismatch is a state, not an error: the list is
+        // "unavailable for this version", never "failed to load".
         <>
-          <h3>Documented nowhere</h3>
+          <h3>{t("envvars.undocumentedTitle")}</h3>
           <p className="envvar-bucket-note">
-            Unavailable — this list was built against Claude Code{" "}
-            {u.snapshot_version} and you're running{" "}
-            {u.installed_version ?? "a version Claudepot could not resolve"}.
-            These names can be renamed or removed in any release, so a list from
-            a different version would be a guess rather than a finding.
+            {t("envvars.undocumentedUnavailable", {
+              snapshot: u.snapshot_version,
+              installed:
+                u.installed_version ?? t("envvars.versionUnresolved"),
+            })}
           </p>
         </>
       )}

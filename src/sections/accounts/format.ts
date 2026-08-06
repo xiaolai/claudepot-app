@@ -1,3 +1,5 @@
+import { i18n } from "../../lib/i18n";
+import { dateTimeFormat, formatDate, formatTime } from "../../lib/intl";
 import type { UsageWindow } from "../../types";
 
 /**
@@ -9,12 +11,22 @@ export function relTime(iso: string | null | undefined): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(Math.abs(diff) / 60_000);
   const future = diff < 0;
-  if (mins < 1) return "just now";
-  if (mins < 60) return future ? `in ${mins}m` : `${mins}m ago`;
+  if (mins < 1) return i18n.t("time.justNow", { ns: "accounts" });
+  if (mins < 60) {
+    return future
+      ? i18n.t("time.inMinutes", { ns: "accounts", mins })
+      : i18n.t("time.minutesAgo", { ns: "accounts", mins });
+  }
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return future ? `in ${hrs}h` : `${hrs}h ago`;
+  if (hrs < 24) {
+    return future
+      ? i18n.t("time.inHours", { ns: "accounts", hours: hrs })
+      : i18n.t("time.hoursAgo", { ns: "accounts", hours: hrs });
+  }
   const days = Math.floor(hrs / 24);
-  return future ? `in ${days}d` : `${days}d ago`;
+  return future
+    ? i18n.t("time.inDays", { ns: "accounts", days })
+    : i18n.t("time.daysAgo", { ns: "accounts", days });
 }
 
 /**
@@ -81,11 +93,13 @@ export function formatResetTime(iso: string | null | undefined): string {
   const d = new Date(iso);
   const now = new Date();
   const diffMs = d.getTime() - now.getTime();
-  if (diffMs <= 0) return "due";
+  if (diffMs <= 0) return i18n.t("time.due", { ns: "accounts" });
   const diffMins = Math.floor(diffMs / 60_000);
-  if (diffMins < 60) return `in ${diffMins}m`;
+  if (diffMins < 60) {
+    return i18n.t("time.inMinutes", { ns: "accounts", mins: diffMins });
+  }
 
-  const time = d.toLocaleTimeString(undefined, {
+  const time = formatTime(d, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -102,13 +116,15 @@ export function formatResetTime(iso: string | null | undefined): string {
     (startOfResetDay.getTime() - startOfToday.getTime()) / 86_400_000,
   );
 
-  if (diffDays === 0) return `today ${time}`;
-  if (diffDays === 1) return `tomorrow ${time}`;
+  if (diffDays === 0) return i18n.t("time.todayAt", { ns: "accounts", time });
+  if (diffDays === 1) {
+    return i18n.t("time.tomorrowAt", { ns: "accounts", time });
+  }
   // For 2+ days out the exact time matters for planning — "resets
   // Apr 23 at 00:00 UTC" vs "Apr 23 14:30" are different decisions.
   // Space-separated so the form matches today/tomorrow idiom and
   // stays compact in the 96px reset column.
-  const date = d.toLocaleDateString(undefined, {
+  const date = formatDate(d, {
     month: "short",
     day: "numeric",
   });
@@ -124,13 +140,15 @@ export function formatResetTime(iso: string | null | undefined): string {
  * Example: `"Resets Apr 20, 2026, 14:30 GMT+08:00 — in 3h 45m"`
  */
 export function formatResetTooltip(iso: string | null | undefined): string {
-  if (!iso) return "No reset scheduled";
+  if (!iso) return i18n.t("time.noReset", { ns: "accounts" });
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "Reset time unknown";
+  if (Number.isNaN(d.getTime())) {
+    return i18n.t("time.resetUnknown", { ns: "accounts" });
+  }
   // `shortOffset` renders e.g. "GMT+08:00" (ES 2022, supported in all
   // Chromium/WebKit webviews Tauri ships against). Falls back to
   // timeZone short code ("EDT") on older runtimes.
-  const absolute = new Intl.DateTimeFormat(undefined, {
+  const absolute = dateTimeFormat({
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -140,9 +158,15 @@ export function formatResetTooltip(iso: string | null | undefined): string {
     timeZoneName: "shortOffset",
   }).format(d);
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return `Reset was ${absolute}`;
+  if (diffMs <= 0) {
+    return i18n.t("time.resetWas", { ns: "accounts", time: absolute });
+  }
   const rel = humanDuration(diffMs);
-  return `Resets ${absolute} — in ${rel}`;
+  return i18n.t("time.resetsIn", {
+    ns: "accounts",
+    time: absolute,
+    duration: rel,
+  });
 }
 
 /** Precise human phrasing for a forward-looking duration, e.g. "3h 45m". */
@@ -151,7 +175,15 @@ function humanDuration(ms: number): string {
   const days = Math.floor(totalMinutes / 1440);
   const hours = Math.floor((totalMinutes % 1440) / 60);
   const mins = totalMinutes % 60;
-  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  return `${mins}m`;
+  if (days > 0) {
+    return hours > 0
+      ? i18n.t("time.durationDaysHours", { ns: "accounts", days, hours })
+      : i18n.t("time.durationDays", { ns: "accounts", days });
+  }
+  if (hours > 0) {
+    return mins > 0
+      ? i18n.t("time.durationHoursMins", { ns: "accounts", hours, mins })
+      : i18n.t("time.durationHours", { ns: "accounts", hours });
+  }
+  return i18n.t("time.durationMins", { ns: "accounts", mins });
 }

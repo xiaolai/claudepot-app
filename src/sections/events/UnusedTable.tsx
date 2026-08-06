@@ -20,6 +20,7 @@
 //     and (for standalone artifacts) disabled or trashed.
 //   - Copy path (rules/path-display.md state C).
 
+import { useTranslation } from "react-i18next";
 import { CopyButton } from "../../components/CopyButton";
 import { IconButton } from "../../components/primitives/IconButton";
 import { NF } from "../../icons";
@@ -34,6 +35,7 @@ export function UnusedTable({
   /** Navigate to Global -> Config focused on this artifact's node. */
   onReveal: (row: UnusedArtifactDto) => void;
 }) {
+  const { t } = useTranslation("activities");
   return (
     <table
       style={{
@@ -44,12 +46,12 @@ export function UnusedTable({
     >
       <thead>
         <tr style={{ borderBottom: "var(--bw-hair) solid var(--line)" }}>
-          <Th>Artifact</Th>
-          <Th>Kind</Th>
-          <Th>Plugin</Th>
-          <Th align="right">Modified</Th>
+          <Th>{t("unused.colArtifact")}</Th>
+          <Th>{t("unused.colKind")}</Th>
+          <Th>{t("unused.colPlugin")}</Th>
+          <Th align="right">{t("unused.colModified")}</Th>
           <Th align="right" srOnly>
-            Actions
+            {t("unused.colActions")}
           </Th>
         </tr>
       </thead>
@@ -73,8 +75,8 @@ export function UnusedTable({
               <IconButton
                 glyph={NF.folder}
                 size="sm"
-                title={`Reveal ${r.label} in Config`}
-                aria-label={`Reveal ${r.label} in Config`}
+                title={t("unused.revealTitle", { label: r.label })}
+                aria-label={t("unused.revealTitle", { label: r.label })}
                 onClick={() => onReveal(r)}
               />
               <CopyButton text={r.abs_path} />

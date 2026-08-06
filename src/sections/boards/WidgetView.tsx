@@ -11,7 +11,10 @@
 // limitation as if it were the whole picture. A downsampled chart says
 // so; a truncated table says so; a collapsed category bucket says so.
 
+import { useTranslation } from "react-i18next";
 import type { RenderPlan, ResolvedWidget } from "../../types";
+import { i18n } from "../../lib/i18n";
+import { formatNumber } from "../../lib/intl";
 import { Table, Td, Th, Tr } from "../../components/primitives/Table";
 
 // SVG viewBox units, not CSS lengths — the element is sized by
@@ -80,6 +83,7 @@ function Spark({
   min: number;
   max: number;
 }) {
+  const { t } = useTranslation("boards");
   const w = SPARK_VIEWBOX_W;
   const h = SPARK_VIEWBOX_H;
   const span = max - min || 1;
@@ -112,7 +116,11 @@ function Spark({
       preserveAspectRatio="none"
       style={{ width: "100%", height: "var(--board-spark-h)", display: "block" }}
       role="img"
-      aria-label={`${points.length} points from ${min.toFixed(2)} to ${max.toFixed(2)}`}
+      aria-label={t("widget.sparkAria", {
+        n: points.length,
+        min: min.toFixed(2),
+        max: max.toFixed(2),
+      })}
     >
       {drawable.map((d, i) => (
         <path
@@ -186,23 +194,35 @@ function scaleNote(plan: Extract<RenderPlan, { kind: "line" | "bar" }>): string 
   if (scale.kind === "log_fell_back_to_linear") {
     // The spec asked for log and the data made it impossible. Say so
     // rather than silently drawing a different chart.
-    parts.push(`log axis unavailable — ${scale.reason}`);
+    parts.push(
+      i18n.t("widget.logUnavailable", { ns: "boards", reason: scale.reason }),
+    );
   }
   if (plan.y_axis.padded) {
-    parts.push("every value is identical; range padded to stay readable");
+    parts.push(i18n.t("widget.rangePadded", { ns: "boards" }));
   }
   if (plan.kind === "line" && plan.downsampled_from !== null) {
     parts.push(
-      `showing ${plan.points.length} of ${plan.downsampled_from} points`,
+      i18n.t("widget.downsampled", {
+        ns: "boards",
+        shown: plan.points.length,
+        total: plan.downsampled_from,
+      }),
     );
   }
   if (plan.kind === "bar" && plan.collapsed_categories !== null) {
-    parts.push(`${plan.collapsed_categories} smaller categories grouped`);
+    parts.push(
+      i18n.t("widget.collapsedCategories", {
+        ns: "boards",
+        n: plan.collapsed_categories,
+      }),
+    );
   }
   return parts.length ? parts.join(" · ") : undefined;
 }
 
 export function WidgetView({ widget }: { widget: ResolvedWidget }) {
+  const { t } = useTranslation("boards");
   const { plan } = widget;
   const title = widget.title.text;
   const full = widget.title.full;
@@ -222,10 +242,10 @@ export function WidgetView({ widget }: { widget: ResolvedWidget }) {
       <Frame
         title={title}
         full={full}
-        note={`over ${plan.sample_size} value${plan.sample_size === 1 ? "" : "s"}`}
+        note={t("widget.overValues", { count: plan.sample_size })}
       >
         <div style={{ fontSize: "var(--fs-xl)", fontWeight: 600 }}>
-          {plan.value === null ? "—" : plan.value.toLocaleString()}
+          {plan.value === null ? "—" : formatNumber(plan.value)}
         </div>
       </Frame>
     );
@@ -257,7 +277,7 @@ export function WidgetView({ widget }: { widget: ResolvedWidget }) {
       full={full}
       note={
         shown < plan.total_rows
-          ? `showing ${shown} of ${plan.total_rows} rows`
+          ? t("widget.tableTruncated", { shown, total: plan.total_rows })
           : undefined
       }
     >

@@ -1,0 +1,303 @@
+{
+  "section": {
+    "title": "账户",
+    "loading": "正在加载账户…",
+    "loadErrorTitle": "无法加载账户",
+    "loadErrorBody": "Claudepot 无法读取账户数据库。重试通常可以解决；若持续出现，请在设置 → 诊断中检查数据目录。",
+    "retry": "重试",
+    "errorDetail": "错误详情",
+    "verifyAll": "全部验证",
+    "verifyingProgress": "验证中… {{done}}/{{total}}",
+    "verifyingProgressAria": "正在验证账户，{{done}}/{{total}}",
+    "verifyAllCompactTitle": "全部验证 — 通过 /profile 检查每个账户",
+    "verifyAllAria": "验证所有账户",
+    "verifyAllBusyTitle": "正在通过 /profile 检查每个账户…",
+    "verifyAllTitle": "通过 /profile 验证每个账户",
+    "refreshUsage": "刷新用量",
+    "refreshUsageTitleCompact": "刷新用量 (⌘R)",
+    "refreshTitle": "刷新 (⌘R)",
+    "addAccount": "添加账户",
+    "addAccountTitle": "添加账户 (⌘N)",
+    "accountAdded": "已添加账户。",
+    "adoptedToast": "已接管 {{email}}。",
+    "adoptFailed": "无法接管当前会话",
+    "copiedEmail": "已复制 {{email}}",
+    "copyFailed": "复制失败",
+    "desktopLaunchFailed": "Desktop 启动失败",
+    "wakeFailed": "唤醒失败",
+    "wokeToast": "已唤醒 {{email}} — 消耗 {{input}}+{{output}} 个 token。重置时间稍后显示。"
+  },
+  "usageAge": {
+    "justNow": "更新于刚刚",
+    "minutesAgo": "更新于 {{mins}} 分钟前",
+    "hoursAgo": "更新于 {{hours}} 小时前",
+    "daysAgo": "更新于 {{days}} 天前"
+  },
+  "grid": {
+    "filterAccounts": "筛选账户",
+    "noMatch": "没有匹配“{{filter}}”的账户。",
+    "empty": {
+      "title": "还没有账户。",
+      "adoptPrompt": "Claude Code 已登录为 <emph>{{email}}</emph>。要把这个会话接管为你的第一个 Claudepot 账户吗？",
+      "adoptCta": "接管 {{email}}",
+      "addDifferent": "添加其他账户",
+      "intro": "Claudepot 为 Claude Code 和 Claude Desktop 管理多个 Anthropic 登录。通过浏览器 OAuth 流程登录即可开始。",
+      "addAccount": "添加账户"
+    }
+  },
+  "card": {
+    "accountAria": "账户 {{email}}",
+    "openKeysTitle": "打开 Keys 并筛选到 {{email}}",
+    "openKeysAria_other": "打开 Keys 并筛选到 {{email}}（{{count}} 个 token）",
+    "tokenCount_other": "{{count}} 个 token",
+    "moreActions": "更多操作",
+    "moreActionsFor": "{{email}} 的更多操作"
+  },
+  "addModal": {
+    "title": "添加账户",
+    "browserLoginOpTitle": "添加账户：浏览器登录",
+    "cancelLogin": "取消登录",
+    "registerFailed": "注册失败",
+    "importTitle": "从 Claude Code 导入",
+    "import": "导入",
+    "importing": "导入中…",
+    "alreadyManaged": "已在管理中",
+    "orDivider": "或添加其他账户",
+    "loginTitle": "用新账户登录…",
+    "loginSubtitle": "打开浏览器完成 OAuth，然后把结果注册为一个新账户。",
+    "openingBrowser": "正在打开浏览器…",
+    "opening": "打开中…",
+    "logIn": "登录",
+    "close": "关闭",
+    "summary": {
+      "checking": "正在检查 Claude Code 的当前会话…",
+      "signedIn": "Claude Code 已登录为 <emph>{{email}}</emph>。",
+      "signedInKnown": "Claude Code 已登录为 <emph>{{email}}</emph> — 已在管理中。",
+      "empty": "Claude Code 没有已保存的凭据。",
+      "error": "无法读取 Claude Code 会话：{{message}}"
+    },
+    "importSubtitle": {
+      "new": "把当前凭据复制到一个新的托管槽位。",
+      "known": "没有可导入的内容 — 该账户已在管理中。",
+      "empty": "没有可导入的凭据。请先在 Claude Code 中登录。",
+      "error": "预检失败。请先解决上面的错误再重试。",
+      "checking": "正在等待 Claude Code 会话检查…"
+    }
+  },
+  "anomaly": {
+    "relogin": "重新登录",
+    "reloginTitle": "打开浏览器 OAuth 流程并导入结果",
+    "drift": {
+      "title": "此槽位上的账户不对",
+      "detail": "这里保存的凭据实际属于 <emph>{{email}}</emph>。请重新登录以修复，或移除此账户。",
+      "anotherAccount": "另一个账户"
+    },
+    "rejected": {
+      "title": "服务器拒绝了已保存的登录",
+      "detail": "已保存的登录不再有效 — 请重新登录以修复。"
+    },
+    "broken": {
+      "title": "已保存的登录缺失或损坏",
+      "detail": "无法读取已保存的凭据文件。请重新登录或移除。"
+    }
+  },
+  "desktopConfirm": {
+    "signOut": {
+      "title": "退出 Claude Desktop 登录？",
+      "confirm": "退出登录",
+      "body": "Claudepot 将退出 Claude Desktop 并删除实时会话条目。当前快照会保留，之后可以把此账户换回来。",
+      "bullet1": "所有未发送的 Desktop 聊天草稿都会丢失。",
+      "bullet2": "下次启动 Desktop 会停在登录界面，直到你重新登录。",
+      "bullet3": "位于 <c>{{path}}</c> 的快照保持不变。"
+    },
+    "overwrite": {
+      "title": "替换 {{email}} 的 Desktop 配置？",
+      "confirm": "替换",
+      "body": "<emph>{{email}}</emph> 已有一份 Desktop 快照。绑定实时会话会用当前状态覆盖它。",
+      "note": "复制期间旧快照会暂存到临时目录；若新快照失败，会回滚到旧快照。成功后旧快照将被永久丢弃。"
+    }
+  },
+  "desktopImport": {
+    "title": "绑定当前 Desktop 会话",
+    "orDivider": "或绑定当前 Claude Desktop 会话",
+    "checking": "检查中…",
+    "checkingSubtitle": "正在探测 Claude Desktop 实时身份…",
+    "newSubtitle": "Desktop 已登录为 {{email}}，但该账户尚未注册。请先通过上方的 CC 流程注册，再回到这里。",
+    "registerFirst": "请先注册",
+    "knownSubtitle": "把当前 Desktop 会话快照到已存账户下。",
+    "bind": "绑定",
+    "binding": "绑定中…",
+    "adoptedSubtitle": "已绑定 — 在账户 → 设为 Desktop 中换入。",
+    "done": "完成",
+    "alreadyBound": "已绑定",
+    "notSignedIn": "Claude Desktop 未登录。",
+    "nothingToBind": "没有可绑定的会话",
+    "unavailable": "不可用",
+    "unconfirmed": "无法确认 Claude Desktop 当前登录的账户。请先打开一次 Claude Desktop，然后重试。",
+    "errorSubtitle": "无法读取 Desktop 会话：{{message}}",
+    "summary": {
+      "checking": "正在探测 Desktop 实时身份…",
+      "newText": "Claude Desktop 已登录为 <emph>{{email}}</emph> — 尚未注册。",
+      "knownText": "Claude Desktop 已登录为 <emph>{{email}}</emph>。",
+      "adopted": "已为 <emph>{{email}}</emph> 存有快照。"
+    }
+  },
+  "chips": {
+    "none": "尚未注册任何账户。",
+    "summaryAria": "账户健康摘要",
+    "totalTitle_other": "共 {{count}} 个账户",
+    "totalAria": "共 {{n}} 个账户",
+    "verifiedTitle": "{{n}} 个最近已验证",
+    "verifiedAria": "{{n}} 个已验证",
+    "unverifiedTitle": "{{n}} 个尚未验证",
+    "unverifiedAria": "{{n}} 个未验证",
+    "driftTitle": "{{n}} 个漂移 — 槽位错配，请重新登录或移除",
+    "driftAria": "{{n}} 个漂移",
+    "brokenTitle": "{{n}} 个损坏 — 凭据被拒绝或无法读取",
+    "brokenAria": "{{n}} 个损坏"
+  },
+  "footer": {
+    "verifying": "验证中…",
+    "verified": "已验证",
+    "verifiedAgo": "已验证 · {{ago}}",
+    "drift": "漂移 → {{email}}",
+    "tokenRejected": "token 被拒绝",
+    "profileUnreachable": "profile 不可达",
+    "notYetVerified": "尚未验证",
+    "token": "token {{status}}",
+    "cliSwitch": "CLI 切换于 {{ago}}",
+    "desktopSwitch": "Desktop 切换于 {{ago}}"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "inMinutes": "{{mins}} 分钟后",
+    "minutesAgo": "{{mins}} 分钟前",
+    "inHours": "{{hours}} 小时后",
+    "hoursAgo": "{{hours}} 小时前",
+    "inDays": "{{days}} 天后",
+    "daysAgo": "{{days}} 天前",
+    "due": "已到期",
+    "todayAt": "今天 {{time}}",
+    "tomorrowAt": "明天 {{time}}",
+    "noReset": "没有计划中的重置",
+    "resetUnknown": "重置时间未知",
+    "resetWas": "重置时间为 {{time}}",
+    "resetsIn": "将于 {{time}} 重置 — 还有 {{duration}}",
+    "durationDaysHours": "{{days}} 天 {{hours}} 小时",
+    "durationDays": "{{days}} 天",
+    "durationHoursMins": "{{hours}} 小时 {{mins}} 分钟",
+    "durationHours": "{{hours}} 小时",
+    "durationMins": "{{mins}} 分钟",
+    "secsShort": "{{n}} 秒",
+    "minsShort": "{{n}} 分钟",
+    "hoursShort": "{{n}} 小时"
+  },
+  "loginPhases": {
+    "spawning": "准备中",
+    "waitingForBrowser": "等待浏览器",
+    "readingBlob": "读取凭据",
+    "fetchingProfile": "获取 profile",
+    "verifyingIdentity": "验证身份",
+    "persisting": "保存中"
+  },
+  "splitBrain": {
+    "title": "Claude Code 正在运行",
+    "confirm": "仍然切换到 {{email}}",
+    "intro": "有一个正在运行的 Claude Code 会话在使用当前账户。在退出它之前你会看到脑裂状态：",
+    "bullet1": "会话身份（标题栏、组织名）保持为旧账户 — 启动时已缓存。",
+    "bullet2": "API 调用（/usage、补全、计费）会立即切换到 <emph>{{email}}</emph>。",
+    "bullet3": "下一次 OAuth 刷新（通常在一小时内）可能把 Keychain 覆盖回旧账户，静默撤销这次切换。",
+    "note": "最稳妥的做法：先退出 Claude Code，再切换。此操作将带 <c>{{flag}}</c> 执行。"
+  },
+  "target": {
+    "cli": "CLI",
+    "desktop": "Desktop",
+    "verifyNow": "立即验证",
+    "noCredsToVerify": "没有可验证的凭据",
+    "relogin": "重新登录",
+    "activeCli": "当前 CLI — {{email}}",
+    "switchCli": "把 CLI 切换到 {{email}}",
+    "credsMissing": "凭据缺失 — 请从菜单重新登录",
+    "activeDesktop": "当前 Desktop — {{email}}",
+    "relaunch": "重新启动",
+    "bindAgain": "重新绑定",
+    "setDesktop": "把 Desktop 设为 {{email}}",
+    "setNoRelaunch": "设置但不重启",
+    "bindTooltip": "把当前运行的 Desktop 会话绑定到此账户"
+  },
+  "usage": {
+    "noCreds": "用量不可用 — 没有凭据。",
+    "tokenExpired": "用量不可用 — token 已过期。",
+    "verify": "验证",
+    "verifying": "验证中…",
+    "refresh": "刷新",
+    "refreshing": "刷新中…",
+    "retry": "重试",
+    "retrying": "重试中…",
+    "rateLimited": "被 {{endpoint}} 限流 · {{secs}} 秒后重试",
+    "fetchFailed": "无法获取用量：{{detail}}",
+    "unknownError": "未知错误",
+    "noWindows": "未报告任何用量窗口。",
+    "header": "限额窗口",
+    "cachedTitle": "缓存 — 最后获取于 {{time}}",
+    "ageOld": "已缓存 {{age}}",
+    "rows": {
+      "fiveHour": "5 小时窗口",
+      "sevenDay": "7 天全部",
+      "sonnet": "7 天 Sonnet",
+      "opus": "7 天 Opus",
+      "apps": "7 天应用",
+      "appsTooltip": "已授权此账户的第三方 OAuth 应用（IDE、工具等）。",
+      "cowork": "7 天 cowork",
+      "coworkTooltip": "Cowork / 共享席位池用量。"
+    },
+    "extra": {
+      "label": "额外用量",
+      "off": "关",
+      "disabledTitle": "此账户未启用额外用量（超额计费）。如需超出月度上限的余量，请在 Anthropic 控制台中启用。",
+      "pctUsed": "已用 {{pct}}%",
+      "remainingTitle": "本周期剩余额度（月度上限减去已用）。",
+      "left": "· 剩余 {{amount}}"
+    }
+  },
+  "menu": {
+    "copyEmail": "复制邮箱",
+    "copyUuid": "复制 UUID",
+    "activeCli": "当前 CLI",
+    "setCli": "设为 CLI",
+    "activeDesktop": "当前 Desktop",
+    "setDesktop": "设为 Desktop",
+    "setDesktopNoRelaunch": "设为 Desktop（不重启）",
+    "bindDesktop": "绑定当前 Desktop 会话",
+    "desktopNotInstalled": "未安装 Claude Desktop",
+    "bindFirst": "请先绑定当前 Desktop 会话",
+    "alreadyActive": "已是当前账户",
+    "credsMissingCorrupt": "凭据缺失或损坏",
+    "verifyNow": "立即验证",
+    "noCredsToVerify": "没有可验证的凭据",
+    "refreshUsage": "刷新用量",
+    "wakeWindows": "唤醒窗口（约 {{tokens}} 个 token）",
+    "noCreds": "没有凭据",
+    "wakeInProgress": "唤醒进行中",
+    "launchCcAs": "以此账户启动 CC…",
+    "launchCcAsReason": "请在终端使用 {{cmd}}",
+    "loginAgain": "重新登录…",
+    "loginInProgress": "登录进行中",
+    "remove": "移除"
+  },
+  "verify": {
+    "ok": "已验证 {{email}}",
+    "drift": "漂移：{{email}} 实际认证为 {{actual}}",
+    "unknown": "未知",
+    "rejected": "服务器拒绝了 {{email}} — 需要重新登录",
+    "networkError": "无法验证 {{email}} — /profile 不可达",
+    "failed": "验证失败",
+    "allOk": "全部 {{total}} 个账户已验证。",
+    "summaryBad": "验证：{{drift}} 个漂移、{{rejected}} 个被拒 — 见卡片横幅。",
+    "allFailed": "全部验证失败",
+    "switchingDesktop": "正在把 Desktop 切换到 {{email}}…"
+  },
+  "identity": {
+    "verified": "已验证"
+  }
+}

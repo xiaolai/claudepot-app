@@ -1,4 +1,5 @@
 import React from "react";
+import { i18n } from "./lib/i18n";
 import { redactSecrets } from "./lib/redactSecrets";
 
 interface State {
@@ -85,8 +86,16 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
               fontFamily: "var(--font)",
             }}
           >
+            {/* Class component — no hooks, so the global i18n instance
+                is read directly. A crashed subtree is not re-rendered
+                by a language switch, which is acceptable for a
+                fallback the user is about to dismiss. `label` stays
+                English: it doubles as the console diagnostic tag. */}
             <h2 style={{ margin: 0, fontSize: "var(--fs-md)" }}>
-              {label} couldn’t render
+              {i18n.t("errorBoundary.scopedTitle", {
+                ns: "components",
+                label,
+              })}
             </h2>
             <p
               className="mono"
@@ -101,7 +110,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
               {this.state.error}
             </p>
             <button className="btn" onClick={this.reset}>
-              Try again
+              {i18n.t("errorBoundary.tryAgain", { ns: "components" })}
             </button>
           </div>
         );
@@ -109,13 +118,13 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
       return (
         <main className="app loading">
           <div className="empty">
-            <h2>Something went wrong</h2>
+            <h2>{i18n.t("errorBoundary.title", { ns: "components" })}</h2>
             <p className="muted mono">{this.state.error}</p>
             <button
               className="btn primary"
               onClick={() => window.location.reload()}
             >
-              Retry
+              {i18n.t("errorBoundary.retry", { ns: "components" })}
             </button>
           </div>
         </main>

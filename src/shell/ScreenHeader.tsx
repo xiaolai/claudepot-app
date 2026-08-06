@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
 
@@ -23,6 +24,7 @@ export function ScreenHeader({
   actions,
   style,
 }: ScreenHeaderProps) {
+  const { t } = useTranslation("components");
   return (
     <header
       style={{
@@ -34,7 +36,7 @@ export function ScreenHeader({
     >
       {crumbs && crumbs.length > 0 && (
         <nav
-          aria-label="Breadcrumb"
+          aria-label={t("primitives.breadcrumb")}
           style={{
             fontSize: "var(--fs-xs)",
             color: "var(--fg-faint)",

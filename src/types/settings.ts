@@ -18,6 +18,10 @@ export interface ProtectedPath {
  * Claudepot data dir; read synchronously at Rust startup.
  */
 export interface Preferences {
+  /** UI language preference (BCP-47: "en", "zh-CN"). `null`/absent =
+   *  follow the OS language. Resolution lives in `src/lib/i18n.ts`. */
+  locale?: string | null;
+
   /** macOS-only: when true, the app runs tray-only (no dock icon, no
    *  Cmd+Tab, no app menu bar). No-op on Windows/Linux. */
   hide_dock_icon: boolean;

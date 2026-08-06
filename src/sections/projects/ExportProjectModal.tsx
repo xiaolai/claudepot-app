@@ -1,5 +1,7 @@
 import { useId, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { migrateApi, type ExportReceipt } from "../../api/migrate";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import {
   Modal,
@@ -33,6 +35,7 @@ export function ExportProjectModal({
   onCompleted: (receipt: ExportReceipt) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("projects");
   const headingId = useId();
   const outId = useId();
   const passId = useId();
@@ -48,7 +51,7 @@ export function ExportProjectModal({
 
   async function handleExport() {
     if (encrypt && !passphrase) {
-      onError("Encryption requires a passphrase (or untick Encrypt).");
+      onError(t("export.passphraseRequired"));
       return;
     }
     setSubmitting(true);
@@ -64,7 +67,7 @@ export function ExportProjectModal({
       });
       onCompleted(receipt);
     } catch (e) {
-      onError(String(e));
+      onError(renderError(e));
     } finally {
       setSubmitting(false);
       // Best-effort scrub: clear the local React state so the
@@ -75,15 +78,18 @@ export function ExportProjectModal({
 
   return (
     <Modal open onClose={onClose} aria-labelledby={headingId}>
-      <ModalHeader title="Export project" id={headingId} onClose={onClose} />
+      <ModalHeader title={t("export.title")} id={headingId} onClose={onClose} />
       <ModalBody>
         <p style={{ marginTop: 0 }}>
-          Bundle the CC state for <code>{cwd}</code> into a portable
-          file. Credentials never travel.
+          <Trans
+            ns="projects"
+            i18nKey="export.intro"
+            components={{ cwd: <code>{cwd}</code> }}
+          />
         </p>
 
         <label htmlFor={outId} style={{ display: "block", marginTop: "var(--sp-12)" }}>
-          Output file
+          {t("export.outputLabel")}
         </label>
         <input
           id={outId}
@@ -95,15 +101,14 @@ export function ExportProjectModal({
         />
 
         <fieldset style={{ marginTop: "var(--sp-16)", border: 0, padding: 0 }}>
-          <legend style={{ marginBottom: "var(--sp-6)" }}>Include</legend>
+          <legend style={{ marginBottom: "var(--sp-6)" }}>{t("export.includeLegend")}</legend>
           <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
               type="checkbox"
               checked={includeGlobal}
               onChange={(e) => setIncludeGlobal(e.target.checked)}
             />{" "}
-            Global content (CLAUDE.md, agents/, skills/, scrubbed
-            settings, plugin registry)
+            {t("export.optGlobal")}
           </label>
           <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
@@ -111,8 +116,11 @@ export function ExportProjectModal({
               checked={includeWorktree}
               onChange={(e) => setIncludeWorktree(e.target.checked)}
             />{" "}
-            Worktree (project's <code>.claude/</code> dir + CLAUDE.md;
-            local settings excluded)
+            <Trans
+              ns="projects"
+              i18nKey="export.optWorktree"
+              components={{ dir: <code>.claude/</code> }}
+            />
           </label>
           <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
@@ -120,7 +128,7 @@ export function ExportProjectModal({
               checked={includeClaudepotState}
               onChange={(e) => setIncludeClaudepotState(e.target.checked)}
             />{" "}
-            Claudepot state (account stubs only — no credentials)
+            {t("export.optState")}
           </label>
           <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
@@ -128,7 +136,7 @@ export function ExportProjectModal({
               checked={encrypt}
               onChange={(e) => setEncrypt(e.target.checked)}
             />{" "}
-            Encrypt with passphrase (age)
+            {t("export.optEncrypt")}
           </label>
         </fieldset>
 
@@ -138,7 +146,7 @@ export function ExportProjectModal({
               htmlFor={passId}
               style={{ display: "block", marginTop: "var(--sp-12)" }}
             >
-              Passphrase
+              {t("export.passphraseLabel")}
             </label>
             <input
               id={passId}
@@ -153,14 +161,14 @@ export function ExportProjectModal({
       </ModalBody>
       <ModalFooter>
         <Button onClick={onClose} disabled={submitting}>
-          Cancel
+          {t("shared.cancel")}
         </Button>
         <Button
           variant="solid"
           onClick={handleExport}
           disabled={submitting || !output}
         >
-          {submitting ? "Exporting…" : "Export"}
+          {submitting ? t("export.exporting") : t("export.submit")}
         </Button>
       </ModalFooter>
     </Modal>

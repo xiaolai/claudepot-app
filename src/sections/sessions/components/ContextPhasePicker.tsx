@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ContextStats } from "../../../types";
 
 /**
@@ -14,6 +15,7 @@ export function ContextPhasePicker({
   value: number | null;
   onChange: (v: number | null) => void;
 }) {
+  const { t } = useTranslation("sessions");
   if (stats.phases.length <= 1) return null;
   return (
     <section style={{ marginBottom: "var(--sp-18)" }}>
@@ -26,13 +28,13 @@ export function ContextPhasePicker({
           marginBottom: "var(--sp-6)",
         }}
       >
-        Phase
+        {t("context.phase")}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-4)" }}>
         <PhaseButton
           active={value == null}
           onClick={() => onChange(null)}
-          label="All"
+          label={t("context.all")}
         />
         {stats.phases.map((p) => (
           <PhaseButton

@@ -65,6 +65,14 @@ export const settingsApi = {
     invoke<void>("preferences_set_show_window_on_startup", { show }),
 
   /**
+   * Persist the UI language preference. `null` = follow the OS
+   * language. Pure persistence — the caller applies the change to the
+   * live i18next instance via `applyLocalePreference`.
+   */
+  preferencesSetLocale: (locale: string | null) =>
+    invoke<void>("preferences_set_locale", { locale }),
+
+  /**
    * Read every category's effective notification preference. The
    * backend always returns a complete map — categories without an
    * explicit on-disk entry come back with their defaults filled in.

@@ -1,6 +1,8 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useEnabledSections } from "./useEnabledSections";
 import { type NfIcon } from "../icons";
+import { i18n } from "../lib/i18n";
 import { scoreFields } from "../lib/paletteScore";
 import {
   buildAccountRemovalActions,
@@ -50,10 +52,13 @@ const CATEGORY_RANK = Object.fromEntries(
   CATEGORY_ORDER.map((c, i) => [c, i]),
 ) as Record<PaletteCategory, number>;
 
+/** Group headings in the palette. Getters, so the heading re-reads the
+ *  catalog when it renders — a module-level literal table would pin
+ *  whichever language the app booted in. */
 export const PALETTE_CATEGORY_LABELS: Record<PaletteCategory, string> = {
-  switch: "Quick Switch",
-  navigate: "Navigate",
-  action: "Actions",
+  get switch() { return i18n.t("palette.category.switch"); },
+  get navigate() { return i18n.t("palette.category.navigate"); },
+  get action() { return i18n.t("palette.category.action"); },
 };
 
 export { CATEGORY_ORDER };
@@ -100,6 +105,14 @@ export function usePaletteActions(opts: {
   // been hidden.
   const enabled = useEnabledSections();
 
+  // Every builder resolves its labels through the catalog when it
+  // runs, so the memo has to be re-derived on a language switch too —
+  // otherwise an already-built action list keeps the previous
+  // language's rows. `useTranslation` supplies both the re-render and
+  // the dependency value.
+  const { i18n: runtimeI18n } = useTranslation();
+  const language = runtimeI18n.language;
+
   const actions = useMemo(
     () => [
       ...buildSwitchActions({ accounts, status, onSwitchCli, onSwitchDesktop }),
@@ -127,6 +140,8 @@ export function usePaletteActions(opts: {
     // Optional-section state: an open palette memoized before a toggle
     // kept offering a section that had just been hidden.
     enabled,
+    // Active locale: labels are resolved inside the builders.
+    language,
   ],
   );
 

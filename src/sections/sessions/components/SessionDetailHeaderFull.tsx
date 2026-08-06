@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { BackAffordance } from "../../../components/primitives/BackAffordance";
 import { CopyButton } from "../../../components/CopyButton";
 import { Glyph } from "../../../components/primitives/Glyph";
@@ -6,7 +7,7 @@ import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { SessionRow } from "../../../types";
 import {
-  ESTIMATED_RATE_HINT,
+  estimatedRateHint,
   formatCost,
   formatUsd,
   type PricedCost,
@@ -51,6 +52,7 @@ export function SessionDetailHeaderFull({
   revealNode: ReactNode;
   kebabNode: ReactNode;
 }) {
+  const { t } = useTranslation("sessions");
   const lastTs = bestTimestampMs(row.last_ts, row.last_modified_ms);
   const firstTs = row.first_ts ? Date.parse(row.first_ts) : null;
   const project = projectBasename(row.project_path) || row.slug;
@@ -87,7 +89,7 @@ export function SessionDetailHeaderFull({
             <BackAffordance
               label={project}
               onClick={onBack}
-              title={`Back to session list for ${project}`}
+              title={t("detail.backToSessionList", { project })}
             />
           ) : (
             <span>{project}</span>
@@ -129,10 +131,10 @@ export function SessionDetailHeaderFull({
       >
         {row.has_error && (
           <Tag tone="warn" glyph={NF.warn}>
-            error
+            {t("detail.tagError")}
           </Tag>
         )}
-        {row.is_sidechain && <Tag tone="ghost">agent</Tag>}
+        {row.is_sidechain && <Tag tone="ghost">{t("detail.tagAgent")}</Tag>}
         {row.models.length > 0 && (
           <Tag tone="accent" title={row.models.join(", ")}>
             {modelBadge(row.models)}
@@ -143,30 +145,36 @@ export function SessionDetailHeaderFull({
             {row.git_branch}
           </Tag>
         )}
-        {row.cc_version && <Tag tone="ghost">cc {row.cc_version}</Tag>}
+        {row.cc_version && (
+          <Tag tone="ghost">{t("detail.tagCc", { version: row.cc_version })}</Tag>
+        )}
         {row.tokens.total > 0 && (
           <Tag
             tone="neutral"
-            title={`input ${row.tokens.input} · output ${row.tokens.output} · cache r/w ${row.tokens.cache_read}/${row.tokens.cache_creation}`}
+            title={t("detail.tokensTooltip", {
+              input: row.tokens.input,
+              output: row.tokens.output,
+              read: row.tokens.cache_read,
+              write: row.tokens.cache_creation,
+            })}
           >
-            {formatTokens(row.tokens.total)} tok
+            {t("viewer.tok", { tokens: formatTokens(row.tokens.total) })}
           </Tag>
         )}
         {cost !== null && cost.usd > 0 && (
           <Tag
             tone="neutral"
             title={
-              `On pay-per-call API: ${formatUsd(cost.usd)}. Subscription users don't pay this — ` +
-              `it's what the same tokens would have cost at Anthropic's standard API rates.` +
-              (cost.confidence === "family_estimate" ? ` ${ESTIMATED_RATE_HINT}` : "")
+              t("detail.costTooltip", { usd: formatUsd(cost.usd) }) +
+              (cost.confidence === "family_estimate" ? ` ${estimatedRateHint()}` : "")
             }
           >
-            {formatCost(cost)} on API
+            {t("detail.costOnApi", { cost: formatCost(cost) })}
           </Tag>
         )}
         {row.message_count > 0 && (
           <Tag tone="neutral">
-            {row.message_count} turn{row.message_count === 1 ? "" : "s"}
+            {t("detail.turns", { count: row.message_count })}
           </Tag>
         )}
         <Tag tone="ghost">{formatSize(row.file_size_bytes)}</Tag>
@@ -210,12 +218,12 @@ export function SessionDetailHeaderFull({
         </span>
         {firstTs != null && (
           <span title={row.first_ts ?? ""}>
-            Started {formatRelativeTime(firstTs)}
+            {t("detail.started", { time: formatRelativeTime(firstTs) })}
           </span>
         )}
         {lastTs != null && (
           <span title={row.last_ts ?? ""}>
-            Last event {formatRelativeTime(lastTs)}
+            {t("detail.lastEvent", { time: formatRelativeTime(lastTs) })}
           </span>
         )}
       </div>

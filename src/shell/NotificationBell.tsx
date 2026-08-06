@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
 import { api } from "../api";
@@ -33,6 +34,7 @@ interface NotificationBellProps {
 }
 
 export function NotificationBell({ onMouseDown }: NotificationBellProps) {
+  const { t } = useTranslation("components");
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -84,9 +86,11 @@ export function NotificationBell({ onMouseDown }: NotificationBellProps) {
           onClick={onToggle}
           onMouseDown={onMouseDown}
           title={
-            unread > 0 ? `Notifications (${unread} unread)` : "Notifications"
+            unread > 0
+              ? t("bell.titleUnread", { n: unread })
+              : t("bell.title")
           }
-          aria-label="Open notifications"
+          aria-label={t("bell.open")}
           aria-haspopup="dialog"
           aria-expanded={open}
           style={{ fontSize: "var(--fs-md)" }}

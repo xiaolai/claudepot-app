@@ -3,6 +3,8 @@
 //! rust-conventions ("one enum per module boundary").
 //! `crate::error::OAuthError` remains a re-export.
 
+use crate::error_code::ErrorCode;
+use serde_json::{json, Value};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -27,4 +29,36 @@ pub enum OAuthError {
     /// verified_email history.
     #[error("OAuth server error: {0}")]
     ServerError(String),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl ErrorCode for OAuthError {
+    fn code(&self) -> &'static str {
+        match self {
+            OAuthError::HttpError(_) => "oauth.http_error",
+            OAuthError::RefreshFailed(_) => "oauth.refresh_failed",
+            OAuthError::RateLimited { .. } => "oauth.rate_limited",
+            OAuthError::AuthFailed(_) => "oauth.auth_failed",
+            OAuthError::ServerError(_) => "oauth.server_error",
+        }
+    }
+
+    fn params(&self) -> Value {
+        match self {
+            // Every payload here is a status line, an endpoint name, or
+            // a transport message — the response bodies are drained
+            // without being read precisely so no credential lands in
+            // one. Re-check that before widening any of these.
+            OAuthError::HttpError(e) => json!({ "detail": e.to_string() }),
+            OAuthError::RefreshFailed(detail) => json!({ "detail": detail }),
+            // The structured variant: the number a "retry in N seconds"
+            // sentence needs, without parsing the English one.
+            OAuthError::RateLimited { retry_after_secs } => {
+                json!({ "retry_after_secs": retry_after_secs })
+            }
+            OAuthError::AuthFailed(detail) => json!({ "detail": detail }),
+            OAuthError::ServerError(detail) => json!({ "detail": detail }),
+        }
+    }
 }

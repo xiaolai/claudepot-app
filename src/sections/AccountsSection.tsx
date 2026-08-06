@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { AccountSummary } from "../types";
 import { api } from "../api";
+import { i18n } from "../lib/i18n";
+import { renderError } from "../lib/i18n-error";
+import { formatDateTime } from "../lib/intl";
 import { useUsage } from "../hooks/useUsage";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import {
@@ -31,29 +35,6 @@ import { hasUnreportedWindow } from "./accounts/format";
  */
 const WAKE_REFRESH_DELAY_MS = 25_000;
 
-/**
- * Readable text for an unknown thrown value.
- *
- * `${err}` yields "[object Object]" for a plain object, and so does a
- * bare `String(err)` — which is why the first attempt at this helper
- * did not actually fix anything. Tauri rejects with a string for our
- * `Result<_, String>` commands, but a thrown object can still reach
- * here from the JS side, so the object case is handled explicitly.
- */
-function errorText(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  if (err && typeof err === "object") {
-    const msg = (err as { message?: unknown }).message;
-    if (typeof msg === "string" && msg) return msg;
-    try {
-      return JSON.stringify(err);
-    } catch {
-      return "unknown error"; // circular / non-serializable
-    }
-  }
-  return String(err);
-}
 import {
   useAccountHandlers,
   verifyLiveFor,
@@ -75,6 +56,7 @@ export function AccountsSection({
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
+  const { t } = useTranslation("accounts");
   const {
     pushToast,
     status,
@@ -153,7 +135,11 @@ export function AccountsSection({
         const receipt = await api.accountWake(a.uuid);
         pushToast(
           "info",
-          `Woke ${receipt.email} — spent ${receipt.input_tokens}+${receipt.output_tokens} tokens. Reset times appear shortly.`,
+          t("section.wokeToast", {
+            email: receipt.email,
+            input: receipt.input_tokens,
+            output: receipt.output_tokens,
+          }),
         );
         if (!mounted.current) return; // orphaned — nothing to refresh into
         const timer = window.setTimeout(() => {
@@ -165,11 +151,11 @@ export function AccountsSection({
         }, WAKE_REFRESH_DELAY_MS);
         wakeTimers.current.push(timer);
       } catch (err) {
-        pushToast("error", `Wake failed: ${errorText(err)}`);
+        pushToast("error", renderError(err, t("section.wakeFailed")));
         release();
       }
     },
-    [pushToast, refreshUsageFor],
+    [pushToast, refreshUsageFor, t],
   );
 
   // Token counts per account — one fetch on mount. Keys section owns
@@ -262,14 +248,18 @@ export function AccountsSection({
       if (!target) return;
       void navigator.clipboard
         .writeText(target.email)
-        .then(() => pushToast("info", `Copied ${target.email}`))
-        .catch((err) => pushToast("error", `Copy failed: ${err}`));
+        .then(() =>
+          pushToast("info", t("section.copiedEmail", { email: target.email })),
+        )
+        .catch((err) =>
+          pushToast("error", renderError(err, t("section.copyFailed"))),
+        );
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // `shown` is computed below — tracked by accounts/filter deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts, filter, pushToast]);
+  }, [accounts, filter, pushToast, t]);
 
   useGlobalShortcuts({
     onRefresh: () => {
@@ -356,8 +346,7 @@ export function AccountsSection({
       switchDesktopNoLaunch: (a) => void actions.useDesktop(a, true),
       launchDesktop: () => {
         api.desktopLaunch().catch((e) => {
-          const msg = e instanceof Error ? e.message : String(e);
-          pushToast("error", `Desktop launch failed: ${msg}`);
+          pushToast("error", renderError(e, t("section.desktopLaunchFailed")));
         });
       },
       adoptDesktop: (a) => {
@@ -365,7 +354,7 @@ export function AccountsSection({
         else void actions.adoptDesktop(a);
       },
     }),
-    [handleDesktopSwitch, actions, requestDesktopOverwrite, pushToast],
+    [handleDesktopSwitch, actions, requestDesktopOverwrite, pushToast, t],
   );
 
   if (!status) {
@@ -390,7 +379,7 @@ export function AccountsSection({
               margin: 0,
             }}
           >
-            Couldn't load accounts
+            {t("section.loadErrorTitle")}
           </h2>
           <p
             style={{
@@ -400,12 +389,10 @@ export function AccountsSection({
               textAlign: "center",
             }}
           >
-            Claudepot couldn't read its account database. Retrying often
-            resolves this; if it persists, check the data directory in
-            Settings → Diagnostics.
+            {t("section.loadErrorBody")}
           </p>
           <Button variant="solid" onClick={() => refresh()}>
-            Retry
+            {t("section.retry")}
           </Button>
           <details style={{ width: "100%" }}>
             <summary
@@ -417,7 +404,7 @@ export function AccountsSection({
                 letterSpacing: "var(--ls-wide)",
               }}
             >
-              Error detail
+              {t("section.errorDetail")}
             </summary>
             <pre
               style={{
@@ -431,7 +418,7 @@ export function AccountsSection({
                 wordBreak: "break-word",
               }}
             >
-              {loadError}
+              {renderError(loadError)}
             </pre>
           </details>
         </div>
@@ -440,7 +427,7 @@ export function AccountsSection({
     return (
       <SkeletonList
         rows={2}
-        label="Loading accounts…"
+        label={t("section.loading")}
         style={{ padding: "var(--sp-32)" }}
       />
     );
@@ -449,7 +436,7 @@ export function AccountsSection({
   return (
     <>
       <ScreenHeader
-        title="Accounts"
+        title={t("section.title")}
         subtitle={<HealthChips accounts={accounts} />}
         actions={
           <>
@@ -461,13 +448,19 @@ export function AccountsSection({
                   disabled={verify.active}
                   title={
                     verify.active
-                      ? `Verifying… ${verify.done}/${verifyTotal}`
-                      : "Verify all — check every account against /profile"
+                      ? t("section.verifyingProgress", {
+                          done: verify.done,
+                          total: verifyTotal,
+                        })
+                      : t("section.verifyAllCompactTitle")
                   }
                   aria-label={
                     verify.active
-                      ? `Verifying accounts, ${verify.done} of ${verifyTotal}`
-                      : "Verify all accounts"
+                      ? t("section.verifyingProgressAria", {
+                          done: verify.done,
+                          total: verifyTotal,
+                        })
+                      : t("section.verifyAllAria")
                   }
                 />
                 <IconButton
@@ -476,8 +469,8 @@ export function AccountsSection({
                     refresh();
                     refreshUsage();
                   }}
-                  title="Refresh usage (⌘R)"
-                  aria-label="Refresh usage"
+                  title={t("section.refreshUsageTitleCompact")}
+                  aria-label={t("section.refreshUsage")}
                 />
               </>
             ) : (
@@ -490,13 +483,16 @@ export function AccountsSection({
                   disabled={verify.active}
                   title={
                     verify.active
-                      ? "Checking every account against /profile…"
-                      : "Verify every account against /profile"
+                      ? t("section.verifyAllBusyTitle")
+                      : t("section.verifyAllTitle")
                   }
                 >
                   {verify.active
-                    ? `Verifying… ${verify.done}/${verifyTotal}`
-                    : "Verify all"}
+                    ? t("section.verifyingProgress", {
+                        done: verify.done,
+                        total: verifyTotal,
+                      })
+                    : t("section.verifyAll")}
                 </Button>
                 {usageAgeLabel && (
                   <span
@@ -508,7 +504,7 @@ export function AccountsSection({
                     }}
                     title={
                       lastFetchedAt
-                        ? new Date(lastFetchedAt).toLocaleString()
+                        ? formatDateTime(new Date(lastFetchedAt))
                         : undefined
                     }
                   >
@@ -523,9 +519,9 @@ export function AccountsSection({
                     refresh();
                     refreshUsage();
                   }}
-                  title="Refresh (⌘R)"
+                  title={t("section.refreshTitle")}
                 >
-                  Refresh usage
+                  {t("section.refreshUsage")}
                 </Button>
               </>
             )}
@@ -533,9 +529,9 @@ export function AccountsSection({
               variant="solid"
               glyph={NF.plus}
               onClick={() => setShowAdd(true)}
-              title="Add account (⌘N)"
+              title={t("section.addAccountTitle")}
             >
-              Add account
+              {t("section.addAccount")}
             </Button>
           </>
         }
@@ -560,11 +556,10 @@ export function AccountsSection({
         onAdoptCurrent={async () => {
           try {
             const outcome = await api.accountAddFromCurrent();
-            pushToast("info", `Adopted ${outcome.email}.`);
+            pushToast("info", t("section.adoptedToast", { email: outcome.email }));
             await refresh();
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            pushToast("error", `Couldn't adopt current session: ${msg}`);
+            pushToast("error", renderError(e, t("section.adoptFailed")));
           }
         }}
         verifyLiveFor={(uuid) => verifyLiveFor(verify, uuid)}
@@ -579,7 +574,7 @@ export function AccountsSection({
         onAdded={async () => {
           setShowAdd(false);
           await refresh();
-          pushToast("info", "Account added.");
+          pushToast("info", t("section.accountAdded"));
         }}
         onAdoptDesktop={(a) => actions.adoptDesktop(a)}
       />
@@ -627,12 +622,16 @@ export function AccountsSection({
 function formatUsageAge(lastFetchedAt: number | null): string | null {
   if (!lastFetchedAt) return null;
   const deltaMs = Date.now() - lastFetchedAt;
-  if (deltaMs < 30_000) return "updated just now";
+  if (deltaMs < 30_000) return i18n.t("usageAge.justNow", { ns: "accounts" });
   const minutes = Math.floor(deltaMs / 60_000);
-  if (minutes < 1) return "updated just now";
-  if (minutes < 60) return `updated ${minutes}m ago`;
+  if (minutes < 1) return i18n.t("usageAge.justNow", { ns: "accounts" });
+  if (minutes < 60) {
+    return i18n.t("usageAge.minutesAgo", { ns: "accounts", mins: minutes });
+  }
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `updated ${hours}h ago`;
+  if (hours < 24) {
+    return i18n.t("usageAge.hoursAgo", { ns: "accounts", hours });
+  }
   const days = Math.floor(hours / 24);
-  return `updated ${days}d ago`;
+  return i18n.t("usageAge.daysAgo", { ns: "accounts", days });
 }

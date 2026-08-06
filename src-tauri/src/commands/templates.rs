@@ -16,6 +16,17 @@
 //! computed from gateway URLs in this module; `is_private_cloud`
 //! defaults to false until the routes module exposes a flag.
 //! `capabilities_override` is read when present.
+//!
+//! Errors use the `ErrorDto` shape (i18n plan §2.5). `RouteStore` and
+//! `AgentStore` carry their own codes and lift with `ErrorDto::from`;
+//! everything else here rides a `templates.*` command code, because
+//! `TemplateError` has no `ErrorCode` yet. Blueprint ids, placeholder
+//! names and host-platform names are data — they ride in `params` and
+//! are never translated.
+//!
+//! `templates_install` ends in `agents_add`, which **arms** the agent
+//! it creates. That is this path's whole contract and is unchanged
+//! here; nothing in this file drafts an inert record.
 
 use claudepot_core::agent::types::HostPlatform;
 use claudepot_core::agent::AgentStore;
@@ -27,7 +38,9 @@ use claudepot_core::templates::{
 use serde::Serialize;
 
 use crate::dto_agents::{AgentCreateDto, AgentSummaryDto, PlatformOptionsDto};
+use crate::dto_error::{codes, ErrorDto};
 use crate::dto_templates::{TemplateDetailsDto, TemplateInstanceDto, TemplateSummaryDto};
+use serde_json::json;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RouteSummaryDto {
@@ -43,16 +56,30 @@ pub struct RouteSummaryDto {
     pub ineligibility_reason: String,
 }
 
-fn registry() -> Result<&'static TemplateRegistry, String> {
+/// The bundled registry, loaded once.
+///
+/// The failure is cached as its English text rather than as an
+/// `ErrorDto` so the cell holds one plain `String` and every caller
+/// mints the same code from it — the load can only fail one way.
+fn registry() -> Result<&'static TemplateRegistry, ErrorDto> {
     use std::sync::OnceLock;
     static CELL: OnceLock<Result<TemplateRegistry, String>> = OnceLock::new();
     CELL.get_or_init(|| TemplateRegistry::load_bundled().map_err(|e| e.to_string()))
         .as_ref()
-        .map_err(|e| e.clone())
+        .map_err(|e| ErrorDto::detail(codes::TEMPLATES_REGISTRY_LOAD_FAILED, e))
+}
+
+/// "The bundled registry has no blueprint with this id."
+fn unknown_template(id: &str) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::TEMPLATES_UNKNOWN_ID,
+        json!({ "template_id": id }),
+        format!("unknown template id: {id}"),
+    )
 }
 
 #[tauri::command]
-pub async fn templates_list() -> Result<Vec<TemplateSummaryDto>, String> {
+pub async fn templates_list() -> Result<Vec<TemplateSummaryDto>, ErrorDto> {
     use claudepot_core::agent::types::HostPlatform;
     let r = registry()?;
     // Filter to templates that declare support for the current
@@ -64,20 +91,22 @@ pub async fn templates_list() -> Result<Vec<TemplateSummaryDto>, String> {
 }
 
 #[tauri::command]
-pub async fn templates_get(id: String) -> Result<TemplateDetailsDto, String> {
+pub async fn templates_get(id: String) -> Result<TemplateDetailsDto, ErrorDto> {
     let r = registry()?;
-    let bp = r
-        .get(&id)
-        .ok_or_else(|| format!("unknown template id: {id}"))?;
+    let bp = r.get(&id).ok_or_else(|| unknown_template(&id))?;
     Ok(TemplateDetailsDto::from(bp))
 }
 
 #[tauri::command]
-pub async fn templates_sample_report(id: String) -> Result<String, String> {
+pub async fn templates_sample_report(id: String) -> Result<String, ErrorDto> {
     let r = registry()?;
-    r.sample_report(&id)
-        .map(|s| s.to_string())
-        .ok_or_else(|| format!("no sample report bundled for template id: {id}"))
+    r.sample_report(&id).map(|s| s.to_string()).ok_or_else(|| {
+        ErrorDto::with_params(
+            codes::TEMPLATES_NO_SAMPLE_REPORT,
+            json!({ "template_id": id }),
+            format!("no sample report bundled for template id: {id}"),
+        )
+    })
 }
 
 // The pending-changes sidecar and routing-rules command surface
@@ -93,41 +122,72 @@ pub async fn templates_sample_report(id: String) -> Result<String, String> {
 /// any path outside that directory is rejected. Caps file size
 /// at 4 MB to bound the wire payload.
 #[tauri::command]
-pub async fn templates_read_report(path: String) -> Result<String, String> {
+pub async fn templates_read_report(path: String) -> Result<String, ErrorDto> {
     use std::path::PathBuf;
     let claudepot_root = claudepot_data_dir();
     let target = PathBuf::from(&path);
-    let canonical_target = claudepot_core::path_utils::canonicalize_simplified(&target)
-        .map_err(|e| format!("cannot resolve {path}: {e}"))?;
+    // Paths reach `params` byte-for-byte (rules/paths.md): no
+    // re-separatoring, no normalization, so a localized sentence
+    // places the string the user's filesystem actually uses.
+    let canonical_target =
+        claudepot_core::path_utils::canonicalize_simplified(&target).map_err(|e| {
+            ErrorDto::with_params(
+                codes::TEMPLATES_REPORT_PATH_UNRESOLVABLE,
+                json!({ "path": path, "detail": e.to_string() }),
+                format!("cannot resolve {path}: {e}"),
+            )
+        })?;
     let canonical_root = claudepot_core::path_utils::canonicalize_simplified(&claudepot_root)
         .unwrap_or(claudepot_root.clone());
     if !canonical_target.starts_with(&canonical_root) {
-        return Err(format!(
-            "report path is outside {}: {}",
-            canonical_root.display(),
-            canonical_target.display()
+        return Err(ErrorDto::with_params(
+            codes::TEMPLATES_REPORT_PATH_OUTSIDE_ROOT,
+            json!({
+                "root": canonical_root.display().to_string(),
+                "path": canonical_target.display().to_string(),
+            }),
+            format!(
+                "report path is outside {}: {}",
+                canonical_root.display(),
+                canonical_target.display()
+            ),
         ));
     }
-    let meta = std::fs::metadata(&canonical_target).map_err(|e| format!("stat {path}: {e}"))?;
+    let meta = std::fs::metadata(&canonical_target).map_err(|e| {
+        ErrorDto::with_params(
+            codes::TEMPLATES_REPORT_STAT_FAILED,
+            json!({ "path": path, "detail": e.to_string() }),
+            format!("stat {path}: {e}"),
+        )
+    })?;
     if !meta.is_file() {
-        return Err(format!("not a file: {path}"));
+        return Err(ErrorDto::with_params(
+            codes::TEMPLATES_REPORT_NOT_A_FILE,
+            json!({ "path": path }),
+            format!("not a file: {path}"),
+        ));
     }
     if meta.len() > 4 * 1024 * 1024 {
-        return Err(format!(
-            "report is too large to display: {} bytes",
-            meta.len()
+        return Err(ErrorDto::with_params(
+            codes::TEMPLATES_REPORT_TOO_LARGE,
+            json!({ "path": path, "bytes": meta.len() }),
+            format!("report is too large to display: {} bytes", meta.len()),
         ));
     }
-    std::fs::read_to_string(&canonical_target).map_err(|e| format!("read {path}: {e}"))
+    std::fs::read_to_string(&canonical_target).map_err(|e| {
+        ErrorDto::with_params(
+            codes::TEMPLATES_REPORT_READ_FAILED,
+            json!({ "path": path, "detail": e.to_string() }),
+            format!("read {path}: {e}"),
+        )
+    })
 }
 
 #[tauri::command]
-pub async fn templates_capable_routes(id: String) -> Result<Vec<RouteSummaryDto>, String> {
+pub async fn templates_capable_routes(id: String) -> Result<Vec<RouteSummaryDto>, ErrorDto> {
     let r = registry()?;
-    let bp = r
-        .get(&id)
-        .ok_or_else(|| format!("unknown template id: {id}"))?;
-    let store = RouteStore::open().map_err(|e| format!("routes store open failed: {e}"))?;
+    let bp = r.get(&id).ok_or_else(|| unknown_template(&id))?;
+    let store = RouteStore::open().map_err(ErrorDto::from)?;
     let summaries = store
         .list()
         .iter()
@@ -137,11 +197,11 @@ pub async fn templates_capable_routes(id: String) -> Result<Vec<RouteSummaryDto>
 }
 
 #[tauri::command]
-pub async fn templates_install(instance: TemplateInstanceDto) -> Result<AgentSummaryDto, String> {
+pub async fn templates_install(instance: TemplateInstanceDto) -> Result<AgentSummaryDto, ErrorDto> {
     let r = registry()?;
     let bp = r
         .get(&instance.blueprint_id)
-        .ok_or_else(|| format!("unknown template id: {}", instance.blueprint_id))?;
+        .ok_or_else(|| unknown_template(&instance.blueprint_id))?;
     // Defense-in-depth: the gallery filters by `supported_platforms`
     // via `templates_list`, but a direct IPC call to
     // `templates_install` would otherwise still let a macOS-only
@@ -149,10 +209,14 @@ pub async fn templates_install(instance: TemplateInstanceDto) -> Result<AgentSum
     // contract is symmetric.
     let host = HostPlatform::current();
     if !bp.supports(host) {
-        return Err(format!(
-            "template {} does not declare support for {:?}",
-            bp.id().0,
-            host
+        return Err(ErrorDto::with_params(
+            codes::TEMPLATES_PLATFORM_UNSUPPORTED,
+            json!({ "template_id": bp.id().0, "platform": format!("{host:?}") }),
+            format!(
+                "template {} does not declare support for {:?}",
+                bp.id().0,
+                host
+            ),
         ));
     }
 
@@ -163,11 +227,15 @@ pub async fn templates_install(instance: TemplateInstanceDto) -> Result<AgentSum
         blueprint_schema_version: instance.blueprint_schema_version,
         placeholder_values,
         route_id: instance.route_id.clone(),
-        schedule: instance.schedule.into_core()?,
+        schedule: instance
+            .schedule
+            .into_core()
+            .map_err(|m| ErrorDto::detail(codes::TEMPLATES_INVALID_SCHEDULE, m))?,
         name_override: instance.name_override.clone(),
     };
 
-    let resolved = tpl::instantiate(bp, &core_inst).map_err(|e| e.to_string())?;
+    let resolved = tpl::instantiate(bp, &core_inst)
+        .map_err(|e| ErrorDto::detail(codes::TEMPLATES_INSTANTIATE_FAILED, e))?;
 
     // Translate `ResolvedAgent` into the existing
     // `AgentCreateDto` shape and feed it into the existing
@@ -328,7 +396,17 @@ fn filter_for_privacy(summaries: Vec<RouteSummaryDto>, bp: &Blueprint) -> Vec<Ro
 fn decode_placeholder_values(
     bp: &Blueprint,
     values: &std::collections::BTreeMap<String, serde_json::Value>,
-) -> Result<std::collections::BTreeMap<String, tpl::PlaceholderValue>, String> {
+) -> Result<std::collections::BTreeMap<String, tpl::PlaceholderValue>, ErrorDto> {
+    /// One code for every shape mismatch: the condition and the remedy
+    /// are identical ("that field wants a different kind of value"),
+    /// and `expected` is what a localized sentence needs.
+    fn mismatch(placeholder: &str, expected: &str, message: String) -> ErrorDto {
+        ErrorDto::with_params(
+            codes::TEMPLATES_PLACEHOLDER_TYPE_MISMATCH,
+            json!({ "placeholder": placeholder, "expected": expected }),
+            message,
+        )
+    }
     use claudepot_core::templates::PlaceholderType as PT;
     let mut out = std::collections::BTreeMap::new();
     for ph in &bp.placeholders {
@@ -339,33 +417,63 @@ fn decode_placeholder_values(
             PT::Path => tpl::PlaceholderValue::Path {
                 value: v
                     .as_str()
-                    .ok_or_else(|| format!("placeholder {} expected string path", ph.name))?
+                    .ok_or_else(|| {
+                        mismatch(
+                            &ph.name,
+                            "string path",
+                            format!("placeholder {} expected string path", ph.name),
+                        )
+                    })?
                     .to_string(),
             },
             PT::Text => tpl::PlaceholderValue::Text {
                 value: v
                     .as_str()
-                    .ok_or_else(|| format!("placeholder {} expected string", ph.name))?
+                    .ok_or_else(|| {
+                        mismatch(
+                            &ph.name,
+                            "string",
+                            format!("placeholder {} expected string", ph.name),
+                        )
+                    })?
                     .to_string(),
             },
             PT::Boolean => tpl::PlaceholderValue::Boolean {
-                value: v
-                    .as_bool()
-                    .ok_or_else(|| format!("placeholder {} expected boolean", ph.name))?,
+                value: v.as_bool().ok_or_else(|| {
+                    mismatch(
+                        &ph.name,
+                        "boolean",
+                        format!("placeholder {} expected boolean", ph.name),
+                    )
+                })?,
             },
             PT::Number => tpl::PlaceholderValue::Number {
-                value: v
-                    .as_f64()
-                    .ok_or_else(|| format!("placeholder {} expected number", ph.name))?,
+                value: v.as_f64().ok_or_else(|| {
+                    mismatch(
+                        &ph.name,
+                        "number",
+                        format!("placeholder {} expected number", ph.name),
+                    )
+                })?,
             },
             PT::List => tpl::PlaceholderValue::List {
                 value: v
                     .as_array()
-                    .ok_or_else(|| format!("placeholder {} expected array", ph.name))?
+                    .ok_or_else(|| {
+                        mismatch(
+                            &ph.name,
+                            "array",
+                            format!("placeholder {} expected array", ph.name),
+                        )
+                    })?
                     .iter()
                     .map(|x| {
                         x.as_str().map(String::from).ok_or_else(|| {
-                            format!("placeholder {} list entries must be strings", ph.name)
+                            mismatch(
+                                &ph.name,
+                                "array of strings",
+                                format!("placeholder {} list entries must be strings", ph.name),
+                            )
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -379,8 +487,8 @@ fn decode_placeholder_values(
 /// Templates supply `name = blueprint.name` (e.g. "Morning health
 /// check"); two installs would collide on the existing-store
 /// uniqueness rule. Append a numeric suffix until unique.
-fn derive_unique_name(base: &str) -> Result<String, String> {
-    let store = AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))?;
+fn derive_unique_name(base: &str) -> Result<String, ErrorDto> {
+    let store = AgentStore::open().map_err(ErrorDto::from)?;
     let existing: std::collections::HashSet<String> =
         store.list().iter().map(|a| a.name.clone()).collect();
     if !existing.contains(base) {
@@ -392,5 +500,9 @@ fn derive_unique_name(base: &str) -> Result<String, String> {
             return Ok(candidate);
         }
     }
-    Err(format!("failed to derive a unique agent name for {base:?}"))
+    Err(ErrorDto::with_params(
+        codes::TEMPLATES_UNIQUE_NAME_EXHAUSTED,
+        json!({ "name": base }),
+        format!("failed to derive a unique agent name for {base:?}"),
+    ))
 }

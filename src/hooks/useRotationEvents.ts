@@ -3,6 +3,8 @@ import type { Event as TauriEvent } from "@tauri-apps/api/event";
 
 import { api } from "../api";
 import type { PendingSwap } from "../api/rotation";
+import { i18n } from "../lib/i18n";
+import { renderError } from "../lib/i18n-error";
 import { useEmit } from "../providers/AppStateProvider";
 import { useTauriEvents } from "./useTauriEvent";
 
@@ -92,14 +94,16 @@ export function useRotationEvents(): void {
       const summary = `${p.fromEmail} → ${p.toEmail}`;
       void emit({
         category: "rotationSuggested",
-        title: "Auto-rotation suggested",
-        body: `${summary} — utilization ${p.utilizationPct.toFixed(1)}% on ${
-          p.window ?? "trigger window"
-        }`,
+        title: i18n.t("rotation.event.suggestedTitle"),
+        body: i18n.t("rotation.event.suggestedBody", {
+          summary,
+          pct: p.utilizationPct.toFixed(1),
+          window: p.window ?? i18n.t("rotation.event.triggerWindowFallback"),
+        }),
         dedupeKey: `rotation:suggested:${p.swapId}`,
         target: { kind: "app", route: { section: "settings" } },
         toastAction: {
-          label: "Switch",
+          label: i18n.t("rotation.event.switch"),
           // 30 s — long enough for the user to notice and act, short
           // enough that a stale suggestion auto-dismisses with the
           // dismiss callback firing.
@@ -110,8 +114,8 @@ export function useRotationEvents(): void {
               emit({
                 category: "rotationFailed",
                 kind: "error",
-                title: "Rotation swap failed",
-                body: String(e),
+                title: i18n.t("rotation.event.swapFailedTitle"),
+                body: renderError(e),
                 dedupeKey: `rotation:failed:${p.swapId}`,
               }),
             );
@@ -129,14 +133,18 @@ export function useRotationEvents(): void {
     (p: AppliedPayload) => {
       // A swap that lands while CC is running doesn't take effect until
       // CC restarts — surface that so the user isn't surprised the
-      // running session is still on the old account.
-      const restart = p.ccRunning
-        ? " — restart Claude Code to apply"
-        : "";
+      // running session is still on the old account. Two whole-phrase
+      // keys, not a translated suffix: the caveat isn't sentence-final
+      // in every language.
       void emit({
         category: "rotationApplied",
-        title: "Auto-rotation applied",
-        body: `Switched to ${p.toEmail} (rule ${p.ruleId})${restart}`,
+        title: i18n.t("rotation.event.appliedTitle"),
+        body: i18n.t(
+          p.ccRunning
+            ? "rotation.event.appliedBodyRestart"
+            : "rotation.event.appliedBody",
+          { email: p.toEmail, ruleId: p.ruleId },
+        ),
         dedupeKey: `rotation:applied:${p.ruleId}`,
       });
     },
@@ -148,10 +156,13 @@ export function useRotationEvents(): void {
       void emit({
         category: "rotationFailed",
         kind: "error",
-        title: "Auto-rotation stalled",
-        body: `Rule "${p.ruleId}" can't rotate — every candidate is at or above ${
-          p.thresholdPct
-        }% on ${p.window ?? "the trigger window"}. No safe target.`,
+        title: i18n.t("rotation.event.stalledTitle"),
+        body: i18n.t("rotation.event.stalledBody", {
+          ruleId: p.ruleId,
+          pct: p.thresholdPct,
+          window:
+            p.window ?? i18n.t("rotation.event.stalledWindowFallback"),
+        }),
         dedupeKey: `rotation:stalled:${p.ruleId}`,
         target: { kind: "app", route: { section: "settings" } },
       });
@@ -164,8 +175,11 @@ export function useRotationEvents(): void {
       void emit({
         category: "rotationFailed",
         kind: "error",
-        title: "Auto-rotation failed",
-        body: `${p.toEmail}: ${p.error}`,
+        title: i18n.t("rotation.event.failedTitle"),
+        body: i18n.t("rotation.event.failedBody", {
+          email: p.toEmail,
+          error: p.error,
+        }),
         dedupeKey: `rotation:failed:${p.ruleId}`,
       });
     },
@@ -177,8 +191,11 @@ export function useRotationEvents(): void {
       void emit({
         category: "rotationFailed",
         kind: "error",
-        title: "Auto-rotation rule paused",
-        body: `Rule "${p.ruleId}" was paused after ${p.consecutiveFailures} consecutive failed swaps. It will retry automatically after a cooldown.`,
+        title: i18n.t("rotation.event.breakerTitle"),
+        body: i18n.t("rotation.event.breakerBody", {
+          ruleId: p.ruleId,
+          failures: p.consecutiveFailures,
+        }),
         dedupeKey: `rotation:breaker:${p.ruleId}`,
         target: { kind: "app", route: { section: "settings" } },
       });

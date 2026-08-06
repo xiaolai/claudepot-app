@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { FastModeState } from "../../api/fastMode";
 import { compactModelLabel } from "../../lib/modelLabel";
-import { toastError } from "../../lib/toastError";
+import { toastError } from "../../lib/i18n-error";
 import { SettingToggleRow } from "./SettingToggleRow";
 
 // Settings → General → Claude Code behavior.
@@ -31,6 +32,7 @@ export function FastModeToggle({
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [state, setState] = useState<FastModeState | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,9 +40,9 @@ export function FastModeToggle({
     try {
       setState(await api.fastModeState());
     } catch (e) {
-      toastError(pushToast, "Fast mode setting load failed", e);
+      toastError(pushToast, t("fastMode.loadFailed"), e);
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   useEffect(() => {
     void refresh();
@@ -61,12 +63,10 @@ export function FastModeToggle({
       setState(await api.fastModeSet(next));
       pushToast(
         "info",
-        next
-          ? "Fast mode on — new Opus sessions run faster and bill to usage credits."
-          : "Fast mode off — new sessions run at standard Opus speed and rates.",
+        next ? t("fastMode.onToast") : t("fastMode.offToast"),
       );
     } catch (e) {
-      toastError(pushToast, "Toggle fast mode", e);
+      toastError(pushToast, t("fastMode.toggleFailed"), e);
     } finally {
       setBusy(false);
     }
@@ -80,33 +80,36 @@ export function FastModeToggle({
       pushToast(
         "info",
         next
-          ? "Fast mode now resets each session — re-enable it with /fast."
-          : "Fast mode preference now persists across sessions.",
+          ? t("fastMode.perSessionOnToast")
+          : t("fastMode.perSessionOffToast"),
       );
     } catch (e) {
-      toastError(pushToast, "Toggle per-session opt-in", e);
+      toastError(pushToast, t("fastMode.perSessionFailed"), e);
     } finally {
       setBusy(false);
     }
   };
 
   const models = state
-    ? state.facts.models.map(compactModelLabel).join(" and ")
+    ? state.facts.models.map(compactModelLabel).join(t("fastMode.joinAnd"))
     : "";
   const rate = state
-    ? `$${state.facts.input_per_mtok}/$${state.facts.output_per_mtok} per MTok`
+    ? t("fastMode.rate", {
+        input: state.facts.input_per_mtok,
+        output: state.facts.output_per_mtok,
+      })
     : "";
 
   const hint = !state
-    ? "Loading…"
+    ? t("shared.loading")
     : locked
-      ? "Overridden by the CLAUDE_CODE_DISABLE_FAST_MODE environment variable. Unset it to control this here."
-      : `Runs ${models} up to 2.5× faster at ${rate} instead of the standard rate — same model, same quality. Charged to usage credits, not your plan's included usage, from the first token. Needs usage credits enabled on the account; Team and Enterprise also need an owner to turn it on.`;
+      ? t("fastMode.lockedHint")
+      : t("fastMode.hint", { models, rate });
 
   return (
     <>
       <SettingToggleRow
-        label="Fast mode"
+        label={t("fastMode.label")}
         hint={hint}
         hintTone={locked ? "warn" : "muted"}
         checked={on}
@@ -114,11 +117,11 @@ export function FastModeToggle({
         onChange={(next) => void setOn(next)}
       />
       <SettingToggleRow
-        label="Require per-session opt-in"
+        label={t("fastMode.perSessionLabel")}
         hint={
           state?.per_session_opt_in
-            ? "Every new session starts with fast mode off; re-enable it with /fast. Your saved preference is kept."
-            : "Fast mode persists across sessions once turned on. Enable this to make each session start with it off instead."
+            ? t("fastMode.perSessionOnHint")
+            : t("fastMode.perSessionOffHint")
         }
         checked={state?.per_session_opt_in ?? false}
         disabled={!state || busy}

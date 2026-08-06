@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
@@ -13,6 +14,7 @@ import { computeDiff, parseToolInput, type EditInput } from "./toolInput";
  * verbatim (usually CC echoes the patch — we trust it).
  */
 export function EditToolViewer({ tool }: { tool: LinkedTool }) {
+  const { t } = useTranslation("sessions");
   const parsed = parseToolInput<EditInput>(tool.input_preview);
   if (!parsed.ok) {
     return <RawFallback tool={tool} rawInput={parsed.raw} />;
@@ -77,7 +79,7 @@ export function EditToolViewer({ tool }: { tool: LinkedTool }) {
               fontSize: "var(--fs-3xs)",
             }}
           >
-            replace all
+            {t("viewer.edit.replaceAll")}
           </span>
         )}
         {tool.is_error && (
@@ -89,10 +91,10 @@ export function EditToolViewer({ tool }: { tool: LinkedTool }) {
               letterSpacing: "var(--ls-wide)",
             }}
           >
-            error
+            {t("viewer.error")}
           </span>
         )}
-        <CopyButton text={copyText} ariaLabel="Copy diff" />
+        <CopyButton text={copyText} ariaLabel={t("viewer.edit.copyAria")} />
       </header>
       <div
         className="mono"

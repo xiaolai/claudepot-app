@@ -1,19 +1,23 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type {
   ScheduleDto,
   ScheduleShapeName,
   Weekday,
 } from "../../types";
 
-const WEEKDAY_LABELS: Record<Weekday, string> = {
-  sun: "Sun",
-  mon: "Mon",
-  tue: "Tue",
-  wed: "Wed",
-  thu: "Thu",
-  fri: "Fri",
-  sat: "Sat",
-};
+/** Weekday → catalog key, resolved at render time so language
+ *  switches take effect. `as const` keeps the values inside the
+ *  typed key union. */
+const WEEKDAY_LABEL_KEYS = {
+  sun: "templates.weekday.sun",
+  mon: "templates.weekday.mon",
+  tue: "templates.weekday.tue",
+  wed: "templates.weekday.wed",
+  thu: "templates.weekday.thu",
+  fri: "templates.weekday.fri",
+  sat: "templates.weekday.sat",
+} as const;
 
 interface Props {
   /** Allowed schedule shapes from the blueprint. */
@@ -43,6 +47,7 @@ export function SchedulePicker({
   defaultCron,
   onChange,
 }: Props) {
+  const { t } = useTranslation("projects");
   const [time, setTime] = useState(currentTime(value, defaultTime));
   const [day, setDay] = useState<Weekday>(currentDay(value));
   const [hours, setHours] = useState(currentHours(value));
@@ -80,12 +85,20 @@ export function SchedulePicker({
           onSelect={() => pick("daily")}
           label={
             <span>
-              Each day at{" "}
-              <TimeInput
-                value={time}
-                onChange={(v) => {
-                  setTime(v);
-                  if (value.kind === "daily") onChange({ kind: "daily", time: v });
+              <Trans
+                ns="projects"
+                i18nKey="templates.dailyAt"
+                components={{
+                  time: (
+                    <TimeInput
+                      value={time}
+                      onChange={(v) => {
+                        setTime(v);
+                        if (value.kind === "daily")
+                          onChange({ kind: "daily", time: v });
+                      }}
+                    />
+                  ),
                 }}
               />
             </span>
@@ -100,13 +113,20 @@ export function SchedulePicker({
           onSelect={() => pick("weekdays")}
           label={
             <span>
-              Each weekday at{" "}
-              <TimeInput
-                value={time}
-                onChange={(v) => {
-                  setTime(v);
-                  if (value.kind === "weekdays")
-                    onChange({ kind: "weekdays", time: v });
+              <Trans
+                ns="projects"
+                i18nKey="templates.weekdaysAt"
+                components={{
+                  time: (
+                    <TimeInput
+                      value={time}
+                      onChange={(v) => {
+                        setTime(v);
+                        if (value.kind === "weekdays")
+                          onChange({ kind: "weekdays", time: v });
+                      }}
+                    />
+                  ),
                 }}
               />
             </span>
@@ -121,30 +141,38 @@ export function SchedulePicker({
           onSelect={() => pick("weekly")}
           label={
             <span>
-              Each{" "}
-              <select
-                value={day}
-                onChange={(e) => {
-                  const d = e.target.value as Weekday;
-                  setDay(d);
-                  if (value.kind === "weekly")
-                    onChange({ kind: "weekly", day: d, time });
-                }}
-                style={selectStyle}
-              >
-                {(Object.keys(WEEKDAY_LABELS) as Weekday[]).map((w) => (
-                  <option key={w} value={w}>
-                    {WEEKDAY_LABELS[w]}
-                  </option>
-                ))}
-              </select>{" "}
-              at{" "}
-              <TimeInput
-                value={time}
-                onChange={(v) => {
-                  setTime(v);
-                  if (value.kind === "weekly")
-                    onChange({ kind: "weekly", day, time: v });
+              <Trans
+                ns="projects"
+                i18nKey="templates.weeklyAt"
+                components={{
+                  day: (
+                    <select
+                      value={day}
+                      onChange={(e) => {
+                        const d = e.target.value as Weekday;
+                        setDay(d);
+                        if (value.kind === "weekly")
+                          onChange({ kind: "weekly", day: d, time });
+                      }}
+                      style={selectStyle}
+                    >
+                      {(Object.keys(WEEKDAY_LABEL_KEYS) as Weekday[]).map((w) => (
+                        <option key={w} value={w}>
+                          {t(WEEKDAY_LABEL_KEYS[w])}
+                        </option>
+                      ))}
+                    </select>
+                  ),
+                  time: (
+                    <TimeInput
+                      value={time}
+                      onChange={(v) => {
+                        setTime(v);
+                        if (value.kind === "weekly")
+                          onChange({ kind: "weekly", day, time: v });
+                      }}
+                    />
+                  ),
                 }}
               />
             </span>
@@ -159,21 +187,27 @@ export function SchedulePicker({
           onSelect={() => pick("hourly")}
           label={
             <span>
-              Every{" "}
-              <input
-                type="number"
-                min={1}
-                max={23}
-                value={hours}
-                onChange={(e) => {
-                  const n = Math.max(1, Math.min(23, +e.target.value || 1));
-                  setHours(n);
-                  if (value.kind === "hourly")
-                    onChange({ kind: "hourly", every_n_hours: n });
+              <Trans
+                ns="projects"
+                i18nKey="templates.hourlyEvery"
+                components={{
+                  n: (
+                    <input
+                      type="number"
+                      min={1}
+                      max={23}
+                      value={hours}
+                      onChange={(e) => {
+                        const n = Math.max(1, Math.min(23, +e.target.value || 1));
+                        setHours(n);
+                        if (value.kind === "hourly")
+                          onChange({ kind: "hourly", every_n_hours: n });
+                      }}
+                      style={{ ...inputStyle, width: "var(--sp-32)" }}
+                    />
+                  ),
                 }}
-                style={{ ...inputStyle, width: "var(--sp-32)" }}
-              />{" "}
-              hours
+              />
             </span>
           }
         />
@@ -184,7 +218,7 @@ export function SchedulePicker({
           name="schedule"
           checked={value.kind === "manual"}
           onSelect={() => pick("manual")}
-          label="Only when I run it"
+          label={t("templates.manual")}
         />
       )}
 
@@ -195,17 +229,24 @@ export function SchedulePicker({
           onSelect={() => pick("custom")}
           label={
             <span>
-              Custom (advanced) —{" "}
-              <input
-                type="text"
-                value={cron}
-                placeholder="0 8 * * *"
-                onChange={(e) => {
-                  setCron(e.target.value);
-                  if (value.kind === "custom")
-                    onChange({ kind: "custom", cron: e.target.value });
+              <Trans
+                ns="projects"
+                i18nKey="templates.customCron"
+                components={{
+                  cron: (
+                    <input
+                      type="text"
+                      value={cron}
+                      placeholder="0 8 * * *"
+                      onChange={(e) => {
+                        setCron(e.target.value);
+                        if (value.kind === "custom")
+                          onChange({ kind: "custom", cron: e.target.value });
+                      }}
+                      style={{ ...inputStyle, width: "16ch", fontFamily: "var(--font-mono)" }}
+                    />
+                  ),
                 }}
-                style={{ ...inputStyle, width: "16ch", fontFamily: "var(--font-mono)" }}
               />
             </span>
           }

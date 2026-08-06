@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 /**
  * One row in the preview. `id` is the React key (a unique stable
@@ -48,6 +49,7 @@ export function CleanupPlanPreview({
   extrasFooter,
   marginTop,
 }: CleanupPlanPreviewProps) {
+  const { t } = useTranslation("sessions");
   const visible = rows.slice(0, maxRows);
   const overflow = rows.length - visible.length;
   return (
@@ -114,7 +116,7 @@ export function CleanupPlanPreview({
             color: "var(--fg-faint)",
           }}
         >
-          … and {overflow} more
+          {t("cleanup.andNMore", { n: overflow })}
         </div>
       )}
       {extrasFooter}

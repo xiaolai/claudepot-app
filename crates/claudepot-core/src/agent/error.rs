@@ -3,6 +3,8 @@
 //! One enum at the module boundary. CLI/Tauri callers convert via
 //! `Display` (or `?`-into-anyhow at the top level).
 
+use crate::error_code::ErrorCode;
+use serde_json::{json, Value};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -15,6 +17,21 @@ pub enum AgentError {
 
     #[error("agent not found: {0}")]
     NotFound(String),
+
+    /// The agent's `AgentBinary::Route` points at a route that is no
+    /// longer registered. Distinct from [`NotFound`]: the agent exists,
+    /// its *provider* does not, and the remedy is to re-point or
+    /// re-create the route rather than to look for a missing agent.
+    ///
+    /// Split out because it used to ride `NotFound` as
+    /// `format!("route {id}")` — which made `params.id` mean "an agent
+    /// id" at nineteen call sites and "the string `route <uuid>`" at
+    /// one, so a localized "agent not found: {{id}}" rendered "agent
+    /// not found: route 9f2c…".
+    ///
+    /// [`NotFound`]: AgentError::NotFound
+    #[error("route not found: {0}")]
+    RouteNotFound(String),
 
     #[error("agent name already taken: {0}")]
     DuplicateName(String),
@@ -45,4 +62,54 @@ pub enum AgentError {
 
     #[error("agent file at {0} is not managed by Claudepot — refusing to overwrite")]
     NotManaged(String),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl ErrorCode for AgentError {
+    fn code(&self) -> &'static str {
+        match self {
+            AgentError::Io(_) => "agent.io",
+            AgentError::Json(_) => "agent.json",
+            AgentError::NotFound(_) => "agent.not_found",
+            AgentError::RouteNotFound(_) => "agent.route_not_found",
+            AgentError::DuplicateName(_) => "agent.duplicate_name",
+            AgentError::InvalidName(_, _) => "agent.invalid_name",
+            AgentError::InvalidCron(_, _) => "agent.invalid_cron",
+            AgentError::CronTooDense(_, _, _) => "agent.cron_too_dense",
+            AgentError::InvalidEnv(_) => "agent.invalid_env",
+            AgentError::MissingField(_) => "agent.missing_field",
+            AgentError::InvalidPath(_, _) => "agent.invalid_path",
+            AgentError::NoHomeDir => "agent.no_home_dir",
+            AgentError::UnsupportedPlatform(_) => "agent.unsupported_platform",
+            AgentError::NotManaged(_) => "agent.not_managed",
+        }
+    }
+
+    fn params(&self) -> Value {
+        match self {
+            AgentError::Io(e) => json!({ "detail": e.to_string() }),
+            AgentError::Json(e) => json!({ "detail": e.to_string() }),
+            // An agent id, never a secret, and never anything else:
+            // the one constructor that passed a route locator now uses
+            // `RouteNotFound`, so `id` means exactly one thing.
+            AgentError::NotFound(id) => json!({ "id": id }),
+            AgentError::RouteNotFound(route_id) => json!({ "route_id": route_id }),
+            AgentError::DuplicateName(name) => json!({ "name": name }),
+            AgentError::InvalidName(name, reason) => json!({ "name": name, "reason": reason }),
+            AgentError::InvalidCron(cron, reason) => json!({ "cron": cron, "reason": reason }),
+            AgentError::CronTooDense(cron, slots, limit) => {
+                json!({ "cron": cron, "slots": slots, "limit": limit })
+            }
+            // The *key* and the rule it broke — `agent::env` builds this
+            // text from key names and policy, never from a value. The
+            // env allowlist is what keeps a pasted token out of here.
+            AgentError::InvalidEnv(detail) => json!({ "detail": detail }),
+            AgentError::MissingField(field) => json!({ "field": field }),
+            AgentError::InvalidPath(path, reason) => json!({ "path": path, "reason": reason }),
+            AgentError::NoHomeDir => json!({}),
+            AgentError::UnsupportedPlatform(operation) => json!({ "operation": operation }),
+            AgentError::NotManaged(path) => json!({ "path": path }),
+        }
+    }
 }

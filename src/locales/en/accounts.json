@@ -1,0 +1,306 @@
+{
+  "section": {
+    "title": "Accounts",
+    "loading": "Loading accounts…",
+    "loadErrorTitle": "Couldn't load accounts",
+    "loadErrorBody": "Claudepot couldn't read its account database. Retrying often resolves this; if it persists, check the data directory in Settings → Diagnostics.",
+    "retry": "Retry",
+    "errorDetail": "Error detail",
+    "verifyAll": "Verify all",
+    "verifyingProgress": "Verifying… {{done}}/{{total}}",
+    "verifyingProgressAria": "Verifying accounts, {{done}} of {{total}}",
+    "verifyAllCompactTitle": "Verify all — check every account against /profile",
+    "verifyAllAria": "Verify all accounts",
+    "verifyAllBusyTitle": "Checking every account against /profile…",
+    "verifyAllTitle": "Verify every account against /profile",
+    "refreshUsage": "Refresh usage",
+    "refreshUsageTitleCompact": "Refresh usage (⌘R)",
+    "refreshTitle": "Refresh (⌘R)",
+    "addAccount": "Add account",
+    "addAccountTitle": "Add account (⌘N)",
+    "accountAdded": "Account added.",
+    "adoptedToast": "Adopted {{email}}.",
+    "adoptFailed": "Couldn't adopt current session",
+    "copiedEmail": "Copied {{email}}",
+    "copyFailed": "Copy failed",
+    "desktopLaunchFailed": "Desktop launch failed",
+    "wakeFailed": "Wake failed",
+    "wokeToast": "Woke {{email}} — spent {{input}}+{{output}} tokens. Reset times appear shortly."
+  },
+  "usageAge": {
+    "justNow": "updated just now",
+    "minutesAgo": "updated {{mins}}m ago",
+    "hoursAgo": "updated {{hours}}h ago",
+    "daysAgo": "updated {{days}}d ago"
+  },
+  "grid": {
+    "filterAccounts": "Filter accounts",
+    "noMatch": "No accounts match \"{{filter}}\".",
+    "empty": {
+      "title": "No accounts yet.",
+      "adoptPrompt": "Claude Code is already signed in as <emph>{{email}}</emph>. Adopt this session as your first Claudepot account?",
+      "adoptCta": "Adopt {{email}}",
+      "addDifferent": "Add a different account",
+      "intro": "Claudepot manages multiple Anthropic logins for Claude Code and Claude Desktop. Sign in with a browser OAuth flow to get started.",
+      "addAccount": "Add account"
+    }
+  },
+  "card": {
+    "accountAria": "Account {{email}}",
+    "openKeysTitle": "Open Keys filtered to {{email}}",
+    "openKeysAria_one": "Open Keys filtered to {{email}} ({{count}} token)",
+    "openKeysAria_other": "Open Keys filtered to {{email}} ({{count}} tokens)",
+    "tokenCount_one": "{{count}} token",
+    "tokenCount_other": "{{count}} tokens",
+    "moreActions": "More actions",
+    "moreActionsFor": "More actions for {{email}}"
+  },
+  "addModal": {
+    "title": "Add account",
+    "browserLoginOpTitle": "Add account: browser login",
+    "cancelLogin": "Cancel login",
+    "registerFailed": "register failed",
+    "importTitle": "Import from Claude Code",
+    "import": "Import",
+    "importing": "Importing…",
+    "alreadyManaged": "already managed",
+    "orDivider": "or add a different account",
+    "loginTitle": "Log in with a new account…",
+    "loginSubtitle": "Open a browser, complete OAuth, then register the result as a fresh account.",
+    "openingBrowser": "Opening browser…",
+    "opening": "Opening…",
+    "logIn": "Log in",
+    "close": "Close",
+    "summary": {
+      "checking": "Checking Claude Code's current session…",
+      "signedIn": "Claude Code is signed in as <emph>{{email}}</emph>.",
+      "signedInKnown": "Claude Code is signed in as <emph>{{email}}</emph> — already managed.",
+      "empty": "Claude Code has no saved credentials.",
+      "error": "Couldn't read Claude Code session: {{message}}"
+    },
+    "importSubtitle": {
+      "new": "Copy the current credential blob into a new managed slot.",
+      "known": "Nothing new to import — that account is already managed.",
+      "empty": "No credentials to import. Sign in with Claude Code first.",
+      "error": "Preflight failed. Resolve the error above and retry.",
+      "checking": "Waiting on Claude Code session check…"
+    }
+  },
+  "anomaly": {
+    "relogin": "Re-login",
+    "reloginTitle": "Open a browser OAuth flow and import the result",
+    "drift": {
+      "title": "Wrong account on this slot",
+      "detail": "The credentials saved here actually belong to <emph>{{email}}</emph>. Log in again to fix this, or remove this account.",
+      "anotherAccount": "another account"
+    },
+    "rejected": {
+      "title": "Server rejected the saved login",
+      "detail": "The stored login is no longer valid — log in again to fix."
+    },
+    "broken": {
+      "title": "Saved login is missing or broken",
+      "detail": "The stored credential file couldn't be read. Log in again or remove."
+    }
+  },
+  "desktopConfirm": {
+    "signOut": {
+      "title": "Sign Claude Desktop out?",
+      "confirm": "Sign out",
+      "body": "Claudepot will quit Claude Desktop and delete the live session items. The current snapshot is preserved, so you can swap this account back in later.",
+      "bullet1": "Any unsent Desktop chat drafts will be lost.",
+      "bullet2": "Next Desktop launch will open to the login screen until you sign in again.",
+      "bullet3": "The snapshot under <c>{{path}}</c> stays intact."
+    },
+    "overwrite": {
+      "title": "Replace Desktop profile for {{email}}?",
+      "confirm": "Replace",
+      "body": "<emph>{{email}}</emph> already has a stored Desktop snapshot. Binding the live session will overwrite it with the current state.",
+      "note": "The previous snapshot is stashed to a temporary directory during the copy; if the new snapshot fails, the old one is rolled back. On success, the old snapshot is permanently discarded."
+    }
+  },
+  "desktopImport": {
+    "title": "Bind current Desktop session",
+    "orDivider": "or bind current Claude Desktop session",
+    "checking": "Checking…",
+    "checkingSubtitle": "Probing live Claude Desktop identity…",
+    "newSubtitle": "Desktop is signed in as {{email}}, which isn't registered yet. Register it via the CC flow above, then return here.",
+    "registerFirst": "Register first",
+    "knownSubtitle": "Snapshot the current Desktop session under the stored account.",
+    "bind": "Bind",
+    "binding": "Binding…",
+    "adoptedSubtitle": "Already bound — use Accounts → Set as Desktop to swap in.",
+    "done": "Done",
+    "alreadyBound": "already bound",
+    "notSignedIn": "Claude Desktop is not signed in.",
+    "nothingToBind": "Nothing to bind",
+    "unavailable": "Unavailable",
+    "unconfirmed": "Couldn't confirm which account Claude Desktop is signed in as. Open Claude Desktop once, then try again.",
+    "errorSubtitle": "Couldn't read Desktop session: {{message}}",
+    "summary": {
+      "checking": "Probing live Desktop identity…",
+      "newText": "Claude Desktop is signed in as <emph>{{email}}</emph> — not yet registered.",
+      "knownText": "Claude Desktop is signed in as <emph>{{email}}</emph>.",
+      "adopted": "Snapshot already stored for <emph>{{email}}</emph>."
+    }
+  },
+  "chips": {
+    "none": "No accounts registered yet.",
+    "summaryAria": "Account health summary",
+    "totalTitle_one": "{{count}} account total",
+    "totalTitle_other": "{{count}} accounts total",
+    "totalAria": "{{n}} accounts total",
+    "verifiedTitle": "{{n}} verified recently",
+    "verifiedAria": "{{n}} verified",
+    "unverifiedTitle": "{{n}} not yet verified",
+    "unverifiedAria": "{{n}} unverified",
+    "driftTitle": "{{n}} drift — slot misfiled, re-login or remove",
+    "driftAria": "{{n}} drift",
+    "brokenTitle": "{{n}} broken — credentials rejected or unreadable",
+    "brokenAria": "{{n}} broken"
+  },
+  "footer": {
+    "verifying": "verifying…",
+    "verified": "verified",
+    "verifiedAgo": "verified · {{ago}}",
+    "drift": "drift → {{email}}",
+    "tokenRejected": "token rejected",
+    "profileUnreachable": "profile unreachable",
+    "notYetVerified": "not yet verified",
+    "token": "token {{status}}",
+    "cliSwitch": "CLI switch {{ago}}",
+    "desktopSwitch": "Desktop switch {{ago}}"
+  },
+  "time": {
+    "justNow": "just now",
+    "inMinutes": "in {{mins}}m",
+    "minutesAgo": "{{mins}}m ago",
+    "inHours": "in {{hours}}h",
+    "hoursAgo": "{{hours}}h ago",
+    "inDays": "in {{days}}d",
+    "daysAgo": "{{days}}d ago",
+    "due": "due",
+    "todayAt": "today {{time}}",
+    "tomorrowAt": "tomorrow {{time}}",
+    "noReset": "No reset scheduled",
+    "resetUnknown": "Reset time unknown",
+    "resetWas": "Reset was {{time}}",
+    "resetsIn": "Resets {{time}} — in {{duration}}",
+    "durationDaysHours": "{{days}}d {{hours}}h",
+    "durationDays": "{{days}}d",
+    "durationHoursMins": "{{hours}}h {{mins}}m",
+    "durationHours": "{{hours}}h",
+    "durationMins": "{{mins}}m",
+    "secsShort": "{{n}}s",
+    "minsShort": "{{n}}m",
+    "hoursShort": "{{n}}h"
+  },
+  "loginPhases": {
+    "spawning": "Preparing",
+    "waitingForBrowser": "Waiting for browser",
+    "readingBlob": "Reading credentials",
+    "fetchingProfile": "Fetching profile",
+    "verifyingIdentity": "Verifying identity",
+    "persisting": "Saving"
+  },
+  "splitBrain": {
+    "title": "Claude Code is running",
+    "confirm": "Swap to {{email}} anyway",
+    "intro": "A running Claude Code session is using the current account. Until you quit it you'll see split-brain state:",
+    "bullet1": "Session identity (header, org name) stays as the old account — cached at startup.",
+    "bullet2": "API calls (/usage, completions, billing) switch to <emph>{{email}}</emph> immediately.",
+    "bullet3": "The next OAuth refresh (typically within the hour) may overwrite the keychain back to the old account, silently reverting this swap.",
+    "note": "Safest: quit Claude Code first, then swap. This action proceeds with <c>{{flag}}</c>."
+  },
+  "target": {
+    "cli": "CLI",
+    "desktop": "Desktop",
+    "verifyNow": "Verify now",
+    "noCredsToVerify": "no credentials to verify",
+    "relogin": "Re-login",
+    "activeCli": "Active CLI — {{email}}",
+    "switchCli": "Switch CLI to {{email}}",
+    "credsMissing": "Credentials missing — re-login from the menu",
+    "activeDesktop": "Active Desktop — {{email}}",
+    "relaunch": "Re-launch",
+    "bindAgain": "Bind again",
+    "setDesktop": "Set Desktop to {{email}}",
+    "setNoRelaunch": "Set without relaunch",
+    "bindTooltip": "Bind the currently-running Desktop session to this account"
+  },
+  "usage": {
+    "noCreds": "Usage unavailable — no credentials.",
+    "tokenExpired": "Usage unavailable — token expired.",
+    "verify": "Verify",
+    "verifying": "Verifying…",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "retry": "Retry",
+    "retrying": "Retrying…",
+    "rateLimited": "Rate-limited by {{endpoint}} · retry in {{secs}}s",
+    "fetchFailed": "Couldn't fetch usage: {{detail}}",
+    "unknownError": "unknown error",
+    "noWindows": "No usage windows reported.",
+    "header": "Rate-limit windows",
+    "cachedTitle": "Cached — last fetched {{time}}",
+    "ageOld": "{{age}} old",
+    "rows": {
+      "fiveHour": "5h window",
+      "sevenDay": "7d all",
+      "sonnet": "7d Sonnet",
+      "opus": "7d Opus",
+      "apps": "7d apps",
+      "appsTooltip": "Third-party OAuth apps authorized against this account (IDEs, tools, etc).",
+      "cowork": "7d cowork",
+      "coworkTooltip": "Cowork / shared-seat pool usage."
+    },
+    "extra": {
+      "label": "Extra usage",
+      "off": "off",
+      "disabledTitle": "Extras (overage billing) is disabled for this account. Enable in the Anthropic console if you need headroom past the monthly limit.",
+      "pctUsed": "{{pct}}% used",
+      "remainingTitle": "Remaining balance for this period (monthly limit minus spend).",
+      "left": "· {{amount}} left"
+    }
+  },
+  "menu": {
+    "copyEmail": "Copy email",
+    "copyUuid": "Copy UUID",
+    "activeCli": "Active CLI",
+    "setCli": "Set as CLI",
+    "activeDesktop": "Active Desktop",
+    "setDesktop": "Set as Desktop",
+    "setDesktopNoRelaunch": "Set as Desktop (don't relaunch)",
+    "bindDesktop": "Bind current Desktop session",
+    "desktopNotInstalled": "Claude Desktop not installed",
+    "bindFirst": "bind current Desktop session first",
+    "alreadyActive": "already active",
+    "credsMissingCorrupt": "credentials missing or corrupt",
+    "verifyNow": "Verify now",
+    "noCredsToVerify": "no credentials to verify",
+    "refreshUsage": "Refresh usage",
+    "wakeWindows": "Wake windows (~{{tokens}} tokens)",
+    "noCreds": "no credentials",
+    "wakeInProgress": "wake in progress",
+    "launchCcAs": "Launch CC as…",
+    "launchCcAsReason": "use {{cmd}} from your shell",
+    "loginAgain": "Log in again…",
+    "loginInProgress": "login in progress",
+    "remove": "Remove"
+  },
+  "verify": {
+    "ok": "Verified {{email}}",
+    "drift": "Drift: {{email}} actually authenticates as {{actual}}",
+    "unknown": "unknown",
+    "rejected": "Server rejected {{email}} — re-login required",
+    "networkError": "Couldn't verify {{email}} — /profile unreachable",
+    "failed": "Verify failed",
+    "allOk": "All {{total}} accounts verified.",
+    "summaryBad": "Verify: {{drift}} drift, {{rejected}} rejected — see card banners.",
+    "allFailed": "Verify-all failed",
+    "switchingDesktop": "Switching Desktop to {{email}}…"
+  },
+  "identity": {
+    "verified": "verified"
+  }
+}

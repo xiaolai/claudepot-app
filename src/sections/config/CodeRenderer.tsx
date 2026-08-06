@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import hljs from "highlight.js/lib/common";
 
 /**
@@ -41,6 +42,7 @@ export function CodeRenderer({
    */
   defaultLang?: string | null;
 }) {
+  const { t } = useTranslation("config");
   const { html, language } = useMemo(
     () => highlight(body, defaultLang ?? null, path ?? null),
     [body, defaultLang, path],
@@ -51,7 +53,9 @@ export function CodeRenderer({
       <pre>
         <code
           className={`hljs${language ? ` language-${language}` : ""}`}
-          aria-label={language ? `${language} code` : "code"}
+          aria-label={
+            language ? t("code.langAria", { lang: language }) : t("code.ariaFallback")
+          }
           // Output of hljs.highlight is a structured token stream
           // serialized to HTML strings of <span class="hljs-…">. The
           // grammar runs over the source string and never reflects

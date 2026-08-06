@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { i18n } from "./lib/i18n";
 import type {
   ModelRatesDto,
   PriceBookSnapshotDto,
@@ -221,9 +222,16 @@ export function formatCost(cost: PricedCost): string {
   return cost.confidence === "family_estimate" ? `≈ ${s}` : s;
 }
 
-/** Tooltip copy explaining why a figure is marked estimated. */
-export const ESTIMATED_RATE_HINT =
-  "Estimated: this model isn't in the rate table yet, so its family's current rate was used.";
+/**
+ * Tooltip copy explaining why a figure is marked estimated.
+ *
+ * A function, not a `const`: a string evaluated at module load freezes
+ * the boot language, so a tooltip rendered after a language switch
+ * would keep the old one. Resolved at call time instead.
+ */
+export function estimatedRateHint(): string {
+  return i18n.t("cost.estimatedRateHint");
+}
 
 /**
  * React hook: loads the price table once per mount and caches it.

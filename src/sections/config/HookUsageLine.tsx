@@ -3,6 +3,7 @@
 // loc-guardian limit, and so the canonical `hookArtifactKey` mirror
 // of the Rust helper has a single home.
 
+import { useTranslation } from "react-i18next";
 import { formatRelative } from "../../lib/formatRelative";
 import type { ArtifactUsageStatsDto } from "../../types";
 
@@ -22,6 +23,7 @@ export function HookUsageLine({
 }: {
   stats: ArtifactUsageStatsDto | undefined;
 }) {
+  const { t } = useTranslation("config");
   if (!stats) {
     return (
       <div
@@ -46,25 +48,29 @@ export function HookUsageLine({
           textTransform: "uppercase",
         }}
       >
-        Never fired in last 30 days
+        {t("usage.neverFired30d")}
       </div>
     );
   }
   const errs = stats.error_count_30d;
   const tone = errs > 0 ? "var(--warn)" : "var(--fg-muted)";
   const parts: string[] = [];
-  parts.push(`${stats.count_30d} ${stats.count_30d === 1 ? "fire" : "fires"} (30d)`);
+  parts.push(t("usage.fires", { count: stats.count_30d }));
   if (stats.count_24h > 0 && stats.count_24h !== stats.count_30d) {
-    parts.push(`${stats.count_24h} (24h)`);
+    parts.push(t("usage.window24h", { n: stats.count_24h }));
   }
   if (stats.last_seen_ms != null) {
-    parts.push(`last ${formatRelative(stats.last_seen_ms, { ago: true })}`);
+    parts.push(
+      t("usage.last", {
+        when: formatRelative(stats.last_seen_ms, { ago: true }),
+      }),
+    );
   }
-  if (errs > 0) parts.push(`${errs} errors`);
+  if (errs > 0) parts.push(t("usage.errors", { n: errs }));
   if (stats.p50_ms_24h != null) {
-    parts.push(`p50 ${stats.p50_ms_24h}ms`);
+    parts.push(t("usage.p50", { ms: stats.p50_ms_24h }));
   } else if (stats.avg_ms_30d != null) {
-    parts.push(`avg ${stats.avg_ms_30d}ms`);
+    parts.push(t("usage.avg", { ms: stats.avg_ms_30d }));
   }
   return (
     <div

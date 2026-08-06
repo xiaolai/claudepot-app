@@ -112,6 +112,41 @@ pub enum SwitchError {
     Store(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// **`Swap` delegates.** It is `#[error(transparent)]`, so `Display`
+/// *is* `DesktopSwapError`'s text; minting a wrapper code here would
+/// freeze that enum's English inside a sentence a translator has already
+/// written once. Same reasoning as `MigrateError::Project`, and note the
+/// contrast with `AdoptError::Swap` / `ClearError::Swap` below, which
+/// prepend `"swap error: "` and therefore keep their own identity.
+///
+/// `NoSnapshot` is the preflight this whole function exists to run
+/// *before* Desktop is quit — its sentence must read as "nothing
+/// happened, sign in first", never as a failed switch.
+impl crate::error_code::ErrorCode for SwitchError {
+    fn code(&self) -> &'static str {
+        match self {
+            SwitchError::NoSnapshot { .. } => "desktop_switch.no_snapshot",
+            SwitchError::NotFound(_) => "desktop_switch.not_found",
+            SwitchError::Unsupported => "desktop_switch.unsupported",
+            SwitchError::Swap(e) => crate::error_code::ErrorCode::code(e),
+            SwitchError::Store(_) => "desktop_switch.store",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            SwitchError::NoSnapshot { email } => serde_json::json!({ "email": email }),
+            SwitchError::NotFound(uuid) => serde_json::json!({ "uuid": uuid.to_string() }),
+            SwitchError::Unsupported => serde_json::json!({}),
+            SwitchError::Swap(e) => crate::error_code::ErrorCode::params(e),
+            SwitchError::Store(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 /// Switch the active Desktop profile to `target_uuid`.
 ///
 /// Wraps [`crate::desktop_backend::swap::switch`] with the snapshot
@@ -199,6 +234,52 @@ pub enum AdoptError {
     Lock(#[from] desktop_lock::DesktopLockError),
     #[error("sidecar write failed: {0}")]
     Sidecar(String),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `Swap` and `Lock` keep their own codes rather than delegating: both
+/// prepend English (`"swap error: "` / `"lock: "`), and per
+/// `crate::error_code`'s rule a wrapper that adds framing owns that
+/// framing. `SwitchError::Swap` is the contrasting case — it is
+/// `transparent` and delegates.
+///
+/// `IdentityMismatch` is the gate, not a glitch: it fires when the live
+/// Desktop session belongs to somebody other than the account being
+/// adopted. Both emails cross so the sentence can name them; adopting
+/// anyway would file one identity's session under another's uuid.
+impl crate::error_code::ErrorCode for AdoptError {
+    fn code(&self) -> &'static str {
+        match self {
+            AdoptError::IdentityMismatch { .. } => "desktop_adopt.identity_mismatch",
+            AdoptError::NotFound(_) => "desktop_adopt.not_found",
+            AdoptError::ProfileExists => "desktop_adopt.profile_exists",
+            AdoptError::Unsupported => "desktop_adopt.unsupported",
+            AdoptError::DataDirUnreadable => "desktop_adopt.data_dir_unreadable",
+            AdoptError::Swap(_) => "desktop_adopt.swap",
+            AdoptError::Store(_) => "desktop_adopt.store",
+            AdoptError::Lock(_) => "desktop_adopt.lock",
+            AdoptError::Sidecar(_) => "desktop_adopt.sidecar",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            AdoptError::IdentityMismatch { expected, actual } => {
+                serde_json::json!({ "expected": expected, "actual": actual })
+            }
+            AdoptError::NotFound(uuid) => serde_json::json!({ "uuid": uuid.to_string() }),
+            AdoptError::ProfileExists | AdoptError::Unsupported | AdoptError::DataDirUnreadable => {
+                serde_json::json!({})
+            }
+            AdoptError::Swap(e) => serde_json::json!({ "detail": e.to_string() }),
+            AdoptError::Lock(e) => serde_json::json!({ "detail": e.to_string() }),
+            AdoptError::Store(detail) | AdoptError::Sidecar(detail) => {
+                serde_json::json!({ "detail": detail })
+            }
+        }
+    }
 }
 
 /// Adopt the live Desktop session into `target_uuid`'s snapshot
@@ -365,6 +446,40 @@ pub enum ClearError {
     Store(String),
     #[error("lock: {0}")]
     Lock(#[from] desktop_lock::DesktopLockError),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// **`DataDirMissing` is a success in disguise.** The English says so —
+/// "Desktop is already signed out" — and the localized sentence must
+/// keep that framing rather than reading as a broken sign-out. It is the
+/// arm `desktop_prelude`'s `NotInstalled` lands on.
+///
+/// `Swap` and `Lock` keep their own codes for the same reason as
+/// `AdoptError`'s: both prepend English to the inner text.
+impl crate::error_code::ErrorCode for ClearError {
+    fn code(&self) -> &'static str {
+        match self {
+            ClearError::Unsupported => "desktop_clear.unsupported",
+            ClearError::DataDirMissing => "desktop_clear.data_dir_missing",
+            ClearError::Swap(_) => "desktop_clear.swap",
+            ClearError::Fs(_) => "desktop_clear.fs",
+            ClearError::Store(_) => "desktop_clear.store",
+            ClearError::Lock(_) => "desktop_clear.lock",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ClearError::Unsupported | ClearError::DataDirMissing => serde_json::json!({}),
+            ClearError::Swap(e) => serde_json::json!({ "detail": e.to_string() }),
+            ClearError::Lock(e) => serde_json::json!({ "detail": e.to_string() }),
+            ClearError::Fs(detail) | ClearError::Store(detail) => {
+                serde_json::json!({ "detail": detail })
+            }
+        }
+    }
 }
 
 /// Sign Desktop out — by default stashes the current session into

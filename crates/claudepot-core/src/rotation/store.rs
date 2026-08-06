@@ -32,6 +32,32 @@ pub enum RotationStoreError {
     Validation(#[from] ValidationError),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `Validation` does not delegate to the inner `ValidationError`'s code
+/// — `Display` here is the wrapper sentence `"validation: {0}"`, not
+/// the inner one, so a delegated code would promise a translator a
+/// sentence this variant never renders. The inner text rides as
+/// `detail`.
+impl crate::error_code::ErrorCode for RotationStoreError {
+    fn code(&self) -> &'static str {
+        match self {
+            RotationStoreError::Io(_) => "rotation_store.io",
+            RotationStoreError::Serde(_) => "rotation_store.serde",
+            RotationStoreError::Validation(_) => "rotation_store.validation",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            RotationStoreError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            RotationStoreError::Serde(e) => serde_json::json!({ "detail": e.to_string() }),
+            RotationStoreError::Validation(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 impl json_store::Validate for RotationRulesFile {
     type Error = ValidationError;
     fn validate(&self) -> Result<(), ValidationError> {

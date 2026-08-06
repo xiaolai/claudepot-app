@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { api } from "../../api";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import type {
   AutoInstallOutcome,
   CliInstall,
@@ -44,42 +47,66 @@ function describeInstallOutcome(
   before: string | null,
   after: string | null,
 ): string {
-  if (after && before === after) return `${surface} reinstalled (${after})`;
-  if (after && before) return `${surface} updated from ${before} to ${after}`;
-  if (after) return `${surface} installed at ${after}`;
-  return `${surface} install completed`;
+  if (after && before === after) {
+    return i18n.t("updates.outcome.reinstalled", {
+      ns: "global",
+      surface,
+      version: after,
+    });
+  }
+  if (after && before) {
+    return i18n.t("updates.outcome.updated", {
+      ns: "global",
+      surface,
+      before,
+      after,
+    });
+  }
+  if (after) {
+    return i18n.t("updates.outcome.installed", {
+      ns: "global",
+      surface,
+      version: after,
+    });
+  }
+  return i18n.t("updates.outcome.completed", { ns: "global", surface });
 }
 
 function formatRelativeTime(unix: number | null): string {
-  if (!unix) return "never";
+  if (!unix) return i18n.t("updates.time.never", { ns: "global" });
   const now = Date.now() / 1000;
   const dt = now - unix;
-  if (dt < 60) return "just now";
-  if (dt < 3600) return `${Math.round(dt / 60)} min ago`;
-  if (dt < 86400) return `${Math.round(dt / 3600)} h ago`;
-  return `${Math.round(dt / 86400)} d ago`;
+  if (dt < 60) return i18n.t("updates.time.justNow", { ns: "global" });
+  if (dt < 3600) {
+    return i18n.t("updates.time.minAgo", { ns: "global", n: Math.round(dt / 60) });
+  }
+  if (dt < 86400) {
+    return i18n.t("updates.time.hAgo", { ns: "global", n: Math.round(dt / 3600) });
+  }
+  return i18n.t("updates.time.dAgo", { ns: "global", n: Math.round(dt / 86400) });
 }
 
 function StatusBadge({ comparison }: { comparison: Comparison }) {
+  const { t } = useTranslation("global");
   switch (comparison) {
     case "older":
       return (
         <Tag tone="warn">
           <Glyph g={NF.download} />
-          update available
+          {t("updates.badge.updateAvailable")}
         </Tag>
       );
     case "equal":
       return (
         <Tag tone="ok">
           <Glyph g={NF.check} />
-          up to date
+          {t("updates.badge.upToDate")}
         </Tag>
       );
     case "newer":
-      return <Tag tone="neutral">newer than channel</Tag>;
+      return <Tag tone="neutral">{t("updates.badge.newerThanChannel")}</Tag>;
     default:
-      return <Tag tone="neutral">unknown</Tag>;
+      return <Tag tone="neutral">{t("updates.badge.unknown")}</Tag>;
   }
 }
 
@@ -89,6 +116,7 @@ function StatusBadge({ comparison }: { comparison: Comparison }) {
  * cannot act on is a dead end, which is what this pane was before.
  */
 function EditEnvVarsLink({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation("global");
   return (
     <button
       type="button"
@@ -104,7 +132,7 @@ function EditEnvVarsLink({ onClick }: { onClick: () => void }) {
         font: "inherit",
       }}
     >
-      Edit in Env variables
+      {t("updates.editEnvVars")}
     </button>
   );
 }
@@ -130,6 +158,7 @@ function CliCard({
    *  rather than resolve one. */
   onEditEnvVars: () => void;
 }) {
+  const { t } = useTranslation("global");
   const cli = status.cli;
   const active = cli.installs.find((i) => i.is_active);
   const installed = active?.version ?? null;
@@ -137,45 +166,61 @@ function CliCard({
   const comparison = compareVersions(installed, latest);
 
   const disabledReason = cli.cc_settings.disable_updates
-    ? "DISABLE_UPDATES=1 set in ~/.claude/settings.json"
+    ? t("updates.cli.blockedInSettings")
     : !active
-      ? "no active `claude` binary on PATH"
+      ? t("updates.cli.noActiveBinary")
       : null;
 
   return (
     <Card>
+      {/* "CC CLI" is the product surface's own name — identical in
+          every locale, so it stays a literal rather than a key whose
+          translations would all read the same. */}
       <CardHeader
         title="CC CLI"
-        subtitle={installed ? `installed: ${installed}` : "not installed"}
+        subtitle={
+          installed
+            ? t("updates.installedVersion", { version: installed })
+            : t("updates.notInstalled")
+        }
         badge={installed ? <StatusBadge comparison={comparison} /> : undefined}
       />
-      <Row label="Latest">
-        {latest ?? <em style={{ color: "var(--fg-faint)" }}>network probe failed</em>}
+      <Row label={t("updates.row.latest")}>
+        {latest ?? (
+          <em style={{ color: "var(--fg-faint)" }}>
+            {t("updates.networkProbeFailed")}
+          </em>
+        )}
         {cli.last_check_unix && (
-          <Sub>checked {formatRelativeTime(cli.last_check_unix)}</Sub>
+          <Sub>
+            {t("updates.checkedRelative", {
+              relative: formatRelativeTime(cli.last_check_unix),
+            })}
+          </Sub>
         )}
       </Row>
-      <Row label="Channel">
+      <Row label={t("updates.row.channel")}>
         <ChannelToggle
           value={cli.channel}
           onChange={onChannelSet}
           minimumVersion={cli.cc_settings.minimum_version}
         />
       </Row>
-      <Row label="Auto-update">
+      <Row label={t("updates.row.autoUpdate")}>
         <ToggleWithLabel
           on={status.settings.cli.force_update_on_check}
           onChange={onAutoToggle}
           disabled={cli.cc_settings.disable_updates}
           label={
             cli.cc_settings.disable_updates
-              ? "blocked by DISABLE_UPDATES=1"
-              : "run `claude update` whenever a new version is detected"
+              ? t("updates.cli.blockedByFlag")
+              : t("updates.cli.autoUpdateHint")
           }
         />
       </Row>
       {cli.cc_settings.minimum_version && (
-        <Row label="Floor">
+        <Row label={t("updates.row.floor")}>
+          {/* CC settings key + its raw value — not prose. */}
           <code style={{ fontSize: "var(--fs-xs)" }}>
             minimumVersion = {cli.cc_settings.minimum_version}
           </code>
@@ -184,25 +229,24 @@ function CliCard({
       {cli.cc_settings.disable_autoupdater && (
         <Warning>
           <Glyph g={NF.warn} />
-          DISABLE_AUTOUPDATER=1 set — background auto-updates are off
+          {t("updates.cli.warnAutoupdaterOff")}
           <EditEnvVarsLink onClick={onEditEnvVars} />
         </Warning>
       )}
       {cli.cc_settings.disable_updates && (
         <Warning>
           <Glyph g={NF.warn} />
-          DISABLE_UPDATES=1 set — manual updates are blocked too
+          {t("updates.cli.warnUpdatesBlocked")}
           <EditEnvVarsLink onClick={onEditEnvVars} />
         </Warning>
       )}
       {cli.running_count > 0 && (
-        <Row label="Running">
-          {cli.running_count} CC process{cli.running_count === 1 ? "" : "es"} active —
-          symlink swap is safe (old processes keep their version)
+        <Row label={t("updates.row.running")}>
+          {t("updates.cli.runningProcesses", { count: cli.running_count })}
         </Row>
       )}
       {cli.installs.length > 1 && (
-        <Row label="Installs">
+        <Row label={t("updates.row.installs")}>
           <ul style={{ margin: 0, paddingLeft: "var(--sp-16)", listStyle: "none" }}>
             {cli.installs.map((i) => (
               <InstallRow key={i.binary_path} install={i} />
@@ -212,14 +256,17 @@ function CliCard({
       )}
       <Actions
         primary={{
-          label: comparison === "older" ? "Update now" : "Reinstall",
+          label:
+            comparison === "older"
+              ? t("updates.action.updateNow")
+              : t("updates.action.reinstall"),
           onClick: onInstall,
           disabled: busy || disabledReason !== null,
           glyph: NF.download,
           variant: comparison === "older" ? "solid" : "outline",
         }}
         secondary={{
-          label: "Check now",
+          label: t("updates.action.checkNow"),
           onClick: onCheck,
           disabled: busy,
           glyph: NF.refresh,
@@ -243,6 +290,7 @@ function DesktopCard({
   onInstall: () => void;
   onAutoToggle: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("global");
   const ds = status.desktop;
   const installed = ds.install?.version ?? null;
   const latest = ds.latest_remote;
@@ -251,53 +299,71 @@ function DesktopCard({
   const noInstall = !ds.install;
   const notManageable = ds.install && !ds.install.manageable;
   const disabledReason = noInstall
-    ? "no Claude Desktop install detected"
+    ? t("updates.desktop.noInstall")
     : notManageable
-      ? `Desktop is managed by ${ds.install!.source} — Claudepot can't drive updates here`
+      ? t("updates.desktop.notManageable", { source: ds.install!.source })
       : ds.running
-        ? "Desktop is currently running — quit it before updating"
+        ? t("updates.desktop.isRunning")
         : null;
 
   return (
     <Card>
+      {/* Product name — same in every locale (see CliCard). */}
       <CardHeader
         title="Claude Desktop"
-        subtitle={installed ? `installed: ${installed}` : "not installed"}
+        subtitle={
+          installed
+            ? t("updates.installedVersion", { version: installed })
+            : t("updates.notInstalled")
+        }
         badge={installed ? <StatusBadge comparison={comparison} /> : undefined}
       />
       {ds.install && (
-        <Row label="Source">
+        <Row label={t("updates.row.source")}>
           <SourceTag source={ds.install.source} />
         </Row>
       )}
-      <Row label="Latest">
-        {latest ?? <em style={{ color: "var(--fg-faint)" }}>network probe failed</em>}
+      <Row label={t("updates.row.latest")}>
+        {latest ?? (
+          <em style={{ color: "var(--fg-faint)" }}>
+            {t("updates.networkProbeFailed")}
+          </em>
+        )}
         {ds.last_check_unix && (
-          <Sub>checked {formatRelativeTime(ds.last_check_unix)}</Sub>
+          <Sub>
+            {t("updates.checkedRelative", {
+              relative: formatRelativeTime(ds.last_check_unix),
+            })}
+          </Sub>
         )}
       </Row>
-      <Row label="Status">
+      <Row label={t("updates.row.status")}>
         <Tag tone={ds.running ? "warn" : "neutral"}>
-          {ds.running ? "running" : "not running"}
+          {ds.running
+            ? t("updates.desktop.statusRunning")
+            : t("updates.desktop.statusNotRunning")}
         </Tag>
       </Row>
-      <Row label="Auto-install">
+      <Row label={t("updates.row.autoInstall")}>
         <ToggleWithLabel
           on={status.settings.desktop.auto_install_when_quit}
           onChange={onAutoToggle}
-          label="when Desktop is not running"
+          label={t("updates.desktop.autoInstallHint")}
         />
       </Row>
       <Actions
         primary={{
-          label: comparison === "older" ? "Update now" : "Reinstall",
+          label:
+            comparison === "older"
+              ? t("updates.action.updateNow")
+              : t("updates.action.reinstall"),
           onClick: onInstall,
           disabled: busy || disabledReason !== null,
           glyph: NF.download,
           variant: comparison === "older" ? "solid" : "outline",
         }}
         secondary={{
-          label: "Check now",
+          label: t("updates.action.checkNow"),
           onClick: onCheck,
           disabled: busy,
           glyph: NF.refresh,
@@ -325,40 +391,45 @@ function SettingsCard({
   onDesktopNotifyOsToggle: (v: boolean) => void;
   onMinimumVersionClear: () => void;
 }) {
+  const { t } = useTranslation("global");
   return (
     <Card>
-      <CardHeader title="Settings" subtitle="Notifications and pinning" />
-      <Row label="CLI notify">
+      <CardHeader
+        title={t("updates.settings.title")}
+        subtitle={t("updates.settings.subtitle")}
+      />
+      <Row label={t("updates.row.cliNotify")}>
         <span style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
           <ToggleWithLabel
             on={status.settings.cli.notify_on_available}
             onChange={onCliNotifyToggle}
-            label="tray badge when a new version is available"
+            label={t("updates.settings.trayBadgeHint")}
           />
           <ToggleWithLabel
             on={status.settings.cli.notify_os_on_available}
             onChange={onCliNotifyOsToggle}
-            label="OS notification (toast) when a new version is available"
+            label={t("updates.settings.osNotifyHint")}
           />
         </span>
       </Row>
-      <Row label="Desktop notify">
+      <Row label={t("updates.row.desktopNotify")}>
         <span style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
           <ToggleWithLabel
             on={status.settings.desktop.notify_on_available}
             onChange={onDesktopNotifyToggle}
-            label="tray badge when a new version is available"
+            label={t("updates.settings.trayBadgeHint")}
           />
           <ToggleWithLabel
             on={status.settings.desktop.notify_os_on_available}
             onChange={onDesktopNotifyOsToggle}
-            label="OS notification (toast) when a new version is available"
+            label={t("updates.settings.osNotifyHint")}
           />
         </span>
       </Row>
       {status.cli.cc_settings.minimum_version && (
-        <Row label="Pin">
+        <Row label={t("updates.row.pin")}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-8)" }}>
+            {/* CC settings key + its raw value — not prose. */}
             <code style={{ fontSize: "var(--fs-xs)" }}>
               minimumVersion = {status.cli.cc_settings.minimum_version}
             </code>
@@ -368,16 +439,18 @@ function SettingsCard({
               onClick={onMinimumVersionClear}
               disabled={busy}
             >
-              clear
+              {t("updates.settings.clear")}
             </Button>
           </span>
         </Row>
       )}
-      <Row label="Source">
+      <Row label={t("updates.row.source")}>
         <span style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
-          Channel + DISABLE_* keys live in <code>~/.claude/settings.json</code>{" "}
-          (CC's own file). Notification toggles + cadence live in{" "}
-          <code>~/.claudepot/updates.json</code>.
+          <Trans
+            ns="global"
+            i18nKey="updates.settings.sourceNote"
+            components={{ code: <code /> }}
+          />
         </span>
       </Row>
     </Card>
@@ -590,8 +663,12 @@ function ChannelToggle({
   onChange: (v: "latest" | "stable") => void;
   minimumVersion: string | null;
 }) {
+  const { t } = useTranslation("global");
   return (
     <div style={{ display: "inline-flex", gap: "var(--sp-4)" }}>
+      {/* "latest" / "stable" are CC's own `autoUpdatesChannel` wire
+          values, rendered raw so the button reads as the value it
+          writes. */}
       <Button
         size="sm"
         variant={value === "latest" ? "subtle" : "ghost"}
@@ -607,7 +684,7 @@ function ChannelToggle({
         onClick={() => onChange("stable")}
         title={
           minimumVersion
-            ? `minimumVersion=${minimumVersion} pin will be honored`
+            ? t("updates.channel.pinHonored", { version: minimumVersion })
             : undefined
         }
       >
@@ -618,19 +695,21 @@ function ChannelToggle({
 }
 
 function SourceTag({ source }: { source: DesktopInstall["source"] }) {
+  const { t } = useTranslation("global");
   const labels: Record<DesktopInstall["source"], string> = {
-    homebrew: "Homebrew Cask",
-    "direct-dmg": "Direct download",
-    setapp: "Setapp",
-    "mac-app-store": "Mac App Store",
-    "user-local": "User-local install",
+    homebrew: t("updates.source.homebrew"),
+    "direct-dmg": t("updates.source.directDmg"),
+    setapp: t("updates.source.setapp"),
+    "mac-app-store": t("updates.source.macAppStore"),
+    "user-local": t("updates.source.userLocal"),
   };
   return <Tag tone="neutral">{labels[source]}</Tag>;
 }
 
 function InstallRow({ install }: { install: CliInstall }) {
+  const { t } = useTranslation("global");
   const kindLabel: Record<CliInstall["kind"], string> = {
-    "native-curl": "native (curl)",
+    "native-curl": t("updates.installKind.nativeCurl"),
     "npm-global": "npm",
     "homebrew-stable": "homebrew (stable)",
     "homebrew-latest": "homebrew (latest)",
@@ -638,7 +717,7 @@ function InstallRow({ install }: { install: CliInstall }) {
     dnf: "dnf",
     apk: "apk",
     "win-get": "winget",
-    unknown: "unknown",
+    unknown: t("updates.installKind.unknown"),
   };
   return (
     <li
@@ -654,7 +733,7 @@ function InstallRow({ install }: { install: CliInstall }) {
       {install.is_active && (
         <Tag tone="ok">
           <Glyph g={NF.dot} />
-          active
+          {t("updates.installActive")}
         </Tag>
       )}
       <code>{install.binary_path}</code>
@@ -677,6 +756,7 @@ function AutoOutcomeBanner({
   outcome: AutoInstallOutcome;
   surface: string;
 }) {
+  const { t } = useTranslation("global");
   if (outcome.kind === "disabled" || outcome.kind === "up-to-date") {
     return null;
   }
@@ -685,15 +765,20 @@ function AutoOutcomeBanner({
   switch (outcome.kind) {
     case "installed":
       tone = "ok";
-      text = `Auto-updated ${surface}${outcome.version ? ` to ${outcome.version}` : ""}.`;
+      text = outcome.version
+        ? t("updates.auto.installedVersion", {
+            surface,
+            version: outcome.version,
+          })
+        : t("updates.auto.installed", { surface });
       break;
     case "skipped":
       tone = "warn";
-      text = `${surface} auto-update skipped: ${outcome.reason}`;
+      text = t("updates.auto.skipped", { surface, reason: outcome.reason });
       break;
     case "failed":
       tone = "error";
-      text = `${surface} auto-update failed: ${outcome.error}`;
+      text = t("updates.auto.failed", { surface, error: outcome.error });
       break;
   }
   const color =
@@ -784,6 +869,7 @@ export function UpdatesPanel({
   /** Optional so the panel still renders standalone (and in tests). */
   onEditEnvVars?: () => void;
 } = {}) {
+  const { t } = useTranslation("global");
   const [status, setStatus] = useState<UpdatesStatusDto | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -798,7 +884,7 @@ export function UpdatesPanel({
         : await api.updatesStatusGet();
       setStatus(next);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(renderError(e));
     } finally {
       setBusy(false);
     }
@@ -822,15 +908,15 @@ export function UpdatesPanel({
       setError(null);
       try {
         await api.updatesChannelSet(channel);
-        setInfo(`Wrote autoUpdatesChannel=${channel} to ~/.claude/settings.json`);
+        setInfo(t("updates.info.wroteChannel", { channel }));
         await refresh(false);
       } catch (e: unknown) {
-        setError(String(e));
+        setError(renderError(e));
       } finally {
         setBusy(false);
       }
     },
-    [refresh],
+    [refresh, t],
   );
 
   const onCliInstall = useCallback(async () => {
@@ -844,7 +930,7 @@ export function UpdatesPanel({
       setInfo(describeInstallOutcome("CC CLI", before, res.installed_after));
       await refresh(true);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(renderError(e));
     } finally {
       setBusy(false);
     }
@@ -862,7 +948,7 @@ export function UpdatesPanel({
       );
       await refresh(true);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(renderError(e));
     } finally {
       setBusy(false);
     }
@@ -880,7 +966,7 @@ export function UpdatesPanel({
         setInfo(label);
         await refresh(false);
       } catch (e: unknown) {
-        setError(String(e));
+        setError(renderError(e));
       } finally {
         setBusy(false);
       }
@@ -889,44 +975,44 @@ export function UpdatesPanel({
   );
 
   const onCliNotifyToggle = useCallback(
-    (v: boolean) => setSettingsField({ cliNotifyOnAvailable: v }, "Saved"),
-    [setSettingsField],
+    (v: boolean) => setSettingsField({ cliNotifyOnAvailable: v }, t("updates.info.saved")),
+    [setSettingsField, t],
   );
   const onCliNotifyOsToggle = useCallback(
-    (v: boolean) => setSettingsField({ cliNotifyOsOnAvailable: v }, "Saved"),
-    [setSettingsField],
+    (v: boolean) => setSettingsField({ cliNotifyOsOnAvailable: v }, t("updates.info.saved")),
+    [setSettingsField, t],
   );
   const onDesktopNotifyToggle = useCallback(
-    (v: boolean) => setSettingsField({ desktopNotifyOnAvailable: v }, "Saved"),
-    [setSettingsField],
+    (v: boolean) => setSettingsField({ desktopNotifyOnAvailable: v }, t("updates.info.saved")),
+    [setSettingsField, t],
   );
   const onDesktopNotifyOsToggle = useCallback(
     (v: boolean) =>
-      setSettingsField({ desktopNotifyOsOnAvailable: v }, "Saved"),
-    [setSettingsField],
+      setSettingsField({ desktopNotifyOsOnAvailable: v }, t("updates.info.saved")),
+    [setSettingsField, t],
   );
   const onCliAutoToggle = useCallback(
-    (v: boolean) => setSettingsField({ cliForceUpdateOnCheck: v }, "Saved"),
-    [setSettingsField],
+    (v: boolean) => setSettingsField({ cliForceUpdateOnCheck: v }, t("updates.info.saved")),
+    [setSettingsField, t],
   );
   const onDesktopAutoToggle = useCallback(
     (v: boolean) =>
-      setSettingsField({ desktopAutoInstallWhenQuit: v }, "Saved"),
-    [setSettingsField],
+      setSettingsField({ desktopAutoInstallWhenQuit: v }, t("updates.info.saved")),
+    [setSettingsField, t],
   );
   const onMinimumVersionClear = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
       await api.updatesMinimumVersionSet(null);
-      setInfo("Cleared minimumVersion in ~/.claude/settings.json");
+      setInfo(t("updates.info.clearedMinimumVersion"));
       await refresh(false);
     } catch (e: unknown) {
-      setError(String(e));
+      setError(renderError(e));
     } finally {
       setBusy(false);
     }
-  }, [refresh]);
+  }, [refresh, t]);
 
   const onCheckNow = useCallback(() => refresh(true), [refresh]);
 
@@ -939,7 +1025,7 @@ export function UpdatesPanel({
   if (!status) {
     return (
       <div style={{ padding: "var(--sp-16)", color: "var(--fg-faint)" }}>
-        Loading update status…
+        {t("updates.loading")}
       </div>
     );
   }
@@ -955,11 +1041,11 @@ export function UpdatesPanel({
             onClick={onCheckNow}
             disabled={busy}
           >
-            Check now
+            {t("updates.action.checkNow")}
           </Button>
         }
       >
-        Updates
+        {t("updates.title")}
       </SectionLabel>
 
       {banner && (

@@ -7,6 +7,11 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+// Initialize the global i18next instance (module side effect) so any
+// component using useTranslation renders real strings. jsdom reports
+// navigator.language "en-US", so tests run in English by default and
+// existing getByText assertions stay valid.
+import "../lib/i18n";
 
 // Node 26 exposes an experimental global `localStorage` that is undefined
 // unless the process receives `--localstorage-file`. Use an explicit memory

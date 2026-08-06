@@ -27,6 +27,7 @@ use super::config_types::{
     SearchSummaryDto,
 };
 use crate::config_dto::{kind_from_str, policy_origin_label, scope_label_with_origin, FileNodeDto};
+use crate::dto_error::{codes, ErrorDto};
 use crate::preferences::PreferencesState;
 use claudepot_core::config_view::{
     discover, effective_io,
@@ -58,7 +59,7 @@ pub struct SearchRegistry(pub Mutex<HashMap<String, CancelToken>>);
 pub async fn config_scan(
     cwd: Option<String>,
     svc: State<'_, Arc<ConfigScanService>>,
-) -> Result<ConfigTreeDto, String> {
+) -> Result<ConfigTreeDto, ErrorDto> {
     // `cwd = None` means "no project anchor selected" — scan global
     // scopes only. We deliberately do NOT fall back to
     // `std::env::current_dir()`, which was non-deterministic between
@@ -71,7 +72,7 @@ pub async fn config_scan(
     let svc = Arc::clone(svc.inner());
     let tree = tauri::async_runtime::spawn_blocking(move || svc.scan_and_commit(anchor.as_deref()))
         .await
-        .map_err(|e| format!("scan join: {e}"))?;
+        .map_err(ErrorDto::task_join)?;
 
     let dto = ConfigTreeDto {
         scopes: tree.scopes.iter().map(ScopeNodeDto::from).collect(),
@@ -98,7 +99,7 @@ pub struct PreviewDto {
 pub async fn config_preview(
     node_id: String,
     svc: State<'_, Arc<ConfigScanService>>,
-) -> Result<PreviewDto, String> {
+) -> Result<PreviewDto, ErrorDto> {
     // Markdown / hook scripts: 256 KiB head is plenty.
     const HEAD_LIMIT: u64 = 256 * 1024;
     // JSON files: must read the whole document for the JSON-aware mask
@@ -114,10 +115,16 @@ pub async fn config_preview(
     let file = svc
         .with_tree(|tree| {
             discover::find_file(tree, &node_id)
-                .ok_or_else(|| format!("node not found: {node_id}"))
+                .ok_or_else(|| {
+                    ErrorDto::with_params(
+                        codes::CONFIG_NODE_NOT_FOUND,
+                        serde_json::json!({ "node_id": node_id }),
+                        format!("node not found: {node_id}"),
+                    )
+                })
                 .cloned()
         })
-        .ok_or_else(|| "tree not scanned yet".to_string())??;
+        .ok_or_else(|| ErrorDto::new(codes::CONFIG_TREE_NOT_SCANNED, "tree not scanned yet"))??;
 
     // File open + read. Fast on a local SSD but can stall on a slow
     // mount or a huge file — push onto the blocking pool rather than
@@ -126,9 +133,19 @@ pub async fn config_preview(
         use std::io::Read;
         let is_json = is_json_kind(&file.kind);
         let limit: u64 = if is_json { JSON_LIMIT } else { HEAD_LIMIT };
-        let f = std::fs::File::open(&file.abs_path)
-            .map_err(|e| format!("open {}: {}", file.abs_path.display(), e))?;
-        let meta = f.metadata().map_err(|e| format!("stat: {e}"))?;
+        let f = std::fs::File::open(&file.abs_path).map_err(|e| {
+            ErrorDto::with_params(
+                codes::CONFIG_PREVIEW_OPEN_FAILED,
+                serde_json::json!({
+                    "path": file.abs_path.display().to_string(),
+                    "detail": e.to_string(),
+                }),
+                format!("open {}: {}", file.abs_path.display(), e),
+            )
+        })?;
+        let meta = f.metadata().map_err(|e| {
+            ErrorDto::detail(codes::CONFIG_PREVIEW_STAT_FAILED, format!("stat: {e}"))
+        })?;
         let truncated = meta.len() > limit;
         let mut buf = Vec::with_capacity(std::cmp::min(limit, meta.len()) as usize);
         let _ = f.take(limit).read_to_end(&mut buf);
@@ -150,7 +167,7 @@ pub async fn config_preview(
         })
     })
     .await
-    .map_err(|e| format!("preview join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// File kinds whose on-disk representation is a single JSON document.
@@ -178,7 +195,7 @@ fn is_json_kind(kind: &Kind) -> bool {
 /// Detected editors, cached for 5 minutes. Pass `force = true` to
 /// bypass the cache (e.g. after a user installs a new editor).
 #[tauri::command]
-pub async fn config_list_editors(force: Option<bool>) -> Result<Vec<EditorCandidateDto>, String> {
+pub async fn config_list_editors(force: Option<bool>) -> Result<Vec<EditorCandidateDto>, ErrorDto> {
     let force = force.unwrap_or(false);
     let cands = launcher::detect_cached(force);
     Ok(cands.iter().map(EditorCandidateDto::from).collect())
@@ -188,8 +205,8 @@ pub async fn config_list_editors(force: Option<bool>) -> Result<Vec<EditorCandid
 #[tauri::command]
 pub async fn config_get_editor_defaults(
     prefs: State<'_, PreferencesState>,
-) -> Result<EditorDefaultsDto, String> {
-    let g = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
+) -> Result<EditorDefaultsDto, ErrorDto> {
+    let g = prefs.0.lock().map_err(prefs_lock_err)?;
     Ok(EditorDefaultsDto::from(&g.editor_defaults))
 }
 
@@ -200,22 +217,31 @@ pub async fn config_set_editor_default(
     kind: Option<String>,
     editor_id: String,
     prefs: State<'_, PreferencesState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     if editor_id.trim().is_empty() {
-        return Err("editor_id is empty".to_string());
+        return Err(ErrorDto::new(
+            codes::CONFIG_EDITOR_ID_EMPTY,
+            "editor_id is empty",
+        ));
     }
     // Mutate under the lock, drop the guard, persist on a blocking
     // thread — same discipline as `preferences_set_activity`. Holding
     // the std mutex across the disk write blocks every concurrent
     // preferences reader for the write duration.
     let snapshot = {
-        let mut g = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
+        let mut g = prefs.0.lock().map_err(prefs_lock_err)?;
         match kind {
             None => {
                 g.editor_defaults.fallback = editor_id;
             }
             Some(k) => {
-                let parsed = kind_from_str(&k).ok_or_else(|| format!("unknown kind: {k}"))?;
+                let parsed = kind_from_str(&k).ok_or_else(|| {
+                    ErrorDto::with_params(
+                        codes::CONFIG_UNKNOWN_KIND,
+                        serde_json::json!({ "kind": k }),
+                        format!("unknown kind: {k}"),
+                    )
+                })?;
                 g.editor_defaults.by_kind.insert(parsed, editor_id);
             }
         }
@@ -223,7 +249,10 @@ pub async fn config_set_editor_default(
     };
     tokio::task::spawn_blocking(move || snapshot.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+        .map_err(ErrorDto::task_join)?
+        // `Preferences::save` composes its own English; it is carried
+        // verbatim under the shared preferences code.
+        .map_err(|detail| ErrorDto::detail(codes::PREFERENCES_SAVE_FAILED, detail))?;
     Ok(())
 }
 
@@ -239,21 +268,24 @@ pub async fn config_open_in_editor_path(
     editor_id: Option<String>,
     kind_hint: Option<String>,
     prefs: State<'_, PreferencesState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     if path.trim().is_empty() {
-        return Err("path is empty".to_string());
+        return Err(ErrorDto::new(codes::CONFIG_PATH_EMPTY, "path is empty"));
     }
     let target = PathBuf::from(&path);
     let candidates = launcher::detect_cached(false);
     let defaults = {
-        let g = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
+        let g = prefs.0.lock().map_err(prefs_lock_err)?;
         g.editor_defaults.clone()
     };
     let chosen: &EditorCandidate = if let Some(id) = editor_id.as_ref() {
-        candidates
-            .iter()
-            .find(|c| &c.id == id)
-            .ok_or_else(|| format!("editor not detected: {id}"))?
+        candidates.iter().find(|c| &c.id == id).ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::CONFIG_EDITOR_NOT_DETECTED,
+                serde_json::json!({ "editor_id": id }),
+                format!("editor not detected: {id}"),
+            )
+        })?
     } else {
         let kind = kind_hint.as_deref().and_then(kind_from_str);
         let resolved = match kind {
@@ -263,18 +295,38 @@ pub async fn config_open_in_editor_path(
                 .find(|c| c.id == defaults.fallback)
                 .or_else(|| candidates.iter().find(|c| c.id == "system")),
         };
-        resolved.ok_or_else(|| "no editor available".to_string())?
+        resolved.ok_or_else(|| {
+            ErrorDto::new(codes::CONFIG_NO_EDITOR_AVAILABLE, "no editor available")
+        })?
     };
     launch_into(chosen, &target)
 }
 
-fn launch_into(chosen: &EditorCandidate, target: &Path) -> Result<(), String> {
-    launcher::invoke(chosen, target).map_err(|e| match e {
-        LaunchError::Spawn(s) => format!("launch failed: {s}"),
-        LaunchError::NoEnvEditor => "$EDITOR is not set".to_string(),
-        LaunchError::NoBinary => "editor binary missing".to_string(),
-        LaunchError::EmptyPath => "path is empty".to_string(),
-        LaunchError::UnknownEditor(id) => format!("unknown editor: {id}"),
+/// Shared `prefs.0.lock()` poison mapper. The English is the same text
+/// this file has always produced; only the identity is new, and it is
+/// the same identity `commands/preferences.rs` uses for the same mutex.
+fn prefs_lock_err<T>(e: std::sync::PoisonError<T>) -> ErrorDto {
+    ErrorDto::detail(codes::PREFERENCES_LOCK_POISONED, format!("prefs lock: {e}"))
+}
+
+/// This command has always re-worded `LaunchError` — "launch failed"
+/// rather than core's "spawn failed", "editor binary missing" rather
+/// than "editor binary path missing". Those strings stay verbatim (they
+/// are what `ErrorDto.message` must carry), and the **core** code rides
+/// along beside them, so the catalog sentence a user actually sees is
+/// keyed off `config_launcher.*` rather than off a near-duplicate
+/// command code that says the same thing twice.
+fn launch_into(chosen: &EditorCandidate, target: &Path) -> Result<(), ErrorDto> {
+    use claudepot_core::error_code::ErrorCode;
+    launcher::invoke(chosen, target).map_err(|e| {
+        let message = match &e {
+            LaunchError::Spawn(s) => format!("launch failed: {s}"),
+            LaunchError::NoEnvEditor => "$EDITOR is not set".to_string(),
+            LaunchError::NoBinary => "editor binary missing".to_string(),
+            LaunchError::EmptyPath => "path is empty".to_string(),
+            LaunchError::UnknownEditor(id) => format!("unknown editor: {id}"),
+        };
+        ErrorDto::with_params(e.code(), e.params(), message)
     })
 }
 
@@ -290,20 +342,23 @@ pub async fn config_search_start(
     app: tauri::AppHandle,
     svc: State<'_, Arc<ConfigScanService>>,
     registry: State<'_, SearchRegistry>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     if search_id.trim().is_empty() {
-        return Err("search_id is empty".to_string());
+        return Err(ErrorDto::new(
+            codes::CONFIG_SEARCH_ID_EMPTY,
+            "search_id is empty",
+        ));
     }
     // `current_tree` returns an `Arc<ConfigTree>`; cheap refcount bump
     // and the search runs against an immutable snapshot, so concurrent
     // commits don't disturb in-flight searches.
     let tree = svc
         .current_tree()
-        .ok_or_else(|| "tree not scanned yet".to_string())?;
+        .ok_or_else(|| ErrorDto::new(codes::CONFIG_TREE_NOT_SCANNED, "tree not scanned yet"))?;
 
     let cancel = CancelToken::new();
     {
-        let mut g = registry.0.lock().map_err(|e| format!("reg lock: {e}"))?;
+        let mut g = registry.0.lock().map_err(registry_lock_err)?;
         g.insert(search_id.clone(), cancel.clone());
     }
 
@@ -368,12 +423,19 @@ pub async fn config_search_start(
 pub async fn config_search_cancel(
     search_id: String,
     registry: State<'_, SearchRegistry>,
-) -> Result<(), String> {
-    let mut g = registry.0.lock().map_err(|e| format!("reg lock: {e}"))?;
+) -> Result<(), ErrorDto> {
+    let mut g = registry.0.lock().map_err(registry_lock_err)?;
     if let Some(tok) = g.remove(&search_id) {
         tok.cancel();
     }
     Ok(())
+}
+
+fn registry_lock_err<T>(e: std::sync::PoisonError<T>) -> ErrorDto {
+    ErrorDto::detail(
+        codes::CONFIG_SEARCH_REGISTRY_LOCK_POISONED,
+        format!("reg lock: {e}"),
+    )
 }
 
 // ---------- Effective Settings (P4 UI) --------------------------------
@@ -381,14 +443,17 @@ pub async fn config_search_cancel(
 #[tauri::command]
 pub async fn config_effective_settings(
     cwd: Option<String>,
-) -> Result<EffectiveSettingsDto, String> {
+) -> Result<EffectiveSettingsDto, ErrorDto> {
     // Effective settings merges Project + Local + User + Policy — the
     // result is only meaningful with a project anchor. Callers that
     // reach this command in global-only mode have skipped the UI
     // gating; fail loudly rather than fabricate a result.
-    let cwd_path = cwd
-        .map(PathBuf::from)
-        .ok_or_else(|| "no project anchored — effective settings needs a cwd".to_string())?;
+    let cwd_path = cwd.map(PathBuf::from).ok_or_else(|| {
+        ErrorDto::new(
+            codes::CONFIG_NO_ANCHOR_EFFECTIVE_SETTINGS,
+            "no project anchored — effective settings needs a cwd",
+        )
+    })?;
 
     let dto = tauri::async_runtime::spawn_blocking(move || {
         let input = effective_io::load_effective_settings_input(&cwd_path);
@@ -419,7 +484,7 @@ pub async fn config_effective_settings(
         }
     })
     .await
-    .map_err(|e| format!("effective-settings join: {e}"))?;
+    .map_err(ErrorDto::task_join)?;
 
     Ok(dto)
 }
@@ -430,12 +495,15 @@ pub async fn config_effective_settings(
 pub async fn config_effective_mcp(
     cwd: Option<String>,
     mode: Option<McpSimulationModeDto>,
-) -> Result<EffectiveMcpDto, String> {
+) -> Result<EffectiveMcpDto, ErrorDto> {
     // Same rationale as `config_effective_settings`: MCP merge requires
     // a project anchor.
-    let cwd_path = cwd
-        .map(PathBuf::from)
-        .ok_or_else(|| "no project anchored — effective MCP needs a cwd".to_string())?;
+    let cwd_path = cwd.map(PathBuf::from).ok_or_else(|| {
+        ErrorDto::new(
+            codes::CONFIG_NO_ANCHOR_EFFECTIVE_MCP,
+            "no project anchored — effective MCP needs a cwd",
+        )
+    })?;
     let mode: McpSimulationMode = mode.unwrap_or(McpSimulationModeDto::Interactive).into();
 
     let dto = tauri::async_runtime::spawn_blocking(move || {
@@ -478,7 +546,7 @@ pub async fn config_effective_mcp(
         }
     })
     .await
-    .map_err(|e| format!("effective-mcp join: {e}"))?;
+    .map_err(ErrorDto::task_join)?;
 
     Ok(dto)
 }

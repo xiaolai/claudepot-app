@@ -13,6 +13,7 @@
 
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
 
+import { i18n } from "../lib/i18n";
 import { useEmit } from "../providers/AppStateProvider";
 import { useTauriEvents } from "./useTauriEvent";
 
@@ -63,16 +64,19 @@ export function useBackgroundChangeEmits(): void {
       // longer exists. We can't tell apart without reading the FS
       // again, so we keep all events but use `change_type` to
       // render a clearer title.
-      const verb =
+      const verb = i18n.t(
         p.change_type === "created"
-          ? "Created"
+          ? "backgroundChange.created"
           : p.change_type === "deleted"
-            ? "Deleted"
-            : "Edited";
-      const scope = p.project_slug ? `project (${p.project_slug})` : "global";
+            ? "backgroundChange.deleted"
+            : "backgroundChange.edited",
+      );
+      const scope = p.project_slug
+        ? i18n.t("backgroundChange.scopeProject", { slug: p.project_slug })
+        : i18n.t("backgroundChange.scopeGlobal");
       void emit({
         category: "memoryChanged",
-        title: `${verb} CLAUDE.md — ${scope}`,
+        title: i18n.t("backgroundChange.memoryTitle", { verb, scope }),
         body: p.abs_path,
         dedupeKey: `memory:${p.abs_path}:${p.change_type}`,
       });
@@ -96,7 +100,9 @@ export function useBackgroundChangeEmits(): void {
         p.added?.[0]?.file?.abs_path ?? p.updated?.[0]?.abs_path ?? "";
       void emit({
         category: "configTreePatched",
-        title: `Config file changed (${parts.join(" ")})`,
+        title: i18n.t("backgroundChange.configTitle", {
+          parts: parts.join(" "),
+        }),
         body: firstPath,
         // Dedup on patch shape — repeated saves of the same file
         // collapse into one bell row inside the rate window.

@@ -4,10 +4,12 @@
 // limit and the table renderer is independently testable.
 
 import { useCallback, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { IconButton } from "../../components/primitives/IconButton";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
+import { renderError } from "../../lib/i18n-error";
 import type { DisabledRecordDto, LifecycleKind } from "../../types";
 import { Table, Th, Td, Tr } from "../../components/primitives";
 import { Section, Empty } from "./LifecyclePresentational";
@@ -23,32 +25,36 @@ export function DisabledArtifactList({
   pushToast: (kind: "info" | "error", text: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("settings");
   if (rows === null) {
     return (
-      <Section title="Disabled artifacts">
-        <Empty>Loading…</Empty>
+      <Section title={t("artifacts.disabledTitle")}>
+        <Empty>{t("shared.loading")}</Empty>
       </Section>
     );
   }
   if (rows.length === 0) {
     return (
-      <Section title="Disabled artifacts">
+      <Section title={t("artifacts.disabledTitle")}>
         <Empty>
-          Nothing disabled. Use the <em>Disable</em> action in the Config
-          tree to hide an artifact from Claude Code without deleting it.
+          <Trans
+            ns="settings"
+            i18nKey="artifacts.noneDisabled"
+            components={{ em: <em /> }}
+          />
         </Empty>
       </Section>
     );
   }
   return (
-    <Section title={`Disabled artifacts (${rows.length})`}>
+    <Section title={t("artifacts.disabledTitleCount", { count: rows.length })}>
       <Table>
         <thead>
           <tr>
-            <Th>Kind</Th>
-            <Th>Name</Th>
-            <Th>Scope</Th>
-            <Th aria-label="Actions" />
+            <Th>{t("artifacts.thKind")}</Th>
+            <Th>{t("artifacts.thName")}</Th>
+            <Th>{t("artifacts.thScope")}</Th>
+            <Th aria-label={t("artifacts.thActions")} />
           </tr>
         </thead>
         <tbody>
@@ -78,6 +84,7 @@ function DisabledRow({
   pushToast: (kind: "info" | "error", text: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const [busy, setBusy] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
 
@@ -91,15 +98,17 @@ function DisabledRow({
         "refuse",
         projectRoot,
       );
-      pushToast("info", `Re-enabled ${record.kind} "${record.name}"`);
+      pushToast(
+        "info",
+        t("artifacts.reenabled", { kind: record.kind, name: record.name }),
+      );
       onChanged();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pushToast("error", `Re-enable failed: ${msg}`);
+      pushToast("error", renderError(err, t("artifacts.reenableFailed")));
     } finally {
       setBusy(false);
     }
-  }, [record, projectRoot, pushToast, onChanged]);
+  }, [record, projectRoot, pushToast, onChanged, t]);
 
   const doTrash = useCallback(async () => {
     setConfirmTrash(false);
@@ -111,15 +120,17 @@ function DisabledRow({
         record.name,
         projectRoot,
       );
-      pushToast("info", `Moved ${record.kind} "${record.name}" to trash`);
+      pushToast(
+        "info",
+        t("artifacts.movedToTrash", { kind: record.kind, name: record.name }),
+      );
       onChanged();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pushToast("error", `Trash failed: ${msg}`);
+      pushToast("error", renderError(err, t("artifacts.trashFailed")));
     } finally {
       setBusy(false);
     }
-  }, [record, projectRoot, pushToast, onChanged]);
+  }, [record, projectRoot, pushToast, onChanged, t]);
 
   return (
     <>
@@ -132,7 +143,9 @@ function DisabledRow({
         </Td>
         <Td muted>
           <span title={record.scope_root}>
-            {record.scope === "user" ? "User" : "Project"}
+            {record.scope === "user"
+              ? t("artifacts.scopeUser")
+              : t("artifacts.scopeProject")}
           </span>
         </Td>
         <Td align="right">
@@ -142,25 +155,25 @@ function DisabledRow({
               onClick={onEnable}
               disabled={busy}
               size="sm"
-              title="Re-enable"
-              aria-label="Re-enable"
+              title={t("artifacts.reenable")}
+              aria-label={t("artifacts.reenable")}
             />
             <IconButton
               glyph={NF.trash}
               onClick={() => setConfirmTrash(true)}
               disabled={busy}
               size="sm"
-              title="Move to trash"
-              aria-label="Move to trash"
+              title={t("artifacts.moveToTrash")}
+              aria-label={t("artifacts.moveToTrash")}
             />
           </span>
         </Td>
       </Tr>
       {confirmTrash && (
         <ConfirmDialog
-          title={`Move ${record.kind} to trash?`}
-          body={`"${record.name}" will move to trash. You can restore it within ~30 days.`}
-          confirmLabel="Move to trash"
+          title={t("artifacts.confirmTrash.title", { kind: record.kind })}
+          body={t("artifacts.confirmTrash.body", { name: record.name })}
+          confirmLabel={t("artifacts.confirmTrash.confirm")}
           confirmDanger
           onConfirm={doTrash}
           onCancel={() => setConfirmTrash(false)}

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
+import { renderError } from "../../../lib/i18n-error";
 import { Button } from "../../../components/primitives/Button";
 import { FilterChip } from "../../../components/primitives/FilterChip";
 import type { BulkSlimPlan, PruneFilterInput } from "../../../types";
@@ -44,6 +46,7 @@ export function SlimSubsection({
   onOpChange?: (opId: string | null) => void;
   onTrashChanged?: () => void;
 }) {
+  const { t } = useTranslation("sessions");
   const [stripImages, setStripImages] = useState(false);
   const [stripDocuments, setStripDocuments] = useState(false);
   const [slimPlan, setSlimPlan] = useState<BulkSlimPlan | null>(null);
@@ -89,7 +92,7 @@ export function SlimSubsection({
       setSlimPlan(p);
     } catch (e) {
       if (mySeq !== previewSeqRef.current) return;
-      setErr(String(e));
+      setErr(renderError(e));
       setSlimPlan(null);
     } finally {
       if (mySeq === previewSeqRef.current) setLoading(false);
@@ -110,7 +113,7 @@ export function SlimSubsection({
       onOpChange?.(opId);
       onTrashChanged?.();
     } catch (e) {
-      setErr(String(e));
+      setErr(renderError(e));
     } finally {
       setRunning(false);
     }
@@ -144,7 +147,7 @@ export function SlimSubsection({
           textTransform: "uppercase",
         }}
       >
-        Reclaim image tokens
+        {t("cleanup.slimHeading")}
       </div>
       <div
         style={{
@@ -158,13 +161,13 @@ export function SlimSubsection({
           active={stripImages}
           onToggle={() => setStripImages((v) => !v)}
         >
-          Strip images
+          {t("cleanup.stripImages")}
         </FilterChip>
         <FilterChip
           active={stripDocuments}
           onToggle={() => setStripDocuments((v) => !v)}
         >
-          Strip documents
+          {t("cleanup.stripDocuments")}
         </FilterChip>
         <div style={{ flex: 1 }} />
         <Button
@@ -173,13 +176,13 @@ export function SlimSubsection({
           disabled={!anyFilter || !anySlimFlag || loading}
           title={
             !anyFilter
-              ? "Pick at least one filter above"
+              ? t("cleanup.pickFilterAbove")
               : !anySlimFlag
-                ? "Pick images and/or documents"
+                ? t("cleanup.pickImagesOrDocs")
                 : undefined
           }
         >
-          {loading ? "Previewing…" : "Preview slim"}
+          {loading ? t("cleanup.previewing") : t("cleanup.previewSlim")}
         </Button>
         <Button
           variant="solid"
@@ -187,13 +190,13 @@ export function SlimSubsection({
           disabled={!slimPlan || slimPlan.entries.length === 0 || running}
           title={
             !slimPlan
-              ? "Run Preview slim first"
+              ? t("cleanup.runPreviewSlimFirst")
               : slimPlan.entries.length === 0
-                ? "Nothing matches the filter"
+                ? t("cleanup.nothingMatchesFilter")
                 : undefined
           }
         >
-          {running ? "Slimming…" : "Slim → Trash"}
+          {running ? t("cleanup.slimming") : t("cleanup.slimToTrash")}
         </Button>
       </div>
 
@@ -202,14 +205,19 @@ export function SlimSubsection({
           testid="slim-preview"
           marginTop="var(--sp-8)"
           summaryText={
-            `Slim · ${slimPlan.entries.length} file(s) · ${formatSize(slimPlan.total_bytes_saved)} saved` +
+            t("cleanup.slimPlanSummary", {
+              n: slimPlan.entries.length,
+              size: formatSize(slimPlan.total_bytes_saved),
+            }) +
             (slimPlan.total_image_redacts > 0
-              ? ` · ${slimPlan.total_image_redacts} images`
+              ? ` · ${t("cleanup.slimImages", { n: slimPlan.total_image_redacts })}`
               : "") +
             (slimPlan.total_document_redacts > 0
-              ? ` · ${slimPlan.total_document_redacts} docs`
+              ? ` · ${t("cleanup.slimDocs", { n: slimPlan.total_document_redacts })}`
               : "") +
-            (slimPlan.entries.length === 0 ? " · nothing to slim" : "")
+            (slimPlan.entries.length === 0
+              ? ` · ${t("cleanup.nothingToSlim")}`
+              : "")
           }
           rows={slimPlan.entries.map((e) => ({
             id: e.file_path,
@@ -228,8 +236,9 @@ export function SlimSubsection({
                   background: "var(--bg-sunken)",
                 }}
               >
-                Could not scan {slimPlan.failed_to_plan.length} session
-                {slimPlan.failed_to_plan.length === 1 ? "" : "s"}:
+                {t("cleanup.couldNotScan", {
+                  count: slimPlan.failed_to_plan.length,
+                })}
                 <ul style={{ margin: "var(--sp-4) 0 0", paddingInlineStart: "var(--sp-16)" }}>
                   {slimPlan.failed_to_plan.slice(0, 10).map(([p, err]) => (
                     <li key={p} title={err}>
@@ -238,7 +247,9 @@ export function SlimSubsection({
                   ))}
                   {slimPlan.failed_to_plan.length > 10 && (
                     <li style={{ color: "var(--fg-faint)" }}>
-                      … and {slimPlan.failed_to_plan.length - 10} more
+                      {t("cleanup.andNMore", {
+                        n: slimPlan.failed_to_plan.length - 10,
+                      })}
                     </li>
                   )}
                 </ul>

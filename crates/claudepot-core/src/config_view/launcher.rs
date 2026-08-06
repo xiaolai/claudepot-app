@@ -397,6 +397,36 @@ pub enum LaunchError {
     UnknownEditor(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The module segment is `config_launcher`, not `config_view` — this
+/// enum is a sibling of `ConfigViewError` inside the same module and
+/// the two must not share a namespace.
+impl crate::error_code::ErrorCode for LaunchError {
+    fn code(&self) -> &'static str {
+        match self {
+            LaunchError::Spawn(_) => "config_launcher.spawn",
+            LaunchError::NoEnvEditor => "config_launcher.no_env_editor",
+            LaunchError::NoBinary => "config_launcher.no_binary",
+            LaunchError::EmptyPath => "config_launcher.empty_path",
+            LaunchError::UnknownEditor(_) => "config_launcher.unknown_editor",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            LaunchError::Spawn(detail) => serde_json::json!({ "detail": detail }),
+            LaunchError::NoEnvEditor | LaunchError::NoBinary | LaunchError::EmptyPath => {
+                serde_json::json!({})
+            }
+            // An editor id from the bundled catalog (`vscode`, `zed`, …),
+            // never a filesystem path or a secret.
+            LaunchError::UnknownEditor(id) => serde_json::json!({ "editor_id": id }),
+        }
+    }
+}
+
 /// Fire-and-forget launch. Returns immediately on successful spawn.
 pub fn invoke(editor: &EditorCandidate, path: &Path) -> Result<(), LaunchError> {
     if path.as_os_str().is_empty() {

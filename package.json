@@ -17,6 +17,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check:envvar-layout": "node scripts/check-envvar-layout.mjs",
+    "check:catalogs": "node scripts/check-catalogs.mjs",
+    "scan:untranslated": "node scripts/scan-untranslated.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {
@@ -28,10 +30,12 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2",
     "highlight.js": "^11.11.1",
+    "i18next": "^26.3.6",
     "lucide-react": "^1.8.0",
     "mermaid": "^11.16.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-i18next": "^17.0.11",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1"

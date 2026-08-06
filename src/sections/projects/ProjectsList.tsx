@@ -1,4 +1,5 @@
 import type { MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type { ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
 import { formatRelativeTime, formatSize } from "./format";
@@ -57,6 +58,7 @@ export function ProjectsList({
    */
   costByPath?: Map<string, number | null>;
 }) {
+  const { t } = useTranslation("projects");
   if (projects.length === 0) {
     return (
       <div
@@ -67,14 +69,14 @@ export function ProjectsList({
           textAlign: "center",
         }}
       >
-        No projects match.
+        {t("list.noMatch")}
       </div>
     );
   }
   return (
     <ul
       role="listbox"
-      aria-label="Projects"
+      aria-label={t("list.aria")}
       style={{
         listStyle: "none",
         margin: 0,
@@ -111,6 +113,7 @@ function ProjectRow({
   onContextMenu?: (e: MouseEvent, project: ProjectInfo) => void;
   cost: number | null | undefined;
 }) {
+  const { t } = useTranslation("projects");
   const status = classifyProject(project);
   const name =
     project.original_path.split(/[/\\]/).filter(Boolean).pop() ??
@@ -124,9 +127,7 @@ function ProjectRow({
   // like "· · ·".
   const parts: string[] = [];
   if (project.session_count > 0) {
-    parts.push(
-      `${project.session_count} session${project.session_count === 1 ? "" : "s"}`,
-    );
+    parts.push(t("shared.sessions", { count: project.session_count }));
   }
   if (project.total_size_bytes > 0) {
     parts.push(formatSize(project.total_size_bytes));
@@ -189,25 +190,25 @@ function ProjectRow({
         {status === "orphan" && (
           <span
             className="project-tag orphan"
-            title="source directory does not exist"
+            title={t("list.orphanTitle")}
           >
-            orphan
+            {t("status.orphan")}
           </span>
         )}
         {status === "unreachable" && (
           <span
             className="project-tag unreachable"
-            title="source on an unmounted volume or permission-denied path"
+            title={t("list.offlineTitle")}
           >
-            offline
+            {t("status.offline")}
           </span>
         )}
         {status === "empty" && (
           <span
             className="project-tag empty"
-            title="no sessions, no memory files"
+            title={t("list.emptyTitle")}
           >
-            empty
+            {t("status.empty")}
           </span>
         )}
       </div>

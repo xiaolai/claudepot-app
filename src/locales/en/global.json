@@ -1,0 +1,179 @@
+{
+  "tabs": {
+    "ariaLabel": "Global views",
+    "config": "Config",
+    "memory": "Memory",
+    "tips": "Tips",
+    "updates": "Updates"
+  },
+  "updates": {
+    "title": "Updates",
+    "loading": "Loading update status…",
+    "installedVersion": "installed: {{version}}",
+    "notInstalled": "not installed",
+    "networkProbeFailed": "network probe failed",
+    "checkedRelative": "checked {{relative}}",
+    "installActive": "active",
+    "editEnvVars": "Edit in Env variables",
+    "row": {
+      "latest": "Latest",
+      "channel": "Channel",
+      "autoUpdate": "Auto-update",
+      "floor": "Floor",
+      "running": "Running",
+      "installs": "Installs",
+      "source": "Source",
+      "status": "Status",
+      "autoInstall": "Auto-install",
+      "cliNotify": "CLI notify",
+      "desktopNotify": "Desktop notify",
+      "pin": "Pin"
+    },
+    "action": {
+      "updateNow": "Update now",
+      "reinstall": "Reinstall",
+      "checkNow": "Check now"
+    },
+    "badge": {
+      "updateAvailable": "update available",
+      "upToDate": "up to date",
+      "newerThanChannel": "newer than channel",
+      "unknown": "unknown"
+    },
+    "time": {
+      "never": "never",
+      "justNow": "just now",
+      "minAgo": "{{n}} min ago",
+      "hAgo": "{{n}} h ago",
+      "dAgo": "{{n}} d ago"
+    },
+    "outcome": {
+      "reinstalled": "{{surface}} reinstalled ({{version}})",
+      "updated": "{{surface}} updated from {{before}} to {{after}}",
+      "installed": "{{surface}} installed at {{version}}",
+      "completed": "{{surface}} install completed"
+    },
+    "cli": {
+      "blockedInSettings": "DISABLE_UPDATES=1 set in ~/.claude/settings.json",
+      "noActiveBinary": "no active `claude` binary on PATH",
+      "blockedByFlag": "blocked by DISABLE_UPDATES=1",
+      "autoUpdateHint": "run `claude update` whenever a new version is detected",
+      "warnAutoupdaterOff": "DISABLE_AUTOUPDATER=1 set — background auto-updates are off",
+      "warnUpdatesBlocked": "DISABLE_UPDATES=1 set — manual updates are blocked too",
+      "runningProcesses_one": "{{count}} CC process active — symlink swap is safe (old processes keep their version)",
+      "runningProcesses_other": "{{count}} CC processes active — symlink swap is safe (old processes keep their version)"
+    },
+    "desktop": {
+      "noInstall": "no Claude Desktop install detected",
+      "notManageable": "Desktop is managed by {{source}} — Claudepot can't drive updates here",
+      "isRunning": "Desktop is currently running — quit it before updating",
+      "statusRunning": "running",
+      "statusNotRunning": "not running",
+      "autoInstallHint": "when Desktop is not running"
+    },
+    "settings": {
+      "title": "Settings",
+      "subtitle": "Notifications and pinning",
+      "trayBadgeHint": "tray badge when a new version is available",
+      "osNotifyHint": "OS notification (toast) when a new version is available",
+      "clear": "clear",
+      "sourceNote": "Channel + DISABLE_* keys live in <code>~/.claude/settings.json</code> (CC's own file). Notification toggles + cadence live in <code>~/.claudepot/updates.json</code>."
+    },
+    "channel": {
+      "pinHonored": "minimumVersion={{version}} pin will be honored"
+    },
+    "source": {
+      "homebrew": "Homebrew Cask",
+      "directDmg": "Direct download",
+      "setapp": "Setapp",
+      "macAppStore": "Mac App Store",
+      "userLocal": "User-local install"
+    },
+    "installKind": {
+      "nativeCurl": "native (curl)",
+      "unknown": "unknown"
+    },
+    "auto": {
+      "installed": "Auto-updated {{surface}}.",
+      "installedVersion": "Auto-updated {{surface}} to {{version}}.",
+      "skipped": "{{surface}} auto-update skipped: {{reason}}",
+      "failed": "{{surface}} auto-update failed: {{error}}"
+    },
+    "info": {
+      "saved": "Saved",
+      "wroteChannel": "Wrote autoUpdatesChannel={{channel}} to ~/.claude/settings.json",
+      "clearedMinimumVersion": "Cleared minimumVersion in ~/.claude/settings.json"
+    }
+  },
+  "memory": {
+    "auto": {
+      "title": "Auto-memory",
+      "loading": "Loading…",
+      "description": "Lets CC build a per-project memory directory and auto-write topic files at session end. Per-project overrides live in Projects → Memory.",
+      "overridden": "Overridden by {{label}}. Clear the env var to control this from here.",
+      "enabledToast": "Auto-memory enabled globally.",
+      "disabledToast": "Auto-memory disabled globally.",
+      "loadFailed": "Auto-memory state load failed",
+      "toggleFailed": "Toggle failed"
+    },
+    "health": {
+      "title": "Memory health",
+      "subtitle": "Static analysis of CLAUDE.md and MEMORY.md.",
+      "cutoffNote": " CC truncates global memory after line <strong>{{line}}</strong>.",
+      "loadingLower": "loading…",
+      "refresh": "Refresh",
+      "claudeMdSubtitle": "Global instructions",
+      "memoryMdSubtitle": "Per-account memory index",
+      "fileMissing": "File not present — nothing to audit.",
+      "lines": "Lines",
+      "estTokens": "Est. tokens",
+      "kb": "{{kb}} KB",
+      "pastLine": "Past line {{line}}",
+      "kbInvisible": "{{kb}} KB invisible",
+      "allVisible": "all visible"
+    }
+  },
+  "dream": {
+    "title": "Background memory consolidation",
+    "loading": "Loading…",
+    "description": "Lets Claude Code review recent sessions in the background and distill them into memory. Default follows Claude Code's own rollout; override it here.",
+    "requiresAutoMemory": "Requires auto-memory, which is off — consolidation won't run until it's enabled above.",
+    "modeDefault": "Default",
+    "modeOn": "On",
+    "modeOff": "Off",
+    "followsDefaultToast": "Consolidation follows Claude Code's default.",
+    "onToast": "Background consolidation on.",
+    "offToast": "Background consolidation off.",
+    "loadFailed": "Consolidation state load failed",
+    "toggleFailed": "Toggle failed"
+  },
+  "tips": {
+    "title": "CC tips",
+    "headerSummary": "{{extracted}} of {{known}} known tips extracted from CC <strong>{{version}}</strong>{{partial}} · current startup #{{startup}}",
+    "partialSuffix": " (partial — format may have shifted)",
+    "loadingCatalog": "Loading tip catalog…",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "privacyNote": "Tip prose is read from your local CC binary. History and timing come from <code>~/.claude.json</code> and Claudepot's local snapshot log. Nothing is uploaded.",
+    "readingBinary": "Reading CC binary…",
+    "unavailable": "Tips catalog unavailable.",
+    "installHint": "Install or update CC, then click Refresh.",
+    "filterPlaceholder": "Filter tips by prose, id, or trigger…",
+    "filterAll": "All {{n}}",
+    "filterSeen": "Seen {{n}}",
+    "filterNeverSeen": "Never seen {{n}}",
+    "filterExperiments": "Experiments {{n}}",
+    "noMatch": "No tips match the current filter.",
+    "seen": "seen",
+    "neverSeen": "never seen",
+    "seenRelative": "seen {{relative}}",
+    "cooldown": "cooldown {{n}}",
+    "experiment": "experiment: {{flag}}",
+    "variantA": "Variant A",
+    "variantB": "Variant B",
+    "lastSeenAt": "Last seen at startup #{{n}}",
+    "beforeSnapshot": " (before snapshot history)",
+    "relativeParen": " ({{relative}})",
+    "showTriggerLogic": "Show advanced trigger logic"
+  }
+}

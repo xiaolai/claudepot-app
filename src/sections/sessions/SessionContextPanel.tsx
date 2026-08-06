@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { Glyph } from "../../components/primitives/Glyph";
 import { IconButton } from "../../components/primitives/IconButton";
 import { NF } from "../../icons";
@@ -28,6 +30,7 @@ export function SessionContextPanel({
   onClose: () => void;
   refreshSignal: number;
 }) {
+  const { t } = useTranslation("sessions");
   const [stats, setStats] = useState<ContextStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +50,7 @@ export function SessionContextPanel({
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(String(e));
+          setError(renderError(e));
           setLoading(false);
         }
       });
@@ -107,7 +110,7 @@ export function SessionContextPanel({
   return (
     <aside
       data-testid="session-context-panel"
-      aria-label="Visible context"
+      aria-label={t("context.title")}
       style={{
         width: "var(--context-panel-width)",
         borderLeft: "var(--bw-hair) solid var(--line)",
@@ -136,13 +139,13 @@ export function SessionContextPanel({
             flex: 1,
           }}
         >
-          Visible context
+          {t("context.title")}
         </h3>
         <IconButton
           glyph={NF.x}
           onClick={onClose}
-          title="Close panel"
-          aria-label="Close visible context panel"
+          title={t("context.closePanel")}
+          aria-label={t("context.closePanelAria")}
         />
       </header>
 
@@ -153,7 +156,7 @@ export function SessionContextPanel({
           padding: "var(--sp-14) var(--sp-18)",
         }}
       >
-        {loading && <LoadingLine text="Computing context…" />}
+        {loading && <LoadingLine text={t("context.computing")} />}
         {error && <ErrorLine text={error} />}
         {stats && filteredTotals && (
           <>
@@ -183,6 +186,7 @@ export function SessionContextPanel({
 
 
 function InjectionList({ injections }: { injections: ContextInjection[] }) {
+  const { t } = useTranslation("sessions");
   if (injections.length === 0) {
     return (
       <div
@@ -192,7 +196,7 @@ function InjectionList({ injections }: { injections: ContextInjection[] }) {
           fontStyle: "italic",
         }}
       >
-        No injections for this phase.
+        {t("context.noInjections")}
       </div>
     );
   }
@@ -209,7 +213,7 @@ function InjectionList({ injections }: { injections: ContextInjection[] }) {
           marginBottom: "var(--sp-6)",
         }}
       >
-        Top injections
+        {t("context.topInjections")}
       </div>
       <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
         {sorted.slice(0, 50).map((i, idx) => (
@@ -266,9 +270,10 @@ function LoadingLine({ text }: { text: string }) {
 }
 
 function ErrorLine({ text }: { text: string }) {
+  const { t } = useTranslation("sessions");
   return (
     <div style={{ color: "var(--warn)", fontSize: "var(--fs-sm)" }}>
-      Couldn't load context: {text}
+      {t("context.loadFailed", { error: text })}
     </div>
   );
 }

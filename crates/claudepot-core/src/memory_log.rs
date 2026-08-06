@@ -85,6 +85,24 @@ pub enum MemoryLogError {
     Sql(#[from] rusqlite::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for MemoryLogError {
+    fn code(&self) -> &'static str {
+        match self {
+            MemoryLogError::Io(_) => "memory_log.io",
+            MemoryLogError::Sql(_) => "memory_log.sql",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            MemoryLogError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            MemoryLogError::Sql(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 /// Whether the recorded event is a creation, modification, or deletion.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
 #[serde(rename_all = "snake_case")]

@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../../api";
+import { renderError } from "../../../lib/i18n-error";
 import { Button } from "../../../components/primitives/Button";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 
@@ -12,9 +14,12 @@ export function SessionIndexRebuild({
   setToast,
 }: {
   /** Sessions-style toast setter — matches the pane's own pattern so
-   *  no extra useToasts instance is needed here. */
-  setToast: (msg: string) => void;
+   *  no extra useToasts instance is needed here. `kind` defaults to
+   *  "info"; the caller states failure explicitly rather than leaving a
+   *  downstream adapter to infer it from the wording. */
+  setToast: (msg: string, kind?: "info" | "error") => void;
 }) {
+  const { t } = useTranslation("sessions");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -23,15 +28,13 @@ export function SessionIndexRebuild({
     setBusy(true);
     try {
       await api.sessionIndexRebuild();
-      setToast(
-        "Session index cleared. The next load will re-parse every transcript.",
-      );
+      setToast(t("cleanup.rebuildDone"));
     } catch (e) {
-      setToast(`Rebuild failed: ${e}`);
+      setToast(t("cleanup.rebuildFailed", { error: renderError(e) }), "error");
     } finally {
       setBusy(false);
     }
-  }, [setToast]);
+  }, [setToast, t]);
 
   return (
     <>
@@ -54,7 +57,7 @@ export function SessionIndexRebuild({
             color: "var(--fg)",
           }}
         >
-          Rebuild session index
+          {t("cleanup.rebuildTitle")}
         </h3>
         <p
           style={{
@@ -64,10 +67,11 @@ export function SessionIndexRebuild({
             lineHeight: "var(--lh-body)",
           }}
         >
-          Drops every cached row in <code className="mono">~/.claudepot/sessions.db</code>.
-          Safe — no transcripts or credentials are touched; only derived
-          rows are removed. The next Sessions open re-parses from cold,
-          which can take tens of seconds on a large account.
+          <Trans
+            ns="sessions"
+            i18nKey="cleanup.rebuildBody"
+            components={{ code: <code className="mono" /> }}
+          />
         </p>
         <div>
           <Button
@@ -75,23 +79,24 @@ export function SessionIndexRebuild({
             onClick={() => setConfirming(true)}
             disabled={busy}
           >
-            Rebuild
+            {t("cleanup.rebuild")}
           </Button>
         </div>
       </section>
 
       {confirming && (
         <ConfirmDialog
-          title="Rebuild session index?"
+          title={t("cleanup.rebuildConfirmTitle")}
           body={
             <p style={{ margin: 0 }}>
-              This clears the persistent cache at{" "}
-              <code className="mono">~/.claudepot/sessions.db</code>.
-              The next Sessions open will be slow while every transcript
-              is re-parsed.
+              <Trans
+                ns="sessions"
+                i18nKey="cleanup.rebuildConfirmBody"
+                components={{ code: <code className="mono" /> }}
+              />
             </p>
           }
-          confirmLabel="Rebuild"
+          confirmLabel={t("cleanup.rebuild")}
           onCancel={() => setConfirming(false)}
           onConfirm={() => void rebuild()}
         />

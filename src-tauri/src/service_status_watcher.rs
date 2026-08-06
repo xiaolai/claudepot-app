@@ -27,6 +27,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::notification::NotificationLogState;
 use crate::commands::service_status::ServiceStatusState;
+use crate::i18n::{tr, tr_args};
 use crate::preferences::PreferencesState;
 
 /// Initial delay before the first tick. Long enough for the webview
@@ -223,17 +224,21 @@ fn transition_message(
     summary: &core::StatusSummary,
 ) -> (String, String) {
     let title = match new {
-        core::StatusTier::Ok => "Claude services back to normal".to_string(),
-        core::StatusTier::Degraded => "Claude services degraded".to_string(),
-        core::StatusTier::Down => "Claude services down".to_string(),
-        core::StatusTier::Unknown => "Claude service status unknown".to_string(),
+        core::StatusTier::Ok => tr("status.backToNormal"),
+        core::StatusTier::Degraded => tr("status.degraded"),
+        core::StatusTier::Down => tr("status.down"),
+        core::StatusTier::Unknown => tr("status.unknown"),
     };
 
+    // `summary.status.description` and component names come from the
+    // status page verbatim — data, not ours to translate.
     let body = if matches!(new, core::StatusTier::Ok) {
-        format!(
-            "Recovered from {}. Status: {}.",
-            tier_human(prev),
-            summary.status.description,
+        tr_args(
+            "status.recovered",
+            &[
+                ("tier", &tier_human(prev)),
+                ("status", &summary.status.description),
+            ],
         )
     } else {
         let affected: Vec<&str> = summary
@@ -251,10 +256,12 @@ fn transition_message(
         if affected.is_empty() {
             summary.status.description.clone()
         } else {
-            format!(
-                "Affected: {}. {}",
-                affected.join(", "),
-                summary.status.description
+            tr_args(
+                "status.affected",
+                &[
+                    ("list", &affected.join(", ")),
+                    ("description", &summary.status.description),
+                ],
             )
         }
     };
@@ -262,12 +269,12 @@ fn transition_message(
     (title, body)
 }
 
-fn tier_human(t: core::StatusTier) -> &'static str {
+fn tier_human(t: core::StatusTier) -> String {
     match t {
-        core::StatusTier::Ok => "operational",
-        core::StatusTier::Degraded => "degraded",
-        core::StatusTier::Down => "down",
-        core::StatusTier::Unknown => "unknown",
+        core::StatusTier::Ok => tr("status.tierOperational"),
+        core::StatusTier::Degraded => tr("status.tierDegraded"),
+        core::StatusTier::Down => tr("status.tierDown"),
+        core::StatusTier::Unknown => tr("status.tierUnknown"),
     }
 }
 

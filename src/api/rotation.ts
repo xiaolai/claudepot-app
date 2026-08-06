@@ -3,6 +3,7 @@
 // side and `dev-docs/auto-rotation.md` for the design.
 
 import { invoke } from "@tauri-apps/api/core";
+import { i18n } from "../lib/i18n";
 
 export type WindowId =
   | "five_hour"
@@ -10,11 +11,14 @@ export type WindowId =
   | "seven_day_opus"
   | "seven_day_sonnet";
 
+/** Window labels. Each entry is a getter so the catalog is read at
+ *  property-access time, not at module load — a table evaluated once at
+ *  import would freeze whatever language the app booted in. */
 export const WINDOW_LABELS: Record<WindowId, string> = {
-  five_hour: "5-hour window",
-  seven_day: "7-day window",
-  seven_day_opus: "7-day Opus window",
-  seven_day_sonnet: "7-day Sonnet window",
+  get five_hour() { return i18n.t("rotation.window.fiveHour"); },
+  get seven_day() { return i18n.t("rotation.window.sevenDay"); },
+  get seven_day_opus() { return i18n.t("rotation.window.sevenDayOpus"); },
+  get seven_day_sonnet() { return i18n.t("rotation.window.sevenDaySonnet"); },
 };
 
 export type SelectorKind = "least_used" | "round_robin" | "explicit";
@@ -163,12 +167,18 @@ export function newRule(id: string, candidates: string[]): RotationRule {
   };
 }
 
+/** Audit-outcome labels. Getters for the same reason as
+ *  `WINDOW_LABELS` — the map is enumerated (`Object.keys`) and indexed
+ *  by consumers, both of which work unchanged with accessor
+ *  properties. */
 export const ROTATION_OUTCOME_LABEL: Record<RotationOutcomeId, string> = {
-  applied: "Applied",
-  suggested: "Suggested",
-  skipped_guard: "Skipped (guard)",
-  skipped_cc_running: "Skipped (CC running)",
-  no_candidate: "No candidate",
-  failed: "Failed",
-  quarantined: "Quarantined",
+  get applied() { return i18n.t("rotation.outcome.applied"); },
+  get suggested() { return i18n.t("rotation.outcome.suggested"); },
+  get skipped_guard() { return i18n.t("rotation.outcome.skippedGuard"); },
+  get skipped_cc_running() {
+    return i18n.t("rotation.outcome.skippedCcRunning");
+  },
+  get no_candidate() { return i18n.t("rotation.outcome.noCandidate"); },
+  get failed() { return i18n.t("rotation.outcome.failed"); },
+  get quarantined() { return i18n.t("rotation.outcome.quarantined"); },
 };

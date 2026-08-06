@@ -1,5 +1,8 @@
 import { useEffect, useId, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { i18n } from "../../lib/i18n";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import { Input } from "../../components/primitives/Input";
 import {
@@ -36,6 +39,7 @@ export function AddKeyModal({
   onClose: () => void;
   onAdded: (kind: "api" | "oauth") => void;
 }) {
+  const { t } = useTranslation("keys");
   const [label, setLabel] = useState("");
   const [token, setToken] = useState("");
   const [accountUuid, setAccountUuid] = useState<string>("");
@@ -55,13 +59,12 @@ export function AddKeyModal({
   }, [accountUuid, accounts]);
 
   const disableReason = useMemo(() => {
-    if (!label.trim()) return "Label is required";
-    if (kind === "empty") return "Paste a key or token";
-    if (kind === "invalid")
-      return "Must start with sk-ant-api03- or sk-ant-oat01-";
-    if (!accountUuid) return "Pick the account this key was created under";
+    if (!label.trim()) return t("addModal.labelRequired");
+    if (kind === "empty") return t("addModal.pasteKeyOrToken");
+    if (kind === "invalid") return t("addModal.mustStartWith");
+    if (!accountUuid) return t("addModal.pickAccount");
     return null;
-  }, [label, kind, accountUuid]);
+  }, [label, kind, accountUuid, t]);
 
   const submit = async () => {
     if (disableReason) return;
@@ -76,7 +79,7 @@ export function AddKeyModal({
         onAdded("oauth");
       }
     } catch (e) {
-      setError(`${e}`);
+      setError(renderError(e));
     } finally {
       // D-5/6/7: scrub the token from React state regardless of
       // success or error. The plaintext was only ever needed for the
@@ -97,30 +100,33 @@ export function AddKeyModal({
     >
       <ModalHeader
         glyph={NF.key}
-        title="Add key"
+        title={t("addModal.title")}
         id={titleId}
         onClose={busy ? undefined : onClose}
       />
       <ModalBody>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-14)" }}>
-          <Field label="Label" hint="A short name you'll see in the list.">
+          <Field
+            label={t("addModal.labelField")}
+            hint={t("addModal.labelHint")}
+          >
             <Input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Personal / CI / staging"
+              placeholder={t("addModal.labelPlaceholder")}
               autoFocus
               disabled={busy}
             />
           </Field>
 
           <Field
-            label="Token"
-            hint="Paste the full value. We detect the kind from its prefix."
+            label={t("addModal.tokenField")}
+            hint={t("addModal.tokenHint")}
           >
             <Input
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="sk-ant-api03-… or sk-ant-oat01-…"
+              placeholder={t("addModal.tokenPlaceholder")}
               disabled={busy}
               type="password"
             />
@@ -128,18 +134,25 @@ export function AddKeyModal({
 
           {kind === "api" && (
             <Hint>
-              <strong>API key</strong> detected.
+              <Trans
+                ns="keys"
+                i18nKey="addModal.apiDetected"
+                components={{ strong: <strong /> }}
+              />
             </Hint>
           )}
           {kind === "invalid" && (
             <Hint tone="danger">
-              Unknown prefix. Expected <code>sk-ant-api03-</code> (API key) or{" "}
-              <code>sk-ant-oat01-</code> (OAuth token).
+              <Trans
+                ns="keys"
+                i18nKey="addModal.unknownPrefix"
+                components={{ code: <code /> }}
+              />
             </Hint>
           )}
 
           <Field
-            label="Created by account"
+            label={t("addModal.createdByField")}
             hint={accountHint(kind, accounts.length)}
           >
             <AccountSelect
@@ -177,14 +190,14 @@ export function AddKeyModal({
           {disableReason ?? ""}
         </span>
         <Button variant="ghost" onClick={onClose} disabled={busy}>
-          Cancel
+          {t("addModal.cancel")}
         </Button>
         <Button
           variant="solid"
           onClick={() => void submit()}
           disabled={!!disableReason || busy}
         >
-          {busy ? "Adding…" : "Add"}
+          {busy ? t("addModal.adding") : t("addModal.add")}
         </Button>
       </ModalFooter>
     </Modal>
@@ -193,20 +206,21 @@ export function AddKeyModal({
 
 function accountHint(kind: DetectedKind, total: number): React.ReactNode {
   if (total === 0) {
-    return "No registered accounts yet — add one from the Accounts section first.";
+    return i18n.t("addModal.hintNoAccounts", { ns: "keys" });
   }
   if (kind === "oauth") {
     return (
-      <>
-        The account you were signed in as when you ran{" "}
-        <code>claude setup-token</code>.
-      </>
+      <Trans
+        ns="keys"
+        i18nKey="addModal.hintOauth"
+        components={{ code: <code /> }}
+      />
     );
   }
   if (kind === "api") {
-    return "The Anthropic account that owns this API key in the console.";
+    return i18n.t("addModal.hintApi", { ns: "keys" });
   }
-  return "Defaults to your active CLI account.";
+  return i18n.t("addModal.hintDefault", { ns: "keys" });
 }
 
 function Field({
@@ -290,6 +304,7 @@ function AccountSelect({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("keys");
   return (
     <select
       value={value}
@@ -306,11 +321,11 @@ function AccountSelect({
         color: "var(--fg)",
       }}
     >
-      {!value && <option value="">— select account —</option>}
+      {!value && <option value="">{t("addModal.selectAccount")}</option>}
       {accounts.map((a) => (
         <option key={a.uuid} value={a.uuid}>
           {a.email}
-          {a.is_cli_active ? " · active CLI" : ""}
+          {a.is_cli_active ? ` ${t("addModal.activeCliSuffix")}` : ""}
         </option>
       ))}
     </select>

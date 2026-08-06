@@ -12,9 +12,16 @@
 //! - [`ServiceStatusState`] — mutex-guarded last-known summary +
 //!   last-known probe results. Owned here, mutated by the watcher
 //!   and read by both commands.
+//!
+//! Every command here is infallible today — a failed poll is *data*
+//! (`last_error`, `tier: "unknown"`), never a rejection, because a
+//! status pane that throws tells the user less than one that says the
+//! status is unknown. The `Result<_, ErrorDto>` shape is kept so a
+//! future rejection has somewhere to go without a renderer change.
 
 use std::sync::Mutex;
 
+use crate::dto_error::ErrorDto;
 use claudepot_core::service_status as core;
 use tauri::State;
 
@@ -125,7 +132,7 @@ fn lock(m: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
 #[tauri::command]
 pub async fn service_status_summary_get(
     state: State<'_, ServiceStatusState>,
-) -> Result<ServiceStatusSummaryDto, String> {
+) -> Result<ServiceStatusSummaryDto, ErrorDto> {
     let g = lock(&state.inner);
 
     let (indicator, description, components, incidents) = match &g.summary {
@@ -156,7 +163,7 @@ pub async fn service_status_summary_get(
 #[tauri::command]
 pub async fn service_status_probe_now(
     state: State<'_, ServiceStatusState>,
-) -> Result<LatencyReportDto, String> {
+) -> Result<LatencyReportDto, ErrorDto> {
     let hosts = core::probe_hosts(core::HOTPATH_HOSTS).await;
     state.store_latency(hosts.clone());
 
@@ -179,7 +186,7 @@ pub async fn service_status_probe_now(
 /// pane's per-host table. This command is shaped for the panel —
 /// single host, single classification, no caller-side aggregation.
 #[tauri::command]
-pub async fn network_first_run_check() -> Result<FirstRunNetworkDto, String> {
+pub async fn network_first_run_check() -> Result<FirstRunNetworkDto, ErrorDto> {
     let d = core::diagnose_anthropic().await;
     Ok(FirstRunNetworkDto::from(d))
 }
@@ -190,7 +197,7 @@ pub async fn network_first_run_check() -> Result<FirstRunNetworkDto, String> {
 #[tauri::command]
 pub async fn service_status_latency_get(
     state: State<'_, ServiceStatusState>,
-) -> Result<LatencyReportDto, String> {
+) -> Result<LatencyReportDto, ErrorDto> {
     let g = lock(&state.inner);
     match &g.latency {
         Some(r) => Ok(LatencyReportDto {

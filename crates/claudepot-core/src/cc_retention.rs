@@ -336,6 +336,49 @@ pub enum RetentionError {
     NonPositive(i64),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Two things here are load-bearing beyond the usual contract, both
+/// from this module's header:
+///
+/// - **`NonPositive` keeps its own code.** It is the guard that stops
+///   `0` from riding the duration scale — `0` means *write no
+///   transcripts and delete the existing ones at startup*, the single
+///   most destructive value, reachable only through the separately
+///   named `disable_persistence()` behind a type-to-confirm gate.
+///   Folding it into a generic "invalid value" code would let a
+///   translator write one sentence for two opposite stakes.
+/// - **Nothing here is the `cleanup_suppressed` case.** A value CC's
+///   schema rejects *protects* transcripts and is reported as
+///   `RetentionMode::Invalid` state, never as an error — which is why
+///   no code in this impl may ever be given "restore the default"
+///   remediation copy. Restoring re-arms deletion.
+impl crate::error_code::ErrorCode for RetentionError {
+    fn code(&self) -> &'static str {
+        match self {
+            RetentionError::Write(_) => "cc_retention.write",
+            RetentionError::NonPositive(_) => "cc_retention.non_positive",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // `Display` here is the bare label "write CC settings" —
+            // the source is deliberately not folded into it, so a GUI
+            // with no `--verbose` would otherwise have nothing to show.
+            // `detail` is what makes the failure diagnosable; the
+            // English `message` is unchanged either way.
+            RetentionError::Write(e) => serde_json::json!({ "detail": e.to_string() }),
+            // The rejected day count. The English sentence names
+            // `disable_persistence()` because the CLI prints it
+            // verbatim; a GUI sentence has no such call and needs the
+            // number to say what the user typed.
+            RetentionError::NonPositive(days) => serde_json::json!({ "days": days }),
+        }
+    }
+}
+
 fn user_settings_path() -> PathBuf {
     claude_config_dir().join("settings.json")
 }

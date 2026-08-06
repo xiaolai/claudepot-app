@@ -13,12 +13,14 @@ export type SafetyFilter = "secret" | "hazard" | "provider" | "set";
 
 export const CONTROLS: EnvControl[] = ["toggle", "enum", "number", "text"];
 
-export const SAFETY_FILTERS: { key: SafetyFilter; label: string }[] = [
-  { key: "set", label: "modified" },
-  { key: "secret", label: "secret" },
-  { key: "hazard", label: "risky" },
-  { key: "provider", label: "provider-managed" },
-];
+/** Catalog keys, not literals — the chip label is looked up at render
+ *  time so a language switch reaches a toolbar already on screen. */
+export const SAFETY_FILTERS = [
+  { key: "set", labelKey: "envvars.filterModified" },
+  { key: "secret", labelKey: "envvars.filterSecret" },
+  { key: "hazard", labelKey: "envvars.filterRisky" },
+  { key: "provider", labelKey: "envvars.filterProviderManaged" },
+] as const satisfies readonly { key: SafetyFilter; labelKey: string }[];
 
 function toggleIn<T>(set: Set<T>, v: T): Set<T> {
   const next = new Set(set);

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "./primitives/Glyph";
 import { NF } from "../icons";
+import { i18n } from "../lib/i18n";
 import { basename } from "../lib/paths";
 import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 import type { RunningOpInfo } from "../types";
@@ -26,6 +28,7 @@ export function RunningOpsChip({
   ops: RunningOpInfo[];
   onReopen: (opId: string) => void;
 }) {
+  const { t } = useTranslation("components");
   const running = ops.filter((o) => o.status === "running");
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -43,10 +46,7 @@ export function RunningOpsChip({
 
   if (running.length === 0) return null;
 
-  const label =
-    running.length === 1
-      ? "1 op"
-      : `${running.length} ops`;
+  const label = t("chips.ops", { count: running.length });
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
@@ -55,7 +55,7 @@ export function RunningOpsChip({
         className="statusbar-chip"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`${running.length} background operation${running.length === 1 ? "" : "s"} running. Click to view details.`}
+        aria-label={t("chips.opsAria", { count: running.length })}
         onClick={() => setOpen((o) => !o)}
       >
         <span className="statusbar-chip-pulse" aria-hidden="true" />
@@ -66,10 +66,10 @@ export function RunningOpsChip({
         <div
           className="statusbar-chip-popover"
           role="menu"
-          aria-label="Background operations"
+          aria-label={t("chips.opsGroup")}
         >
           <div className="statusbar-chip-popover-header">
-            Background operations
+            {t("chips.opsGroup")}
           </div>
           <div className="statusbar-chip-popover-list">
             {running.map((op) => (
@@ -78,7 +78,7 @@ export function RunningOpsChip({
                 type="button"
                 role="menuitem"
                 className="statusbar-chip-popover-item"
-                title="Re-open progress modal"
+                title={t("chips.opsReopen")}
                 onClick={() => {
                   onReopen(op.op_id);
                   setOpen(false);
@@ -102,30 +102,38 @@ export function RunningOpsChip({
   );
 }
 
+/**
+ * `verb` and `labelFor` are plain functions, not components — they
+ * read the global i18n instance. `RunningOpsChip` subscribes via
+ * `useTranslation`, so a language switch re-renders it and re-invokes
+ * these.
+ */
+const NS = { ns: "components" } as const;
+
 function verb(kind: RunningOpInfo["kind"]): string {
   switch (kind) {
     case "repair_resume":
-      return "Resuming";
+      return i18n.t("ops.resuming", NS);
     case "repair_rollback":
-      return "Rolling back";
+      return i18n.t("ops.rollingBack", NS);
     case "move_project":
-      return "Renaming";
+      return i18n.t("ops.renaming", NS);
     case "clean_projects":
-      return "Cleaning";
+      return i18n.t("ops.cleaning", NS);
     case "session_prune":
-      return "Pruning";
+      return i18n.t("ops.pruning", NS);
     case "session_slim":
-      return "Slimming";
+      return i18n.t("ops.slimming", NS);
     case "session_share":
-      return "Sharing";
+      return i18n.t("ops.sharing", NS);
     case "session_move":
-      return "Moving session";
+      return i18n.t("ops.movingSession", NS);
     case "account_login":
-      return "Logging in";
+      return i18n.t("ops.loggingIn", NS);
     case "account_register":
-      return "Adding account";
+      return i18n.t("ops.addingAccount", NS);
     case "verify_all":
-      return "Verifying";
+      return i18n.t("ops.verifying", NS);
   }
 }
 
@@ -133,32 +141,52 @@ export function labelFor(op: RunningOpInfo): string {
   if (op.kind === "clean_projects") {
     if (op.current_phase && op.sub_progress) {
       const [done, total] = op.sub_progress;
-      return `Cleaning projects (${done}/${total})`;
+      return i18n.t("ops.cleaningProjectsProgress", { ...NS, done, total });
     }
-    return "Cleaning projects";
+    return i18n.t("ops.cleaningProjects", NS);
   }
   if (op.kind === "session_prune") {
-    const suffix = op.sub_progress
-      ? ` (${op.sub_progress[0]}/${op.sub_progress[1]})`
-      : "";
-    return `Pruning sessions${suffix}`;
+    return op.sub_progress
+      ? i18n.t("ops.pruningSessionsProgress", {
+          ...NS,
+          done: op.sub_progress[0],
+          total: op.sub_progress[1],
+        })
+      : i18n.t("ops.pruningSessions", NS);
   }
   if (op.kind === "session_slim") {
-    const file = basename(op.old_path) || "session";
+    const file = basename(op.old_path) || i18n.t("ops.sessionFallback", NS);
     return op.current_phase
-      ? `Slimming ${file} (${op.current_phase})`
-      : `Slimming ${file}`;
+      ? i18n.t("ops.slimmingFilePhase", {
+          ...NS,
+          file,
+          phase: op.current_phase,
+        })
+      : i18n.t("ops.slimmingFile", { ...NS, file });
   }
   if (op.kind === "session_share") {
     return op.current_phase
-      ? `Sharing (${op.current_phase})`
-      : "Sharing session";
+      ? i18n.t("ops.sharingPhase", { ...NS, phase: op.current_phase })
+      : i18n.t("ops.sharingSession", NS);
   }
-  const base = `${verb(op.kind)} ${basename(op.old_path)} → ${basename(op.new_path)}`;
+  const base = i18n.t("ops.rename", {
+    ...NS,
+    verb: verb(op.kind),
+    from: basename(op.old_path),
+    to: basename(op.new_path),
+  });
   if (op.current_phase && op.sub_progress) {
     const [done, total] = op.sub_progress;
-    return `${base} (${op.current_phase}: ${done}/${total} files)`;
+    return i18n.t("ops.renameFiles", {
+      ...NS,
+      base,
+      phase: op.current_phase,
+      done,
+      total,
+    });
   }
-  if (op.current_phase) return `${base} (${op.current_phase})`;
+  if (op.current_phase) {
+    return i18n.t("ops.renamePhase", { ...NS, base, phase: op.current_phase });
+  }
   return base;
 }

@@ -1,6 +1,8 @@
 import { useId, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import {
@@ -56,6 +58,7 @@ export function MoveSessionModal({
   /** Called after a successful move so the caller can refresh. */
   onCompleted: (report: MoveSessionReport | null) => void;
 }) {
+  const { t } = useTranslation("projects");
   const headingId = useId();
   const selectId = useId();
   const customCwdId = useId();
@@ -116,7 +119,7 @@ export function MoveSessionModal({
     const picked = await openDialog({
       directory: true,
       multiple: false,
-      title: "Choose target project directory",
+      title: t("move.chooseTargetTitle"),
     });
     if (typeof picked === "string") {
       setSelection("__other__");
@@ -140,7 +143,10 @@ export function MoveSessionModal({
       const shortToBase = basename(target);
       openOpModal({
         opId,
-        title: `Moving session ${sessionId.slice(0, 8)} → ${shortToBase}`,
+        title: t("move.progressTitle", {
+          sid: sessionId.slice(0, 8),
+          to: shortToBase,
+        }),
         phases: SESSION_MOVE_PHASES,
         fetchStatus: api.sessionMoveStatus,
         renderResult: renderSessionMoveResult,
@@ -161,7 +167,7 @@ export function MoveSessionModal({
       // path doesn't depend on it.
       void shortFromBase;
     } catch (e) {
-      setPhase({ kind: "error", message: String(e) });
+      setPhase({ kind: "error", message: renderError(e) });
     }
   }
 
@@ -173,7 +179,7 @@ export function MoveSessionModal({
     <Modal open onClose={handleClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
         glyph={NF.arrowR}
-        title="Move session"
+        title={t("move.title")}
         id={headingId}
         onClose={handleClose}
       />
@@ -195,7 +201,7 @@ export function MoveSessionModal({
             fontSize: "var(--fs-2xs)",
           }}
         >
-          <span className="mono-cap">session</span>
+          <span className="mono-cap">{t("move.sessionLabel")}</span>
           <span className="mono" title={sessionId}>
             {shortSid}
           </span>
@@ -209,16 +215,30 @@ export function MoveSessionModal({
             color: "var(--fg-muted)",
           }}
         >
-          From <strong className="mono" style={{ color: "var(--fg)" }}>{shortFrom}</strong>{" "}
-          to the target you pick. Every transcript line's{" "}
-          <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>cwd</code>{" "}
-          is rewritten so{" "}
-          <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>--resume</code>{" "}
-          opens the new project. History entries keyed by this sessionId
-          follow; pre-sessionId entries stay behind.
+          <Trans
+            ns="projects"
+            i18nKey="move.explain"
+            components={{
+              from: (
+                <strong className="mono" style={{ color: "var(--fg)" }}>
+                  {shortFrom}
+                </strong>
+              ),
+              cwd: (
+                <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>
+                  cwd
+                </code>
+              ),
+              resume: (
+                <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>
+                  --resume
+                </code>
+              ),
+            }}
+          />
         </p>
 
-        <FieldBlock label="Target project" htmlFor={selectId}>
+        <FieldBlock label={t("move.targetLabel")} htmlFor={selectId}>
           <select
             id={selectId}
             value={selection}
@@ -239,7 +259,7 @@ export function MoveSessionModal({
           >
             {options.length === 0 && (
               <option value="__other__" disabled>
-                No live project targets — pick Other…
+                {t("move.noTargets")}
               </option>
             )}
             {options.map((p) => {
@@ -250,12 +270,12 @@ export function MoveSessionModal({
                 </option>
               );
             })}
-            <option value="__other__">Other…</option>
+            <option value="__other__">{t("move.other")}</option>
           </select>
         </FieldBlock>
 
         {selection === "__other__" && (
-          <FieldBlock label="Custom path" htmlFor={customCwdId}>
+          <FieldBlock label={t("move.customPath")} htmlFor={customCwdId}>
             <div
               style={{
                 display: "flex",
@@ -267,7 +287,7 @@ export function MoveSessionModal({
                 id={customCwdId}
                 type="text"
                 className="mono pm-focus"
-                placeholder="Target cwd (absolute path)"
+                placeholder={t("shared.targetCwd")}
                 value={customCwd}
                 onChange={(e) => setCustomCwd(e.target.value)}
                 disabled={starting}
@@ -283,13 +303,13 @@ export function MoveSessionModal({
                 }}
               />
               <Button variant="ghost" onClick={browse} disabled={starting}>
-                Browse…
+                {t("shared.browse")}
               </Button>
             </div>
           </FieldBlock>
         )}
 
-        <Disclosure label="Advanced">
+        <Disclosure label={t("move.advanced")}>
           <OptionRow
             type="checkbox"
             checked={forceLive}
@@ -297,11 +317,11 @@ export function MoveSessionModal({
             disabled={starting}
           >
             <strong style={{ fontWeight: 600 }}>
-              Force past the live-session mtime guard
+              {t("move.forceLive")}
             </strong>
             <span style={{ color: "var(--fg-faint)" }}>
               {" "}
-              — use only if CC isn't writing to this session.
+              {t("move.forceLiveDesc")}
             </span>
           </OptionRow>
           <OptionRow
@@ -311,14 +331,21 @@ export function MoveSessionModal({
             disabled={starting}
           >
             <strong style={{ fontWeight: 600 }}>
-              Force past Syncthing{" "}
-              <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>
-                .sync-conflict-*
-              </code>
+              <Trans
+                ns="projects"
+                i18nKey="move.forceConflict"
+                components={{
+                  pat: (
+                    <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>
+                      .sync-conflict-*
+                    </code>
+                  ),
+                }}
+              />
             </strong>
             <span style={{ color: "var(--fg-faint)" }}>
               {" "}
-              — will silently orphan the conflict copy.
+              {t("move.forceConflictDesc")}
             </span>
           </OptionRow>
           <OptionRow
@@ -328,11 +355,11 @@ export function MoveSessionModal({
             disabled={starting}
           >
             <strong style={{ fontWeight: 600 }}>
-              Remove source project dir if it's empty after the move
+              {t("move.cleanupSource")}
             </strong>
             <span style={{ color: "var(--fg-faint)" }}>
               {" "}
-              — tidy up the husk when this was the last session here.
+              {t("move.cleanupSourceDesc")}
             </span>
           </OptionRow>
         </Disclosure>
@@ -362,7 +389,7 @@ export function MoveSessionModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={handleClose} disabled={starting}>
-          Cancel
+          {t("shared.cancel")}
         </Button>
         <Button
           variant="solid"
@@ -370,7 +397,9 @@ export function MoveSessionModal({
           disabled={!canSubmit}
           autoFocus
         >
-          {starting ? "Starting…" : `Move to ${shortTo || "…"}`}
+          {starting
+            ? t("move.starting")
+            : t("move.moveTo", { target: shortTo || "…" })}
         </Button>
       </ModalFooter>
     </Modal>

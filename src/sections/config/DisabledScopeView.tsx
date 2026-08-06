@@ -7,7 +7,9 @@
 // loc-guardian limit.
 
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { renderError } from "../../lib/i18n-error";
 import type { DisabledRecordDto } from "../../types";
 import { DisabledList, matches } from "./disabled/DisabledList";
 import { DisabledPreview } from "./disabled/DisabledPreview";
@@ -23,6 +25,7 @@ export function DisabledScopeView({
   /** Bumped after re-enable so the parent can refresh the active tree. */
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("config");
   const [rows, setRows] = useState<DisabledRecordDto[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -45,7 +48,7 @@ export function DisabledScopeView({
       })
       .catch((err) => {
         if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadError(renderError(err));
       });
     return () => {
       cancelled = true;
@@ -55,14 +58,14 @@ export function DisabledScopeView({
   if (loadError) {
     return (
       <Pane>
-        <Empty danger>Couldn't load disabled artifacts: {loadError}</Empty>
+        <Empty danger>{t("disabled.loadFailed", { error: loadError })}</Empty>
       </Pane>
     );
   }
   if (rows === null) {
     return (
       <Pane>
-        <Empty>Loading…</Empty>
+        <Empty>{t("state.loading")}</Empty>
       </Pane>
     );
   }
@@ -70,11 +73,11 @@ export function DisabledScopeView({
     return (
       <Pane>
         <Empty>
-          Nothing is disabled. Use the <em>Disable</em> action in the Config
-          tree to hide a Skill, Agent, or Slash command from Claude Code
-          without deleting it. Disabled artifacts can be re-enabled in one
-          click and stay on disk under <code>.disabled/</code> until you
-          trash them.
+          <Trans
+            ns="config"
+            i18nKey="disabled.empty"
+            components={{ em: <em />, code: <code /> }}
+          />
         </Empty>
       </Pane>
     );
@@ -127,6 +130,7 @@ function Pane({ children }: { children: React.ReactNode }) {
 }
 
 function Header({ count }: { count: number }) {
+  const { t } = useTranslation("config");
   return (
     <header
       style={{
@@ -143,7 +147,7 @@ function Header({ count }: { count: number }) {
           color: "var(--fg)",
         }}
       >
-        Disabled artifacts
+        {t("disabled.title")}
       </h2>
       <span
         style={{
@@ -153,7 +157,7 @@ function Header({ count }: { count: number }) {
           textTransform: "uppercase",
         }}
       >
-        {count} hidden from Claude Code
+        {t("disabled.hiddenCount", { total: count })}
       </span>
     </header>
   );

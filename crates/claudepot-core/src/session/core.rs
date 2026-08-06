@@ -51,6 +51,34 @@ pub enum SessionError {
     Index(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `NotFound` / `InvalidPath` carry `detail`, not `path`, on purpose:
+/// their constructors pass a transcript path at some call sites and a
+/// bare session id at others (`locate_session` rejects an id containing
+/// a separator through `InvalidPath`). Naming it `path` would promise a
+/// translator something half the sites do not deliver.
+impl crate::error_code::ErrorCode for SessionError {
+    fn code(&self) -> &'static str {
+        match self {
+            SessionError::Io(_) => "session.io",
+            SessionError::NotFound(_) => "session.not_found",
+            SessionError::InvalidPath(_) => "session.invalid_path",
+            SessionError::Index(_) => "session.index",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            SessionError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            SessionError::NotFound(detail) => serde_json::json!({ "detail": detail }),
+            SessionError::InvalidPath(detail) => serde_json::json!({ "detail": detail }),
+            SessionError::Index(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public types — cross the Tauri boundary via DTO conversion.
 // ---------------------------------------------------------------------------

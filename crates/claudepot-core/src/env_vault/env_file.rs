@@ -43,6 +43,37 @@ pub enum EnvEditError {
     ValueHasNewline(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Every payload here is an env **key** — `ValueHasNewline` included,
+/// whose `{0}` is the key whose value was rejected, not the value. A
+/// `.env` value is a secret by default and `params` lands in the JS
+/// heap, so a variant that carried one would be a leak; there is none,
+/// and adding one would need the value redacted before it reached here.
+impl crate::error_code::ErrorCode for EnvEditError {
+    fn code(&self) -> &'static str {
+        match self {
+            EnvEditError::KeyNotFound(_) => "env_file.key_not_found",
+            EnvEditError::AlreadyActive(_) => "env_file.already_active",
+            EnvEditError::AlreadyCommented(_) => "env_file.already_commented",
+            EnvEditError::InvalidKeyName(_) => "env_file.invalid_key_name",
+            EnvEditError::ValueHasNewline(_) => "env_file.value_has_newline",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            EnvEditError::KeyNotFound(key) => json!({ "key": key }),
+            EnvEditError::AlreadyActive(key) => json!({ "key": key }),
+            EnvEditError::AlreadyCommented(key) => json!({ "key": key }),
+            EnvEditError::InvalidKeyName(key) => json!({ "key": key }),
+            EnvEditError::ValueHasNewline(key) => json!({ "key": key }),
+        }
+    }
+}
+
 /// True for a syntactically valid env key: `[A-Za-z_][A-Za-z0-9_]*`.
 pub fn is_valid_key(key: &str) -> bool {
     let mut chars = key.chars();

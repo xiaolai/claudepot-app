@@ -3,6 +3,7 @@
 // owning UsageView passes filtered rows + sort state and gets back
 // `onSort` callbacks; the table itself is pure presentation.
 
+import { useTranslation } from "react-i18next";
 import { Table, Th, ThSort, Tr, Td } from "../../components/primitives";
 import { formatRelative } from "../../lib/formatRelative";
 import type { ArtifactUsageRowDto } from "../../types";
@@ -24,30 +25,31 @@ export function UsageTable({
   sortKey: SortKey;
   onSort: (k: SortKey) => void;
 }) {
+  const { t } = useTranslation("activities");
   return (
     <Table style={{ fontSize: "var(--fs-xs)" }}>
       <thead>
         <tr style={{ background: "var(--bg-sunken)" }}>
-          <Th>Kind</Th>
-          <Th>Artifact</Th>
-          <Th>Plugin</Th>
+          <Th>{t("usage.colKind")}</Th>
+          <Th>{t("usage.colArtifact")}</Th>
+          <Th>{t("usage.colPlugin")}</Th>
           <ThSort current={sortKey} value="count_24h" onSort={onSort} align="right">
-            24h
+            {t("usage.col24h")}
           </ThSort>
           <ThSort current={sortKey} value="count_7d" onSort={onSort} align="right">
-            7d
+            {t("usage.col7d")}
           </ThSort>
           <ThSort current={sortKey} value="count_30d" onSort={onSort} align="right">
-            30d
+            {t("usage.col30d")}
           </ThSort>
           <ThSort current={sortKey} value="last_seen" onSort={onSort} align="right">
-            Last seen
+            {t("usage.colLastSeen")}
           </ThSort>
           <ThSort current={sortKey} value="errors" onSort={onSort} align="right">
-            Errors
+            {t("usage.colErrors")}
           </ThSort>
           <ThSort current={sortKey} value="p50" onSort={onSort} align="right">
-            p50
+            {t("usage.colP50")}
           </ThSort>
         </tr>
       </thead>
@@ -61,6 +63,7 @@ export function UsageTable({
 }
 
 function Row({ row }: { row: ArtifactUsageRowDto }) {
+  const { t } = useTranslation("activities");
   const s = row.stats;
   const errRate =
     s.count_30d > 0 ? (s.error_count_30d / s.count_30d) * 100 : 0;
@@ -95,7 +98,7 @@ function Row({ row }: { row: ArtifactUsageRowDto }) {
       </Td>
       <Td muted num>
         {s.p50_ms_24h ?? s.avg_ms_30d ?? "—"}
-        {(s.p50_ms_24h ?? s.avg_ms_30d) != null ? "ms" : ""}
+        {(s.p50_ms_24h ?? s.avg_ms_30d) != null ? t("usage.unitMs") : ""}
       </Td>
     </Tr>
   );

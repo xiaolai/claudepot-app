@@ -1,0 +1,1027 @@
+{
+  "comment": [
+    "Config / settings / retention / permissions / rotation / pricing.",
+    "",
+    "Schema and rules: see 00-foundation.json. One file per domain so the",
+    "registry can be appended to in parallel; a duplicate code across two",
+    "files is a hard error in the loader.",
+    "",
+    "Two entries in here carry safety semantics that a translator must not",
+    "smooth over, both from AGENTS.md's \"Transcript retention\" section:",
+    "",
+    "  cc_retention.non_positive - `0` is NOT a short retention window. It",
+    "    means write no transcripts and delete the existing ones at",
+    "    startup, and it is reachable only through a separately named call",
+    "    behind a type-to-confirm gate. This code exists so that value can",
+    "    never be phrased as an ordinary out-of-range number.",
+    "",
+    "  cc_retention.write - the failure to persist a retention change. Its",
+    "    remediation copy must never be \"restore the default\": a value CC's",
+    "    schema rejects suppresses cleanup entirely, which *protects*",
+    "    transcripts, so restoring re-arms deletion. That state is reported",
+    "    as RetentionMode::Invalid, not as an error, and no code in this",
+    "    file describes it.",
+    "",
+    "cc_env.invalid_enum_value / cc_env.invalid_number carry a `value`",
+    "param. It is the user's env value, redacted at its one constructor",
+    "(cc_env::settings::validate -> errors::redacted) and re-scanned in",
+    "params(). ANTHROPIC_CUSTOM_HEADERS is marked secret in the spec",
+    "precisely because it can carry an Authorization header; `name` is",
+    "always safe to render, a value never is on its own authority."
+  ],
+  "codes": [
+    {
+      "code": "cc_env.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io: permission denied"
+    },
+    {
+      "code": "cc_env.json_parse",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "json parse: expected value at line 1 column 1"
+    },
+    {
+      "code": "cc_env.not_a_json_object",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "settings file is not a JSON object at /Users/me/.claude/settings.json"
+    },
+    {
+      "code": "cc_env.env_not_an_object",
+      "owner": "core",
+      "params": [
+        "path",
+        "found"
+      ],
+      "message": "`env` in /Users/me/.claude/settings.json is a array, not an object — fix it by hand"
+    },
+    {
+      "code": "cc_env.unknown_variable",
+      "owner": "core",
+      "params": [
+        "name"
+      ],
+      "message": "NOT_A_REAL_VAR is not a documented Claude Code environment variable"
+    },
+    {
+      "code": "cc_env.not_editable",
+      "owner": "core",
+      "params": [
+        "name",
+        "reason"
+      ],
+      "message": "CLAUDE_CONFIG_DIR cannot be edited here: Claude Code reads it before settings load, so writing it here would leave one run resolving paths against two different directories — set it in your shell instead"
+    },
+    {
+      "code": "cc_env.invalid_enum_value",
+      "owner": "core",
+      "params": [
+        "name",
+        "value",
+        "allowed"
+      ],
+      "message": "DISABLE_TELEMETRY accepts 0 or 1, not `yes`"
+    },
+    {
+      "code": "cc_env.invalid_number",
+      "owner": "core",
+      "params": [
+        "name",
+        "value"
+      ],
+      "message": "MAX_THINKING_TOKENS takes a whole number, not `12x`"
+    },
+    {
+      "code": "cc_env.not_set",
+      "owner": "core",
+      "params": [
+        "name"
+      ],
+      "message": "MAX_THINKING_TOKENS is not currently set, so there is nothing to clear"
+    },
+    {
+      "code": "cc_env.contended",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "/Users/me/.claude/settings.json is being written by something else; try again"
+    },
+    {
+      "code": "cc_env.malformed_spec",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "the embedded Claude Code env-var spec is unusable: duplicate variable name"
+    },
+    {
+      "code": "cc_retention.write",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "write CC settings"
+    },
+    {
+      "code": "cc_retention.non_positive",
+      "owner": "core",
+      "params": [
+        "days"
+      ],
+      "message": "cleanupPeriodDays must be positive; got 0. Use disable_persistence() to set 0."
+    },
+    {
+      "code": "cc_tips.binary_not_found",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "CC binary not found: tried `/usr/local/bin/claude`"
+    },
+    {
+      "code": "cc_tips.binary_read",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "failed to read CC binary at `/usr/local/bin/claude`: permission denied"
+    },
+    {
+      "code": "cc_tips.config_read",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "failed to read CC global config at `/Users/me/.claude.json`: permission denied"
+    },
+    {
+      "code": "cc_tips.config_parse",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "failed to parse CC global config at `/Users/me/.claude.json`: expected value at line 1 column 1"
+    },
+    {
+      "code": "cc_tips.snapshot_read",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "failed to read snapshot log at `/Users/me/.claudepot/tips.json`: permission denied"
+    },
+    {
+      "code": "cc_tips.snapshot_write",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "failed to write snapshot log at `/Users/me/.claudepot/tips.json`: permission denied"
+    },
+    {
+      "code": "cc_tips.catalog_io",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "catalog cache I/O at `/Users/me/.claudepot/tips-cache.json`: permission denied"
+    },
+    {
+      "code": "cc_tips.catalog_parse",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "catalog cache parse error: expected value at line 1 column 1"
+    },
+    {
+      "code": "cc_tips.no_home",
+      "owner": "core",
+      "params": [],
+      "message": "HOME directory not resolvable"
+    },
+    {
+      "code": "config_view.io",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "read /Users/me/.claude/settings.json: permission denied"
+    },
+    {
+      "code": "config_view.parse",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "parse /Users/me/.claude/settings.json: expected value at line 1 column 1"
+    },
+    {
+      "code": "config_view.bad_query",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "bad search query: regex parse error"
+    },
+    {
+      "code": "config_view.manifest_not_found",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "no plugin manifest in /Users/me/.claude/plugins/demo (looked for plugin.json / .claude-plugin/plugin.json)"
+    },
+    {
+      "code": "config_launcher.spawn",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "spawn failed: no such file or directory"
+    },
+    {
+      "code": "config_launcher.no_env_editor",
+      "owner": "core",
+      "params": [],
+      "message": "$EDITOR is not set"
+    },
+    {
+      "code": "config_launcher.no_binary",
+      "owner": "core",
+      "params": [],
+      "message": "editor binary path missing"
+    },
+    {
+      "code": "config_launcher.empty_path",
+      "owner": "core",
+      "params": [],
+      "message": "path is empty"
+    },
+    {
+      "code": "config_launcher.unknown_editor",
+      "owner": "core",
+      "params": [
+        "editor_id"
+      ],
+      "message": "editor not found by id: nano9000"
+    },
+    {
+      "code": "launcher.no_stored_credentials",
+      "owner": "core",
+      "params": [
+        "uuid"
+      ],
+      "message": "no stored credentials for account 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "launcher.corrupt_blob",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "corrupt credential blob: missing field `accessToken`"
+    },
+    {
+      "code": "launcher.credential_read",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "failed to read Claude Code credentials: keychain is locked"
+    },
+    {
+      "code": "launcher.refresh_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "token refresh failed: token endpoint rejected refresh_token with 401"
+    },
+    {
+      "code": "launcher.save_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "failed to save refreshed credentials: keychain is locked"
+    },
+    {
+      "code": "launcher.no_command",
+      "owner": "core",
+      "params": [],
+      "message": "no command specified"
+    },
+    {
+      "code": "launcher.spawn_failed",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "spawn failed: no such file or directory"
+    },
+    {
+      "code": "protected_paths.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io: permission denied"
+    },
+    {
+      "code": "protected_paths.invalid_json",
+      "owner": "core",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "invalid JSON in /Users/me/.claudepot/protected-paths.json: expected value at line 1 column 1"
+    },
+    {
+      "code": "protected_paths.empty",
+      "owner": "core",
+      "params": [],
+      "message": "path is empty"
+    },
+    {
+      "code": "protected_paths.not_absolute",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "path must be absolute or start with '~' (got 'relative/dir')"
+    },
+    {
+      "code": "protected_paths.duplicate",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "path is already protected: '/Users/me/proj'"
+    },
+    {
+      "code": "protected_paths.not_found",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "no such protected path: '/Users/me/proj'"
+    },
+    {
+      "code": "available_models.empty_entry",
+      "owner": "core",
+      "params": [
+        "index"
+      ],
+      "message": "entry 2 is empty"
+    },
+    {
+      "code": "available_models.contains_whitespace",
+      "owner": "core",
+      "params": [
+        "index",
+        "entry"
+      ],
+      "message": "entry 1 contains whitespace: \"claude opus 4\""
+    },
+    {
+      "code": "permission_grants.unsupported_schema_version",
+      "owner": "core",
+      "params": [
+        "found",
+        "expected"
+      ],
+      "message": "schema version 9 is unsupported (expected 1)"
+    },
+    {
+      "code": "permission_grants.empty_project_path",
+      "owner": "core",
+      "params": [],
+      "message": "grant project_path must not be empty"
+    },
+    {
+      "code": "permission_grants.non_positive_duration",
+      "owner": "core",
+      "params": [
+        "project_path"
+      ],
+      "message": "grant for `/Users/me/proj` has expires_at <= granted_at"
+    },
+    {
+      "code": "permission_grants.duplicate_project",
+      "owner": "core",
+      "params": [
+        "project_path"
+      ],
+      "message": "more than one grant targets project `/Users/me/proj`"
+    },
+    {
+      "code": "permission_grants.project_layer_not_allowed",
+      "owner": "core",
+      "params": [
+        "project_path"
+      ],
+      "message": "write to the committed Project settings layer is not allowed for grant `/Users/me/proj`"
+    },
+    {
+      "code": "permission_settings.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io: permission denied"
+    },
+    {
+      "code": "permission_settings.json_parse",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "json parse: expected value at line 1 column 1"
+    },
+    {
+      "code": "permission_settings.not_a_json_object",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "settings file is not a JSON object at /Users/me/proj/.claude/settings.local.json"
+    },
+    {
+      "code": "permission_settings.permissions_not_an_object",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "`permissions` is present but not a JSON object at /Users/me/proj/.claude/settings.local.json"
+    },
+    {
+      "code": "permission_settings.unsupported_layer",
+      "owner": "core",
+      "params": [
+        "layer"
+      ],
+      "message": "write to Project is not supported (commit-bound or admin-managed)"
+    },
+    {
+      "code": "permission_settings.contended",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "/Users/me/proj/.claude/settings.local.json is being written by something else; try again"
+    },
+    {
+      "code": "permission_store.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io error: permission denied"
+    },
+    {
+      "code": "permission_store.serde",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "serde error: expected value at line 1 column 1"
+    },
+    {
+      "code": "permission_store.validation",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "validation: grant project_path must not be empty"
+    },
+    {
+      "code": "rotation_rules.empty_id",
+      "owner": "core",
+      "params": [],
+      "message": "rule id must not be empty"
+    },
+    {
+      "code": "rotation_rules.duplicate_id",
+      "owner": "core",
+      "params": [
+        "rule_id"
+      ],
+      "message": "rule id `nightly` appears more than once"
+    },
+    {
+      "code": "rotation_rules.bad_threshold",
+      "owner": "core",
+      "params": [
+        "pct"
+      ],
+      "message": "threshold pct must be in 1..=100, got 120"
+    },
+    {
+      "code": "rotation_rules.empty_candidates",
+      "owner": "core",
+      "params": [],
+      "message": "candidate list must not be empty"
+    },
+    {
+      "code": "rotation_rules.duplicate_candidate",
+      "owner": "core",
+      "params": [
+        "email"
+      ],
+      "message": "candidate email `me@example.com` appears more than once"
+    },
+    {
+      "code": "rotation_rules.empty_explicit_email",
+      "owner": "core",
+      "params": [],
+      "message": "explicit selector email must not be empty"
+    },
+    {
+      "code": "rotation_rules.zero_max_swaps",
+      "owner": "core",
+      "params": [],
+      "message": "max_swaps_per_window must be >= 1, got 0"
+    },
+    {
+      "code": "rotation_rules.least_used_window_mismatch",
+      "owner": "core",
+      "params": [
+        "selector",
+        "trigger"
+      ],
+      "message": "least_used selector window must equal the trigger window (selector `seven_day`, trigger `five_hour`)"
+    },
+    {
+      "code": "rotation_rules.unsupported_schema_version",
+      "owner": "core",
+      "params": [
+        "found",
+        "expected"
+      ],
+      "message": "schema version 9 is unsupported (expected 1)"
+    },
+    {
+      "code": "rotation_store.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io error: permission denied"
+    },
+    {
+      "code": "rotation_store.serde",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "serde error: expected value at line 1 column 1"
+    },
+    {
+      "code": "rotation_store.validation",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "validation: rule id must not be empty"
+    },
+    {
+      "code": "rotation_breaker.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io error: permission denied"
+    },
+    {
+      "code": "rotation_breaker.serde",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "serde error: expected value at line 1 column 1"
+    },
+    {
+      "code": "rotation_breaker.unsupported_schema_version",
+      "owner": "core",
+      "params": [
+        "found",
+        "expected"
+      ],
+      "message": "schema version 9 is unsupported (expected 1)"
+    },
+    {
+      "code": "pricing_history.unsupported_schema_version",
+      "owner": "core",
+      "params": [
+        "found",
+        "expected"
+      ],
+      "message": "unsupported schema_version 9 (this build understands 1)"
+    },
+    {
+      "code": "pricing_history.bad_date",
+      "owner": "core",
+      "params": [
+        "index"
+      ],
+      "message": "observation 3 has an out-of-range date"
+    },
+    {
+      "code": "pricing_history.empty_model_id",
+      "owner": "core",
+      "params": [
+        "index"
+      ],
+      "message": "observation 3 has an empty model_id"
+    },
+    {
+      "code": "pricing_history.negative_rate",
+      "owner": "core",
+      "params": [
+        "index"
+      ],
+      "message": "observation 3 has a negative rate"
+    },
+    {
+      "code": "pricing_history_store.io",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "io error: permission denied"
+    },
+    {
+      "code": "pricing_history_store.validation",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "validation: observation 3 has a negative rate"
+    },
+    {
+      "code": "artifact_lifecycle.source_missing",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "source missing: /Users/me/.claude/skills/demo"
+    },
+    {
+      "code": "artifact_lifecycle.conflict",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "destination already exists: /Users/me/.claude/skills/demo"
+    },
+    {
+      "code": "artifact_lifecycle.scope_root_missing",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "scope root missing: /Users/me/proj"
+    },
+    {
+      "code": "artifact_lifecycle.wrong_trash_state",
+      "owner": "core",
+      "params": [
+        "state",
+        "action"
+      ],
+      "message": "trash entry state \"MissingManifest\" cannot restore"
+    },
+    {
+      "code": "artifact_lifecycle.trash_entry_not_found",
+      "owner": "core",
+      "params": [
+        "trash_id"
+      ],
+      "message": "trash entry not found: 6f9a1c2e-0000-4000-8000-000000000000"
+    },
+    {
+      "code": "artifact_lifecycle.io",
+      "owner": "core",
+      "params": [
+        "op",
+        "detail"
+      ],
+      "message": "disable failed: permission denied"
+    },
+    {
+      "code": "artifact_lifecycle.manifest_parse",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "manifest parse failed: expected value at line 1 column 1"
+    },
+    {
+      "code": "artifact_lifecycle.recovery_ambiguous",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "recovery ambiguous: orphan payload has multiple children"
+    },
+    {
+      "code": "artifact_lifecycle.invalid_trash_id",
+      "owner": "core",
+      "params": [
+        "trash_id"
+      ],
+      "message": "invalid trash id: ../../etc"
+    },
+    {
+      "code": "artifact_refused.plugin",
+      "owner": "core",
+      "params": [
+        "plugin_id",
+        "path"
+      ],
+      "message": "plugin-owned (cc-suite) — manage from the plugin manager"
+    },
+    {
+      "code": "artifact_refused.managed_policy",
+      "owner": "core",
+      "params": [
+        "root",
+        "path"
+      ],
+      "message": "managed by your organization's policy — read-only in Claudepot"
+    },
+    {
+      "code": "artifact_refused.out_of_scope",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "outside Claudepot's managed scope (/tmp/elsewhere)"
+    },
+    {
+      "code": "artifact_refused.symlink_loop",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "symlink loop at /Users/me/.claude/skills/demo"
+    },
+    {
+      "code": "artifact_refused.wrong_kind",
+      "owner": "core",
+      "params": [
+        "path"
+      ],
+      "message": "not a Skill, Agent, or Slash command (/Users/me/.claude/notes.md)"
+    },
+    {
+      "code": "permission.duration_out_of_range",
+      "owner": "command",
+      "params": [
+        "min",
+        "max",
+        "got"
+      ],
+      "message": "duration must be 60..=86400 seconds, got 5"
+    },
+    {
+      "code": "permission.unknown_mode",
+      "owner": "command",
+      "params": [
+        "mode"
+      ],
+      "message": "`yolo` is not a permission mode Claudepot can grant"
+    },
+    {
+      "code": "permission.no_active_grant",
+      "owner": "command",
+      "params": [
+        "project_path"
+      ],
+      "message": "no active grant for /Users/me/proj"
+    },
+    {
+      "code": "permission.invalid_project_path",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "project path must be absolute: relative/dir"
+    },
+    {
+      "code": "permission.read_settings_for_project_failed",
+      "owner": "command",
+      "params": [
+        "project_path",
+        "detail"
+      ],
+      "message": "read permission settings for /Users/me/proj: io: permission denied"
+    },
+    {
+      "code": "rotation.bad_rule_dto",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "unknown rotation mode: yolo"
+    },
+    {
+      "code": "rotation.apply_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "swap failed: keychain is locked"
+    },
+    {
+      "code": "rotation.snapshot_parse_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "snapshot parse failed: expected value at line 1 column 1"
+    },
+    {
+      "code": "artifact.unknown_on_conflict",
+      "owner": "command",
+      "params": [
+        "value"
+      ],
+      "message": "unknown on_conflict value: clobber"
+    },
+    {
+      "code": "artifact.unknown_kind",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "unknown artifact kind: widget"
+    },
+    {
+      "code": "artifact.invalid_relative_path",
+      "owner": "command",
+      "params": [
+        "relative_path",
+        "detail"
+      ],
+      "message": "relative_path must not contain `..`: ../etc/passwd"
+    },
+    {
+      "code": "artifact.scope_root_not_active",
+      "owner": "command",
+      "params": [
+        "scope_root"
+      ],
+      "message": "scope_root not in active roots: /tmp/elsewhere"
+    },
+    {
+      "code": "artifact.not_disabled",
+      "owner": "command",
+      "params": [
+        "path"
+      ],
+      "message": "not a disabled artifact: /Users/me/.claude/skills/demo"
+    },
+    {
+      "code": "artifact.preview_open_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "read open failed: no such file or directory"
+    },
+    {
+      "code": "artifact.preview_read_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "read failed: input/output error"
+    },
+    {
+      "code": "config.node_not_found",
+      "owner": "command",
+      "params": [
+        "node_id"
+      ],
+      "message": "node not found: user:settings.json"
+    },
+    {
+      "code": "config.tree_not_scanned",
+      "owner": "command",
+      "params": [],
+      "message": "tree not scanned yet"
+    },
+    {
+      "code": "config.preview_open_failed",
+      "owner": "command",
+      "params": [
+        "path",
+        "detail"
+      ],
+      "message": "open /Users/me/.claude/settings.json: permission denied"
+    },
+    {
+      "code": "config.preview_stat_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "stat: permission denied"
+    },
+    {
+      "code": "config.editor_id_empty",
+      "owner": "command",
+      "params": [],
+      "message": "editor_id is empty"
+    },
+    {
+      "code": "config.unknown_kind",
+      "owner": "command",
+      "params": [
+        "kind"
+      ],
+      "message": "unknown kind: widget"
+    },
+    {
+      "code": "config.path_empty",
+      "owner": "command",
+      "params": [],
+      "message": "path is empty"
+    },
+    {
+      "code": "config.editor_not_detected",
+      "owner": "command",
+      "params": [
+        "editor_id"
+      ],
+      "message": "editor not detected: nano9000"
+    },
+    {
+      "code": "config.no_editor_available",
+      "owner": "command",
+      "params": [],
+      "message": "no editor available"
+    },
+    {
+      "code": "config.search_id_empty",
+      "owner": "command",
+      "params": [],
+      "message": "search_id is empty"
+    },
+    {
+      "code": "config.search_registry_lock_poisoned",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "reg lock: poisoned lock: another task failed inside"
+    },
+    {
+      "code": "config.no_anchor_effective_settings",
+      "owner": "command",
+      "params": [],
+      "message": "no project anchored — effective settings needs a cwd"
+    },
+    {
+      "code": "config.no_anchor_effective_mcp",
+      "owner": "command",
+      "params": [],
+      "message": "no project anchored — effective MCP needs a cwd"
+    },
+    {
+      "code": "permission.grants_load_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "permission denied"
+    },
+    {
+      "code": "rotation.rules_load_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "permission denied"
+    }
+  ]
+}

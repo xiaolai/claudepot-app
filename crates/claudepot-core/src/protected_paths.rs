@@ -108,6 +108,37 @@ pub enum ProtectedPathsError {
     NotFound(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for ProtectedPathsError {
+    fn code(&self) -> &'static str {
+        match self {
+            ProtectedPathsError::Io(_) => "protected_paths.io",
+            ProtectedPathsError::InvalidJson { .. } => "protected_paths.invalid_json",
+            ProtectedPathsError::Empty => "protected_paths.empty",
+            ProtectedPathsError::NotAbsolute(_) => "protected_paths.not_absolute",
+            ProtectedPathsError::Duplicate(_) => "protected_paths.duplicate",
+            ProtectedPathsError::NotFound(_) => "protected_paths.not_found",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ProtectedPathsError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            ProtectedPathsError::InvalidJson { path, err } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": err.to_string(),
+            }),
+            ProtectedPathsError::Empty => serde_json::json!({}),
+            // The user-supplied path, verbatim — the three sentences
+            // that name it all need it to point at the offending row.
+            ProtectedPathsError::NotAbsolute(path)
+            | ProtectedPathsError::Duplicate(path)
+            | ProtectedPathsError::NotFound(path) => serde_json::json!({ "path": path }),
+        }
+    }
+}
+
 /// Path of the persisted store file under `data_dir`.
 pub fn store_path(data_dir: &Path) -> PathBuf {
     data_dir.join(STORE_FILENAME)

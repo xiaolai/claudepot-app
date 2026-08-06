@@ -12,6 +12,7 @@
 //! in-app refresh.
 
 use crate::dto::AccountSummary;
+use crate::i18n::{tr, tr_n};
 use crate::tray_icons::{
     icon_item, ICON_BADGE_CHECK, ICON_HOME, ICON_LAYERS, ICON_POWER, ICON_REFRESH, ICON_SHIELD,
     ICON_SLIDERS, ICON_USER_PLUS, ID_ACTIVITIES, ID_ADD, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR,
@@ -206,38 +207,39 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     // bitmaps on any platform (muda never calls setTemplate:YES).
     let sep1 = PredefinedMenuItem::separator(app).map_err(|e| format!("sep1: {e}"))?;
 
-    let add_item = icon_item(app, ID_ADD, "Add account from browser…", &ICON_USER_PLUS)?;
-    let sync_item = icon_item(app, ID_SYNC, "Sync from current CC", &ICON_REFRESH)?;
+    let add_item = icon_item(app, ID_ADD, &tr("tray.addAccount"), &ICON_USER_PLUS)?;
+    // Shared catalog keys with the app menu — same verb, same label.
+    let sync_item = icon_item(app, ID_SYNC, &tr("menu.syncFromCc"), &ICON_REFRESH)?;
     // `Verify all` is the natural quick-maintenance action after the
     // user comes back from a break — credential health goes stale on
     // its own schedule. The handler reuses the existing `app-menu:
     // account:verify-all` listener in App.tsx (no new IPC needed).
-    let verify_item = icon_item(app, ID_VERIFY_ALL, "Verify all", &ICON_BADGE_CHECK)?;
+    let verify_item = icon_item(app, ID_VERIFY_ALL, &tr("menu.verifyAll"), &ICON_BADGE_CHECK)?;
 
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| format!("sep2: {e}"))?;
 
-    let show_item = icon_item(app, ID_SHOW, "Show Claudepot", &ICON_HOME)?;
+    let show_item = icon_item(app, ID_SHOW, &tr("tray.showClaudepot"), &ICON_HOME)?;
     // `Open Activities` is the only stable Activities entry-point
     // from the tray. The pre-existing "Active: N ▸" submenu is
     // conditional (renders only when a session is live) and only
     // covers the live time-scale; the Activities section itself is
     // the today/month dashboard. Reuses the existing
     // `app-menu:nav:events` listener in App.tsx.
-    let activities_item = icon_item(app, ID_ACTIVITIES, "Open Activities", &ICON_LAYERS)?;
+    let activities_item = icon_item(app, ID_ACTIVITIES, &tr("tray.openActivities"), &ICON_LAYERS)?;
     // Health row — reflects the last cc_doctor scrape. Label
     // depends on TrayHealthState so closed-window users still get
     // a glanceable verdict. Unknown reads as "checking…" — never
     // "healthy" until we've actually confirmed.
     let health_label = compose_health_label(app);
     let health_item = icon_item(app, ID_HEALTH, &health_label, &ICON_SHIELD)?;
-    let settings_item = icon_item(app, ID_SETTINGS, "Settings…", &ICON_SLIDERS)?;
+    let settings_item = icon_item(app, ID_SETTINGS, &tr("menu.settings"), &ICON_SLIDERS)?;
 
     // Quit carries a power glyph for column consistency with the
     // rest of the stack. macOS convention leaves system Quit items
     // bare, but here every other row is iconized and a lone
     // text-only Quit row misaligned the whole menu.
     let quit_icon = ICON_POWER.image().map_err(|e| format!("power icon: {e}"))?;
-    let quit_item = IconMenuItemBuilder::with_id(ID_QUIT, "Quit Claudepot")
+    let quit_item = IconMenuItemBuilder::with_id(ID_QUIT, tr("tray.quit"))
         .icon(quit_icon)
         .accelerator("CmdOrCtrl+Q")
         .build(app)
@@ -521,11 +523,7 @@ fn append_alert_suffix(base: String, alert_count: u32) -> String {
     if alert_count == 0 {
         base
     } else {
-        let suffix = if alert_count == 1 {
-            "1 alerting session".to_string()
-        } else {
-            format!("{alert_count} alerting sessions")
-        };
+        let suffix = tr_n("tray.alertSuffix", u64::from(alert_count));
         format!("{base}\n⚠ {suffix}")
     }
 }
@@ -540,7 +538,7 @@ fn append_alert_suffix(base: String, alert_count: u32) -> String {
 /// shapes are unit-testable without a Tauri runtime.
 fn compose_health_label(app: &AppHandle) -> String {
     let Some(state) = app.try_state::<crate::state::TrayHealthState>() else {
-        return "Health".to_string();
+        return tr("tray.health");
     };
     health_label(state.get())
 }
@@ -550,28 +548,20 @@ fn compose_health_label(app: &AppHandle) -> String {
 fn health_label(rec: crate::state::HealthRecord) -> String {
     use crate::state::HealthRecordKind;
     match rec.kind {
-        HealthRecordKind::Unknown => "Health: checking…".to_string(),
-        HealthRecordKind::Healthy => "Health: ok".to_string(),
+        HealthRecordKind::Unknown => tr("tray.healthChecking"),
+        HealthRecordKind::Healthy => tr("tray.healthOk"),
         HealthRecordKind::Warning => {
             if rec.flagged_sections == 0 {
-                "Health: warnings".to_string()
+                tr("tray.healthWarnings")
             } else {
-                format!(
-                    "Health: {} warning{}",
-                    rec.flagged_sections,
-                    if rec.flagged_sections == 1 { "" } else { "s" }
-                )
+                tr_n("tray.healthWarnCount", u64::from(rec.flagged_sections))
             }
         }
         HealthRecordKind::Error => {
             if rec.flagged_sections == 0 {
-                "Health: errors".to_string()
+                tr("tray.healthErrors")
             } else {
-                format!(
-                    "Health: {} issue{}",
-                    rec.flagged_sections,
-                    if rec.flagged_sections == 1 { "" } else { "s" }
-                )
+                tr_n("tray.healthIssueCount", u64::from(rec.flagged_sections))
             }
         }
     }
@@ -802,8 +792,15 @@ fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
                 let _ = app.emit("tray-cli-switched", payload);
             }
             Err(e) => {
-                tracing::warn!("tray cli_use failed: {e}");
-                let _ = app.emit("tray-cli-switch-failed", e);
+                // `cli_use` now rejects with an `ErrorDto`. The tray
+                // event stays a plain string: its renderer handler
+                // (`useTrayBridge`) types the payload as `string` and
+                // falls back to "unknown" for anything else. `message`
+                // is the same English `SwapError::to_string()` this
+                // emitted before the command migrated, so the banner
+                // text is byte-identical.
+                tracing::warn!("tray cli_use failed: {}", e.message);
+                let _ = app.emit("tray-cli-switch-failed", e.message);
             }
         }
     });
@@ -852,8 +849,10 @@ fn handle_desktop_switch(app: &AppHandle, uuid_str: &str) {
                 let _ = app.emit("tray-desktop-switched", ());
             }
             Err(e) => {
-                tracing::warn!("tray desktop_use failed: {e}");
-                let _ = app.emit("tray-desktop-switch-failed", e.to_string());
+                // `desktop_use` now rejects with an `ErrorDto`; the
+                // English lives in `message` (see `dto_error.rs`).
+                tracing::warn!("tray desktop_use failed: {}", e.message);
+                let _ = app.emit("tray-desktop-switch-failed", e.message);
             }
         }
     });

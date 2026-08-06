@@ -4,6 +4,7 @@
 //! GUI-only fields don't leak back into core) and register the
 //! command.
 
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::memory_health::{self, FileHealth, MemoryHealthReport};
 use serde::Serialize;
 
@@ -55,7 +56,10 @@ impl From<MemoryHealthReport> for MemoryHealthReportDto {
 /// here, in which case the GUI shows a "couldn't audit" tile rather
 /// than zeros.
 #[tauri::command]
-pub async fn memory_health_get() -> Result<MemoryHealthReportDto, String> {
-    let report = memory_health::build_report().map_err(|e| format!("memory_health: {e}"))?;
+pub async fn memory_health_get() -> Result<MemoryHealthReportDto, ErrorDto> {
+    // `build_report` returns a bare `std::io::Result`, so the identity
+    // is minted here rather than lifted from a core enum.
+    let report = memory_health::build_report()
+        .map_err(|e| ErrorDto::detail(codes::MEMORY_HEALTH_AUDIT_FAILED, e))?;
     Ok(report.into())
 }

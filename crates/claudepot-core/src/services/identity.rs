@@ -75,6 +75,41 @@ pub enum VerifyError {
     Store(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// **None of these is "verification said no".** A rejected or drifted
+/// identity is a successful call returning [`VerifyOutcome`]; this enum
+/// only fires when the verification could not be *attempted* or its
+/// result could not be persisted. A sentence that reads like a failed
+/// identity check would tell the user their account is compromised when
+/// the truth is that a row was missing or a write failed.
+///
+/// `NoBlob` is the one a user can act on directly — the slot is empty,
+/// so the account has to be re-imported before anything can verify it.
+impl crate::error_code::ErrorCode for VerifyError {
+    fn code(&self) -> &'static str {
+        match self {
+            VerifyError::AccountNotFound(_) => "account_verify.account_not_found",
+            VerifyError::NoBlob => "account_verify.no_blob",
+            VerifyError::CorruptBlob(_) => "account_verify.corrupt_blob",
+            VerifyError::Store(_) => "account_verify.store",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            VerifyError::AccountNotFound(uuid) => serde_json::json!({ "uuid": uuid.to_string() }),
+            VerifyError::NoBlob => serde_json::json!({}),
+            // The blob's own bytes never reach here: `CorruptBlob`
+            // carries serde's positional complaint, not the credential.
+            VerifyError::CorruptBlob(detail) | VerifyError::Store(detail) => {
+                serde_json::json!({ "detail": detail })
+            }
+        }
+    }
+}
+
 /// Verify the blob under `uuid` against `/api/oauth/profile` and persist
 /// the outcome on the account row. Returns the outcome so the caller can
 /// log, exit-code, or render from it.
