@@ -366,7 +366,10 @@
   --glyph-optical-nudge:   0.08em;
 
   /* ── Font stack ─────────────────────────────────────────── */
-  --font:      'JetBrainsMonoNF', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  /* SarasaMonoSC serves ONLY CJK codepoints (unicode-range gated in
+     index.html) — Latin never reaches it, so the paper-mono Latin
+     register stays pure JetBrainsMonoNF. */
+  --font:      'JetBrainsMonoNF', 'JetBrains Mono', 'SarasaMonoSC', ui-monospace, Menlo, monospace;
   --font-mono: var(--font);
 
   /* Boards (top-level section) — chart geometry.

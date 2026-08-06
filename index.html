@@ -45,11 +45,34 @@
         src: url('/fonts/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
         font-weight: 700; font-style: normal; font-display: swap;
       }
+      /* Sarasa Mono SC — CJK companion. JetBrains Mono carries no CJK
+         glyphs, so without this every Chinese string (localized UI,
+         Chinese project names, transcript text) falls through to a
+         proportional system face and breaks the mono rhythm. The
+         unicode-range gates the ~9 MB download: the file is fetched
+         only when a CJK glyph actually renders. NOT preloaded on
+         purpose — an en-only session with no CJK content never pays
+         for it. Weight ranges map Sarasa's two shipped weights onto
+         the four JBM weights (400/500 → Regular, 600/700 → Bold). */
+      @font-face {
+        font-family: 'SarasaMonoSC';
+        src: url('/fonts/SarasaMonoSC-Regular.woff2') format('woff2');
+        font-weight: 300 500; font-style: normal; font-display: swap;
+        unicode-range: U+2E80-303F, U+3040-30FF, U+31C0-9FFF,
+          U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF, U+20000-2FA1F;
+      }
+      @font-face {
+        font-family: 'SarasaMonoSC';
+        src: url('/fonts/SarasaMonoSC-Bold.woff2') format('woff2');
+        font-weight: 600 800; font-style: normal; font-display: swap;
+        unicode-range: U+2E80-303F, U+3040-30FF, U+31C0-9FFF,
+          U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF, U+20000-2FA1F;
+      }
       html, body { height: 100%; margin: 0; }
       body {
         background: oklch(99% 0.003 60);
         color: oklch(22% 0.008 60);
-        font-family: 'JetBrainsMonoNF', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        font-family: 'JetBrainsMonoNF', 'JetBrains Mono', 'SarasaMonoSC', ui-monospace, Menlo, monospace;
         font-size: 13px;
       }
       @media (prefers-color-scheme: dark) {
