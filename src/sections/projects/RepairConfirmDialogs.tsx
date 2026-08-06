@@ -76,7 +76,14 @@ export function RepairConfirmDialogs({
     <ConfirmDangerousAction
       title={t("repair.abandonConfirmTitle")}
       confirmLabel={t("repair.abandon")}
-      typeToConfirm="ABANDON"
+      // Localized, like the retention gate's phrase. The token is the
+      // one thing in this dialog the user must reproduce, so leaving it
+      // as the English literal asked a reader of a fully-Chinese dialog
+      // to type a word it never showed them. AGENTS.md's "don't
+      // localize what the user types" rule exists to keep paths and
+      // commands typeable — a confirmation token is the documented
+      // exception, because the friction only works if the word is read.
+      typeToConfirm={t("repair.abandonPhrase")}
       consequences={
         <>
           <p>

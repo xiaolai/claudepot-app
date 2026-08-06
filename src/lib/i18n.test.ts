@@ -85,3 +85,49 @@ describe("locale allowlist parity with Rust", () => {
     expect(rust).toEqual([...SUPPORTED_LOCALES].sort());
   });
 });
+
+// A type-to-confirm token is the one string in a destructive dialog the
+// user must reproduce character for character. The general rule is that
+// values a user types stay English (paths, commands, setting keys) —
+// a confirmation token is the documented exception, because the friction
+// only works if the word was read and understood. `ABANDON` was a
+// hardcoded English literal inside an otherwise fully-translated dialog,
+// so a zh reader was asked to type a word the dialog never showed them.
+describe("type-to-confirm tokens are localized", () => {
+  const GATES = [
+    { ns: "settings", key: "retention.confirmDisable.phrase" },
+    { ns: "projects", key: "repair.abandonPhrase" },
+  ] as const;
+
+  it("every gate token exists in both locales", () => {
+    for (const { ns, key } of GATES) {
+      for (const loc of ["en", "zh-CN"] as const) {
+        const v = i18n.getFixedT(loc, ns)(key);
+        expect(v, `${loc} ${ns}.${key}`).toBeTruthy();
+        expect(v, `${loc} ${ns}.${key} is a raw key`).not.toContain(key);
+      }
+    }
+  });
+
+  it("the zh token differs from the en token where the word is prose", () => {
+    // Not a blanket rule: a token may legitimately be identical across
+    // locales. But the retention phrase is a sentence and the abandon
+    // token is a verb the dialog itself translates, so both must differ
+    // — if they match, the gate is showing English inside a zh dialog.
+    for (const { ns, key } of GATES) {
+      const en = i18n.getFixedT("en", ns)(key);
+      const zh = i18n.getFixedT("zh-CN", ns)(key);
+      expect(zh, `${ns}.${key} was left untranslated`).not.toBe(en);
+    }
+  });
+
+  it("the instruction that frames the token is localized too", () => {
+    // Typing the right word is useless if the sentence asking for it is
+    // in another language.
+    const zh = i18n.getFixedT("zh-CN", "components")("modals.typeToConfirm", {
+      token: "X",
+    });
+    expect(zh).not.toContain("Type ");
+    expect(zh).toContain("确认");
+  });
+});

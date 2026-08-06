@@ -550,7 +550,8 @@
     "snapshotsNote": "快照不会自动恢复。",
     "abandonConfirmTitle": "放弃日志？",
     "abandonBody": "写入 <f/> sidecar。之后不会再提示此日志。",
-    "abandonNote": "审计痕迹会保留；日志本身仍留在磁盘上。"
+    "abandonNote": "审计痕迹会保留；日志本身仍留在磁盘上。",
+    "abandonPhrase": "放弃"
   },
   "op": {
     "statePending": "等待中",

@@ -575,7 +575,8 @@
     "snapshotsNote": "Snapshots are NOT auto-restored.",
     "abandonConfirmTitle": "Abandon journal?",
     "abandonBody": "Writes a <f/> sidecar. Future runs will no longer nag about this journal.",
-    "abandonNote": "Audit trail is preserved; the journal itself is kept on disk."
+    "abandonNote": "Audit trail is preserved; the journal itself is kept on disk.",
+    "abandonPhrase": "ABANDON"
   },
   "op": {
     "statePending": "pending",
