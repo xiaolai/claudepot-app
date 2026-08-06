@@ -292,7 +292,7 @@
     "providerManagedNote": "由宿主托管的启动方式可以覆盖这里设置的任何值。",
     "legacyGlobalWins": "<code>~/.claude.json</code> 里也设置了它，而 Claude Code 会先应用那个文件。在 settings.json 没有覆盖的情况下，真正生效的是那个值。",
     "legacyGlobalShadowed": "<code>~/.claude.json</code> 里也设置了它。在这里清除后，那个值就会浮出来生效。",
-    "noOverride": "settings.json 没有覆盖",
+    "noOverride": "settings.json 中未设置覆盖值",
     "documentedDefault": " — 文档中的默认值 {{value}}",
     "readOnly": "只读",
     "clear": "清除",
