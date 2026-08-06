@@ -3,18 +3,44 @@
 //! State lives in `crate::preferences::PreferencesState` (disk-backed
 //! JSON). Each setter takes `Option<T>` per field so the webview can
 //! flip one toggle without re-sending the others.
+//!
+//! Errors follow the `ErrorDto` shape (i18n plan §2.5, `commands/keys.rs`
+//! is the reference). Every failure here is raised at the command site —
+//! there is no core enum behind a poisoned mutex or an unsupported
+//! locale — so each one carries an `owner: "command"` code from
+//! `dto_error::codes`, with the English text unchanged in `message`.
+
+use crate::dto_error::{codes, ErrorDto};
+use serde_json::json;
+
+/// The `PreferencesState` mutex is `std::sync`, so a panic anywhere
+/// under it poisons the lock for every later reader. One spelling for
+/// the eight call sites that would otherwise each write their own.
+fn lock_poisoned(e: impl std::fmt::Display) -> ErrorDto {
+    // `detail` is the raw poison text; `message` keeps the exact English
+    // the command returned before. Matches `commands/activity.rs`'s
+    // sibling code for the same mutex.
+    ErrorDto::with_params(
+        codes::PREFERENCES_LOCK_POISONED,
+        json!({ "detail": e.to_string() }),
+        format!("preferences lock: {e}"),
+    )
+}
+
+/// `Preferences::save` returns a pre-composed English string
+/// ("preferences: mkdir …"). Carried verbatim — this layer has nothing
+/// to add to it.
+fn save_failed(m: String) -> ErrorDto {
+    ErrorDto::detail(codes::PREFERENCES_SAVE_FAILED, m)
+}
 
 /// Read the current preferences snapshot. Cheap — a clone of the
 /// mutex-guarded record.
 #[tauri::command]
 pub async fn preferences_get(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
-) -> Result<crate::preferences::Preferences, String> {
-    Ok(state
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock: {e}"))?
-        .clone())
+) -> Result<crate::preferences::Preferences, ErrorDto> {
+    Ok(state.0.lock().map_err(lock_poisoned)?.clone())
 }
 
 /// Set the complete `activity_*` preference block in one call.
@@ -30,7 +56,7 @@ pub async fn preferences_set_activity(
     consent_seen: Option<bool>,
     hide_thinking: Option<bool>,
     excluded_paths: Option<Vec<String>>,
-) -> Result<crate::preferences::Preferences, String> {
+) -> Result<crate::preferences::Preferences, ErrorDto> {
     // Update the in-memory snapshot, drop the std::sync guard, then
     // hand the JSON write off to a blocking thread so the IPC worker
     // doesn't sit on a `write_all` (audit B8 commands_preferences.rs:47).
@@ -38,10 +64,7 @@ pub async fn preferences_set_activity(
     // short, which matters because every other preferences read is
     // contending for the same mutex.
     let snapshot = {
-        let mut prefs = state
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock: {e}"))?;
+        let mut prefs = state.0.lock().map_err(lock_poisoned)?;
         if let Some(v) = enabled {
             prefs.activity_enabled = v;
         }
@@ -68,7 +91,8 @@ pub async fn preferences_set_activity(
     let to_persist = snapshot.clone();
     tokio::task::spawn_blocking(move || to_persist.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+        .map_err(ErrorDto::task_join)?
+        .map_err(save_failed)?;
     Ok(snapshot)
 }
 
@@ -91,7 +115,7 @@ pub async fn preferences_set_notifications(
     on_waiting: Option<bool>,
     on_usage_thresholds: Option<Vec<u32>>,
     on_sub_windows: Option<bool>,
-) -> Result<crate::preferences::Preferences, String> {
+) -> Result<crate::preferences::Preferences, ErrorDto> {
     // Mirror the audit-B8 pattern from `preferences_set_activity`:
     // mutate the in-memory snapshot under the std::sync guard, drop
     // the guard, then hand the disk write to a blocking task so the
@@ -99,10 +123,7 @@ pub async fn preferences_set_notifications(
     // preferences read contends for the same mutex.
     use claudepot_core::notifications::Category;
     let snapshot = {
-        let mut prefs = state
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock: {e}"))?;
+        let mut prefs = state.0.lock().map_err(lock_poisoned)?;
         // Mirror every scalar setter back into `category_prefs` via
         // `set_category_pref` so the new routing pipeline sees the
         // change immediately. Without this, the emit() facade keeps
@@ -199,8 +220,82 @@ pub async fn preferences_set_notifications(
     let to_persist = snapshot.clone();
     tokio::task::spawn_blocking(move || to_persist.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+        .map_err(ErrorDto::task_join)?
+        .map_err(save_failed)?;
     Ok(snapshot)
+}
+
+/// Persist the UI language preference. `None` = follow the OS
+/// language. The webview applies the change to its live i18next
+/// instance itself; this command applies it to the Rust-side surfaces
+/// after a successful persist — `i18n::set_locale`, a tray rebuild,
+/// and an app-menu re-install (`app.set_menu` replaces wholesale).
+///
+/// Persist-first: a failed save returns before any surface changes, so
+/// what the user sees never disagrees with what the next boot reads.
+/// Surface refresh failures after a successful persist are logged, not
+/// returned — the preference did land, and the next rebuild heals.
+///
+/// The allowlist mirrors `SUPPORTED_LOCALES` in `src/lib/i18n.ts` —
+/// two entries don't warrant a codegen bridge, but keep them in sync.
+#[tauri::command]
+pub async fn preferences_set_locale(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+    locale: Option<String>,
+) -> Result<(), ErrorDto> {
+    const SUPPORTED: [&str; 2] = ["en", "zh-CN"];
+    if let Some(l) = &locale {
+        if !SUPPORTED.contains(&l.as_str()) {
+            return Err(ErrorDto::with_params(
+                codes::PREFERENCES_UNSUPPORTED_LOCALE,
+                json!({ "locale": l }),
+                format!("unsupported locale: {l}"),
+            ));
+        }
+    }
+    // Persist-first, literally: build the candidate from a *copy* and
+    // leave shared state untouched until the write lands. Mutating
+    // in-memory first and saving after would leave a failed save with
+    // an unpersisted locale live in the process — `preferences_get`
+    // would report it, and the next unrelated `save()` of that same
+    // struct would commit it silently. Cloning a preferences record is
+    // cheap; that failure mode is not.
+    let candidate = {
+        let p = state.0.lock().map_err(lock_poisoned)?;
+        let mut next = p.clone();
+        next.locale = locale.clone();
+        next
+    };
+    let to_persist = candidate.clone();
+    tokio::task::spawn_blocking(move || to_persist.save())
+        .await
+        .map_err(ErrorDto::task_join)?
+        .map_err(save_failed)?;
+    // On disk — now adopt it in memory.
+    {
+        let mut p = state.0.lock().map_err(lock_poisoned)?;
+        p.locale = locale.clone();
+    }
+
+    // Persisted — now flip the Rust-side catalog and rebuild both
+    // native surfaces so they re-resolve every label.
+    crate::i18n::set_locale(locale.as_deref());
+    if let Err(e) = crate::tray::rebuild(&app).await {
+        tracing::warn!("tray rebuild after locale change failed: {e}");
+    }
+    // Menu building mutates AppKit state; route through the main
+    // thread like `tray::rebuild`'s apply step (setup() installs from
+    // the main thread already).
+    let app_for_menu = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || {
+        if let Err(e) = crate::app_menu::install(&app_for_menu) {
+            tracing::warn!("app menu re-install after locale change failed: {e}");
+        }
+    }) {
+        tracing::warn!("app menu re-install dispatch failed: {e}");
+    }
+    Ok(())
 }
 
 /// Persist the "show main window on startup" toggle. Pure persistence
@@ -212,23 +307,21 @@ pub async fn preferences_set_notifications(
 pub async fn preferences_set_show_window_on_startup(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
     show: bool,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     // Audit-fix Medium #13: snapshot under the lock, drop the
     // guard, then persist on a blocking thread so the std::sync
     // mutex isn't held across the disk write. Matches the pattern
     // used by `preferences_set_activity` /
     // `preferences_set_notifications` etc.
     let snapshot = {
-        let mut p = state
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock: {e}"))?;
+        let mut p = state.0.lock().map_err(lock_poisoned)?;
         p.show_window_on_startup = show;
         p.clone()
     };
     tokio::task::spawn_blocking(move || snapshot.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))?
+        .map_err(ErrorDto::task_join)?
+        .map_err(save_failed)
 }
 
 /// Set fields on the `service_status` preference block. Same
@@ -243,12 +336,9 @@ pub async fn preferences_set_service_status(
     poll_interval_minutes: Option<u32>,
     os_notify_on_status_change: Option<bool>,
     probe_latency_on_focus: Option<bool>,
-) -> Result<crate::preferences::Preferences, String> {
+) -> Result<crate::preferences::Preferences, ErrorDto> {
     let snapshot = {
-        let mut prefs = state
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock: {e}"))?;
+        let mut prefs = state.0.lock().map_err(lock_poisoned)?;
         if let Some(v) = poll_status_page {
             prefs.service_status.poll_status_page = v;
         }
@@ -279,7 +369,8 @@ pub async fn preferences_set_service_status(
     let to_persist = snapshot.clone();
     tokio::task::spawn_blocking(move || to_persist.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+        .map_err(ErrorDto::task_join)?
+        .map_err(save_failed)?;
     Ok(snapshot)
 }
 
@@ -295,12 +386,9 @@ pub async fn preferences_category_prefs_get(
         claudepot_core::notifications::Category,
         crate::preferences::CategoryPrefs,
     >,
-    String,
+    ErrorDto,
 > {
-    let p = state
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock: {e}"))?;
+    let p = state.0.lock().map_err(lock_poisoned)?;
     let mut out = p.category_prefs.clone();
     // Backfill missing categories with their per-category defaults
     // (reads `display_meta().default_enabled`). Plain
@@ -322,23 +410,21 @@ pub async fn preferences_category_pref_set(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
     category: claudepot_core::notifications::Category,
     prefs: crate::preferences::CategoryPrefs,
-) -> Result<crate::preferences::CategoryPrefs, String> {
+) -> Result<crate::preferences::CategoryPrefs, ErrorDto> {
     // Audit-fix Medium #13: snapshot under the lock, drop, persist
     // on a blocking task. The std::sync mutex MUST NOT be held
     // across the disk write — every other preferences reader
     // contends on the same lock.
     let (snapshot, refreshed) = {
-        let mut p = state
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock: {e}"))?;
+        let mut p = state.0.lock().map_err(lock_poisoned)?;
         p.set_category_pref(category, prefs);
         let refreshed = p.category_pref(category);
         (p.clone(), refreshed)
     };
     tokio::task::spawn_blocking(move || snapshot.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+        .map_err(ErrorDto::task_join)?
+        .map_err(save_failed)?;
     Ok(refreshed)
 }
 
@@ -350,7 +436,7 @@ pub async fn preferences_set_hide_dock_icon(
     #[allow(unused_variables)] app: tauri::AppHandle,
     state: tauri::State<'_, crate::preferences::PreferencesState>,
     hide: bool,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     #[cfg(target_os = "macos")]
     {
         let policy = if hide {
@@ -358,19 +444,22 @@ pub async fn preferences_set_hide_dock_icon(
         } else {
             tauri::ActivationPolicy::Regular
         };
-        app.set_activation_policy(policy)
-            .map_err(|e| format!("set_activation_policy: {e}"))?;
+        app.set_activation_policy(policy).map_err(|e| {
+            ErrorDto::with_params(
+                codes::PREFERENCES_SET_ACTIVATION_POLICY_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("set_activation_policy: {e}"),
+            )
+        })?;
     }
     let snapshot = {
-        let mut p = state
-            .0
-            .lock()
-            .map_err(|e| format!("preferences lock: {e}"))?;
+        let mut p = state.0.lock().map_err(lock_poisoned)?;
         p.hide_dock_icon = hide;
         p.clone()
     };
     // Audit-fix Medium #13: persist off the std::sync mutex.
     tokio::task::spawn_blocking(move || snapshot.save())
         .await
-        .map_err(|e| format!("blocking task failed: {e}"))?
+        .map_err(ErrorDto::task_join)?
+        .map_err(save_failed)
 }

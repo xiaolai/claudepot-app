@@ -109,6 +109,15 @@ pub const PREFS_SCHEMA_VERSION_CURRENT: u32 = 1;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    /// UI language preference (BCP-47: "en", "zh-CN"). `None` =
+    /// follow the OS language. The webview reads it at boot via
+    /// `preferences_get` and resolves it in `src/lib/i18n.ts`; the
+    /// Rust surfaces (tray, app menu, OS banners — i18n plan P4)
+    /// read the same field. Never write a *resolved* value back
+    /// here: "follow system" must stay `None` so an OS-language
+    /// change keeps taking effect.
+    pub locale: Option<String>,
+
     /// macOS-only. When true, the app runs as an accessory: no dock
     /// icon, no Cmd+Tab entry, no application menu bar. Tray-only.
     pub hide_dock_icon: bool,
@@ -316,6 +325,7 @@ fn default_usage_thresholds() -> Vec<u32> {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            locale: None,
             hide_dock_icon: false,
             show_window_on_startup: default_true(),
             activity_enabled: false,
