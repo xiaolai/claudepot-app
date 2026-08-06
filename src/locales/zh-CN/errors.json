@@ -54,6 +54,7 @@
     "no_home_dir": "无法定位主目录。",
     "not_found": "该 Agent 已不存在。",
     "not_managed": "{{path}} 并非由 Claudepot 写入，不会被覆盖。",
+    "route_not_found": "该代理所使用的供应商已不存在。请为代理重新指定一个供应商，或重新创建原来的供应商。",
     "unsupported_platform": "当前平台不支持：{{operation}}"
   },
   "agent_events": {
@@ -454,8 +455,7 @@
     "auth_login_failed": "浏览器登录失败（退出码 {{exit_code}}）。",
     "cli_binary_not_found": "在 {{path}} 找不到 claude CLI。",
     "import_failed": "登录已完成，但没有可导入的凭据。",
-    "io": "文件系统出错：{{detail}}",
-    "swap": "{{detail}}"
+    "io": "文件系统出错：{{detail}}"
   },
   "permission": {
     "duration_out_of_range": "请选择 {{min}} 到 {{max}} 秒之间的时长。",
@@ -583,8 +583,8 @@
   },
   "route_save": {
     "not_found": "该供应商已不存在。",
-    "secrets": "存储密钥失败：{{detail}}",
-    "store": "保存供应商失败：{{detail}}"
+    "secrets": "存储密钥失败：{{cause}}",
+    "store": "保存供应商失败：{{cause}}"
   },
   "routes": {
     "bedrock_auth_required": "Bedrock 需要 bearer token、AWS profile，或勾选“跳过 AWS 认证”。",
@@ -593,13 +593,12 @@
     "desktop_not_supported": "当前平台不支持 Claude Desktop。",
     "duplicate_name": "已存在名为“{{name}}”的供应商。",
     "duplicate_wrapper_name": "另一个供应商已使用命令“{{wrapper}}”。",
-    "edit_store_failed": "保存失败：{{detail}} 之前保存的供应商仍在生效；若其失效，请重新输入密钥并再次保存。",
+    "edit_store_failed": "保存供应商失败：{{cause}} 先前保存的线路仍在生效；如果重试后仍不可用，请重新输入密钥并保存。",
     "foundry_config_missing": "缺少 Foundry 配置。",
     "foundry_target_ambiguous": "Foundry 的基础 URL 与资源名只能二选一。",
     "foundry_target_required": "Foundry 需要填写基础 URL 或资源名之一。",
     "gateway_config_missing": "缺少 Gateway 配置。",
     "gone_after_persist": "供应商已保存但无法读回，请重新载入列表。",
-    "invalid_base_url": "该基础 URL 不可用：{{reason}}",
     "invalid_bedrock_base_url": "Bedrock 基础 URL 不可用：{{detail}}",
     "invalid_foundry_base_url": "Foundry 基础 URL 不可用：{{detail}}",
     "invalid_gateway_base_url": "Gateway 基础 URL 不可用：{{detail}}",

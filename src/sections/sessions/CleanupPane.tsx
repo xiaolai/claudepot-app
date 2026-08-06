@@ -33,7 +33,7 @@ export function CleanupPane({
    *  subsection (the existing prune/slim flows surface errors
    *  inline). Optional so callers that don't need Rebuild still
    *  compile. */
-  setToast?: (msg: string) => void;
+  setToast?: (msg: string, kind?: "info" | "error") => void;
 }) {
   const { t } = useTranslation("sessions");
   const [olderThanDays, setOlderThanDays] = useState<string>("");

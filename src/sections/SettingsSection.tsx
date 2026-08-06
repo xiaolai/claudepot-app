@@ -356,7 +356,16 @@ function GeneralPane({
       setStartSection(v);
       try {
         localStorage.setItem("claudepot.startSection", v);
-        pushToast("info", ts("general.openOnLaunchToast", { value: v }));
+        // The translated label, not the stored id: `v` is the
+        // localStorage compat value ("events", "third-party"), so
+        // interpolating it rendered `启动时打开：accounts`.
+        pushToast(
+          "info",
+          ts("general.openOnLaunchToast", {
+            value:
+              sectionOptions().find((o) => o.value === v)?.label ?? v,
+          }),
+        );
       } catch {
         // best-effort persistence
       }
@@ -1326,24 +1335,15 @@ function CleanupTabPane({
   // the sub-tab outer chrome is gone since this is just a Settings
   // sub-tab now.
   //
-  // `setToast` adapts CleanupPane's single-string signature (used
-  // primarily by the SessionIndexRebuild subsection for failure
-  // reporting) to SettingsSection's (kind, text) API. We classify
-  // by message prefix — the rebuild surface emits "rebuild failed:"
-  // / "couldn't …" on errors, plain status messages otherwise — so
-  // failures route to the error channel rather than getting lost
-  // in the info stream.
+  // `setToast` adapts CleanupPane's signature to SettingsSection's
+  // (kind, text) API. The kind is passed by the emitter, which knows
+  // it: this used to sniff the message for "failed:" / "couldn't …",
+  // which worked only while those messages were English. After string
+  // extraction a localized failure would have been classified as info
+  // and shown in the wrong channel — the same defect as the
+  // `auth rejected:` banner, one layer down.
   const setToast = useCallback(
-    (msg: string) => {
-      const lower = msg.toLowerCase();
-      const looksLikeError =
-        lower.startsWith("error") ||
-        lower.startsWith("rebuild failed") ||
-        lower.includes("failed:") ||
-        lower.startsWith("couldn't") ||
-        lower.startsWith("could not");
-      pushToast(looksLikeError ? "error" : "info", msg);
-    },
+    (msg: string, kind: "info" | "error" = "info") => pushToast(kind, msg),
     [pushToast],
   );
   // Bumped when CleanupPane dispatches a prune so the TrashDrawer

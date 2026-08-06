@@ -29,7 +29,9 @@
     {
       "code": "cli_backend.no_stored_credentials",
       "owner": "core",
-      "params": ["uuid"],
+      "params": [
+        "uuid"
+      ],
       "message": "no stored credentials for account 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
@@ -41,37 +43,50 @@
     {
       "code": "cli_backend.write_failed",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "failed to write credentials: keychain item did not read back"
     },
     {
       "code": "cli_backend.keychain_error",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "keychain operation failed: keychain is locked"
     },
     {
       "code": "cli_backend.file_error",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "file operation failed: no such file or directory"
     },
     {
       "code": "cli_backend.corrupt_blob",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "corrupt credential blob: missing field accessToken"
     },
     {
       "code": "cli_backend.refresh_failed",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "token refresh failed: token endpoint returned 401"
     },
     {
       "code": "cli_backend.identity_mismatch",
       "owner": "core",
-      "params": ["stored_email", "actual_email"],
+      "params": [
+        "stored_email",
+        "actual_email"
+      ],
       "message": "identity mismatch: account a@example.com holds credentials for b@example.com. Run `claudepot account remove a@example.com` and re-add to re-seed."
     },
     {
@@ -83,7 +98,9 @@
     {
       "code": "cli_backend.identity_verification_failed",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "identity verification failed: /profile returned 503"
     },
     {
@@ -95,13 +112,17 @@
     {
       "code": "desktop_backend.no_stored_profile",
       "owner": "core",
-      "params": ["uuid"],
+      "params": [
+        "uuid"
+      ],
       "message": "no desktop profile stored for account 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
       "code": "desktop_backend.file_copy_failed",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "file copy failed: destination is read-only"
     },
     {
@@ -119,31 +140,41 @@
     {
       "code": "desktop_backend.lock",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "desktop lock: desktop operation already in progress — retry in a moment"
     },
     {
       "code": "desktop_backend.io",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "no such file or directory"
     },
     {
       "code": "desktop_key.keychain_read",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "macOS keychain lookup failed: user canceled the operation"
     },
     {
       "code": "desktop_key.dpapi_failed",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "Windows DPAPI unprotect failed: key not valid for use in specified state"
     },
     {
       "code": "desktop_key.local_state",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "Windows Local State missing or unreadable: no such file or directory"
     },
     {
@@ -155,19 +186,25 @@
     {
       "code": "desktop_crypto.bad_format",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "ciphertext format: ciphertext shorter than 3 bytes"
     },
     {
       "code": "desktop_crypto.unknown_version",
       "owner": "core",
-      "params": ["tag"],
+      "params": [
+        "tag"
+      ],
       "message": "unsupported version tag: expected v10 or v11, got [118, 57, 57]"
     },
     {
       "code": "desktop_crypto.base64",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "base64 decode failed: Invalid symbol 33, offset 2"
     },
     {
@@ -179,13 +216,17 @@
     {
       "code": "desktop_crypto.kdf",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "key derivation failed: invalid iteration count"
     },
     {
       "code": "desktop_token_cache.json",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "decrypted token cache is not valid JSON: expected value at line 1 column 2"
     },
     {
@@ -197,7 +238,9 @@
     {
       "code": "desktop_identity.data_dir_unreadable",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "Desktop data_dir missing or unreadable: permission denied"
     },
     {
@@ -215,7 +258,9 @@
     {
       "code": "desktop_identity.config_parse",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "config.json is not valid JSON: expected value at line 1 column 2"
     },
     {
@@ -227,25 +272,33 @@
     {
       "code": "desktop_identity.key",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "key retrieval failed: platform does not implement Desktop safeStorage"
     },
     {
       "code": "desktop_identity.decrypt",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "decryption failed: AES decrypt failed (corrupt ciphertext or wrong key)"
     },
     {
       "code": "desktop_identity.token_parse",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "decrypted token cache is malformed: no access token found in decrypted bundles"
     },
     {
       "code": "desktop_identity.profile_fetch",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "/profile returned error: OAuth server error: /profile returned 503"
     },
     {
@@ -257,7 +310,9 @@
     {
       "code": "desktop_lock.open",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "desktop lock file open failed: permission denied"
     },
     {
@@ -269,37 +324,51 @@
     {
       "code": "desktop_lock.timeout",
       "owner": "core",
-      "params": ["timeout_secs"],
+      "params": [
+        "timeout_secs"
+      ],
       "message": "desktop lock wait timed out after 5s"
     },
     {
       "code": "resolve.no_match",
       "owner": "core",
-      "params": ["input"],
+      "params": [
+        "input"
+      ],
       "message": "no account matching 'nobody'"
     },
     {
       "code": "resolve.ambiguous",
       "owner": "core",
-      "params": ["input", "candidates"],
+      "params": [
+        "input",
+        "candidates"
+      ],
       "message": "'x' is ambiguous: xa@example.com, xb@example.com"
     },
     {
       "code": "resolve.store_error",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "store error: no such table: accounts"
     },
     {
       "code": "onboard.cli_binary_not_found",
       "owner": "core",
-      "params": ["path"],
+      "params": [
+        "path"
+      ],
       "message": "claude CLI not found at /usr/local/bin/claude"
     },
     {
       "code": "onboard.auth_login_failed",
       "owner": "core",
-      "params": ["exit_code", "stderr_tail"],
+      "params": [
+        "exit_code",
+        "stderr_tail"
+      ],
       "message": "`claude auth login` exited with code 1"
     },
     {
@@ -311,26 +380,25 @@
     {
       "code": "onboard.import_failed",
       "owner": "core",
-      "params": ["path"],
+      "params": [
+        "path"
+      ],
       "message": "import failed: no credentials at hashed service name for /tmp/claudepot-onboard-xyz"
-    },
-    {
-      "code": "onboard.swap",
-      "owner": "core",
-      "params": ["detail"],
-      "message": "no default credentials found in CC storage"
     },
     {
       "code": "onboard.io",
       "owner": "core",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "no such file or directory"
     },
-
     {
       "code": "accounts.login_state_lock_poisoned",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "login state lock poisoned: poisoned lock: another task failed inside"
     },
     {
@@ -348,13 +416,17 @@
     {
       "code": "accounts.remove_failed",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "no stored credentials for account 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
       "code": "accounts.lookup_failed",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "no such table: accounts"
     },
     {
@@ -372,31 +444,41 @@
     {
       "code": "desktop.resolve_target_failed",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "resolve failed: no account matching 'nobody'"
     },
     {
       "code": "preferences.lock_poisoned",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "preferences lock: poisoned lock: another task failed inside"
     },
     {
       "code": "preferences.save_failed",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "preferences: mkdir /Users/me/.claudepot: permission denied"
     },
     {
       "code": "preferences.unsupported_locale",
       "owner": "command",
-      "params": ["locale"],
+      "params": [
+        "locale"
+      ],
       "message": "unsupported locale: fr"
     },
     {
       "code": "preferences.set_activation_policy_failed",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "set_activation_policy: unsupported on this platform"
     }
   ]

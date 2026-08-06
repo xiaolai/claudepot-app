@@ -11,18 +11,12 @@
 //! `useRefresh.ts` branches on `account_register.auth_rejected`. A
 //! prefix is not a protocol; a code is.
 
-use super::{active_id, open_store, resolve_target};
+use super::{active_id, open_account_store, resolve_target};
 use crate::dto::CcIdentity;
 use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::account::AccountStore;
 use claudepot_core::cli_backend;
 use claudepot_core::services;
-
-/// `accounts.db`. See `commands/account.rs`'s copy for why the shared
-/// `open_store()` is wrapped rather than converted.
-fn open_account_store() -> Result<AccountStore, ErrorDto> {
-    open_store().map_err(|m| ErrorDto::detail(codes::ACCOUNTS_STORE_OPEN_FAILED, m))
-}
 
 /// Preflight probe: is a `claude` process currently running? The GUI
 /// uses this before `cli_use` to raise a split-brain confirmation

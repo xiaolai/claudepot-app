@@ -48,6 +48,15 @@ pub enum OnboardError {
 
 /// Hand-written, wildcard-free: a new variant must be named here before
 /// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `Swap` **delegates** to the inner [`SwapError`]. Its `#[error("{0}")]`
+/// adds no words of its own, so an `onboard.swap` code would name a
+/// wrapper the user never sees, and its only honest catalog sentence was
+/// the bare `{{detail}}` — a "translation" that re-emits English. The
+/// inner error already carries a code and structured params; forwarding
+/// them is what makes the sentence translatable at all.
+///
+/// `Io` keeps its own code: `std::io::Error` has no code to forward to.
 impl crate::error_code::ErrorCode for OnboardError {
     fn code(&self) -> &'static str {
         match self {
@@ -55,7 +64,7 @@ impl crate::error_code::ErrorCode for OnboardError {
             OnboardError::AuthLoginFailed(..) => "onboard.auth_login_failed",
             OnboardError::AuthLoginCancelled => "onboard.auth_login_cancelled",
             OnboardError::ImportFailed(_) => "onboard.import_failed",
-            OnboardError::Swap(_) => "onboard.swap",
+            OnboardError::Swap(e) => e.code(),
             OnboardError::Io(_) => "onboard.io",
         }
     }
@@ -86,10 +95,11 @@ impl crate::error_code::ErrorCode for OnboardError {
             // The temp `CLAUDE_CONFIG_DIR` the import looked in, not an
             // email — see `import_credential`'s only constructor.
             OnboardError::ImportFailed(path) => serde_json::json!({ "path": path }),
-            // The message is the inner `SwapError`'s Display verbatim.
+            // Delegated above, so the inner error's own params travel
+            // with its own code — no frozen English in `detail`.
             // A caller that needs the inner identity matches on
             // `SwapError` before it is wrapped.
-            OnboardError::Swap(e) => serde_json::json!({ "detail": e.to_string() }),
+            OnboardError::Swap(e) => e.params(),
             OnboardError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
         }
     }

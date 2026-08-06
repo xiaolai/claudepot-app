@@ -85,10 +85,19 @@ for (const file of targetFiles()) {
 
   lines.forEach((line, i) => {
     const n = i + 1;
-    // A line already resolving a translation is fine.
-    if (/\bt\(|i18n\.t\(|<Trans\b|getFixedT/.test(line)) return;
     // Comments are not UI.
-    const code = line.replace(/\/\/.*$/, "");
+    let code = line.replace(/\/\/.*$/, "");
+    // Blank out translated calls rather than skipping the whole line.
+    // Skipping meant `title="Delete project">{t("x")}</...>` was waved
+    // through on the strength of the `t(` at the end — the hard-coded
+    // prop beside it is exactly what this scan is for. Removing just
+    // the resolved calls leaves the remainder scannable.
+    code = code
+      .replace(/\bi18n\.t\([^)]*\)/g, "«t»")
+      .replace(/\bgetFixedT\([^)]*\)(\([^)]*\))?/g, "«t»")
+      .replace(/\bt\([^)]*\)/g, "«t»");
+    // A <Trans> element carries its copy in the catalog by definition.
+    if (/<Trans\b/.test(code)) return;
     if (!code.trim() || /^\s*\*/.test(code)) return;
 
     // 1. User-visible string props.

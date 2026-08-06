@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../lib/i18n";
+import { errorCode, renderError } from "../lib/i18n-error";
 import type {
   AccountSummary,
   AppStatus,
@@ -40,7 +41,8 @@ export interface StatusIssue {
 export function useStatusIssues(opts: {
   ccIdentity: CcIdentity | null;
   status: AppStatus | null;
-  syncError: string | null;
+  /** Raw thrown value; rendered here so it follows the UI language. */
+  syncError: unknown;
   /**
    * Non-null when the last `sync_from_current_cc` returned
    * `auth rejected:` — CC's stored refresh_token is terminally dead
@@ -51,7 +53,7 @@ export function useStatusIssues(opts: {
    * (which predate auto-refresh) keep working without a fixture churn.
    */
   authRejectedAt?: number | null;
-  keychainIssue: string | null;
+  keychainIssue: unknown;
   accounts: AccountSummary[];
   onUnlock: () => void;
   /**
@@ -183,14 +185,20 @@ export function useStatusIssues(opts: {
           : undefined,
       });
     } else if (syncError) {
+      // Rendered here, not upstream: `useRefresh` holds the raw thrown
+      // value so this sentence is produced in whatever language is
+      // active at paint time.
+      const detail = renderError(syncError);
       // Key by the specific error payload so snoozing one sync failure
-      // doesn't suppress a later, genuinely different failure. The
-      // dismissedIssues store's 24 h expiry still applies per key.
+      // doesn't suppress a later, genuinely different failure. The key
+      // prefers the stable error code over the rendered sentence — a
+      // localized key would re-arm every snooze on a language switch.
+      const key = errorCode(syncError) ?? detail;
       issues.push({
-        id: `sync:${syncError}`,
+        id: `sync:${key}`,
         severity: "warning",
         label: i18n.t("status.syncErrorLabel"),
-        detail: syncError,
+        detail,
         dismissable: true,
       });
     }

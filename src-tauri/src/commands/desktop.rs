@@ -14,19 +14,13 @@
 //! own English in `message` — promote them to `from_core` when the
 //! services slice converts them.
 
-use super::open_store;
+use super::open_account_store;
 use crate::dto;
 use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::desktop_backend;
 use claudepot_core::services;
 use serde_json::json;
 use uuid::Uuid;
-
-/// `accounts.db`. See `commands/account.rs`'s copy for why the shared
-/// `open_store()` is wrapped rather than converted.
-fn open_account_store() -> Result<claudepot_core::account::AccountStore, ErrorDto> {
-    open_store().map_err(|m| ErrorDto::detail(codes::ACCOUNTS_STORE_OPEN_FAILED, m))
-}
 
 /// `create_platform()` returned `None`. Three call sites share one
 /// English string already; this keeps them sharing one code.

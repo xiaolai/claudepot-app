@@ -28,9 +28,6 @@ pub enum RouteError {
     #[error("invalid wrapper name '{0}': {1}")]
     InvalidWrapperName(String, String),
 
-    #[error("invalid base URL '{0}': {1}")]
-    InvalidBaseUrl(String, String),
-
     #[error("missing required field: {0}")]
     MissingField(&'static str),
 
@@ -58,7 +55,6 @@ impl ErrorCode for RouteError {
             RouteError::WrapperShadowsClaude(_) => "routes.wrapper_shadows_claude",
             RouteError::WrapperFileNotManaged(_) => "routes.wrapper_file_not_managed",
             RouteError::InvalidWrapperName(_, _) => "routes.invalid_wrapper_name",
-            RouteError::InvalidBaseUrl(_, _) => "routes.invalid_base_url",
             RouteError::MissingField(_) => "routes.missing_field",
             RouteError::NoHomeDir => "routes.no_home_dir",
             RouteError::UnsupportedPlatform(_) => "routes.unsupported_platform",
@@ -80,7 +76,6 @@ impl ErrorCode for RouteError {
             }
             // A base URL is user-entered but not a credential —
             // `url::validate_base_url` rejects embedded auth outright.
-            RouteError::InvalidBaseUrl(url, reason) => json!({ "url": url, "reason": reason }),
             RouteError::MissingField(field) => json!({ "field": field }),
             RouteError::NoHomeDir => json!({}),
             RouteError::UnsupportedPlatform(operation) => json!({ "operation": operation }),

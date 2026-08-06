@@ -166,6 +166,10 @@ export function RetentionPane({
           {risk.already_deletable > 0 && (
             <div style={{ color: "var(--danger)" }}>
               {t("retention.risk.deletable", {
+                // `count` drives i18next's plural selection and must be
+                // the raw number; `num` carries the grouped display form
+                // (`1,234`). Both are required — this key was already
+                // correct; `horizon` and `totalOnMachine` below were not.
                 count: risk.already_deletable,
                 num: formatNumber(risk.already_deletable),
               })}
@@ -174,6 +178,7 @@ export function RetentionPane({
           {risk.at_risk_within_horizon > 0 && (
             <div style={{ color: "var(--warn)" }}>
               {t("retention.risk.horizon", {
+                count: risk.at_risk_within_horizon,
                 num: formatNumber(risk.at_risk_within_horizon),
                 days: risk.horizon_days,
               })}
@@ -196,6 +201,7 @@ export function RetentionPane({
                   <>
                     {" "}
                     {t("retention.risk.totalOnMachine", {
+                      count: risk.total_transcripts,
                       num: formatNumber(risk.total_transcripts),
                     })}
                   </>

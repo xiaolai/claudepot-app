@@ -14,10 +14,19 @@
 //!   renderer's `errors.*` catalog. See `claudepot_core::error_code`.
 //! - **`params`** — the values the sentence interpolates, structured,
 //!   so a translator can re-compose rather than re-parse.
-//! - **`message`** — the English `Display` text, verbatim. Never empty.
-//!   This is what renders when a code has no catalog entry, and it is
-//!   why migrating a command needs no frontend change: the renderer's
-//!   `extractMessage` duck-types any object carrying `message`.
+//! - **`message`** — the underlying failure's English text, verbatim
+//!   from core's `Display`. Never empty. This is what renders when a
+//!   code has no catalog entry, and it is why migrating a command needs
+//!   no frontend change: the renderer's `extractMessage` duck-types any
+//!   object carrying `message`.
+//!
+//!   Precisely: `message` is the *failure*, not the whole string the
+//!   command used to return. The operation prefix a call site used to
+//!   splice on (`format!("login failed: {e}")`) is deliberately absent —
+//!   keeping it would double against the scope the UI supplies, and
+//!   `renderError(e, "Login failed")` would render "Login failed: login
+//!   failed: …". Two independent audit passes read the older wording as
+//!   a contract violation, which is why it now says which half this is.
 //!
 //! The operation prefix does **not** live here. It belongs to the
 //! caller that knows what it was attempting ("Sign in failed: …"), and
@@ -26,8 +35,9 @@
 //! Two caveats a fan-out has to respect:
 //!
 //! - **Never leave `message` empty**, and never fill it with anything
-//!   other than the English text the command used to return. It is the
-//!   whole reason a half-migrated command surface still renders.
+//!   other than the underlying failure's English text — core's
+//!   `Display`, verbatim, without the operation prefix (see above). It
+//!   is the whole reason a half-migrated command surface still renders.
 //! - **A renderer call site that does `String(e)` or `` `${e}` ``
 //!   instead of `renderError` will print `[object Object]`** once its
 //!   command migrates. Check the consumers before converting a

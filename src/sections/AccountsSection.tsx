@@ -418,7 +418,7 @@ export function AccountsSection({
                 wordBreak: "break-word",
               }}
             >
-              {loadError}
+              {renderError(loadError)}
             </pre>
           </details>
         </div>

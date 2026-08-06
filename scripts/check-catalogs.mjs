@@ -118,7 +118,21 @@ const sourceFiles = readdirSync(join(LOCALES_DIR, SOURCE_LOCALE))
 const errors = [];
 const stats = [];
 
-for (const target of locales.filter((l) => l !== SOURCE_LOCALE)) {
+// A gate that checks nothing must not report OK. With only `en/` present
+// the loop below never runs and every parity assertion is vacuous — the
+// script would print "catalogs OK" having compared zero pairs, which is
+// indistinguishable from a passing check right up until someone deletes
+// a locale directory.
+const targetLocales = locales.filter((l) => l !== SOURCE_LOCALE);
+if (targetLocales.length === 0) {
+  console.error(
+    `FAIL: ${SOURCE_LOCALE}/ is the only locale under ${LOCALES_DIR} — ` +
+      "there is nothing to check parity against",
+  );
+  process.exit(1);
+}
+
+for (const target of targetLocales) {
   const targetFiles = new Set(
     readdirSync(join(LOCALES_DIR, target)).filter((f) => f.endsWith(".json")),
   );
@@ -231,10 +245,34 @@ for (const target of locales.filter((l) => l !== SOURCE_LOCALE)) {
 // enough to catch that; it does not need to understand the module.
 // Skipped when CLAUDEPOT_LOCALES_DIR points at a fixture — a fixture
 // has catalogs but no `i18n.ts` beside it.
-if (!process.env.CLAUDEPAT_LOCALES_DIR && !process.env.CLAUDEPOT_LOCALES_DIR) {
+if (!process.env.CLAUDEPOT_LOCALES_DIR) {
   const i18nSrc = readFileSync(
     join(LOCALES_DIR, "..", "lib", "i18n.ts"),
     "utf8",
+  );
+  // `resources` is checked alongside `ns`, because they are two separate
+  // hand-written lists. A namespace in `ns` but absent from `resources`
+  // leaves i18next with the namespace declared and no catalog bundled —
+  // it renders raw keys, and checking only `ns` waved that through.
+  //
+  // Parsed PER LOCALE, not as one flat set: a first attempt collected
+  // every `foo: enFoo,`-shaped line anywhere in the file, so deleting a
+  // namespace from the `en` block still passed on the strength of the
+  // `zh-CN` block's copy of the same name.
+  const resourcesByLocale = new Map();
+  const resourcesBlock = i18nSrc.match(/\bresources:\s*\{([\s\S]*?)\n {2}\}/);
+  if (resourcesBlock) {
+    for (const m of resourcesBlock[1].matchAll(
+      /["']?([\w-]+)["']?:\s*\{([^}]*)\}/g,
+    )) {
+      resourcesByLocale.set(
+        m[1],
+        new Set([...m[2].matchAll(/([\w-]+):\s*\w+,/g)].map((x) => x[1])),
+      );
+    }
+  }
+  const resourceNames = new Set(
+    [...resourcesByLocale.values()].flatMap((s) => [...s]),
   );
   const nsBlock = i18nSrc.match(/\bns:\s*\[([\s\S]*?)\]/);
   if (!nsBlock) {
@@ -247,12 +285,39 @@ if (!process.env.CLAUDEPAT_LOCALES_DIR && !process.env.CLAUDEPOT_LOCALES_DIR) {
       [...nsBlock[1].matchAll(/["']([\w-]+)["']/g)].map((m) => m[1]),
     );
     const onDisk = new Set(sourceFiles.map((f) => f.replace(/\.json$/, "")));
+    if (resourceNames.size === 0) {
+      errors.push(
+        "src/lib/i18n.ts: could not find any `resources` entries — the " +
+          "bundled-catalog check cannot run, so it must not silently pass",
+      );
+    }
+    // Every locale on disk must HAVE a resources block. Iterating only
+    // the blocks that were found means deleting `resources["zh-CN"]`
+    // wholesale reports nothing — the per-namespace loop below simply
+    // has one fewer locale to check, which is a false negative shaped
+    // exactly like success.
+    for (const loc of locales) {
+      if (!resourcesByLocale.has(loc)) {
+        errors.push(
+          `src/lib/i18n.ts: locale "${loc}" has catalogs on disk but no ` +
+            `\`resources.${loc}\` block — i18next bundles nothing for it`,
+        );
+      }
+    }
     for (const ns of onDisk) {
       if (!registered.has(ns)) {
         errors.push(
           `src/lib/i18n.ts: catalog "${ns}" exists on disk but is not in ` +
             `the \`ns\` array — i18next will never load it`,
         );
+      }
+      for (const [loc, names] of resourcesByLocale) {
+        if (!names.has(ns)) {
+          errors.push(
+            `src/lib/i18n.ts: namespace "${ns}" has no entry under ` +
+              `\`resources.${loc}\` — i18next loads no ${loc} catalog for it`,
+          );
+        }
       }
     }
     for (const ns of registered) {

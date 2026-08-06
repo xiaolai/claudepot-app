@@ -391,13 +391,15 @@
     "risk": {
       "deletable_one": "{{num}} transcript will be deleted the next time Claude Code starts.",
       "deletable_other": "{{num}} transcripts will be deleted the next time Claude Code starts.",
-      "horizon": "{{num}} more cross the cutoff within {{days}} days.",
-      "scanIncomplete": "Part of Claude Code’s transcript folder couldn’t be read, so these counts are a floor, not a total.",
+      "horizon_one": "{{num}} more crosses the cutoff within {{days}} days.",
+      "horizon_other": "{{num}} more cross the cutoff within {{days}} days.",
       "nothing": "Nothing is scheduled for deletion.",
-      "totalOnMachine": "{{num}} transcripts on this machine.",
-      "suppressed": "Claude Code is skipping cleanup entirely because this value makes its settings file invalid. That is protecting your transcripts by accident — correct the value rather than restoring the default, which would re-arm deletion.",
       "oldest": "Oldest surviving conversation: {{date}}.",
-      "silent": "Claude Code does this silently — it never reports what it deleted."
+      "scanIncomplete": "Part of Claude Code’s transcript folder couldn’t be read, so these counts are a floor, not a total.",
+      "silent": "Claude Code does this silently — it never reports what it deleted.",
+      "suppressed": "Claude Code is skipping cleanup entirely because this value makes its settings file invalid. That is protecting your transcripts by accident — correct the value rather than restoring the default, which would re-arm deletion.",
+      "totalOnMachine_one": "{{num}} transcript on this machine.",
+      "totalOnMachine_other": "{{num}} transcripts on this machine."
     },
     "nestedNote": "Cleanup only removes the {{total}} top-level session transcripts. {{nested}} nested files (subagent runs, tool results) are never removed, so the folder keeps growing while conversations are deleted — disk usage cannot reveal this loss.",
     "keepFor": "Keep transcripts for",
@@ -447,7 +449,7 @@
     "openParseLog": "Open parse-failures log",
     "noEntries": "(no entries)",
     "noSections": "No sections parsed from the doctor output.",
-    "running": "Running <code>claude doctor</code>… (first call per minute takes 6–10\u00a0s)"
+    "running": "Running <code>claude doctor</code>… (first call per minute takes 6–10 s)"
   },
   "mcp": {
     "serverHealth": "Server health",

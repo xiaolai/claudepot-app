@@ -389,13 +389,13 @@
     "sectionTitle": "对话记录保留",
     "risk": {
       "deletable_other": "{{num}} 条对话记录将在 Claude Code 下次启动时被删除。",
-      "horizon": "另有 {{num}} 条将在 {{days}} 天内越过删除线。",
-      "scanIncomplete": "Claude Code 的对话记录文件夹有一部分无法读取，这些数字只是下限，不是总数。",
+      "horizon_other": "另有 {{num}} 条将在 {{days}} 天内越过删除线。",
       "nothing": "没有内容被排定删除。",
-      "totalOnMachine": "这台机器上共有 {{num}} 条对话记录。",
-      "suppressed": "由于这个值使设置文件无效，Claude Code 目前完全跳过清理。这是在无意中保护了你的对话记录 — 请改正这个值，而不要恢复默认值：恢复默认会重新启用删除。",
       "oldest": "现存最早的对话：{{date}}。",
-      "silent": "Claude Code 会静默执行 — 它从不报告删除了什么。"
+      "scanIncomplete": "Claude Code 的对话记录文件夹有一部分无法读取，这些数字只是下限，不是总数。",
+      "silent": "Claude Code 会静默执行 — 它从不报告删除了什么。",
+      "suppressed": "由于这个值使设置文件无效，Claude Code 目前完全跳过清理。这是在无意中保护了你的对话记录 — 请改正这个值，而不要恢复默认值：恢复默认会重新启用删除。",
+      "totalOnMachine_other": "这台机器上共有 {{num}} 条对话记录。"
     },
     "nestedNote": "清理只删除 {{total}} 个顶层会话对话记录。另有 {{nested}} 个嵌套文件（子代理运行、工具结果）永远不会被删除，所以对话在被删除的同时文件夹仍在增长 — 磁盘占用无法暴露这种丢失。",
     "keepFor": "对话记录保留时长",

@@ -85,7 +85,7 @@ pub fn resolve_binary(
         AgentBinary::FirstParty => Ok(claude_exe_name().to_string()),
         AgentBinary::Route { route_id } => {
             let wrapper_name = route_lookup(route_id)
-                .ok_or_else(|| AgentError::NotFound(format!("route {route_id}")))?;
+                .ok_or_else(|| AgentError::RouteNotFound(route_id.to_string()))?;
             let bin = claudepot_data_dir().join("bin").join(&wrapper_name);
             if !bin.exists() {
                 return Err(AgentError::InvalidPath(
@@ -267,14 +267,22 @@ mod tests {
     }
 
     #[test]
-    fn resolve_binary_route_unknown_id_returns_not_found() {
+    fn resolve_binary_route_unknown_id_returns_route_not_found() {
         let mut a = auto();
         a.binary = AgentBinary::Route {
             route_id: Uuid::new_v4(),
         };
         let lookup = |_id: &uuid::Uuid| None;
         let res = resolve_binary(&a, &lookup);
-        assert!(matches!(res, Err(AgentError::NotFound(_))));
+        // `RouteNotFound`, not `NotFound`: the agent exists, its
+        // provider does not. Riding `NotFound` meant `params.id` held
+        // `"route <uuid>"` here and a bare agent id everywhere else, so
+        // a localized "agent not found: {{id}}" read "agent not found:
+        // route 9f2c…". The remedy differs too — re-point the route.
+        assert!(matches!(res, Err(AgentError::RouteNotFound(_))));
+        if let Err(AgentError::RouteNotFound(id)) = res {
+            assert!(!id.starts_with("route "), "params.route_id is a bare uuid");
+        }
     }
 
     #[test]

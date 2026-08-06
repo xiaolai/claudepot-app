@@ -20,7 +20,7 @@
 //!   change on `RunningOpInfo` — its own slice, per
 //!   `dev-docs/i18n-error-codes-seed.md`.
 
-use super::open_store;
+use super::{open_account_store, open_store};
 use crate::dto::{AccountSummary, RegisterOutcome, RemoveOutcome, UsageEntryDto, WakeReceiptDto};
 use crate::dto_error::{codes, ErrorDto};
 use crate::ops::{
@@ -35,15 +35,6 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::Notify;
 use uuid::Uuid;
-
-/// `accounts.db`. The shared `open_store()` still returns a prefixed
-/// English string — `AccountStore`'s errors are raw `rusqlite` ones and
-/// converting them is the services slice's job — so wrap it under a
-/// stable code here. Same helper `commands/keys.rs` carries; the third
-/// copy is the signal to promote it into `commands/mod.rs`.
-fn open_account_store() -> Result<claudepot_core::account::AccountStore, ErrorDto> {
-    open_store().map_err(|m| ErrorDto::detail(codes::ACCOUNTS_STORE_OPEN_FAILED, m))
-}
 
 /// Renderer-supplied account uuid. `bad uuid: {e}` is kept verbatim as
 /// the English fallback; `params.uuid` is what a localized sentence

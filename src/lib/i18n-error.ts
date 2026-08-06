@@ -95,6 +95,34 @@ export function errorCode(e: unknown): string | null {
  * composed, so an untranslated code degrades to the exact text the user
  * saw before this phase rather than to a raw `errors:foo.bar`.
  */
+/**
+ * Resolve a nested cause into a localized clause.
+ *
+ * A wrapper error whose *phase* is the user-facing fact keeps its own
+ * code (`route_save.store` means "the previously-saved route is still
+ * active") while naming what actually failed underneath. That cause
+ * arrives as `cause_code` + `cause_params`, never as rendered English —
+ * splicing `detail` in produced half-translated sentences like
+ * "存储密钥失败：keychain write denied".
+ *
+ * Returns `null` when there is no cause or its code has no sentence, so
+ * the wrapper's own sentence can fall back rather than interpolate the
+ * literal `{{cause}}`.
+ */
+function causeClause(params: Record<string, unknown> | undefined): string | null {
+  const code = params?.cause_code;
+  if (typeof code !== "string" || !code) return null;
+  if (!i18n.exists(code, { ns: "errors" })) return null;
+  const nested =
+    params?.cause_params && typeof params.cause_params === "object"
+      ? (params.cause_params as Record<string, unknown>)
+      : {};
+  return (i18n.t as unknown as (k: string, o?: object) => string)(code, {
+    ...nested,
+    ns: "errors",
+  });
+}
+
 function catalogSentence(e: unknown): string | null {
   const coded = asCoded(e);
   if (!coded) return null;
@@ -105,12 +133,20 @@ function catalogSentence(e: unknown): string | null {
   // Rust registry rather than against the TS catalog alone.
   const key = coded.code;
   if (!i18n.exists(key, { ns: "errors" })) return null;
+  const cause = causeClause(coded.params);
+  if (cause === null && typeof coded.params?.cause_code === "string") {
+    // The wrapper names a cause the catalog cannot render. Its own
+    // sentence interpolates `{{cause}}`, so rendering it now would show
+    // the user a literal brace pair — fall back to English instead.
+    return null;
+  }
   // `params` is a flat JSON object built by Rust's `params()`; it never
   // carries a secret (locked by the `*_params_never_carry_a_token`
   // tests) and it is the only interpolation source — the English
   // `message` is never spliced into a localized sentence.
   return (i18n.t as unknown as (k: string, o?: object) => string)(key, {
     ...(coded.params ?? {}),
+    ...(cause !== null ? { cause } : {}),
     ns: "errors",
   });
 }

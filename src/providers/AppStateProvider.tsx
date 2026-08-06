@@ -55,9 +55,10 @@ interface AppStateValue {
   // round per tick.
   status: AppStatus | null;
   accounts: AccountSummary[];
-  loadError: string | null;
-  keychainIssue: string | null;
-  syncError: string | null;
+  /** Raw thrown value — render with `renderError` at paint time. */
+  loadError: unknown;
+  keychainIssue: unknown;
+  syncError: unknown;
   /**
    * Epoch-ms timestamp of the last `sync_from_current_cc` result that
    * came back with `auth rejected:` — CC's refresh_token is dead, the

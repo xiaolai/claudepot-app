@@ -18,6 +18,21 @@ pub enum AgentError {
     #[error("agent not found: {0}")]
     NotFound(String),
 
+    /// The agent's `AgentBinary::Route` points at a route that is no
+    /// longer registered. Distinct from [`NotFound`]: the agent exists,
+    /// its *provider* does not, and the remedy is to re-point or
+    /// re-create the route rather than to look for a missing agent.
+    ///
+    /// Split out because it used to ride `NotFound` as
+    /// `format!("route {id}")` — which made `params.id` mean "an agent
+    /// id" at nineteen call sites and "the string `route <uuid>`" at
+    /// one, so a localized "agent not found: {{id}}" rendered "agent
+    /// not found: route 9f2c…".
+    ///
+    /// [`NotFound`]: AgentError::NotFound
+    #[error("route not found: {0}")]
+    RouteNotFound(String),
+
     #[error("agent name already taken: {0}")]
     DuplicateName(String),
 
@@ -57,6 +72,7 @@ impl ErrorCode for AgentError {
             AgentError::Io(_) => "agent.io",
             AgentError::Json(_) => "agent.json",
             AgentError::NotFound(_) => "agent.not_found",
+            AgentError::RouteNotFound(_) => "agent.route_not_found",
             AgentError::DuplicateName(_) => "agent.duplicate_name",
             AgentError::InvalidName(_, _) => "agent.invalid_name",
             AgentError::InvalidCron(_, _) => "agent.invalid_cron",
@@ -74,9 +90,11 @@ impl ErrorCode for AgentError {
         match self {
             AgentError::Io(e) => json!({ "detail": e.to_string() }),
             AgentError::Json(e) => json!({ "detail": e.to_string() }),
-            // An agent id (or a `route <uuid>` locator), never a secret
-            // — `store.rs` and `install.rs` are the only constructors.
+            // An agent id, never a secret, and never anything else:
+            // the one constructor that passed a route locator now uses
+            // `RouteNotFound`, so `id` means exactly one thing.
             AgentError::NotFound(id) => json!({ "id": id }),
+            AgentError::RouteNotFound(route_id) => json!({ "route_id": route_id }),
             AgentError::DuplicateName(name) => json!({ "name": name }),
             AgentError::InvalidName(name, reason) => json!({ "name": name, "reason": reason }),
             AgentError::InvalidCron(cron, reason) => json!({ "cron": cron, "reason": reason }),

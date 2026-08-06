@@ -17,18 +17,17 @@ import zhErrors from "../locales/zh-CN/errors.json";
 // exact thing the phase exists to remove, and invisible in an
 // English-language test suite.
 //
-// The registry is read with Vite's `?raw` + JSON.parse rather than a
-// glob import: these files live outside `src/`, and the eager-glob form
-// would bake a build-time file list into the bundle. Adding a domain
-// file must fail here, not silently pass.
-import foundation from "../../crates/claudepot-core/testdata/error-codes/00-foundation.json?raw";
-import account from "../../crates/claudepot-core/testdata/error-codes/10-account.json?raw";
-import project from "../../crates/claudepot-core/testdata/error-codes/20-project.json?raw";
-import config from "../../crates/claudepot-core/testdata/error-codes/30-config.json?raw";
-import agent from "../../crates/claudepot-core/testdata/error-codes/40-agent.json?raw";
-import sharedMemory from "../../crates/claudepot-core/testdata/error-codes/50-shared-memory.json?raw";
-import miscCommands from "../../crates/claudepot-core/testdata/error-codes/70-misc-commands.json?raw";
-import coreCommands from "../../crates/claudepot-core/testdata/error-codes/60-core-commands.json?raw";
+// The registry is globbed from the shard directory, not listed. It was a
+// fixed list of `?raw` imports, on the reasoning that an eager glob would
+// bake a build-time file list into the bundle — but this is a test file
+// and is never bundled, and the list made the comment above a lie: a new
+// `80-*.json` shard was silently unchecked, which is the exact failure
+// this suite exists to prevent. The Rust side already treats
+// `error-codes/*.json` as the registry; this now matches it.
+const SHARDS = import.meta.glob(
+  "../../crates/claudepot-core/testdata/error-codes/*.json",
+  { eager: true, query: "?raw", import: "default" },
+) as Record<string, string>;
 
 interface CodeVector {
   code: string;
@@ -37,16 +36,7 @@ interface CodeVector {
   message: string;
 }
 
-const REGISTRY: CodeVector[] = [
-  foundation,
-  account,
-  project,
-  config,
-  agent,
-  sharedMemory,
-  coreCommands,
-  miscCommands,
-]
+const REGISTRY: CodeVector[] = Object.values(SHARDS)
   .map((raw) => JSON.parse(raw) as { codes: CodeVector[] })
   .flatMap((f) => f.codes);
 
@@ -65,6 +55,17 @@ function placeholders(s: string): Set<string> {
 }
 
 describe("error-code catalog lock", () => {
+  it("the glob actually found the shard files", () => {
+    // Without this, a wrong glob pattern yields an empty REGISTRY and
+    // every "each code has a sentence" assertion below passes over zero
+    // codes. Green would mean nothing happened.
+    const names = Object.keys(SHARDS)
+      .map((p) => p.split("/").pop())
+      .sort();
+    expect(names.length).toBeGreaterThanOrEqual(8);
+    expect(names).toContain("00-foundation.json");
+  });
+
   it("the registry is non-empty and free of duplicates", () => {
     expect(REGISTRY.length).toBeGreaterThan(400);
     const seen = new Set<string>();
@@ -107,11 +108,33 @@ describe("error-code catalog lock", () => {
     const bad: string[] = [];
     for (const v of REGISTRY) {
       const carried = new Set(v.params);
+      // `cause` is synthesized by the renderer, not by Rust's `params()`:
+      // a wrapper that carries `cause_code` has its cause resolved
+      // against this same catalog and interpolated as `{{cause}}`. See
+      // `causeClause` in `src/lib/i18n-error.ts`.
+      if (carried.has("cause_code")) carried.add("cause");
       for (const cat of [enErrors, zhErrors]) {
         const sentence = lookup(cat, v.code);
         if (!sentence) continue;
         for (const p of placeholders(sentence)) {
           if (!carried.has(p)) bad.push(`${v.code} uses {{${p}}}`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("a sentence using {{cause}} carries a cause to resolve", () => {
+    // The converse of the rule above, and the more dangerous direction:
+    // `{{cause}}` with no `cause_code` in params renders the literal
+    // braces to the user, because nothing ever supplies that value.
+    const bad: string[] = [];
+    for (const v of REGISTRY) {
+      for (const cat of [enErrors, zhErrors]) {
+        const sentence = lookup(cat, v.code);
+        if (!sentence || !placeholders(sentence).has("cause")) continue;
+        if (!v.params.includes("cause_code")) {
+          bad.push(`${v.code} interpolates {{cause}} but carries no cause_code`);
         }
       }
     }

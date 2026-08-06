@@ -54,6 +54,7 @@
     "no_home_dir": "Couldn't locate your home directory.",
     "not_found": "That agent no longer exists.",
     "not_managed": "{{path}} wasn't written by Claudepot — it won't be overwritten.",
+    "route_not_found": "The provider this agent runs through no longer exists. Re-point the agent at a provider, or re-create the one it used.",
     "unsupported_platform": "This isn't supported on your platform: {{operation}}"
   },
   "agent_events": {
@@ -454,8 +455,7 @@
     "auth_login_failed": "Browser sign-in failed (exit {{exit_code}}).",
     "cli_binary_not_found": "No claude CLI at {{path}}.",
     "import_failed": "The sign-in finished but left no credentials to import.",
-    "io": "Filesystem error: {{detail}}",
-    "swap": "{{detail}}"
+    "io": "Filesystem error: {{detail}}"
   },
   "permission": {
     "duration_out_of_range": "Pick a duration between {{min}} and {{max}} seconds.",
@@ -583,8 +583,8 @@
   },
   "route_save": {
     "not_found": "That provider no longer exists.",
-    "secrets": "Storing the secret failed: {{detail}}",
-    "store": "Saving the provider failed: {{detail}}"
+    "secrets": "Storing the secret failed: {{cause}}",
+    "store": "Saving the provider failed: {{cause}}"
   },
   "routes": {
     "bedrock_auth_required": "Bedrock needs a bearer token, an AWS profile, or \"skip AWS auth\".",
@@ -593,13 +593,12 @@
     "desktop_not_supported": "Claude Desktop isn't supported on your platform.",
     "duplicate_name": "A provider named \"{{name}}\" already exists.",
     "duplicate_wrapper_name": "Another provider already uses the command \"{{wrapper}}\".",
-    "edit_store_failed": "Saving failed: {{detail}} The previously-saved provider is still active; if it stops working, re-enter the secret and save again.",
+    "edit_store_failed": "Saving the provider failed: {{cause}} The previously-saved route remains active; if it stops working after a retry, re-enter the secret and save again.",
     "foundry_config_missing": "Foundry settings are missing.",
     "foundry_target_ambiguous": "Choose a base URL or a resource name for Foundry, not both.",
     "foundry_target_required": "Foundry needs either a base URL or a resource name.",
     "gateway_config_missing": "Gateway settings are missing.",
     "gone_after_persist": "The provider was saved but couldn't be read back. Reload the list.",
-    "invalid_base_url": "That base URL isn't usable: {{reason}}",
     "invalid_bedrock_base_url": "The Bedrock base URL isn't usable: {{detail}}",
     "invalid_foundry_base_url": "The Foundry base URL isn't usable: {{detail}}",
     "invalid_gateway_base_url": "The gateway base URL isn't usable: {{detail}}",

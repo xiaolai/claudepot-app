@@ -130,9 +130,15 @@ pub enum SaveRouteError {
 /// than forwarding the inner one. The phase *is* the user-facing fact —
 /// `Store` on edit means "the previously-saved route is still active",
 /// `Secrets` means "re-enter the secret" — and forwarding would erase
-/// exactly the distinction the enum exists to record. The inner code
-/// travels as `cause_code` so a sentence can still name the underlying
-/// failure.
+/// exactly the distinction the enum exists to record.
+///
+/// The cause travels **structurally**: `cause_code` plus `cause_params`,
+/// not a rendered `detail` string. An earlier version passed
+/// `e.to_string()`, which put frozen English inside a sentence the
+/// renderer then translated around it — "存储密钥失败：keychain write
+/// denied". The renderer resolves `cause_code` against the same catalog
+/// and interpolates the result as `{{cause}}`, so both halves are
+/// localized. See `catalogSentence` in `src/lib/i18n-error.ts`.
 impl crate::error_code::ErrorCode for SaveRouteError {
     fn code(&self) -> &'static str {
         match self {
@@ -148,10 +154,10 @@ impl crate::error_code::ErrorCode for SaveRouteError {
         match self {
             SaveRouteError::NotFound(id) => serde_json::json!({ "id": id }),
             SaveRouteError::Secrets(e) => {
-                serde_json::json!({ "detail": e.to_string(), "cause_code": e.code() })
+                serde_json::json!({ "cause_code": e.code(), "cause_params": e.params() })
             }
             SaveRouteError::Store(e) => {
-                serde_json::json!({ "detail": e.to_string(), "cause_code": e.code() })
+                serde_json::json!({ "cause_code": e.code(), "cause_params": e.params() })
             }
         }
     }

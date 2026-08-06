@@ -14,8 +14,10 @@ export function SessionIndexRebuild({
   setToast,
 }: {
   /** Sessions-style toast setter — matches the pane's own pattern so
-   *  no extra useToasts instance is needed here. */
-  setToast: (msg: string) => void;
+   *  no extra useToasts instance is needed here. `kind` defaults to
+   *  "info"; the caller states failure explicitly rather than leaving a
+   *  downstream adapter to infer it from the wording. */
+  setToast: (msg: string, kind?: "info" | "error") => void;
 }) {
   const { t } = useTranslation("sessions");
   const [busy, setBusy] = useState(false);
@@ -28,7 +30,7 @@ export function SessionIndexRebuild({
       await api.sessionIndexRebuild();
       setToast(t("cleanup.rebuildDone"));
     } catch (e) {
-      setToast(t("cleanup.rebuildFailed", { error: renderError(e) }));
+      setToast(t("cleanup.rebuildFailed", { error: renderError(e) }), "error");
     } finally {
       setBusy(false);
     }

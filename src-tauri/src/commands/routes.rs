@@ -595,12 +595,15 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, E
             // The persisted route is unchanged; the keychain may
             // already hold the new secret while the route still
             // references the old shape — tell the user to re-save.
-            // `cause` is the store failure's own code so a localized
-            // sentence can name it without re-parsing the English.
+            // The cause travels structurally (`cause_code` +
+            // `cause_params`), never as rendered English: the renderer
+            // resolves it against the same catalog and interpolates the
+            // result as `{{cause}}`. Passing `cause.message` here put an
+            // English clause inside a translated sentence.
             let cause = ErrorDto::from(e);
             return Err(ErrorDto::with_params(
                 codes::ROUTES_EDIT_STORE_FAILED,
-                json!({ "detail": cause.message, "cause_code": cause.code }),
+                json!({ "cause_code": cause.code, "cause_params": cause.params }),
                 format!(
                     "{}; the previously-saved route remains active. \
                      If the route stops working after retry, re-enter the secret and save again.",

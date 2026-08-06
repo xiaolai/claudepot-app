@@ -240,6 +240,7 @@ mod tests {
                 E::Io(std::io::Error::other("permission denied")),
                 E::Json(json_err()),
                 E::NotFound("6f9a1c2e-0000-4000-8000-000000000000".to_string()),
+                E::RouteNotFound("9f2c1d80-0000-4000-8000-000000000000".to_string()),
                 E::DuplicateName("nightly-usage".to_string()),
                 E::InvalidName("Nightly Usage".to_string(), "must be lowercase"),
                 E::InvalidCron("* * *".to_string(), "expected 5 fields".to_string()),
@@ -256,6 +257,7 @@ mod tests {
                     E::Io(_)
                     | E::Json(_)
                     | E::NotFound(_)
+                    | E::RouteNotFound(_)
                     | E::DuplicateName(_)
                     | E::InvalidName(_, _)
                     | E::InvalidCron(_, _)
@@ -432,10 +434,6 @@ mod tests {
                 E::WrapperShadowsClaude("claude".to_string()),
                 E::WrapperFileNotManaged("/Users/me/.local/bin/claude-kimi".to_string()),
                 E::InvalidWrapperName("claude kimi".to_string(), "not shell-safe".to_string()),
-                E::InvalidBaseUrl(
-                    "ftp://example.com".to_string(),
-                    "URL must use http:// or https://".to_string(),
-                ),
                 E::MissingField("base_url"),
                 E::NoHomeDir,
                 E::UnsupportedPlatform("Desktop profile install"),
@@ -450,7 +448,6 @@ mod tests {
                     | E::WrapperShadowsClaude(_)
                     | E::WrapperFileNotManaged(_)
                     | E::InvalidWrapperName(_, _)
-                    | E::InvalidBaseUrl(_, _)
                     | E::MissingField(_)
                     | E::NoHomeDir
                     | E::UnsupportedPlatform(_) => {}

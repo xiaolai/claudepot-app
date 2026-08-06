@@ -539,8 +539,13 @@ pub async fn env_file_copy_value(
             // file, not just the one being copied — scrub both before
             // this closure returns (`Zeroizing` on drop for the
             // buffer, `zeroize_lines` for the parse).
-            let content =
-                Zeroizing::new(std::fs::read_to_string(&path).map_err(|e| read_failed(&path, &e))?);
+            // `read_env_content`, not a bare `read_to_string`: the shared
+            // reader enforces the MAX_ENV_FILE_BYTES ceiling and reports
+            // invalid UTF-8 as `env_file.invalid_encoding`, which has its
+            // own remedy. Reading directly here silently dropped both —
+            // an oversized file was slurped whole, and a mis-encoded one
+            // reported the generic read failure.
+            let content = read_env_content(&path)?;
             let mut lines = env_file::parse(&content);
             // Active first, then commented — copy-out works for either.
             let value = lines

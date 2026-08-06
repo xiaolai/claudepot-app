@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { extractMessage, renderError, toastError } from "./i18n-error";
+import { applyLocalePreference } from "./i18n";
 
 describe("extractMessage", () => {
   it("passes strings through and unwraps Error.message", () => {
@@ -134,5 +135,40 @@ describe("toastError", () => {
     expect(text.startsWith("Login: ")).toBe(true);
     expect(text).not.toContain("aaaaaaaaaa1234");
     expect(text).toContain("sk-ant-***1234");
+  });
+});
+
+// A wrapper whose *phase* is the user-facing fact keeps its own code and
+// names its cause structurally (`cause_code` + `cause_params`). Passing
+// the cause as rendered English produced half-translated sentences —
+// "存储密钥失败：keychain write denied" — which is what this replaces.
+describe("nested cause resolution", () => {
+  const wrapped = {
+    code: "route_save.store",
+    params: { cause_code: "routes.duplicate_name", cause_params: { name: "acme" } },
+    message: "route name already taken: acme",
+  };
+
+  it("renders both halves in the active locale", async () => {
+    await applyLocalePreference("zh-CN");
+    const zh = renderError(wrapped);
+    expect(zh).toContain("保存供应商失败");
+    // The cause is localized too — no English clause spliced in.
+    expect(zh).not.toContain("already taken");
+    expect(zh).toContain("acme");
+    await applyLocalePreference(null);
+    const en = renderError(wrapped);
+    expect(en).toContain("Saving the provider failed");
+  });
+
+  it("falls back to English rather than printing a literal {{cause}}", () => {
+    const unknownCause = {
+      ...wrapped,
+      params: { cause_code: "nope.not_a_real_code", cause_params: {} },
+    };
+    const out = renderError(unknownCause);
+    expect(out).not.toContain("{{cause}}");
+    // Degrades to Rust's English message, which is the documented floor.
+    expect(out).toBe(wrapped.message);
   });
 });
