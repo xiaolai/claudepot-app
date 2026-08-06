@@ -9,6 +9,11 @@
 //! Per `.claude/rules/architecture.md`: no business logic here.
 //! Wraps [`claudepot_core::cc_doctor::scrape_doctor`], converts the
 //! core type to a DTO, and caches.
+//!
+//! Rejections cross as `ErrorDto`. The scrape itself never fails —
+//! an unavailable `claude` binary is *data* in the snapshot, not a
+//! rejection — so the only failures here are the cache mutex and the
+//! blocking-task join. See `crate::dto_error`.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -16,7 +21,18 @@ use std::time::{Duration, Instant};
 use claudepot_core::cc_doctor::{DoctorSeverity, DoctorSnapshot};
 
 use crate::dto_cc_doctor::DoctorSnapshotDto;
+use crate::dto_error::{codes, ErrorDto};
 use crate::state::{HealthRecordKind, TrayHealthState};
+
+/// The snapshot cache's mutex is `std::sync`, so a panic under it
+/// poisons the lock for every later reader. Two call sites share the
+/// check, so they share one spelling.
+fn cache_lock_poisoned() -> ErrorDto {
+    ErrorDto::new(
+        codes::CC_DOCTOR_CACHE_LOCK_POISONED,
+        "cc_doctor cache mutex poisoned",
+    )
+}
 
 /// How long a snapshot stays "fresh" before the next call re-scrapes.
 /// 60s matches the renderer's 60s poll cadence — same-second double
@@ -80,7 +96,7 @@ pub async fn cc_doctor_snapshot(
     state: tauri::State<'_, CcDoctorState>,
     tray_health: tauri::State<'_, TrayHealthState>,
     app: tauri::AppHandle,
-) -> Result<DoctorSnapshotDto, String> {
+) -> Result<DoctorSnapshotDto, ErrorDto> {
     let force = force_refresh.unwrap_or(false);
 
     if !force {
@@ -88,10 +104,7 @@ pub async fn cc_doctor_snapshot(
         // across the probe — the probe is a fork-exec that takes
         // ~50 ms; we don't want to gate every other consumer on it.
         let cached: Option<(std::time::Instant, DoctorSnapshot)> = {
-            let g = state
-                .cache
-                .lock()
-                .map_err(|_| "cc_doctor cache mutex poisoned".to_string())?;
+            let g = state.cache.lock().map_err(|_| cache_lock_poisoned())?;
             g.as_ref().map(|c| (c.captured_at, c.snapshot.clone()))
         };
 
@@ -134,13 +147,10 @@ pub async fn cc_doctor_snapshot(
     // (see `cc_doctor::compose` for the merge rules).
     let snapshot = tokio::task::spawn_blocking(claudepot_core::cc_doctor::scrape_with_probes)
         .await
-        .map_err(|e| format!("cc_doctor blocking-task join: {e}"))?;
+        .map_err(ErrorDto::task_join)?;
 
     {
-        let mut g = state
-            .cache
-            .lock()
-            .map_err(|_| "cc_doctor cache mutex poisoned".to_string())?;
+        let mut g = state.cache.lock().map_err(|_| cache_lock_poisoned())?;
         *g = Some(Cached {
             captured_at: Instant::now(),
             snapshot: snapshot.clone(),
@@ -198,7 +208,7 @@ pub fn push_to_tray_health(state: &TrayHealthState, snapshot: &DoctorSnapshot) {
 /// Wraps [`crate::commands::reveal_in_finder`] so the underlying
 /// macOS/Linux/Windows branching stays in one place.
 #[tauri::command]
-pub async fn cc_doctor_open_parse_failures_log() -> Result<(), String> {
+pub async fn cc_doctor_open_parse_failures_log() -> Result<(), ErrorDto> {
     let path = claudepot_core::cc_doctor::parse_failures::default_path();
     let target = if path.exists() {
         path
@@ -210,6 +220,8 @@ pub async fn cc_doctor_open_parse_failures_log() -> Result<(), String> {
         // there's just been nothing to log.
         claudepot_core::paths::claudepot_data_dir()
     };
+    // `reveal_in_finder` already owns its codes (`app.reveal_*`), so
+    // this wrapper adds nothing and forwards them unchanged.
     crate::commands::reveal_in_finder(target.display().to_string()).await
 }
 

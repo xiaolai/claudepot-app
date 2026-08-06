@@ -16,30 +16,32 @@ use claudepot_core::routes::{
     FoundryConfig, GatewayConfig, OsRouteEffects, ProviderKind, Route, RouteError, RouteProvider,
     RouteStore, SaveRouteError, VertexConfig,
 };
+use serde_json::json;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
+use crate::dto_error::{codes, ErrorDto};
 use crate::dto_routes::{
     BedrockDetailsDto, BedrockInputDto, FoundryDetailsDto, FoundryInputDto, GatewayDetailsDto,
     GatewayInputDto, RouteCreateDto, RouteDetailsDto, RouteSettingsDto, RouteSummaryDto,
     RouteUpdateDto, VertexDetailsDto, VertexInputDto,
 };
 
-fn map_err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+fn open_store() -> Result<RouteStore, ErrorDto> {
+    RouteStore::open().map_err(ErrorDto::from)
 }
 
-fn open_store() -> Result<RouteStore, String> {
-    RouteStore::open().map_err(|e| format!("routes store open failed: {e}"))
-}
-
-fn parse_provider(s: &str) -> Result<ProviderKind, String> {
+fn parse_provider(s: &str) -> Result<ProviderKind, ErrorDto> {
     match s {
         "gateway" => Ok(ProviderKind::Gateway),
         "bedrock" => Ok(ProviderKind::Bedrock),
         "vertex" => Ok(ProviderKind::Vertex),
         "foundry" => Ok(ProviderKind::Foundry),
-        other => Err(format!("unknown provider kind: {other}")),
+        other => Err(ErrorDto::with_params(
+            codes::ROUTES_UNKNOWN_PROVIDER_KIND,
+            json!({ "kind": other }),
+            format!("unknown provider kind: {other}"),
+        )),
     }
 }
 
@@ -87,7 +89,7 @@ fn build_provider(
     mut bedrock: Option<BedrockInputDto>,
     vertex: Option<VertexInputDto>,
     mut foundry: Option<FoundryInputDto>,
-) -> Result<RouteProvider, String> {
+) -> Result<RouteProvider, ErrorDto> {
     // Scrub the NON-selected provider inputs up front: they are never
     // read, and the `config missing` error arms below would otherwise
     // drop their secrets unscrubbed (audit T7).
@@ -108,7 +110,12 @@ fn build_provider(
     }
     match kind {
         ProviderKind::Gateway => {
-            let mut g = gateway.ok_or_else(|| String::from("gateway config missing"))?;
+            let mut g = gateway.ok_or_else(|| {
+                ErrorDto::new(
+                    codes::ROUTES_GATEWAY_CONFIG_MISSING,
+                    "gateway config missing",
+                )
+            })?;
             // Normalize, not just validate: a trailing `/v1` is stripped
             // here because Claude Code's SDK appends `/v1/messages`
             // itself — see `normalize_gateway_base_url`.
@@ -116,7 +123,11 @@ fn build_provider(
                 Ok(base) => base,
                 Err(e) => {
                     g.api_key.zeroize();
-                    return Err(format!("invalid gateway base URL: {e}"));
+                    return Err(ErrorDto::with_params(
+                        codes::ROUTES_INVALID_GATEWAY_BASE_URL,
+                        json!({ "detail": e.to_string() }),
+                        format!("invalid gateway base URL: {e}"),
+                    ));
                 }
             };
             Ok(RouteProvider::Gateway(GatewayConfig {
@@ -128,12 +139,20 @@ fn build_provider(
             }))
         }
         ProviderKind::Bedrock => {
-            let b = bedrock.ok_or_else(|| String::from("bedrock config missing"))?;
+            let b = bedrock.ok_or_else(|| {
+                ErrorDto::new(
+                    codes::ROUTES_BEDROCK_CONFIG_MISSING,
+                    "bedrock config missing",
+                )
+            })?;
             let region = b.region.trim();
             if region.is_empty() {
                 let mut bearer = b.bearer_token;
                 bearer.zeroize();
-                return Err(String::from("AWS region is required"));
+                return Err(ErrorDto::new(
+                    codes::ROUTES_BEDROCK_REGION_REQUIRED,
+                    "AWS region is required",
+                ));
             }
             let mut bearer = secret_empty_to_none(b.bearer_token);
             let profile = empty_to_none(b.aws_profile);
@@ -141,7 +160,8 @@ fn build_provider(
                 if let Some(token) = bearer.as_mut() {
                     token.zeroize();
                 }
-                return Err(String::from(
+                return Err(ErrorDto::new(
+                    codes::ROUTES_BEDROCK_AUTH_REQUIRED,
                     "Bedrock needs a bearer token, AWS profile, or skip_aws_auth set",
                 ));
             }
@@ -151,7 +171,11 @@ fn build_provider(
                     if let Some(token) = bearer.as_mut() {
                         token.zeroize();
                     }
-                    format!("invalid Bedrock base URL: {e}")
+                    ErrorDto::with_params(
+                        codes::ROUTES_INVALID_BEDROCK_BASE_URL,
+                        json!({ "detail": e.to_string() }),
+                        format!("invalid Bedrock base URL: {e}"),
+                    )
                 })?),
                 None => None,
             };
@@ -165,15 +189,24 @@ fn build_provider(
             }))
         }
         ProviderKind::Vertex => {
-            let v = vertex.ok_or_else(|| String::from("vertex config missing"))?;
+            let v = vertex.ok_or_else(|| {
+                ErrorDto::new(codes::ROUTES_VERTEX_CONFIG_MISSING, "vertex config missing")
+            })?;
             let project_id = v.project_id.trim();
             if project_id.is_empty() {
-                return Err(String::from("GCP project ID is required"));
+                return Err(ErrorDto::new(
+                    codes::ROUTES_VERTEX_PROJECT_ID_REQUIRED,
+                    "GCP project ID is required",
+                ));
             }
             let validated_base = match empty_to_none(v.base_url) {
-                Some(url) => Some(
-                    validate_base_url(&url).map_err(|e| format!("invalid Vertex base URL: {e}"))?,
-                ),
+                Some(url) => Some(validate_base_url(&url).map_err(|e| {
+                    ErrorDto::with_params(
+                        codes::ROUTES_INVALID_VERTEX_BASE_URL,
+                        json!({ "detail": e.to_string() }),
+                        format!("invalid Vertex base URL: {e}"),
+                    )
+                })?),
                 None => None,
             };
             Ok(RouteProvider::Vertex(VertexConfig {
@@ -184,7 +217,12 @@ fn build_provider(
             }))
         }
         ProviderKind::Foundry => {
-            let f = foundry.ok_or_else(|| String::from("foundry config missing"))?;
+            let f = foundry.ok_or_else(|| {
+                ErrorDto::new(
+                    codes::ROUTES_FOUNDRY_CONFIG_MISSING,
+                    "foundry config missing",
+                )
+            })?;
             let base = empty_to_none(f.base_url);
             let resource = empty_to_none(f.resource);
             let mut api_key = secret_empty_to_none(f.api_key);
@@ -192,7 +230,8 @@ fn build_provider(
                 if let Some(key) = api_key.as_mut() {
                     key.zeroize();
                 }
-                return Err(String::from(
+                return Err(ErrorDto::new(
+                    codes::ROUTES_FOUNDRY_TARGET_REQUIRED,
                     "Foundry needs either a base URL or a resource name",
                 ));
             }
@@ -200,7 +239,8 @@ fn build_provider(
                 if let Some(key) = api_key.as_mut() {
                     key.zeroize();
                 }
-                return Err(String::from(
+                return Err(ErrorDto::new(
+                    codes::ROUTES_FOUNDRY_TARGET_AMBIGUOUS,
                     "Foundry: choose base URL OR resource name, not both",
                 ));
             }
@@ -209,7 +249,11 @@ fn build_provider(
                     if let Some(key) = api_key.as_mut() {
                         key.zeroize();
                     }
-                    format!("invalid Foundry base URL: {e}")
+                    ErrorDto::with_params(
+                        codes::ROUTES_INVALID_FOUNDRY_BASE_URL,
+                        json!({ "detail": e.to_string() }),
+                        format!("invalid Foundry base URL: {e}"),
+                    )
                 })?),
                 None => None,
             };
@@ -269,18 +313,43 @@ fn project_summary(r: &Route) -> RouteSummaryDto {
     }
 }
 
-fn parse_route_id(s: &str) -> Result<Uuid, String> {
-    Uuid::parse_str(s).map_err(|_| format!("invalid route id: {s}"))
+fn parse_route_id(s: &str) -> Result<Uuid, ErrorDto> {
+    Uuid::parse_str(s).map_err(|_| {
+        ErrorDto::with_params(
+            codes::ROUTES_INVALID_ROUTE_ID,
+            json!({ "id": s }),
+            format!("invalid route id: {s}"),
+        )
+    })
 }
 
-fn pick_wrapper_name(user: &str, model: &str) -> Result<String, String> {
+/// The form gate for a wrapper name, typed or derived. `name` is the
+/// candidate and `detail` the rule it broke — a wrapper name is a
+/// binary name, never a secret.
+fn wrapper_name_rejected(name: &str, e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::ROUTES_WRAPPER_NAME_REJECTED,
+        json!({ "name": name, "detail": e.to_string() }),
+        format!("invalid wrapper name '{name}': {e}"),
+    )
+}
+
+fn pick_wrapper_name(user: &str, model: &str) -> Result<String, ErrorDto> {
     let candidate = if user.trim().is_empty() {
         derive_wrapper_slug(model)
     } else {
         user.trim().to_string()
     };
-    sanitize_wrapper_name(&candidate)
-        .map_err(|e| format!("invalid wrapper name '{candidate}': {e}"))
+    sanitize_wrapper_name(&candidate).map_err(|e| wrapper_name_rejected(&candidate, e))
+}
+
+/// The route vanished between a successful persist and the re-read
+/// that projects the response.
+fn gone_after_persist() -> ErrorDto {
+    ErrorDto::new(
+        codes::ROUTES_GONE_AFTER_PERSIST,
+        "route disappeared after persist",
+    )
 }
 
 fn project_details(r: &Route) -> RouteDetailsDto {
@@ -358,23 +427,23 @@ fn project_details(r: &Route) -> RouteDetailsDto {
 }
 
 #[tauri::command]
-pub async fn routes_list() -> Result<Vec<RouteSummaryDto>, String> {
+pub async fn routes_list() -> Result<Vec<RouteSummaryDto>, ErrorDto> {
     let store = open_store()?;
     Ok(store.list().iter().map(project_summary).collect())
 }
 
 #[tauri::command]
-pub async fn routes_get(id: String) -> Result<RouteDetailsDto, String> {
+pub async fn routes_get(id: String) -> Result<RouteDetailsDto, ErrorDto> {
     let id = parse_route_id(&id)?;
     let store = open_store()?;
     let route = store
         .get(id)
-        .ok_or_else(|| RouteError::NotFound(id.to_string()).to_string())?;
+        .ok_or_else(|| ErrorDto::from(RouteError::NotFound(id.to_string())))?;
     Ok(project_details(route))
 }
 
 #[tauri::command]
-pub async fn routes_settings_get() -> Result<RouteSettingsDto, String> {
+pub async fn routes_settings_get() -> Result<RouteSettingsDto, ErrorDto> {
     let store = open_store()?;
     Ok(RouteSettingsDto {
         disable_deployment_mode_chooser: store.disable_chooser(),
@@ -382,12 +451,12 @@ pub async fn routes_settings_get() -> Result<RouteSettingsDto, String> {
 }
 
 #[tauri::command]
-pub async fn routes_settings_set(settings: RouteSettingsDto) -> Result<RouteSettingsDto, String> {
+pub async fn routes_settings_set(settings: RouteSettingsDto) -> Result<RouteSettingsDto, ErrorDto> {
     let mut store = open_store()?;
     let prev_disable = store.disable_chooser();
     store
         .set_disable_chooser(settings.disable_deployment_mode_chooser)
-        .map_err(map_err)?;
+        .map_err(ErrorDto::from)?;
     // If the chooser flag changed AND there's a route currently
     // active on Desktop, re-mirror its enterpriseConfig so the new
     // flag takes effect on the next launch instead of staying stale
@@ -404,7 +473,7 @@ pub async fn routes_settings_set(settings: RouteSettingsDto) -> Result<RouteSett
 }
 
 #[tauri::command]
-pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, String> {
+pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, ErrorDto> {
     let provider_kind = match parse_provider(&route.provider_kind) {
         Ok(k) => k,
         Err(e) => {
@@ -455,12 +524,12 @@ pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, St
     // The commit → persist ordering and the keychain/helper rollback
     // on either failure live in core (`routes::lifecycle::add_route`).
     let mut store = open_store()?;
-    let saved = add_route(&mut store, new_route, &OsRouteEffects).map_err(map_err)?;
+    let saved = add_route(&mut store, new_route, &OsRouteEffects).map_err(ErrorDto::from)?;
     Ok(project_summary(&saved))
 }
 
 #[tauri::command]
-pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, String> {
+pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, ErrorDto> {
     let (id, provider_kind) = match parse_route_id(&route.id)
         .and_then(|id| Ok((id, parse_provider(&route.provider_kind)?)))
     {
@@ -526,28 +595,40 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
             // The persisted route is unchanged; the keychain may
             // already hold the new secret while the route still
             // references the old shape — tell the user to re-save.
-            return Err(format!(
-                "{e}; the previously-saved route remains active. \
-                 If the route stops working after retry, re-enter the secret and save again."
+            // `cause` is the store failure's own code so a localized
+            // sentence can name it without re-parsing the English.
+            let cause = ErrorDto::from(e);
+            return Err(ErrorDto::with_params(
+                codes::ROUTES_EDIT_STORE_FAILED,
+                json!({ "detail": cause.message, "cause_code": cause.code }),
+                format!(
+                    "{}; the previously-saved route remains active. \
+                     If the route stops working after retry, re-enter the secret and save again.",
+                    cause.message
+                ),
             ));
         }
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(ErrorDto::from(e)),
     };
 
     if !saved.warnings.is_empty() {
-        return Err(format!(
-            "route saved, but follow-up writes had warnings — {}",
-            saved.warnings.join("; ")
+        return Err(ErrorDto::with_params(
+            codes::ROUTES_SAVE_WARNINGS,
+            json!({ "warnings": saved.warnings }),
+            format!(
+                "route saved, but follow-up writes had warnings — {}",
+                saved.warnings.join("; ")
+            ),
         ));
     }
     Ok(project_summary(&saved.route))
 }
 
 #[tauri::command]
-pub async fn routes_remove(id: String) -> Result<(), String> {
+pub async fn routes_remove(id: String) -> Result<(), ErrorDto> {
     let id = parse_route_id(&id)?;
     let mut store = open_store()?;
-    let removed = store.remove(id).map_err(map_err)?;
+    let removed = store.remove(id).map_err(ErrorDto::from)?;
     // Side effects: tear down wrapper + clear Desktop activation +
     // delete the library profile (which may carry plaintext secrets) +
     // forget any keychain entries / helper scripts the route owned.
@@ -581,57 +662,57 @@ pub async fn routes_remove(id: String) -> Result<(), String> {
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "route removed but {} cleanup step(s) failed: {}",
-            errors.len(),
-            errors.join("; ")
+        Err(ErrorDto::with_params(
+            codes::ROUTES_REMOVE_CLEANUP_FAILED,
+            json!({ "count": errors.len(), "steps": errors }),
+            format!(
+                "route removed but {} cleanup step(s) failed: {}",
+                errors.len(),
+                errors.join("; ")
+            ),
         ))
     }
 }
 
 #[tauri::command]
-pub async fn routes_use_cli(id: String) -> Result<RouteSummaryDto, String> {
+pub async fn routes_use_cli(id: String) -> Result<RouteSummaryDto, ErrorDto> {
     let id = parse_route_id(&id)?;
     let mut store = open_store()?;
     let route = store
         .get(id)
-        .ok_or_else(|| RouteError::NotFound(id.to_string()).to_string())?
+        .ok_or_else(|| ErrorDto::from(RouteError::NotFound(id.to_string())))?
         .clone();
-    write_wrapper(&route).map_err(map_err)?;
+    write_wrapper(&route).map_err(ErrorDto::from)?;
     if let Err(e) = store.set_installed_cli(id, true) {
         // Roll back the wrapper file we just wrote so disk state
         // matches the persisted (failed-to-update) flag.
         let _ = delete_wrapper(&route.wrapper_name);
-        return Err(map_err(e));
+        return Err(ErrorDto::from(e));
     }
-    let r = store
-        .get(id)
-        .ok_or_else(|| String::from("route disappeared after persist"))?;
+    let r = store.get(id).ok_or_else(gone_after_persist)?;
     Ok(project_summary(r))
 }
 
 #[tauri::command]
-pub async fn routes_unuse_cli(id: String) -> Result<RouteSummaryDto, String> {
+pub async fn routes_unuse_cli(id: String) -> Result<RouteSummaryDto, ErrorDto> {
     let id = parse_route_id(&id)?;
     let mut store = open_store()?;
     let route = store
         .get(id)
-        .ok_or_else(|| RouteError::NotFound(id.to_string()).to_string())?
+        .ok_or_else(|| ErrorDto::from(RouteError::NotFound(id.to_string())))?
         .clone();
     // Persist the flag first; only then try to delete the file.
     // Reverse order to use_cli — if delete fails after the flag is
     // off, we'd want a "stale file" warning, but at least the flag
     // is the source of truth and a follow-up rerun can clean up.
-    store.set_installed_cli(id, false).map_err(map_err)?;
+    store.set_installed_cli(id, false).map_err(ErrorDto::from)?;
     if let Err(e) = delete_wrapper(&route.wrapper_name) {
         // Restore the flag so the route's persisted state matches
         // the wrapper that's still on disk.
         let _ = store.set_installed_cli(id, true);
-        return Err(map_err(e));
+        return Err(ErrorDto::from(e));
     }
-    let r = store
-        .get(id)
-        .ok_or_else(|| String::from("route disappeared after persist"))?;
+    let r = store.get(id).ok_or_else(gone_after_persist)?;
     Ok(project_summary(r))
 }
 
@@ -641,7 +722,7 @@ pub async fn routes_unuse_cli(id: String) -> Result<RouteSummaryDto, String> {
 /// Third-party UI uses this to render an honest wrapper indicator
 /// instead of assuming "wrapper written" means "wrapper reachable".
 #[tauri::command]
-pub async fn routes_path_status() -> Result<String, String> {
+pub async fn routes_path_status() -> Result<String, ErrorDto> {
     Ok(wrapper_dir_path_status().await.as_str().to_string())
 }
 
@@ -650,35 +731,33 @@ pub async fn routes_path_status() -> Result<String, String> {
 /// of the rc file that was written so the UI can name it. Errors on
 /// shells whose config syntax we don't auto-edit (e.g. fish).
 #[tauri::command]
-pub async fn routes_add_to_path() -> Result<String, String> {
-    let rc = add_wrapper_dir_to_path().map_err(map_err)?;
+pub async fn routes_add_to_path() -> Result<String, ErrorDto> {
+    let rc = add_wrapper_dir_to_path().map_err(ErrorDto::from)?;
     Ok(rc.display().to_string())
 }
 
 #[tauri::command]
-pub async fn routes_use_desktop(id: String) -> Result<RouteSummaryDto, String> {
+pub async fn routes_use_desktop(id: String) -> Result<RouteSummaryDto, ErrorDto> {
     let id = parse_route_id(&id)?;
     let mut store = open_store()?;
     let route = store
         .get(id)
-        .ok_or_else(|| RouteError::NotFound(id.to_string()).to_string())?
+        .ok_or_else(|| ErrorDto::from(RouteError::NotFound(id.to_string())))?
         .clone();
     let disable = store.disable_chooser();
-    activate_desktop(&route, disable).map_err(map_err)?;
+    activate_desktop(&route, disable).map_err(ErrorDto::from)?;
     if let Err(e) = store.set_active_desktop(Some(id)) {
         // Best-effort: tear down what we just wrote so the persisted
         // "no route active" flag matches the on-disk enterpriseConfig.
         let _ = clear_desktop_active();
-        return Err(map_err(e));
+        return Err(ErrorDto::from(e));
     }
-    let r = store
-        .get(id)
-        .ok_or_else(|| String::from("route disappeared after persist"))?;
+    let r = store.get(id).ok_or_else(gone_after_persist)?;
     Ok(project_summary(r))
 }
 
 #[tauri::command]
-pub async fn routes_unuse_desktop() -> Result<(), String> {
+pub async fn routes_unuse_desktop() -> Result<(), ErrorDto> {
     let mut store = open_store()?;
     // Capture the previously-active route id so we can re-mirror if
     // the persist step fails. Without this, a flag-set failure after
@@ -686,31 +765,31 @@ pub async fn routes_unuse_desktop() -> Result<(), String> {
     // store with no enterpriseConfig backing it.
     let prev_active: Option<Route> = store.list().iter().find(|r| r.active_on_desktop).cloned();
     let disable = store.disable_chooser();
-    clear_desktop_active().map_err(map_err)?;
+    clear_desktop_active().map_err(ErrorDto::from)?;
     if let Err(e) = store.set_active_desktop(None) {
         if let Some(r) = &prev_active {
             let _ = activate_desktop(r, disable);
         }
-        return Err(map_err(e));
+        return Err(ErrorDto::from(e));
     }
     Ok(())
 }
 
 #[tauri::command]
-pub async fn routes_derive_slug(model: String) -> Result<String, String> {
+pub async fn routes_derive_slug(model: String) -> Result<String, ErrorDto> {
     Ok(derive_wrapper_slug(&model))
 }
 
 #[tauri::command]
-pub async fn routes_validate_wrapper_name(name: String) -> Result<String, String> {
-    sanitize_wrapper_name(&name).map_err(|e| format!("invalid wrapper name '{name}': {e}"))
+pub async fn routes_validate_wrapper_name(name: String) -> Result<String, ErrorDto> {
+    sanitize_wrapper_name(&name).map_err(|e| wrapper_name_rejected(&name, e))
 }
 
 /// Best-effort: if the renderer wants to forcibly zero a key it
 /// previously sent (e.g. on form submit), call this with the
 /// string. Rust drops it deterministically.
 #[tauri::command]
-pub async fn routes_zero_secret(mut secret: String) -> Result<(), String> {
+pub async fn routes_zero_secret(mut secret: String) -> Result<(), ErrorDto> {
     secret.zeroize();
     Ok(())
 }
@@ -719,7 +798,7 @@ pub async fn routes_zero_secret(mut secret: String) -> Result<(), String> {
 /// `desktop_backend` probe — used by the Third-party section to
 /// surface a "restart required" affordance after activate/deactivate.
 #[tauri::command]
-pub async fn routes_desktop_running() -> Result<bool, String> {
+pub async fn routes_desktop_running() -> Result<bool, ErrorDto> {
     let Some(platform) = claudepot_core::desktop_backend::create_platform() else {
         return Ok(false);
     };
@@ -730,15 +809,16 @@ pub async fn routes_desktop_running() -> Result<bool, String> {
 /// picked up. Idempotent on cold-start machines (skips quit when the
 /// app isn't running, then launches).
 #[tauri::command]
-pub async fn routes_desktop_restart() -> Result<(), String> {
+pub async fn routes_desktop_restart() -> Result<(), ErrorDto> {
     let Some(platform) = claudepot_core::desktop_backend::create_platform() else {
-        return Err(String::from(
+        return Err(ErrorDto::new(
+            codes::ROUTES_DESKTOP_NOT_SUPPORTED,
             "Claude Desktop is not supported on this platform",
         ));
     };
     if platform.is_running().await {
-        platform.quit().await.map_err(map_err)?;
+        platform.quit().await.map_err(ErrorDto::from)?;
     }
-    platform.launch().await.map_err(map_err)?;
+    platform.launch().await.map_err(ErrorDto::from)?;
     Ok(())
 }

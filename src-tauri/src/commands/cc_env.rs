@@ -21,14 +21,15 @@
 //! post-write state so the renderer reconciles against the file rather than
 //! against its own optimism.
 
+use crate::dto_error::ErrorDto;
 use claudepot_core::cc_env::{self, EnvOverview};
 use zeroize::Zeroizing;
 
-fn load() -> Result<EnvOverview, String> {
+fn load() -> Result<EnvOverview, ErrorDto> {
     // Binary selection is core's policy (`resolve_installed_claude`); this
     // layer only calls it, per rules/architecture.md.
     let (version, path) = cc_env::resolve_installed_claude();
-    cc_env::load(version.as_deref(), path.as_deref()).map_err(|e| e.to_string())
+    cc_env::load(version.as_deref(), path.as_deref()).map_err(ErrorDto::from)
 }
 
 /// `cc_env_list` — the spec, every variable's resolved state, and the three
@@ -38,10 +39,10 @@ fn load() -> Result<EnvOverview, String> {
 /// `SecretSet` or `Absent`; an unrecognized key emits `Withheld` with its
 /// JSON shape and nothing else.
 #[tauri::command]
-pub async fn cc_env_list() -> Result<EnvOverview, String> {
+pub async fn cc_env_list() -> Result<EnvOverview, ErrorDto> {
     tokio::task::spawn_blocking(load)
         .await
-        .map_err(|e| format!("cc_env_list join: {e}"))?
+        .map_err(ErrorDto::task_join)?
 }
 
 /// `cc_env_set` — write one documented, editable variable.
@@ -58,21 +59,25 @@ pub async fn cc_env_list() -> Result<EnvOverview, String> {
 /// early return and left the plaintext in the heap. A guard that runs in
 /// `Drop` cannot be skipped by a return path someone adds later.
 #[tauri::command]
-pub async fn cc_env_set(name: String, value: String) -> Result<EnvOverview, String> {
+pub async fn cc_env_set(name: String, value: String) -> Result<EnvOverview, ErrorDto> {
     let value = Zeroizing::new(value);
     let result = {
         let name = name.clone();
         let owned = Zeroizing::new(value.to_string());
+        // `ErrorDto::from` is built inside the closure, while `owned` is
+        // still alive, and the DTO it produces carries only the
+        // already-redacted `value` field — never the plaintext this
+        // closure holds. See `cc_env::errors`'s `ErrorCode` impl.
         tokio::task::spawn_blocking(move || {
-            cc_env::set_user_env_var(&name, &owned).map_err(|e| e.to_string())
+            cc_env::set_user_env_var(&name, &owned).map_err(ErrorDto::from)
         })
         .await
-        .map_err(|e| format!("cc_env_set join: {e}"))?
+        .map_err(ErrorDto::task_join)?
     };
     result?;
     tokio::task::spawn_blocking(load)
         .await
-        .map_err(|e| format!("cc_env_set join: {e}"))?
+        .map_err(ErrorDto::task_join)?
 }
 
 /// `cc_env_clear` — remove one key from the `env` map.
@@ -88,15 +93,13 @@ pub async fn cc_env_set(name: String, value: String) -> Result<EnvOverview, Stri
 /// `settings.env` additively and deletes nothing — so the confirmation that
 /// precedes this call has to say the old value survives until relaunch.
 #[tauri::command]
-pub async fn cc_env_clear(name: String) -> Result<EnvOverview, String> {
-    tokio::task::spawn_blocking(move || {
-        cc_env::clear_user_env_var(&name).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("cc_env_clear join: {e}"))??;
+pub async fn cc_env_clear(name: String) -> Result<EnvOverview, ErrorDto> {
+    tokio::task::spawn_blocking(move || cc_env::clear_user_env_var(&name).map_err(ErrorDto::from))
+        .await
+        .map_err(ErrorDto::task_join)??;
     tokio::task::spawn_blocking(load)
         .await
-        .map_err(|e| format!("cc_env_clear join: {e}"))?
+        .map_err(ErrorDto::task_join)?
 }
 
 #[cfg(test)]

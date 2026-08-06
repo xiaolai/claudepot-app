@@ -93,6 +93,39 @@ pub enum GhError {
     Timeout(&'static str),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `Subprocess.stderr` is `gh`/`git` diagnostic output. `gh` reads its
+/// token from the keychain or `GH_TOKEN` and does not echo it on
+/// failure; the frozen English message already prints this text, so
+/// `params` carries the same string rather than a second, differing
+/// spelling of it.
+impl crate::error_code::ErrorCode for GhError {
+    fn code(&self) -> &'static str {
+        match self {
+            GhError::MissingCli(_) => "github_pr.missing_cli",
+            GhError::Subprocess { .. } => "github_pr.subprocess",
+            GhError::BadOutput(_, _) => "github_pr.bad_output",
+            GhError::Io(_, _) => "github_pr.io",
+            GhError::Timeout(_) => "github_pr.timeout",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            GhError::MissingCli(tool) => json!({ "tool": tool }),
+            GhError::Subprocess { tool, code, stderr } => {
+                json!({ "tool": tool, "code": code, "stderr": stderr })
+            }
+            GhError::BadOutput(tool, e) => json!({ "tool": tool, "detail": e.to_string() }),
+            GhError::Io(tool, e) => json!({ "tool": tool, "detail": e.to_string() }),
+            GhError::Timeout(tool) => json!({ "tool": tool }),
+        }
+    }
+}
+
 impl GhError {
     /// Whether this error is "we genuinely tried and failed and the
     /// user might want to know" — used by the orchestrator to decide

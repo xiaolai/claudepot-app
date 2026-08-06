@@ -4,6 +4,7 @@
 //! `ops.rs` op-progress pipeline. `session_trash_*` is a
 //! read/restore/empty surface over `claudepot_core::trash`.
 
+use crate::dto_error::ErrorDto;
 use crate::ops::{emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOps};
 use claudepot_core::paths;
 use tauri::{AppHandle, State};
@@ -34,18 +35,18 @@ fn slim_opts_from_dto(dto: crate::dto::SlimOptsDto) -> claudepot_core::session_s
 #[tauri::command]
 pub async fn session_prune_plan(
     filter: crate::dto::PruneFilterDto,
-) -> Result<crate::dto::PrunePlanDto, String> {
+) -> Result<crate::dto::PrunePlanDto, ErrorDto> {
     // Wrapped in `spawn_blocking` — `plan_prune` walks every project
     // directory and stats every JSONL synchronously (audit B8
     // commands_session_prune.rs:41).
     tokio::task::spawn_blocking(move || {
         let f = filter_from_dto(filter);
         let plan = claudepot_core::session_prune::plan_prune(&paths::claude_config_dir(), &f)
-            .map_err(|e| format!("plan_prune: {e}"))?;
-        Ok::<_, String>((&plan).into())
+            .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>((&plan).into())
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -53,10 +54,10 @@ pub async fn session_prune_start(
     filter: crate::dto::PruneFilterDto,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let f = filter_from_dto(filter);
     let plan = claudepot_core::session_prune::plan_prune(&paths::claude_config_dir(), &f)
-        .map_err(|e| format!("plan_prune: {e}"))?;
+        .map_err(ErrorDto::from)?;
     let op_id = new_op_id();
     ops.insert(new_running_op(&op_id, OpKind::SessionPrune, "", ""));
     let ops_c = ops.inner().clone();
@@ -73,18 +74,18 @@ pub async fn session_prune_start(
 pub async fn session_slim_plan(
     path: String,
     opts: crate::dto::SlimOptsDto,
-) -> Result<crate::dto::SlimPlanDto, String> {
+) -> Result<crate::dto::SlimPlanDto, ErrorDto> {
     // Wrapped in `spawn_blocking` — full JSONL parse to compute the
     // slim diff (audit B8 commands_session_prune.rs:41 covers prune/
     // slim/trash read paths).
     tokio::task::spawn_blocking(move || {
         let opts = slim_opts_from_dto(opts);
         let plan = claudepot_core::session_slim::plan_slim(std::path::Path::new(&path), &opts)
-            .map_err(|e| format!("plan_slim: {e}"))?;
-        Ok::<_, String>((&plan).into())
+            .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>((&plan).into())
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -93,7 +94,7 @@ pub async fn session_slim_start(
     opts: crate::dto::SlimOptsDto,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let opts = slim_opts_from_dto(opts);
     let path_buf = std::path::PathBuf::from(&path);
     let op_id = new_op_id();
@@ -117,7 +118,7 @@ pub async fn session_slim_start(
 pub async fn session_slim_plan_all(
     filter: crate::dto::PruneFilterDto,
     opts: crate::dto::SlimOptsDto,
-) -> Result<crate::dto::BulkSlimPlanDto, String> {
+) -> Result<crate::dto::BulkSlimPlanDto, ErrorDto> {
     // Wrapped in `spawn_blocking` — bulk plan parses every matching
     // JSONL synchronously.
     tokio::task::spawn_blocking(move || {
@@ -125,11 +126,11 @@ pub async fn session_slim_plan_all(
         let opts = slim_opts_from_dto(opts);
         let config_dir = paths::claude_config_dir();
         let plan = claudepot_core::session_slim::plan_slim_all(&config_dir, &filter, &opts)
-            .map_err(|e| format!("plan_slim_all: {e}"))?;
-        Ok::<_, String>((&plan).into())
+            .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>((&plan).into())
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -138,7 +139,7 @@ pub async fn session_slim_start_all(
     opts: crate::dto::SlimOptsDto,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let filter = filter_from_dto(filter);
     let opts = slim_opts_from_dto(opts);
     let op_id = new_op_id();
@@ -190,7 +191,7 @@ pub async fn session_slim_start_all(
 #[tauri::command]
 pub async fn session_trash_list(
     older_than_secs: Option<u64>,
-) -> Result<crate::dto::TrashListingDto, String> {
+) -> Result<crate::dto::TrashListingDto, ErrorDto> {
     // `spawn_blocking` — directory walk + per-entry stat.
     tokio::task::spawn_blocking(move || {
         let filter = claudepot_core::trash::TrashFilter {
@@ -198,40 +199,39 @@ pub async fn session_trash_list(
             kind: None,
         };
         let listing = claudepot_core::trash::list(&paths::claudepot_data_dir(), filter)
-            .map_err(|e| format!("trash list: {e}"))?;
-        Ok::<_, String>((&listing).into())
+            .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>((&listing).into())
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn session_trash_restore(
     entry_id: String,
     override_cwd: Option<String>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     // `spawn_blocking` — file move + manifest write.
     tokio::task::spawn_blocking(move || {
         let cwd = override_cwd.as_deref().map(std::path::Path::new);
         let restored = claudepot_core::trash::restore(&paths::claudepot_data_dir(), &entry_id, cwd)
-            .map_err(|e| format!("trash restore: {e}"))?;
-        Ok::<_, String>(restored.to_string_lossy().to_string())
+            .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(restored.to_string_lossy().to_string())
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn session_trash_empty(older_than_secs: Option<u64>) -> Result<u64, String> {
+pub async fn session_trash_empty(older_than_secs: Option<u64>) -> Result<u64, ErrorDto> {
     // `spawn_blocking` — directory walk + remove_dir_all.
     tokio::task::spawn_blocking(move || {
         let filter = claudepot_core::trash::TrashFilter {
             older_than: older_than_secs.map(std::time::Duration::from_secs),
             kind: None,
         };
-        claudepot_core::trash::empty(&paths::claudepot_data_dir(), filter)
-            .map_err(|e| format!("trash empty: {e}"))
+        claudepot_core::trash::empty(&paths::claudepot_data_dir(), filter).map_err(ErrorDto::from)
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }

@@ -30,6 +30,24 @@ pub enum MetricsError {
     Io(#[from] std::io::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for MetricsError {
+    fn code(&self) -> &'static str {
+        match self {
+            MetricsError::Sqlite(_) => "session_live_metrics.sqlite",
+            MetricsError::Io(_) => "session_live_metrics.io",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            MetricsError::Sqlite(e) => serde_json::json!({ "detail": e.to_string() }),
+            MetricsError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS metrics_tick (\
     session_id TEXT NOT NULL,\

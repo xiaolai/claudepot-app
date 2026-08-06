@@ -129,6 +129,45 @@ pub enum ValidationError {
     ProjectLayerNotAllowed(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The module segment is `permission_grants`, not `permission` — two
+/// sibling modules (`rotation::rules`, `pricing::history`) also name an
+/// enum `ValidationError`, and a shared `validation.*` namespace would
+/// make the three indistinguishable to a translator.
+impl crate::error_code::ErrorCode for ValidationError {
+    fn code(&self) -> &'static str {
+        match self {
+            ValidationError::UnsupportedSchemaVersion { .. } => {
+                "permission_grants.unsupported_schema_version"
+            }
+            ValidationError::EmptyProjectPath => "permission_grants.empty_project_path",
+            ValidationError::NonPositiveDuration(_) => "permission_grants.non_positive_duration",
+            ValidationError::DuplicateProject(_) => "permission_grants.duplicate_project",
+            ValidationError::ProjectLayerNotAllowed(_) => {
+                "permission_grants.project_layer_not_allowed"
+            }
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ValidationError::UnsupportedSchemaVersion { found, expected } => {
+                serde_json::json!({ "found": found, "expected": expected })
+            }
+            ValidationError::EmptyProjectPath => serde_json::json!({}),
+            // A grant is keyed by project_path, so the `{0}` in all
+            // three messages is that path — never a secret.
+            ValidationError::NonPositiveDuration(path)
+            | ValidationError::DuplicateProject(path)
+            | ValidationError::ProjectLayerNotAllowed(path) => {
+                serde_json::json!({ "project_path": path })
+            }
+        }
+    }
+}
+
 impl GrantsFile {
     /// Validate the whole file. The store refuses to persist an
     /// invalid file, so on-disk grants are always loadable + coherent.

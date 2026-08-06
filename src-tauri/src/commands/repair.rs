@@ -8,6 +8,7 @@
 
 use super::project::{claudepot_home_dirs, JOURNAL_NAG_THRESHOLD_SECS};
 use crate::dto::MoveArgsDto;
+use crate::dto_error::{codes, ErrorDto};
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, MoveResultSummary, OpKind,
     RunningOpInfo, RunningOps,
@@ -77,11 +78,20 @@ impl From<claudepot_core::project_repair::AbandonedCleanupReport> for AbandonedC
     }
 }
 
-fn find_journal(id: &str) -> Result<claudepot_core::project_repair::JournalEntry, String> {
+fn find_journal(id: &str) -> Result<claudepot_core::project_repair::JournalEntry, ErrorDto> {
     let (journals, locks, _snaps) = claudepot_home_dirs();
+    // `repair list failed: ` is gone — the scan fails with a
+    // `ProjectError`, which carries its own code. The `Ok(None)` case
+    // has no core enum behind it, so it mints one here.
     project_repair::find_pending_by_id(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS, id)
-        .map_err(|e| format!("repair list failed: {e}"))?
-        .ok_or_else(|| format!("no journal with id '{id}'"))
+        .map_err(ErrorDto::from)?
+        .ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::REPAIR_JOURNAL_NOT_FOUND,
+                serde_json::json!({ "id": id }),
+                format!("no journal with id '{id}'"),
+            )
+        })
 }
 
 fn spawn_repair_op(
@@ -183,7 +193,7 @@ pub async fn project_move_start(
     args: MoveArgsDto,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let cfg = paths::claude_config_dir();
     let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
     let repair_root = paths::claudepot_repair_dir();
@@ -234,7 +244,7 @@ pub async fn project_move_start(
 pub async fn project_move_status(
     op_id: String,
     ops: State<'_, RunningOps>,
-) -> Result<Option<RunningOpInfo>, String> {
+) -> Result<Option<RunningOpInfo>, ErrorDto> {
     Ok(ops.get(&op_id))
 }
 
@@ -243,7 +253,7 @@ pub async fn repair_resume_start(
     id: String,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let entry = find_journal(&id)?;
     Ok(spawn_repair_op(
         app,
@@ -258,7 +268,7 @@ pub async fn repair_rollback_start(
     id: String,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let entry = find_journal(&id)?;
     Ok(spawn_repair_op(
         app,
@@ -269,24 +279,31 @@ pub async fn repair_rollback_start(
 }
 
 #[tauri::command]
-pub async fn repair_abandon(id: String) -> Result<(), String> {
+pub async fn repair_abandon(id: String) -> Result<(), ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let entry = find_journal(&id)?;
-        project_repair::abandon(&entry).map_err(|e| format!("abandon failed: {e}"))?;
+        project_repair::abandon(&entry).map_err(ErrorDto::from)?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("abandon join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, String> {
+pub async fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let (journals, locks, _snaps) = claudepot_home_dirs();
-        let lock_path = project_repair::resolve_lock_file(&locks, &path)
-            .ok_or_else(|| format!("no lock file found for '{path}'"))?;
-        let broken = project_repair::break_lock_with_audit(&lock_path, &journals)
-            .map_err(|e| format!("break-lock failed: {e}"))?;
+        let lock_path = project_repair::resolve_lock_file(&locks, &path).ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::REPAIR_LOCK_FILE_NOT_FOUND,
+                // The project hint the user typed, raw — never
+                // normalized (rules/paths.md).
+                serde_json::json!({ "path": path }),
+                format!("no lock file found for '{path}'"),
+            )
+        })?;
+        let broken =
+            project_repair::break_lock_with_audit(&lock_path, &journals).map_err(ErrorDto::from)?;
         Ok(BreakLockOutcomeDto {
             prior_pid: broken.prior.pid,
             prior_hostname: broken.prior.hostname,
@@ -295,22 +312,21 @@ pub async fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, Stri
         })
     })
     .await
-    .map_err(|e| format!("break-lock join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Preview every abandoned journal's artifacts (journal + sidecar +
 /// referenced snapshots) without deleting anything. Used to populate
 /// the "Clean recovery artifacts" card in Maintenance.
 #[tauri::command]
-pub async fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, String> {
+pub async fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(|| {
         let (journals, _locks, _snaps) = claudepot_home_dirs();
-        let result = project_repair::preview_abandoned(&journals)
-            .map_err(|e| format!("preview_abandoned failed: {e}"))?;
+        let result = project_repair::preview_abandoned(&journals).map_err(ErrorDto::from)?;
         Ok(result.into())
     })
     .await
-    .map_err(|e| format!("preview_abandoned join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Remove every abandoned journal + sidecar + its referenced
@@ -318,23 +334,22 @@ pub async fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, Str
 /// linked to an abandoned entry; unreferenced or recent snapshots
 /// from successful ops are left alone.
 #[tauri::command]
-pub async fn repair_cleanup_abandoned() -> Result<AbandonedCleanupReportDto, String> {
+pub async fn repair_cleanup_abandoned() -> Result<AbandonedCleanupReportDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(|| {
         let (journals, _locks, _snaps) = claudepot_home_dirs();
-        let result = project_repair::cleanup_abandoned(&journals)
-            .map_err(|e| format!("cleanup_abandoned failed: {e}"))?;
+        let result = project_repair::cleanup_abandoned(&journals).map_err(ErrorDto::from)?;
         Ok(result.into())
     })
     .await
-    .map_err(|e| format!("cleanup_abandoned join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, String> {
+pub async fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let (journals, _locks, snapshots) = claudepot_home_dirs();
         let result = project_repair::gc(&journals, &snapshots, older_than_days, dry_run)
-            .map_err(|e| format!("gc failed: {e}"))?;
+            .map_err(ErrorDto::from)?;
         Ok(GcOutcomeDto {
             removed_journals: result.removed_journals,
             removed_snapshots: result.removed_snapshots,
@@ -347,12 +362,12 @@ pub async fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeD
         })
     })
     .await
-    .map_err(|e| format!("gc join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Snapshot of currently-tracked ops. UI's RunningOpStrip polls this
 /// as a backstop if events drop.
 #[tauri::command]
-pub async fn running_ops_list(ops: State<'_, RunningOps>) -> Result<Vec<RunningOpInfo>, String> {
+pub async fn running_ops_list(ops: State<'_, RunningOps>) -> Result<Vec<RunningOpInfo>, ErrorDto> {
     Ok(ops.list())
 }

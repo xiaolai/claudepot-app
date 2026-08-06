@@ -10,6 +10,7 @@ use crate::dto::{
     ProjectRestoreReportDto, ProjectTrashListingDto, RemoveProjectPreviewBasicDto,
     RemoveProjectPreviewDto, RemoveProjectPreviewExtrasDto, RemoveProjectResultDto,
 };
+use crate::dto_error::{codes, ErrorDto};
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, CleanResultSummary, OpKind,
     RunningOpInfo, RunningOps,
@@ -37,7 +38,7 @@ pub(crate) fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, 
 pub async fn project_list(
     pr_orch: tauri::State<'_, std::sync::Arc<crate::pr_orchestrator::PrOrchestrator>>,
     index: tauri::State<'_, crate::commands::shared_memory::SharedMemoryIndex>,
-) -> Result<Vec<ProjectInfoDto>, String> {
+) -> Result<Vec<ProjectInfoDto>, ErrorDto> {
     // `list_projects` fans out over every project slug, running a
     // recursive size+mtime walk, `classify_reachability` (stat +
     // optional slow-mount checks), and `canonicalize` on each.
@@ -55,8 +56,8 @@ pub async fn project_list(
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
         let cwds = index.as_ref().and_then(|idx| idx.project_cwds().ok());
-        let projects = project::list_projects_with_cwds(&cfg, cwds.as_ref())
-            .map_err(|e| format!("list failed: {e}"))?;
+        let projects =
+            project::list_projects_with_cwds(&cfg, cwds.as_ref()).map_err(ErrorDto::from)?;
         let mut out: Vec<ProjectInfoDto> = projects.iter().map(ProjectInfoDto::from).collect();
         // Synchronous cache-only enrichment — never blocks on
         // subprocesses. Misses (nothing cached, expired, or no PR
@@ -68,14 +69,14 @@ pub async fn project_list(
         Ok(out)
     })
     .await
-    .map_err(|e| format!("list join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
 pub async fn project_show(
     path: String,
     pr_orch: tauri::State<'_, std::sync::Arc<crate::pr_orchestrator::PrOrchestrator>>,
-) -> Result<ProjectDetailDto, String> {
+) -> Result<ProjectDetailDto, ErrorDto> {
     // Same heavy I/O shape as `project_list`, focused on a single slug.
     // Fires on every row click — the freeze the user feels is this
     // command holding a worker for seconds on large projects or
@@ -84,7 +85,7 @@ pub async fn project_show(
         std::sync::Arc::clone(&pr_orch);
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let detail = project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
+        let detail = project::show_project(&cfg, &path).map_err(ErrorDto::from)?;
         let mut dto = ProjectDetailDto::from(&detail);
         // Decorate the header with cached PR info so the badge in
         // ProjectDetail matches the one rendered in the list.
@@ -94,7 +95,7 @@ pub async fn project_show(
         Ok(dto)
     })
     .await
-    .map_err(|e| format!("show join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Sentinel the client checks for and silently discards. Distinguished
@@ -104,13 +105,21 @@ pub async fn project_show(
 /// Lives in the IPC layer on purpose — it's a Tauri-bridge protocol
 /// artifact, not a domain concept. The core service surfaces a typed
 /// `DryRunOutcome::Superseded`; we map it to this string here.
+///
+/// **This string is load-bearing and must stay verbatim.**
+/// `src/sections/projects/RenameProjectModal.tsx` matches it by
+/// *substring* against `extractMessage(e)`. `extractMessage` duck-types
+/// `.message` off any object, so the sentinel survives the move to
+/// `ErrorDto` — but only because `ErrorDto.message` below carries this
+/// constant and nothing else. Prefixing, wrapping, or localizing it
+/// makes the rename preview flash an error on every keystroke.
 const DRY_RUN_SUPERSEDED: &str = "__claudepot_dry_run_superseded__";
 
 #[tauri::command]
 pub async fn project_move_dry_run(
     args: MoveArgsDto,
     svc: State<'_, crate::state::DryRunState>,
-) -> Result<DryRunPlanDto, String> {
+) -> Result<DryRunPlanDto, ErrorDto> {
     let cfg = paths::claude_config_dir();
     let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
     let repair_root = paths::claudepot_repair_dir();
@@ -136,16 +145,18 @@ pub async fn project_move_dry_run(
     // rapid-typing token races don't starve other commands.
     let svc_arc = std::sync::Arc::clone(&svc.0);
     let outcome = tauri::async_runtime::spawn_blocking(move || {
-        svc_arc
-            .dry_run(core_args, token)
-            .map_err(|e| format!("dry-run failed: {e}"))
+        svc_arc.dry_run(core_args, token).map_err(ErrorDto::from)
     })
     .await
-    .map_err(|e| format!("dry-run join: {e}"))??;
+    .map_err(ErrorDto::task_join)??;
 
     match outcome {
         DryRunOutcome::Plan(p) => Ok(DryRunPlanDto::from(&p)),
-        DryRunOutcome::Superseded => Err(DRY_RUN_SUPERSEDED.to_string()),
+        // `message` is the bare sentinel — see `DRY_RUN_SUPERSEDED`.
+        DryRunOutcome::Superseded => Err(ErrorDto::new(
+            codes::PROJECT_DRY_RUN_SUPERSEDED,
+            DRY_RUN_SUPERSEDED,
+        )),
     }
 }
 
@@ -158,7 +169,7 @@ pub async fn project_move_dry_run(
 /// The pending-journals gate is NOT applied here because this is just
 /// a preview — the gate fires on `project_clean_execute`.
 #[tauri::command]
-pub async fn project_clean_preview() -> Result<CleanPreviewDto, String> {
+pub async fn project_clean_preview() -> Result<CleanPreviewDto, ErrorDto> {
     // `clean_preview` calls `clean_orphans(dry_run=true)` internally,
     // which scans every project slug — same heavy path as
     // `project_list`. Runs on the blocking pool.
@@ -175,11 +186,11 @@ pub async fn project_clean_preview() -> Result<CleanPreviewDto, String> {
             Some(locks.as_path()),
             &paths::claudepot_data_dir(),
         )
-        .map_err(|e| format!("clean preview failed: {e}"))?;
+        .map_err(ErrorDto::from)?;
         Ok(CleanPreviewDto::from(&preview))
     })
     .await
-    .map_err(|e| format!("clean preview join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Kick off a clean in the background, returning the op_id the UI
@@ -191,15 +202,19 @@ pub async fn project_clean_preview() -> Result<CleanPreviewDto, String> {
 pub async fn project_clean_start(
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (journals, locks, snaps) = claudepot_home_dirs();
 
     let actionable = project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
-        .map_err(|e| format!("journal check failed: {e}"))?;
+        .map_err(ErrorDto::from)?;
     if !actionable.is_empty() {
-        return Err(format!(
-            "refusing to clean while {} rename journal(s) are pending. Resolve them in the Repair view first.",
-            actionable.len()
+        let count = actionable.len();
+        return Err(ErrorDto::with_params(
+            codes::PROJECT_CLEAN_BLOCKED_BY_JOURNALS,
+            serde_json::json!({ "count": count }),
+            format!(
+                "refusing to clean while {count} rename journal(s) are pending. Resolve them in the Repair view first.",
+            ),
         ));
     }
 
@@ -263,12 +278,12 @@ pub async fn project_clean_start(
 pub async fn project_clean_status(
     op_id: String,
     ops: State<'_, RunningOps>,
-) -> Result<Option<RunningOpInfo>, String> {
+) -> Result<Option<RunningOpInfo>, ErrorDto> {
     Ok(ops.get(&op_id))
 }
 
 #[tauri::command]
-pub async fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
+pub async fn repair_list() -> Result<Vec<JournalEntryDto>, ErrorDto> {
     // Walks the journal dir + reads each journal header. Typical N is
     // tiny, but the PendingJournalsBanner polls on refresh and the
     // Maintenance view fans it out with other ops.
@@ -276,27 +291,27 @@ pub async fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
         let (journals, locks, _snaps) = claudepot_home_dirs();
         let entries =
             project_repair::list_pending_with_status(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
-                .map_err(|e| format!("repair list failed: {e}"))?;
+                .map_err(ErrorDto::from)?;
         Ok(entries.iter().map(JournalEntryDto::from).collect())
     })
     .await
-    .map_err(|e| format!("repair list join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Cheap count for the PendingJournalsBanner. Only counts *actionable*
 /// entries — excludes the `abandoned` class so the banner doesn't
 /// perpetually nag about a user-dismissed entry.
 #[tauri::command]
-pub async fn repair_pending_count() -> Result<usize, String> {
+pub async fn repair_pending_count() -> Result<usize, ErrorDto> {
     tauri::async_runtime::spawn_blocking(|| {
         let (journals, locks, _snaps) = claudepot_home_dirs();
         let entries =
             project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
-                .map_err(|e| format!("repair count failed: {e}"))?;
+                .map_err(ErrorDto::from)?;
         Ok(entries.len())
     })
     .await
-    .map_err(|e| format!("repair count join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Status-aware banner input: counts per journal class so the UI can
@@ -305,13 +320,13 @@ pub async fn repair_pending_count() -> Result<usize, String> {
 /// banner can suppress itself for them (RunningOpStrip already shows
 /// the op live).
 #[tauri::command]
-pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummaryDto, String> {
+pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummaryDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(|| {
         use claudepot_core::project_journal::JournalStatus;
         let (journals, locks, _snaps) = claudepot_home_dirs();
         let entries =
             project_repair::list_pending_with_status(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
-                .map_err(|e| format!("repair summary failed: {e}"))?;
+                .map_err(ErrorDto::from)?;
 
         let mut pending = 0usize;
         let mut stale = 0usize;
@@ -331,7 +346,7 @@ pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummar
         })
     })
     .await
-    .map_err(|e| format!("repair summary join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +382,7 @@ fn remove_paths() -> (
 #[tauri::command]
 pub async fn project_remove_preview_basic(
     target: String,
-) -> Result<RemoveProjectPreviewBasicDto, String> {
+) -> Result<RemoveProjectPreviewBasicDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
         let args = RemoveArgs {
@@ -379,12 +394,11 @@ pub async fn project_remove_preview_basic(
             data_dir: &data_dir,
             target: &target,
         };
-        let basic = remove_project_preview_basic(&args)
-            .map_err(|e| format!("preview basic failed: {e}"))?;
+        let basic = remove_project_preview_basic(&args).map_err(ErrorDto::from)?;
         Ok(RemoveProjectPreviewBasicDto::from(&basic))
     })
     .await
-    .map_err(|e| format!("preview basic join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Slow preview — runs the lsof-backed live-session probe and parses
@@ -395,7 +409,7 @@ pub async fn project_remove_preview_basic(
 #[tauri::command]
 pub async fn project_remove_preview_extras(
     target: String,
-) -> Result<RemoveProjectPreviewExtrasDto, String> {
+) -> Result<RemoveProjectPreviewExtrasDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
         let args = RemoveArgs {
@@ -407,12 +421,11 @@ pub async fn project_remove_preview_extras(
             data_dir: &data_dir,
             target: &target,
         };
-        let extras = remove_project_preview_extras(&args)
-            .map_err(|e| format!("preview extras failed: {e}"))?;
+        let extras = remove_project_preview_extras(&args).map_err(ErrorDto::from)?;
         Ok(RemoveProjectPreviewExtrasDto::from(&extras))
     })
     .await
-    .map_err(|e| format!("preview extras join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Read-only preview the GUI's RemoveProjectModal renders. Live-session
@@ -420,7 +433,7 @@ pub async fn project_remove_preview_extras(
 /// the reason and disable the confirm path itself, per the design rule
 /// ("disabled buttons state a reason inline").
 #[tauri::command]
-pub async fn project_remove_preview(target: String) -> Result<RemoveProjectPreviewDto, String> {
+pub async fn project_remove_preview(target: String) -> Result<RemoveProjectPreviewDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
         let args = RemoveArgs {
@@ -432,11 +445,11 @@ pub async fn project_remove_preview(target: String) -> Result<RemoveProjectPrevi
             data_dir: &data_dir,
             target: &target,
         };
-        let preview = remove_project_preview(&args).map_err(|e| format!("preview failed: {e}"))?;
+        let preview = remove_project_preview(&args).map_err(ErrorDto::from)?;
         Ok(RemoveProjectPreviewDto::from(&preview))
     })
     .await
-    .map_err(|e| format!("preview join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Execute the trash. Synchronous-from-the-frontend's-perspective —
@@ -444,16 +457,20 @@ pub async fn project_remove_preview(target: String) -> Result<RemoveProjectPrevi
 /// op-progress channel. The pending-journals gate fires here, mirroring
 /// the CLI gate.
 #[tauri::command]
-pub async fn project_remove_execute(target: String) -> Result<RemoveProjectResultDto, String> {
+pub async fn project_remove_execute(target: String) -> Result<RemoveProjectResultDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let (journals, locks_dir, _snaps) = claudepot_home_dirs();
         let actionable =
             project_repair::list_actionable(&journals, &locks_dir, JOURNAL_NAG_THRESHOLD_SECS)
-                .map_err(|e| format!("journal check failed: {e}"))?;
+                .map_err(ErrorDto::from)?;
         if !actionable.is_empty() {
-            return Err(format!(
-                "refusing to remove while {} rename journal(s) are pending. Resolve them in the Repair view first.",
-                actionable.len()
+            let count = actionable.len();
+            return Err(ErrorDto::with_params(
+                codes::PROJECT_REMOVE_BLOCKED_BY_JOURNALS,
+                serde_json::json!({ "count": count }),
+                format!(
+                    "refusing to remove while {count} rename journal(s) are pending. Resolve them in the Repair view first.",
+                ),
             ));
         }
 
@@ -467,28 +484,27 @@ pub async fn project_remove_execute(target: String) -> Result<RemoveProjectResul
             data_dir: &data_dir,
             target: &target,
         };
-        let result = core_remove_project(&args)
-            .map_err(|e| format!("remove failed: {e}"))?;
+        let result = core_remove_project(&args).map_err(ErrorDto::from)?;
         Ok(RemoveProjectResultDto::from(&result))
     })
     .await
-    .map_err(|e| format!("remove join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn project_trash_list() -> Result<ProjectTrashListingDto, String> {
+pub async fn project_trash_list() -> Result<ProjectTrashListingDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(|| {
         let data_dir = paths::claudepot_data_dir();
         let listing = project_trash::list(&data_dir, project_trash::ProjectTrashFilter::default())
-            .map_err(|e| format!("trash list failed: {e}"))?;
+            .map_err(ErrorDto::from)?;
         Ok(ProjectTrashListingDto::from(&listing))
     })
     .await
-    .map_err(|e| format!("trash list join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn project_trash_restore(entry_id: String) -> Result<ProjectRestoreReportDto, String> {
+pub async fn project_trash_restore(entry_id: String) -> Result<ProjectRestoreReportDto, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let (config_dir, claude_json, history, _snaps, _locks, data_dir) = remove_paths();
         let report = project_trash::restore(
@@ -498,23 +514,58 @@ pub async fn project_trash_restore(entry_id: String) -> Result<ProjectRestoreRep
             Some(&claude_json),
             Some(&history),
         )
-        .map_err(|e| format!("restore failed: {e}"))?;
+        .map_err(ErrorDto::from)?;
         Ok(ProjectRestoreReportDto::from(&report))
     })
     .await
-    .map_err(|e| format!("restore join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
-pub async fn project_trash_empty(older_than_days: Option<u64>) -> Result<u64, String> {
+pub async fn project_trash_empty(older_than_days: Option<u64>) -> Result<u64, ErrorDto> {
     tauri::async_runtime::spawn_blocking(move || {
         let data_dir = paths::claudepot_data_dir();
         let filter = project_trash::ProjectTrashFilter {
             older_than: older_than_days
                 .map(|d| std::time::Duration::from_secs(d.saturating_mul(86_400))),
         };
-        project_trash::empty(&data_dir, filter).map_err(|e| format!("empty failed: {e}"))
+        project_trash::empty(&data_dir, filter).map_err(ErrorDto::from)
     })
     .await
-    .map_err(|e| format!("empty join: {e}"))?
+    .map_err(ErrorDto::task_join)?
+}
+
+#[cfg(test)]
+mod dry_run_superseded_tests {
+    //! The sentinel is a wire contract with
+    //! `src/sections/projects/RenameProjectModal.tsx`, which matches it
+    //! by substring against `extractMessage(e)`. `extractMessage`
+    //! duck-types `.message`, so the contract reduces to one equality:
+    //! `ErrorDto.message` is the sentinel and nothing else.
+    //!
+    //! Without this test the failure is silent and only visible by
+    //! typing in the rename box: a prefixed or localized `message`
+    //! still renders, it just makes the preview pane flash an error on
+    //! every keystroke instead of quietly waiting for the newer call.
+
+    use super::*;
+
+    fn superseded() -> ErrorDto {
+        ErrorDto::new(codes::PROJECT_DRY_RUN_SUPERSEDED, DRY_RUN_SUPERSEDED)
+    }
+
+    #[test]
+    fn message_is_the_bare_sentinel_the_renderer_matches() {
+        // Literal, not the constant: renaming the constant must not be
+        // able to silently move the wire string with it.
+        assert_eq!(superseded().message, "__claudepot_dry_run_superseded__");
+    }
+
+    #[test]
+    fn serialized_message_survives_extract_message() {
+        // `extractMessage` reads exactly this JSON key.
+        let json = serde_json::to_value(superseded()).expect("serializes");
+        assert_eq!(json["message"], "__claudepot_dry_run_superseded__");
+        assert_eq!(json["code"], "project.dry_run_superseded");
+    }
 }

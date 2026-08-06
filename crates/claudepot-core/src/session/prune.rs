@@ -26,6 +26,31 @@ pub enum PruneError {
     Trash(#[from] TrashError),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The two wrapping variants keep codes of their own rather than
+/// delegating to the inner enum: both prefix the English text, so the
+/// localized sentence has framing to carry that the inner code knows
+/// nothing about.
+impl crate::error_code::ErrorCode for PruneError {
+    fn code(&self) -> &'static str {
+        match self {
+            PruneError::EmptyFilter => "session_prune.empty_filter",
+            PruneError::List(_) => "session_prune.list",
+            PruneError::Trash(_) => "session_prune.trash",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            PruneError::EmptyFilter => serde_json::json!({}),
+            PruneError::List(e) => serde_json::json!({ "detail": e.to_string() }),
+            PruneError::Trash(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 /// Filter clauses AND-composed. Every non-empty field narrows.
 #[derive(Debug, Clone, Default)]
 pub struct PruneFilter {

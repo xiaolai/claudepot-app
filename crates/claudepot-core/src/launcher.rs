@@ -39,6 +39,41 @@ pub enum LauncherError {
     SpawnFailed(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for LauncherError {
+    fn code(&self) -> &'static str {
+        match self {
+            LauncherError::NoStoredCredentials(_) => "launcher.no_stored_credentials",
+            LauncherError::CorruptBlob(_) => "launcher.corrupt_blob",
+            LauncherError::CredentialRead(_) => "launcher.credential_read",
+            LauncherError::RefreshFailed(_) => "launcher.refresh_failed",
+            LauncherError::SaveFailed(_) => "launcher.save_failed",
+            LauncherError::NoCommand => "launcher.no_command",
+            LauncherError::SpawnFailed(_) => "launcher.spawn_failed",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            LauncherError::NoStoredCredentials(uuid) => {
+                serde_json::json!({ "uuid": uuid.to_string() })
+            }
+            // Every `detail` here is a serde/keychain/HTTP diagnostic —
+            // the credential blob itself is never formatted into one.
+            // `rules/rust-conventions.md`'s token rule applies: if a
+            // constructor ever starts interpolating a token, this arm
+            // has to stop carrying it.
+            LauncherError::CorruptBlob(detail)
+            | LauncherError::CredentialRead(detail)
+            | LauncherError::RefreshFailed(detail)
+            | LauncherError::SaveFailed(detail)
+            | LauncherError::SpawnFailed(detail) => serde_json::json!({ "detail": detail }),
+            LauncherError::NoCommand => serde_json::json!({}),
+        }
+    }
+}
+
 /// Get a fresh access token for an account, refreshing if expired.
 ///
 /// `expected_email` is the account's registered identity; it guards the

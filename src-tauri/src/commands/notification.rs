@@ -26,6 +26,9 @@ use claudepot_core::notification_log::{
     NotificationSource, SortOrder,
 };
 use claudepot_core::notifications::{Category, CategoryMeta, Surface};
+use serde_json::json;
+
+use crate::dto_error::{codes, ErrorDto};
 
 /// Per-field byte caps for notification log entries. The ring
 /// buffer holds 500 entries; without per-field caps a renderer bug
@@ -89,14 +92,14 @@ impl NotificationLogState {
 /// known terminal/editor table).
 ///
 /// Best-effort — the renderer falls back to deep-linking the
-/// transcript inside Claudepot when this returns `false`. Errors
-/// are flattened to `String` per the codebase convention; the
-/// renderer ignores them and falls back as well.
+/// transcript inside Claudepot when this returns `false`. Rejections
+/// carry an `ErrorDto` (i18n plan §2.5); the renderer ignores them
+/// and falls back as well.
 #[tauri::command]
 pub async fn notification_activate_host_for_session(
     session_id: String,
     state: tauri::State<'_, crate::state::LiveSessionState>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     use claudepot_core::host_activate::{activate_bundle_id, find_host_bundle_id, HostLookup};
 
     // Look up the live session by id. Snapshot is cheap (no IO);
@@ -117,11 +120,17 @@ pub async fn notification_activate_host_for_session(
     // is paid once per click.
     let lookup = tokio::task::spawn_blocking(move || find_host_bundle_id(pid))
         .await
-        .map_err(|e| format!("host lookup join: {e}"))?;
+        .map_err(ErrorDto::task_join)?;
 
     match lookup {
         HostLookup::Found { bundle_id, .. } => {
-            activate_bundle_id(bundle_id).map_err(|e| format!("open -b {bundle_id}: {e}"))?;
+            activate_bundle_id(bundle_id).map_err(|e| {
+                ErrorDto::with_params(
+                    codes::NOTIFICATION_HOST_ACTIVATE_FAILED,
+                    json!({ "bundle_id": bundle_id, "detail": e.to_string() }),
+                    format!("open -b {bundle_id}: {e}"),
+                )
+            })?;
             Ok(true)
         }
         HostLookup::NotFound | HostLookup::PidGone => Ok(false),
@@ -176,17 +185,23 @@ pub async fn notification_log_append(
     args: NotificationLogAppendArgs,
     state: tauri::State<'_, NotificationLogState>,
     app: tauri::AppHandle,
-) -> Result<u64, String> {
+) -> Result<u64, ErrorDto> {
     let log = std::sync::Arc::clone(&state.log);
     let title = cap_string(args.title, MAX_TITLE_LEN);
     let body = cap_string(args.body, MAX_BODY_LEN);
     let target = cap_target(args.target);
     let id = tokio::task::spawn_blocking(move || {
         log.append(args.source, args.kind, title, body, target)
-            .map_err(|e| format!("notification_log append failed: {e}"))
+            .map_err(|e| {
+                ErrorDto::with_params(
+                    codes::NOTIFICATION_LOG_APPEND_FAILED,
+                    json!({ "detail": e.to_string() }),
+                    format!("notification_log append failed: {e}"),
+                )
+            })
     })
     .await
-    .map_err(|e| format!("notification_log_append join: {e}"))??;
+    .map_err(ErrorDto::task_join)??;
     // Refresh the tray badge so a fresh entry lights up the dot.
     crate::tray::refresh_alert_chrome(&app);
     Ok(id)
@@ -201,13 +216,13 @@ pub async fn notification_log_list(
     order: Option<NotificationLogOrderArg>,
     limit: Option<usize>,
     state: tauri::State<'_, NotificationLogState>,
-) -> Result<Vec<NotificationEntry>, String> {
+) -> Result<Vec<NotificationEntry>, ErrorDto> {
     let log = std::sync::Arc::clone(&state.log);
     let filter = filter.unwrap_or_default();
     let order: SortOrder = order.unwrap_or_default().into();
-    tokio::task::spawn_blocking(move || Ok(log.list(&filter, order, limit)))
+    tokio::task::spawn_blocking(move || log.list(&filter, order, limit))
         .await
-        .map_err(|e| format!("notification_log_list join: {e}"))?
+        .map_err(ErrorDto::task_join)
 }
 
 /// Mark every current entry as seen. Sets the bell badge count to 0
@@ -216,14 +231,19 @@ pub async fn notification_log_list(
 pub async fn notification_log_mark_all_read(
     state: tauri::State<'_, NotificationLogState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let log = std::sync::Arc::clone(&state.log);
     tokio::task::spawn_blocking(move || {
-        log.mark_all_read()
-            .map_err(|e| format!("notification_log mark_all_read failed: {e}"))
+        log.mark_all_read().map_err(|e| {
+            ErrorDto::with_params(
+                codes::NOTIFICATION_LOG_MARK_ALL_READ_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("notification_log mark_all_read failed: {e}"),
+            )
+        })
     })
     .await
-    .map_err(|e| format!("notification_log_mark_all_read join: {e}"))??;
+    .map_err(ErrorDto::task_join)??;
     crate::tray::refresh_alert_chrome(&app);
     Ok(())
 }
@@ -234,14 +254,19 @@ pub async fn notification_log_mark_all_read(
 pub async fn notification_log_clear(
     state: tauri::State<'_, NotificationLogState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let log = std::sync::Arc::clone(&state.log);
     tokio::task::spawn_blocking(move || {
-        log.clear()
-            .map_err(|e| format!("notification_log clear failed: {e}"))
+        log.clear().map_err(|e| {
+            ErrorDto::with_params(
+                codes::NOTIFICATION_LOG_CLEAR_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("notification_log clear failed: {e}"),
+            )
+        })
     })
     .await
-    .map_err(|e| format!("notification_log_clear join: {e}"))??;
+    .map_err(ErrorDto::task_join)??;
     crate::tray::refresh_alert_chrome(&app);
     Ok(())
 }
@@ -251,11 +276,11 @@ pub async fn notification_log_clear(
 #[tauri::command]
 pub async fn notification_log_unread_count(
     state: tauri::State<'_, NotificationLogState>,
-) -> Result<u32, String> {
+) -> Result<u32, ErrorDto> {
     let log = std::sync::Arc::clone(&state.log);
-    tokio::task::spawn_blocking(move || Ok(log.unread_count()))
+    tokio::task::spawn_blocking(move || log.unread_count())
         .await
-        .map_err(|e| format!("notification_log_unread_count join: {e}"))?
+        .map_err(ErrorDto::task_join)
 }
 
 // ─── Phase 1: routed-emit surface ──────────────────────────────────
@@ -301,7 +326,7 @@ pub async fn notification_log_append_routed(
     args: NotificationLogAppendRoutedArgs,
     state: tauri::State<'_, NotificationLogState>,
     app: tauri::AppHandle,
-) -> Result<u64, String> {
+) -> Result<u64, ErrorDto> {
     let log = std::sync::Arc::clone(&state.log);
     // Derive priority server-side (audit-fix High #7) so a renderer
     // drift can never persist an impossible row. The Rust enum's
@@ -370,10 +395,16 @@ pub async fn notification_log_append_routed(
             surfaces_requested,
             args.surfaces_delivered,
         )
-        .map_err(|e| format!("notification_log append_routed failed: {e}"))
+        .map_err(|e| {
+            ErrorDto::with_params(
+                codes::NOTIFICATION_LOG_APPEND_ROUTED_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("notification_log append_routed failed: {e}"),
+            )
+        })
     })
     .await
-    .map_err(|e| format!("notification_log_append_routed join: {e}"))??;
+    .map_err(ErrorDto::task_join)??;
     crate::tray::refresh_alert_chrome(&app);
     Ok(id)
 }
@@ -387,20 +418,25 @@ pub async fn notification_log_mark_delivered(
     id: u64,
     surface: Surface,
     state: tauri::State<'_, NotificationLogState>,
-) -> Result<bool, String> {
+) -> Result<bool, ErrorDto> {
     let log = std::sync::Arc::clone(&state.log);
     tokio::task::spawn_blocking(move || {
-        log.mark_delivered(id, surface)
-            .map_err(|e| format!("notification_log mark_delivered failed: {e}"))
+        log.mark_delivered(id, surface).map_err(|e| {
+            ErrorDto::with_params(
+                codes::NOTIFICATION_LOG_MARK_DELIVERED_FAILED,
+                json!({ "detail": e.to_string() }),
+                format!("notification_log mark_delivered failed: {e}"),
+            )
+        })
     })
     .await
-    .map_err(|e| format!("notification_log_mark_delivered join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Return the full category metadata table for the Settings pane.
 /// Source-of-truth lives in `claudepot_core::notifications::Category::display_meta`;
 /// the renderer reads this at mount and renders one row per entry.
 #[tauri::command]
-pub async fn notification_categories_metadata() -> Result<Vec<CategoryMeta>, String> {
+pub async fn notification_categories_metadata() -> Result<Vec<CategoryMeta>, ErrorDto> {
     Ok(Category::all().iter().map(|c| c.display_meta()).collect())
 }

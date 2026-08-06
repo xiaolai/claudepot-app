@@ -7,6 +7,7 @@
 //! `rules/architecture.md`, NO business logic here — normalization,
 //! the empty-list rule, and the enforce-is-inert rule all live in core.
 
+use crate::dto_error::ErrorDto;
 use claudepot_core::available_models::{
     resolve_available_models, set_available_models, AvailableModelsState, ENFORCE_MIN_CC_VERSION,
 };
@@ -41,7 +42,7 @@ fn dto(state: AvailableModelsState) -> AvailableModelsDto {
 
 /// `available_models_state` — read the current allowlist.
 #[tauri::command]
-pub async fn available_models_state() -> Result<AvailableModelsDto, String> {
+pub async fn available_models_state() -> Result<AvailableModelsDto, ErrorDto> {
     Ok(dto(resolve_available_models()))
 }
 
@@ -53,7 +54,10 @@ pub async fn available_models_state() -> Result<AvailableModelsDto, String> {
 pub async fn available_models_set(
     entries: Vec<String>,
     enforce: bool,
-) -> Result<AvailableModelsDto, String> {
-    set_available_models(&entries, enforce).map_err(|e| e.to_string())?;
+) -> Result<AvailableModelsDto, ErrorDto> {
+    // `SetAllowlistError` is `#[error(transparent)]` over both halves,
+    // so the lifted code is the normalization rejection's or the
+    // settings write's — never a wrapper identity.
+    set_available_models(&entries, enforce)?;
     Ok(dto(resolve_available_models()))
 }

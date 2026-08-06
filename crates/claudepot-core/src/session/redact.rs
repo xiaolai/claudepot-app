@@ -73,6 +73,46 @@ pub enum RedactError {
     NoPatterns,
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `NoPatterns` names `--pattern` / `--secrets` because the CLI prints
+/// that text verbatim; the GUI has no flags, which is why the code
+/// carries no params and a catalog sentence can drop them entirely.
+impl crate::error_code::ErrorCode for RedactError {
+    fn code(&self) -> &'static str {
+        match self {
+            RedactError::Io { .. } => "session_redact.io",
+            RedactError::NotFound(_) => "session_redact.not_found",
+            RedactError::LiveWriteDetected => "session_redact.live_write_detected",
+            RedactError::Trash(_) => "session_redact.trash",
+            RedactError::Json { .. } => "session_redact.json",
+            RedactError::NoPatterns => "session_redact.no_patterns",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            RedactError::Io { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            RedactError::NotFound(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            RedactError::LiveWriteDetected => serde_json::json!({}),
+            RedactError::Trash(e) => serde_json::json!({ "detail": e.to_string() }),
+            // `source` is serde's own parse complaint about a transcript
+            // line; the line's *content* is never included.
+            RedactError::Json { line, source } => serde_json::json!({
+                "line": line,
+                "detail": source.to_string(),
+            }),
+            RedactError::NoPatterns => serde_json::json!({}),
+        }
+    }
+}
+
 impl RedactError {
     fn io(path: impl Into<PathBuf>, source: io::Error) -> Self {
         Self::Io {

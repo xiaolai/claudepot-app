@@ -59,6 +59,26 @@ pub enum LiveActivityError {
     NotStarted,
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for LiveActivityError {
+    fn code(&self) -> &'static str {
+        match self {
+            LiveActivityError::AlreadySubscribed(_) => "live_activity.already_subscribed",
+            LiveActivityError::NotStarted => "live_activity.not_started",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            LiveActivityError::AlreadySubscribed(session_id) => {
+                serde_json::json!({ "session_id": session_id })
+            }
+            LiveActivityError::NotStarted => serde_json::json!({}),
+        }
+    }
+}
+
 /// The service. Owns the runtime, the listener list, and the bridge
 /// task handles. Cheap to clone via `Arc`. Build with `new` for
 /// production, `with_runtime` for tests.

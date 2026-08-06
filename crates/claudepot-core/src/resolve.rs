@@ -16,6 +16,34 @@ pub enum ResolveError {
     StoreError(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for ResolveError {
+    fn code(&self) -> &'static str {
+        match self {
+            ResolveError::NoMatch(_) => "resolve.no_match",
+            ResolveError::Ambiguous { .. } => "resolve.ambiguous",
+            ResolveError::StoreError(_) => "resolve.store_error",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // What the user typed, and the emails it matched. Both are
+            // account-identity data the UI already renders.
+            ResolveError::NoMatch(input) => serde_json::json!({ "input": input }),
+            // `candidates` stays an array, not the English message's
+            // ", "-joined string: a localized sentence picks its own
+            // separator (zh uses "、"), which it cannot do from a
+            // pre-joined value.
+            ResolveError::Ambiguous { input, candidates } => {
+                serde_json::json!({ "input": input, "candidates": candidates })
+            }
+            ResolveError::StoreError(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 /// Resolve a user-provided string to a registered email.
 ///
 /// Resolution: find all registered emails where input is a prefix.

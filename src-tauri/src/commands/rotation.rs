@@ -15,6 +15,7 @@ use claudepot_core::rotation::{
 use claudepot_core::services::usage_snapshot;
 use tauri::{AppHandle, State};
 
+use crate::dto_error::{codes, ErrorDto};
 use crate::dto_rotation::{
     PendingSwapDto, RotationAuditEntryDto, RotationDryRunDto, RotationRuleDto, RotationRulesFileDto,
 };
@@ -25,31 +26,40 @@ use crate::rotation_orchestrator::RotationOrchestrator;
 /// it instead of silently presenting an empty rule list that a save
 /// would clobber over the real file.
 #[tauri::command]
-pub async fn rotation_rules_get() -> Result<RotationRulesFileDto, String> {
+pub async fn rotation_rules_get() -> Result<RotationRulesFileDto, ErrorDto> {
+    // `rotation_store::load` returns a bare `io::Error`, so the code is
+    // minted here. The `rotation_rules_get: ` prefix named the command,
+    // not the user's intent — the UI owns that framing now.
     let file = tauri::async_runtime::spawn_blocking(rotation_store::load)
         .await
-        .map_err(|e| format!("rotation_rules_get: join failed: {e}"))?
-        .map_err(|e| format!("rotation_rules_get: {e}"))?;
+        .map_err(ErrorDto::task_join)?
+        .map_err(|e| ErrorDto::detail(codes::ROTATION_RULES_LOAD_FAILED, e))?;
     Ok(file.into())
 }
 
 /// Persist rules to disk. Validates before writing — invalid input is
 /// rejected with a structured error.
 #[tauri::command]
-pub async fn rotation_rules_set(file: RotationRulesFileDto) -> Result<(), String> {
-    let core: RotationRulesFile = RotationRulesFile::try_from(file)?;
+pub async fn rotation_rules_set(file: RotationRulesFileDto) -> Result<(), ErrorDto> {
+    // The DTO boundary's `String` is the only place that knows which
+    // field failed to convert, so it is carried verbatim as `detail`
+    // rather than collapsed into the core validation codes.
+    let core: RotationRulesFile = RotationRulesFile::try_from(file)
+        .map_err(|detail| ErrorDto::detail(codes::ROTATION_BAD_RULE_DTO, detail))?;
     tauri::async_runtime::spawn_blocking(move || rotation_store::save(&core))
         .await
-        .map_err(|e| format!("rotation_rules_set: join failed: {e}"))?
-        .map_err(|e| e.to_string())
+        .map_err(ErrorDto::task_join)?
+        .map_err(ErrorDto::from)
 }
 
 /// Validate a single rule without persisting. Used by the form to
-/// surface errors inline as the user types.
+/// surface errors inline as the user types — so every
+/// `rotation_rules.*` code lands in that inline slot, not a toast.
 #[tauri::command]
-pub async fn rotation_rule_validate(rule: RotationRuleDto) -> Result<(), String> {
-    let core = claudepot_core::rotation::rules::RotationRule::try_from(rule)?;
-    core.validate().map_err(|e| e.to_string())
+pub async fn rotation_rule_validate(rule: RotationRuleDto) -> Result<(), ErrorDto> {
+    let core = claudepot_core::rotation::rules::RotationRule::try_from(rule)
+        .map_err(|detail| ErrorDto::detail(codes::ROTATION_BAD_RULE_DTO, detail))?;
+    core.validate().map_err(ErrorDto::from)
 }
 
 /// Dry-run a proposed rule against the current usage snapshot. v1
@@ -63,9 +73,10 @@ pub async fn rotation_rule_validate(rule: RotationRuleDto) -> Result<(), String>
 pub async fn rotation_dry_run(
     orchestrator: State<'_, Arc<RotationOrchestrator>>,
     rule: RotationRuleDto,
-) -> Result<RotationDryRunDto, String> {
-    let core_rule = claudepot_core::rotation::rules::RotationRule::try_from(rule)?;
-    core_rule.validate().map_err(|e| e.to_string())?;
+) -> Result<RotationDryRunDto, ErrorDto> {
+    let core_rule = claudepot_core::rotation::rules::RotationRule::try_from(rule)
+        .map_err(|detail| ErrorDto::detail(codes::ROTATION_BAD_RULE_DTO, detail))?;
+    core_rule.validate().map_err(ErrorDto::from)?;
 
     // Read the current snapshot off disk. We don't trigger a fresh
     // fetch — the dry-run is "what would happen on the next tick"
@@ -77,7 +88,7 @@ pub async fn rotation_dry_run(
         let p = snapshot_path.clone();
         tokio::task::spawn_blocking(move || std::fs::read(p))
             .await
-            .map_err(|e| format!("blocking task failed: {e}"))?
+            .map_err(ErrorDto::task_join)?
     };
     let snapshot_bytes = match read_result {
         Ok(b) => b,
@@ -93,7 +104,13 @@ pub async fn rotation_dry_run(
     };
     let snapshot: usage_snapshot::UsageSnapshot = match serde_json::from_slice(&snapshot_bytes) {
         Ok(s) => s,
-        Err(e) => return Err(format!("snapshot parse failed: {e}")),
+        Err(e) => {
+            return Err(ErrorDto::with_params(
+                codes::ROTATION_SNAPSHOT_PARSE_FAILED,
+                serde_json::json!({ "detail": e.to_string() }),
+                format!("snapshot parse failed: {e}"),
+            ))
+        }
     };
 
     // Resolve active CLI uuid from the snapshot itself.
@@ -186,7 +203,7 @@ fn no_candidate_user_text(r: &NoCandidateReason) -> &'static str {
 pub async fn rotation_audit_get(
     orchestrator: State<'_, Arc<RotationOrchestrator>>,
     limit: Option<usize>,
-) -> Result<Vec<RotationAuditEntryDto>, String> {
+) -> Result<Vec<RotationAuditEntryDto>, ErrorDto> {
     let entries = orchestrator.list_audit(limit.unwrap_or(50));
     Ok(entries.into_iter().map(Into::into).collect())
 }
@@ -197,7 +214,7 @@ pub async fn rotation_audit_get(
 #[tauri::command]
 pub async fn rotation_pending_list(
     orchestrator: State<'_, Arc<RotationOrchestrator>>,
-) -> Result<Vec<PendingSwapDto>, String> {
+) -> Result<Vec<PendingSwapDto>, ErrorDto> {
     Ok(orchestrator
         .pending_list()
         .into_iter()
@@ -227,12 +244,18 @@ pub async fn rotation_apply_pending(
     app: AppHandle,
     orchestrator: State<'_, Arc<RotationOrchestrator>>,
     swap_id: String,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let queued = match orchestrator.begin_apply(&swap_id) {
         Some(q) => q,
         None => return Ok(()),
     };
-    orchestrator.apply_confirmed(&app, queued).await
+    // `apply_confirmed` composes its own English and writes the same
+    // text into the audit log as `RotationOutcome::Failed`, so it is
+    // carried verbatim rather than re-derived here.
+    orchestrator
+        .apply_confirmed(&app, queued)
+        .await
+        .map_err(|detail| ErrorDto::detail(codes::ROTATION_APPLY_FAILED, detail))
 }
 
 /// Drop a pending suggestion without acting on it.
@@ -240,7 +263,7 @@ pub async fn rotation_apply_pending(
 pub async fn rotation_dismiss_pending(
     orchestrator: State<'_, Arc<RotationOrchestrator>>,
     swap_id: String,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     orchestrator.take_pending(&swap_id);
     Ok(())
 }

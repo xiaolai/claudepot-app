@@ -144,6 +144,30 @@ pub enum RotationBreakerError {
     UnsupportedSchemaVersion { found: u32, expected: u32 },
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for RotationBreakerError {
+    fn code(&self) -> &'static str {
+        match self {
+            RotationBreakerError::Io(_) => "rotation_breaker.io",
+            RotationBreakerError::Serde(_) => "rotation_breaker.serde",
+            RotationBreakerError::UnsupportedSchemaVersion { .. } => {
+                "rotation_breaker.unsupported_schema_version"
+            }
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            RotationBreakerError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            RotationBreakerError::Serde(e) => serde_json::json!({ "detail": e.to_string() }),
+            RotationBreakerError::UnsupportedSchemaVersion { found, expected } => {
+                serde_json::json!({ "found": found, "expected": expected })
+            }
+        }
+    }
+}
+
 /// Store name used in log messages.
 const STORE: &str = "rotation_breaker_store";
 

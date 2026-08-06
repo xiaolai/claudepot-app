@@ -71,6 +71,61 @@ pub enum LifecycleError {
     InvalidTrashId(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `#[non_exhaustive]` blocks a wildcard-free match for *downstream*
+/// crates only; inside the defining crate the match must still be
+/// exhaustive, which is exactly the compile-time gate this trait wants.
+///
+/// `Refused` delegates: its `#[error("{0}")]` makes `Display` the inner
+/// reason verbatim, so minting a wrapper code would promise a sentence
+/// this variant never renders.
+impl crate::error_code::ErrorCode for LifecycleError {
+    fn code(&self) -> &'static str {
+        match self {
+            LifecycleError::Refused(reason) => crate::error_code::ErrorCode::code(reason),
+            LifecycleError::SourceMissing(_) => "artifact_lifecycle.source_missing",
+            LifecycleError::Conflict(_) => "artifact_lifecycle.conflict",
+            LifecycleError::ScopeRootMissing(_) => "artifact_lifecycle.scope_root_missing",
+            LifecycleError::WrongTrashState { .. } => "artifact_lifecycle.wrong_trash_state",
+            LifecycleError::TrashEntryNotFound(_) => "artifact_lifecycle.trash_entry_not_found",
+            LifecycleError::Io { .. } => "artifact_lifecycle.io",
+            LifecycleError::ManifestParse(_) => "artifact_lifecycle.manifest_parse",
+            LifecycleError::RecoveryAmbiguous(_) => "artifact_lifecycle.recovery_ambiguous",
+            LifecycleError::InvalidTrashId(_) => "artifact_lifecycle.invalid_trash_id",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            LifecycleError::Refused(reason) => crate::error_code::ErrorCode::params(reason),
+            LifecycleError::SourceMissing(path)
+            | LifecycleError::Conflict(path)
+            | LifecycleError::ScopeRootMissing(path) => {
+                serde_json::json!({ "path": path.display().to_string() })
+            }
+            // Both are `&'static str` labels from the call site
+            // (`restore`, `MissingManifest`), not user input.
+            LifecycleError::WrongTrashState { state, action } => {
+                serde_json::json!({ "state": state, "action": action })
+            }
+            // A trash-entry uuid; `InvalidTrashId` carries the rejected
+            // string, which by construction failed uuid validation and
+            // may be a traversal attempt — it is already in `Display`,
+            // and the GUI must render it as data, never as a path.
+            LifecycleError::TrashEntryNotFound(id) | LifecycleError::InvalidTrashId(id) => {
+                serde_json::json!({ "trash_id": id })
+            }
+            LifecycleError::Io { op, source } => {
+                serde_json::json!({ "op": op, "detail": source.to_string() })
+            }
+            LifecycleError::ManifestParse(e) => serde_json::json!({ "detail": e.to_string() }),
+            LifecycleError::RecoveryAmbiguous(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 impl LifecycleError {
     /// Helper for IO call sites — wraps an `io::Error` with the
     /// op label so error toasts read clearly ("disable failed: …",
@@ -101,6 +156,44 @@ pub enum RefuseReason {
 
     #[error("not a Skill, Agent, or Slash command ({path})")]
     WrongKind { path: PathBuf },
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Every variant carries `path` even where the English sentence omits
+/// it (`Plugin`, `ManagedPolicy`). A refusal the user cannot trace to
+/// an artifact is not actionable, and the GUI names the row rather than
+/// re-printing the CLI's sentence — the same reasoning that puts `path`
+/// on `project.claude_running`.
+impl crate::error_code::ErrorCode for RefuseReason {
+    fn code(&self) -> &'static str {
+        match self {
+            RefuseReason::Plugin { .. } => "artifact_refused.plugin",
+            RefuseReason::ManagedPolicy { .. } => "artifact_refused.managed_policy",
+            RefuseReason::OutOfScope { .. } => "artifact_refused.out_of_scope",
+            RefuseReason::SymlinkLoop { .. } => "artifact_refused.symlink_loop",
+            RefuseReason::WrongKind { .. } => "artifact_refused.wrong_kind",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            RefuseReason::Plugin { plugin_id, path } => serde_json::json!({
+                "plugin_id": plugin_id,
+                "path": path.display().to_string(),
+            }),
+            RefuseReason::ManagedPolicy { root, path } => serde_json::json!({
+                "root": root.display().to_string(),
+                "path": path.display().to_string(),
+            }),
+            RefuseReason::OutOfScope { path }
+            | RefuseReason::SymlinkLoop { path }
+            | RefuseReason::WrongKind { path } => {
+                serde_json::json!({ "path": path.display().to_string() })
+            }
+        }
+    }
 }
 
 pub type Result<T, E = LifecycleError> = std::result::Result<T, E>;

@@ -270,6 +270,42 @@ pub enum InstallError {
     },
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for InstallError {
+    fn code(&self) -> &'static str {
+        match self {
+            InstallError::NoHomeDir => "mcp_snippet.no_home_dir",
+            InstallError::MissingProjectPath => "mcp_snippet.missing_project_path",
+            InstallError::ProjectPathNotAbsolute(_) => "mcp_snippet.project_path_not_absolute",
+            InstallError::ProjectPathNotDir(_) => "mcp_snippet.project_path_not_dir",
+            InstallError::CreateParent { .. } => "mcp_snippet.create_parent",
+            InstallError::Write { .. } => "mcp_snippet.write",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            InstallError::NoHomeDir => json!({}),
+            InstallError::MissingProjectPath => json!({}),
+            // `display()`, matching the message: a lossy path is what
+            // the user sees, and a second spelling in `params` would
+            // make the two disagree.
+            InstallError::ProjectPathNotAbsolute(path) => {
+                json!({ "path": path.display().to_string() })
+            }
+            InstallError::ProjectPathNotDir(path) => json!({ "path": path.display().to_string() }),
+            InstallError::CreateParent { path, source } => {
+                json!({ "path": path.display().to_string(), "detail": source.to_string() })
+            }
+            InstallError::Write { path, source } => {
+                json!({ "path": path.display().to_string(), "detail": source.to_string() })
+            }
+        }
+    }
+}
+
 /// Write the canonical snippet and report where it landed plus the
 /// `@`-import line and paste targets. The single install policy for
 /// both the CLI's `claudepot mcp install-snippet` verb and the

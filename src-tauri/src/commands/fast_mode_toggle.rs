@@ -10,6 +10,7 @@
 //! no path or secret fields, so it crosses to JS directly rather than
 //! through a hand-mirrored DTO.
 
+use crate::dto_error::ErrorDto;
 use claudepot_core::fast_mode_toggle::{
     resolve_fast_mode, set_fast_mode, set_per_session_opt_in, FastModeState,
     FAST_MODE_INPUT_PER_MTOK, FAST_MODE_MODELS, FAST_MODE_OUTPUT_PER_MTOK,
@@ -48,16 +49,20 @@ fn dto(state: FastModeState) -> FastModeStateDto {
 /// `fast_mode_state` — read the current fast-mode default
 /// (`CLAUDE_CODE_DISABLE_FAST_MODE` env + `~/.claude/settings.json`).
 #[tauri::command]
-pub async fn fast_mode_state() -> Result<FastModeStateDto, String> {
+pub async fn fast_mode_state() -> Result<FastModeStateDto, ErrorDto> {
     Ok(dto(resolve_fast_mode()))
 }
 
 /// `fast_mode_set` — set the fast-mode default. `enabled = true` writes
 /// `fastMode: true`; `false` clears the key (CC's default). Returns the
 /// re-resolved state.
+///
+/// The `write setting: ` prefix is gone — `SettingsWriteError` names
+/// what failed and the UI names what it was attempting. See
+/// `crate::dto_error`.
 #[tauri::command]
-pub async fn fast_mode_set(enabled: bool) -> Result<FastModeStateDto, String> {
-    set_fast_mode(enabled).map_err(|e| format!("write setting: {e}"))?;
+pub async fn fast_mode_set(enabled: bool) -> Result<FastModeStateDto, ErrorDto> {
+    set_fast_mode(enabled)?;
     Ok(dto(resolve_fast_mode()))
 }
 
@@ -65,7 +70,7 @@ pub async fn fast_mode_set(enabled: bool) -> Result<FastModeStateDto, String> {
 /// makes every new session start with fast mode off regardless of the
 /// saved preference.
 #[tauri::command]
-pub async fn fast_mode_set_per_session(required: bool) -> Result<FastModeStateDto, String> {
-    set_per_session_opt_in(required).map_err(|e| format!("write setting: {e}"))?;
+pub async fn fast_mode_set_per_session(required: bool) -> Result<FastModeStateDto, ErrorDto> {
+    set_per_session_opt_in(required)?;
     Ok(dto(resolve_fast_mode()))
 }

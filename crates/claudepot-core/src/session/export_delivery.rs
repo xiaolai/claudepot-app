@@ -83,6 +83,37 @@ pub enum DeliverError {
     Harden(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `NoToken` names `GITHUB_TOKEN` because the CLI prints that text
+/// verbatim. No variant here may ever carry the token itself.
+impl crate::error_code::ErrorCode for DeliverError {
+    fn code(&self) -> &'static str {
+        match self {
+            DeliverError::File(_) => "session_export_delivery.file",
+            DeliverError::Clipboard(_) => "session_export_delivery.clipboard",
+            DeliverError::Gist(_) => "session_export_delivery.gist",
+            DeliverError::NoToken => "session_export_delivery.no_token",
+            DeliverError::Keychain(_) => "session_export_delivery.keychain",
+            DeliverError::Harden(_) => "session_export_delivery.harden",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            DeliverError::File(e) => serde_json::json!({ "detail": e.to_string() }),
+            DeliverError::Clipboard(detail) => serde_json::json!({ "detail": detail }),
+            // Its own code rather than the inner `ShareError`'s: the
+            // variant prefixes the English with "gist upload failed: ".
+            DeliverError::Gist(e) => serde_json::json!({ "detail": e.to_string() }),
+            DeliverError::NoToken => serde_json::json!({}),
+            DeliverError::Keychain(detail) => serde_json::json!({ "detail": detail }),
+            DeliverError::Harden(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 /// Injection point for clipboard writing. Implementations live outside
 /// `claudepot-core` so the core crate stays free of subprocess concerns
 /// and the GUI doesn't drag in subprocess machinery it doesn't need.

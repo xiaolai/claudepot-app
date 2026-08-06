@@ -46,6 +46,55 @@ pub enum OnboardError {
     Io(#[from] std::io::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for OnboardError {
+    fn code(&self) -> &'static str {
+        match self {
+            OnboardError::CliBinaryNotFound(_) => "onboard.cli_binary_not_found",
+            OnboardError::AuthLoginFailed(..) => "onboard.auth_login_failed",
+            OnboardError::AuthLoginCancelled => "onboard.auth_login_cancelled",
+            OnboardError::ImportFailed(_) => "onboard.import_failed",
+            OnboardError::Swap(_) => "onboard.swap",
+            OnboardError::Io(_) => "onboard.io",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            OnboardError::CliBinaryNotFound(path) => serde_json::json!({ "path": path }),
+            // One code, three English branches (timeout, exit code
+            // alone, exit code + stderr tail) — the Display impl picks
+            // between them and a catalog entry must do the same, which
+            // is why both values are carried unconditionally.
+            // `exit_code == -2` is the timeout sentinel; `stderr_tail`
+            // is `""` when the subprocess produced none.
+            //
+            // The tail is already run through
+            // `session_export::redact_secrets` at capture time, which
+            // is what makes it safe to put in `params` at all — do not
+            // widen this to the raw stream.
+            OnboardError::AuthLoginFailed(code, tail) => serde_json::json!({
+                "exit_code": code,
+                "stderr_tail": tail
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(""),
+            }),
+            OnboardError::AuthLoginCancelled => serde_json::json!({}),
+            // The temp `CLAUDE_CONFIG_DIR` the import looked in, not an
+            // email — see `import_credential`'s only constructor.
+            OnboardError::ImportFailed(path) => serde_json::json!({ "path": path }),
+            // The message is the inner `SwapError`'s Display verbatim.
+            // A caller that needs the inner identity matches on
+            // `SwapError` before it is wrapped.
+            OnboardError::Swap(e) => serde_json::json!({ "detail": e.to_string() }),
+            OnboardError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 /// Hard timeout for `claude auth login` — generous enough that slow
 /// readers completing OAuth in the browser finish in time, tight enough
 /// that a user who closed the browser or walked away doesn't leave the

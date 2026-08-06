@@ -195,6 +195,32 @@ pub enum AgentEventsError {
     UnsupportedSchemaVersion { found: u32, expected: u32 },
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for AgentEventsError {
+    fn code(&self) -> &'static str {
+        match self {
+            AgentEventsError::Io(_) => "agent_events.io",
+            AgentEventsError::Serde(_) => "agent_events.serde",
+            AgentEventsError::UnsupportedSchemaVersion { .. } => {
+                "agent_events.unsupported_schema_version"
+            }
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            AgentEventsError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            AgentEventsError::Serde(e) => serde_json::json!({ "detail": e.to_string() }),
+            // The two version numbers a "upgrade Claudepot" sentence
+            // needs without parsing the English one.
+            AgentEventsError::UnsupportedSchemaVersion { found, expected } => {
+                serde_json::json!({ "found": found, "expected": expected })
+            }
+        }
+    }
+}
+
 /// Store name used in log messages.
 const STORE: &str = "agent_events_store";
 

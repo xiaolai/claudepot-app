@@ -49,6 +49,32 @@ pub enum PermissionStoreError {
     Validation(#[from] ValidationError),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `Validation` does **not** delegate to the inner `ValidationError`'s
+/// code: the message is `"validation: {0}"`, so `Display` is a wrapper
+/// sentence rather than the inner one, and a delegated code would
+/// promise a translator a sentence this variant never renders. The
+/// inner text rides along as `detail`.
+impl crate::error_code::ErrorCode for PermissionStoreError {
+    fn code(&self) -> &'static str {
+        match self {
+            PermissionStoreError::Io(_) => "permission_store.io",
+            PermissionStoreError::Serde(_) => "permission_store.serde",
+            PermissionStoreError::Validation(_) => "permission_store.validation",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            PermissionStoreError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            PermissionStoreError::Serde(e) => serde_json::json!({ "detail": e.to_string() }),
+            PermissionStoreError::Validation(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 impl json_store::Validate for GrantsFile {
     type Error = ValidationError;
     fn validate(&self) -> Result<(), ValidationError> {

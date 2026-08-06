@@ -40,3 +40,45 @@ pub enum SessionIndexError {
         missing: Vec<String>,
     },
 }
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for SessionIndexError {
+    fn code(&self) -> &'static str {
+        match self {
+            SessionIndexError::Sql(_) => "session_index.sql",
+            SessionIndexError::Io(_) => "session_index.io",
+            SessionIndexError::Session(_) => "session_index.session",
+            SessionIndexError::Json(_) => "session_index.json",
+            SessionIndexError::MigrationValidationFailed { .. } => {
+                "session_index.migration_validation_failed"
+            }
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            SessionIndexError::Sql(e) => serde_json::json!({ "detail": e.to_string() }),
+            SessionIndexError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+            // Its own code rather than the inner `SessionError`'s: the
+            // variant prefixes the English with "session scan: ", so a
+            // localized sentence has framing of its own to carry.
+            SessionIndexError::Session(e) => serde_json::json!({ "detail": e.to_string() }),
+            SessionIndexError::Json(e) => serde_json::json!({ "detail": e.to_string() }),
+            SessionIndexError::MigrationValidationFailed {
+                target_version,
+                expected,
+                found,
+                missing,
+            } => serde_json::json!({
+                "target_version": target_version,
+                "expected": expected,
+                "found": found,
+                // Joined exactly as the English message joins it —
+                // a catalog entry interpolates one string, and
+                // i18next cannot join an array.
+                "missing": missing.join(", "),
+            }),
+        }
+    }
+}

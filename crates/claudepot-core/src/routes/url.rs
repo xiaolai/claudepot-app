@@ -24,6 +24,60 @@ pub enum BaseUrlError {
     Malformed(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for BaseUrlError {
+    fn code(&self) -> &'static str {
+        match self {
+            BaseUrlError::Empty => "base_url.empty",
+            BaseUrlError::BadScheme(_) => "base_url.bad_scheme",
+            BaseUrlError::NoHost => "base_url.no_host",
+            BaseUrlError::InvalidChars => "base_url.invalid_chars",
+            BaseUrlError::Malformed(_) => "base_url.malformed",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            BaseUrlError::Empty => serde_json::json!({}),
+            // The rejected input as stored — already userinfo-masked by
+            // `validate_base_url`, so neither this nor the `#[error]`
+            // message can echo `user:pass@`.
+            BaseUrlError::BadScheme(url) => serde_json::json!({ "url": url }),
+            BaseUrlError::NoHost => serde_json::json!({}),
+            BaseUrlError::InvalidChars => serde_json::json!({}),
+            BaseUrlError::Malformed(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
+/// Mask `user:pass@` in a URL-shaped string.
+///
+/// The scheme check runs before the userinfo check, so an input like
+/// `ftp://user:password@host` is rejected as `BadScheme` — the one
+/// variant that echoes its input. Without this, the password reaches
+/// the error message, `params`, the IPC bridge, and the JS heap. The
+/// `#[error]` format string is unchanged; only the value interpolated
+/// into it is masked, which is the difference between rewording frozen
+/// English and not printing a credential.
+fn redact_userinfo(s: &str) -> String {
+    let (prefix, rest) = match s.find("://") {
+        Some(i) => s.split_at(i + 3),
+        None => ("", s),
+    };
+    let authority_end = rest.find('/').unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    // `rfind`: a password may itself contain `@`.
+    match authority.rfind('@') {
+        Some(at) => format!(
+            "{prefix}<redacted>@{}{}",
+            &authority[at + 1..],
+            &rest[authority_end..]
+        ),
+        None => s.to_string(),
+    }
+}
+
 /// Validate a base URL. Returns the trimmed string on success.
 pub fn validate_base_url(input: &str) -> Result<String, BaseUrlError> {
     let s = input.trim();
@@ -39,7 +93,7 @@ pub fn validate_base_url(input: &str) -> Result<String, BaseUrlError> {
     } else if let Some(rest) = s.strip_prefix("http://") {
         rest
     } else {
-        return Err(BaseUrlError::BadScheme(s.to_string()));
+        return Err(BaseUrlError::BadScheme(redact_userinfo(s)));
     };
 
     // Reject query strings and fragments. No provider base URL
@@ -147,6 +201,40 @@ pub fn normalize_gateway_base_url(input: &str) -> Result<String, BaseUrlError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::error_code::ErrorCode;
+
+    /// The scheme check fires before the userinfo check, so a URL
+    /// carrying credentials lands in the one variant that echoes its
+    /// input. Neither the message nor `params` may repeat the password
+    /// — `params` crosses IPC into the JS heap, and the message is
+    /// rendered in a toast.
+    #[test]
+    fn a_rejected_scheme_never_echoes_embedded_credentials() {
+        let err = validate_base_url("ftp://user:hunter2@example.com/v1").unwrap_err();
+        let msg = err.to_string();
+        let params = err.params().to_string();
+        for surface in [&msg, &params] {
+            assert!(!surface.contains("hunter2"), "leaked password: {surface}");
+            assert!(!surface.contains("user:"), "leaked userinfo: {surface}");
+        }
+        assert!(msg.contains("<redacted>@example.com"), "{msg}");
+        assert_eq!(err.code(), "base_url.bad_scheme");
+    }
+
+    #[test]
+    fn redacting_userinfo_leaves_ordinary_urls_untouched() {
+        assert_eq!(
+            redact_userinfo("ftp://example.com/v1"),
+            "ftp://example.com/v1"
+        );
+        assert_eq!(redact_userinfo("not a url"), "not a url");
+        // A password may itself contain '@' — mask through the last one.
+        assert_eq!(
+            redact_userinfo("ftp://u:p@ss@host/x"),
+            "ftp://<redacted>@host/x"
+        );
+    }
+
     use super::*;
 
     #[test]

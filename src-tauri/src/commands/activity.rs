@@ -5,6 +5,14 @@
 //! tray rebuild) lives in the service or in the registered
 //! `TauriSessionEventListener`. These commands carry no business
 //! logic of their own — they exist solely to bridge JS into core.
+//!
+//! Rejections cross as `ErrorDto` (`code` + `params` + English
+//! `message`). The operation prefixes these commands used to write
+//! (`active_series: …`, `error_count: …`) are gone — the UI names what
+//! it was attempting; core names what failed. See `crate::dto_error`.
+
+use crate::dto_error::{codes, ErrorDto};
+use serde_json::json;
 
 /// Start the live runtime. Idempotent: repeated calls after a first
 /// successful start return `Ok(())` without re-spawning.
@@ -19,26 +27,28 @@
 pub async fn session_live_start(
     state: tauri::State<'_, crate::state::LiveSessionState>,
     prefs: tauri::State<'_, crate::preferences::PreferencesState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let (enabled, excluded) = {
-        let p = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
+        let p = prefs.0.lock().map_err(|e| {
+            ErrorDto::with_params(
+                codes::ACTIVITY_PREFS_LOCK_POISONED,
+                json!({ "detail": e.to_string() }),
+                format!("prefs lock: {e}"),
+            )
+        })?;
         (p.activity_enabled, p.activity_excluded_paths.clone())
     };
     if !enabled {
         return Ok(());
     }
-    state
-        .service
-        .start(excluded)
-        .await
-        .map_err(|e| e.to_string())
+    state.service.start(excluded).await.map_err(ErrorDto::from)
 }
 
 /// Stop the live runtime. Idempotent.
 #[tauri::command]
 pub async fn session_live_stop(
     state: tauri::State<'_, crate::state::LiveSessionState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     state.service.stop().await;
     Ok(())
 }
@@ -48,7 +58,7 @@ pub async fn session_live_stop(
 pub async fn session_live_unsubscribe(
     session_id: String,
     state: tauri::State<'_, crate::state::LiveSessionState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     state.service.unsubscribe_detail(&session_id).await;
     Ok(())
 }
@@ -57,7 +67,7 @@ pub async fn session_live_unsubscribe(
 #[tauri::command]
 pub async fn session_live_snapshot(
     state: tauri::State<'_, crate::state::LiveSessionState>,
-) -> Result<Vec<crate::dto::LiveSessionSummaryDto>, String> {
+) -> Result<Vec<crate::dto::LiveSessionSummaryDto>, ErrorDto> {
     Ok(state
         .service
         .snapshot()
@@ -72,7 +82,7 @@ pub async fn session_live_snapshot(
 pub async fn session_live_session_snapshot(
     session_id: String,
     state: tauri::State<'_, crate::state::LiveSessionState>,
-) -> Result<Option<crate::dto::LiveSessionSummaryDto>, String> {
+) -> Result<Option<crate::dto::LiveSessionSummaryDto>, ErrorDto> {
     Ok(state
         .service
         .session_snapshot(&session_id)
@@ -91,7 +101,7 @@ pub async fn activity_trends(
     from_ms: i64,
     to_ms: i64,
     bucket_count: u32,
-) -> Result<crate::dto::ActivityTrendsDto, String> {
+) -> Result<crate::dto::ActivityTrendsDto, ErrorDto> {
     let buckets = bucket_count as usize;
     let bucket_width = if buckets > 0 && to_ms > from_ms {
         (to_ms - from_ms) / buckets as i64
@@ -116,19 +126,15 @@ pub async fn activity_trends(
     let series_task = tokio::task::spawn_blocking(move || {
         series_store
             .active_series(from_ms, to_ms, buckets)
-            .map_err(|e| format!("active_series: {e}"))
+            .map_err(ErrorDto::from)
     });
     let error_task = tokio::task::spawn_blocking(move || {
         error_store
             .error_count(from_ms, to_ms)
-            .map_err(|e| format!("error_count: {e}"))
+            .map_err(ErrorDto::from)
     });
-    let active_series = series_task
-        .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
-    let error_count = error_task
-        .await
-        .map_err(|e| format!("blocking task failed: {e}"))??;
+    let active_series = series_task.await.map_err(ErrorDto::task_join)??;
+    let error_count = error_task.await.map_err(ErrorDto::task_join)??;
     Ok(crate::dto::ActivityTrendsDto {
         from_ms,
         to_ms,
@@ -147,10 +153,10 @@ pub async fn activity_trends(
 pub async fn session_live_subscribe(
     session_id: String,
     state: tauri::State<'_, crate::state::LiveSessionState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     state
         .service
         .subscribe_detail(&session_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(ErrorDto::from)
 }

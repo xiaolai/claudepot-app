@@ -60,6 +60,46 @@ pub enum SlimError {
     Session(#[from] crate::session::SessionError),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `EmptyFilter` names `--all` because the CLI prints that text
+/// verbatim; the code carries no params so a GUI sentence can drop the
+/// flag it has no use for.
+impl crate::error_code::ErrorCode for SlimError {
+    fn code(&self) -> &'static str {
+        match self {
+            SlimError::Io { .. } => "session_slim.io",
+            SlimError::NotFound(_) => "session_slim.not_found",
+            SlimError::LiveWriteDetected => "session_slim.live_write_detected",
+            SlimError::Trash(_) => "session_slim.trash",
+            SlimError::Json { .. } => "session_slim.json",
+            SlimError::EmptyFilter => "session_slim.empty_filter",
+            SlimError::Session(_) => "session_slim.session",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            SlimError::Io { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            SlimError::NotFound(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            SlimError::LiveWriteDetected => serde_json::json!({}),
+            SlimError::Trash(e) => serde_json::json!({ "detail": e.to_string() }),
+            SlimError::Json { line, source } => serde_json::json!({
+                "line": line,
+                "detail": source.to_string(),
+            }),
+            SlimError::EmptyFilter => serde_json::json!({}),
+            SlimError::Session(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 impl SlimError {
     fn io(path: impl Into<PathBuf>, source: io::Error) -> Self {
         Self::Io {

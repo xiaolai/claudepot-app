@@ -3,6 +3,8 @@
 //! One enum at the module boundary. CLI/Tauri callers convert via
 //! `Display` (or `?`-into-anyhow at the top level).
 
+use crate::error_code::ErrorCode;
+use serde_json::{json, Value};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -45,4 +47,51 @@ pub enum AgentError {
 
     #[error("agent file at {0} is not managed by Claudepot — refusing to overwrite")]
     NotManaged(String),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl ErrorCode for AgentError {
+    fn code(&self) -> &'static str {
+        match self {
+            AgentError::Io(_) => "agent.io",
+            AgentError::Json(_) => "agent.json",
+            AgentError::NotFound(_) => "agent.not_found",
+            AgentError::DuplicateName(_) => "agent.duplicate_name",
+            AgentError::InvalidName(_, _) => "agent.invalid_name",
+            AgentError::InvalidCron(_, _) => "agent.invalid_cron",
+            AgentError::CronTooDense(_, _, _) => "agent.cron_too_dense",
+            AgentError::InvalidEnv(_) => "agent.invalid_env",
+            AgentError::MissingField(_) => "agent.missing_field",
+            AgentError::InvalidPath(_, _) => "agent.invalid_path",
+            AgentError::NoHomeDir => "agent.no_home_dir",
+            AgentError::UnsupportedPlatform(_) => "agent.unsupported_platform",
+            AgentError::NotManaged(_) => "agent.not_managed",
+        }
+    }
+
+    fn params(&self) -> Value {
+        match self {
+            AgentError::Io(e) => json!({ "detail": e.to_string() }),
+            AgentError::Json(e) => json!({ "detail": e.to_string() }),
+            // An agent id (or a `route <uuid>` locator), never a secret
+            // — `store.rs` and `install.rs` are the only constructors.
+            AgentError::NotFound(id) => json!({ "id": id }),
+            AgentError::DuplicateName(name) => json!({ "name": name }),
+            AgentError::InvalidName(name, reason) => json!({ "name": name, "reason": reason }),
+            AgentError::InvalidCron(cron, reason) => json!({ "cron": cron, "reason": reason }),
+            AgentError::CronTooDense(cron, slots, limit) => {
+                json!({ "cron": cron, "slots": slots, "limit": limit })
+            }
+            // The *key* and the rule it broke — `agent::env` builds this
+            // text from key names and policy, never from a value. The
+            // env allowlist is what keeps a pasted token out of here.
+            AgentError::InvalidEnv(detail) => json!({ "detail": detail }),
+            AgentError::MissingField(field) => json!({ "field": field }),
+            AgentError::InvalidPath(path, reason) => json!({ "path": path, "reason": reason }),
+            AgentError::NoHomeDir => json!({}),
+            AgentError::UnsupportedPlatform(operation) => json!({ "operation": operation }),
+            AgentError::NotManaged(path) => json!({ "path": path }),
+        }
+    }
 }

@@ -52,6 +52,42 @@ pub enum DecryptError {
     Kdf(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Segment is `desktop_crypto` — see the note on
+/// [`super::error::DesktopSwapError`]'s impl for why `desktop_backend`'s
+/// four enums are namespaced by concern.
+impl crate::error_code::ErrorCode for DecryptError {
+    fn code(&self) -> &'static str {
+        match self {
+            DecryptError::BadFormat(_) => "desktop_crypto.bad_format",
+            DecryptError::UnknownVersion(_) => "desktop_crypto.unknown_version",
+            DecryptError::Base64(_) => "desktop_crypto.base64",
+            DecryptError::Aes => "desktop_crypto.aes",
+            DecryptError::Kdf(_) => "desktop_crypto.kdf",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // Length complaints and decoder messages. Nothing here is
+            // derived from plaintext — `Aes` deliberately carries no
+            // payload so a failed decrypt cannot leak a partial block.
+            DecryptError::BadFormat(detail) => serde_json::json!({ "detail": detail }),
+            // The three-byte version tag, rendered exactly as the
+            // English message's `{0:?}` does so a localized sentence
+            // interpolating `{{tag}}` reads identically.
+            DecryptError::UnknownVersion(tag) => {
+                serde_json::json!({ "tag": format!("{tag:?}") })
+            }
+            DecryptError::Base64(detail) => serde_json::json!({ "detail": detail }),
+            DecryptError::Aes => serde_json::json!({}),
+            DecryptError::Kdf(detail) => serde_json::json!({ "detail": detail }),
+        }
+    }
+}
+
 /// Strip and validate the Chromium `v10`/`v11` version prefix.
 ///
 /// The three-byte tag is ASCII `v10` for the modern envelope. `v11`

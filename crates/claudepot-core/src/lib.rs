@@ -63,6 +63,7 @@ pub mod desktop_lock;
 pub mod diagnostic_logging;
 pub mod env_vault;
 pub mod error;
+pub mod error_code;
 pub mod fast_mode_toggle;
 pub mod fs_utils;
 pub mod github_pr;

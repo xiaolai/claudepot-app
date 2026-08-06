@@ -63,6 +63,59 @@ pub enum ProjectTrashError {
     InvalidSlug(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Every path lands in `params` raw — `Path::display()` and nothing
+/// else. A localized sentence places it; re-separatoring or
+/// normalizing it here would corrupt the Windows shapes
+/// `rules/paths.md` enumerates.
+impl crate::error_code::ErrorCode for ProjectTrashError {
+    fn code(&self) -> &'static str {
+        match self {
+            ProjectTrashError::Io { .. } => "project_trash.io",
+            ProjectTrashError::SourceMissing(_) => "project_trash.source_missing",
+            ProjectTrashError::EntryNotFound(_) => "project_trash.entry_not_found",
+            ProjectTrashError::ManifestParse { .. } => "project_trash.manifest_parse",
+            ProjectTrashError::Serialize { .. } => "project_trash.serialize",
+            ProjectTrashError::RestoreCollision(_) => "project_trash.restore_collision",
+            ProjectTrashError::InvalidSlug(_) => "project_trash.invalid_slug",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            ProjectTrashError::Io { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            ProjectTrashError::SourceMissing(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            // A trash batch id (`<timestamp>-<uuid8>`), not a path.
+            ProjectTrashError::EntryNotFound(entry_id) => {
+                serde_json::json!({ "entry_id": entry_id })
+            }
+            ProjectTrashError::ManifestParse { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            ProjectTrashError::Serialize { path, source } => serde_json::json!({
+                "path": path.display().to_string(),
+                "detail": source.to_string(),
+            }),
+            ProjectTrashError::RestoreCollision(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            // The English message renders the slug with `{0:?}` (quoted)
+            // because an empty or whitespace slug is otherwise invisible.
+            // `params` carries it raw so the sentence can quote it its
+            // own way.
+            ProjectTrashError::InvalidSlug(slug) => serde_json::json!({ "slug": slug }),
+        }
+    }
+}
+
 impl ProjectTrashError {
     fn io(path: impl Into<PathBuf>, source: io::Error) -> Self {
         Self::Io {

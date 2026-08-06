@@ -32,6 +32,30 @@ pub enum WrapperNameError {
     Reserved(String),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// Module segment is `wrapper_name`, not `routes`: `RouteError` already
+/// owns `routes.*`, and these validate the same noun from a different
+/// boundary — one identity per variant, so they cannot share a prefix.
+impl crate::error_code::ErrorCode for WrapperNameError {
+    fn code(&self) -> &'static str {
+        match self {
+            WrapperNameError::Empty => "wrapper_name.empty",
+            WrapperNameError::InvalidChars(_) => "wrapper_name.invalid_chars",
+            WrapperNameError::Reserved(_) => "wrapper_name.reserved",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            WrapperNameError::Empty => serde_json::json!({}),
+            WrapperNameError::InvalidChars(name) => serde_json::json!({ "name": name }),
+            WrapperNameError::Reserved(name) => serde_json::json!({ "name": name }),
+        }
+    }
+}
+
 /// Reserved binary names Claudepot refuses to write a wrapper for.
 const RESERVED: &[&str] = &["claude", "sh", "bash", "zsh", "fish", "env"];
 

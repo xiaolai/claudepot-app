@@ -9,6 +9,7 @@
 //! second — matching the CLI. The settings UI reads / writes only the
 //! keychain slot.
 
+use crate::dto_error::{codes, ErrorDto};
 use crate::ops::{emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOps};
 use claudepot_core::paths;
 use tauri::{AppHandle, State};
@@ -82,15 +83,22 @@ fn format_from_dto(f: ExportFormatDto) -> claudepot_core::session_export::Export
     }
 }
 
-fn resolve_session_detail(target: &str) -> Result<claudepot_core::session::SessionDetail, String> {
+/// Resolve a target (transcript path or session id) to its parsed
+/// detail. Returns `ErrorDto` rather than a prefixed string — the
+/// `read session: ` framing belonged to the caller, and the one caller
+/// that still needs it (the op-progress thread, whose event payload is
+/// a plain `String` on a surface this pass does not touch) re-applies
+/// it to `message` so that channel's English is unchanged.
+fn resolve_session_detail(
+    target: &str,
+) -> Result<claudepot_core::session::SessionDetail, ErrorDto> {
     let cfg = paths::claude_config_dir();
     if target.ends_with(".jsonl") {
         let p = std::path::PathBuf::from(target);
         return claudepot_core::session::read_session_detail_at_path(&cfg, &p)
-            .map_err(|e| format!("read session: {e}"));
+            .map_err(ErrorDto::from);
     }
-    claudepot_core::session::read_session_detail(&cfg, target)
-        .map_err(|e| format!("read session: {e}"))
+    claudepot_core::session::read_session_detail(&cfg, target).map_err(ErrorDto::from)
 }
 
 #[tauri::command]
@@ -98,19 +106,19 @@ pub async fn session_export_preview(
     target: String,
     format: ExportFormatDto,
     policy: Option<RedactionPolicyDto>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     // Wrapped in `spawn_blocking` — JSONL parse + redaction render
     // (audit B8 commands_session_share.rs:110).
     tokio::task::spawn_blocking(move || {
         let detail = resolve_session_detail(&target)?;
         let fmt = format_from_dto(format);
         let pol = policy_from_dto(policy);
-        Ok::<_, String>(claudepot_core::session_export::export_preview(
+        Ok::<_, ErrorDto>(claudepot_core::session_export::export_preview(
             &detail, fmt, &pol,
         ))
     })
     .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 #[tauri::command]
@@ -121,7 +129,7 @@ pub async fn session_share_gist_start(
     public: bool,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     // Pre-flighting `resolve_session_detail` + `export_with` + the
     // keychain read on the IPC worker delayed `op_id` return by the
     // full duration of the JSONL parse + redaction pass — for big
@@ -156,7 +164,16 @@ pub async fn session_share_gist_start(
             let detail = match resolve_session_detail(&target) {
                 Ok(d) => d,
                 Err(e) => {
-                    emit_terminal(&app, &ops, &op_id, Some(e));
+                    // Op-progress payloads are still plain English
+                    // strings; re-apply the prefix this thread used to
+                    // get from `resolve_session_detail` so the event
+                    // text is unchanged.
+                    emit_terminal(
+                        &app,
+                        &ops,
+                        &op_id,
+                        Some(format!("read session: {}", e.message)),
+                    );
                     return;
                 }
             };
@@ -269,13 +286,13 @@ mod last4_of_tests {
 }
 
 #[tauri::command]
-pub async fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
+pub async fn settings_github_token_get() -> Result<GithubTokenStatus, ErrorDto> {
     let env_override = std::env::var("GITHUB_TOKEN")
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
     match claudepot_core::session_export_delivery::github_token_keychain_read()
         .await
-        .map_err(|e| format!("keychain read: {e}"))?
+        .map_err(ErrorDto::from)?
     {
         Some(mut t) => {
             // The plaintext PAT is only needed long enough to derive
@@ -297,7 +314,7 @@ pub async fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
 }
 
 #[tauri::command]
-pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenStatus, String> {
+pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenStatus, ErrorDto> {
     // Trim into a fresh owned `String`; the original IPC arg `value`
     // gets zeroized at the end regardless of outcome (D-5/6/7).
     let mut trimmed = value.trim().to_string();
@@ -306,7 +323,10 @@ pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenS
     value.zeroize();
     if trimmed.is_empty() {
         trimmed.zeroize();
-        return Err("token is empty".to_string());
+        return Err(ErrorDto::new(
+            codes::SESSION_SHARE_TOKEN_EMPTY,
+            "token is empty",
+        ));
     }
 
     // Core's write does a read-back verification, so a "saved" toast
@@ -326,7 +346,7 @@ pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenS
                 env_override,
             })
         }
-        Err(e) => Err(format!("keychain set: {e}")),
+        Err(e) => Err(ErrorDto::from(e)),
     };
 
     trimmed.zeroize();
@@ -334,10 +354,10 @@ pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenS
 }
 
 #[tauri::command]
-pub async fn settings_github_token_clear() -> Result<(), String> {
+pub async fn settings_github_token_clear() -> Result<(), ErrorDto> {
     claudepot_core::session_export_delivery::github_token_keychain_delete()
         .await
-        .map_err(|e| format!("keychain clear: {e}"))
+        .map_err(ErrorDto::from)
 }
 
 #[cfg(test)]
@@ -356,7 +376,12 @@ mod settings_github_token_set_tests {
         // the Err arm explicitly instead of using `unwrap_err`.
         let res = settings_github_token_set("".to_string()).await;
         match res {
-            Err(msg) => assert_eq!(msg, "token is empty"),
+            Err(e) => {
+                assert_eq!(e.code, codes::SESSION_SHARE_TOKEN_EMPTY);
+                // The English `message` is the contract the renderer
+                // falls back to when the code has no catalog entry.
+                assert_eq!(e.message, "token is empty");
+            }
             Ok(_) => panic!("expected empty input to be rejected"),
         }
     }
@@ -368,7 +393,10 @@ mod settings_github_token_set_tests {
         // write with a useless payload.
         let res = settings_github_token_set("   \t\n".to_string()).await;
         match res {
-            Err(msg) => assert_eq!(msg, "token is empty"),
+            Err(e) => {
+                assert_eq!(e.code, codes::SESSION_SHARE_TOKEN_EMPTY);
+                assert_eq!(e.message, "token is empty");
+            }
             Ok(_) => panic!("expected whitespace-only input to be rejected"),
         }
     }

@@ -21,6 +21,7 @@ use crate::config_dto::{file_to_dto, flatten_file_refs, scope_kind_label};
 use crate::config_watch_types::{
     AddedFileDto, ConfigTreePatchEvent, ConfigTreeSnapshotDto, ReorderedDto, ScopeSnapshotDto,
 };
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::config_view::{
     diff::ConfigTreePatch as CorePatch,
     discover,
@@ -81,6 +82,17 @@ impl Drop for WatcherHandle {
 
 #[derive(Default)]
 pub struct ConfigWatchState(pub Mutex<Option<WatcherHandle>>);
+/// `ConfigWatchState`'s mutex is `std::sync`, so a panic under it
+/// poisons the lock for every later caller. Three call sites share the
+/// check, so they share one spelling. `message` keeps the exact English
+/// the commands returned before (`watch state lock: …`).
+fn watch_lock_poisoned(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::CONFIG_WATCH_STATE_LOCK_POISONED,
+        serde_json::json!({ "detail": e.to_string() }),
+        format!("watch state lock: {e}"),
+    )
+}
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
 const KEEPALIVE: Duration = Duration::from_secs(300);
@@ -405,16 +417,13 @@ pub async fn config_watch_start(
     app: AppHandle,
     state: tauri::State<'_, ConfigWatchState>,
     svc: tauri::State<'_, Arc<ConfigScanService>>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     // Take the previous handle out under the lock, then drop the lock
     // before joining its worker thread. Holding the mutex during
     // `stop()` would block any concurrent `config_watch_*` command
     // until the worker exits (audit 2026-04-24, B9).
     let prev = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("watch state lock: {e}"))?;
+        let mut guard = state.0.lock().map_err(watch_lock_poisoned)?;
         guard.take()
     };
     if let Some(mut h) = prev {
@@ -426,25 +435,20 @@ pub async fn config_watch_start(
     // through, and both use the service's generation counter to
     // avoid clobbering each other's results.
     let shared = Arc::clone(svc.inner());
-    let handle = start(app.clone(), cwd.map(PathBuf::from), shared)?;
-    let mut guard = state
-        .0
-        .lock()
-        .map_err(|e| format!("watch state lock: {e}"))?;
+    let handle = start(app.clone(), cwd.map(PathBuf::from), shared)
+        .map_err(|m| ErrorDto::detail(codes::CONFIG_WATCH_START_FAILED, m))?;
+    let mut guard = state.0.lock().map_err(watch_lock_poisoned)?;
     *guard = Some(handle);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn config_watch_stop(state: tauri::State<'_, ConfigWatchState>) -> Result<(), String> {
+pub async fn config_watch_stop(state: tauri::State<'_, ConfigWatchState>) -> Result<(), ErrorDto> {
     // Same pattern as `config_watch_start`: release the mutex before
     // joining the worker so other commands can make progress while
     // shutdown is in flight (audit 2026-04-24, B9).
     let prev = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("watch state lock: {e}"))?;
+        let mut guard = state.0.lock().map_err(watch_lock_poisoned)?;
         guard.take()
     };
     if let Some(mut h) = prev {

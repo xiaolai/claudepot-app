@@ -220,6 +220,24 @@ pub enum BusError {
     AlreadySubscribed,
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for BusError {
+    fn code(&self) -> &'static str {
+        match self {
+            BusError::SubscriberGone => "session_live_bus.subscriber_gone",
+            BusError::AlreadySubscribed => "session_live_bus.already_subscribed",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            BusError::SubscriberGone => serde_json::json!({}),
+            BusError::AlreadySubscribed => serde_json::json!({}),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

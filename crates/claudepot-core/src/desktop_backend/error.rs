@@ -4,6 +4,8 @@
 //! module boundary"). `crate::error::DesktopSwapError` remains a
 //! re-export.
 
+use crate::error_code::ErrorCode;
+use serde_json::{json, Value};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -44,4 +46,43 @@ pub enum DesktopSwapError {
 
     #[error("{0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// `desktop_backend` owns four error enums rather than the one
+/// rust-conventions asks for, so only this one — the module's boundary
+/// error, the `desktop` noun's swap failures — takes the bare
+/// `desktop_backend` segment. The other three are namespaced by the
+/// concern they carry: `desktop_key`, `desktop_crypto`,
+/// `desktop_token_cache`.
+impl ErrorCode for DesktopSwapError {
+    fn code(&self) -> &'static str {
+        match self {
+            DesktopSwapError::DesktopStillRunning => "desktop_backend.desktop_still_running",
+            DesktopSwapError::NoStoredProfile(_) => "desktop_backend.no_stored_profile",
+            DesktopSwapError::FileCopyFailed(_) => "desktop_backend.file_copy_failed",
+            DesktopSwapError::NotInstalled => "desktop_backend.not_installed",
+            DesktopSwapError::DpapiInvalidated => "desktop_backend.dpapi_invalidated",
+            DesktopSwapError::Lock(_) => "desktop_backend.lock",
+            DesktopSwapError::Io(_) => "desktop_backend.io",
+        }
+    }
+
+    fn params(&self) -> Value {
+        match self {
+            DesktopSwapError::DesktopStillRunning => json!({}),
+            // The account row's uuid, never a profile secret.
+            DesktopSwapError::NoStoredProfile(uuid) => json!({ "uuid": uuid.to_string() }),
+            DesktopSwapError::FileCopyFailed(detail) => json!({ "detail": detail }),
+            DesktopSwapError::NotInstalled => json!({}),
+            DesktopSwapError::DpapiInvalidated => json!({}),
+            // The inner lock error's own English. A GUI that wants to
+            // branch on "already held" vs "open failed" should match on
+            // `DesktopLockError` before it reaches this boundary.
+            DesktopSwapError::Lock(e) => json!({ "detail": e.to_string() }),
+            DesktopSwapError::Io(e) => json!({ "detail": e.to_string() }),
+        }
+    }
 }

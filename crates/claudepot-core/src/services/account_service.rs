@@ -848,6 +848,62 @@ pub enum RegisterError {
     CcLiveRefreshSkipped,
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The three variants below the fold are the reason this enum could not
+/// keep riding one generic `accounts.register_failed` code carrying only
+/// `{{detail}}` — each needs a different sentence and a different button:
+///
+/// - **`AuthRejected` is the only one that means "sign in again".** Both
+///   the access token and its paired refresh token were refused, so no
+///   retry recovers it.
+/// - **`CcChangedDuringRefresh` means "retry", not "re-login".** CC's
+///   keychain blob moved under our CAS write; nothing was lost.
+/// - **`CcLiveRefreshSkipped` is a deliberate refusal, not a failure.**
+///   Spending the single-use refresh token while `claude` is live would
+///   sign that session out. It is strictly transient, and a UI that
+///   renders it as a re-login prompt would be actively harmful.
+///
+/// `AlreadyRegistered` crosses the account's email and uuid rather than
+/// one pre-composed English clause: the GUI names the existing account
+/// and offers to open it, which the CLI's `(uuid: …)` suffix cannot do.
+/// Emails are user-facing identity here, never a secret — the same
+/// judgement `cli_backend::SwapError::IdentityMismatch` already makes.
+impl crate::error_code::ErrorCode for RegisterError {
+    fn code(&self) -> &'static str {
+        match self {
+            RegisterError::NoCredentials => "account_register.no_credentials",
+            RegisterError::CredentialRead(_) => "account_register.credential_read",
+            RegisterError::CredentialWrite(_) => "account_register.credential_write",
+            RegisterError::ProfileFetch(_) => "account_register.profile_fetch",
+            RegisterError::AlreadyRegistered(_, _) => "account_register.already_registered",
+            RegisterError::Store(_) => "account_register.store",
+            RegisterError::NotFound => "account_register.not_found",
+            RegisterError::AuthRejected => "account_register.auth_rejected",
+            RegisterError::CcChangedDuringRefresh => "account_register.cc_changed_during_refresh",
+            RegisterError::CcLiveRefreshSkipped => "account_register.cc_live_refresh_skipped",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            RegisterError::NoCredentials
+            | RegisterError::NotFound
+            | RegisterError::AuthRejected
+            | RegisterError::CcChangedDuringRefresh
+            | RegisterError::CcLiveRefreshSkipped => serde_json::json!({}),
+            RegisterError::CredentialRead(detail)
+            | RegisterError::CredentialWrite(detail)
+            | RegisterError::ProfileFetch(detail)
+            | RegisterError::Store(detail) => serde_json::json!({ "detail": detail }),
+            RegisterError::AlreadyRegistered(email, uuid) => {
+                serde_json::json!({ "email": email, "uuid": uuid.to_string() })
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Login progress — phase events for the multi-step browser-OAuth flow.
 //

@@ -123,6 +123,40 @@ pub enum SaveRouteError {
     Store(RouteError),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+///
+/// The two `#[error(transparent)]` variants keep their own codes rather
+/// than forwarding the inner one. The phase *is* the user-facing fact —
+/// `Store` on edit means "the previously-saved route is still active",
+/// `Secrets` means "re-enter the secret" — and forwarding would erase
+/// exactly the distinction the enum exists to record. The inner code
+/// travels as `cause_code` so a sentence can still name the underlying
+/// failure.
+impl crate::error_code::ErrorCode for SaveRouteError {
+    fn code(&self) -> &'static str {
+        match self {
+            SaveRouteError::NotFound(_) => "route_save.not_found",
+            SaveRouteError::Secrets(_) => "route_save.secrets",
+            SaveRouteError::Store(_) => "route_save.store",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        // `code()` on the inner `RouteError` resolves without a `use`:
+        // inside an `impl Trait for T` block the trait is in scope.
+        match self {
+            SaveRouteError::NotFound(id) => serde_json::json!({ "id": id }),
+            SaveRouteError::Secrets(e) => {
+                serde_json::json!({ "detail": e.to_string(), "cause_code": e.code() })
+            }
+            SaveRouteError::Store(e) => {
+                serde_json::json!({ "detail": e.to_string(), "cause_code": e.code() })
+            }
+        }
+    }
+}
+
 /// A successfully saved route plus any post-store side-effect
 /// failures. A non-empty `warnings` means the route IS persisted
 /// but on-disk artifacts (wrapper, Desktop profile) may be stale.

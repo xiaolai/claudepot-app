@@ -9,6 +9,7 @@
 //! bool/enum struct with no path or secret fields, so it crosses to JS
 //! directly rather than through a hand-mirrored DTO.
 
+use crate::dto_error::ErrorDto;
 use claudepot_core::thinking_toggle::{
     resolve_thinking_enabled, set_thinking_enabled, ThinkingState,
 };
@@ -16,15 +17,19 @@ use claudepot_core::thinking_toggle::{
 /// `thinking_state` — read the current extended-thinking default
 /// (`MAX_THINKING_TOKENS` env + `~/.claude/settings.json`).
 #[tauri::command]
-pub async fn thinking_state() -> Result<ThinkingState, String> {
+pub async fn thinking_state() -> Result<ThinkingState, ErrorDto> {
     Ok(resolve_thinking_enabled())
 }
 
 /// `thinking_set` — set the extended-thinking default. `enabled = true`
 /// returns to CC's default (key cleared); `false` writes
 /// `alwaysThinkingEnabled: false`. Returns the re-resolved state.
+///
+/// The `write setting: ` prefix this used to prepend is gone —
+/// `SettingsWriteError` already names what failed, and the UI owns the
+/// framing for what it was attempting. See `crate::dto_error`.
 #[tauri::command]
-pub async fn thinking_set(enabled: bool) -> Result<ThinkingState, String> {
-    set_thinking_enabled(enabled).map_err(|e| format!("write setting: {e}"))?;
+pub async fn thinking_set(enabled: bool) -> Result<ThinkingState, ErrorDto> {
+    set_thinking_enabled(enabled)?;
     Ok(resolve_thinking_enabled())
 }

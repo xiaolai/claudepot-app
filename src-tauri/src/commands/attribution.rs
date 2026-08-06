@@ -9,13 +9,15 @@
 //! `AttributionState` carries only user-authored attribution text (not
 //! a secret), so it crosses to JS directly rather than through a DTO.
 
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::attribution_settings::{
     resolve_attribution, set_attribution, AttributionMode, AttributionState,
 };
+use serde_json::json;
 
 /// `attribution_state` — read the current commit/PR attribution state.
 #[tauri::command]
-pub async fn attribution_state() -> Result<AttributionState, String> {
+pub async fn attribution_state() -> Result<AttributionState, ErrorDto> {
     Ok(resolve_attribution())
 }
 
@@ -23,12 +25,16 @@ pub async fn attribution_state() -> Result<AttributionState, String> {
 /// `"default" | "off" | "custom"`. For `"custom"`, `commit` and `pr`
 /// carry the literal trailer / PR-body text (empty string allowed).
 /// Returns the re-resolved state.
+///
+/// The `write setting: ` prefix is gone — `SettingsWriteError` names
+/// what failed and the UI names what it was attempting. See
+/// `crate::dto_error`.
 #[tauri::command]
 pub async fn attribution_set(
     mode: String,
     commit: Option<String>,
     pr: Option<String>,
-) -> Result<AttributionState, String> {
+) -> Result<AttributionState, ErrorDto> {
     let m = match mode.as_str() {
         "default" => AttributionMode::Default,
         "off" => AttributionMode::Off,
@@ -36,8 +42,14 @@ pub async fn attribution_set(
             commit: commit.unwrap_or_default(),
             pr: pr.unwrap_or_default(),
         },
-        other => return Err(format!("unknown mode {other}; want default|off|custom")),
+        other => {
+            return Err(ErrorDto::with_params(
+                codes::ATTRIBUTION_UNKNOWN_MODE,
+                json!({ "mode": other }),
+                format!("unknown mode {other}; want default|off|custom"),
+            ))
+        }
     };
-    set_attribution(m).map_err(|e| format!("write setting: {e}"))?;
+    set_attribution(m)?;
     Ok(resolve_attribution())
 }

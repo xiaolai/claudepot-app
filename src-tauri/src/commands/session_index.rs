@@ -7,12 +7,9 @@
 //! thousands of JSONL files would freeze the webview for seconds.
 
 use crate::commands::shared_memory::SharedMemoryIndex;
+use crate::dto_error::{codes, ErrorDto};
 use claudepot_core::paths;
 use tauri::State;
-
-fn join_blocking_err(e: tokio::task::JoinError) -> String {
-    format!("blocking task failed: {e}")
-}
 
 // ---------------------------------------------------------------------------
 // Session index — Sessions tab list + per-session detail (transcript).
@@ -29,15 +26,14 @@ fn join_blocking_err(e: tokio::task::JoinError) -> String {
 /// async command — letting a multi-second scan park there serializes
 /// everything else (audit B8 commands_session_index.rs:28).
 #[tauri::command]
-pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String> {
+pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let cfg = paths::claude_config_dir();
-        let rows = claudepot_core::session::list_all_sessions(&cfg)
-            .map_err(|e| format!("session list failed: {e}"))?;
-        Ok::<_, String>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
+        let rows = claudepot_core::session::list_all_sessions(&cfg).map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Per-project variant of `session_list_all`: same refresh + DTO
@@ -48,15 +44,17 @@ pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String
 ///
 /// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
-pub async fn session_list_by_slug(slug: String) -> Result<Vec<crate::dto::SessionRowDto>, String> {
+pub async fn session_list_by_slug(
+    slug: String,
+) -> Result<Vec<crate::dto::SessionRowDto>, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let rows = claudepot_core::session::list_sessions_by_slug(&cfg, &slug)
-            .map_err(|e| format!("session list failed: {e}"))?;
-        Ok::<_, String>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
+        let rows =
+            claudepot_core::session::list_sessions_by_slug(&cfg, &slug).map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Full JSONL parse for a single session, keyed by its UUID. Returns
@@ -65,15 +63,15 @@ pub async fn session_list_by_slug(slug: String) -> Result<Vec<crate::dto::Sessio
 ///
 /// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
-pub async fn session_read(session_id: String) -> Result<crate::dto::SessionDetailDto, String> {
+pub async fn session_read(session_id: String) -> Result<crate::dto::SessionDetailDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
         let detail = claudepot_core::session::read_session_detail(&cfg, &session_id)
-            .map_err(|e| format!("session read failed: {e}"))?;
-        Ok::<_, String>(crate::dto::SessionDetailDto::from(&detail))
+            .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(crate::dto::SessionDetailDto::from(&detail))
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Full JSONL parse keyed by the transcript's on-disk path. Preferred
@@ -84,18 +82,20 @@ pub async fn session_read(session_id: String) -> Result<crate::dto::SessionDetai
 ///
 /// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
-pub async fn session_read_path(file_path: String) -> Result<crate::dto::SessionDetailDto, String> {
+pub async fn session_read_path(
+    file_path: String,
+) -> Result<crate::dto::SessionDetailDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
         let detail = claudepot_core::session::read_session_detail_at_path(
             &cfg,
             std::path::Path::new(&file_path),
         )
-        .map_err(|e| format!("session read failed: {e}"))?;
-        Ok::<_, String>(crate::dto::SessionDetailDto::from(&detail))
+        .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(crate::dto::SessionDetailDto::from(&detail))
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Drop every cached row in `sessions.db` and repopulate from disk.
@@ -106,17 +106,20 @@ pub async fn session_read_path(file_path: String) -> Result<crate::dto::SessionD
 ///
 /// Wrapped in `spawn_blocking` — full rebuild scans every JSONL.
 #[tauri::command]
-pub async fn session_index_rebuild() -> Result<(), String> {
+pub async fn session_index_rebuild() -> Result<(), ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let data_dir = paths::claudepot_data_dir();
         let db_path = data_dir.join("sessions.db");
-        let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
-            .map_err(|e| format!("open session index: {e}"))?;
-        idx.rebuild()
-            .map_err(|e| format!("rebuild session index: {e}"))
+        // `open session index: ` / `rebuild session index: ` are gone.
+        // Both failures are `SessionIndexError`, which already
+        // distinguishes sql / io / json / migration-validation — the
+        // prefix only said which half of this function we were in.
+        let idx =
+            claudepot_core::session_index::SessionIndex::open(&db_path).map_err(ErrorDto::from)?;
+        idx.rebuild().map_err(ErrorDto::from)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 // ---------------------------------------------------------------------------
@@ -130,11 +133,13 @@ pub async fn session_index_rebuild() -> Result<(), String> {
 /// Wrapped in `spawn_blocking` — `load_detail_by_path` parses the full
 /// JSONL synchronously.
 #[tauri::command]
-pub async fn session_chunks(file_path: String) -> Result<Vec<crate::dto::SessionChunkDto>, String> {
+pub async fn session_chunks(
+    file_path: String,
+) -> Result<Vec<crate::dto::SessionChunkDto>, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let detail = load_detail_by_path(&file_path)?;
         let chunks = claudepot_core::session_chunks::build_chunks(&detail.events);
-        Ok::<_, String>(
+        Ok::<_, ErrorDto>(
             chunks
                 .iter()
                 .map(crate::dto::SessionChunkDto::from)
@@ -142,7 +147,7 @@ pub async fn session_chunks(file_path: String) -> Result<Vec<crate::dto::Session
         )
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Visible-context token attribution across six categories.
@@ -151,28 +156,59 @@ pub async fn session_chunks(file_path: String) -> Result<Vec<crate::dto::Session
 #[tauri::command]
 pub async fn session_context_attribution(
     file_path: String,
-) -> Result<crate::dto::ContextStatsDto, String> {
+) -> Result<crate::dto::ContextStatsDto, ErrorDto> {
     tokio::task::spawn_blocking(move || {
         let detail = load_detail_by_path(&file_path)?;
         let stats = claudepot_core::session_context::attribute_context(&detail.events);
-        Ok::<_, String>((&stats).into())
+        Ok::<_, ErrorDto>((&stats).into())
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Export transcript to Markdown or JSON (sk-ant-* redacted). Kept as
 /// an internal helper for `session_export_to_file` — not exposed
 /// separately until the UI has a "copy to clipboard" flow that needs
 /// the raw body.
-fn session_export_text(file_path: String, format: String) -> Result<String, String> {
+fn session_export_text(file_path: String, format: String) -> Result<String, ErrorDto> {
     let detail = load_detail_by_path(&file_path)?;
     let fmt = match format.as_str() {
         "md" | "markdown" => claudepot_core::session_export::ExportFormat::Markdown,
         "json" => claudepot_core::session_export::ExportFormat::Json,
-        other => return Err(format!("unknown format: {other}")),
+        other => {
+            return Err(ErrorDto::with_params(
+                codes::SESSION_EXPORT_UNKNOWN_FORMAT,
+                serde_json::json!({ "format": other }),
+                format!("unknown format: {other}"),
+            ))
+        }
     };
     Ok(claudepot_core::session_export::export(&detail, fmt))
+}
+
+/// One of the four ways the renderer-supplied destination can be
+/// unusable. The English is the string this function used to return,
+/// verbatim, and rides in `detail` as well so a localized sentence can
+/// append it without re-deriving it from `message`.
+fn invalid_output_path(output_path: &str, message: String) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::SESSION_EXPORT_INVALID_OUTPUT_PATH,
+        // Raw, exactly as the renderer spelled it (rules/paths.md).
+        serde_json::json!({ "path": output_path, "detail": message }),
+        message,
+    )
+}
+
+/// A step of the atomic-write pipeline failed. `path` is always the
+/// user's chosen destination — the temp file is an implementation
+/// detail the sentence should not name — while the step and the
+/// underlying io text ride in `detail`, which is also `message`.
+fn export_write_failed(output_path: &str, message: String) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::SESSION_EXPORT_WRITE_FAILED,
+        serde_json::json!({ "path": output_path, "detail": message }),
+        message,
+    )
 }
 
 /// Export transcript directly to disk. The UI hands us an absolute
@@ -197,37 +233,47 @@ pub async fn session_export_to_file(
     file_path: String,
     format: String,
     output_path: String,
-) -> Result<usize, String> {
+) -> Result<usize, ErrorDto> {
     // Wrapped in `spawn_blocking` — JSONL parse, redaction, atomic
     // write, and chmod are all sync and would otherwise hold the IPC
     // worker for the whole export (audit B8 commands_session_index.rs:146).
-    tokio::task::spawn_blocking(move || -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || -> Result<usize, ErrorDto> {
         session_export_to_file_sync(file_path, format, output_path)
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 fn session_export_to_file_sync(
     file_path: String,
     format: String,
     output_path: String,
-) -> Result<usize, String> {
+) -> Result<usize, ErrorDto> {
     let output = std::path::Path::new(&output_path);
     if !output.is_absolute() {
-        return Err(format!("output path must be absolute: {output_path}"));
+        return Err(invalid_output_path(
+            &output_path,
+            format!("output path must be absolute: {output_path}"),
+        ));
     }
     if output
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
-        return Err(format!("output path must not contain `..`: {output_path}"));
+        return Err(invalid_output_path(
+            &output_path,
+            format!("output path must not contain `..`: {output_path}"),
+        ));
     }
     // Refuse to overwrite a symlink — the user's chosen filesystem
     // might resolve to somewhere unexpected under our permissions.
     match std::fs::symlink_metadata(output) {
         Ok(meta) if meta.file_type().is_symlink() => {
-            return Err(format!("refusing to overwrite symlink: {output_path}"));
+            return Err(ErrorDto::with_params(
+                codes::SESSION_EXPORT_OUTPUT_IS_SYMLINK,
+                serde_json::json!({ "path": output_path }),
+                format!("refusing to overwrite symlink: {output_path}"),
+            ));
         }
         _ => {}
     }
@@ -238,13 +284,18 @@ fn session_export_to_file_sync(
     // rename into place. On Unix `rename(2)` is atomic within the same
     // filesystem. If we crash mid-write the user still sees the
     // previous file (or no file) — never a half-written transcript.
-    let parent = output
-        .parent()
-        .ok_or_else(|| format!("output has no parent directory: {output_path}"))?;
-    let final_name = output
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| format!("output has no filename: {output_path}"))?;
+    let parent = output.parent().ok_or_else(|| {
+        invalid_output_path(
+            &output_path,
+            format!("output has no parent directory: {output_path}"),
+        )
+    })?;
+    let final_name = output.file_name().and_then(|s| s.to_str()).ok_or_else(|| {
+        invalid_output_path(
+            &output_path,
+            format!("output has no filename: {output_path}"),
+        )
+    })?;
 
     // Unique per-call suffix so concurrent exports don't stomp each other.
     let nonce = std::time::SystemTime::now()
@@ -264,9 +315,12 @@ fn session_export_to_file_sync(
         // and the post-write chmod fallback below catches the rest.
         opts.mode(0o600);
     }
-    let mut file = opts
-        .open(&tmp_path)
-        .map_err(|e| format!("open tmp {}: {e}", tmp_path.display()))?;
+    let mut file = opts.open(&tmp_path).map_err(|e| {
+        export_write_failed(
+            &output_path,
+            format!("open tmp {}: {e}", tmp_path.display()),
+        )
+    })?;
 
     use std::io::Write as _;
     if let Err(e) = (|| -> std::io::Result<()> {
@@ -277,7 +331,10 @@ fn session_export_to_file_sync(
         // Best-effort cleanup; ignore secondary errors.
         drop(file);
         let _ = std::fs::remove_file(&tmp_path);
-        return Err(format!("write tmp {}: {e}", tmp_path.display()));
+        return Err(export_write_failed(
+            &output_path,
+            format!("write tmp {}: {e}", tmp_path.display()),
+        ));
     }
     drop(file);
 
@@ -286,22 +343,28 @@ fn session_export_to_file_sync(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let meta = std::fs::metadata(&tmp_path).map_err(|e| format!("stat tmp: {e}"))?;
+        let meta = std::fs::metadata(&tmp_path)
+            .map_err(|e| export_write_failed(&output_path, format!("stat tmp: {e}")))?;
         if meta.permissions().mode() & 0o077 != 0 {
             if let Err(e) =
                 std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
             {
                 let _ = std::fs::remove_file(&tmp_path);
-                return Err(format!("chmod tmp: {e}"));
+                return Err(export_write_failed(&output_path, format!("chmod tmp: {e}")));
             }
             let mode2 = std::fs::metadata(&tmp_path)
-                .map_err(|e| format!("re-stat tmp: {e}"))?
+                .map_err(|e| export_write_failed(&output_path, format!("re-stat tmp: {e}")))?
                 .permissions()
                 .mode();
             if mode2 & 0o077 != 0 {
                 let _ = std::fs::remove_file(&tmp_path);
-                return Err(format!(
-                    "filesystem does not enforce 0600 permissions at {output_path}"
+                // A refusal, not an I/O failure — its own identity, so
+                // the GUI can say "pick another disk" rather than
+                // "try again".
+                return Err(ErrorDto::with_params(
+                    codes::SESSION_EXPORT_PERMISSIONS_NOT_ENFORCED,
+                    serde_json::json!({ "path": output_path }),
+                    format!("filesystem does not enforce 0600 permissions at {output_path}"),
                 ));
             }
         }
@@ -313,7 +376,10 @@ fn session_export_to_file_sync(
     // is always same-filesystem.
     if let Err(e) = std::fs::rename(&tmp_path, output) {
         let _ = std::fs::remove_file(&tmp_path);
-        return Err(format!("rename into {output_path}: {e}"));
+        return Err(export_write_failed(
+            &output_path,
+            format!("rename into {output_path}: {e}"),
+        ));
     }
 
     Ok(body.len())
@@ -336,7 +402,7 @@ pub async fn session_search(
     query: String,
     limit: Option<usize>,
     state: State<'_, SharedMemoryIndex>,
-) -> Result<Vec<crate::dto::SearchHitDto>, String> {
+) -> Result<Vec<crate::dto::SearchHitDto>, ErrorDto> {
     // Clone the `Option<Arc<SessionIndex>>` out of Tauri state so the
     // blocking closure can own it across the await point.
     let idx = state.0.clone();
@@ -348,11 +414,11 @@ pub async fn session_search(
             &query,
             limit.unwrap_or(25),
         )
-        .map_err(|e| format!("search sessions: {e}"))?;
-        Ok::<_, String>(hits.iter().map(crate::dto::SearchHitDto::from).collect())
+        .map_err(ErrorDto::from)?;
+        Ok::<_, ErrorDto>(hits.iter().map(crate::dto::SearchHitDto::from).collect())
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Group all sessions by git repository (collapses worktrees into a
@@ -360,13 +426,12 @@ pub async fn session_search(
 ///
 /// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
-pub async fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroupDto>, String> {
+pub async fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroupDto>, ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let cfg = paths::claude_config_dir();
-        let rows = claudepot_core::session::list_all_sessions(&cfg)
-            .map_err(|e| format!("list sessions: {e}"))?;
+        let rows = claudepot_core::session::list_all_sessions(&cfg).map_err(ErrorDto::from)?;
         let groups = claudepot_core::session_worktree::group_by_repo(rows);
-        Ok::<_, String>(
+        Ok::<_, ErrorDto>(
             groups
                 .iter()
                 .map(crate::dto::RepositoryGroupDto::from)
@@ -374,13 +439,16 @@ pub async fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroup
         )
     })
     .await
-    .map_err(join_blocking_err)?
+    .map_err(ErrorDto::task_join)?
 }
 
 pub(crate) fn load_detail_by_path(
     file_path: &str,
-) -> Result<claudepot_core::session::SessionDetail, String> {
+) -> Result<claudepot_core::session::SessionDetail, ErrorDto> {
     let cfg = paths::claude_config_dir();
+    // `session read failed: ` is gone; `SessionError` carries
+    // `session.io` / `session.not_found` / `session.invalid_path` and
+    // its own English.
     claudepot_core::session::read_session_detail_at_path(&cfg, std::path::Path::new(file_path))
-        .map_err(|e| format!("session read failed: {e}"))
+        .map_err(ErrorDto::from)
 }

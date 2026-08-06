@@ -51,6 +51,7 @@ pub use crate::{
         DesktopAdoptOutcome, DesktopClearOutcome, DesktopIdentity, DesktopProbeMethod,
         DesktopSyncOutcome,
     },
+    dto_error::ErrorDto,
     dto_keys::{ApiKeySummaryDto, OauthTokenSummaryDto},
     dto_project::{
         CleanPreviewDto, DryRunPlanDto, MoveArgsDto, PendingJournalsSummaryDto, PrInfoDto,

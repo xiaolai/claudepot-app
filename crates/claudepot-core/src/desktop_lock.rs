@@ -42,6 +42,33 @@ pub enum DesktopLockError {
     Timeout(Duration),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for DesktopLockError {
+    fn code(&self) -> &'static str {
+        match self {
+            DesktopLockError::Open(_) => "desktop_lock.open",
+            DesktopLockError::Held => "desktop_lock.held",
+            DesktopLockError::Timeout(_) => "desktop_lock.timeout",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            DesktopLockError::Open(detail) => serde_json::json!({ "detail": detail }),
+            DesktopLockError::Held => serde_json::json!({}),
+            // The English renders `Duration`'s Debug ("5s"); a
+            // translated sentence needs the number, not that string —
+            // `crate::error_code`'s "a duration as `retry_after_secs`"
+            // rule. Seconds rather than the raw Debug for the same
+            // reason `oauth.rate_limited` carries `retry_after_secs`.
+            DesktopLockError::Timeout(d) => {
+                serde_json::json!({ "timeout_secs": d.as_secs_f64() })
+            }
+        }
+    }
+}
+
 fn lock_path() -> PathBuf {
     crate::paths::claudepot_data_dir().join("desktop.lock")
 }

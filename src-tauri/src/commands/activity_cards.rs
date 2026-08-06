@@ -8,6 +8,10 @@
 //! Heavy work runs on the Tokio blocking pool (SQLite reads can
 //! stall the IPC worker on a hot DB or large index). Commands that
 //! only flip a meta cell stay sync.
+//!
+//! Rejections cross as `ErrorDto`. The `query: ` / `recent join: `
+//! prefixes are gone — `ActivityIndexError` names what failed and the
+//! UI names what it was attempting. See `crate::dto_error`.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -19,6 +23,15 @@ use crate::dto_activity_cards::{
     ActivityCardDto, CardNavigateDto, CardsCountDto, CardsRecentQueryDto, CardsReindexFailureDto,
     CardsReindexResultDto,
 };
+use crate::dto_error::{codes, ErrorDto};
+
+/// `CardsRecentQueryDto::into_core` validates two wire enums (card
+/// kind, severity) and returns one English string for either. One code
+/// covers both: same stake — a renderer that sent a value it did not
+/// get from us — and same remedy. Which field it was rides as `detail`.
+fn invalid_query(m: String) -> ErrorDto {
+    ErrorDto::detail(codes::ACTIVITY_CARDS_INVALID_QUERY, m)
+}
 
 /// Tauri-managed handle to the activity index. Wrapped so the
 /// command surface only depends on this type, not directly on
@@ -35,13 +48,12 @@ pub struct ActivityCardsState {
 pub async fn cards_recent(
     state: State<'_, ActivityCardsState>,
     query: CardsRecentQueryDto,
-) -> Result<Vec<ActivityCardDto>, String> {
-    let q = query.into_core()?;
+) -> Result<Vec<ActivityCardDto>, ErrorDto> {
+    let q = query.into_core().map_err(invalid_query)?;
     let idx = Arc::clone(&state.index);
     let cards = tauri::async_runtime::spawn_blocking(move || idx.recent(&q))
         .await
-        .map_err(|e| format!("recent join: {e}"))?
-        .map_err(|e| e.to_string())?;
+        .map_err(ErrorDto::task_join)??;
     Ok(cards.iter().map(ActivityCardDto::from).collect())
 }
 
@@ -51,15 +63,13 @@ pub async fn cards_recent(
 pub async fn cards_count_new_since(
     state: State<'_, ActivityCardsState>,
     query: CardsRecentQueryDto,
-) -> Result<CardsCountDto, String> {
-    let q = query.into_core()?;
+) -> Result<CardsCountDto, ErrorDto> {
+    let q = query.into_core().map_err(invalid_query)?;
     let idx = Arc::clone(&state.index);
-    tauri::async_runtime::spawn_blocking(move || -> Result<CardsCountDto, String> {
-        let last_seen = idx.last_seen().map_err(|e| e.to_string())?;
-        let total = idx.count_new_since(None, &q).map_err(|e| e.to_string())?;
-        let new = idx
-            .count_new_since(last_seen, &q)
-            .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<CardsCountDto, ErrorDto> {
+        let last_seen = idx.last_seen()?;
+        let total = idx.count_new_since(None, &q)?;
+        let new = idx.count_new_since(last_seen, &q)?;
         Ok(CardsCountDto {
             total,
             new,
@@ -67,7 +77,7 @@ pub async fn cards_count_new_since(
         })
     })
     .await
-    .map_err(|e| format!("count join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Set the cursor to `card_id`. Idempotent. Called when the user
@@ -76,11 +86,8 @@ pub async fn cards_count_new_since(
 pub fn cards_set_last_seen(
     state: State<'_, ActivityCardsState>,
     card_id: i64,
-) -> Result<(), String> {
-    state
-        .index
-        .set_last_seen(card_id)
-        .map_err(|e| e.to_string())
+) -> Result<(), ErrorDto> {
+    state.index.set_last_seen(card_id).map_err(ErrorDto::from)
 }
 
 /// Resolve a card id to a navigation payload — session path +
@@ -90,9 +97,9 @@ pub fn cards_set_last_seen(
 pub async fn cards_navigate(
     state: State<'_, ActivityCardsState>,
     card_id: i64,
-) -> Result<Option<CardNavigateDto>, String> {
+) -> Result<Option<CardNavigateDto>, ErrorDto> {
     let idx = Arc::clone(&state.index);
-    tauri::async_runtime::spawn_blocking(move || -> Result<Option<CardNavigateDto>, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Option<CardNavigateDto>, ErrorDto> {
         // Recent query with limit 1 won't work — we need an
         // arbitrary id lookup. Use a pinpoint query through the
         // recent path with limit 10000 and find by id; cheap because
@@ -100,12 +107,10 @@ pub async fn cards_navigate(
         // already loaded the same row in the GUI list.
         // For a more direct path, expose a `get_by_id` on the
         // index later; v1 stays minimal.
-        let cards = idx
-            .recent(&claudepot_core::activity::RecentQuery {
-                limit: Some(10_000),
-                ..Default::default()
-            })
-            .map_err(|e| e.to_string())?;
+        let cards = idx.recent(&claudepot_core::activity::RecentQuery {
+            limit: Some(10_000),
+            ..Default::default()
+        })?;
         Ok(cards
             .into_iter()
             .find(|c| c.id == Some(card_id))
@@ -116,7 +121,7 @@ pub async fn cards_navigate(
             }))
     })
     .await
-    .map_err(|e| format!("navigate join: {e}"))?
+    .map_err(ErrorDto::task_join)?
 }
 
 /// Fetch the body of a card lazily — seek to `byte_offset` in the
@@ -127,7 +132,7 @@ pub async fn cards_navigate(
 pub async fn cards_body(
     state: State<'_, ActivityCardsState>,
     card_id: i64,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, ErrorDto> {
     let nav = cards_navigate(state, card_id).await?;
     let Some(nav) = nav else {
         return Ok(None);
@@ -154,8 +159,8 @@ pub async fn cards_body(
         )))
     })
     .await
-    .map_err(|e| format!("body join: {e}"))?
-    .map_err(|e| format!("body io: {e}"))?;
+    .map_err(ErrorDto::task_join)?
+    .map_err(|e| ErrorDto::detail(codes::ACTIVITY_CARDS_BODY_READ_FAILED, e))?;
     Ok(body)
 }
 
@@ -165,15 +170,14 @@ pub async fn cards_body(
 #[tauri::command]
 pub async fn cards_reindex(
     state: State<'_, ActivityCardsState>,
-) -> Result<CardsReindexResultDto, String> {
+) -> Result<CardsReindexResultDto, ErrorDto> {
     let idx = Arc::clone(&state.index);
     let stats = tauri::async_runtime::spawn_blocking(move || {
         let config_dir = claudepot_core::paths::claude_config_dir();
         claudepot_core::activity::backfill::run(&config_dir, &idx)
     })
     .await
-    .map_err(|e| format!("reindex join: {e}"))?
-    .map_err(|e| e.to_string())?;
+    .map_err(ErrorDto::task_join)??;
     Ok(CardsReindexResultDto {
         files_scanned: stats.files_scanned,
         cards_inserted: stats.cards_inserted,

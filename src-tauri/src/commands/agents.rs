@@ -3,6 +3,23 @@
 //! Thin wrappers over `claudepot_core::agent`. No business
 //! logic. Outbound DTOs follow the routes pattern; inbound DTOs
 //! carry only public fields (no secrets).
+//!
+//! Errors use the `ErrorDto` shape (i18n plan §2.5; `commands/routes.rs`
+//! is the reference). `AgentError` carries its own `code()`/`params()`,
+//! so every store, scheduler and shim path lifts with `ErrorDto::from`
+//! and drops the English operation prefix it used to compose — that
+//! prefix belongs to the UI, which knows what the user was doing.
+//! Form-shaped rejections that have no core enum behind them ride the
+//! `agents.*` command codes in `dto_error::codes`.
+//!
+//! # A draft is inert, and no error here may suggest otherwise
+//!
+//! `agents_run_now_start` refuses a `Draft` twice — once on a
+//! lock-free fast path, once under the store lock. Both rejections say
+//! the same thing (`agents.draft_not_runnable`): nothing was spawned,
+//! and the only way to arm the agent is a human clicking through the
+//! install review. Cron strings, permission modes, model ids and
+//! artifact paths ride in `params` as data; none of them is translated.
 
 use chrono::Utc;
 use claudepot_core::agent::{
@@ -19,21 +36,48 @@ use crate::dto_agents::{
     AgentSummaryDto, AgentUpdateDto, CronValidationDto, NameValidationDto,
     SchedulerCapabilitiesDto,
 };
+use crate::dto_error::{codes, ErrorDto};
 use crate::ops::{emit_terminal, new_running_op, OpKind, RunningOps};
+use serde_json::json;
 use tauri::{AppHandle, State};
 
 // ---------- helpers ----------
 
-fn err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+fn open_store() -> Result<AgentStore, ErrorDto> {
+    AgentStore::open().map_err(ErrorDto::from)
 }
 
-fn open_store() -> Result<AgentStore, String> {
-    AgentStore::open().map_err(|e| format!("agents store open failed: {e}"))
+fn parse_id(s: &str) -> Result<AgentId, ErrorDto> {
+    Uuid::parse_str(s.trim()).map_err(|e| ErrorDto::detail(codes::AGENTS_INVALID_ID, e))
 }
 
-fn parse_id(s: &str) -> Result<AgentId, String> {
-    Uuid::parse_str(s.trim()).map_err(|e| format!("invalid agent id: {e}"))
+/// "There is no agent with this id." Raised at the command site
+/// because the lookup is a store read that returns `Option`, not a
+/// core call that returns `AgentError::NotFound`.
+fn agent_not_found(id: &AgentId) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::AGENTS_NOT_FOUND,
+        json!({ "id": id.to_string() }),
+        format!("agent {id} not found"),
+    )
+}
+
+/// Run-Now / install refused because the record is still a draft.
+///
+/// The wording is load-bearing: a draft has **not** run, is **not**
+/// armed, and has no scheduler artifact. The remedy is a human opening
+/// the install review — that click is the security gate, and no
+/// localization of this code may imply the agent is already live.
+fn draft_not_runnable(name: &str) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::AGENTS_DRAFT_NOT_RUNNABLE,
+        json!({ "name": name }),
+        format!(
+            "agent '{name}' is a draft — review and install it before running. \
+             A draft is never executed directly; arming it through the \
+             install review is the gate."
+        ),
+    )
 }
 
 /// Build the route-id → wrapper-name lookup closure used by every
@@ -60,36 +104,63 @@ pub fn route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
     }
 }
 
-fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
-    claudepot_core::agent::validate_name(&dto.name).map_err(err)?;
-    let permission_mode = parse_permission_mode(&dto.permission_mode)
-        .ok_or_else(|| format!("invalid permission_mode: {}", dto.permission_mode))?;
-    let output_format = parse_output_format(&dto.output_format)
-        .ok_or_else(|| format!("invalid output_format: {}", dto.output_format))?;
+fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, ErrorDto> {
+    claudepot_core::agent::validate_name(&dto.name).map_err(ErrorDto::from)?;
+    let permission_mode = parse_permission_mode(&dto.permission_mode).ok_or_else(|| {
+        ErrorDto::with_params(
+            codes::AGENTS_INVALID_PERMISSION_MODE,
+            json!({ "mode": dto.permission_mode }),
+            format!("invalid permission_mode: {}", dto.permission_mode),
+        )
+    })?;
+    let output_format = parse_output_format(&dto.output_format).ok_or_else(|| {
+        ErrorDto::with_params(
+            codes::AGENTS_INVALID_OUTPUT_FORMAT,
+            json!({ "format": dto.output_format }),
+            format!("invalid output_format: {}", dto.output_format),
+        )
+    })?;
     if matches!(
         permission_mode,
         claudepot_core::agent::PermissionMode::BypassPermissions
     ) && dto.allowed_tools.is_empty()
     {
-        return Err(String::from(
+        return Err(ErrorDto::new(
+            codes::AGENTS_BYPASS_REQUIRES_ALLOWED_TOOLS,
             "bypassPermissions requires a non-empty allowed_tools whitelist",
         ));
     }
-    claudepot_core::agent::env::validate_map(&dto.extra_env).map_err(err)?;
+    claudepot_core::agent::env::validate_map(&dto.extra_env).map_err(ErrorDto::from)?;
 
     let binary = match dto.binary_kind.as_str() {
         "first_party" => AgentBinary::FirstParty,
         "route" => {
-            let route_id = dto
-                .binary_route_id
-                .as_deref()
-                .ok_or_else(|| String::from("route binary requires binary_route_id"))?;
+            let route_id = dto.binary_route_id.as_deref().ok_or_else(|| {
+                ErrorDto::new(
+                    codes::AGENTS_ROUTE_BINARY_ID_REQUIRED,
+                    "route binary requires binary_route_id",
+                )
+            })?;
             AgentBinary::Route {
-                route_id: Uuid::parse_str(route_id)
-                    .map_err(|e| format!("invalid route id: {e}"))?,
+                // The Providers surface already owns "that provider id
+                // isn't valid" — reusing its code rather than minting an
+                // agent-flavored twin keeps one identity per condition.
+                route_id: Uuid::parse_str(route_id).map_err(|e| {
+                    ErrorDto::with_params(
+                        codes::ROUTES_INVALID_ROUTE_ID,
+                        json!({ "id": route_id }),
+                        format!("invalid route id: {e}"),
+                    )
+                })?,
             }
         }
-        other => return Err(format!("unknown binary_kind: {other}")),
+        other => {
+            return Err(ErrorDto::with_params(
+                codes::AGENTS_UNKNOWN_BINARY_KIND,
+                json!({ "kind": other }),
+                format!("unknown binary_kind: {other}"),
+            ))
+        }
     };
 
     // Determine trigger ahead of cron validation: event/manual
@@ -106,7 +177,11 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
             // rather than silently treat it as session_settled.
             let event_str = dto.event_kind.as_deref().unwrap_or("session_settled");
             if event_str != "session_settled" {
-                return Err(format!("unknown event_kind: {event_str}"));
+                return Err(ErrorDto::with_params(
+                    codes::AGENTS_UNKNOWN_EVENT_KIND,
+                    json!({ "event": event_str }),
+                    format!("unknown event_kind: {event_str}"),
+                ));
             }
             let debounce_secs = dto
                 .event_debounce_secs
@@ -119,7 +194,7 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
         _ => {
             // Default = "cron". Validate the cron string before
             // anything else so we fail fast on bad input.
-            let _ = claudepot_core::agent::cron::expand(&dto.cron).map_err(err)?;
+            let _ = claudepot_core::agent::cron::expand(&dto.cron).map_err(ErrorDto::from)?;
             Trigger::Cron {
                 cron: dto.cron.clone(),
                 timezone: dto.timezone.clone(),
@@ -207,22 +282,32 @@ fn build_agent_from_create(dto: AgentCreateDto) -> Result<Agent, String> {
 /// merge `Trigger` correctly when the caller supplies only one of
 /// `cron`/`timezone` (preserving the other), and lets us validate
 /// the post-merge record's cross-field invariants.
-fn build_patch_from_update(dto: AgentUpdateDto, existing: &Agent) -> Result<AgentPatch, String> {
+fn build_patch_from_update(dto: AgentUpdateDto, existing: &Agent) -> Result<AgentPatch, ErrorDto> {
     // Resolve every fallible / branchy field BEFORE constructing the
     // patch — keeps the struct literal below a single, scannable
     // shape and avoids the field_reassign_with_default lint that
     // accumulating `patch.x = …` after `Default::default()` triggers.
     let permission_mode = match dto.permission_mode {
-        Some(s) => {
-            Some(parse_permission_mode(&s).ok_or_else(|| format!("invalid permission_mode: {s}"))?)
-        }
+        Some(s) => Some(parse_permission_mode(&s).ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::AGENTS_INVALID_PERMISSION_MODE,
+                json!({ "mode": s }),
+                format!("invalid permission_mode: {s}"),
+            )
+        })?),
         None => None,
     };
     let max_budget_usd = match dto.max_budget_usd {
         Some(b) => {
             if !b.is_finite() || b < 0.0 {
-                return Err(format!(
-                    "max_budget_usd must be a finite non-negative number (got {b})"
+                // `value` is stringified rather than passed as a JSON
+                // number: NaN and ±inf have no JSON number form and
+                // would serialize as `null`, erasing the one value the
+                // sentence is about.
+                return Err(ErrorDto::with_params(
+                    codes::AGENTS_INVALID_MAX_BUDGET,
+                    json!({ "value": b.to_string() }),
+                    format!("max_budget_usd must be a finite non-negative number (got {b})"),
                 ));
             }
             Some(b)
@@ -230,14 +315,18 @@ fn build_patch_from_update(dto: AgentUpdateDto, existing: &Agent) -> Result<Agen
         None => None,
     };
     let output_format = match dto.output_format {
-        Some(s) => {
-            Some(parse_output_format(&s).ok_or_else(|| format!("invalid output_format: {s}"))?)
-        }
+        Some(s) => Some(parse_output_format(&s).ok_or_else(|| {
+            ErrorDto::with_params(
+                codes::AGENTS_INVALID_OUTPUT_FORMAT,
+                json!({ "format": s }),
+                format!("invalid output_format: {s}"),
+            )
+        })?),
         None => None,
     };
     let extra_env = match dto.extra_env {
         Some(env) => {
-            claudepot_core::agent::env::validate_map(&env).map_err(err)?;
+            claudepot_core::agent::env::validate_map(&env).map_err(ErrorDto::from)?;
             Some(env)
         }
         None => None,
@@ -257,7 +346,7 @@ fn build_patch_from_update(dto: AgentUpdateDto, existing: &Agent) -> Result<Agen
         };
         let cron = dto.cron.unwrap_or(existing_cron);
         // Validate the cron string before building the trigger.
-        let _ = claudepot_core::agent::cron::expand(&cron).map_err(err)?;
+        let _ = claudepot_core::agent::cron::expand(&cron).map_err(ErrorDto::from)?;
         // Empty timezone string from the wire == "no timezone";
         // otherwise treat as a fresh override. Missing field == keep existing.
         let timezone = match dto.timezone {
@@ -325,7 +414,8 @@ fn build_patch_from_update(dto: AgentUpdateDto, existing: &Agent) -> Result<Agen
         claudepot_core::agent::PermissionMode::BypassPermissions
     ) && post_tools_empty
     {
-        return Err(String::from(
+        return Err(ErrorDto::new(
+            codes::AGENTS_BYPASS_REQUIRES_ALLOWED_TOOLS,
             "bypassPermissions requires a non-empty allowed_tools whitelist",
         ));
     }
@@ -349,14 +439,20 @@ fn build_patch_from_update(dto: AgentUpdateDto, existing: &Agent) -> Result<Agen
 pub async fn agent_add_from_template(
     template_id: String,
     cwd: String,
-) -> Result<AgentSummaryDto, String> {
+) -> Result<AgentSummaryDto, ErrorDto> {
     let agent = match template_id.as_str() {
         "session-narrator" => {
             // `session_narrator` is a pure constructor; the cwd is
             // the project the narrator watches (event scope rule).
             claudepot_core::agent::templates::session_narrator(&cwd, Utc::now())
         }
-        other => return Err(format!("unknown template id: {other}")),
+        other => {
+            return Err(ErrorDto::with_params(
+                codes::TEMPLATES_UNKNOWN_ID,
+                json!({ "template_id": other }),
+                format!("unknown template id: {other}"),
+            ))
+        }
     };
 
     // Re-validate at the store boundary — `cwd` shape, name shape,
@@ -364,39 +460,45 @@ pub async fn agent_add_from_template(
     // surfaces here, not as a later failure during install.
     let mut store = open_store()?;
     if store.get_by_name(&agent.name).is_some() {
-        return Err(format!(
-            "an agent named '{}' already exists — rename or remove \
-             it before instantiating this template again",
-            agent.name
+        return Err(ErrorDto::with_params(
+            codes::AGENTS_TEMPLATE_NAME_TAKEN,
+            json!({ "name": agent.name }),
+            format!(
+                "an agent named '{}' already exists — rename or remove \
+                 it before instantiating this template again",
+                agent.name
+            ),
         ));
     }
     let summary = AgentSummaryDto::from(&agent);
-    store.add(agent).map_err(err)?;
-    store.save().map_err(err)?;
+    store.add(agent).map_err(ErrorDto::from)?;
+    store.save().map_err(ErrorDto::from)?;
     Ok(summary)
 }
 
 #[tauri::command]
-pub async fn agents_list() -> Result<Vec<AgentSummaryDto>, String> {
+pub async fn agents_list() -> Result<Vec<AgentSummaryDto>, ErrorDto> {
     let store = open_store()?;
     Ok(store.list().iter().map(AgentSummaryDto::from).collect())
 }
 
 #[tauri::command]
-pub async fn agents_get(id: String) -> Result<AgentDetailsDto, String> {
+pub async fn agents_get(id: String) -> Result<AgentDetailsDto, ErrorDto> {
     let store = open_store()?;
     let id = parse_id(&id)?;
-    let a = store
-        .get(&id)
-        .ok_or_else(|| format!("agent {id} not found"))?;
+    let a = store.get(&id).ok_or_else(|| agent_not_found(&id))?;
     Ok(AgentDetailsDto::from(a))
 }
 
 #[tauri::command]
-pub async fn agents_add(dto: AgentCreateDto) -> Result<AgentSummaryDto, String> {
+pub async fn agents_add(dto: AgentCreateDto) -> Result<AgentSummaryDto, ErrorDto> {
     let mut store = open_store()?;
     if store.get_by_name(&dto.name).is_some() {
-        return Err(format!("agent name '{}' is already taken", dto.name));
+        return Err(ErrorDto::with_params(
+            codes::AGENTS_NAME_TAKEN,
+            json!({ "name": dto.name }),
+            format!("agent name '{}' is already taken", dto.name),
+        ));
     }
     let agent = build_agent_from_create(dto)?;
     let id = agent.id;
@@ -406,7 +508,7 @@ pub async fn agents_add(dto: AgentCreateDto) -> Result<AgentSummaryDto, String> 
     // `install_shim` closure also surfaces it, but doing this lookup
     // first matches the previous behavior — and `resolve_binary` is
     // a pure path lookup with no side effects.)
-    let cli_path = current_claudepot_cli().map_err(err)?;
+    let cli_path = current_claudepot_cli().map_err(ErrorDto::from)?;
     let lookup = route_lookup_fn();
     let scheduler = active_scheduler();
 
@@ -439,26 +541,23 @@ pub async fn agents_add(dto: AgentCreateDto) -> Result<AgentSummaryDto, String> 
         },
         scheduler.as_ref(),
     )
-    .map_err(err)?;
+    .map_err(ErrorDto::from)?;
 
     Ok(AgentSummaryDto::from(&inserted))
 }
 
 #[tauri::command]
-pub async fn agents_update(dto: AgentUpdateDto) -> Result<AgentSummaryDto, String> {
+pub async fn agents_update(dto: AgentUpdateDto) -> Result<AgentSummaryDto, ErrorDto> {
     let mut store = open_store()?;
     let id = parse_id(&dto.id)?;
     // Snapshot the existing record so the patch builder can merge
     // partial trigger fields (cron without timezone, etc.), so we
     // can validate cross-field invariants against the post-merge
     // state, and so the helper's rollback can restore it.
-    let existing = store
-        .get(&id)
-        .ok_or_else(|| format!("agent {id} not found"))?
-        .clone();
+    let existing = store.get(&id).ok_or_else(|| agent_not_found(&id))?.clone();
     let patch = build_patch_from_update(dto, &existing)?;
 
-    let cli_path = current_claudepot_cli().map_err(err)?;
+    let cli_path = current_claudepot_cli().map_err(ErrorDto::from)?;
     let lookup = route_lookup_fn();
     let scheduler = active_scheduler();
 
@@ -508,7 +607,7 @@ pub async fn agents_update(dto: AgentUpdateDto) -> Result<AgentSummaryDto, Strin
         },
         scheduler.as_ref(),
     )
-    .map_err(err)?;
+    .map_err(ErrorDto::from)?;
 
     Ok(AgentSummaryDto::from(&updated))
 }
@@ -526,11 +625,11 @@ pub async fn agents_update(dto: AgentUpdateDto) -> Result<AgentSummaryDto, Strin
 /// save ordering and both rollback directions live in core and are
 /// covered by `install_gate`'s tests.
 #[tauri::command]
-pub async fn agent_install(id: String) -> Result<AgentSummaryDto, String> {
+pub async fn agent_install(id: String) -> Result<AgentSummaryDto, ErrorDto> {
     let mut store = open_store()?;
     let aid = parse_id(&id)?;
 
-    let cli_path = current_claudepot_cli().map_err(err)?;
+    let cli_path = current_claudepot_cli().map_err(ErrorDto::from)?;
     let lookup = route_lookup_fn();
     let scheduler = active_scheduler();
 
@@ -539,20 +638,20 @@ pub async fn agent_install(id: String) -> Result<AgentSummaryDto, String> {
             let binary_path = resolve_binary(agent, &lookup)?;
             install_shim(agent, &binary_path, &cli_path).map(|_| ())
         })
-        .map_err(err)?;
+        .map_err(ErrorDto::from)?;
 
     Ok(AgentSummaryDto::from(&outcome.agent))
 }
 
 #[tauri::command]
-pub async fn agents_remove(id: String) -> Result<(), String> {
+pub async fn agents_remove(id: String) -> Result<(), ErrorDto> {
     let mut store = open_store()?;
     let aid = parse_id(&id)?;
-    let _ = store.remove(&aid).map_err(err)?;
+    let _ = store.remove(&aid).map_err(ErrorDto::from)?;
     // Persist FIRST so the JSON store and OS scheduler can never
     // diverge if a later step fails. Even if scheduler unregister
     // errors, the store no longer points at the dropped record.
-    store.save().map_err(err)?;
+    store.save().map_err(ErrorDto::from)?;
     let scheduler = active_scheduler();
     let _ = scheduler.unregister(&aid);
     // Best-effort cleanup of the on-disk per-agent dir.
@@ -564,7 +663,7 @@ pub async fn agents_remove(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), String> {
+pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), ErrorDto> {
     let mut store = open_store()?;
     let aid = parse_id(&id)?;
 
@@ -574,11 +673,11 @@ pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), String>
     // before any artifact is materialized; see install_gate.rs.
     let existing = store
         .get(&aid)
-        .ok_or_else(|| format!("agent {aid} not found"))?
+        .ok_or_else(|| agent_not_found(&aid))?
         .clone();
     let rollback_enabled = existing.enabled;
 
-    let cli_path = current_claudepot_cli().map_err(err)?;
+    let cli_path = current_claudepot_cli().map_err(ErrorDto::from)?;
     let lookup = route_lookup_fn();
     let scheduler = active_scheduler();
 
@@ -622,7 +721,7 @@ pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), String>
         },
         scheduler.as_ref(),
     )
-    .map_err(err)?;
+    .map_err(ErrorDto::from)?;
 
     Ok(())
 }
@@ -632,7 +731,7 @@ pub async fn agents_run_now_start(
     id: String,
     app: AppHandle,
     ops: State<'_, RunningOps>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let aid = parse_id(&id)?;
 
     // grill X17: fast-path the Draft rejection without the
@@ -657,18 +756,14 @@ pub async fn agents_run_now_start(
             .get(&aid)
             .map(|a| a.name.clone())
             .unwrap_or_else(|| aid.to_string());
-        return Err(format!(
-            "agent '{name}' is a draft — review and install it before running. \
-             A draft is never executed directly; arming it through the \
-             install review is the gate."
-        ));
+        return Err(draft_not_runnable(&name));
     }
 
     // Load the agent now so we fail fast on missing.
     let store = open_store()?;
     let agent = store
         .get(&aid)
-        .ok_or_else(|| format!("agent {aid} not found"))?
+        .ok_or_else(|| agent_not_found(&aid))?
         .clone();
 
     // grill F16: Run-Now must NOT execute a `Draft`. A draft has
@@ -685,12 +780,7 @@ pub async fn agents_run_now_start(
     // path (and for any future caller that builds `agent` without
     // going through the X17 prelude).
     if matches!(agent.lifecycle, claudepot_core::agent::Lifecycle::Draft) {
-        return Err(format!(
-            "agent '{}' is a draft — review and install it before running. \
-             A draft is never executed directly; arming it through the \
-             install review is the gate.",
-            agent.name
-        ));
+        return Err(draft_not_runnable(&agent.name));
     }
 
     let op_id = format!("agent-run-{}", Uuid::new_v4());
@@ -746,14 +836,14 @@ pub async fn agents_run_now_start(
 pub async fn agents_runs_list(
     id: String,
     limit: Option<usize>,
-) -> Result<Vec<AgentRunDto>, String> {
+) -> Result<Vec<AgentRunDto>, ErrorDto> {
     let aid = parse_id(&id)?;
     let cap = limit.unwrap_or(50);
     // Core owns the listing policy (`.latest`-symlink skip, newest-
     // first sort) and `read_run` is the validated single-run reader.
     // `.ok()` keeps the historical silent-skip on a missing or
     // half-written result.json — one bad run must not 500 the list.
-    let names = claudepot_core::agent::list_run_ids(&aid).map_err(err)?;
+    let names = claudepot_core::agent::list_run_ids(&aid).map_err(ErrorDto::from)?;
     Ok(names
         .into_iter()
         .take(cap)
@@ -763,14 +853,14 @@ pub async fn agents_runs_list(
 }
 
 #[tauri::command]
-pub async fn agents_run_get(id: String, run_id: String) -> Result<AgentRunDto, String> {
+pub async fn agents_run_get(id: String, run_id: String) -> Result<AgentRunDto, ErrorDto> {
     let aid = parse_id(&id)?;
-    let run = core_read_run(&aid, &run_id).map_err(err)?;
+    let run = core_read_run(&aid, &run_id).map_err(ErrorDto::from)?;
     Ok(AgentRunDto::from(run))
 }
 
 #[tauri::command]
-pub async fn agents_validate_name(name: String) -> Result<NameValidationDto, String> {
+pub async fn agents_validate_name(name: String) -> Result<NameValidationDto, ErrorDto> {
     let mut already_taken = false;
     let validation = match claudepot_core::agent::validate_name(&name) {
         Ok(_) => {
@@ -799,7 +889,7 @@ pub async fn agents_validate_name(name: String) -> Result<NameValidationDto, Str
 }
 
 #[tauri::command]
-pub async fn agents_validate_cron(expr: String) -> Result<CronValidationDto, String> {
+pub async fn agents_validate_cron(expr: String) -> Result<CronValidationDto, ErrorDto> {
     match claudepot_core::agent::cron::expand(&expr) {
         Ok(_) => {
             let from = Utc::now();
@@ -819,27 +909,25 @@ pub async fn agents_validate_cron(expr: String) -> Result<CronValidationDto, Str
 }
 
 #[tauri::command]
-pub async fn agents_scheduler_capabilities() -> Result<SchedulerCapabilitiesDto, String> {
+pub async fn agents_scheduler_capabilities() -> Result<SchedulerCapabilitiesDto, ErrorDto> {
     let scheduler = active_scheduler();
     Ok(SchedulerCapabilitiesDto::from(scheduler.capabilities()))
 }
 
 #[tauri::command]
-pub async fn agents_dry_run_artifact(id: String) -> Result<String, String> {
+pub async fn agents_dry_run_artifact(id: String) -> Result<String, ErrorDto> {
     let store = open_store()?;
     let aid = parse_id(&id)?;
-    let agent = store
-        .get(&aid)
-        .ok_or_else(|| format!("agent {aid} not found"))?;
+    let agent = store.get(&aid).ok_or_else(|| agent_not_found(&aid))?;
 
     #[cfg(target_os = "macos")]
     {
-        claudepot_core::agent::scheduler::launchd::render_plist(agent).map_err(err)
+        claudepot_core::agent::scheduler::launchd::render_plist(agent).map_err(ErrorDto::from)
     }
     #[cfg(target_os = "linux")]
     {
-        let (timer, service) =
-            claudepot_core::agent::scheduler::systemd::render_units(agent).map_err(err)?;
+        let (timer, service) = claudepot_core::agent::scheduler::systemd::render_units(agent)
+            .map_err(ErrorDto::from)?;
         return Ok(format!(
             "# {} ===== timer ======\n{}\n# ===== service =====\n{}",
             agent.id, timer, service
@@ -847,22 +935,28 @@ pub async fn agents_dry_run_artifact(id: String) -> Result<String, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        return claudepot_core::agent::scheduler::schtasks::render_xml(agent).map_err(err);
+        return claudepot_core::agent::scheduler::schtasks::render_xml(agent)
+            .map_err(ErrorDto::from);
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = agent;
-        Err(String::from("no scheduler adapter for this platform"))
+        Err(ErrorDto::new(
+            codes::AGENTS_NO_SCHEDULER_ADAPTER,
+            "no scheduler adapter for this platform",
+        ))
     }
 }
 
 #[tauri::command]
-pub async fn agents_open_artifact_dir() -> Result<(), String> {
+pub async fn agents_open_artifact_dir() -> Result<(), ErrorDto> {
     let scheduler = active_scheduler();
-    let dir = scheduler
-        .capabilities()
-        .artifact_dir
-        .ok_or_else(|| String::from("no artifact dir for active scheduler"))?;
+    let dir = scheduler.capabilities().artifact_dir.ok_or_else(|| {
+        ErrorDto::new(
+            codes::AGENTS_NO_ARTIFACT_DIR,
+            "no artifact dir for active scheduler",
+        )
+    })?;
     let status = if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(&dir).status()
     } else if cfg!(target_os = "windows") {
@@ -873,18 +967,30 @@ pub async fn agents_open_artifact_dir() -> Result<(), String> {
     } else {
         std::process::Command::new("xdg-open").arg(&dir).status()
     };
-    let s = status.map_err(err)?;
+    // Both arms are the same failure to the user — the folder did not
+    // open — so they share one code and differ only in `detail`.
+    let s = status.map_err(|e| {
+        ErrorDto::with_params(
+            codes::AGENTS_OPEN_ARTIFACT_DIR_FAILED,
+            json!({ "dir": dir, "detail": e.to_string() }),
+            e.to_string(),
+        )
+    })?;
     if !s.success() {
-        return Err(format!("open '{dir}' exited {s}"));
+        return Err(ErrorDto::with_params(
+            codes::AGENTS_OPEN_ARTIFACT_DIR_FAILED,
+            json!({ "dir": dir, "detail": format!("exited {s}") }),
+            format!("open '{dir}' exited {s}"),
+        ));
     }
     Ok(())
 }
 
 #[tauri::command]
-pub async fn agents_linger_status() -> Result<bool, String> {
+pub async fn agents_linger_status() -> Result<bool, ErrorDto> {
     #[cfg(target_os = "linux")]
     {
-        return claudepot_core::agent::scheduler::systemd::linger_status().map_err(err);
+        return claudepot_core::agent::scheduler::systemd::linger_status().map_err(ErrorDto::from);
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -893,14 +999,17 @@ pub async fn agents_linger_status() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn agents_linger_enable() -> Result<(), String> {
+pub async fn agents_linger_enable() -> Result<(), ErrorDto> {
     #[cfg(target_os = "linux")]
     {
-        claudepot_core::agent::scheduler::systemd::linger_enable().map_err(err)
+        claudepot_core::agent::scheduler::systemd::linger_enable().map_err(ErrorDto::from)
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Err(String::from("linger is a Linux-only feature"))
+        Err(ErrorDto::new(
+            codes::AGENTS_LINGER_LINUX_ONLY,
+            "linger is a Linux-only feature",
+        ))
     }
 }
 

@@ -4,20 +4,78 @@
 //! `account_list` / `account_list_basic` live in `commands.rs` because
 //! they're the default read surface every section mounts against. The
 //! mutating / async-heavy verbs live here.
+//!
+//! Errors use the `ErrorDto` shape (i18n plan §2.5; `commands/keys.rs`
+//! is the reference implementation). Two consequences worth stating:
+//!
+//! - The English operation prefixes this file used to write
+//!   (`"login failed: "`, `"register failed: "`, `"verify failed: "`)
+//!   are gone. The UI knows what it was attempting and frames it in the
+//!   user's language; `message` carries core's own text unchanged, so an
+//!   untranslated code still renders exactly what core said.
+//! - `emit_terminal(…, Some(format!("login failed: {e}")))` in the
+//!   `*_start` workers is **not** touched. That English rides an
+//!   `op-progress` *event* payload, not a command rejection, and
+//!   `useActions.ts` substring-matches it. Converting it needs a DTO
+//!   change on `RunningOpInfo` — its own slice, per
+//!   `dev-docs/i18n-error-codes-seed.md`.
 
 use super::open_store;
 use crate::dto::{AccountSummary, RegisterOutcome, RemoveOutcome, UsageEntryDto, WakeReceiptDto};
+use crate::dto_error::{codes, ErrorDto};
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOpInfo, RunningOps,
     TauriLoginProgressSink, TauriVerifyProgressSink, VerifyResultSummary,
 };
 use claudepot_core::services;
 use claudepot_core::services::usage_cache::UsageCache;
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::Notify;
 use uuid::Uuid;
+
+/// `accounts.db`. The shared `open_store()` still returns a prefixed
+/// English string — `AccountStore`'s errors are raw `rusqlite` ones and
+/// converting them is the services slice's job — so wrap it under a
+/// stable code here. Same helper `commands/keys.rs` carries; the third
+/// copy is the signal to promote it into `commands/mod.rs`.
+fn open_account_store() -> Result<claudepot_core::account::AccountStore, ErrorDto> {
+    open_store().map_err(|m| ErrorDto::detail(codes::ACCOUNTS_STORE_OPEN_FAILED, m))
+}
+
+/// Renderer-supplied account uuid. `bad uuid: {e}` is kept verbatim as
+/// the English fallback; `params.uuid` is what a localized sentence
+/// names.
+fn parse_account_uuid(s: &str) -> Result<Uuid, ErrorDto> {
+    Uuid::parse_str(s).map_err(|e| {
+        ErrorDto::with_params(
+            codes::ACCOUNTS_INVALID_UUID,
+            json!({ "uuid": s }),
+            format!("bad uuid: {e}"),
+        )
+    })
+}
+
+/// `LoginState`'s `std::sync::Mutex`. One spelling for the four call
+/// sites that guard the single-login invariant.
+fn login_lock_poisoned(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::ACCOUNTS_LOGIN_STATE_LOCK_POISONED,
+        json!({ "detail": e.to_string() }),
+        format!("login state lock poisoned: {e}"),
+    )
+}
+
+/// The single-login guard's rejection. Four call sites shared one
+/// English string already; this keeps them sharing one code too.
+fn login_in_progress() -> ErrorDto {
+    ErrorDto::new(
+        codes::ACCOUNTS_LOGIN_IN_PROGRESS,
+        "a login is already in progress",
+    )
+}
 
 /// Spawn `claude auth login` (browser opens), wait for the user to
 /// complete OAuth, then import CC's fresh blob into the existing
@@ -30,18 +88,15 @@ use uuid::Uuid;
 pub async fn account_login(
     uuid: String,
     state: tauri::State<'_, crate::state::LoginState>,
-) -> Result<(), String> {
-    let store = open_store()?;
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+) -> Result<(), ErrorDto> {
+    let store = open_account_store()?;
+    let id = parse_account_uuid(&uuid)?;
 
     let notify = std::sync::Arc::new(tokio::sync::Notify::new());
     {
-        let mut slot = state
-            .active
-            .lock()
-            .map_err(|e| format!("login state lock poisoned: {e}"))?;
+        let mut slot = state.active.lock().map_err(login_lock_poisoned)?;
         if slot.is_some() {
-            return Err("a login is already in progress".to_string());
+            return Err(login_in_progress());
         }
         *slot = Some(notify.clone());
     }
@@ -53,7 +108,9 @@ pub async fn account_login(
         slot.take();
     }
 
-    result.map_err(|e| format!("login failed: {e}"))
+    // Prefix dropped on purpose — the UI frames "Sign in failed"; core's
+    // own text stays in `message`.
+    result.map_err(ErrorDto::from)
 }
 
 /// Abort the in-flight `account_login` subprocess, if any. Safe to call
@@ -61,7 +118,7 @@ pub async fn account_login(
 #[tauri::command]
 pub async fn account_login_cancel(
     state: tauri::State<'_, crate::state::LoginState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     if let Ok(guard) = state.active.lock() {
         if let Some(notify) = guard.as_ref() {
             notify.notify_one();
@@ -71,11 +128,11 @@ pub async fn account_login_cancel(
 }
 
 #[tauri::command]
-pub async fn account_add_from_current() -> Result<RegisterOutcome, String> {
-    let store = open_store()?;
+pub async fn account_add_from_current() -> Result<RegisterOutcome, ErrorDto> {
+    let store = open_account_store()?;
     let result = services::account_service::register_from_current(&store)
         .await
-        .map_err(|e| format!("register failed: {e}"))?;
+        .map_err(ErrorDto::from)?;
     Ok(RegisterOutcome {
         email: result.email,
         org_name: result.org_name,
@@ -96,17 +153,14 @@ pub async fn account_add_from_current() -> Result<RegisterOutcome, String> {
 #[tauri::command]
 pub async fn account_register_from_browser(
     state: tauri::State<'_, crate::state::LoginState>,
-) -> Result<RegisterOutcome, String> {
-    let store = open_store()?;
+) -> Result<RegisterOutcome, ErrorDto> {
+    let store = open_account_store()?;
 
     let notify = std::sync::Arc::new(tokio::sync::Notify::new());
     {
-        let mut slot = state
-            .active
-            .lock()
-            .map_err(|e| format!("login state lock poisoned: {e}"))?;
+        let mut slot = state.active.lock().map_err(login_lock_poisoned)?;
         if slot.is_some() {
-            return Err("a login is already in progress".to_string());
+            return Err(login_in_progress());
         }
         *slot = Some(notify.clone());
     }
@@ -125,7 +179,7 @@ pub async fn account_register_from_browser(
             org_name: r.org_name,
             subscription_type: r.subscription_type,
         }),
-        Err(e) => Err(format!("register failed: {e}")),
+        Err(e) => Err(ErrorDto::from(e)),
     }
 }
 
@@ -136,12 +190,12 @@ pub async fn account_register_from_browser(
 // so the refresh token never materialises in JS.
 
 #[tauri::command]
-pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
-    let store = open_store()?;
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, ErrorDto> {
+    let store = open_account_store()?;
+    let id = parse_account_uuid(&uuid)?;
     let result = services::account_service::remove_account(&store, id, None)
         .await
-        .map_err(|e| format!("remove failed: {e}"))?;
+        .map_err(|e| ErrorDto::detail(codes::ACCOUNTS_REMOVE_FAILED, e))?;
     Ok(RemoveOutcome {
         email: result.email,
         was_cli_active: result.was_cli_active,
@@ -159,13 +213,13 @@ pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
 pub async fn refresh_usage_for(
     uuid: String,
     cache: tauri::State<'_, UsageCache>,
-) -> Result<UsageEntryDto, String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+) -> Result<UsageEntryDto, ErrorDto> {
+    let id = parse_account_uuid(&uuid)?;
     cache.invalidate(id).await;
     // Identity-gated fetch: refuses to serve when the stored slot's
     // verify_status is drift/rejected so we never attribute another
     // account's usage to this UUID (audit H4).
-    let store = open_store()?;
+    let store = open_account_store()?;
     let batch = cache.fetch_batch_detailed_verified(&store, &[id]).await;
     let outcome = batch.into_values().next().unwrap_or(
         claudepot_core::services::usage_cache::UsageOutcome::Error(
@@ -187,9 +241,11 @@ pub async fn refresh_usage_for(
 #[tauri::command]
 pub async fn fetch_all_usage(
     cache: tauri::State<'_, UsageCache>,
-) -> Result<HashMap<String, UsageEntryDto>, String> {
-    let store = open_store()?;
-    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+) -> Result<HashMap<String, UsageEntryDto>, ErrorDto> {
+    let store = open_account_store()?;
+    let accounts = store
+        .list()
+        .map_err(|e| ErrorDto::detail(codes::ACCOUNTS_LIST_FAILED, e))?;
 
     let uuids: Vec<Uuid> = accounts
         .iter()
@@ -229,20 +285,29 @@ pub async fn fetch_all_usage(
 /// Returns the refreshed `AccountSummary` for the target account so the
 /// caller can patch the row without a full list round-trip.
 #[tauri::command]
-pub async fn verify_account(uuid: String) -> Result<AccountSummary, String> {
+pub async fn verify_account(uuid: String) -> Result<AccountSummary, ErrorDto> {
     use claudepot_core::cli_backend::swap::DefaultProfileFetcher;
     use claudepot_core::services::identity;
 
-    let store = open_store()?;
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let store = open_account_store()?;
+    let id = parse_account_uuid(&uuid)?;
     let fetcher = DefaultProfileFetcher;
     identity::verify_account_identity(&store, id, &fetcher)
         .await
-        .map_err(|e| format!("verify failed: {e}"))?;
+        .map_err(ErrorDto::from)?;
     let account = store
         .find_by_uuid(id)
-        .map_err(|e| format!("lookup failed: {e}"))?
-        .ok_or_else(|| "account not found".to_string())?;
+        .map_err(|e| ErrorDto::detail(codes::ACCOUNTS_LOOKUP_FAILED, e))?
+        .ok_or_else(|| {
+            // The row vanished between the verify and the re-read. The
+            // English stays "account not found"; `params.uuid` is what a
+            // localized sentence would name (and a DevBadge disclose).
+            ErrorDto::with_params(
+                codes::ACCOUNTS_UNKNOWN_UUID,
+                json!({ "uuid": uuid }),
+                "account not found",
+            )
+        })?;
     Ok(crate::dto::summary_for_account(&account).await)
 }
 
@@ -250,13 +315,15 @@ pub async fn verify_account(uuid: String) -> Result<AccountSummary, String> {
 /// Called by the Refresh button; the GUI may also auto-invoke it on
 /// window focus (debounced) so drift surfaces without a click.
 #[tauri::command]
-pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
+pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, ErrorDto> {
     use claudepot_core::cli_backend::swap::DefaultProfileFetcher;
     use claudepot_core::services::identity;
     use std::time::Duration;
 
-    let store = open_store()?;
-    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+    let store = open_account_store()?;
+    let accounts = store
+        .list()
+        .map_err(|e| ErrorDto::detail(codes::ACCOUNTS_LIST_FAILED, e))?;
     let fetcher = DefaultProfileFetcher;
 
     let mut first = true;
@@ -290,7 +357,9 @@ pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
     // (reads each blob from disk once) — acceptable O(n) disk reads, and
     // the values can differ from what verify_account_identity saw if a
     // refresh rotated the access_token in between.
-    let refreshed = store.list().map_err(|e| format!("list failed: {e}"))?;
+    let refreshed = store
+        .list()
+        .map_err(|e| ErrorDto::detail(codes::ACCOUNTS_LIST_FAILED, e))?;
     // Sequential rather than concurrent: macOS surfaces one unlock
     // dialog per locked-keychain access; parallel reads would stack
     // dialogs on the user. Mirrors `account_summary::list_summaries`.
@@ -324,19 +393,16 @@ pub async fn account_login_start(
     state: State<'_, crate::state::LoginState>,
     ops: State<'_, RunningOps>,
     app: AppHandle,
-) -> Result<String, String> {
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+) -> Result<String, ErrorDto> {
+    let id = parse_account_uuid(&uuid)?;
 
     // Guard 1: reject second-start BEFORE allocating op_id, so a rejection
     // doesn't leak a stuck op into `RunningOps`.
     let notify = Arc::new(Notify::new());
     {
-        let mut slot = state
-            .active
-            .lock()
-            .map_err(|e| format!("login state lock poisoned: {e}"))?;
+        let mut slot = state.active.lock().map_err(login_lock_poisoned)?;
         if slot.is_some() {
-            return Err("a login is already in progress".to_string());
+            return Err(login_in_progress());
         }
         // Guard 2: register cancel Notify BEFORE spawning the worker.
         // A fast cancel arriving between spawn and notify-install would
@@ -412,7 +478,7 @@ pub async fn account_login_start(
 pub async fn account_login_status(
     op_id: String,
     ops: State<'_, RunningOps>,
-) -> Result<Option<RunningOpInfo>, String> {
+) -> Result<Option<RunningOpInfo>, ErrorDto> {
     Ok(ops.get(&op_id))
 }
 
@@ -424,15 +490,12 @@ pub async fn account_register_from_browser_start(
     state: State<'_, crate::state::LoginState>,
     ops: State<'_, RunningOps>,
     app: AppHandle,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let notify = Arc::new(Notify::new());
     {
-        let mut slot = state
-            .active
-            .lock()
-            .map_err(|e| format!("login state lock poisoned: {e}"))?;
+        let mut slot = state.active.lock().map_err(login_lock_poisoned)?;
         if slot.is_some() {
-            return Err("a login is already in progress".to_string());
+            return Err(login_in_progress());
         }
         *slot = Some(notify.clone());
     }
@@ -505,7 +568,7 @@ pub async fn account_register_from_browser_start(
 pub async fn verify_all_accounts_start(
     ops: State<'_, RunningOps>,
     app: AppHandle,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     // Concurrency guard: check-and-insert under ONE RunningOps guard
     // (audit T9 — the earlier separate `list()` check let two rapid
     // starts both pass before either inserted, doubling the /profile
@@ -518,7 +581,10 @@ pub async fn verify_all_accounts_start(
         String::new(),
         String::new(),
     )) {
-        return Err("verify_all is already in progress".to_string());
+        return Err(ErrorDto::new(
+            codes::ACCOUNTS_VERIFY_ALL_IN_PROGRESS,
+            "verify_all is already in progress",
+        ));
     }
 
     let ops_for_task = ops.inner().clone();
@@ -569,7 +635,7 @@ pub async fn verify_all_accounts_start(
 pub async fn verify_all_accounts_status(
     op_id: String,
     ops: State<'_, RunningOps>,
-) -> Result<Option<RunningOpInfo>, String> {
+) -> Result<Option<RunningOpInfo>, ErrorDto> {
     Ok(ops.get(&op_id))
 }
 
@@ -589,14 +655,14 @@ pub async fn verify_all_accounts_status(
 /// Returns the measured token cost so the toast can state what was
 /// spent rather than asserting "negligible".
 #[tauri::command]
-pub async fn account_wake(uuid: String) -> Result<WakeReceiptDto, String> {
+pub async fn account_wake(uuid: String) -> Result<WakeReceiptDto, ErrorDto> {
     use claudepot_core::services::wake_service;
 
-    let store = open_store()?;
-    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let store = open_account_store()?;
+    let id = parse_account_uuid(&uuid)?;
     let receipt = wake_service::wake_account(&store, id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(ErrorDto::from)?;
 
     Ok(WakeReceiptDto {
         email: receipt.email,

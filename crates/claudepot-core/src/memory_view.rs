@@ -343,6 +343,29 @@ pub enum ReadMemoryError {
     Io(#[from] std::io::Error),
 }
 
+/// Hand-written, wildcard-free: a new variant must be named here before
+/// it compiles. See `crate::error_code` for the code/params contract.
+impl crate::error_code::ErrorCode for ReadMemoryError {
+    fn code(&self) -> &'static str {
+        match self {
+            ReadMemoryError::PathOutsideScope(_) => "memory_view.path_outside_scope",
+            ReadMemoryError::Io(_) => "memory_view.io",
+        }
+    }
+
+    fn params(&self) -> serde_json::Value {
+        match self {
+            // Raw, exactly as the caller supplied it — the refusal is
+            // *about* this path, so normalizing it would hide which
+            // shape was rejected.
+            ReadMemoryError::PathOutsideScope(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            ReadMemoryError::Io(e) => serde_json::json!({ "detail": e.to_string() }),
+        }
+    }
+}
+
 /// Read a memory file's contents after verifying the path is one we're
 /// allowed to surface. Allowed scopes:
 ///
