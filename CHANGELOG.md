@@ -6,6 +6,37 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.4.2 — beta (unreleased)
+
+### Fixed
+
+Chinese terminology, from a pass that read the catalogs for meaning
+rather than structure. Every one of these passed the existing checks:
+the keys existed, the placeholders matched, and each string was valid
+Chinese — only the wrong one.
+
+- **Two different trashes had swapped names.** Claudepot's own trash
+  (restorable in Settings → Cleanup) and the macOS Trash (restorable in
+  Finder) were both called 废纸篓 on some screens and 回收站 on others.
+  Following the Chinese "recover it in Settings → Cleanup" led to a pane
+  whose title used the other word, and an orphan sent to the real Trash
+  could be looked for in the wrong place entirely. They now have one name
+  each.
+- **Config artifacts had two names.** The Skills, Agents and slash
+  commands you disable and trash were 配置产物 in Config and 工件 in
+  Settings, so each pane's pointer at the other named something that
+  wasn't there.
+- The Keys table's **"Created by"** column read as the imperative
+  "Create account".
+- **Break lock** appeared as three different verbs across the two panes
+  that offer it, for the same operation on the same file.
+- A failure to open the file manager reported **"couldn't locate the
+  file"** — a different and far more alarming claim than the one meant.
+- The **Desktop drift** notification category was named inconsistently
+  with the matching banner.
+- Names you chose were quoted with the brackets these catalogs reserve
+  for clickable UI labels, making your own data look like a button.
+
 ## 0.4.1 — beta (released 2026-08-06)
 
 ### Fixed
