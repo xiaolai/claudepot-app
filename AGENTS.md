@@ -839,10 +839,31 @@ dependency. Each shot waits for a `settle` string rather than sleeping,
 and a pane that never settles is **skipped, never captured blank**.
 
 Adding a screenshot means two edits: a `SHOTS` row in the capture
-script, and a `SCREENSHOTS` row in `crates/xtask/src/verify_docs.rs` so
-`verify-docs` fails when the UI moves ahead of the image. That check
-compares **commit dates, not mtimes** — `git checkout` rewrites mtimes,
-which is how eight screenshots sat three months stale unnoticed.
+script, and a `SCREENSHOTS` row in `crates/xtask/src/verify_docs.rs`.
+
+Two checks read that table, and the split is deliberate:
+
+- **`cargo xtask verify-docs`** (runs in CI) asserts each shot exists and
+  that `assets/screenshots/` and `web/public/screenshots/` hold the same
+  bytes. Content-based, no false positives, and the fix is a file copy —
+  something a red CI run can actually ask you for.
+- **`cargo xtask verify-screenshots`** (**on demand**, not a PR gate)
+  reports shots whose sources have moved since capture. Run it before a
+  release, or after changing a view you know is captured.
+
+Freshness is not a gate for two reasons. It compares **commit dates, not
+mtimes** — `git checkout` rewrites mtimes, which is how eight screenshots
+sat three months stale unnoticed — but it compares them per *directory*,
+so any edit under `src/sections/projects` reads as "the UI changed",
+including edits to views no screenshot shows. And re-capturing needs a
+macOS GUI session, a Vite server, a debug build carrying the MCP bridge
+and a windowed app; CI has none of them, so a failure there is a wall
+rather than a signal. A gate whose remedy cannot run where it fires is
+the dynamic that made `--no-verify` a reflex for the release validators.
+
+Adjacency is not staleness. When `verify-screenshots` flags a shot whose
+captured view provably did not move, that is the check being coarse —
+say so, rather than re-capturing to silence it.
 
 Known limitation: `HOME` does not redirect the macOS keychain, so the
 Accounts pane's live credential probe finds nothing and each card shows

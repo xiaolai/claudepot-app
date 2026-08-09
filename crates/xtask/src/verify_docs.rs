@@ -23,7 +23,12 @@
 //! 2. every Settings sub-pane id appears in README and the web settings
 //!    page, and the spelled-out count matches;
 //! 3. every `*.db` filename under the Claudepot data dir appears in
-//!    AGENTS.md.
+//!    AGENTS.md;
+//! 4. every documented screenshot exists and its two committed copies
+//!    are byte-identical.
+//!
+//! Screenshot *freshness* is deliberately not here — see
+//! [`verify_screenshots`], which is on demand.
 //!
 //! Prose quality is explicitly *not* checked. This catches "you added a
 //! thing and forgot to say so", which is the whole observed failure.
@@ -88,7 +93,9 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_cli_verbs(repo, &mut problems)?;
     check_settings_panes(repo, &mut problems)?;
     check_data_dir_databases(repo, &mut problems)?;
-    check_screenshot_freshness(repo, &mut problems)?;
+    // Screenshot *freshness* is `cargo xtask verify-screenshots`, on
+    // demand — see that function for why it is not a pull-request gate.
+    check_screenshot_pairs(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
 
     if problems.is_empty() {
@@ -343,12 +350,14 @@ fn last_commit_date(repo: &Path, paths: &[&str]) -> Option<String> {
     }
 }
 
-fn check_screenshot_freshness(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
-    // Only meaningful inside a git checkout.
-    if !repo.join(".git").exists() {
-        return Ok(());
-    }
-    for (shot, sources) in SCREENSHOTS {
+/// Screenshot facts that are cheap, deterministic and fixable *here*:
+/// the file exists, and the two committed copies are the same bytes.
+///
+/// A drifted pair means the README and the web docs show different apps,
+/// and the fix is a file copy — something a CI failure can actually tell
+/// you to do. Contrast [`verify_screenshots`], which cannot say that.
+fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    for (shot, _sources) in SCREENSHOTS {
         let asset = format!("assets/screenshots/{shot}");
         let web = format!("web/public/screenshots/{shot}");
         if !repo.join(&asset).exists() {
@@ -366,6 +375,46 @@ fn check_screenshot_freshness(repo: &Path, problems: &mut Vec<String>) -> Result
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+/// `cargo xtask verify-screenshots` — report screenshots whose UI has
+/// been touched since they were captured.
+///
+/// # Why this is on demand rather than part of `verify-docs`
+///
+/// It was a CI gate, and it was the wrong shape for one on two counts.
+///
+/// **It cannot tell staleness from adjacency.** The comparison is
+/// per-*directory* commit dates, so any edit under `src/sections/projects`
+/// — a new sibling component, a renamed prop, a test file — reads as
+/// "the UI changed", including when the captured view provably did not
+/// move. `projects.png` shows the Projects list; a change to the
+/// move-session dialog flags it anyway.
+///
+/// **Its remediation cannot run where it fires.** Re-capturing needs a
+/// macOS GUI session, a Vite dev server, a debug build carrying the MCP
+/// bridge, and a windowed app driven over a WebSocket. CI has none of
+/// those, so a red run there is a wall, not a signal — and a gate whose
+/// fix is unrunnable at the point of failure is the same dynamic that
+/// turned `--no-verify` into a reflex for the release validators.
+///
+/// It stays a real check — loud, exit-code-bearing — so that running it
+/// still means something. The original failure it caught (eight
+/// screenshots three months stale) is a periodic-sweep problem, not a
+/// per-pull-request one.
+pub fn verify_screenshots(repo: &Path) -> Result<()> {
+    if !repo.join(".git").exists() {
+        bail!("verify-screenshots needs a git checkout — it compares commit dates");
+    }
+    let mut stale: Vec<String> = Vec::new();
+    for (shot, sources) in SCREENSHOTS {
+        let asset = format!("assets/screenshots/{shot}");
+        if !repo.join(&asset).exists() {
+            stale.push(format!("{asset} is referenced by the docs but missing"));
+            continue;
+        }
         let (Some(shot_at), Some(src_at)) = (
             last_commit_date(repo, &[&asset]),
             last_commit_date(repo, sources),
@@ -373,13 +422,34 @@ fn check_screenshot_freshness(repo: &Path, problems: &mut Vec<String>) -> Result
             continue;
         };
         if src_at > shot_at {
-            problems.push(format!(
-                "{shot} was last captured {shot_at} but its UI changed {src_at} \
-                 — re-capture with `cargo xtask screenshot-fixture` (see its docs)"
+            stale.push(format!(
+                "{shot}: captured {shot_at}, its sources last moved {src_at}"
             ));
         }
     }
-    Ok(())
+    if stale.is_empty() {
+        println!(
+            "verify-screenshots: ok — all {} shots are at least as new as their sources",
+            SCREENSHOTS.len()
+        );
+        return Ok(());
+    }
+    let mut msg = format!("verify-screenshots: {} shot(s) may be stale:", stale.len());
+    for s in &stale {
+        msg.push_str("\n  - ");
+        msg.push_str(s);
+    }
+    msg.push_str(
+        "\n\nRe-capture (macOS, GUI session required):\n\
+         \x20 cargo xtask screenshot-fixture\n\
+         \x20 pnpm dev &\n\
+         \x20 cargo build -p claudepot-tauri\n\
+         \x20 HOME=/tmp/claudepot-demo-home ./target/debug/claudepot-tauri &\n\
+         \x20 pnpm screenshots\n\n\
+         Adjacency is not staleness: if the captured view genuinely did not \
+         change, there is nothing to re-capture.",
+    );
+    bail!(msg)
 }
 
 // ─── 5. The embedded Claude Code env-var spec ────────────────────────
