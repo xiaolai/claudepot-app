@@ -32,6 +32,14 @@ Versioning scheme:
 
 ### Fixed
 
+- **Closing the window with the red ✕ left no way back.** The ✕ hides
+  Claudepot rather than quitting it, so that a stray click never
+  discards what you were doing — but nothing was listening for the Dock
+  icon being clicked afterwards, so the window never came back. The only
+  routes back were the menu bar icon, or the View menu, which is
+  reachable only while Claudepot is still frontmost. Minimize was never
+  affected, because macOS restores a minimized window itself. Reported
+  as #43.
 - **A broken Keychain entry could delete a working credential file.**
   On the automatic backend, any Keychain value was preferred over the
   file copy and the file was then removed — including when the Keychain
