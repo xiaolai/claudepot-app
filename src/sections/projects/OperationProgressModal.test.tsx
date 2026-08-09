@@ -13,12 +13,28 @@ import {
 } from "./sessionMoveProgress";
 import type { RunningOpInfo } from "../../types";
 
+// Capture the subscribed handlers so a test can deliver a real event
+// on the channel the modal actually listens to. Previously this dropped
+// them, which is why nothing covered "an event and a poll disagree".
+const bus = vi.hoisted(() => new Map<string, (e: unknown) => void>());
 vi.mock("@tauri-apps/api/event", () => ({
-  // The hook calls listen() and never gets to fire its handler in
-  // tests — we only care about the static render. Resolve a no-op
-  // unlisten so the hook doesn't throw.
-  listen: () => Promise.resolve(() => {}),
+  listen: (channel: string, handler: (e: unknown) => void) => {
+    bus.set(channel, handler);
+    return Promise.resolve(() => bus.delete(channel));
+  },
 }));
+
+/** Deliver an `op-progress::<op_id>` event exactly as the backend would. */
+function emit(payload: {
+  op_id: string;
+  phase: string;
+  status: "running" | "complete" | "error";
+  done?: number;
+  total?: number;
+  detail?: string;
+}) {
+  bus.get(`op-progress::${payload.op_id}`)?.({ payload });
+}
 
 describe("OperationProgressModal", () => {
   it("renders every project-move phase label in order", () => {
@@ -127,6 +143,7 @@ describe("OperationProgressModal", () => {
       old_path: "/from",
       new_path: "/to",
       current_phase: "S3",
+      phase_states: {},
       sub_progress: null,
       status: "running",
       started_unix_secs: 0,
@@ -157,6 +174,69 @@ describe("OperationProgressModal", () => {
       />,
     );
   }
+
+  it("seeds phases that finished before it mounted", async () => {
+    // The observed bug: a session move's S1 and S2 complete before this
+    // modal subscribes, so their events go to nobody and both rows read
+    // "Pending" for the rest of the op — next to an S3 that is clearly
+    // past them. The phase list was lying about work already done.
+    vi.useFakeTimers();
+    try {
+      renderWithBackstop(async () =>
+        mkInfo({
+          status: "running",
+          current_phase: "S3",
+          phase_states: { S1: "complete", S2: "complete", S3: "running" },
+        }),
+      );
+      // The very first poll is immediate — waiting a full interval to
+      // correct the rows is the visible half of the bug.
+      await advance(50);
+
+      const rows = [...document.querySelectorAll(".phase-list li")].map(
+        (li) => li.textContent ?? "",
+      );
+      expect(rows[0]).toMatch(/Rewriting primary transcript.*complete/);
+      expect(rows[1]).toMatch(/Moving sidecar dirs.*complete/);
+      expect(rows[2]).toMatch(/Updating history\.jsonl.*running/);
+      // Phases nobody has reported stay pending — seeding fills gaps,
+      // it does not invent progress.
+      expect(rows[3]).toMatch(/Clearing \.claude\.json pointers.*pending/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a live event beats a stale poll for the same phase", async () => {
+    // Events are the transport and are newer than a 2 s poll. Seeding
+    // must fill gaps only — never walk a phase backwards.
+    vi.useFakeTimers();
+    try {
+      renderWithBackstop(async () =>
+        mkInfo({ status: "running", phase_states: { S1: "running" } }),
+      );
+      await advance(50);
+      expect(
+        [...document.querySelectorAll(".phase-list li")][0]?.textContent,
+      ).toMatch(/Rewriting primary transcript.*running/);
+
+      // The phase completes on the live channel...
+      act(() => {
+        emit({ op_id: "op-backstop", phase: "S1", status: "complete" });
+      });
+      expect(
+        [...document.querySelectorAll(".phase-list li")][0]?.textContent,
+      ).toMatch(/Rewriting primary transcript.*complete/);
+
+      // ...and a later poll still reporting "running" must not undo it.
+      await advance(2100);
+      expect(
+        [...document.querySelectorAll(".phase-list li")][0]?.textContent,
+      ).toMatch(/Rewriting primary transcript.*complete/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("reaches a terminal state from polling when the event never arrives", async () => {
     vi.useFakeTimers();
@@ -191,6 +271,29 @@ describe("OperationProgressModal", () => {
       expect(screen.getByText("Error.")).toBeInTheDocument();
       expect(screen.getByText("target slug collision")).toBeInTheDocument();
       expect(onError).toHaveBeenCalledWith("target slug collision");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the mount poll never concludes the op is untracked", async () => {
+    // "Not found on the very first look" is a startup race, not proof
+    // the op ended. Announcing an unknown outcome the instant the
+    // dialog opens would be its own lie — and it would hide the Cancel
+    // button on every op that offers one.
+    vi.useFakeTimers();
+    try {
+      const onComplete = vi.fn();
+      renderWithBackstop(async () => null, { onComplete });
+      await advance(50);
+      expect(screen.queryByText("Finished — outcome unknown.")).toBeNull();
+
+      // One interval later, absence does mean something.
+      await advance(2100);
+      expect(
+        screen.getByText("Finished — outcome unknown."),
+      ).toBeInTheDocument();
+      expect(onComplete).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

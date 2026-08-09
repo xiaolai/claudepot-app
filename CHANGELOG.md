@@ -6,7 +6,19 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.3 — beta (unreleased)
+## 0.4.4 — beta (unreleased)
+
+### Fixed
+
+- **A progress dialog claimed work was pending that had already
+  finished.** Long operations start before their dialog opens, so the
+  earliest steps report to nobody and sat on "pending" for the rest of
+  the run — visibly stuck next to a later step that was clearly past
+  them. Claudepot now records what each step reported, and the dialog
+  fills in whatever it missed the moment it opens. A live update still
+  wins over that catch-up, so a step never walks backwards.
+
+## 0.4.3 — beta (released 2026-08-09)
 
 ### Changed
 

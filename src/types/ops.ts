@@ -122,6 +122,10 @@ export interface RunningOpInfo {
   old_path: string;
   new_path: string;
   current_phase: string | null;
+  /** Every phase this op has reported, keyed by phase id. Lets a
+   *  consumer that attached mid-op render what already happened —
+   *  `current_phase` names only the latest one and carries no status. */
+  phase_states: Record<string, "running" | "complete" | "error">;
   /** Tuple [done, total] when a phase reports sub-progress. */
   sub_progress: [number, number] | null;
   status: OpStatus;

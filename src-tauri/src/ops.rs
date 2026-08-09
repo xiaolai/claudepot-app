@@ -124,6 +124,15 @@ pub struct RunningOpInfo {
     pub old_path: String,
     pub new_path: String,
     pub current_phase: Option<String>,
+    /// Every phase this op has reported, and what it reported.
+    /// `"running" | "complete" | "error"`, keyed by phase id.
+    ///
+    /// `current_phase` cannot answer this. It holds only the *latest*
+    /// phase and carries no status, so a consumer arriving mid-op has to
+    /// guess how far along the earlier ones are — and a modal that
+    /// guesses "pending" for a phase that finished is a lying progress
+    /// list. `BTreeMap` so the serialized shape is deterministic.
+    pub phase_states: std::collections::BTreeMap<String, String>,
     pub sub_progress: Option<(usize, usize)>,
     pub status: OpStatus,
     pub started_unix_secs: u64,
@@ -508,11 +517,15 @@ impl ProgressSink for TauriProgressSink {
             detail: detail.clone(),
         };
         let _ = self.app.emit(&self.channel(), payload);
-        // Only mirror per-phase updates when the phase actually
-        // advanced — Running events are cheap but we can skip them for
-        // now since core emits Complete per phase.
         self.ops.update(&self.op_id, |op| {
             op.current_phase = Some(phase.to_string());
+            // Record the per-phase verdict, not just the latest phase.
+            // A consumer that attaches after the op started reads this
+            // to render what already happened; without it every earlier
+            // phase renders "pending" forever, because its event went
+            // out before anyone was listening.
+            op.phase_states
+                .insert(phase.to_string(), status_str.to_string());
             if matches!(status, PhaseStatus::Error(_)) {
                 op.status = OpStatus::Error;
                 op.last_error = detail;
@@ -538,6 +551,14 @@ impl ProgressSink for TauriProgressSink {
         let _ = self.app.emit(&self.channel(), payload);
         self.ops.update(&self.op_id, |op| {
             op.sub_progress = Some((done, total));
+            // A phase reporting items is a phase that has started. Core
+            // emits no explicit Running for these, so this is the only
+            // place the in-flight phase gets recorded. The throttle's
+            // first-tick rule guarantees we reach here at least once per
+            // phase, and `or_insert` keeps a later Complete authoritative.
+            op.phase_states
+                .entry(phase.to_string())
+                .or_insert_with(|| "running".to_string());
         });
     }
 }
@@ -697,6 +718,7 @@ pub fn new_running_op(
         old_path: old_path.into(),
         new_path: new_path.into(),
         current_phase: None,
+        phase_states: std::collections::BTreeMap::new(),
         sub_progress: None,
         status: OpStatus::Running,
         started_unix_secs: now_unix_secs(),
@@ -957,6 +979,77 @@ mod tests {
     // costs an IPC event plus a React re-render, so admitting all of
     // them wedges the webview for minutes on work that takes under a
     // second.
+
+    #[test]
+    fn phase_states_records_each_phase_not_just_the_latest() {
+        // `current_phase` holds only the newest phase and carries no
+        // status, so a modal that attaches mid-op cannot tell how far
+        // the earlier phases got. That is what rendered S1 and S2 as
+        // "pending" next to a running S3.
+        let ops = RunningOps::new();
+        ops.insert(new_running_op("op-p", OpKind::SessionMove, "a", "b"));
+
+        // What the sink does, minus the AppHandle it cannot have here.
+        let record = |phase: &str, status: &str| {
+            ops.update("op-p", |op| {
+                op.current_phase = Some(phase.to_string());
+                op.phase_states
+                    .insert(phase.to_string(), status.to_string());
+            });
+        };
+        record("S1", "complete");
+        record("S2", "complete");
+        ops.update("op-p", |op| {
+            op.phase_states
+                .entry("S3".to_string())
+                .or_insert_with(|| "running".to_string());
+        });
+
+        let info = ops.get("op-p").expect("op present");
+        assert_eq!(info.current_phase.as_deref(), Some("S2"));
+        assert_eq!(
+            info.phase_states.get("S1").map(String::as_str),
+            Some("complete")
+        );
+        assert_eq!(
+            info.phase_states.get("S2").map(String::as_str),
+            Some("complete")
+        );
+        assert_eq!(
+            info.phase_states.get("S3").map(String::as_str),
+            Some("running")
+        );
+        assert_eq!(
+            info.phase_states.get("S4"),
+            None,
+            "unreported phases stay absent"
+        );
+    }
+
+    #[test]
+    fn sub_progress_never_downgrades_a_completed_phase() {
+        // `or_insert` on the sub-progress path: a late tick for a phase
+        // core already reported Complete must not walk it back to
+        // "running" in the map the modal seeds from.
+        let ops = RunningOps::new();
+        ops.insert(new_running_op("op-q", OpKind::SessionMove, "a", "b"));
+        ops.update("op-q", |op| {
+            op.phase_states.insert("S1".into(), "complete".into());
+        });
+        ops.update("op-q", |op| {
+            op.phase_states
+                .entry("S1".to_string())
+                .or_insert_with(|| "running".to_string());
+        });
+        assert_eq!(
+            ops.get("op-q")
+                .unwrap()
+                .phase_states
+                .get("S1")
+                .map(String::as_str),
+            Some("complete")
+        );
+    }
 
     #[test]
     fn throttle_admits_the_first_and_last_tick_unconditionally() {
