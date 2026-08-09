@@ -28,6 +28,16 @@ Versioning scheme:
   `cd` into. `claudepot session move` gains a matching `--create-target`
   flag.
 
+### Fixed
+
+- **"Updating history.jsonl" looked hung during a session move.** Core
+  reports sub-progress per item; delivering one report costs an IPC
+  event and a React re-render. `~/.claude/history.jsonl` is tens of
+  thousands of lines, so that phase spent minutes rendering a counter
+  nobody could read while the actual work took under a second. Progress
+  ticks are now sampled at 20 Hz, with the first and last always
+  delivered — every long-running operation benefits, not just moves.
+
 ## 0.4.2 — beta (released 2026-08-07)
 
 ### Fixed
