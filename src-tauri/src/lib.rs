@@ -1371,9 +1371,46 @@ pub fn run() {
             commands::shared_memory::shared_memory_snippet_body,
             commands::shared_memory::shared_memory_mcp_health,
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .unwrap_or_else(|e| {
             eprintln!("fatal: tauri application failed to start: {e}");
             std::process::exit(1);
+        })
+        .run(|app, event| {
+            // Dock-icon click with no visible window (#43).
+            //
+            // The red ✕ does not close this app, it hides the window —
+            // see the `CloseRequested` handler above, which calls
+            // `prevent_close()` so quitting stays deliberate. macOS then
+            // sends `applicationShouldHandleReopen:` when the Dock icon
+            // is clicked, and with nothing listening for it the click
+            // did nothing: the window was hidden, the app was running,
+            // and the only ways back were the tray or the View menu —
+            // and the menu bar is only reachable while Claudepot is
+            // still frontmost, which it stops being the moment you
+            // click anything else.
+            //
+            // Minimize was never affected, because AppKit restores a
+            // miniaturized window itself. Only the app-managed hidden
+            // state needed an owner.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
+                if !has_visible_windows {
+                    use tauri::Manager;
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.show();
+                        let _ = w.unminimize();
+                        let _ = w.set_focus();
+                    }
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (app, event);
+            }
         });
 }
