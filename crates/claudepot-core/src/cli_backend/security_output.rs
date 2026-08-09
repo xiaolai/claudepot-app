@@ -24,21 +24,47 @@
 //! Keeping the rule in one module with one exported function means a
 //! future writer has somewhere obvious to reach for, instead of
 //! reaching for `String::from_utf8_lossy` again.
+//!
+//! # Why oversize writes go through argv
+//!
+//! `security` offers no size-safe stdin path: `-X` on a `security -i`
+//! line hits the buffer above, and `-w` reading stdin silently
+//! truncates to 128 bytes and still exits 0 — measured, not assumed.
+//! The only transport that carries a large payload is argv.
+//!
+//! That is a real trade-off, and it is the one **Claude Code already
+//! made** for this exact item (`macOsKeychainStorage.ts`): prefer stdin
+//! so process monitors see only `security -i`, fall back to argv when
+//! the payload cannot fit, because hex in argv "is recoverable by a
+//! determined observer but defeats naive plaintext-grep rules, and the
+//! alternative — silent credential corruption — is strictly worse."
+//!
+//! We match that policy deliberately. This crate writes the same
+//! Keychain item Claude Code does; a blob CC can store and Claudepot
+//! cannot is a broken account switch, and refusing the write does not
+//! make the credential safer — it just moves it to a file.
 
-/// `security -i` reads one command per line into a fixed buffer.
-/// Measured on macOS 26.5 (`security` from the 15.x tools): a blob of
-/// ~2008 bytes writes cleanly, ~2016 bytes fails — consistent with a
-/// 4096-byte line limit once hex doubles the payload.
-pub(crate) const SECURITY_STDIN_LINE_LIMIT: usize = 4096;
+/// `security -i` reads stdin with a 4096-byte `fgets()` buffer (BUFSIZ
+/// on darwin). A longer command line is not truncated — the first 4096
+/// bytes are consumed as one command with an unterminated quote, and
+/// the overflow is re-parsed as further commands.
+///
+/// The 64-byte headroom and this whole threshold are taken from Claude
+/// Code's own `macOsKeychainStorage.ts`, which hit the same wall and
+/// documents the same derivation. Matching their constant is not
+/// cosmetic: we write the *same Keychain item* they do, so a blob one
+/// side considers writable and the other does not is a split brain.
+///
+/// Independently confirmed here: ~2008 bytes of blob writes, ~2016
+/// fails, consistent with 4096 once hex doubles the payload.
+pub(crate) const SECURITY_STDIN_LINE_LIMIT: usize = 4096 - 64;
 
-/// Largest blob whose hex form still fits on one `security -i` line,
-/// after the `add-generic-password` scaffolding and the account and
-/// service names.
-pub(crate) fn max_blob_len(account: &str, service: &str) -> usize {
-    let scaffolding =
-        "add-generic-password -U -a \"\" -s \"\" -X \"\"\n".len() + account.len() + service.len();
-    // Every blob byte costs two hex characters.
-    SECURITY_STDIN_LINE_LIMIT.saturating_sub(scaffolding) / 2
+/// Does this fully-formed `security -i` command line fit the buffer?
+///
+/// The caller builds the exact line it would send, so nothing has to
+/// re-derive the scaffolding length and get it subtly wrong.
+pub(crate) fn fits_stdin(command_line: &str) -> bool {
+    command_line.len() <= SECURITY_STDIN_LINE_LIMIT
 }
 
 /// Describe a failed `security` invocation **without reproducing its
@@ -110,23 +136,33 @@ mod tests {
         );
     }
 
+    /// The transport decision, at the sizes that actually occur.
+    /// A ~1 KB blob is an ordinary credential; ~2 KB+ is one with a few
+    /// `mcpOAuth` records, which is what #45 was about.
     #[test]
-    fn max_blob_len_leaves_room_for_the_command_scaffolding() {
-        let limit = max_blob_len("me@example.com", "Claudepot-cli-credentials");
-        // Two hex chars per byte, plus the prefix, must fit the buffer.
-        let account = "me@example.com";
-        let service = "Claudepot-cli-credentials";
-        let line = format!(
-            "add-generic-password -U -a \"{account}\" -s \"{service}\" -X \"{}\"\n",
-            "a".repeat(limit * 2)
-        );
+    fn transport_switches_to_argv_exactly_when_stdin_cannot_carry_it() {
+        let line = |blob_len: usize| {
+            format!(
+                "add-generic-password -U -a \"me@example.com\" -s \"Claude Code-credentials\" -X \"{}\"\n",
+                "a".repeat(blob_len * 2) // hex doubles it
+            )
+        };
+        assert!(fits_stdin(&line(1024)), "an ordinary credential uses stdin");
         assert!(
-            line.len() <= SECURITY_STDIN_LINE_LIMIT,
-            "a blob at the limit must still fit: {} > {}",
-            line.len(),
-            SECURITY_STDIN_LINE_LIMIT
+            !fits_stdin(&line(4096)),
+            "an mcpOAuth-heavy credential must take the argv path rather than \
+             being silently mangled by the line buffer"
         );
-        // And it should not be uselessly conservative.
-        assert!(limit > 1900, "limit unexpectedly small: {limit}");
+        // The boundary is the buffer, not a guess.
+        assert!(fits_stdin(&"x".repeat(SECURITY_STDIN_LINE_LIMIT)));
+        assert!(!fits_stdin(&"x".repeat(SECURITY_STDIN_LINE_LIMIT + 1)));
+    }
+
+    /// Parity with Claude Code's own constant. We write the same
+    /// Keychain item; disagreeing about what is writable is a split
+    /// brain, so this is pinned rather than tuned.
+    #[test]
+    fn stdin_limit_matches_claude_codes_constant() {
+        assert_eq!(SECURITY_STDIN_LINE_LIMIT, 4096 - 64);
     }
 }

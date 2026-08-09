@@ -107,25 +107,6 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
     let user = std::env::var("USER").unwrap_or_else(|_| whoami::username());
     validate_security_input(&user, "USER")?;
     validate_security_input(service, "service")?;
-    // Refuse before spawning when the hex form cannot fit on one
-    // `security -i` line. Attempting it is what makes `security` echo
-    // the credential back on stderr (#45), and the write fails either
-    // way — this just fails it cleanly and says why.
-    //
-    // Unlike the private slot in `storage.rs`, there is no file
-    // fallback here: this item's format belongs to Claude Code, so the
-    // honest outcome is a typed error rather than a silent half-write.
-    let limit = super::security_output::max_blob_len(&user, service);
-    if blob.len() > limit {
-        return Err(SwapError::KeychainError(format!(
-            "credential blob is {} bytes; the macOS `security` command cannot \
-             store more than {} bytes in one Keychain item. This usually means \
-             Claude Code has accumulated a large `mcpOAuth` map.",
-            blob.len(),
-            limit
-        )));
-    }
-
     let hex_value = SecretString::from(hex::encode(blob.as_bytes()));
     tracing::info!(
         target: "claudepot::keychain_write",
@@ -140,27 +121,64 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
         hex_value.expose_secret()
     ));
 
+    // Prefer stdin so process monitors see only `security -i`, never the
+    // payload. Fall back to argv when the payload cannot fit the line
+    // buffer — see `security_output` for why that trade is the right
+    // one, and why it is the same one Claude Code makes for this item.
+    let use_stdin = super::security_output::fits_stdin(command_line.expose_secret());
+    if !use_stdin {
+        tracing::warn!(
+            target: "claudepot::keychain_write",
+            blob_len = blob.len(),
+            "payload exceeds the `security -i` line buffer; using argv transport"
+        );
+    }
+
     let output = tokio::time::timeout(TIMEOUT, async {
-        let mut child = Command::new(SECURITY_BIN)
-            .args(["-i"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))?;
+        if use_stdin {
+            let mut child = Command::new(SECURITY_BIN)
+                .args(["-i"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(command_line.expose_secret().as_bytes())
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin
+                    .write_all(command_line.expose_secret().as_bytes())
+                    .await
+                    .map_err(|e| SwapError::KeychainError(format!("stdin write failed: {e}")))?;
+                drop(stdin);
+            }
+
+            child
+                .wait_with_output()
                 .await
-                .map_err(|e| SwapError::KeychainError(format!("stdin write failed: {e}")))?;
-            drop(stdin);
+                .map_err(|e| SwapError::KeychainError(format!("security wait failed: {e}")))
+        } else {
+            // No shell is involved, so argv needs no quoting and cannot
+            // be injected into — the value is one argument by
+            // construction, which is strictly safer than the quoted
+            // line the stdin path has to build.
+            Command::new(SECURITY_BIN)
+                .args([
+                    "add-generic-password",
+                    "-U",
+                    "-a",
+                    &user,
+                    "-s",
+                    service,
+                    "-X",
+                    hex_value.expose_secret(),
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await
+                .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))
         }
-
-        child
-            .wait_with_output()
-            .await
-            .map_err(|e| SwapError::KeychainError(format!("security wait failed: {e}")))
     })
     .await
     .map_err(|_| SwapError::KeychainError("security write timed out".into()))??;

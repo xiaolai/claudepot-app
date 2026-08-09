@@ -20,9 +20,11 @@ Versioning scheme:
   `~/Library/Logs/com.claudepot.app/`, where access and refresh tokens
   were recoverable in plaintext.
 
-  Claudepot now refuses an oversize write before running the command,
-  and no `security` output is ever quoted into a log or an error —
-  only an exit code and a category. Reported as #45.
+  No `security` output is ever quoted into a log or an error now —
+  only an exit code and a category. Large credentials are also stored
+  correctly again: Claudepot sends them the same way Claude Code itself
+  does when they overflow that buffer, so switching accounts works with
+  a big `mcpOAuth` map instead of failing. Reported as #45.
 
   **If you saw repeated `token corrupt blob` errors on an affected
   build, rotate your Claude credentials and delete old logs in

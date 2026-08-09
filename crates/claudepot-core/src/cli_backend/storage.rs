@@ -54,14 +54,10 @@ enum KeychainErr {
     /// but the calling contract is the same: fail closed, never fall
     /// back to file storage.
     Other(String),
-    /// The hex-encoded command line would exceed `security -i`'s input
-    /// buffer. Refused before spawning, because attempting it is what
-    /// produces the credential-bearing stderr described in #45.
-    PayloadTooLarge { blob_len: usize, limit: usize },
 }
 
 #[cfg(target_os = "macos")]
-use super::security_output::{classify_security_failure, max_blob_len};
+use super::security_output::{classify_security_failure, fits_stdin};
 
 #[cfg(target_os = "macos")]
 impl std::fmt::Display for KeychainErr {
@@ -73,11 +69,6 @@ impl std::fmt::Display for KeychainErr {
                  unlock the \"login\" keychain, then retry"
             ),
             Self::Other(s) => write!(f, "{s}"),
-            Self::PayloadTooLarge { blob_len, limit } => write!(
-                f,
-                "credential is {blob_len} bytes; the macOS `security` \
-                 command cannot store more than {limit} bytes per item"
-            ),
         }
     }
 }
@@ -218,19 +209,6 @@ async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr
     //   2. Pass blob via `-X <hex>` over stdin to `security -i` so the
     //      blob never appears in argv (argv is world-readable on macOS
     //      via `ps`/`lsof`).
-    // Refuse an oversize blob BEFORE spawning. `security -i` does not
-    // truncate an over-long line, it re-parses the tail as further
-    // commands and echoes each unparsable fragment back in stderr —
-    // and those fragments are our hex-encoded credential. Not running
-    // the command is what stops that output existing at all (#45).
-    let limit = max_blob_len(&account, KEYCHAIN_SERVICE);
-    if blob.len() > limit {
-        return Err(KeychainErr::PayloadTooLarge {
-            blob_len: blob.len(),
-            limit,
-        });
-    }
-
     let hex_value = SecretString::from(hex::encode(blob.as_bytes()));
     let command_line = SecretString::from(format!(
         "add-generic-password -U -a \"{account}\" -s \"{KEYCHAIN_SERVICE}\" -X \"{}\"\n",
@@ -253,7 +231,34 @@ async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr
     // the docs. A leaked `security` process would block subsequent
     // keychain accesses on the same login keychain until macOS reaps
     // it; the kill avoids that pile-up.
+    // Prefer stdin so process monitors see only `security -i`; fall back
+    // to argv when the payload cannot fit the line buffer. See
+    // `security_output` for the reasoning and the Claude Code parity.
+    let use_stdin = fits_stdin(command_line.expose_secret());
+    if !use_stdin {
+        tracing::warn!("credential exceeds the `security -i` line buffer; using argv transport");
+    }
+
     let result = tokio::time::timeout(KEYCHAIN_TIMEOUT, async {
+        if !use_stdin {
+            return Command::new("/usr/bin/security")
+                .args([
+                    "add-generic-password",
+                    "-U",
+                    "-a",
+                    account.as_str(),
+                    "-s",
+                    KEYCHAIN_SERVICE,
+                    "-X",
+                    hex_value.expose_secret(),
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await
+                .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")));
+        }
         let mut child = Command::new("/usr/bin/security")
             .args(["-i"])
             .stdin(Stdio::piped())
