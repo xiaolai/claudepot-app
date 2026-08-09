@@ -57,6 +57,9 @@ enum KeychainErr {
 }
 
 #[cfg(target_os = "macos")]
+use super::security_output::{classify_security_failure, fits_stdin};
+
+#[cfg(target_os = "macos")]
 impl std::fmt::Display for KeychainErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -228,7 +231,34 @@ async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr
     // the docs. A leaked `security` process would block subsequent
     // keychain accesses on the same login keychain until macOS reaps
     // it; the kill avoids that pile-up.
+    // Prefer stdin so process monitors see only `security -i`; fall back
+    // to argv when the payload cannot fit the line buffer. See
+    // `security_output` for the reasoning and the Claude Code parity.
+    let use_stdin = fits_stdin(command_line.expose_secret());
+    if !use_stdin {
+        tracing::warn!("credential exceeds the `security -i` line buffer; using argv transport");
+    }
+
     let result = tokio::time::timeout(KEYCHAIN_TIMEOUT, async {
+        if !use_stdin {
+            return Command::new("/usr/bin/security")
+                .args([
+                    "add-generic-password",
+                    "-U",
+                    "-a",
+                    account.as_str(),
+                    "-s",
+                    KEYCHAIN_SERVICE,
+                    "-X",
+                    hex_value.expose_secret(),
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await
+                .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")));
+        }
         let mut child = Command::new("/usr/bin/security")
             .args(["-i"])
             .stdin(Stdio::piped())
@@ -257,10 +287,12 @@ async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr
 
     let out = result?;
     if !out.status.success() {
-        return Err(KeychainErr::Other(format!(
-            "security add-generic-password failed (exit {}): {}",
+        // NEVER interpolate `out.stderr`. On the oversize path it is a
+        // verbatim copy of the hex-encoded credential (#45), and this
+        // error is logged by the Auto-mode fallback below.
+        return Err(KeychainErr::Other(classify_security_failure(
             out.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&out.stderr).trim()
+            &out.stderr,
         )));
     }
 
@@ -515,9 +547,29 @@ enum AutoLoadAction {
 /// would surface stale data after a real keychain that the attacker
 /// just forced unreachable. Fail closed.
 #[cfg(target_os = "macos")]
+/// Is this blob a credential we could actually use?
+///
+/// Only a shape check — no field is trusted beyond "this parses as a
+/// JSON object". That is deliberately weak: the point is to catch a
+/// Keychain item that is truncated or otherwise garbage, not to
+/// validate Claude Code's schema, which is not ours to police.
+fn is_usable_blob(blob: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(blob)
+        .map(|v| v.is_object())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
 fn classify_auto_load(outcome: Result<Option<String>, KeychainErr>) -> AutoLoadAction {
     match outcome {
-        Ok(Some(blob)) => AutoLoadAction::UseKeychain(blob),
+        // A Keychain item that does not parse must not win over the
+        // file copy — and must not cause it to be deleted. Before
+        // this, any `Ok(Some(_))` was preferred and `load` then removed
+        // the file, so one bad Keychain write made a perfectly good
+        // fallback disappear and left the account reading "token
+        // corrupt blob" with no way back (#45).
+        Ok(Some(blob)) if is_usable_blob(&blob) => AutoLoadAction::UseKeychain(blob),
+        Ok(Some(_)) => AutoLoadAction::FallBackToFile,
         Ok(None) => AutoLoadAction::FallBackToFile,
         Err(e) => AutoLoadAction::FailClosed(e),
     }
@@ -728,13 +780,36 @@ mod tests {
         // classify_auto_load — the fail-closed load matrix
         // (audit fix for storage.rs:289).
 
+        /// Shape of a real stored credential — a JSON object.
+        const GOOD_BLOB: &str = r#"{"claudeAiOauth":{"accessToken":"x","refreshToken":"y"}}"#;
+
         #[test]
         fn test_classify_auto_load_keychain_hit_uses_blob() {
-            let action = classify_auto_load(Ok(Some("blob".to_string())));
+            let action = classify_auto_load(Ok(Some(GOOD_BLOB.to_string())));
             assert!(
-                matches!(action, AutoLoadAction::UseKeychain(ref b) if b == "blob"),
+                matches!(action, AutoLoadAction::UseKeychain(ref b) if b == GOOD_BLOB),
                 "action={action:?}"
             );
+        }
+
+        /// #45: a Keychain item that does not parse must not be
+        /// preferred, because `load` deletes the file copy when it is.
+        /// One bad write would otherwise evict a good fallback and
+        /// leave the account stuck on "token corrupt blob".
+        #[test]
+        fn unparseable_keychain_value_falls_back_instead_of_evicting_the_file() {
+            for garbage in [
+                "",                                // empty item
+                "not json at all",                 // never was a blob
+                r#"{"claudeAiOauth":{"accessTok"#, // truncated write
+                r#"["an","array"]"#,               // valid JSON, wrong shape
+            ] {
+                let action = classify_auto_load(Ok(Some(garbage.to_string())));
+                assert!(
+                    matches!(action, AutoLoadAction::FallBackToFile),
+                    "garbage {garbage:?} should fall back, got {action:?}"
+                );
+            }
         }
 
         #[test]

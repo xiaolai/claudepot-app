@@ -4,6 +4,7 @@
 //! item by spawning `/usr/bin/security` — never by calling `SecItem*`
 //! directly. See reference.md §I.6 for why this is non-negotiable.
 
+use super::security_output::classify_security_failure;
 use crate::error::SwapError;
 use age::secrecy::{ExposeSecret, SecretString};
 use std::time::Duration;
@@ -58,8 +59,14 @@ pub async fn read(service: &str) -> Result<Option<String>, SwapError> {
                     .into(),
             ));
         }
-        return Err(SwapError::KeychainError(format!(
-            "security find-generic-password failed: {stderr}"
+        // The read command carries no secret in its argv, so its stderr
+        // is not credential-bearing today. Classified anyway: the rule
+        // "no `security` output is ever quoted" is easier to keep than
+        // "no output from the subset of commands that carry secrets",
+        // and this file has already been wrong about that once (#45).
+        return Err(SwapError::KeychainError(classify_security_failure(
+            output.status.code().unwrap_or(-1),
+            &output.stderr,
         )));
     }
 
@@ -114,45 +121,83 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
         hex_value.expose_secret()
     ));
 
+    // Prefer stdin so process monitors see only `security -i`, never the
+    // payload. Fall back to argv when the payload cannot fit the line
+    // buffer — see `security_output` for why that trade is the right
+    // one, and why it is the same one Claude Code makes for this item.
+    let use_stdin = super::security_output::fits_stdin(command_line.expose_secret());
+    if !use_stdin {
+        tracing::warn!(
+            target: "claudepot::keychain_write",
+            blob_len = blob.len(),
+            "payload exceeds the `security -i` line buffer; using argv transport"
+        );
+    }
+
     let output = tokio::time::timeout(TIMEOUT, async {
-        let mut child = Command::new(SECURITY_BIN)
-            .args(["-i"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))?;
+        if use_stdin {
+            let mut child = Command::new(SECURITY_BIN)
+                .args(["-i"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(command_line.expose_secret().as_bytes())
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin
+                    .write_all(command_line.expose_secret().as_bytes())
+                    .await
+                    .map_err(|e| SwapError::KeychainError(format!("stdin write failed: {e}")))?;
+                drop(stdin);
+            }
+
+            child
+                .wait_with_output()
                 .await
-                .map_err(|e| SwapError::KeychainError(format!("stdin write failed: {e}")))?;
-            drop(stdin);
+                .map_err(|e| SwapError::KeychainError(format!("security wait failed: {e}")))
+        } else {
+            // No shell is involved, so argv needs no quoting and cannot
+            // be injected into — the value is one argument by
+            // construction, which is strictly safer than the quoted
+            // line the stdin path has to build.
+            Command::new(SECURITY_BIN)
+                .args([
+                    "add-generic-password",
+                    "-U",
+                    "-a",
+                    &user,
+                    "-s",
+                    service,
+                    "-X",
+                    hex_value.expose_secret(),
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await
+                .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))
         }
-
-        child
-            .wait_with_output()
-            .await
-            .map_err(|e| SwapError::KeychainError(format!("security wait failed: {e}")))
     })
     .await
     .map_err(|_| SwapError::KeychainError("security write timed out".into()))??;
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // `security -i` echoes any unparsable remainder of an over-long
+    // command line back in stderr — and that remainder is our
+    // hex-encoded credential. Logging it verbatim wrote recoverable
+    // access and refresh tokens into the diagnostic log on every
+    // oversize write (#45). Exit code only; content never.
     tracing::info!(
         target: "claudepot::keychain_write",
         exit_code = output.status.code().unwrap_or(-1),
-        stderr = %stderr.trim(),
-        stdout = %stdout.trim(),
         "security -i returned"
     );
     if !output.status.success() {
-        return Err(SwapError::KeychainError(format!(
-            "security add-generic-password failed (exit {}): {}",
+        // Same rule as the log above: classify, never quote (#45).
+        return Err(SwapError::KeychainError(classify_security_failure(
             output.status.code().unwrap_or(-1),
-            stderr.trim()
+            &output.stderr,
         )));
     }
     // Exit-zero is not always sufficient — `security -i` can silently accept
@@ -216,8 +261,9 @@ pub async fn delete(service: &str) -> Result<(), SwapError> {
         // the numeric exit conventions.
         let not_found = output.status.code() == Some(44) || stderr.contains("could not be found");
         if !not_found {
-            return Err(SwapError::KeychainError(format!(
-                "security delete-generic-password failed: {stderr}"
+            return Err(SwapError::KeychainError(classify_security_failure(
+                output.status.code().unwrap_or(-1),
+                &output.stderr,
             )));
         }
     }
@@ -246,6 +292,13 @@ pub async fn write_default(blob: &str) -> Result<(), SwapError> {
 /// Exit code 51 is the common cancel-by-user case; we surface the
 /// stderr along with the code so the caller can format a useful
 /// message without re-spawning `security`.
+///
+/// This is the one deliberate exemption from the
+/// [`super::security_output`] rule. Quoting `security` stderr is unsafe
+/// when the *input* carried a secret, because the parser echoes what it
+/// could not consume. Here no secret is ever passed — the password goes
+/// from the user to macOS's own panel and never enters this process —
+/// so the stderr is diagnostic text and nothing else.
 pub async fn unlock_login_keychain() -> Result<(), SwapError> {
     let output = tokio::time::timeout(TIMEOUT, async {
         Command::new(SECURITY_BIN)
@@ -309,9 +362,9 @@ impl super::CliPlatform for MacosKeychain {
         if stderr.contains("could not be found") || out.status.code() == Some(44) {
             return Ok(());
         }
-        Err(SwapError::WriteFailed(format!(
-            "security delete-generic-password: {}",
-            stderr.trim()
+        Err(SwapError::WriteFailed(classify_security_failure(
+            out.status.code().unwrap_or(-1),
+            &out.stderr,
         )))
     }
 }
