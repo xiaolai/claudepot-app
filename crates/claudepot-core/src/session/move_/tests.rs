@@ -489,6 +489,98 @@ fn move_session_accepts_aged_source_without_force() {
         .expect("aged session should move without force flag");
 }
 
+#[test]
+fn move_session_refuses_missing_target_without_create_flag() {
+    // Default behavior is unchanged: nothing creates the target, so the
+    // slug is computed from a path that isn't there. The move itself
+    // still succeeds — this pins that `create_target_dir` is opt-in and
+    // that the folder is genuinely absent afterwards, which is exactly
+    // the fresh-orphan outcome the flag exists to avoid.
+    let f = Fixture::new();
+    let from = f.make_live_cwd("src");
+    let to = f.work.path().join("not-created-yet");
+    let sid = Uuid::new_v4();
+    f.write_session(&from, sid, 1);
+
+    move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("move to a missing target is still permitted");
+    assert!(!to.exists(), "default opts must not create the target dir");
+}
+
+#[test]
+fn move_session_creates_missing_target_dir_when_asked() {
+    let f = Fixture::new();
+    let from = f.make_live_cwd("src");
+    // Two levels deep: `create_dir_all`, not `create_dir`.
+    let to = f.work.path().join("brand").join("new");
+    let sid = Uuid::new_v4();
+    f.write_session(&from, sid, 2);
+
+    let report = move_session(
+        f.config_dir(),
+        sid,
+        &from,
+        &to,
+        MoveSessionOpts {
+            create_target_dir: true,
+            ..Default::default()
+        },
+    )
+    .expect("move into a to-be-created dir");
+
+    assert!(to.is_dir(), "target cwd must exist after the move");
+    // The slug must match what CC computes standing in that directory —
+    // i.e. from the *canonicalized* path. On macOS the tempdir root is
+    // /var → /private/var, so a slug computed before creation would
+    // differ and CC would never find the session.
+    let canonical = canonicalize_cc_path(&to);
+    let landed = f.slug_dir(&canonical).join(format!("{sid}.jsonl"));
+    assert!(
+        landed.is_file(),
+        "session must land under the canonicalized slug, looked for {landed:?}"
+    );
+    // Unix only, matching the other rewrite-count tests in this file:
+    // `write_session` builds its JSON by interpolation, so a Windows cwd
+    // puts unescaped `\` in the line, `serde_json` refuses it, and the
+    // rewriter passes it through untouched by design. Real transcripts
+    // come from `JSON.stringify` and are properly escaped. The two
+    // assertions above are the ones this test exists for, and they do
+    // run on Windows — which is where `\\?\` handling can go wrong.
+    #[cfg(unix)]
+    assert_eq!(report.jsonl_lines_rewritten, 2);
+    #[cfg(not(unix))]
+    let _ = report;
+}
+
+#[test]
+fn move_session_refuses_target_that_is_a_file() {
+    let f = Fixture::new();
+    let from = f.make_live_cwd("src");
+    let to = f.work.path().join("notes.txt");
+    fs::write(&to, "not a directory").unwrap();
+    let sid = Uuid::new_v4();
+    let source = f.write_session(&from, sid, 1);
+
+    let err = move_session(
+        f.config_dir(),
+        sid,
+        &from,
+        &to,
+        MoveSessionOpts {
+            create_target_dir: true,
+            ..Default::default()
+        },
+    )
+    .expect_err("a file target must be refused");
+
+    assert!(
+        matches!(err, MoveSessionError::TargetNotADirectory(_)),
+        "got: {err}"
+    );
+    // Refused before anything moved.
+    assert!(source.is_file(), "source transcript must be untouched");
+}
+
 // -----------------------------------------------------------------------
 // Section C — history.jsonl + .claude.json
 // -----------------------------------------------------------------------
@@ -992,5 +1084,156 @@ fn discard_orphan_project_errors_when_slug_dir_missing() {
     assert!(
         matches!(err, MoveSessionError::InvalidConfigDir(_)),
         "expected InvalidConfigDir, got {err:?}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Section F — history.jsonl under concurrent writers
+//
+// These drive `rewrite_history_jsonl_with_progress` directly rather than
+// through `move_session`: `on_progress` fires once per line, which is the
+// only hook that lands *inside* the read-modify-write window. That window
+// is the whole subject here.
+// -----------------------------------------------------------------------
+
+/// Append one line to `path`, standing in for Claude Code writing from
+/// another live session.
+fn append_history_line(path: &Path, line: &str) {
+    let mut h = fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(h, "{line}").unwrap();
+}
+
+#[test]
+fn history_rewrite_keeps_lines_appended_while_it_runs() {
+    // The rewrite snapshots the file, builds a copy, and renames it into
+    // place. A line that arrives in between is exactly what a
+    // last-writer-wins rename erases — silently, and this is the user's
+    // prompt history for every project.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    f.write_history(&[
+        &format!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+        r#"{"display":"b","project":"/other","sessionId":"11111111-1111-4111-8111-111111111111"}"#,
+    ]);
+
+    let live = r#"{"display":"live","project":"/elsewhere","sessionId":"22222222-2222-4222-8222-222222222222"}"#;
+    let mut fired = false;
+    let (rewritten, _) =
+        rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_done, _total| {
+            if !fired {
+                fired = true;
+                append_history_line(&path, live);
+            }
+        })
+        .expect("rewrite should succeed");
+
+    assert_eq!(rewritten, 1);
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(
+        after.contains(r#""project":"/new""#),
+        "target line must still be rewritten: {after}"
+    );
+    assert!(
+        after.contains(r#""display":"live""#),
+        "a line appended mid-rewrite must survive: {after}"
+    );
+    assert_eq!(after.lines().count(), 3, "no line may be lost: {after}");
+}
+
+#[test]
+fn history_rewrite_keeps_every_line_from_several_concurrent_writers() {
+    // More than one line arrives mid-rewrite. Catching up has to fold in
+    // the whole tail and keep the byte accounting straight, not just the
+    // first appended record.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    f.write_history(&[
+        &format!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+        r#"{"display":"b","project":"/other"}"#,
+        r#"{"display":"c","project":"/other"}"#,
+    ]);
+
+    let mut tick = 0usize;
+    rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_, _| {
+        tick += 1;
+        append_history_line(
+            &path,
+            &format!(r#"{{"display":"live{tick}","project":"/x"}}"#),
+        );
+    })
+    .expect("rewrite should succeed");
+
+    let after = fs::read_to_string(&path).unwrap();
+    for n in 1..=3 {
+        assert!(
+            after.contains(&format!(r#""display":"live{n}""#)),
+            "line appended on tick {n} was lost: {after}"
+        );
+    }
+    assert!(after.contains(r#""project":"/new""#), "{after}");
+    assert_eq!(after.lines().count(), 6, "no line may be lost: {after}");
+}
+
+#[test]
+fn history_rewrite_preserves_an_unterminated_trailing_line() {
+    // A writer caught mid-append leaves a record with no newline.
+    // Terminating it on their behalf splits one record into two broken
+    // ones, so it goes out exactly as found.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    let partial = r#"{"display":"half","proj"#;
+    fs::write(
+        &path,
+        format!(
+            "{}\n{}",
+            format_args!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+            partial
+        ),
+    )
+    .unwrap();
+
+    rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_, _| {})
+        .expect("rewrite should succeed");
+
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(
+        after.ends_with(partial),
+        "fragment must survive as-is: {after:?}"
+    );
+    assert!(
+        !after.ends_with('\n'),
+        "no newline may be invented for an unfinished record: {after:?}"
+    );
+    assert!(after.contains(r#""project":"/new""#), "{after}");
+}
+
+#[test]
+fn history_rewrite_refuses_a_file_that_shrank_under_it() {
+    // Truncated or replaced wholesale, our copy is no longer a superset
+    // of the live file — renaming it over would destroy the difference,
+    // so the move fails loudly instead.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    f.write_history(&[
+        &format!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+        r#"{"display":"b","project":"/other"}"#,
+    ]);
+
+    let mut fired = false;
+    let err = rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_, _| {
+        if !fired {
+            fired = true;
+            fs::write(&path, "").unwrap();
+        }
+    })
+    .expect_err("a shrinking history file must be refused");
+
+    assert!(
+        matches!(err, MoveSessionError::HistoryFileReplaced(_)),
+        "got: {err}"
     );
 }

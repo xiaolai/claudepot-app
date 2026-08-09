@@ -1,4 +1,12 @@
-import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { Button } from "../../components/primitives/Button";
@@ -22,6 +30,11 @@ import type {
 export type PhaseSpec = { id: string; label: string };
 
 type PhaseState = "pending" | "running" | "complete" | "error";
+
+/** How often the backstop asks `RunningOps` whether the op ended.
+ *  Slow on purpose — the event is the transport, this only catches the
+ *  case where it never arrives. */
+const TERMINAL_POLL_MS = 2000;
 
 /**
  * Subscribes to `op-progress::<opId>` and renders a phase-by-phase
@@ -93,6 +106,9 @@ export function OperationProgressModal({
   const [terminal, setTerminal] = useState<
     | { kind: "complete"; info: RunningOpInfo | null }
     | { kind: "error"; detail: string | null; failedJournalId: string | null }
+    /** The op left `RunningOps` without us seeing its terminal event.
+     *  It is over, but its outcome is not recoverable. */
+    | { kind: "untracked" }
     | null
   >(null);
   const firedTerminal = useRef(false);
@@ -179,6 +195,70 @@ export function OperationProgressModal({
 
   useTauriEvent<OperationProgressEvent>(channel, handler);
 
+  // Polling backstop.
+  //
+  // Every terminal state above depends on one `op / complete|error`
+  // event arriving. Miss it — the emit lands while the webview is
+  // draining a backlog, the listener attaches a beat late — and this
+  // modal waits forever over a scrim, which is exactly the "frozen
+  // dialog" users report. `RunningOps` is the authoritative record and
+  // is what `AGENTS.md` already describes as the backstop; nothing was
+  // reading it.
+  //
+  // Deliberately slow (2 s): this is a safety net, not the transport.
+  // In the normal case the event wins and this never fires a state
+  // change, because `firedTerminal` gates both paths through the same
+  // latch.
+  useEffect(() => {
+    if (terminal) return;
+    let cancelled = false;
+    const settle = (
+      next:
+        | { kind: "complete"; info: RunningOpInfo | null }
+        | { kind: "error"; detail: string | null; failedJournalId: string | null }
+        | { kind: "untracked" },
+    ) => {
+      if (cancelled || firedTerminal.current) return;
+      firedTerminal.current = true;
+      setTerminal(next);
+      if (next.kind === "complete") onCompleteRef.current?.();
+      else if (next.kind === "error") onErrorRef.current?.(next.detail);
+      // `untracked` fires neither callback: we genuinely do not know
+      // whether the op succeeded, and claiming either would be a
+      // guess the caller would act on.
+    };
+    const id = setInterval(() => {
+      fetchStatusRef
+        .current(opId)
+        .then((info) => {
+          if (cancelled || firedTerminal.current) return;
+          if (!info) {
+            // The op is gone from `RunningOps`. It terminated and its
+            // 5 s grace window elapsed while we were not looking, so
+            // the outcome is unrecoverable — say so rather than
+            // reporting a success we never saw.
+            settle({ kind: "untracked" });
+            return;
+          }
+          if (info.status === "complete") settle({ kind: "complete", info });
+          else if (info.status === "error")
+            settle({
+              kind: "error",
+              detail: info.last_error,
+              failedJournalId: info.failed_journal_id,
+            });
+        })
+        .catch(() => {
+          // A failed poll says nothing about the op — keep waiting and
+          // let the next tick decide.
+        });
+    }, TERMINAL_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [opId, terminal]);
+
   return (
     <Modal open onClose={onClose} aria-labelledby={headingId}>
       <ModalHeader title={title} id={headingId} onClose={onClose} />
@@ -217,6 +297,12 @@ export function OperationProgressModal({
           <div className="op-terminal ok">
             <strong>{t("op.complete")}</strong>
             {renderResult ? renderResult(terminal.info) : null}
+          </div>
+        )}
+        {terminal?.kind === "untracked" && (
+          <div className="op-terminal info">
+            <strong>{t("op.untracked")}</strong>{" "}
+            <span className="small muted">{t("op.untrackedDetail")}</span>
           </div>
         )}
         {terminal?.kind === "error" && (

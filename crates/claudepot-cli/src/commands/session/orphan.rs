@@ -34,6 +34,7 @@ pub fn move_cmd(
     force_live: bool,
     force_conflict: bool,
     cleanup_source: bool,
+    create_target: bool,
 ) -> Result<()> {
     let sid: Uuid = session_id
         .parse()
@@ -43,6 +44,7 @@ pub fn move_cmd(
         force_live_session: force_live,
         force_sync_conflict: force_conflict,
         cleanup_source_if_empty: cleanup_source,
+        create_target_dir: create_target,
         claude_json_path: claude_json_path(),
     };
     let report = move_session(

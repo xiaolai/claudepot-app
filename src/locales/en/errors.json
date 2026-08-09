@@ -657,6 +657,7 @@
     "sqlite": "Activity metrics database error: {{detail}}"
   },
   "session_move": {
+    "history_file_replaced": "{{path}} changed underneath the move, so nothing was written. Re-run the move.",
     "invalid_config_dir": "Can't read {{path}}.",
     "invalid_session_id": "That session id isn't valid: {{detail}}",
     "invalid_slug": "That project folder name isn't valid: {{reason}}",
@@ -668,6 +669,7 @@
     "sync_conflict_present": "This session has a sync-conflict copy beside it. Resolve it first, or move anyway.",
     "target_collision": "The target project already holds this session.",
     "target_cwd_missing": "{{path}} doesn't exist, so there's nothing to adopt the sessions into.",
+    "target_not_a_directory": "{{path}} is a file, not a folder — pick a folder instead.",
     "trash_failed": "Couldn't move it to the trash: {{detail}}",
     "worktree_sibling_still_live": "{{path}} is still a live git worktree — Claude Code already resumes across worktrees, so no move is needed."
   },

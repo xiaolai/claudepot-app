@@ -21,6 +21,7 @@ fn main() -> Result<()> {
     match cmd.as_str() {
         "verify-cc-parity" => verify_cc_parity(&rest),
         "verify-docs" => verify_docs::verify_docs(&workspace_root()?),
+        "verify-screenshots" => verify_docs::verify_screenshots(&workspace_root()?),
         "screenshot-fixture" => {
             let out = rest
                 .iter()
@@ -50,7 +51,18 @@ subcommands:
   verify-docs                         fail when README / AGENTS.md / the
                                       web docs drift from the code they
                                       describe (CLI verbs, Settings
-                                      panes, data-dir databases).
+                                      panes, data-dir databases, and that
+                                      both copies of each screenshot
+                                      match). Runs in CI.
+
+  verify-screenshots                  report screenshots whose sources
+                                      have moved since capture. NOT a CI
+                                      gate: the comparison is per-
+                                      directory, so adjacency reads as
+                                      staleness, and re-capturing needs a
+                                      macOS GUI that CI does not have.
+                                      Run it before a release, or when
+                                      you have changed a captured view.
 
   verify-cc-parity [--only <name>]    diff Rust merge output against
                                       parity-harness/fixtures/*/expected.json.

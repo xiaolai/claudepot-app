@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use claudepot_core::project_progress::{PhaseStatus, ProgressSink};
 use serde::Serialize;
@@ -395,6 +395,78 @@ impl RunningOps {
     }
 }
 
+/// Minimum wall-clock gap between two *interior* `sub_progress`
+/// emissions on one op. First and last ticks always go out (see
+/// [`TauriProgressSink::sub_progress`]).
+///
+/// Core reports sub-progress **per item** — per JSONL line, per sidecar
+/// file — because it has no idea how expensive delivering one report
+/// is. Delivery is not free: each one serializes a `ProgressEvent`,
+/// crosses the IPC boundary, and lands in a React `setState` that
+/// re-renders the op-progress modal. On a real machine
+/// `~/.claude/history.jsonl` is ~58k lines, so an unthrottled session
+/// move spent minutes in "Updating history.jsonl" rendering a counter
+/// nobody can read at that rate — the phase looked hung, and the work
+/// it was actually doing takes well under a second.
+///
+/// 50 ms is 20 Hz: faster than the eye resolves a changing number,
+/// slower than the renderer by four orders of magnitude.
+const SUB_PROGRESS_MIN_GAP: Duration = Duration::from_millis(50);
+
+/// Rate limiter for `sub_progress` ticks.
+///
+/// Split out from [`TauriProgressSink`] so the policy is testable
+/// without an `AppHandle` — the sink can only be built inside a running
+/// Tauri app, which is exactly the kind of thing that leaves a fix like
+/// this shipped with no test.
+#[derive(Default)]
+pub(crate) struct SubProgressThrottle {
+    /// When a tick was last admitted. `Mutex` because `ProgressSink`
+    /// hands out `&self`; the sink is driven from one worker thread, so
+    /// this is never contended.
+    last_emit: Mutex<Option<Instant>>,
+}
+
+impl SubProgressThrottle {
+    /// Should this tick be delivered? True for the first and last tick
+    /// of a phase, and for any tick at least [`SUB_PROGRESS_MIN_GAP`]
+    /// after the previous admitted one.
+    ///
+    /// The last tick is unconditional so a throttled phase still ends on
+    /// its true count rather than wherever the clock happened to land —
+    /// a readout frozen at 57,400/58,339 beside a "Complete" label is a
+    /// worse lie than no readout at all.
+    ///
+    /// `now` is injected so the gap behaviour is testable without
+    /// sleeping.
+    fn admits_at(&self, done: usize, total: usize, now: Instant) -> bool {
+        // A poisoned mutex here would mean this same worker thread
+        // panicked mid-emit and the op is over anyway — fall open, since
+        // dropping progress is the failure this guard exists to avoid.
+        let Ok(mut last) = self.last_emit.lock() else {
+            return true;
+        };
+        let endpoint = done <= 1 || done >= total;
+        if !endpoint {
+            if let Some(prev) = *last {
+                if now.duration_since(prev) < SUB_PROGRESS_MIN_GAP {
+                    return false;
+                }
+            }
+        }
+        // Every admission arms the window, endpoints included. Letting
+        // the first tick through *without* arming it emitted two events
+        // back to back at phase start, which is the one moment the
+        // renderer is also mounting the modal.
+        *last = Some(now);
+        true
+    }
+
+    fn admits(&self, done: usize, total: usize) -> bool {
+        self.admits_at(done, total, Instant::now())
+    }
+}
+
 /// ProgressSink that emits events on `op-progress::<op_id>` channels
 /// AND mirrors the latest phase / sub_progress into the shared
 /// [`RunningOps`] map so polling calls see consistent state.
@@ -402,9 +474,19 @@ pub struct TauriProgressSink {
     pub app: AppHandle,
     pub op_id: String,
     pub ops: RunningOps,
+    throttle: SubProgressThrottle,
 }
 
 impl TauriProgressSink {
+    pub fn new(app: AppHandle, op_id: String, ops: RunningOps) -> Self {
+        Self {
+            app,
+            op_id,
+            ops,
+            throttle: SubProgressThrottle::default(),
+        }
+    }
+
     fn channel(&self) -> String {
         crate::events::op_progress_channel(&self.op_id)
     }
@@ -439,6 +521,12 @@ impl ProgressSink for TauriProgressSink {
     }
 
     fn sub_progress(&self, phase: &str, done: usize, total: usize) {
+        // Dropping a tick loses nothing: the next one carries the same
+        // (done, total) shape, and the phase's own `Complete` event is
+        // emitted separately by core. Only the readout is sampled.
+        if !self.throttle.admits(done, total) {
+            return;
+        }
         let payload = ProgressEvent {
             op_id: self.op_id.clone(),
             phase: phase.to_string(),
@@ -816,11 +904,7 @@ where
     F: FnOnce(TauriProgressSink, AppHandle, RunningOps, String) + Send + 'static,
 {
     std::thread::spawn(move || {
-        let sink = TauriProgressSink {
-            app: app.clone(),
-            op_id: op_id.clone(),
-            ops: ops.clone(),
-        };
+        let sink = TauriProgressSink::new(app.clone(), op_id.clone(), ops.clone());
         let app_for_panic = app.clone();
         let ops_for_panic = ops.clone();
         let op_id_for_panic = op_id.clone();
@@ -865,6 +949,79 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── sub-progress throttle ────────────────────────────────────
+    //
+    // The freeze this guards against: core reports one tick per item,
+    // and `~/.claude/history.jsonl` is ~58k lines. Every admitted tick
+    // costs an IPC event plus a React re-render, so admitting all of
+    // them wedges the webview for minutes on work that takes under a
+    // second.
+
+    #[test]
+    fn throttle_admits_the_first_and_last_tick_unconditionally() {
+        let t = SubProgressThrottle::default();
+        let now = Instant::now();
+        assert!(t.admits_at(1, 58_339, now), "first tick must go out");
+        // Same instant, so only the endpoint rule can admit this.
+        assert!(
+            t.admits_at(58_339, 58_339, now),
+            "last tick must go out so the readout ends on its true count"
+        );
+    }
+
+    #[test]
+    fn throttle_drops_interior_ticks_inside_the_gap() {
+        let t = SubProgressThrottle::default();
+        let start = Instant::now();
+        assert!(t.admits_at(1, 1_000, start));
+        // Every interior tick in the same millisecond is dropped.
+        for done in 2..500 {
+            assert!(
+                !t.admits_at(done, 1_000, start),
+                "tick {done} inside the gap must be dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn throttle_admits_again_once_the_gap_elapses() {
+        let t = SubProgressThrottle::default();
+        let start = Instant::now();
+        assert!(t.admits_at(1, 1_000, start));
+        assert!(!t.admits_at(2, 1_000, start + Duration::from_millis(49)));
+        assert!(
+            t.admits_at(3, 1_000, start + SUB_PROGRESS_MIN_GAP),
+            "a tick at exactly the gap must be admitted"
+        );
+        // ...and that admission resets the window.
+        assert!(!t.admits_at(4, 1_000, start + SUB_PROGRESS_MIN_GAP));
+    }
+
+    #[test]
+    fn throttle_cuts_a_58k_line_phase_to_a_readable_rate() {
+        // The real shape: one tick per history.jsonl line, arriving far
+        // faster than the gap. Pinning the count is the point — this is
+        // what turns minutes of IPC into a handful of events.
+        let t = SubProgressThrottle::default();
+        let start = Instant::now();
+        let total = 58_339;
+        // 10 µs per line ≈ 0.58 s of work for the whole phase.
+        let admitted = (1..=total)
+            .filter(|done| {
+                t.admits_at(
+                    *done,
+                    total,
+                    start + Duration::from_micros(10 * *done as u64),
+                )
+            })
+            .count();
+        assert!(
+            admitted <= 20,
+            "expected a couple of dozen ticks at most, got {admitted}"
+        );
+        assert!(admitted >= 2, "first and last must always survive");
+    }
 
     /// Audit fix (ops.rs:367): `remove_after_grace`'s worker thread
     /// must recover from a poisoned map — the old `if let Ok(guard) =

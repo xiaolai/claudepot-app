@@ -25,6 +25,16 @@ export interface MoveSessionReport {
   sourceDirRemoved: boolean;
 }
 
+/** What a free-form move target is on disk. Mirrors `TargetProbeDto`.
+ *  `exists && !isDir` is the one combination a move must refuse. */
+export interface TargetProbe {
+  /** Input with a leading `~` expanded; use this, not what was typed. */
+  resolvedPath: string;
+  isAbsolute: boolean;
+  exists: boolean;
+  isDir: boolean;
+}
+
 export interface AdoptFailure {
   sessionId: string;
   error: string;

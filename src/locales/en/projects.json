@@ -254,9 +254,6 @@
     "sessionLabel": "session",
     "explain": "From <from/> to the target you pick. Every transcript line's <cwd/> is rewritten so <resume/> opens the new project. History entries keyed by this sessionId follow; pre-sessionId entries stay behind.",
     "targetLabel": "Target project",
-    "noTargets": "No live project targets — pick Other…",
-    "other": "Other…",
-    "customPath": "Custom path",
     "advanced": "Advanced",
     "forceLive": "Force past the live-session mtime guard",
     "forceLiveDesc": "— use only if CC isn't writing to this session.",
@@ -278,7 +275,21 @@
     "resultUnmapped": "{{n}} stayed (pre-sessionId)",
     "resultPointers": "pointers cleared",
     "resultSourceDir": "Source project dir",
-    "resultRemoved": "removed (was empty)"
+    "resultRemoved": "removed (was empty)",
+    "filterPlaceholder": "Filter projects, or type a folder path",
+    "filterAria": "Filter target projects",
+    "listAria": "Target projects",
+    "noMatch": "No project matches. Type an absolute path to use a folder that isn't in the list.",
+    "usePath": "Use this folder",
+    "projectCount_one": "{{count}} live project",
+    "projectCount_other": "{{count}} live projects",
+    "checking": "Checking that path…",
+    "willCreate": "{{path}} doesn't exist yet — the move will create it.",
+    "existingFolder": "Existing folder: {{path}}",
+    "notAbsolute": "Enter an absolute path — one starting with / or ~.",
+    "notADirectory": "That path is a file, not a folder.",
+    "probeFailed": "Couldn't check that path: {{detail}}",
+    "createAndMoveTo": "Create & move to {{target}}"
   },
   "rename": {
     "progressTitle": "Renaming {{from}} → {{to}}",
@@ -590,7 +601,9 @@
     "unknown": "unknown",
     "journalId": "Journal id:",
     "runInBackground": "Run in background",
-    "openRepair": "Open Repair"
+    "openRepair": "Open Repair",
+    "untracked": "Finished — outcome unknown.",
+    "untrackedDetail": "Claudepot stopped tracking this operation before its result arrived. Refresh to see the current state."
   },
   "templates": {
     "localOnlyNotice": "This template runs only on a local route, but you don’t have one configured.",

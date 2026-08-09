@@ -6,7 +6,54 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.2 — beta (unreleased)
+## 0.4.3 — beta (unreleased)
+
+### Changed
+
+- **Moving a session picks its target from a filterable list, not a
+  dropdown of everything.** With dozens of tracked projects the old
+  `<select>` was a scroll rather than a list — there was no way to
+  *find* a project in it. Type to filter on name or path, arrow keys and
+  Enter to pick. Settings → MCP's project picker gets the same
+  treatment, for the same reason.
+- **A session can now be moved into a folder that doesn't exist yet.**
+  Type or browse to any path and Claudepot says whether it is there
+  already or will be created; the button reads "Create & move" when it
+  will create it, so nothing is made behind your back. Previously the
+  free-form option was the last row of that same long dropdown and could
+  only name a folder that already existed — pointing a session at a
+  missing one just produced a fresh orphan.
+- The move now refuses a target that exists but is a file, instead of
+  rewriting the transcript's `cwd` to something Claude Code can never
+  `cd` into. `claudepot session move` gains a matching `--create-target`
+  flag.
+
+### Fixed
+
+- **"Updating history.jsonl" looked hung during a session move.** Core
+  reports sub-progress per item; delivering one report costs an IPC
+  event and a React re-render. `~/.claude/history.jsonl` is tens of
+  thousands of lines, so that phase spent minutes rendering a counter
+  nobody could read while the actual work took under a second. Progress
+  ticks are now sampled at 20 Hz, with the first and last always
+  delivered — every long-running operation benefits, not just moves.
+- **A progress dialog could hang forever if its finish signal went
+  missing.** Every terminal state depended on one event arriving; miss
+  it and the dialog sat open over a scrim with nothing to dismiss it —
+  the "frozen Claudepot" you get after a long operation. It now also
+  polls the operation registry as a backstop, which is what the
+  architecture notes always claimed happened. When an operation ends
+  without its result reaching the dialog, the dialog says the outcome is
+  unknown rather than guessing at success.
+- **A session move could silently drop history entries written by other
+  running sessions.** The `history.jsonl` rewrite read the file, built a
+  copy, and renamed it into place; anything Claude Code appended in that
+  window was discarded by the rename, permanently and with no error. The
+  rewrite now catches up on appended lines before renaming, leaves an
+  unfinished trailing record untouched instead of terminating it, and
+  refuses outright if the file is truncated or replaced underneath it.
+
+## 0.4.2 — beta (released 2026-08-07)
 
 ### Fixed
 

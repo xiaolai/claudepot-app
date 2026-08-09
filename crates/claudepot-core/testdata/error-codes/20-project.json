@@ -434,6 +434,18 @@
       "message": "from_cwd and to_cwd canonicalize to the same path"
     },
     {
+      "code": "session_move.history_file_replaced",
+      "owner": "core",
+      "params": ["path"],
+      "message": "\"/Users/me/.claude/history.jsonl\" was truncated or replaced while the move was rewriting it — nothing was written; re-run the move"
+    },
+    {
+      "code": "session_move.target_not_a_directory",
+      "owner": "core",
+      "params": ["path"],
+      "message": "target cwd \"/Users/me/notes.txt\" exists but is not a directory"
+    },
+    {
       "code": "session_move.worktree_sibling_still_live",
       "owner": "core",
       "params": ["path"],

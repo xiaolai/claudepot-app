@@ -248,9 +248,6 @@
     "sessionLabel": "会话",
     "explain": "从 <from/> 移到你选择的目标。每条转录记录的 <cwd/> 都会被重写，使 <resume/> 打开新项目。以此 sessionId 为键的历史记录会跟随迁移；早于 sessionId 的记录保留原处。",
     "targetLabel": "目标项目",
-    "noTargets": "没有可用的目标项目 — 请选择“其他…”",
-    "other": "其他…",
-    "customPath": "自定义路径",
     "advanced": "高级",
     "forceLive": "强制跳过活动会话 mtime 保护",
     "forceLiveDesc": "— 仅在确认 CC 未在写入此会话时使用。",
@@ -272,7 +269,20 @@
     "resultUnmapped": "{{n}} 条保留原处（早于 sessionId）",
     "resultPointers": "指针已清除",
     "resultSourceDir": "源项目目录",
-    "resultRemoved": "已删除（为空）"
+    "resultRemoved": "已删除（为空）",
+    "filterPlaceholder": "筛选项目，或直接输入文件夹路径",
+    "filterAria": "筛选目标项目",
+    "listAria": "目标项目",
+    "noMatch": "没有匹配的项目。输入绝对路径即可使用列表之外的文件夹。",
+    "usePath": "使用此文件夹",
+    "projectCount_other": "{{count}} 个活动项目",
+    "checking": "正在检查该路径…",
+    "willCreate": "{{path}} 尚不存在 —— 移动时会创建它。",
+    "existingFolder": "已有文件夹：{{path}}",
+    "notAbsolute": "请输入绝对路径 —— 以 / 或 ~ 开头。",
+    "notADirectory": "该路径是文件，不是文件夹。",
+    "probeFailed": "无法检查该路径：{{detail}}",
+    "createAndMoveTo": "创建并移动到 {{target}}"
   },
   "rename": {
     "progressTitle": "正在重命名 {{from}} → {{to}}",
@@ -565,7 +575,9 @@
     "unknown": "未知",
     "journalId": "日志 id：",
     "runInBackground": "转入后台运行",
-    "openRepair": "打开修复"
+    "openRepair": "打开修复",
+    "untracked": "已结束 —— 结果未知。",
+    "untrackedDetail": "Claudepot 在收到结果之前就不再跟踪此操作。请刷新以查看当前状态。"
   },
   "templates": {
     "localOnlyNotice": "此模板只能在本地路由上运行，但你还没有配置本地路由。",

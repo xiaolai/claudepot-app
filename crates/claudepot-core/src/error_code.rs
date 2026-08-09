@@ -1289,6 +1289,8 @@ mod tests {
                     "/Users/me/.claude/projects/-Users-me-new/6f9a.summary.json",
                 )),
                 E::SameCwd,
+                E::TargetNotADirectory(PathBuf::from("/Users/me/notes.txt")),
+                E::HistoryFileReplaced(PathBuf::from("/Users/me/.claude/history.jsonl")),
                 E::WorktreeSiblingStillLive(PathBuf::from("/Users/me/proj")),
                 E::InvalidConfigDir(PathBuf::from("/Users/me/.claude")),
                 E::TrashFailed("permission denied".to_string()),
@@ -1303,6 +1305,8 @@ mod tests {
                     | E::TargetCollision(_)
                     | E::SidecarCollision(_)
                     | E::SameCwd
+                    | E::TargetNotADirectory(_)
+                    | E::HistoryFileReplaced(_)
                     | E::WorktreeSiblingStillLive(_)
                     | E::InvalidConfigDir(_)
                     | E::TrashFailed(_)

@@ -1106,6 +1106,7 @@ pub fn run() {
             commands::session_move::session_move,
             commands::session_move::session_move_start,
             commands::session_move::session_move_status,
+            commands::session_move::session_move_probe_target,
             commands::session_move::session_adopt_orphan,
             commands::session_move::session_discard_orphan,
             commands::session_index::session_list_all,
