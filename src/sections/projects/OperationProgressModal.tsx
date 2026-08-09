@@ -227,17 +227,45 @@ export function OperationProgressModal({
       // whether the op succeeded, and claiming either would be a
       // guess the caller would act on.
     };
-    const id = setInterval(() => {
+    const poll = (seedOnly: boolean) => {
       fetchStatusRef
         .current(opId)
         .then((info) => {
-          if (cancelled || firedTerminal.current) return;
+          if (cancelled) return;
+          // Seed phases that finished before this modal was listening.
+          // The op starts on `*_start`, but the modal only subscribes
+          // once it mounts, so on a fast op S1 and S2 are already done
+          // and their events went to nobody. Applied only where the
+          // local state is still "pending": a live event is newer than
+          // a poll, so this fills gaps and never overwrites.
+          if (info?.phase_states) {
+            setPhaseStates((prev) => {
+              let changed = false;
+              const next = { ...prev };
+              for (const [phase, state] of Object.entries(info.phase_states)) {
+                // The wire type has no "pending" — a phase only appears
+                // here once it has reported something.
+                if (next[phase] === "pending") {
+                  next[phase] = state;
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
+          }
+          if (firedTerminal.current) return;
           if (!info) {
             // The op is gone from `RunningOps`. It terminated and its
             // 5 s grace window elapsed while we were not looking, so
             // the outcome is unrecoverable — say so rather than
             // reporting a success we never saw.
-            settle({ kind: "untracked" });
+            //
+            // Never from the mount poll, though. "Not found on the very
+            // first look" is a startup race, not evidence the op ended,
+            // and announcing an unknown outcome the instant the dialog
+            // opens would be its own lie. One interval later, absence
+            // means something.
+            if (!seedOnly) settle({ kind: "untracked" });
             return;
           }
           if (info.status === "complete") settle({ kind: "complete", info });
@@ -252,7 +280,12 @@ export function OperationProgressModal({
           // A failed poll says nothing about the op — keep waiting and
           // let the next tick decide.
         });
-    }, TERMINAL_POLL_MS);
+    };
+    // Poll once immediately: the phases this modal missed were missed
+    // before it mounted, so waiting a full interval to correct them is
+    // the whole visible bug.
+    poll(true);
+    const id = setInterval(() => poll(false), TERMINAL_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);

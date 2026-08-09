@@ -11,6 +11,7 @@ function op(partial: Partial<RunningOpInfo> = {}): RunningOpInfo {
     old_path: "/a/b",
     new_path: "/a/c",
     current_phase: null,
+    phase_states: {},
     sub_progress: null,
     status: "running",
     started_unix_secs: 0,
@@ -66,12 +67,14 @@ describe("RunningOpsChip", () => {
           op({
             op_id: "op-a",
             current_phase: "P6",
+            phase_states: {},
             sub_progress: [47, 168],
           }),
           op({
             op_id: "op-b",
             kind: "repair_rollback",
             current_phase: "P3",
+            phase_states: {},
           }),
         ]}
         onReopen={() => {}}
@@ -123,6 +126,7 @@ describe("labelFor", () => {
         op({
           kind: "clean_projects",
           current_phase: "scan",
+          phase_states: {},
           sub_progress: [3, 10],
         }),
       ),
@@ -144,6 +148,7 @@ describe("labelFor", () => {
           kind: "session_slim",
           old_path: "/p/abc.jsonl",
           current_phase: "P2",
+          phase_states: {},
         }),
       ),
     ).toBe("Slimming abc.jsonl (P2)");

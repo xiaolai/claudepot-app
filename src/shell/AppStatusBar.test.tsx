@@ -232,6 +232,7 @@ describe("AppStatusBar — chip rendering", () => {
             old_path: "",
             new_path: "",
             current_phase: null,
+            phase_states: {},
             sub_progress: null,
             status: "running",
             started_unix_secs: 0,
