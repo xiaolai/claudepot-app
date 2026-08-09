@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.5 — beta (unreleased)
+## 0.4.5 — beta (released 2026-08-10)
 
 ### Security
 
