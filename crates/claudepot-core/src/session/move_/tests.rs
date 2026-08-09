@@ -539,7 +539,17 @@ fn move_session_creates_missing_target_dir_when_asked() {
         landed.is_file(),
         "session must land under the canonicalized slug, looked for {landed:?}"
     );
+    // Unix only, matching the other rewrite-count tests in this file:
+    // `write_session` builds its JSON by interpolation, so a Windows cwd
+    // puts unescaped `\` in the line, `serde_json` refuses it, and the
+    // rewriter passes it through untouched by design. Real transcripts
+    // come from `JSON.stringify` and are properly escaped. The two
+    // assertions above are the ones this test exists for, and they do
+    // run on Windows — which is where `\\?\` handling can go wrong.
+    #[cfg(unix)]
     assert_eq!(report.jsonl_lines_rewritten, 2);
+    #[cfg(not(unix))]
+    let _ = report;
 }
 
 #[test]
