@@ -37,6 +37,14 @@ Versioning scheme:
   nobody could read while the actual work took under a second. Progress
   ticks are now sampled at 20 Hz, with the first and last always
   delivered — every long-running operation benefits, not just moves.
+- **A progress dialog could hang forever if its finish signal went
+  missing.** Every terminal state depended on one event arriving; miss
+  it and the dialog sat open over a scrim with nothing to dismiss it —
+  the "frozen Claudepot" you get after a long operation. It now also
+  polls the operation registry as a backstop, which is what the
+  architecture notes always claimed happened. When an operation ends
+  without its result reaching the dialog, the dialog says the outcome is
+  unknown rather than guessing at success.
 
 ## 0.4.2 — beta (released 2026-08-07)
 

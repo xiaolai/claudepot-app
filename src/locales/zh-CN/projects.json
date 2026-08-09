@@ -575,7 +575,9 @@
     "unknown": "未知",
     "journalId": "日志 id：",
     "runInBackground": "转入后台运行",
-    "openRepair": "打开修复"
+    "openRepair": "打开修复",
+    "untracked": "已结束 —— 结果未知。",
+    "untrackedDetail": "Claudepot 在收到结果之前就不再跟踪此操作。请刷新以查看当前状态。"
   },
   "templates": {
     "localOnlyNotice": "此模板只能在本地路由上运行，但你还没有配置本地路由。",

@@ -601,7 +601,9 @@
     "unknown": "unknown",
     "journalId": "Journal id:",
     "runInBackground": "Run in background",
-    "openRepair": "Open Repair"
+    "openRepair": "Open Repair",
+    "untracked": "Finished — outcome unknown.",
+    "untrackedDetail": "Claudepot stopped tracking this operation before its result arrived. Refresh to see the current state."
   },
   "templates": {
     "localOnlyNotice": "This template runs only on a local route, but you don’t have one configured.",
