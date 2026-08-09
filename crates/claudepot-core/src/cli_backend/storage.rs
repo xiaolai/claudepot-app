@@ -559,6 +559,7 @@ fn is_usable_blob(blob: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(target_os = "macos")]
 fn classify_auto_load(outcome: Result<Option<String>, KeychainErr>) -> AutoLoadAction {
     match outcome {
         // A Keychain item that does not parse must not win over the
