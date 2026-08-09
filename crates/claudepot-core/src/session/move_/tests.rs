@@ -489,6 +489,88 @@ fn move_session_accepts_aged_source_without_force() {
         .expect("aged session should move without force flag");
 }
 
+#[test]
+fn move_session_refuses_missing_target_without_create_flag() {
+    // Default behavior is unchanged: nothing creates the target, so the
+    // slug is computed from a path that isn't there. The move itself
+    // still succeeds — this pins that `create_target_dir` is opt-in and
+    // that the folder is genuinely absent afterwards, which is exactly
+    // the fresh-orphan outcome the flag exists to avoid.
+    let f = Fixture::new();
+    let from = f.make_live_cwd("src");
+    let to = f.work.path().join("not-created-yet");
+    let sid = Uuid::new_v4();
+    f.write_session(&from, sid, 1);
+
+    move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("move to a missing target is still permitted");
+    assert!(!to.exists(), "default opts must not create the target dir");
+}
+
+#[test]
+fn move_session_creates_missing_target_dir_when_asked() {
+    let f = Fixture::new();
+    let from = f.make_live_cwd("src");
+    // Two levels deep: `create_dir_all`, not `create_dir`.
+    let to = f.work.path().join("brand").join("new");
+    let sid = Uuid::new_v4();
+    f.write_session(&from, sid, 2);
+
+    let report = move_session(
+        f.config_dir(),
+        sid,
+        &from,
+        &to,
+        MoveSessionOpts {
+            create_target_dir: true,
+            ..Default::default()
+        },
+    )
+    .expect("move into a to-be-created dir");
+
+    assert!(to.is_dir(), "target cwd must exist after the move");
+    // The slug must match what CC computes standing in that directory —
+    // i.e. from the *canonicalized* path. On macOS the tempdir root is
+    // /var → /private/var, so a slug computed before creation would
+    // differ and CC would never find the session.
+    let canonical = canonicalize_cc_path(&to);
+    let landed = f.slug_dir(&canonical).join(format!("{sid}.jsonl"));
+    assert!(
+        landed.is_file(),
+        "session must land under the canonicalized slug, looked for {landed:?}"
+    );
+    assert_eq!(report.jsonl_lines_rewritten, 2);
+}
+
+#[test]
+fn move_session_refuses_target_that_is_a_file() {
+    let f = Fixture::new();
+    let from = f.make_live_cwd("src");
+    let to = f.work.path().join("notes.txt");
+    fs::write(&to, "not a directory").unwrap();
+    let sid = Uuid::new_v4();
+    let source = f.write_session(&from, sid, 1);
+
+    let err = move_session(
+        f.config_dir(),
+        sid,
+        &from,
+        &to,
+        MoveSessionOpts {
+            create_target_dir: true,
+            ..Default::default()
+        },
+    )
+    .expect_err("a file target must be refused");
+
+    assert!(
+        matches!(err, MoveSessionError::TargetNotADirectory(_)),
+        "got: {err}"
+    );
+    // Refused before anything moved.
+    assert!(source.is_file(), "source transcript must be untouched");
+}
+
 // -----------------------------------------------------------------------
 // Section C — history.jsonl + .claude.json
 // -----------------------------------------------------------------------

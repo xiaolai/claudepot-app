@@ -124,6 +124,25 @@ pub fn move_session_with_progress(
         return Err(MoveSessionError::InvalidConfigDir(config_dir.to_path_buf()));
     }
 
+    // The target cwd is the directory CC `cd`s into on `--resume`. A path
+    // that already exists as a file can never become one, so refuse before
+    // a single byte is rewritten rather than producing a transcript that
+    // points at a file.
+    if to_cwd.exists() && !to_cwd.is_dir() {
+        return Err(MoveSessionError::TargetNotADirectory(to_cwd.to_path_buf()));
+    }
+    // Create the target BEFORE canonicalizing, not after the guards below.
+    // `canonicalize_cc_path` falls back to the literal path when realpath
+    // fails, and realpath only succeeds once the directory exists — so
+    // creating late would compute the slug from `/tmp/foo` while CC, run
+    // in that same directory, computes it from `/private/tmp/foo` and
+    // never finds the session. The cost of creating early is an empty
+    // directory left behind if a guard below rejects the move; that
+    // directory is one the caller explicitly asked for.
+    if opts.create_target_dir && !to_cwd.exists() {
+        fs::create_dir_all(to_cwd)?;
+    }
+
     let from_canonical = canonicalize_cc_path(from_cwd);
     let to_canonical = canonicalize_cc_path(to_cwd);
     if from_canonical == to_canonical {
@@ -445,6 +464,10 @@ pub fn adopt_orphan_project(
             force_live_session: true,
             force_sync_conflict: false,
             cleanup_source_if_empty: false,
+            // Adoption targets a directory the caller already verified
+            // exists; creating one here would silently rescue an orphan
+            // into a folder nobody asked for.
+            create_target_dir: false,
             claude_json_path: claude_json_path.clone(),
         };
         match move_session(config_dir, sid, &orphan_cwd, target_cwd, opts) {

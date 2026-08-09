@@ -2,6 +2,27 @@
 
 use serde::Serialize;
 
+/// What a free-form move target actually is on disk, resolved once so
+/// the Move-session modal can say "this folder will be created" rather
+/// than guessing — and so the path it finally submits is the expanded
+/// one, not the `~/…` the user typed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProbeDto {
+    /// The input with a leading `~` / `~/` expanded; byte-identical to
+    /// the input for every other shape (including `~user`, which has no
+    /// portable expansion — see `path_utils::expand_tilde`).
+    pub resolved_path: String,
+    /// `Path::is_absolute` on `resolved_path`. A relative cwd would be
+    /// resolved against whatever directory CC happens to start in, so
+    /// the caller must refuse one.
+    pub is_absolute: bool,
+    pub exists: bool,
+    /// Follows symlinks, matching what CC does when it `cd`s there.
+    /// `exists && !is_dir` is the one combination a move must refuse.
+    pub is_dir: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrphanedProjectDto {

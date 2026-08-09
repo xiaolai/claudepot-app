@@ -1,6 +1,5 @@
-import { useId, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
@@ -11,16 +10,16 @@ import {
   ModalBody,
   ModalFooter,
 } from "../../components/primitives/Modal";
-import {
-  Disclosure,
-  FieldBlock,
-  OptionRow,
-} from "../../components/primitives/modalParts";
+import { Disclosure, OptionRow } from "../../components/primitives/modalParts";
 import { useOperations } from "../../hooks/useOperations";
 import { NF } from "../../icons";
 import { basename } from "../../lib/paths";
 import type { MoveSessionReport, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
+import {
+  MoveTargetPicker,
+  type ResolvedMoveTarget,
+} from "./MoveTargetPicker";
 import {
   SESSION_MOVE_PHASES,
   renderSessionMoveResult,
@@ -40,8 +39,9 @@ type Phase =
  * S1..S5 phase rows render live progress, and the user can close the
  * progress modal to background the op without cancelling it.
  *
- * Target picker: dropdown of existing Claudepot-tracked projects plus
- * an "Other…" escape hatch that opens a native directory picker.
+ * Target picking lives in `MoveTargetPicker` — a filterable list of live
+ * projects plus a path escape hatch that can name a folder which does
+ * not exist yet. This component owns only the move itself.
  */
 export function MoveSessionModal({
   sessionId,
@@ -60,14 +60,12 @@ export function MoveSessionModal({
 }) {
   const { t } = useTranslation("projects");
   const headingId = useId();
-  const selectId = useId();
-  const customCwdId = useId();
   const { open: openOpModal } = useOperations();
 
-  // Dropdown options: only "alive" projects — picking an orphan /
-  // unreachable / empty target would either fail the backend or
-  // rewrite cwd to a path that doesn't exist. "Other…" is always
-  // available as the free-form escape hatch.
+  // Listed targets: only "alive" projects — offering an orphan /
+  // unreachable / empty one would either fail the backend or rewrite cwd
+  // to a path that doesn't exist. A folder outside this set is still
+  // reachable, by typing or browsing to it in the picker.
   //
   // Sort: most-recently-touched first so the default selection is
   // the one the user almost certainly wants (B1, B11).
@@ -95,18 +93,18 @@ export function MoveSessionModal({
     },
     [projects, fromCwd],
   );
-  const [selection, setSelection] = useState<string>(
-    options[0]?.original_path ?? "__other__",
-  );
-  const [customCwd, setCustomCwd] = useState("");
+  // `null` until the picker has a target it will vouch for — a project
+  // row, or a path it has probed. A blocked state (still checking, not
+  // absolute, points at a file) reads as "no target" here, so this
+  // component can't submit something the picker rejected.
+  const [target, setTarget] = useState<ResolvedMoveTarget | null>(null);
   const [forceLive, setForceLive] = useState(false);
   const [forceConflict, setForceConflict] = useState(false);
   const [cleanupSource, setCleanupSource] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
-  const target = selection === "__other__" ? customCwd.trim() : selection;
   const canSubmit =
-    phase.kind === "idle" && target !== "" && target !== fromCwd;
+    phase.kind === "idle" && target !== null && target.path !== fromCwd;
   const starting = phase.kind === "starting";
 
   // Escape is suppressed while the submit is in flight — Modal wires
@@ -115,32 +113,27 @@ export function MoveSessionModal({
     if (!starting) onClose();
   };
 
-  async function browse() {
-    const picked = await openDialog({
-      directory: true,
-      multiple: false,
-      title: t("move.chooseTargetTitle"),
-    });
-    if (typeof picked === "string") {
-      setSelection("__other__");
-      setCustomCwd(picked);
-    }
-  }
+  // Stable identity: the picker reports upward from an effect, and an
+  // inline lambda here would re-run it on every render of this modal.
+  const handleResolve = useCallback((next: ResolvedMoveTarget | null) => {
+    setTarget(next);
+  }, []);
 
   async function submit() {
-    if (!canSubmit) return;
+    if (!canSubmit || !target) return;
     setPhase({ kind: "starting" });
     try {
       const opId = await api.sessionMoveStart({
         sessionId,
         fromCwd,
-        toCwd: target,
+        toCwd: target.path,
         forceLive,
         forceConflict,
         cleanupSource,
+        createTargetDir: target.createDir,
       });
       const shortFromBase = basename(fromCwd);
-      const shortToBase = basename(target);
+      const shortToBase = basename(target.path);
       openOpModal({
         opId,
         title: t("move.progressTitle", {
@@ -173,7 +166,7 @@ export function MoveSessionModal({
 
   const shortSid = sessionId.slice(0, 8);
   const shortFrom = basename(fromCwd);
-  const shortTo = target ? basename(target) : "";
+  const shortTo = target ? basename(target.path) : "";
 
   return (
     <Modal open onClose={handleClose} width="lg" aria-labelledby={headingId}>
@@ -238,76 +231,11 @@ export function MoveSessionModal({
           />
         </p>
 
-        <FieldBlock label={t("move.targetLabel")} htmlFor={selectId}>
-          <select
-            id={selectId}
-            value={selection}
-            onChange={(e) => setSelection(e.target.value)}
-            disabled={starting}
-            className="mono pm-focus"
-            style={{
-              width: "100%",
-              height: "var(--sp-28)",
-              padding: "0 var(--sp-8)",
-              border: "var(--bw-hair) solid var(--line)",
-              borderRadius: "var(--r-2)",
-              background: "var(--bg)",
-              color: "var(--fg)",
-              fontSize: "var(--fs-sm)",
-              cursor: starting ? "not-allowed" : "pointer",
-            }}
-          >
-            {options.length === 0 && (
-              <option value="__other__" disabled>
-                {t("move.noTargets")}
-              </option>
-            )}
-            {options.map((p) => {
-              const base = basename(p.original_path);
-              return (
-                <option key={p.sanitized_name} value={p.original_path}>
-                  {base} — {p.original_path}
-                </option>
-              );
-            })}
-            <option value="__other__">{t("move.other")}</option>
-          </select>
-        </FieldBlock>
-
-        {selection === "__other__" && (
-          <FieldBlock label={t("move.customPath")} htmlFor={customCwdId}>
-            <div
-              style={{
-                display: "flex",
-                gap: "var(--sp-6)",
-                alignItems: "stretch",
-              }}
-            >
-              <input
-                id={customCwdId}
-                type="text"
-                className="mono pm-focus"
-                placeholder={t("shared.targetCwd")}
-                value={customCwd}
-                onChange={(e) => setCustomCwd(e.target.value)}
-                disabled={starting}
-                style={{
-                  flex: 1,
-                  padding: "var(--sp-6) var(--sp-10)",
-                  fontSize: "var(--fs-sm)",
-                  color: "var(--fg)",
-                  background: "var(--bg)",
-                  border: "var(--bw-hair) solid var(--line)",
-                  borderRadius: "var(--r-2)",
-                  outline: "none",
-                }}
-              />
-              <Button variant="ghost" onClick={browse} disabled={starting}>
-                {t("shared.browse")}
-              </Button>
-            </div>
-          </FieldBlock>
-        )}
+        <MoveTargetPicker
+          projects={options}
+          disabled={starting}
+          onResolve={handleResolve}
+        />
 
         <Disclosure label={t("move.advanced")}>
           <OptionRow
@@ -391,15 +319,17 @@ export function MoveSessionModal({
         <Button variant="ghost" onClick={handleClose} disabled={starting}>
           {t("shared.cancel")}
         </Button>
-        <Button
-          variant="solid"
-          onClick={submit}
-          disabled={!canSubmit}
-          autoFocus
-        >
+        {/* No autoFocus: the picker's filter field claims initial focus,
+            because choosing a target is the first thing this modal is
+            for. The label names the folder-creating variant explicitly —
+            a move that quietly `mkdir`s is a move the user didn't
+            authorize. */}
+        <Button variant="solid" onClick={submit} disabled={!canSubmit}>
           {starting
             ? t("move.starting")
-            : t("move.moveTo", { target: shortTo || "…" })}
+            : target?.createDir
+              ? t("move.createAndMoveTo", { target: shortTo })
+              : t("move.moveTo", { target: shortTo || "…" })}
         </Button>
       </ModalFooter>
     </Modal>

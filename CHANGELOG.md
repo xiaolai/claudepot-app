@@ -6,7 +6,29 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.2 — beta (unreleased)
+## 0.4.3 — beta (unreleased)
+
+### Changed
+
+- **Moving a session picks its target from a filterable list, not a
+  dropdown of everything.** With dozens of tracked projects the old
+  `<select>` was a scroll rather than a list — there was no way to
+  *find* a project in it. Type to filter on name or path, arrow keys and
+  Enter to pick. Settings → MCP's project picker gets the same
+  treatment, for the same reason.
+- **A session can now be moved into a folder that doesn't exist yet.**
+  Type or browse to any path and Claudepot says whether it is there
+  already or will be created; the button reads "Create & move" when it
+  will create it, so nothing is made behind your back. Previously the
+  free-form option was the last row of that same long dropdown and could
+  only name a folder that already existed — pointing a session at a
+  missing one just produced a fresh orphan.
+- The move now refuses a target that exists but is a file, instead of
+  rewriting the transcript's `cwd` to something Claude Code can never
+  `cd` into. `claudepot session move` gains a matching `--create-target`
+  flag.
+
+## 0.4.2 — beta (released 2026-08-07)
 
 ### Fixed
 

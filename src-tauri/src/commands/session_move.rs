@@ -53,6 +53,30 @@ pub async fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto
 // share, so the two surfaces can't drift.
 use claudepot_core::paths::claude_json_path;
 
+/// Resolve a free-form move target so the caller can describe it before
+/// committing to it: `~` expanded, absolute-ness settled, and the
+/// exists / is-a-directory pair read in one `stat`.
+///
+/// Read-only. The renderer is our own code (see
+/// `.claude/rules/architecture.md` on IPC trust), so this is not a
+/// filesystem-enumeration surface for untrusted callers.
+#[tauri::command]
+pub async fn session_move_probe_target(
+    path: String,
+) -> Result<crate::dto::TargetProbeDto, ErrorDto> {
+    let resolved = claudepot_core::path_utils::expand_tilde(&path).unwrap_or(path);
+    let p = std::path::Path::new(&resolved);
+    // `is_dir` already implies `exists`; both are read so the caller can
+    // tell "not there yet, offer to create it" from "there, but a file".
+    let meta = std::fs::metadata(p).ok();
+    Ok(crate::dto::TargetProbeDto {
+        is_absolute: p.is_absolute(),
+        exists: meta.is_some(),
+        is_dir: meta.map(|m| m.is_dir()).unwrap_or(false),
+        resolved_path: resolved,
+    })
+}
+
 #[tauri::command]
 pub async fn session_move(
     session_id: String,
@@ -61,6 +85,7 @@ pub async fn session_move(
     force_live: bool,
     force_conflict: bool,
     cleanup_source: bool,
+    create_target_dir: bool,
 ) -> Result<crate::dto::MoveSessionReportDto, ErrorDto> {
     let sid = Uuid::parse_str(&session_id).map_err(invalid_session_id)?;
     // `move_session` rewrites transcript files, mutates `.claude.json`,
@@ -72,6 +97,7 @@ pub async fn session_move(
             force_live_session: force_live,
             force_sync_conflict: force_conflict,
             cleanup_source_if_empty: cleanup_source,
+            create_target_dir,
             claude_json_path: claude_json_path(),
         };
         let report = claudepot_core::session_move::move_session(
@@ -152,6 +178,7 @@ pub async fn session_move_start(
     force_live: bool,
     force_conflict: bool,
     cleanup_source: bool,
+    create_target_dir: bool,
     app: AppHandle,
     ops: State<'_, RunningOps>,
 ) -> Result<String, ErrorDto> {
@@ -178,6 +205,7 @@ pub async fn session_move_start(
                 force_live_session: force_live,
                 force_sync_conflict: force_conflict,
                 cleanup_source_if_empty: cleanup_source,
+                create_target_dir,
                 claude_json_path: claude_json_path(),
             };
             let result = session_move::move_session_with_progress(

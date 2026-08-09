@@ -69,7 +69,8 @@ pub use crate::{
         TokensByCategoryDto,
     },
     dto_session_move::{
-        AdoptFailureDto, AdoptReportDto, DiscardReportDto, MoveSessionReportDto, OrphanedProjectDto,
+        AdoptFailureDto, AdoptReportDto, DiscardReportDto, MoveSessionReportDto,
+        OrphanedProjectDto, TargetProbeDto,
     },
     dto_session_prune::{
         BulkSlimEntryDto, BulkSlimPlanDto, PruneEntryDto, PruneFilterDto, PrunePlanDto,

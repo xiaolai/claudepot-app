@@ -15,6 +15,7 @@ import type {
   SessionChunk,
   SessionDetail,
   SessionRow,
+  TargetProbe,
 } from "../types";
 
 export const sessionApi = {
@@ -61,6 +62,9 @@ export const sessionApi = {
     forceLive?: boolean;
     forceConflict?: boolean;
     cleanupSource?: boolean;
+    /** Create `toCwd` when it isn't there yet. Off by default — without
+     *  it a missing target produces a transcript CC can't resume into. */
+    createTargetDir?: boolean;
   }) =>
     invoke<string>("session_move_start", {
       sessionId: args.sessionId,
@@ -69,10 +73,18 @@ export const sessionApi = {
       forceLive: args.forceLive ?? false,
       forceConflict: args.forceConflict ?? false,
       cleanupSource: args.cleanupSource ?? false,
+      createTargetDir: args.createTargetDir ?? false,
     }),
   /** Poll current state of an in-flight session move. null if op_id unknown. */
   sessionMoveStatus: (opId: string) =>
     invoke<RunningOpInfo | null>("session_move_status", { opId }),
+  /**
+   * Resolve a free-form move target before committing to it: `~`
+   * expanded, absolute-ness settled, exists / is-a-directory read in one
+   * stat. Read-only — submit `resolvedPath`, not the raw input.
+   */
+  sessionMoveProbeTarget: (path: string) =>
+    invoke<TargetProbe>("session_move_probe_target", { path }),
   /**
    * Move every session under an orphaned slug into a live target cwd.
    * Force-bypasses the live-mtime guard since an orphan's cwd is gone

@@ -478,7 +478,9 @@
     "includeCopied": "@include line copied to clipboard",
     "wroteLine": "Wrote ({{scope}}): {{path}}",
     "pasteInto": "Paste the line above into:",
-    "preview": "Preview snippet content"
+    "preview": "Preview snippet content",
+    "projectListAria": "Projects",
+    "noProjectMatch": "No project matches that filter."
   },
   "protected": {
     "errEmpty": "Path cannot be empty.",

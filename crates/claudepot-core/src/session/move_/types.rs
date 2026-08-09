@@ -34,6 +34,15 @@ pub struct MoveSessionOpts {
     /// After a successful move, remove the source project dir if it now
     /// contains no JSONL files and no session subdirs.
     pub cleanup_source_if_empty: bool,
+    /// Create `to_cwd` on disk when it does not exist yet. Default false —
+    /// orphan adoption, the original caller, targets a directory it has
+    /// already verified is there.
+    ///
+    /// This is what makes "move this session into a folder I haven't
+    /// created yet" a supported operation rather than a silent way to
+    /// manufacture a fresh orphan: without it the transcript's `cwd` is
+    /// rewritten to a path `--resume` cannot `cd` into.
+    pub create_target_dir: bool,
     /// Path to the `~/.claude.json` config file where CC stores per-project
     /// metadata (including `lastSessionId` and
     /// `activeWorktreeSession.sessionId` session pointers). The caller
@@ -93,6 +102,9 @@ pub enum MoveSessionError {
     #[error("from_cwd and to_cwd canonicalize to the same path")]
     SameCwd,
 
+    #[error("target cwd {0:?} exists but is not a directory")]
+    TargetNotADirectory(PathBuf),
+
     #[error("source cwd {0:?} is still a live git worktree of target — CC already handles cross-worktree resume, no move needed")]
     WorktreeSiblingStillLive(PathBuf),
 
@@ -123,6 +135,7 @@ impl crate::error_code::ErrorCode for MoveSessionError {
             MoveSessionError::TargetCollision(_) => "session_move.target_collision",
             MoveSessionError::SidecarCollision(_) => "session_move.sidecar_collision",
             MoveSessionError::SameCwd => "session_move.same_cwd",
+            MoveSessionError::TargetNotADirectory(_) => "session_move.target_not_a_directory",
             MoveSessionError::WorktreeSiblingStillLive(_) => {
                 "session_move.worktree_sibling_still_live"
             }
@@ -155,6 +168,9 @@ impl crate::error_code::ErrorCode for MoveSessionError {
                 "path": path.display().to_string(),
             }),
             MoveSessionError::SameCwd => serde_json::json!({}),
+            MoveSessionError::TargetNotADirectory(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
             MoveSessionError::WorktreeSiblingStillLive(path) => serde_json::json!({
                 "path": path.display().to_string(),
             }),

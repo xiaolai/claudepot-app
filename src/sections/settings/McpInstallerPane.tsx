@@ -28,10 +28,12 @@ import type {
 } from "../../api/sharedMemory";
 import type { ProjectInfo } from "../../types/project";
 import { Button } from "../../components/primitives/Button";
+import { FilterPicker } from "../../components/primitives/FilterPicker";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import { renderError } from "../../lib/i18n-error";
+import { basename } from "../../lib/paths";
 
 // Narrow toast signature to the only two kinds we use, keeping the
 // pane decoupled from the broader Toast type. The PushToast prop
@@ -52,7 +54,17 @@ export function McpInstallerPane({
   const [installing, setInstalling] = useState(false);
   const [scope, setScope] = useState<SnippetScope>("user");
   const [projectPath, setProjectPath] = useState<string>("");
+  const [projectQuery, setProjectQuery] = useState("");
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const projectOptions = useMemo(
+    () =>
+      projects.map((p) => ({
+        value: p.original_path,
+        label: basename(p.original_path),
+        detail: p.original_path,
+      })),
+    [projects],
+  );
 
   const checkHealth = useCallback(async () => {
     setChecking(true);
@@ -260,27 +272,22 @@ export function McpInstallerPane({
               </span>
             </label>
           </fieldset>
+          {/* Same picker as Move-session's target list, for the same
+              reason: this is one choice out of every tracked project,
+              and a native dropdown over dozens of them is a scroll
+              rather than a list. */}
           {scope === "project" && (
-            <select
-              value={projectPath}
-              onChange={(e) => setProjectPath(e.currentTarget.value)}
-              aria-label={t("mcp.projectAria")}
-              style={{
-                padding: "var(--sp-8)",
-                border: "var(--sp-px) solid var(--line)",
-                borderRadius: "var(--r-2)",
-                background: "var(--bg-base)",
-                fontFamily: "var(--font-mono)",
-                fontSize: "var(--fs-sm)",
-              }}
-            >
-              <option value="">{t("mcp.selectProject")}</option>
-              {projects.map((p) => (
-                <option key={p.original_path} value={p.original_path}>
-                  {p.original_path}
-                </option>
-              ))}
-            </select>
+            <FilterPicker
+              options={projectOptions}
+              value={projectPath || null}
+              onChange={(o) => setProjectPath(o.value)}
+              query={projectQuery}
+              onQueryChange={setProjectQuery}
+              placeholder={t("mcp.selectProject")}
+              inputAriaLabel={t("mcp.projectAria")}
+              listAriaLabel={t("mcp.projectListAria")}
+              emptyText={t("mcp.noProjectMatch")}
+            />
           )}
           <div style={{ display: "flex", gap: "var(--sp-12)" }}>
             <Button

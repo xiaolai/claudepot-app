@@ -474,7 +474,9 @@
     "includeCopied": "@include 行已复制到剪贴板",
     "wroteLine": "已写入（{{scope}}）：{{path}}",
     "pasteInto": "把上面这一行粘贴到：",
-    "preview": "预览片段内容"
+    "preview": "预览片段内容",
+    "projectListAria": "项目",
+    "noProjectMatch": "没有匹配该筛选条件的项目。"
   },
   "protected": {
     "errEmpty": "路径不能为空。",

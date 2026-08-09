@@ -454,6 +454,11 @@ enum SessionAction {
         /// Remove the source project dir if it is empty after the move.
         #[arg(long)]
         cleanup_source: bool,
+        /// Create `--to` if it does not exist yet. Without this, a target
+        /// that isn't there produces a transcript whose `cwd` no longer
+        /// resolves — i.e. a fresh orphan.
+        #[arg(long)]
+        create_target: bool,
     },
     /// Move every session under an orphaned slug into a live target cwd.
     AdoptOrphan {
@@ -1523,6 +1528,7 @@ async fn main() -> Result<()> {
                 force_live,
                 force_conflict,
                 cleanup_source,
+                create_target,
             } => commands::session::move_cmd(
                 &ctx,
                 &session_id,
@@ -1531,6 +1537,7 @@ async fn main() -> Result<()> {
                 force_live,
                 force_conflict,
                 cleanup_source,
+                create_target,
             )?,
             SessionAction::AdoptOrphan { slug, target } => {
                 commands::session::adopt_orphan_cmd(&ctx, &slug, &target)?
