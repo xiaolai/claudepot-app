@@ -13,9 +13,25 @@
 
 use super::types::MoveSessionError;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use uuid::Uuid;
+
+/// How many times to re-check `history.jsonl` for concurrent appends
+/// before persisting. Each pass copies only the bytes that arrived
+/// since the previous one, so passes converge fast; the bound exists so
+/// a machine with several busy Claude Code sessions cannot spin here.
+const HISTORY_CATCHUP_PASSES: usize = 8;
+
+/// Split at the final newline: `(complete_lines, trailing_fragment)`.
+/// The fragment is whatever sits after the last `\n` — normally empty,
+/// but non-empty when the reader caught a writer mid-append.
+fn split_complete_lines(s: &str) -> (&str, &str) {
+    match s.rfind('\n') {
+        Some(i) => s.split_at(i + 1),
+        None => ("", s),
+    }
+}
 
 /// Encode a plain `&str` as a JSON string value. Infallible in practice
 /// — `serde_json::to_string(&str)` only errors on non-string inputs or
@@ -178,6 +194,21 @@ pub(crate) fn rewrite_history_jsonl(
 /// (we cannot attribute them to a single session).
 ///
 /// Byte-exact for non-target lines.
+///
+/// # Concurrent appends
+///
+/// This is a read-modify-write over a file Claude Code appends to from
+/// every running session, and `persist` finishes it by renaming a
+/// rewritten copy over the original. Anything appended between the read
+/// and that rename would be discarded — silently, and permanently:
+/// `history.jsonl` is the user's prompt history for every project.
+///
+/// A lock is not available (CC does not take one), so the window is
+/// *closed by catching up* instead: after the rewrite, re-read whatever
+/// arrived past the last byte we accounted for, fold it in, and repeat
+/// until the file stops growing. The residual window is the gap between
+/// the final read and the rename — microseconds, versus the seconds the
+/// rewrite itself takes on a large history.
 pub(crate) fn rewrite_history_jsonl_with_progress(
     path: &Path,
     session_id: Uuid,
@@ -186,7 +217,6 @@ pub(crate) fn rewrite_history_jsonl_with_progress(
     on_progress: &mut dyn FnMut(usize, usize),
 ) -> Result<(usize, usize), MoveSessionError> {
     let contents = fs::read_to_string(path)?;
-    let total = contents.lines().count();
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("history.jsonl has no parent"))?;
@@ -200,7 +230,19 @@ pub(crate) fn rewrite_history_jsonl_with_progress(
     let mut unmapped = 0usize;
     let mut done = 0usize;
 
-    for line in contents.lines() {
+    // Complete lines only. A trailing fragment means a writer was caught
+    // mid-append; passing it to `process_history_line` would end it with
+    // a `writeln!` and split one record into two broken ones. It is
+    // carried instead, for a later pass to complete.
+    let (whole, fragment) = split_complete_lines(&contents);
+    let total = whole.lines().count();
+    // Byte offset in the *source* file that `tmp` now accounts for.
+    // Always on a line boundary, so a catch-up read never starts
+    // mid-record.
+    let mut consumed = whole.len() as u64;
+    let mut carried = fragment.to_string();
+
+    for line in whole.lines() {
         process_history_line(
             line,
             from_cwd,
@@ -214,6 +256,47 @@ pub(crate) fn rewrite_history_jsonl_with_progress(
         )?;
         done += 1;
         on_progress(done, total);
+    }
+
+    for _ in 0..HISTORY_CATCHUP_PASSES {
+        let mut f = fs::File::open(path)?;
+        if f.metadata()?.len() < consumed {
+            // The file lost bytes we had already folded in, so it was
+            // truncated or replaced wholesale rather than appended to.
+            // Our copy is no longer a superset of the live file and
+            // renaming it would destroy the difference.
+            return Err(MoveSessionError::HistoryFileReplaced(path.to_path_buf()));
+        }
+        f.seek(SeekFrom::Start(consumed))?;
+        let mut tail = String::new();
+        f.read_to_string(&mut tail)?;
+        if tail == carried {
+            // Nothing arrived since the previous pass.
+            break;
+        }
+        let (whole, fragment) = split_complete_lines(&tail);
+        for line in whole.lines() {
+            process_history_line(
+                line,
+                from_cwd,
+                to_cwd,
+                &sid_str,
+                &old_kv,
+                &new_kv,
+                &mut tmp,
+                &mut rewritten,
+                &mut unmapped,
+            )?;
+        }
+        consumed += whole.len() as u64;
+        carried = fragment.to_string();
+    }
+
+    // Whatever is still a partial record goes out verbatim — no
+    // trailing newline invented for it, since the writer has not
+    // finished the line.
+    if !carried.is_empty() {
+        tmp.write_all(carried.as_bytes())?;
     }
     tmp.flush()?;
     tmp.persist(path).map_err(|e| e.error)?;

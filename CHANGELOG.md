@@ -45,6 +45,13 @@ Versioning scheme:
   architecture notes always claimed happened. When an operation ends
   without its result reaching the dialog, the dialog says the outcome is
   unknown rather than guessing at success.
+- **A session move could silently drop history entries written by other
+  running sessions.** The `history.jsonl` rewrite read the file, built a
+  copy, and renamed it into place; anything Claude Code appended in that
+  window was discarded by the rename, permanently and with no error. The
+  rewrite now catches up on appended lines before renaming, leaves an
+  unfinished trailing record untouched instead of terminating it, and
+  refuses outright if the file is truncated or replaced underneath it.
 
 ## 0.4.2 — beta (released 2026-08-07)
 

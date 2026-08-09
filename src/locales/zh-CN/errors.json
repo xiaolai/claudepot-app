@@ -657,6 +657,7 @@
     "sqlite": "活动指标数据库出错：{{detail}}"
   },
   "session_move": {
+    "history_file_replaced": "{{path}} 在移动过程中被改动，因此未写入任何内容。请重新执行移动。",
     "invalid_config_dir": "无法读取 {{path}}。",
     "invalid_session_id": "该会话 ID 无效：{{detail}}",
     "invalid_slug": "项目目录名无效：{{reason}}",

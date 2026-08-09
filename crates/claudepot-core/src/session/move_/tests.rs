@@ -1076,3 +1076,154 @@ fn discard_orphan_project_errors_when_slug_dir_missing() {
         "expected InvalidConfigDir, got {err:?}"
     );
 }
+
+// -----------------------------------------------------------------------
+// Section F — history.jsonl under concurrent writers
+//
+// These drive `rewrite_history_jsonl_with_progress` directly rather than
+// through `move_session`: `on_progress` fires once per line, which is the
+// only hook that lands *inside* the read-modify-write window. That window
+// is the whole subject here.
+// -----------------------------------------------------------------------
+
+/// Append one line to `path`, standing in for Claude Code writing from
+/// another live session.
+fn append_history_line(path: &Path, line: &str) {
+    let mut h = fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(h, "{line}").unwrap();
+}
+
+#[test]
+fn history_rewrite_keeps_lines_appended_while_it_runs() {
+    // The rewrite snapshots the file, builds a copy, and renames it into
+    // place. A line that arrives in between is exactly what a
+    // last-writer-wins rename erases — silently, and this is the user's
+    // prompt history for every project.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    f.write_history(&[
+        &format!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+        r#"{"display":"b","project":"/other","sessionId":"11111111-1111-4111-8111-111111111111"}"#,
+    ]);
+
+    let live = r#"{"display":"live","project":"/elsewhere","sessionId":"22222222-2222-4222-8222-222222222222"}"#;
+    let mut fired = false;
+    let (rewritten, _) =
+        rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_done, _total| {
+            if !fired {
+                fired = true;
+                append_history_line(&path, live);
+            }
+        })
+        .expect("rewrite should succeed");
+
+    assert_eq!(rewritten, 1);
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(
+        after.contains(r#""project":"/new""#),
+        "target line must still be rewritten: {after}"
+    );
+    assert!(
+        after.contains(r#""display":"live""#),
+        "a line appended mid-rewrite must survive: {after}"
+    );
+    assert_eq!(after.lines().count(), 3, "no line may be lost: {after}");
+}
+
+#[test]
+fn history_rewrite_keeps_every_line_from_several_concurrent_writers() {
+    // More than one line arrives mid-rewrite. Catching up has to fold in
+    // the whole tail and keep the byte accounting straight, not just the
+    // first appended record.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    f.write_history(&[
+        &format!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+        r#"{"display":"b","project":"/other"}"#,
+        r#"{"display":"c","project":"/other"}"#,
+    ]);
+
+    let mut tick = 0usize;
+    rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_, _| {
+        tick += 1;
+        append_history_line(
+            &path,
+            &format!(r#"{{"display":"live{tick}","project":"/x"}}"#),
+        );
+    })
+    .expect("rewrite should succeed");
+
+    let after = fs::read_to_string(&path).unwrap();
+    for n in 1..=3 {
+        assert!(
+            after.contains(&format!(r#""display":"live{n}""#)),
+            "line appended on tick {n} was lost: {after}"
+        );
+    }
+    assert!(after.contains(r#""project":"/new""#), "{after}");
+    assert_eq!(after.lines().count(), 6, "no line may be lost: {after}");
+}
+
+#[test]
+fn history_rewrite_preserves_an_unterminated_trailing_line() {
+    // A writer caught mid-append leaves a record with no newline.
+    // Terminating it on their behalf splits one record into two broken
+    // ones, so it goes out exactly as found.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    let partial = r#"{"display":"half","proj"#;
+    fs::write(
+        &path,
+        format!(
+            "{}\n{}",
+            format_args!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+            partial
+        ),
+    )
+    .unwrap();
+
+    rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_, _| {})
+        .expect("rewrite should succeed");
+
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(
+        after.ends_with(partial),
+        "fragment must survive as-is: {after:?}"
+    );
+    assert!(
+        !after.ends_with('\n'),
+        "no newline may be invented for an unfinished record: {after:?}"
+    );
+    assert!(after.contains(r#""project":"/new""#), "{after}");
+}
+
+#[test]
+fn history_rewrite_refuses_a_file_that_shrank_under_it() {
+    // Truncated or replaced wholesale, our copy is no longer a superset
+    // of the live file — renaming it over would destroy the difference,
+    // so the move fails loudly instead.
+    let f = Fixture::new();
+    let sid = Uuid::new_v4();
+    let path = f.history_jsonl_path();
+    f.write_history(&[
+        &format!(r#"{{"display":"a","project":"/old","sessionId":"{sid}"}}"#),
+        r#"{"display":"b","project":"/other"}"#,
+    ]);
+
+    let mut fired = false;
+    let err = rewrite_history_jsonl_with_progress(&path, sid, "/old", "/new", &mut |_, _| {
+        if !fired {
+            fired = true;
+            fs::write(&path, "").unwrap();
+        }
+    })
+    .expect_err("a shrinking history file must be refused");
+
+    assert!(
+        matches!(err, MoveSessionError::HistoryFileReplaced(_)),
+        "got: {err}"
+    );
+}

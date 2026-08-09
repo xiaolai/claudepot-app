@@ -105,6 +105,9 @@ pub enum MoveSessionError {
     #[error("target cwd {0:?} exists but is not a directory")]
     TargetNotADirectory(PathBuf),
 
+    #[error("{0:?} was truncated or replaced while the move was rewriting it — nothing was written; re-run the move")]
+    HistoryFileReplaced(PathBuf),
+
     #[error("source cwd {0:?} is still a live git worktree of target — CC already handles cross-worktree resume, no move needed")]
     WorktreeSiblingStillLive(PathBuf),
 
@@ -136,6 +139,7 @@ impl crate::error_code::ErrorCode for MoveSessionError {
             MoveSessionError::SidecarCollision(_) => "session_move.sidecar_collision",
             MoveSessionError::SameCwd => "session_move.same_cwd",
             MoveSessionError::TargetNotADirectory(_) => "session_move.target_not_a_directory",
+            MoveSessionError::HistoryFileReplaced(_) => "session_move.history_file_replaced",
             MoveSessionError::WorktreeSiblingStillLive(_) => {
                 "session_move.worktree_sibling_still_live"
             }
@@ -169,6 +173,9 @@ impl crate::error_code::ErrorCode for MoveSessionError {
             }),
             MoveSessionError::SameCwd => serde_json::json!({}),
             MoveSessionError::TargetNotADirectory(path) => serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+            MoveSessionError::HistoryFileReplaced(path) => serde_json::json!({
                 "path": path.display().to_string(),
             }),
             MoveSessionError::WorktreeSiblingStillLive(path) => serde_json::json!({

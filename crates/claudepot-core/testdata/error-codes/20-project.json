@@ -40,314 +40,229 @@
     {
       "code": "project_trash.io",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "I/O error on /Users/me/.claudepot/trash/projects: permission denied"
     },
     {
       "code": "project_trash.source_missing",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "source path not found: /Users/me/.claude/projects/-Users-me-proj"
     },
     {
       "code": "project_trash.entry_not_found",
       "owner": "core",
-      "params": [
-        "entry_id"
-      ],
+      "params": ["entry_id"],
       "message": "trash entry not found: 20260426T153045Z-6f9a1c2e"
     },
     {
       "code": "project_trash.manifest_parse",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "manifest parse error at /Users/me/.claudepot/trash/projects/20260426T153045Z-6f9a1c2e/manifest.json: expected value at line 1 column 1"
     },
     {
       "code": "project_trash.serialize",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "serialize error at /Users/me/.claudepot/trash/projects/20260426T153045Z-6f9a1c2e/manifest.json: expected value at line 1 column 1"
     },
     {
       "code": "project_trash.restore_collision",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "restore target already exists: /Users/me/.claude/projects/-Users-me-proj"
     },
     {
       "code": "project_trash.invalid_slug",
       "owner": "core",
-      "params": [
-        "slug"
-      ],
+      "params": ["slug"],
       "message": "invalid slug: \"../escape\""
     },
     {
       "code": "activity_index.sql",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "sqlite: Query returned no rows"
     },
     {
       "code": "activity_index.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "io: permission denied"
     },
     {
       "code": "activity_index.serde",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "serde: expected value at line 1 column 1"
     },
     {
       "code": "corpus.db",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "corpus db: Query returned no rows"
     },
     {
       "code": "corpus.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "io: permission denied"
     },
     {
       "code": "memory_log.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "io: permission denied"
     },
     {
       "code": "memory_log.sql",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "sql: Query returned no rows"
     },
     {
       "code": "memory_view.path_outside_scope",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "path is outside the allowed memory scopes: /etc/passwd"
     },
     {
       "code": "memory_view.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "io: permission denied"
     },
     {
       "code": "migrate.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "no such file or directory"
     },
     {
       "code": "migrate.integrity_violation",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "bundle integrity violation: manifest digest does not match payload"
     },
     {
       "code": "migrate.serialize",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "serialization: expected value at line 1 column 1"
     },
     {
       "code": "migrate.unsupported_schema_version",
       "owner": "core",
-      "params": [
-        "found",
-        "expected"
-      ],
+      "params": ["found", "expected"],
       "message": "unsupported bundle schema_version 3 (expected 1)"
     },
     {
       "code": "migrate.configuration",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "configuration error: --to requires --from"
     },
     {
       "code": "migrate.project_not_in_bundle",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "project not found in bundle: no on-disk slug for cwd /Users/me/proj (looked for /Users/me/.claude/projects/-Users-me-proj)"
     },
     {
       "code": "migrate.conflict",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "conflict: target already holds a different session with this id"
     },
     {
       "code": "migrate.trust_gate",
       "owner": "core",
-      "params": [
-        "gate",
-        "reason"
-      ],
+      "params": ["gate", "reason"],
       "message": "trust gate signature: bundle is unsigned"
     },
     {
       "code": "migrate.live_session",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "live session detected on /Users/me/proj — refusing to import"
     },
     {
       "code": "migrate.not_implemented",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "not yet implemented: worktree remap"
     },
     {
       "code": "codex_session.io",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "io error reading /Users/me/.codex/sessions/rollout.jsonl: permission denied"
     },
     {
       "code": "codex_session.missing_session_meta",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "no session_meta record found in /Users/me/.codex/sessions/rollout.jsonl"
     },
     {
       "code": "codex_session.missing_session_id",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "session_meta in /Users/me/.codex/sessions/rollout.jsonl is missing payload.id"
     },
     {
       "code": "session.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "no such file or directory"
     },
     {
       "code": "session.not_found",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "session not found: 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
       "code": "session.invalid_path",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "invalid session path: /Users/me/elsewhere/notes.jsonl"
     },
     {
       "code": "session.index",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "session index: sqlite: Query returned no rows"
     },
     {
       "code": "session_index.sql",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "sqlite: Query returned no rows"
     },
     {
       "code": "session_index.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "i/o: permission denied"
     },
     {
       "code": "session_index.session",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "session scan: session not found: 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
       "code": "session_index.json",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "json: expected value at line 1 column 1"
     },
     {
       "code": "session_index.migration_validation_failed",
       "owner": "core",
-      "params": [
-        "target_version",
-        "expected",
-        "found",
-        "missing"
-      ],
+      "params": ["target_version", "expected", "found", "missing"],
       "message": "migration validation failed at v4: expected 12 objects, found 10; missing: [exchanges, tool_calls]"
     },
     {
@@ -359,34 +274,25 @@
     {
       "code": "session_prune.list",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "listing sessions failed: session not found: 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
       "code": "session_prune.trash",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "trash op failed: source path not found: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
     },
     {
       "code": "session_redact.io",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "I/O error on /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl: permission denied"
     },
     {
       "code": "session_redact.not_found",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "source file not found: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
     },
     {
@@ -398,18 +304,13 @@
     {
       "code": "session_redact.trash",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "trash op failed: source path not found: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
     },
     {
       "code": "session_redact.json",
       "owner": "core",
-      "params": [
-        "line",
-        "detail"
-      ],
+      "params": ["line", "detail"],
       "message": "json parse error on line 42: expected value at line 1 column 1"
     },
     {
@@ -427,51 +328,37 @@
     {
       "code": "session_share.oversized",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "payload rejected by GitHub (422 Validation Failed)"
     },
     {
       "code": "session_share.http",
       "owner": "core",
-      "params": [
-        "status",
-        "body"
-      ],
+      "params": ["status", "body"],
       "message": "GitHub returned HTTP 503: service unavailable"
     },
     {
       "code": "session_share.network",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "network error: connection refused"
     },
     {
       "code": "session_share.parse",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "response parse failed: expected value at line 1 column 1"
     },
     {
       "code": "session_slim.io",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "I/O error on /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl: permission denied"
     },
     {
       "code": "session_slim.not_found",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "source file not found: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
     },
     {
@@ -483,18 +370,13 @@
     {
       "code": "session_slim.trash",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "trash op failed: source path not found: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
     },
     {
       "code": "session_slim.json",
       "owner": "core",
-      "params": [
-        "line",
-        "detail"
-      ],
+      "params": ["line", "detail"],
       "message": "json parse error on line 42: expected value at line 1 column 1"
     },
     {
@@ -506,59 +388,43 @@
     {
       "code": "session_slim.session",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "listing sessions failed: session not found: 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
       "code": "session_move.session_not_found",
       "owner": "core",
-      "params": [
-        "session_id",
-        "path"
-      ],
+      "params": ["session_id", "path"],
       "message": "session 6f9a1c2e-0000-4000-8000-000000000000 not found under project dir \"/Users/me/.claude/projects/-Users-me-proj\""
     },
     {
       "code": "session_move.invalid_slug",
       "owner": "core",
-      "params": [
-        "slug",
-        "reason"
-      ],
+      "params": ["slug", "reason"],
       "message": "invalid slug \"\": empty after sanitization"
     },
     {
       "code": "session_move.sync_conflict_present",
       "owner": "core",
-      "params": [
-        "session_id"
-      ],
+      "params": ["session_id"],
       "message": "sync-conflict sibling present for session 6f9a1c2e-0000-4000-8000-000000000000 — resolve manually or pass force_sync_conflict"
     },
     {
       "code": "session_move.live_session",
       "owner": "core",
-      "params": [
-        "session_id"
-      ],
+      "params": ["session_id"],
       "message": "session 6f9a1c2e-0000-4000-8000-000000000000 appears live (mtime < threshold) — quit Claude Code first or pass force_live_session"
     },
     {
       "code": "session_move.target_collision",
       "owner": "core",
-      "params": [
-        "session_id"
-      ],
+      "params": ["session_id"],
       "message": "target slug already contains a file for session 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
       "code": "session_move.sidecar_collision",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "target sidecar path already exists: \"/Users/me/.claude/projects/-Users-me-new/6f9a.summary.json\" — refusing to overwrite an existing per-session file"
     },
     {
@@ -568,67 +434,57 @@
       "message": "from_cwd and to_cwd canonicalize to the same path"
     },
     {
+      "code": "session_move.history_file_replaced",
+      "owner": "core",
+      "params": ["path"],
+      "message": "\"/Users/me/.claude/history.jsonl\" was truncated or replaced while the move was rewriting it — nothing was written; re-run the move"
+    },
+    {
       "code": "session_move.target_not_a_directory",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "target cwd \"/Users/me/notes.txt\" exists but is not a directory"
     },
     {
       "code": "session_move.worktree_sibling_still_live",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "source cwd \"/Users/me/proj\" is still a live git worktree of target — CC already handles cross-worktree resume, no move needed"
     },
     {
       "code": "session_move.invalid_config_dir",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "config_dir does not exist or is unreadable: \"/Users/me/.claude\""
     },
     {
       "code": "session_move.trash_failed",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "failed to move to Trash: permission denied"
     },
     {
       "code": "session_move.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "no such file or directory"
     },
     {
       "code": "session_export_delivery.file",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "file write failed: permission denied"
     },
     {
       "code": "session_export_delivery.clipboard",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "clipboard unavailable: no display server"
     },
     {
       "code": "session_export_delivery.gist",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "gist upload failed: network error: connection refused"
     },
     {
@@ -640,17 +496,13 @@
     {
       "code": "session_export_delivery.keychain",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "keychain error: keychain is locked"
     },
     {
       "code": "session_export_delivery.harden",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "permission hardening failed: permission denied"
     },
     {
@@ -668,75 +520,55 @@
     {
       "code": "session_live_metrics.sqlite",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "sqlite: Query returned no rows"
     },
     {
       "code": "session_live_metrics.io",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "io: permission denied"
     },
     {
       "code": "trash.io",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "I/O error on /Users/me/.claudepot/trash: permission denied"
     },
     {
       "code": "trash.source_missing",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "source path not found: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
     },
     {
       "code": "trash.entry_not_found",
       "owner": "core",
-      "params": [
-        "entry_id"
-      ],
+      "params": ["entry_id"],
       "message": "trash entry not found: 20260426T153045Z-6f9a1c2e"
     },
     {
       "code": "trash.manifest_parse",
       "owner": "core",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "manifest parse error at /Users/me/.claudepot/trash/manifest.json: expected value at line 1 column 1"
     },
     {
       "code": "trash.manifest_serialize",
       "owner": "core",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "manifest serialize error: expected value at line 1 column 1"
     },
     {
       "code": "trash.restore_collision",
       "owner": "core",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "restore target already exists: /Users/me/.claude/projects/-Users-me-proj/6f9a.jsonl"
     },
     {
       "code": "live_activity.already_subscribed",
       "owner": "core",
-      "params": [
-        "session_id"
-      ],
+      "params": ["session_id"],
       "message": "already subscribed to session 6f9a1c2e-0000-4000-8000-000000000000"
     },
     {
@@ -748,9 +580,7 @@
     {
       "code": "activity.prefs_lock_poisoned",
       "owner": "command",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "prefs lock: poisoned lock: another task failed"
     },
     {
@@ -768,75 +598,55 @@
     {
       "code": "project.clean_blocked_by_journals",
       "owner": "command",
-      "params": [
-        "count"
-      ],
+      "params": ["count"],
       "message": "refusing to clean while 2 rename journal(s) are pending. Resolve them in the Repair view first."
     },
     {
       "code": "project.remove_blocked_by_journals",
       "owner": "command",
-      "params": [
-        "count"
-      ],
+      "params": ["count"],
       "message": "refusing to remove while 2 rename journal(s) are pending. Resolve them in the Repair view first."
     },
     {
       "code": "repair.journal_not_found",
       "owner": "command",
-      "params": [
-        "id"
-      ],
+      "params": ["id"],
       "message": "no journal with id '20260426T153045Z-6f9a1c2e'"
     },
     {
       "code": "repair.lock_file_not_found",
       "owner": "command",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "no lock file found for '/Users/me/proj'"
     },
     {
       "code": "session_export.unknown_format",
       "owner": "command",
-      "params": [
-        "format"
-      ],
+      "params": ["format"],
       "message": "unknown format: pdf"
     },
     {
       "code": "session_export.invalid_output_path",
       "owner": "command",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "output path must be absolute: exports/session.md"
     },
     {
       "code": "session_export.output_is_symlink",
       "owner": "command",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "refusing to overwrite symlink: /Users/me/exports/session.md"
     },
     {
       "code": "session_export.write_failed",
       "owner": "command",
-      "params": [
-        "path",
-        "detail"
-      ],
+      "params": ["path", "detail"],
       "message": "open tmp /Users/me/exports/.session.md.claudepot-tmp-1: permission denied"
     },
     {
       "code": "session_export.permissions_not_enforced",
       "owner": "command",
-      "params": [
-        "path"
-      ],
+      "params": ["path"],
       "message": "filesystem does not enforce 0600 permissions at /Volumes/share/session.md"
     },
     {
@@ -848,33 +658,25 @@
     {
       "code": "memory.enumerate_failed",
       "owner": "command",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "permission denied"
     },
     {
       "code": "memory.unknown_scope",
       "owner": "command",
-      "params": [
-        "scope"
-      ],
+      "params": ["scope"],
       "message": "unknown scope project; want user|local_project"
     },
     {
       "code": "memory.auto_memory_write_failed",
       "owner": "command",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "io: permission denied"
     },
     {
       "code": "memory.auto_memory_clear_failed",
       "owner": "command",
-      "params": [
-        "detail"
-      ],
+      "params": ["detail"],
       "message": "io: permission denied"
     }
   ]
