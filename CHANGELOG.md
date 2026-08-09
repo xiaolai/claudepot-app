@@ -6,6 +6,37 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.4.5 — beta (unreleased)
+
+### Security
+
+- **Failed Keychain writes could copy your credentials into the
+  diagnostic log.** macOS's `security` command reads one command per
+  line into a 4 KiB buffer. Claudepot hex-encodes the whole credential
+  into that line, so a blob over ~2 KB — which is what happens once
+  Claude Code accumulates a few `mcpOAuth` records — overflowed it, and
+  `security` echoed the unread remainder back as an error. That
+  remainder is the credential. Claudepot then wrote the error to
+  `~/Library/Logs/com.claudepot.app/`, where access and refresh tokens
+  were recoverable in plaintext.
+
+  Claudepot now refuses an oversize write before running the command,
+  and no `security` output is ever quoted into a log or an error —
+  only an exit code and a category. Reported as #45.
+
+  **If you saw repeated `token corrupt blob` errors on an affected
+  build, rotate your Claude credentials and delete old logs in
+  `~/Library/Logs/com.claudepot.app/`.**
+
+### Fixed
+
+- **A broken Keychain entry could delete a working credential file.**
+  On the automatic backend, any Keychain value was preferred over the
+  file copy and the file was then removed — including when the Keychain
+  value was truncated or unparseable, which is exactly what an
+  interrupted oversize write leaves behind. The file copy now survives
+  unless the Keychain holds something that actually parses.
+
 ## 0.4.4 — beta (released 2026-08-09)
 
 ### Fixed

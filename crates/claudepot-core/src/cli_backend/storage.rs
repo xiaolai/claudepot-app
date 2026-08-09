@@ -54,7 +54,14 @@ enum KeychainErr {
     /// but the calling contract is the same: fail closed, never fall
     /// back to file storage.
     Other(String),
+    /// The hex-encoded command line would exceed `security -i`'s input
+    /// buffer. Refused before spawning, because attempting it is what
+    /// produces the credential-bearing stderr described in #45.
+    PayloadTooLarge { blob_len: usize, limit: usize },
 }
+
+#[cfg(target_os = "macos")]
+use super::security_output::{classify_security_failure, max_blob_len};
 
 #[cfg(target_os = "macos")]
 impl std::fmt::Display for KeychainErr {
@@ -66,6 +73,11 @@ impl std::fmt::Display for KeychainErr {
                  unlock the \"login\" keychain, then retry"
             ),
             Self::Other(s) => write!(f, "{s}"),
+            Self::PayloadTooLarge { blob_len, limit } => write!(
+                f,
+                "credential is {blob_len} bytes; the macOS `security` \
+                 command cannot store more than {limit} bytes per item"
+            ),
         }
     }
 }
@@ -206,6 +218,19 @@ async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr
     //   2. Pass blob via `-X <hex>` over stdin to `security -i` so the
     //      blob never appears in argv (argv is world-readable on macOS
     //      via `ps`/`lsof`).
+    // Refuse an oversize blob BEFORE spawning. `security -i` does not
+    // truncate an over-long line, it re-parses the tail as further
+    // commands and echoes each unparsable fragment back in stderr —
+    // and those fragments are our hex-encoded credential. Not running
+    // the command is what stops that output existing at all (#45).
+    let limit = max_blob_len(&account, KEYCHAIN_SERVICE);
+    if blob.len() > limit {
+        return Err(KeychainErr::PayloadTooLarge {
+            blob_len: blob.len(),
+            limit,
+        });
+    }
+
     let hex_value = SecretString::from(hex::encode(blob.as_bytes()));
     let command_line = SecretString::from(format!(
         "add-generic-password -U -a \"{account}\" -s \"{KEYCHAIN_SERVICE}\" -X \"{}\"\n",
@@ -257,10 +282,12 @@ async fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr
 
     let out = result?;
     if !out.status.success() {
-        return Err(KeychainErr::Other(format!(
-            "security add-generic-password failed (exit {}): {}",
+        // NEVER interpolate `out.stderr`. On the oversize path it is a
+        // verbatim copy of the hex-encoded credential (#45), and this
+        // error is logged by the Auto-mode fallback below.
+        return Err(KeychainErr::Other(classify_security_failure(
             out.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&out.stderr).trim()
+            &out.stderr,
         )));
     }
 
@@ -515,9 +542,28 @@ enum AutoLoadAction {
 /// would surface stale data after a real keychain that the attacker
 /// just forced unreachable. Fail closed.
 #[cfg(target_os = "macos")]
+/// Is this blob a credential we could actually use?
+///
+/// Only a shape check — no field is trusted beyond "this parses as a
+/// JSON object". That is deliberately weak: the point is to catch a
+/// Keychain item that is truncated or otherwise garbage, not to
+/// validate Claude Code's schema, which is not ours to police.
+fn is_usable_blob(blob: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(blob)
+        .map(|v| v.is_object())
+        .unwrap_or(false)
+}
+
 fn classify_auto_load(outcome: Result<Option<String>, KeychainErr>) -> AutoLoadAction {
     match outcome {
-        Ok(Some(blob)) => AutoLoadAction::UseKeychain(blob),
+        // A Keychain item that does not parse must not win over the
+        // file copy — and must not cause it to be deleted. Before
+        // this, any `Ok(Some(_))` was preferred and `load` then removed
+        // the file, so one bad Keychain write made a perfectly good
+        // fallback disappear and left the account reading "token
+        // corrupt blob" with no way back (#45).
+        Ok(Some(blob)) if is_usable_blob(&blob) => AutoLoadAction::UseKeychain(blob),
+        Ok(Some(_)) => AutoLoadAction::FallBackToFile,
         Ok(None) => AutoLoadAction::FallBackToFile,
         Err(e) => AutoLoadAction::FailClosed(e),
     }
@@ -728,13 +774,36 @@ mod tests {
         // classify_auto_load — the fail-closed load matrix
         // (audit fix for storage.rs:289).
 
+        /// Shape of a real stored credential — a JSON object.
+        const GOOD_BLOB: &str = r#"{"claudeAiOauth":{"accessToken":"x","refreshToken":"y"}}"#;
+
         #[test]
         fn test_classify_auto_load_keychain_hit_uses_blob() {
-            let action = classify_auto_load(Ok(Some("blob".to_string())));
+            let action = classify_auto_load(Ok(Some(GOOD_BLOB.to_string())));
             assert!(
-                matches!(action, AutoLoadAction::UseKeychain(ref b) if b == "blob"),
+                matches!(action, AutoLoadAction::UseKeychain(ref b) if b == GOOD_BLOB),
                 "action={action:?}"
             );
+        }
+
+        /// #45: a Keychain item that does not parse must not be
+        /// preferred, because `load` deletes the file copy when it is.
+        /// One bad write would otherwise evict a good fallback and
+        /// leave the account stuck on "token corrupt blob".
+        #[test]
+        fn unparseable_keychain_value_falls_back_instead_of_evicting_the_file() {
+            for garbage in [
+                "",                                // empty item
+                "not json at all",                 // never was a blob
+                r#"{"claudeAiOauth":{"accessTok"#, // truncated write
+                r#"["an","array"]"#,               // valid JSON, wrong shape
+            ] {
+                let action = classify_auto_load(Ok(Some(garbage.to_string())));
+                assert!(
+                    matches!(action, AutoLoadAction::FallBackToFile),
+                    "garbage {garbage:?} should fall back, got {action:?}"
+                );
+            }
         }
 
         #[test]
