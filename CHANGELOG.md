@@ -6,6 +6,43 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## Unreleased
+
+### Added
+
+- **`import --mode=merge` now works.** Merging into an existing project
+  unions the bundle's sessions with the target's instead of refusing.
+  Sessions only the target has are preserved — the previous
+  whole-directory rename would have destroyed them. A session id present
+  on both machines is a conflict: `--prefer-imported` or
+  `--prefer-target` resolves it, and merge refuses without one rather
+  than picking a winner (spec §6, golden #16).
+- **`~/.claude.json` and `history.jsonl` now travel** with a project
+  (spec §5.6 / §5.7). The project's `projects[<cwd>]` entry is re-keyed
+  to the target cwd with embedded paths re-anchored; history lines are
+  appended and deduped by `(sessionId, hash(prompt))`, never reordered.
+  Additive bundle entries — no schema bump, and older bundles import
+  unchanged.
+- **`export --since-peer <id>`** ships only what changed since the last
+  export to that peer. Files removed since then ride along as
+  tombstones, which the importer *reports and never acts on* — a
+  retention sweep on one machine must not delete another machine's last
+  copy.
+
+### Fixed
+
+- Session-overlap detection never fired: the importer hardcoded a
+  zero-count "no overlap", so a cross-machine session id collision was
+  undetectable.
+- `undo` could restore a half-applied `~/.claude.json` or
+  `history.jsonl`. Snapshots are named per `(bundle, target)`, so a
+  second project in the same bundle overwrote the pre-import copy with
+  already-mutated bytes. The first snapshot of a target now wins.
+- An import that failed partway through a merge left the files it had
+  already placed out of the journal, invisible to rollback.
+- The dry run ignored `--remap` and could promise an import that apply
+  then refused.
+
 ## 0.4.5 — beta (released 2026-08-10)
 
 ### Security

@@ -180,6 +180,10 @@ claudepot experimental board                        # durable agent-written
                                                     # is self-declared, not
                                                     # authenticated.
 claudepot export / import                           # *.claudepot.tar.zst bundles
+                    export --since-peer <id>        # ship only what changed
+                    import --mode=merge             # union into an existing
+                            --prefer-imported|-target #  project; refuses an
+                                                    #  id collision otherwise
 claudepot migrate   inspect | undo
 claudepot doctor                                    # health check
 claudepot status                                    # ground-truth auth status

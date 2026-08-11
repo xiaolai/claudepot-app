@@ -126,7 +126,7 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   authoritative). Stores backed by `claudepot-core::json_store` (the
   six below plus `agent-events.json`) move a corrupt file aside to a
   timestamped `<name>.corrupt.<unix-ts>` and start empty — never
-  fatal at boot. Six carry behavior worth documenting here:
+  fatal at boot. Seven carry behavior worth documenting here:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -162,6 +162,18 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     `claudepot-core::pricing::history`. Empty file = no change ever
     observed, and the bundled rate history stands alone. See
     "## Pricing".
+  - `migrate-peers.json` — per-`(peer, project)` file fingerprints
+    for delta export (`claudepot export --since-peer <id>`).
+    `{schema_version, peers: {peer_id: {projects: {cwd: [...]}}}}`.
+    Owned by `claudepot-core::migrate::peer`. **Transport state, not
+    cache**: it must survive a `sessions.db` rebuild, because
+    rebuilding a cache would silently re-send every file to every
+    peer — which is why it is its own file rather than a table in
+    `sessions.db`, whose documented remedy is "delete and rebuild".
+    Empty file = every export is full. Fingerprints are
+    `(size, mtime_ns)` rather than a high-water mark, because
+    `session slim` rewrites transcripts *smaller* in place and
+    retention deletes them outright; a watermark skips both.
 
 ## Pricing (Activities → Cost, and every "on API" figure)
 
