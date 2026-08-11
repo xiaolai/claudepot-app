@@ -240,7 +240,7 @@ pub async fn sync_from_current_cc(store: &AccountStore) -> Result<Option<Uuid>, 
 /// best-effort CAS against the keychain: if another writer landed
 /// something newer between our refresh and our write, we yield
 /// rather than clobber.
-async fn resolve_cc_identity(
+pub(crate) async fn resolve_cc_identity(
     platform: &dyn cli_backend::CliPlatform,
     fetch_profile: &dyn ProfileFetcher,
     refresher: &dyn crate::cli_backend::swap::TokenRefresher,

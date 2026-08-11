@@ -658,6 +658,97 @@ pub(crate) async fn switch_force_for_tests(
     .await
 }
 
+/// Mint a usable access token from CC's OWN credential slot, refreshing
+/// it in place when it has expired.
+///
+/// This exists because the active account is the one case where two live
+/// copies of a single OAuth token family are in play: CC's slot and
+/// Claudepot's private slot. Anthropic rotates and invalidates the
+/// refresh_token on every exchange, so refreshing the private copy of the
+/// *active* account strands CC with a dead token — the user is forced
+/// back through `/login` as soon as their access token lapses. Refreshing
+/// CC's own slot and writing the rotation straight back keeps the two
+/// copies one family.
+///
+/// The rotated blob is CAS-guarded: if another writer (CC itself, or a
+/// second Claudepot process) landed a different blob while we were
+/// refreshing, we adopt theirs instead of clobbering it.
+///
+/// `account_id`'s private slot is mirrored from whatever CC ends up
+/// holding, so Claudepot's copy never drifts into a separate family.
+///
+/// Returns `Ok(None)` when CC's slot is empty or unparseable — the caller
+/// should fall back to the private slot, which is safe precisely because
+/// no competing copy exists in that case.
+pub async fn fresh_token_from_cc_slot(
+    account_id: Uuid,
+    platform: &dyn CliPlatform,
+    refresher: &dyn TokenRefresher,
+) -> Result<Option<String>, SwapError> {
+    let Some(blob_str) = platform.read_default().await? else {
+        return Ok(None);
+    };
+    if crate::blob::CredentialBlob::from_json(&blob_str).is_err() {
+        return Ok(None);
+    }
+
+    let refreshed = match maybe_refresh_blob(&blob_str, refresher).await? {
+        // CC's token is still live. Mirror it into the private slot —
+        // best-effort: a mirroring failure is hygiene, and must not
+        // deny the caller a token that is demonstrably good.
+        MaybeRefreshed::Unchanged => {
+            if let Err(e) = mirror_to_private(account_id, &blob_str).await {
+                tracing::warn!(account = %account_id, "mirroring CC's blob to the private slot failed: {e}");
+            }
+            return Ok(Some(token_of(&blob_str)?));
+        }
+        MaybeRefreshed::Refreshed { blob } => blob,
+    };
+
+    // CAS: only install our rotation if CC's slot still holds the bytes
+    // we refreshed from.
+    let pre_write = platform.read_default().await?;
+    if pre_write.as_deref() != Some(blob_str.as_str()) {
+        // Someone rotated under us. Ours is an orphan — never installed,
+        // so never mirror it. Adopt whatever CC holds now.
+        let Some(live) = pre_write else {
+            return Ok(None);
+        };
+        if crate::blob::CredentialBlob::from_json(&live).is_err() {
+            return Ok(None);
+        }
+        if let Err(e) = mirror_to_private(account_id, &live).await {
+            tracing::warn!(account = %account_id, "mirroring CC's blob to the private slot failed: {e}");
+        }
+        return Ok(Some(token_of(&live)?));
+    }
+
+    platform.write_default(&refreshed).await?;
+    // Load-bearing here, unlike the Unchanged path: we just rotated, so
+    // the private slot holds a refresh_token the server has invalidated.
+    // Leaving it there is the very divergence this function prevents.
+    mirror_to_private(account_id, &refreshed).await?;
+    Ok(Some(token_of(&refreshed)?))
+}
+
+/// Write `blob_str` into `account_id`'s private slot unless it's already
+/// there. Skipping the no-op write keeps keychain churn (and the macOS
+/// unlock prompts that come with it) down.
+async fn mirror_to_private(account_id: Uuid, blob_str: &str) -> Result<(), SwapError> {
+    if let Ok(current) = storage::load(account_id).await {
+        if current == blob_str {
+            return Ok(());
+        }
+    }
+    storage::save(account_id, blob_str).await
+}
+
+fn token_of(blob_str: &str) -> Result<String, SwapError> {
+    crate::blob::CredentialBlob::from_json(blob_str)
+        .map(|b| b.claude_ai_oauth.access_token)
+        .map_err(|e| SwapError::CorruptBlob(e.to_string()))
+}
+
 // Re-export storage functions for external callers (account_service, etc.)
 #[cfg(test)]
 pub(crate) use storage::private_path;

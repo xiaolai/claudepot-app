@@ -19,13 +19,36 @@
 //! must re-login). If the profile fetch comes back with a different email
 //! than the label, the outcome is `Drift` — and we do NOT persist the
 //! refreshed blob, so we don't entrench the misfiling.
-use crate::account::{AccountStore, VerifyOutcome};
+use crate::account::{Account, AccountStore, VerifyOutcome};
 use crate::blob::CredentialBlob;
 use crate::cli_backend::swap;
 use crate::cli_backend::swap::{DefaultRefresher, ProfileFetcher, TokenRefresher};
+use crate::cli_backend::{self, CliPlatform};
 use crate::error::OAuthError;
 use chrono::Utc;
 use uuid::Uuid;
+
+/// "Is a Claude Code process live right now?" — injectable so tests
+/// don't depend on whatever happens to be running on the host (a
+/// developer machine is very often running `claude`).
+///
+/// Only consulted on the active account, and only once its token has
+/// actually expired, so the process probe stays off the common path.
+#[async_trait::async_trait]
+pub trait LiveSessionProbe: Send + Sync {
+    async fn cc_running(&self) -> bool;
+}
+
+/// Production probe — the same `ps`-based detector `swap::switch` gates
+/// on.
+pub struct ProcessProbe;
+
+#[async_trait::async_trait]
+impl LiveSessionProbe for ProcessProbe {
+    async fn cc_running(&self) -> bool {
+        swap::is_cc_process_running_public().await
+    }
+}
 
 /// Error surfaced to callers that need the cause (mostly doctor / CLI).
 /// Most GUI code converts this to a [`VerifyOutcome`] via
@@ -69,21 +92,57 @@ pub async fn verify_account_identity(
     uuid: Uuid,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<VerifyOutcome, VerifyError> {
-    verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await
+    let platform = cli_backend::create_platform();
+    verify_account_identity_with(
+        store,
+        uuid,
+        fetcher,
+        &DefaultRefresher,
+        platform.as_ref(),
+        &ProcessProbe,
+    )
+    .await
 }
 
-/// Testable variant: inject a [`TokenRefresher`] so the 401→refresh
-/// branch can be exercised without real HTTP.
+/// Testable variant: inject a [`TokenRefresher`], a [`CliPlatform`] and
+/// a [`LiveSessionProbe`] so the 401→refresh branch and the
+/// active-account branch can be exercised without real HTTP, a real
+/// keychain, or a real `claude` process.
 pub async fn verify_account_identity_with(
     store: &AccountStore,
     uuid: Uuid,
     fetcher: &dyn ProfileFetcher,
     refresher: &dyn TokenRefresher,
+    platform: &dyn CliPlatform,
+    probe: &dyn LiveSessionProbe,
 ) -> Result<VerifyOutcome, VerifyError> {
     let account = store
         .find_by_uuid(uuid)
         .map_err(|e| VerifyError::Store(e.to_string()))?
         .ok_or(VerifyError::AccountNotFound(uuid))?;
+
+    // The ACTIVE CLI account is the one case where two live copies of
+    // the same OAuth token family exist: CC's own slot and Claudepot's
+    // private slot. Anthropic rotates (and invalidates) the
+    // refresh_token on every exchange, so refreshing the private copy
+    // here would strand CC holding a dead token — the user gets
+    // "/login" the moment their access token expires. Route the active
+    // account through the CC slot instead: it reads CC's live blob,
+    // CAS-writes any rotation back into it, and mirrors the result
+    // into the private slot so the two never split into separate
+    // token families.
+    if account.is_cli_active {
+        if let Some(outcome) =
+            verify_active_from_cc_slot(&account, uuid, platform, probe, fetcher, refresher).await?
+        {
+            store
+                .update_verification(uuid, &outcome)
+                .map_err(|e| VerifyError::Store(e.to_string()))?;
+            return Ok(outcome);
+        }
+        // CC's slot is empty or unparseable — there is no competing
+        // copy to strand, so the private-slot path below is safe.
+    }
 
     let blob_str = match swap::load_private(uuid).await {
         Ok(s) => s,
@@ -174,6 +233,114 @@ pub async fn verify_account_identity_with(
     Ok(outcome)
 }
 
+/// Verify the ACTIVE CLI account against CC's own credential slot.
+///
+/// Returns `Ok(None)` when CC's slot holds nothing we can work with
+/// (empty, or not parseable as a credential blob) — the caller falls
+/// back to the private-slot path, which is safe precisely because no
+/// competing copy exists in that case.
+/// The refresh, when one is needed, is spent on CC's OWN refresh_token
+/// and the rotated blob is CAS-written straight back into CC's slot by
+/// [`account_service::resolve_cc_identity`] — so CC never ends up
+/// holding a token the server has already invalidated. Whatever CC ends
+/// up with is then mirrored into the private slot, which also self-heals
+/// the mirror-image case where CC rotated on its own and Claudepot's
+/// copy went stale.
+///
+/// A `Drift` outcome deliberately leaves the private slot alone: CC is
+/// signed in as somebody else, and copying that blob into this
+/// account's slot is exactly the misfiling the verification pass exists
+/// to catch.
+///
+/// When CC's token has already expired AND a `claude` process is live,
+/// the refresh is deferred entirely — see [`LiveSessionProbe`].
+async fn verify_active_from_cc_slot(
+    account: &Account,
+    uuid: Uuid,
+    platform: &dyn CliPlatform,
+    probe: &dyn LiveSessionProbe,
+    fetcher: &dyn ProfileFetcher,
+    refresher: &dyn TokenRefresher,
+) -> Result<Option<VerifyOutcome>, VerifyError> {
+    use crate::services::account_service::{self, RegisterError};
+
+    // A rotation is only in play once CC's own token has lapsed. If a
+    // `claude` process is live at that moment, refreshing would rotate
+    // behind its back — it holds its credentials in memory and writes
+    // them back, so it would keep using the refresh_token the server
+    // just invalidated. `swap::switch` refuses to touch credentials
+    // under a live session for the same reason; defer here too and let
+    // CC refresh itself. Costs at most a stale verification row for the
+    // few minutes until CC's next request.
+    if let Ok(Some(cc_blob)) = platform.read_default().await {
+        let expiring = CredentialBlob::from_json(&cc_blob)
+            .map(|b| b.is_expired(300))
+            .unwrap_or(false);
+        if expiring && probe.cc_running().await {
+            tracing::info!(
+                account = %uuid,
+                "CC's token needs a refresh but a claude process is live — deferring to it"
+            );
+            return Ok(Some(VerifyOutcome::NetworkError));
+        }
+    }
+
+    let adapter = ProfileFetcherAdapter(fetcher);
+    match account_service::resolve_cc_identity(platform, &adapter, refresher).await {
+        Ok(Some((blob_str, actual))) => {
+            let outcome = classify(&account.email, actual);
+            if matches!(outcome, VerifyOutcome::Ok { .. }) {
+                let needs_write = match swap::load_private(uuid).await {
+                    Ok(current) => current != blob_str,
+                    Err(_) => true,
+                };
+                if needs_write {
+                    swap::save_private(uuid, &blob_str).await.map_err(|e| {
+                        VerifyError::Store(format!("mirroring CC's blob to the private slot: {e}"))
+                    })?;
+                }
+            } else {
+                tracing::warn!(
+                    account = %uuid,
+                    expected = %account.email,
+                    "CC's slot holds another account — NOT mirroring it into this slot"
+                );
+            }
+            Ok(Some(outcome))
+        }
+        // CC's slot is empty or unparseable — nothing to reconcile
+        // against; the caller falls back to the private slot.
+        Ok(None) => Ok(None),
+        // Both the access token and the refresh token were refused:
+        // the user really does have to sign in again.
+        Err(RegisterError::AuthRejected) => Ok(Some(VerifyOutcome::Rejected)),
+        // Everything else (5xx, transport, a concurrent writer landing
+        // a blob mid-flight) is transient — preserve verification
+        // history rather than flipping the row to a terminal state.
+        Err(e) => {
+            tracing::debug!(account = %uuid, "active-account verify could not confirm: {e}");
+            Ok(Some(VerifyOutcome::NetworkError))
+        }
+    }
+}
+
+/// Bridges this module's [`ProfileFetcher`] (email-first, what the
+/// verification path injects) onto the profile-returning trait
+/// `account_service::resolve_cc_identity` expects. Only `.email` is
+/// read out of the returned profile, so the default `fetch_profile`
+/// degradation in [`ProfileFetcher`] is sufficient here.
+struct ProfileFetcherAdapter<'a>(&'a dyn ProfileFetcher);
+
+#[async_trait::async_trait]
+impl crate::services::account_service::ProfileFetcher for ProfileFetcherAdapter<'_> {
+    async fn fetch(
+        &self,
+        access_token: &str,
+    ) -> Result<crate::oauth::profile::Profile, OAuthError> {
+        self.0.fetch_profile(access_token).await
+    }
+}
+
 /// Convenience wrapper for callers that need both an outcome AND the
 /// usable access_token (e.g. `usage_cache` immediately calls /usage with
 /// it). Returns the access_token from the slot only when verification
@@ -185,7 +352,16 @@ pub async fn verify_and_get_access_token(
     uuid: Uuid,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(VerifyOutcome, Option<String>), VerifyError> {
-    let outcome = verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await?;
+    let platform = cli_backend::create_platform();
+    let outcome = verify_account_identity_with(
+        store,
+        uuid,
+        fetcher,
+        &DefaultRefresher,
+        platform.as_ref(),
+        &ProcessProbe,
+    )
+    .await?;
     let token = if matches!(outcome, VerifyOutcome::Ok { .. }) {
         // Re-read the slot — it may have been rotated by a refresh inside
         // `verify_account_identity`.
@@ -366,6 +542,107 @@ mod tests {
         }
     }
 
+    /// Stand-in for CC's credential slot. Records every write so tests
+    /// can assert a rotation actually landed back in CC's slot (the
+    /// whole point of the active-account path).
+    struct MockPlatform {
+        blob: Mutex<Option<String>>,
+        writes: Mutex<Vec<String>>,
+    }
+
+    impl MockPlatform {
+        fn holding(blob: &str) -> Self {
+            Self {
+                blob: Mutex::new(Some(blob.to_string())),
+                writes: Mutex::new(Vec::new()),
+            }
+        }
+        fn empty() -> Self {
+            Self {
+                blob: Mutex::new(None),
+                writes: Mutex::new(Vec::new()),
+            }
+        }
+        fn writes(&self) -> Vec<String> {
+            self.writes.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CliPlatform for MockPlatform {
+        async fn read_default(&self) -> Result<Option<String>, crate::error::SwapError> {
+            Ok(self.blob.lock().unwrap().clone())
+        }
+        async fn write_default(&self, blob: &str) -> Result<(), crate::error::SwapError> {
+            *self.blob.lock().unwrap() = Some(blob.to_string());
+            self.writes.lock().unwrap().push(blob.to_string());
+            Ok(())
+        }
+        async fn touch_credfile(&self) -> Result<(), crate::error::SwapError> {
+            Ok(())
+        }
+    }
+
+    /// Refresher that records how many exchanges were spent. The
+    /// self-heal test asserts this stays at zero: adopting CC's newer
+    /// blob must not burn a refresh_token.
+    struct CountingRefresher {
+        calls: Mutex<u32>,
+        access_token: String,
+        refresh_token: String,
+    }
+
+    impl CountingRefresher {
+        fn new(access_token: &str, refresh_token: &str) -> Self {
+            Self {
+                calls: Mutex::new(0),
+                access_token: access_token.to_string(),
+                refresh_token: refresh_token.to_string(),
+            }
+        }
+        fn calls(&self) -> u32 {
+            *self.calls.lock().unwrap()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TokenRefresher for CountingRefresher {
+        async fn refresh(
+            &self,
+            _refresh_token: &str,
+        ) -> Result<crate::oauth::refresh::TokenResponse, OAuthError> {
+            *self.calls.lock().unwrap() += 1;
+            Ok(crate::oauth::refresh::TokenResponse {
+                access_token: self.access_token.clone(),
+                refresh_token: self.refresh_token.clone(),
+                expires_in: 3600,
+                scope: None,
+                token_type: None,
+            })
+        }
+    }
+
+    /// No `claude` process running — the default for tests, so results
+    /// don't depend on what the developer happens to have open.
+    struct IdleProbe;
+
+    #[async_trait::async_trait]
+    impl LiveSessionProbe for IdleProbe {
+        async fn cc_running(&self) -> bool {
+            false
+        }
+    }
+
+    /// A `claude` process is live.
+    struct BusyProbe;
+
+    #[async_trait::async_trait]
+    impl LiveSessionProbe for BusyProbe {
+        async fn cc_running(&self) -> bool {
+            true
+        }
+    }
+
     /// Caller MUST already hold the data-dir lock — std::sync::Mutex isn't
     /// reentrant, so taking it a second time on the same thread deadlocks.
     fn setup_account(email: &str) -> (AccountStore, tempfile::TempDir, Uuid) {
@@ -438,9 +715,16 @@ mod tests {
 
         let fetcher = MockFetcher::rejecting();
         let refresher = MockRefresher::rejecting();
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
-            .await
-            .unwrap();
+        let outcome = verify_account_identity_with(
+            &store,
+            uuid,
+            &fetcher,
+            &refresher,
+            &MockPlatform::empty(),
+            &IdleProbe,
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome, VerifyOutcome::Rejected);
 
         let row = store.find_by_uuid(uuid).unwrap().unwrap();
@@ -469,9 +753,16 @@ mod tests {
 
         let fetcher = MockFetcher::rejecting();
         let refresher = MockRefresher::server_erroring();
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
-            .await
-            .unwrap();
+        let outcome = verify_account_identity_with(
+            &store,
+            uuid,
+            &fetcher,
+            &refresher,
+            &MockPlatform::empty(),
+            &IdleProbe,
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome, VerifyOutcome::NetworkError);
 
         let row = store.find_by_uuid(uuid).unwrap().unwrap();
@@ -499,9 +790,16 @@ mod tests {
         };
         let refresher = MockRefresher::ok_with("sk-ant-oat01-new", "sk-ant-ort01-new");
 
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
-            .await
-            .unwrap();
+        let outcome = verify_account_identity_with(
+            &store,
+            uuid,
+            &fetcher,
+            &refresher,
+            &MockPlatform::empty(),
+            &IdleProbe,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             outcome,
             VerifyOutcome::Ok {
@@ -535,9 +833,16 @@ mod tests {
         };
         let refresher = MockRefresher::ok_with("new-access", "new-refresh");
 
-        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
-            .await
-            .unwrap();
+        let outcome = verify_account_identity_with(
+            &store,
+            uuid,
+            &fetcher,
+            &refresher,
+            &MockPlatform::empty(),
+            &IdleProbe,
+        )
+        .await
+        .unwrap();
         assert!(matches!(outcome, VerifyOutcome::Drift { .. }));
 
         // Critical: the rotated blob must NOT have been written.
@@ -590,5 +895,252 @@ mod tests {
         let fetcher = MockFetcher::ok("alice@example.com");
         let result = verify_account_identity(&store, uuid, &fetcher).await;
         assert!(matches!(result, Err(VerifyError::NoBlob)));
+    }
+
+    // -- Active-account path: CC's slot owns the live token family --
+
+    /// The regression this whole path exists for. The active account's
+    /// access token has expired, so /profile 401s and a refresh is
+    /// spent. The rotated blob MUST land back in CC's slot — refreshing
+    /// only Claudepot's private copy leaves CC holding a refresh_token
+    /// the server just invalidated, which surfaces to the user as a
+    /// forced `/login` every time the 8-hour access token lapses.
+    #[tokio::test]
+    async fn active_account_refresh_writes_rotated_blob_back_to_cc_slot() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+
+        // Both copies start identical and expired — the state right
+        // after a swap, eight hours on.
+        let expired = crate::testing::expired_blob_json();
+        swap::save_private(uuid, &expired).await.unwrap();
+        store.set_active_cli(uuid).unwrap();
+        let platform = MockPlatform::holding(&expired);
+
+        // /profile rejects the stale access token, then accepts the
+        // rotated one.
+        let fetcher = MockFetcher {
+            email: Mutex::new(Some("alice@example.com".into())),
+            err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
+        };
+        let refresher = CountingRefresher::new("sk-ant-oat01-rotated", "sk-ant-ort01-rotated");
+
+        let outcome =
+            verify_account_identity_with(&store, uuid, &fetcher, &refresher, &platform, &IdleProbe)
+                .await
+                .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        assert_eq!(refresher.calls(), 1, "exactly one refresh should be spent");
+
+        let writes = platform.writes();
+        assert_eq!(writes.len(), 1, "CC's slot must receive the rotated blob");
+        assert!(
+            writes[0].contains("sk-ant-ort01-rotated"),
+            "CC's slot must hold the rotated refresh_token, not the dead one"
+        );
+
+        // And Claudepot's private copy must track it, so the two stay
+        // one token family.
+        let private = swap::load_private(uuid).await.unwrap();
+        assert!(
+            private.contains("sk-ant-ort01-rotated"),
+            "private slot must mirror the rotated blob"
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// The mirror-image failure: CC refreshed on its own and Claudepot's
+    /// private copy went stale. Verification must adopt CC's newer blob
+    /// rather than spend the dead refresh_token it still holds — which
+    /// would otherwise mark a perfectly healthy account `rejected`.
+    #[tokio::test]
+    async fn active_account_adopts_cc_rotation_without_spending_refresh_token() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+
+        let stale = crate::testing::expired_blob_json();
+        swap::save_private(uuid, &stale).await.unwrap();
+        store.set_active_cli(uuid).unwrap();
+
+        // CC holds a fresh blob it minted itself.
+        let cc_blob = crate::testing::fresh_blob_json().replace("oat01-test", "oat01-cc-rotated");
+        let platform = MockPlatform::holding(&cc_blob);
+
+        let fetcher = MockFetcher::ok("alice@example.com");
+        let refresher = CountingRefresher::new("unused", "unused");
+
+        let outcome =
+            verify_account_identity_with(&store, uuid, &fetcher, &refresher, &platform, &IdleProbe)
+                .await
+                .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        assert_eq!(
+            refresher.calls(),
+            0,
+            "CC's blob is live — no refresh_token should be spent"
+        );
+        assert!(
+            platform.writes().is_empty(),
+            "nothing to write back when CC's blob already verifies"
+        );
+
+        let private = swap::load_private(uuid).await.unwrap();
+        assert_eq!(private, cc_blob, "private slot must adopt CC's blob");
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// Non-active accounts have no competing copy in CC's slot, so they
+    /// keep the private-slot path — and must never write to CC's slot.
+    #[tokio::test]
+    async fn inactive_account_refresh_never_touches_cc_slot() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        swap::save_private(uuid, &crate::testing::expired_blob_json())
+            .await
+            .unwrap();
+        // Deliberately NOT set_active_cli.
+
+        let other = crate::testing::fresh_blob_json();
+        let platform = MockPlatform::holding(&other);
+        let fetcher = MockFetcher {
+            email: Mutex::new(Some("alice@example.com".into())),
+            err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
+        };
+        let refresher = CountingRefresher::new("sk-ant-oat01-new", "sk-ant-ort01-new");
+
+        let outcome =
+            verify_account_identity_with(&store, uuid, &fetcher, &refresher, &platform, &IdleProbe)
+                .await
+                .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        assert!(
+            platform.writes().is_empty(),
+            "an inactive account must never write CC's slot"
+        );
+        let private = swap::load_private(uuid).await.unwrap();
+        assert!(private.contains("sk-ant-ort01-new"));
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// A live `claude` process holds its credentials in memory and
+    /// writes them back, so rotating CC's expired token behind its back
+    /// hands it a refresh_token the server has already invalidated —
+    /// the same hazard `swap::switch` refuses to take. Defer instead
+    /// and let CC refresh itself.
+    #[tokio::test]
+    async fn active_account_defers_refresh_while_a_claude_process_is_live() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+
+        let expired = crate::testing::expired_blob_json();
+        swap::save_private(uuid, &expired).await.unwrap();
+        store.set_active_cli(uuid).unwrap();
+        // Seed a prior success so we can prove history survives.
+        store
+            .update_verification(
+                uuid,
+                &VerifyOutcome::Ok {
+                    email: "alice@example.com".into(),
+                },
+            )
+            .unwrap();
+
+        let platform = MockPlatform::holding(&expired);
+        let fetcher = MockFetcher::rejecting();
+        let refresher = CountingRefresher::new("sk-ant-oat01-rotated", "sk-ant-ort01-rotated");
+
+        let outcome =
+            verify_account_identity_with(&store, uuid, &fetcher, &refresher, &platform, &BusyProbe)
+                .await
+                .unwrap();
+        assert_eq!(outcome, VerifyOutcome::NetworkError);
+        assert_eq!(
+            refresher.calls(),
+            0,
+            "must not rotate behind a live claude process"
+        );
+        assert!(platform.writes().is_empty(), "CC's slot must be left alone");
+
+        // Transient outcome — prior verification history survives.
+        let row = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(row.verified_email.as_deref(), Some("alice@example.com"));
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// The gate is scoped to the expired window: a live `claude` process
+    /// must not block plain verification of a token that is still good.
+    #[tokio::test]
+    async fn live_claude_process_does_not_block_verifying_a_live_token() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+
+        let fresh = crate::testing::fresh_blob_json();
+        swap::save_private(uuid, &fresh).await.unwrap();
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockPlatform::holding(&fresh);
+        let fetcher = MockFetcher::ok("alice@example.com");
+        let refresher = CountingRefresher::new("unused", "unused");
+
+        let outcome =
+            verify_account_identity_with(&store, uuid, &fetcher, &refresher, &platform, &BusyProbe)
+                .await
+                .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// Active account, but CC's slot is empty — no competing copy, so
+    /// the private-slot path is safe and must still run.
+    #[tokio::test]
+    async fn active_account_with_empty_cc_slot_falls_back_to_private_slot() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockPlatform::empty();
+        let fetcher = MockFetcher::ok("alice@example.com");
+        let refresher = CountingRefresher::new("unused", "unused");
+
+        let outcome =
+            verify_account_identity_with(&store, uuid, &fetcher, &refresher, &platform, &IdleProbe)
+                .await
+                .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        swap::delete_private(uuid).await.unwrap();
     }
 }

@@ -8,6 +8,23 @@ Versioning scheme:
 
 ## 0.1.51 — beta (unreleased)
 
+### Fixed
+
+- **Claude Code demanding `/login` every ~8 hours.** Verification
+  refreshed the *active* account's token from Claudepot's private copy
+  and wrote the rotated blob only back there. Anthropic invalidates the
+  old refresh_token on every exchange, so Claude Code was left holding a
+  dead token and forced a re-login the moment its 8-hour access token
+  lapsed — turning sessions that used to last days into an 8-hour
+  cycle. The active account now reconciles against CC's own slot: the
+  refresh is spent on CC's refresh_token, the rotation is CAS-written
+  back into CC's slot, and Claudepot's private copy mirrors the result.
+  Fixes the mirror-image case too — when CC rotates on its own,
+  verification now adopts CC's newer blob instead of spending a dead
+  refresh_token and marking a healthy account "rejected". Affects
+  Settings/Accounts verification (GUI, on window focus), `claudepot
+  account verify`, and `claudepot cli run` on the active account.
+
 ### Added
 
 - **Verification-in-progress indicator on the Accounts page.** "Verify

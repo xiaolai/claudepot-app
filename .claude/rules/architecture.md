@@ -108,6 +108,33 @@ be rejected. A new macOS secret slot that both the GUI and the CLI
 read must use the `/usr/bin/security` verified-write pattern, not
 `keyring`.
 
+## Token-family ownership — CC owns the active account
+
+Anthropic's OAuth rotates the `refresh_token` on every exchange and
+invalidates the previous one. The **active** CLI account is therefore
+the one place where two live copies of a single token family exist:
+CC's own slot and Claudepot's private slot. Whoever refreshes first
+strands the other — the user-visible symptom is Claude Code demanding
+`/login` as soon as its access token expires.
+
+The rule: **for the active account, CC's slot is the source of truth.**
+Any code path that may spend a `refresh_token` for it must
+
+1. read the blob from `CliPlatform::read_default`, not `load_private`;
+2. CAS-write the rotation back into CC's slot (skip the write if
+   another writer landed a different blob mid-flight); and
+3. mirror the result into the private slot.
+
+`account_service::resolve_cc_identity` and
+`swap::fresh_token_from_cc_slot` are the two sanctioned
+implementations — reach for one of them rather than writing a third.
+Non-active accounts have no competing copy and keep the private-slot
+path.
+
+A new call to `refresh::refresh` (or `TokenRefresher::refresh`) that
+persists only via `save_private` without checking whether the account
+is active is a review finding.
+
 ## Account resolution
 
 Email prefix matching. One rule: find all registered emails where
