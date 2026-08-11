@@ -117,6 +117,7 @@ pub async fn migrate_export(args: ExportArgsDto) -> Result<ExportReceiptDto, Err
         encrypt_passphrase,
         sign_keyfile: args.sign_keyfile,
         sign_password,
+        since_peer: None,
         account_stubs,
     };
     let receipt = migrate::export_projects(&config_dir, opts)?;

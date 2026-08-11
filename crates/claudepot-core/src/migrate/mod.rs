@@ -83,8 +83,11 @@ pub(crate) mod bundle;
 pub(crate) mod crypto;
 pub(crate) mod error;
 pub(crate) mod file_history;
+pub(crate) mod fragment;
 pub(crate) mod global;
+pub(crate) mod merge;
 pub(crate) mod nfc;
+pub mod peer;
 pub(crate) mod plan;
 pub(crate) mod quarantine;
 pub(crate) mod rewrite;
@@ -126,6 +129,11 @@ pub struct ExportOptions {
     /// `Some("")` for unprotected keys; `None` falls back to empty
     /// (no interactive prompt — see `crypto::sign_bundle`).
     pub sign_password: Option<String>,
+    /// Export only what changed since the last export to this peer id.
+    /// `None` exports everything (the one-shot migrate behavior).
+    /// See `migrate::peer` for why this is a fingerprint diff and not
+    /// a high-water mark.
+    pub since_peer: Option<String>,
     /// Optional account stubs to include when
     /// `include_claudepot_state` is true. Caller pre-builds via
     /// `state::account_stubs_from_store` (we don't take a `&AccountStore`
@@ -179,6 +187,12 @@ pub fn export_projects(
     let mut projects = Vec::new();
     let mut file_count = 0usize;
 
+    // Delta-export state. Loaded once; the new fingerprints are recorded
+    // only after the bundle finalizes, so a failed export never claims
+    // files were shipped.
+    let peer_store = opts.since_peer.as_ref().map(|_| peer::load());
+    let mut peer_updates: Vec<(String, Vec<crate::session_index::diff::IndexTuple>)> = Vec::new();
+
     for cwd in &opts.project_cwds {
         let nfc_cwd = nfc::nfc(&crate::path_utils::simplify_windows_path(cwd));
         let slug = sanitize_path(&nfc_cwd);
@@ -197,7 +211,35 @@ pub fn export_projects(
         // double-record them on the per-project manifest, so we only
         // need the count back here.
         let prefix = format!("projects/{}/claude/projects/{}", project_id, slug);
-        let project_file_count = walk_and_append(&slug_dir, &slug_dir, &prefix, &mut writer)?;
+
+        // Delta scope. `to_upsert` is new-or-changed in either
+        // direction, so a file `slim` shrank re-exports; `to_delete`
+        // becomes tombstones the importer surfaces without acting on.
+        let fs_now = peer::fingerprint_dir(&slug_dir);
+        let (only, tombstones) = match (opts.since_peer.as_deref(), peer_store.as_ref()) {
+            (Some(peer_id), Some(store)) => {
+                let plan = peer::delta(store, peer_id, &nfc_cwd, &fs_now);
+                let set: std::collections::HashSet<String> = plan.to_upsert.into_iter().collect();
+                (Some(set), plan.to_delete)
+            }
+            _ => (None, Vec::new()),
+        };
+        let project_file_count =
+            walk_and_append(&slug_dir, &slug_dir, &prefix, &mut writer, only.as_ref())?;
+
+        if !tombstones.is_empty() {
+            let bytes = serde_json::to_vec_pretty(&tombstones)
+                .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+            writer.append_bytes(
+                &format!("projects/{project_id}/{}", peer::TOMBSTONES_ENTRY),
+                &bytes,
+                0o600,
+            )?;
+            file_count += 1;
+        }
+        if opts.since_peer.is_some() {
+            peer_updates.push((nfc_cwd.clone(), fs_now));
+        }
 
         // Collect sessionIds from `*.jsonl` filenames at the slug root.
         for entry in fs::read_dir(&slug_dir).map_err(MigrateError::from)? {
@@ -214,6 +256,17 @@ pub fn export_projects(
 
         let session_count = session_ids.len() as u32;
         file_count += project_file_count;
+
+        // §5.6 / §5.7 fragments — CC state for this project that lives
+        // outside the slug tree. Additive entries; absence is normal
+        // and never an error (see `fragment`'s module docs).
+        file_count += fragment::append_fragments(
+            &mut writer,
+            &project_id,
+            config_dir,
+            &nfc_cwd,
+            &session_ids,
+        )?;
 
         // Optional: tarball <cwd>/.claude/** + <cwd>/CLAUDE.md when
         // --include-worktree was set. The cwd may not exist on the
@@ -367,6 +420,24 @@ pub fn export_projects(
             std::path::Path::new(keyfile),
             opts.sign_password.clone(),
         )?;
+    }
+
+    // Record what this peer now holds — last, so an export that failed
+    // anywhere above leaves the prior state intact and the next run
+    // re-ships rather than silently skipping.
+    if let (Some(peer_id), Some(mut store)) = (opts.since_peer.as_deref(), peer_store) {
+        for (cwd, fps) in &peer_updates {
+            peer::record(&mut store, peer_id, cwd, fps);
+        }
+        if let Err(e) = peer::save(&store) {
+            // The bundle is already written and valid; failing the whole
+            // export here would be worse than re-shipping next time.
+            tracing::warn!(
+                target = "claudepot_core::migrate",
+                error = %e,
+                "delta-export state could not be saved; the next export to this peer will be full"
+            );
+        }
     }
 
     Ok(ExportReceipt {
@@ -601,6 +672,15 @@ pub struct ImportReceipt {
     /// Account stubs surface to the user as "the source had these;
     /// re-login here." Never auto-inserted (spec §16 Q2).
     pub accounts_listed: Vec<state::AccountStub>,
+    /// Slug-relative paths that left the source since its last export
+    /// to this peer (delta export only).
+    ///
+    /// **Reported, never acted on.** The source may have run a
+    /// retention sweep this machine's user does not want mirrored;
+    /// deleting their last copy of a transcript because another
+    /// machine aged it out is precisely the silent loss this design
+    /// refuses. A human decides.
+    pub tombstones: Vec<String>,
 }
 
 /// Import a bundle. v0 implements the dry-run path end-to-end and the
@@ -691,30 +771,64 @@ pub fn import_bundle(
     let mut projects_imported = Vec::new();
     let mut projects_refused = Vec::new();
     let mut accounts_listed: Vec<state::AccountStub> = Vec::new();
+    let mut tombstones: Vec<String> = Vec::new();
 
     if opts.dry_run {
         // P0+P2 only — no extraction. Caller gets the project plan
         // via `inspect`; this returns the resolution decisions.
         for pref in &manifest.projects {
-            let target_cwd = pref.source_cwd.clone(); // same-machine fallback
+            // Honor --remap here too: checking the un-remapped slug would
+            // detect a conflict against a project we are not writing to.
+            let target_cwd = opts
+                .remap_rules
+                .iter()
+                .find(|(s, _)| s == &pref.source_cwd)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_else(|| pref.source_cwd.clone());
             let target_slug = plan::target_slug(&target_cwd);
             let target_slug_dir = config_dir.join("projects").join(&target_slug);
             let conflict = if target_slug_dir.exists() {
-                conflicts::ProjectConflict::PresentNoOverlap {
-                    target_slug: target_slug.clone(),
-                    target_session_count: 0,
+                // Same overlap rule as apply, sourced from the manifest
+                // inventory because nothing is extracted yet.
+                let slug_prefix =
+                    format!("projects/{}/claude/projects/{}/", pref.id, pref.source_slug);
+                let bundle_ids = merge::session_ids_in_inventory(
+                    manifest.file_inventory.iter().map(|e| e.path.as_str()),
+                    &slug_prefix,
+                );
+                let target_ids = merge::session_ids_in(&target_slug_dir);
+                let overlapping: Vec<String> =
+                    bundle_ids.intersection(&target_ids).cloned().collect();
+                if overlapping.is_empty() {
+                    conflicts::ProjectConflict::PresentNoOverlap {
+                        target_slug: target_slug.clone(),
+                        target_session_count: target_ids.len(),
+                    }
+                } else {
+                    conflicts::ProjectConflict::PresentOverlap {
+                        target_slug: target_slug.clone(),
+                        overlapping_ids: overlapping,
+                    }
                 }
             } else {
                 conflicts::ProjectConflict::None
             };
             match conflicts::resolve(&conflict, opts.mode, opts.prefer) {
-                conflicts::Resolution::Apply
-                | conflicts::Resolution::ArchiveThenApply
-                | conflicts::Resolution::Merge { .. } => {
+                conflicts::Resolution::Apply | conflicts::Resolution::Merge { .. } => {
                     projects_imported.push(pref.source_cwd.clone());
                 }
                 conflicts::Resolution::Refuse(reason) => {
                     projects_refused.push((pref.source_cwd.clone(), reason));
+                }
+                conflicts::Resolution::ArchiveThenApply => {
+                    // Mirror apply's refusal, or the plan would promise an
+                    // import the apply phase declines to perform.
+                    projects_refused.push((
+                        pref.source_cwd.clone(),
+                        "--mode=replace is not implemented; use --mode=merge with \
+                         --prefer-imported or --prefer-target"
+                            .to_string(),
+                    ));
                 }
             }
         }
@@ -725,6 +839,7 @@ pub fn import_bundle(
             journal_path,
             dry_run: true,
             accounts_listed: Vec::new(),
+            tombstones: Vec::new(),
         });
     }
 
@@ -782,82 +897,171 @@ pub fn import_bundle(
             }
             table.finalize();
 
-            // Conflict detection.
-            let target_slug = plan::target_slug(&target_cwd);
-            let target_slug_dir = config_dir.join("projects").join(&target_slug);
-            let conflict = if target_slug_dir.exists() {
-                conflicts::ProjectConflict::PresentNoOverlap {
-                    target_slug: target_slug.clone(),
-                    target_session_count: 0,
-                }
-            } else {
-                conflicts::ProjectConflict::None
-            };
-            match conflicts::resolve(&conflict, opts.mode, opts.prefer) {
-                conflicts::Resolution::Apply => {}
-                conflicts::Resolution::Refuse(reason) => {
-                    projects_refused.push((pref.source_cwd.clone(), reason));
-                    continue;
-                }
-                other => {
-                    // Merge / archive paths land in the next slice; for v0
-                    // we refuse loudly so callers know to wait.
-                    projects_refused.push((
-                        pref.source_cwd.clone(),
-                        format!("v0 only supports apply (no-conflict). got: {other:?}"),
-                    ));
-                    continue;
+            let staged_project_root = staging.join("projects").join(&pref.id);
+
+            // Delta-export tombstones: surface only. See the field docs
+            // on `ImportReceipt::tombstones` for why nothing is deleted.
+            let mut project_tombstones: Vec<String> = Vec::new();
+            let tomb_path = staged_project_root.join(peer::TOMBSTONES_ENTRY);
+            if tomb_path.is_file() {
+                if let Ok(bytes) = fs::read(&tomb_path) {
+                    if let Ok(list) = serde_json::from_slice::<Vec<String>>(&bytes) {
+                        project_tombstones = list;
+                    }
                 }
             }
 
-            // P3 rewrite + P5 apply for the slug tree.
+            // Staging path is needed before conflict detection: overlap
+            // is computed from the session ids actually present on each
+            // side, not from a count.
             let staged_slug_root = staging
                 .join("projects")
                 .join(&pref.id)
                 .join("claude")
                 .join("projects")
                 .join(&pref.source_slug);
-            rewrite_slug_tree(&staged_slug_root, &table)?;
-
-            if !staged_slug_root.exists() {
+            // A delta bundle legitimately carries no slug tree when
+            // nothing changed — the news may be only a removal, or only
+            // a fragment update. Refuse only when the project brings
+            // nothing at all.
+            let has_payload = staged_slug_root.exists();
+            if !has_payload && project_tombstones.is_empty() && !staged_project_root.exists() {
                 projects_refused.push((
                     pref.source_cwd.clone(),
                     "bundle missing expected slug tree".to_string(),
                 ));
                 continue;
             }
-            // P5: rename staged → final. Both paths are in the same volume
-            // (`~/.claudepot/imports/...` and `~/.claude/projects/...`)
-            // are typically on the same FS; if not, fall back to copy.
-            if let Some(parent) = target_slug_dir.parent() {
-                fs::create_dir_all(parent).map_err(MigrateError::from)?;
-            }
-            match fs::rename(&staged_slug_root, &target_slug_dir) {
-                Ok(()) => {}
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::CrossesDevices
-                        || e.raw_os_error() == Some(libc::EXDEV) =>
-                {
-                    copy_dir_recursive(&staged_slug_root, &target_slug_dir)?;
-                    fs::remove_dir_all(&staged_slug_root).map_err(MigrateError::from)?;
-                }
-                Err(e) => return Err(MigrateError::from(e)),
-            }
 
-            // Populate dir_inventory so surgical rollback knows exactly
-            // which files we wrote — preserves user work added post-
-            // import (audit Robustness finding).
-            let dir_inventory = apply::collect_dir_inventory(&target_slug_dir);
-            journal.record(apply::JournalStep {
-                kind: apply::JournalStepKind::CreateDir,
-                before: None,
-                after: Some(target_slug_dir.to_string_lossy().to_string()),
-                snapshot_path: None,
-                after_sha256: None,
-                fragment_key: None,
-                dir_inventory,
-                timestamp_unix_secs: now_secs(),
-            });
+            if has_payload {
+                // Conflict detection (§6). A transcript's identity is its
+                // filename stem — that is how CC resolves it
+                // (`listSessionsImpl.ts:183-185`) and how Claudepot does
+                // (`session/core.rs:549`) — so an id present in both trees is
+                // one logical session recorded twice, i.e. a real overlap.
+                let target_slug = plan::target_slug(&target_cwd);
+                let target_slug_dir = config_dir.join("projects").join(&target_slug);
+                let conflict = if target_slug_dir.exists() {
+                    let target_ids = merge::session_ids_in(&target_slug_dir);
+                    let overlapping: Vec<String> = merge::session_ids_in(&staged_slug_root)
+                        .intersection(&target_ids)
+                        .cloned()
+                        .collect();
+                    if overlapping.is_empty() {
+                        conflicts::ProjectConflict::PresentNoOverlap {
+                            target_slug: target_slug.clone(),
+                            target_session_count: target_ids.len(),
+                        }
+                    } else {
+                        conflicts::ProjectConflict::PresentOverlap {
+                            target_slug: target_slug.clone(),
+                            overlapping_ids: overlapping,
+                        }
+                    }
+                } else {
+                    conflicts::ProjectConflict::None
+                };
+
+                // `Some(prefer)` selects the file-by-file merge below; `None`
+                // is the whole-tree rename onto an absent slug.
+                let merge_prefer = match conflicts::resolve(&conflict, opts.mode, opts.prefer) {
+                    conflicts::Resolution::Apply => None,
+                    conflicts::Resolution::Merge { prefer } => Some(prefer),
+                    conflicts::Resolution::Refuse(reason) => {
+                        projects_refused.push((pref.source_cwd.clone(), reason));
+                        continue;
+                    }
+                    conflicts::Resolution::ArchiveThenApply => {
+                        // `replace` needs an archive-to-trash step that does
+                        // not exist yet. Refuse loudly rather than silently
+                        // degrading to an overwrite — the mode's whole point
+                        // is that the target's copy is recoverable.
+                        projects_refused.push((
+                            pref.source_cwd.clone(),
+                            "--mode=replace is not implemented; use --mode=merge with \
+                         --prefer-imported or --prefer-target"
+                                .to_string(),
+                        ));
+                        continue;
+                    }
+                };
+
+                // P3 rewrite — precedes placement on both paths.
+                rewrite_slug_tree(&staged_slug_root, &table)?;
+
+                if let Some(prefer) = merge_prefer {
+                    // P5 (merge): place file-by-file. A whole-tree rename
+                    // would erase sessions the target has and the bundle
+                    // does not — the union in §6 is precisely about keeping
+                    // those.
+                    // Steps come back through an out-param so a failure
+                    // partway through still journals what already landed;
+                    // the error propagates after the journal is written.
+                    let mut steps = Vec::new();
+                    let merge_result = merge::merge_slug_tree(
+                        &staged_slug_root,
+                        &target_slug_dir,
+                        prefer,
+                        &bundle_id,
+                        &mut steps,
+                    );
+                    for s in steps {
+                        let kind = match s.kind {
+                            merge::MergeApplyKind::Added => apply::JournalStepKind::CreateFile,
+                            merge::MergeApplyKind::Replaced => apply::JournalStepKind::ReplaceFile,
+                            // Nothing was written; nothing to reverse.
+                            merge::MergeApplyKind::KeptTarget => continue,
+                        };
+                        let after_sha256 =
+                            apply::sha256_of_file_optional(std::path::Path::new(&s.after));
+                        journal.record(apply::JournalStep {
+                            kind,
+                            before: None,
+                            after: Some(s.after),
+                            snapshot_path: s.snapshot_path,
+                            after_sha256,
+                            fragment_key: None,
+                            dir_inventory: Vec::new(),
+                            timestamp_unix_secs: now_secs(),
+                        });
+                    }
+                    merge_result?;
+                    let _ = fs::remove_dir_all(&staged_slug_root);
+                } else {
+                    // P5 (apply): rename staged → final. `~/.claudepot/imports/…`
+                    // and `~/.claude/projects/…` are typically on the same
+                    // filesystem; if not, fall back to copy.
+                    if let Some(parent) = target_slug_dir.parent() {
+                        fs::create_dir_all(parent).map_err(MigrateError::from)?;
+                    }
+                    match fs::rename(&staged_slug_root, &target_slug_dir) {
+                        Ok(()) => {}
+                        Err(e)
+                            if e.kind() == std::io::ErrorKind::CrossesDevices
+                                || e.raw_os_error() == Some(libc::EXDEV) =>
+                        {
+                            copy_dir_recursive(&staged_slug_root, &target_slug_dir)?;
+                            fs::remove_dir_all(&staged_slug_root).map_err(MigrateError::from)?;
+                        }
+                        Err(e) => return Err(MigrateError::from(e)),
+                    }
+
+                    // Populate dir_inventory so surgical rollback knows exactly
+                    // which files we wrote — preserves user work added post-
+                    // import (audit Robustness finding).
+                    let dir_inventory = apply::collect_dir_inventory(&target_slug_dir);
+                    journal.record(apply::JournalStep {
+                        kind: apply::JournalStepKind::CreateDir,
+                        before: None,
+                        after: Some(target_slug_dir.to_string_lossy().to_string()),
+                        snapshot_path: None,
+                        after_sha256: None,
+                        fragment_key: None,
+                        dir_inventory,
+                        timestamp_unix_secs: now_secs(),
+                    });
+                }
+            } // end `if has_payload`
 
             // Worktree apply (when bundle carries it).
             if manifest.flags.include_worktree {
@@ -897,6 +1101,58 @@ pub fn import_bundle(
                     // Target cwd missing: skip silently. The slug landed
                     // either way; the user can re-apply worktree later.
                 }
+            }
+
+            tombstones.extend(project_tombstones);
+
+            // §5.6 / §5.7 — the out-of-slug CC state. Both are no-ops
+            // for a bundle exported before these entries existed.
+
+            if let Some(step) = fragment::apply_claude_json_fragment(
+                &staged_project_root,
+                config_dir,
+                &target_cwd,
+                &table,
+                &bundle_id,
+            )? {
+                let after_sha256 =
+                    apply::sha256_of_file_optional(std::path::Path::new(&step.after));
+                journal.record(apply::JournalStep {
+                    kind: apply::JournalStepKind::WriteJsonFragment,
+                    before: None,
+                    after: Some(step.after),
+                    snapshot_path: step.snapshot_path,
+                    after_sha256,
+                    fragment_key: step.fragment_key,
+                    dir_inventory: Vec::new(),
+                    timestamp_unix_secs: now_secs(),
+                });
+            }
+            if let Some(step) = fragment::apply_history_fragment(
+                &staged_project_root,
+                config_dir,
+                &table,
+                &bundle_id,
+            )? {
+                // No snapshot means the target had no `history.jsonl`,
+                // so undo deletes rather than restores.
+                let kind = if step.snapshot_path.is_some() {
+                    apply::JournalStepKind::ReplaceFile
+                } else {
+                    apply::JournalStepKind::CreateFile
+                };
+                let after_sha256 =
+                    apply::sha256_of_file_optional(std::path::Path::new(&step.after));
+                journal.record(apply::JournalStep {
+                    kind,
+                    before: None,
+                    after: Some(step.after),
+                    snapshot_path: step.snapshot_path,
+                    after_sha256,
+                    fragment_key: None,
+                    dir_inventory: Vec::new(),
+                    timestamp_unix_secs: now_secs(),
+                });
             }
 
             projects_imported.push(pref.source_cwd.clone());
@@ -1041,6 +1297,7 @@ pub fn import_bundle(
         journal_path,
         dry_run: false,
         accounts_listed,
+        tombstones,
     })
 }
 
@@ -1100,6 +1357,9 @@ fn walk_and_append(
     base: &Path,
     bundle_prefix: &str,
     writer: &mut bundle::BundleWriter,
+    // `Some` restricts the walk to these slug-relative paths (delta
+    // export). `None` appends everything.
+    only: Option<&std::collections::HashSet<String>>,
 ) -> Result<usize, MigrateError> {
     let mut count = 0usize;
     for entry in fs::read_dir(root).map_err(MigrateError::from)? {
@@ -1118,13 +1378,16 @@ fn walk_and_append(
             )));
         }
         if ft.is_dir() {
-            count += walk_and_append(&path, base, bundle_prefix, writer)?;
+            count += walk_and_append(&path, base, bundle_prefix, writer, only)?;
         } else if ft.is_file() {
             let rel = path
                 .strip_prefix(base)
                 .map_err(|e| MigrateError::Io(std::io::Error::other(format!("strip_prefix: {e}"))))?
                 .to_string_lossy()
                 .replace('\\', "/");
+            if only.is_some_and(|set| !set.contains(&rel)) {
+                continue;
+            }
             let bundle_path = format!("{bundle_prefix}/{rel}");
             writer.append_file(&bundle_path, &path, None)?;
             count += 1;
@@ -1215,6 +1478,7 @@ mod tests {
             account_stubs: None,
             encrypt_passphrase: None,
             sign_password: None,
+            since_peer: None,
         };
         let receipt = export_projects(&cfg, opts).unwrap();
         assert_eq!(receipt.project_count, 1);
@@ -1249,6 +1513,7 @@ mod tests {
             account_stubs: None,
             encrypt_passphrase: None,
             sign_password: None,
+            since_peer: None,
         };
         let err = export_projects(&cfg, opts).unwrap_err();
         // Configuration (not NotImplemented) — encryption ships;
@@ -1275,6 +1540,7 @@ mod tests {
             account_stubs: None,
             encrypt_passphrase: None,
             sign_password: None,
+            since_peer: None,
         };
         let err = export_projects(&cfg, opts).unwrap_err();
         assert!(matches!(err, MigrateError::ProjectNotInBundle(_)));
@@ -1304,6 +1570,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1359,6 +1626,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1423,6 +1691,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1482,6 +1751,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1530,6 +1800,7 @@ mod tests {
                 encrypt_passphrase: Some(pwd.clone()),
                 sign_keyfile: None,
                 sign_password: None,
+                since_peer: None,
                 account_stubs: None,
             },
         )
@@ -1588,6 +1859,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1634,6 +1906,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1684,6 +1957,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1716,6 +1990,632 @@ mod tests {
             }
         }
         assert!(found_jsonl, "expected at least one rewritten jsonl");
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// Seed a project carrying one session with a caller-chosen id, so
+    /// overlap tests can force a collision instead of hoping two random
+    /// UUIDv4s coincide.
+    fn seed_project_with_session(config_dir: &Path, cwd: &str, session_id: &str, body: &str) {
+        let slug = sanitize_path(&nfc::nfc(cwd));
+        let slug_dir = config_dir.join("projects").join(&slug);
+        fs::create_dir_all(&slug_dir).unwrap();
+        fs::write(slug_dir.join(format!("{session_id}.jsonl")), body).unwrap();
+    }
+
+    /// Export a single project from `cfg_src` to `bundle`, no optional
+    /// buckets. Keeps the merge tests below to their actual subject.
+    fn export_one(cfg_src: &Path, cwd: &str, bundle: &Path) {
+        export_projects(
+            cfg_src,
+            ExportOptions {
+                output: bundle.to_path_buf(),
+                project_cwds: vec![cwd.to_string()],
+                include_global: false,
+                include_worktree: false,
+                include_live: false,
+                include_claudepot_state: false,
+                include_file_history: true,
+                encrypt: false,
+                sign_keyfile: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
+                since_peer: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn merge_opts(prefer: Option<conflicts::MergePreference>) -> ImportOptions {
+        ImportOptions {
+            mode: conflicts::ConflictMode::Merge,
+            prefer,
+            ..Default::default()
+        }
+    }
+
+    /// The union property from §6: merging into an existing slug adds the
+    /// bundle's sessions without disturbing sessions only the target has.
+    /// Before merge mode existed this path refused outright; a
+    /// whole-directory rename would have destroyed `local-only`.
+    #[test]
+    fn merge_unions_and_preserves_target_only_sessions() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/test-merge-union".to_string();
+
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(
+            &cfg_src,
+            &cwd,
+            "11111111-1111-4111-8111-111111111111",
+            "from-peer\n",
+        );
+        let bundle = tmp.path().join("merge.tar.zst");
+        export_one(&cfg_src, &cwd, &bundle);
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        seed_project_with_session(
+            &cfg_target,
+            &cwd,
+            "22222222-2222-4222-8222-222222222222",
+            "local-only\n",
+        );
+
+        let receipt = import_bundle(&cfg_target, &bundle, merge_opts(None)).unwrap();
+        assert_eq!(
+            receipt.projects_refused,
+            vec![],
+            "merge must no longer hit the v0 refusal arm"
+        );
+        assert_eq!(receipt.projects_imported.len(), 1);
+
+        let target_dir = cfg_target.join("projects").join(plan::target_slug(&cwd));
+        assert!(
+            target_dir
+                .join("22222222-2222-4222-8222-222222222222.jsonl")
+                .exists(),
+            "a session the bundle never carried must survive the merge"
+        );
+        assert!(
+            target_dir
+                .join("11111111-1111-4111-8111-111111111111.jsonl")
+                .exists(),
+            "the bundle's session must land"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// Golden #16 (§11.3) — a sessionId present on both machines is a
+    /// conflict, and `merge` without a preference refuses rather than
+    /// picking a winner.
+    #[test]
+    fn golden_16_overlapping_session_id_refuses_without_preference() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/test-merge-overlap".to_string();
+        let shared = "33333333-3333-4333-8333-333333333333";
+
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(&cfg_src, &cwd, shared, "imported-copy\n");
+        let bundle = tmp.path().join("overlap.tar.zst");
+        export_one(&cfg_src, &cwd, &bundle);
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        seed_project_with_session(&cfg_target, &cwd, shared, "target-copy\n");
+
+        let receipt = import_bundle(&cfg_target, &bundle, merge_opts(None)).unwrap();
+
+        assert!(receipt.projects_imported.is_empty());
+        assert_eq!(receipt.projects_refused.len(), 1);
+        assert!(
+            receipt.projects_refused[0].1.contains("overlapping"),
+            "refusal must name the overlap, got: {}",
+            receipt.projects_refused[0].1
+        );
+        // The target's copy is untouched by a refused import.
+        let target_dir = cfg_target.join("projects").join(plan::target_slug(&cwd));
+        assert_eq!(
+            fs::read_to_string(target_dir.join(format!("{shared}.jsonl"))).unwrap(),
+            "target-copy\n"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// The dry run must reach the same resolution as apply. A plan that
+    /// promises an import the apply phase refuses is worse than no plan.
+    #[test]
+    fn dry_run_predicts_the_overlap_refusal() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/test-merge-dryrun".to_string();
+        let shared = "44444444-4444-4444-8444-444444444444";
+
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(&cfg_src, &cwd, shared, "imported\n");
+        let bundle = tmp.path().join("dry.tar.zst");
+        export_one(&cfg_src, &cwd, &bundle);
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        seed_project_with_session(&cfg_target, &cwd, shared, "target\n");
+
+        let mut opts = merge_opts(None);
+        opts.dry_run = true;
+        let dry = import_bundle(&cfg_target, &bundle, opts).unwrap();
+        assert!(dry.dry_run);
+        assert_eq!(
+            dry.projects_refused.len(),
+            1,
+            "dry run must predict the refusal apply reaches"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// `--prefer-target` resolves the collision by keeping what the
+    /// target already had.
+    #[test]
+    fn merge_prefer_target_keeps_the_local_copy() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/test-merge-prefer-target".to_string();
+        let shared = "55555555-5555-4555-8555-555555555555";
+
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(&cfg_src, &cwd, shared, "imported\n");
+        let bundle = tmp.path().join("pt.tar.zst");
+        export_one(&cfg_src, &cwd, &bundle);
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        seed_project_with_session(&cfg_target, &cwd, shared, "target\n");
+
+        let receipt = import_bundle(
+            &cfg_target,
+            &bundle,
+            merge_opts(Some(conflicts::MergePreference::Target)),
+        )
+        .unwrap();
+        assert_eq!(receipt.projects_refused, vec![]);
+
+        let target_dir = cfg_target.join("projects").join(plan::target_slug(&cwd));
+        assert_eq!(
+            fs::read_to_string(target_dir.join(format!("{shared}.jsonl"))).unwrap(),
+            "target\n",
+            "--prefer-target must not overwrite the local copy"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// `--prefer-imported` overwrites, and the displaced copy is
+    /// recoverable — the journal step carries a snapshot so `undo`
+    /// can put it back.
+    #[test]
+    fn merge_prefer_imported_replaces_and_snapshots_for_undo() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/test-merge-prefer-imported".to_string();
+        let shared = "66666666-6666-4666-8666-666666666666";
+
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(&cfg_src, &cwd, shared, "imported\n");
+        let bundle = tmp.path().join("pi.tar.zst");
+        export_one(&cfg_src, &cwd, &bundle);
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        seed_project_with_session(&cfg_target, &cwd, shared, "target\n");
+
+        let receipt = import_bundle(
+            &cfg_target,
+            &bundle,
+            merge_opts(Some(conflicts::MergePreference::Imported)),
+        )
+        .unwrap();
+        assert_eq!(receipt.projects_refused, vec![]);
+
+        let target_dir = cfg_target.join("projects").join(plan::target_slug(&cwd));
+        assert_eq!(
+            fs::read_to_string(target_dir.join(format!("{shared}.jsonl"))).unwrap(),
+            "imported\n"
+        );
+
+        // The displaced bytes are recoverable.
+        let journal = apply::ImportJournal::load(&receipt.journal_path).unwrap();
+        let replaced = journal
+            .steps
+            .iter()
+            .find(|s| matches!(s.kind, apply::JournalStepKind::ReplaceFile))
+            .expect("a replaced session must be journaled as ReplaceFile");
+        let snap = replaced
+            .snapshot_path
+            .as_ref()
+            .expect("ReplaceFile must carry a snapshot");
+        assert_eq!(fs::read_to_string(snap).unwrap(), "target\n");
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// §5.6 + §5.7 end to end: both fragments leave the source, land on
+    /// the target, and have their embedded absolute paths re-anchored.
+    #[test]
+    fn fragments_round_trip_through_export_and_import() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let src_cwd = "/tmp/frag-src".to_string();
+        let dst_cwd = "/tmp/frag-dst".to_string();
+        let sid = "77777777-7777-4777-8777-777777777777";
+
+        let src_home = tmp.path().join("src");
+        let cfg_src = src_home.join(".claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(&cfg_src, &src_cwd, sid, "body\n");
+        fs::write(
+            src_home.join(".claude.json"),
+            format!(
+                r#"{{"projects":{{"{src_cwd}":{{"allowedTools":["Bash"],"activeWorktreeSession":{{"originalCwd":"{src_cwd}/wt"}}}}}}}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            cfg_src.join("history.jsonl"),
+            format!("{{\"sessionId\":\"{sid}\",\"display\":\"hi\",\"project\":\"{src_cwd}\"}}\n"),
+        )
+        .unwrap();
+
+        let bundle = tmp.path().join("frag.tar.zst");
+        export_one(&cfg_src, &src_cwd, &bundle);
+
+        let dst_home = tmp.path().join("dst");
+        let cfg_target = dst_home.join(".claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+
+        let receipt = import_bundle(
+            &cfg_target,
+            &bundle,
+            ImportOptions {
+                remap_rules: vec![(src_cwd.clone(), dst_cwd.clone())],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt.projects_refused, vec![]);
+
+        // §5.6 — re-keyed to the target cwd, inner path re-anchored.
+        let root: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dst_home.join(".claude.json")).unwrap())
+                .unwrap();
+        let entry = &root["projects"][&dst_cwd];
+        assert_eq!(entry["allowedTools"][0], "Bash");
+        assert_eq!(
+            entry["activeWorktreeSession"]["originalCwd"],
+            format!("{dst_cwd}/wt")
+        );
+
+        // §5.7 — appended with the project path rewritten.
+        let hist = fs::read_to_string(cfg_target.join("history.jsonl")).unwrap();
+        assert_eq!(hist.lines().count(), 1);
+        assert!(hist.contains(&dst_cwd), "history project path re-anchored");
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// Golden #21 (§11.3) — export → import → export is stable.
+    ///
+    /// "Bit-identical except manifest timestamp + machine identity" is
+    /// asserted on content, not on raw bundle bytes: each export mints
+    /// a fresh `projects/<uuid>/` id, and the archive itself carries
+    /// mtimes. Normalizing the project id and comparing every payload's
+    /// path→sha256 is the same claim without the incidental noise.
+    #[test]
+    fn golden_21_export_import_export_round_trips() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/golden21".to_string();
+
+        let src_home = tmp.path().join("src");
+        let cfg_src = src_home.join(".claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(
+            &cfg_src,
+            &cwd,
+            "88888888-8888-4888-8888-888888888888",
+            "content\n",
+        );
+        fs::write(
+            src_home.join(".claude.json"),
+            format!(r#"{{"projects":{{"{cwd}":{{"allowedTools":["Bash"]}}}}}}"#),
+        )
+        .unwrap();
+
+        let first = tmp.path().join("first.tar.zst");
+        export_one(&cfg_src, &cwd, &first);
+
+        let dst_home = tmp.path().join("dst");
+        let cfg_target = dst_home.join(".claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        let receipt = import_bundle(&cfg_target, &first, ImportOptions::default()).unwrap();
+        assert_eq!(receipt.projects_refused, vec![]);
+
+        let second = tmp.path().join("second.tar.zst");
+        export_one(&cfg_target, &cwd, &second);
+
+        assert_eq!(
+            normalized_inventory(&first),
+            normalized_inventory(&second),
+            "re-exporting an imported bundle must reproduce the same payloads"
+        );
+
+        // The per-project `manifest.json` is excluded above because it
+        // embeds a fresh `id` per export — the "machine identity" half
+        // of the golden's carve-out. Its meaningful fields must still
+        // agree.
+        let (a, b) = (inspect(&first).unwrap(), inspect(&second).unwrap());
+        let key = |m: &manifest::BundleManifest| -> Vec<(String, String, u32)> {
+            m.projects
+                .iter()
+                .map(|p| (p.source_cwd.clone(), p.source_slug.clone(), p.session_count))
+                .collect()
+        };
+        assert_eq!(
+            key(&a),
+            key(&b),
+            "project identity must survive a round trip"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// path → sha256 for every payload, with the per-export project
+    /// UUID folded out so two exports of the same content compare equal.
+    ///
+    /// `manifest.json` entries are excluded: they carry that per-export
+    /// id in their *contents*, so their digests can never match. The
+    /// caller asserts their meaningful fields separately.
+    fn normalized_inventory(bundle: &Path) -> std::collections::BTreeMap<String, String> {
+        let m = inspect(bundle).unwrap();
+        let ids: Vec<String> = m.projects.iter().map(|p| p.id.clone()).collect();
+        m.file_inventory
+            .iter()
+            .filter(|e| !e.path.ends_with("manifest.json"))
+            .map(|e| {
+                let mut path = e.path.clone();
+                for id in &ids {
+                    path = path.replace(id.as_str(), "<project-id>");
+                }
+                (path, e.sha256.clone())
+            })
+            .collect()
+    }
+
+    /// `rules/paths.md` — the merge path must re-anchor all four path
+    /// shapes. Exercised through the §5.6 fragment, which is where an
+    /// absolute path actually crosses machines.
+    #[test]
+    fn merge_fragment_re_anchors_all_four_path_shapes() {
+        // The verbatim shape re-anchors to the *simplified* target:
+        // `simplify_windows_path` strips `\\?\` before the substitution
+        // table is built, because CC never writes the verbatim form into
+        // a cwd or a slug (`rules/paths.md`). Preserving it here would
+        // produce a path CC cannot match.
+        for (from, to, expected) in [
+            ("/Users/alice/proj", "/Users/bob/proj", "/Users/bob/proj"),
+            (
+                r"C:\Users\alice\proj",
+                r"C:\Users\bob\proj",
+                r"C:\Users\bob\proj",
+            ),
+            (
+                r"\\server\share\alice",
+                r"\\server\share\bob",
+                r"\\server\share\bob",
+            ),
+            (r"\\?\C:\Users\alice", r"\\?\C:\Users\bob", r"C:\Users\bob"),
+        ] {
+            let td = tempfile::tempdir().unwrap();
+            let cfg = td.path().join(".claude");
+            fs::create_dir_all(&cfg).unwrap();
+            let staged = td.path().join("staged");
+            fs::create_dir_all(&staged).unwrap();
+
+            let mut table = plan::SubstitutionTable::new();
+            table.push(from, to, plan::RuleOrigin::ProjectCwd);
+            table.finalize();
+
+            let frag = serde_json::json!({ "activeWorktreeSession": { "originalCwd": from } });
+            fs::write(
+                staged.join(fragment::CLAUDE_JSON_FRAGMENT),
+                serde_json::to_vec(&frag).unwrap(),
+            )
+            .unwrap();
+
+            fragment::apply_claude_json_fragment(&staged, &cfg, to, &table, "shapes").unwrap();
+
+            let root: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(td.path().join(".claude.json")).unwrap())
+                    .unwrap();
+            assert_eq!(
+                root["projects"][to]["activeWorktreeSession"]["originalCwd"], expected,
+                "shape {from} -> {to} was not re-anchored"
+            );
+        }
+    }
+
+    /// Transcript payloads actually carried by a bundle. `session_count`
+    /// on the manifest counts the *source project's* sessions, not the
+    /// delta, so it cannot answer "did this delta ship anything".
+    fn shipped_jsonl(bundle: &Path) -> Vec<String> {
+        let mut v: Vec<String> = inspect(bundle)
+            .unwrap()
+            .file_inventory
+            .iter()
+            .filter(|e| e.path.ends_with(".jsonl"))
+            .map(|e| e.path.rsplit('/').next().unwrap_or(&e.path).to_string())
+            .collect();
+        v.sort();
+        v
+    }
+
+    fn export_to_peer(cfg_src: &Path, cwd: &str, bundle: &Path, peer_id: &str) {
+        export_projects(
+            cfg_src,
+            ExportOptions {
+                output: bundle.to_path_buf(),
+                project_cwds: vec![cwd.to_string()],
+                include_global: false,
+                include_worktree: false,
+                include_live: false,
+                include_claudepot_state: false,
+                include_file_history: true,
+                encrypt: false,
+                sign_keyfile: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
+                since_peer: Some(peer_id.to_string()),
+            },
+        )
+        .unwrap();
+    }
+
+    /// WI-2's headline property. A high-water mark skips a file that
+    /// `slim` made *smaller*, leaving the peer on a stale fat copy
+    /// forever; a fingerprint diff re-ships it.
+    #[test]
+    fn delta_export_reships_a_shrunk_file_and_import_lands_it() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/delta-shrink".to_string();
+        let sid = "99999999-9999-4999-8999-999999999999";
+
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        let fat = format!("{}\n", "x".repeat(500));
+        seed_project_with_session(&cfg_src, &cwd, sid, &fat);
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+
+        let b1 = tmp.path().join("d1.tar.zst");
+        export_to_peer(&cfg_src, &cwd, &b1, "laptop");
+        import_bundle(&cfg_target, &b1, ImportOptions::default()).unwrap();
+
+        let target_file = cfg_target
+            .join("projects")
+            .join(plan::target_slug(&cwd))
+            .join(format!("{sid}.jsonl"));
+        assert_eq!(fs::read_to_string(&target_file).unwrap().len(), fat.len());
+
+        // Simulate `claudepot session slim`: same path, fewer bytes.
+        let slim = "{\"slimmed\":true}\n";
+        let src_file = cfg_src
+            .join("projects")
+            .join(sanitize_path(&nfc::nfc(&cwd)))
+            .join(format!("{sid}.jsonl"));
+        fs::write(&src_file, slim).unwrap();
+
+        let b2 = tmp.path().join("d2.tar.zst");
+        export_to_peer(&cfg_src, &cwd, &b2, "laptop");
+        assert_eq!(
+            shipped_jsonl(&b2),
+            vec![format!("{sid}.jsonl")],
+            "the shrunk session must be in the delta bundle"
+        );
+
+        let receipt = import_bundle(
+            &cfg_target,
+            &b2,
+            merge_opts(Some(conflicts::MergePreference::Imported)),
+        )
+        .unwrap();
+        assert_eq!(receipt.projects_refused, vec![]);
+        assert_eq!(
+            fs::read_to_string(&target_file).unwrap(),
+            slim,
+            "the target must end up with the slimmed copy"
+        );
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// An unchanged project ships nothing the second time, and a removed
+    /// session becomes a tombstone the importer reports but never acts
+    /// on.
+    #[test]
+    fn delta_export_tombstones_a_removal_without_deleting_on_target() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cwd = "/tmp/delta-tomb".to_string();
+        let keep = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let gone = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        seed_project_with_session(&cfg_src, &cwd, keep, "keep\n");
+        seed_project_with_session(&cfg_src, &cwd, gone, "gone\n");
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+
+        let b1 = tmp.path().join("t1.tar.zst");
+        export_to_peer(&cfg_src, &cwd, &b1, "laptop");
+        import_bundle(&cfg_target, &b1, ImportOptions::default()).unwrap();
+
+        // Source drops one session (retention sweep, prune, whatever).
+        let src_slug = cfg_src
+            .join("projects")
+            .join(sanitize_path(&nfc::nfc(&cwd)));
+        fs::remove_file(src_slug.join(format!("{gone}.jsonl"))).unwrap();
+
+        let b2 = tmp.path().join("t2.tar.zst");
+        export_to_peer(&cfg_src, &cwd, &b2, "laptop");
+        assert!(
+            shipped_jsonl(&b2).is_empty(),
+            "nothing changed, so no session payload ships: {:?}",
+            shipped_jsonl(&b2)
+        );
+
+        let receipt = import_bundle(
+            &cfg_target,
+            &b2,
+            merge_opts(Some(conflicts::MergePreference::Imported)),
+        )
+        .unwrap();
+        assert_eq!(
+            receipt.tombstones,
+            vec![format!("{gone}.jsonl")],
+            "the removal must be reported"
+        );
+        assert!(
+            cfg_target
+                .join("projects")
+                .join(plan::target_slug(&cwd))
+                .join(format!("{gone}.jsonl"))
+                .exists(),
+            "a tombstone must never delete the target's copy"
+        );
 
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }
@@ -1762,6 +2662,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1826,6 +2727,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: Some(age::secrecy::SecretString::from("pw".to_string())),
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();
@@ -1899,6 +2801,7 @@ mod tests {
                 account_stubs: None,
                 encrypt_passphrase: None,
                 sign_password: None,
+                since_peer: None,
             },
         )
         .unwrap();

@@ -151,6 +151,7 @@ fn row32_encrypt_returns_not_implemented_no_partial_state() {
         account_stubs: None,
         encrypt_passphrase: None,
         sign_password: None,
+        since_peer: None,
     };
     let err = crate::migrate::export_projects(&cfg, opts).unwrap_err();
     // After v1 encryption support landed, missing passphrase became a

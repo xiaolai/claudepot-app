@@ -161,6 +161,7 @@ fn row21_round_trip_export_inspect_export_diff() {
             account_stubs: None,
             encrypt_passphrase: None,
             sign_password: None,
+            since_peer: None,
         },
     )
     .unwrap();
@@ -188,6 +189,7 @@ fn row21_round_trip_export_inspect_export_diff() {
             account_stubs: None,
             encrypt_passphrase: None,
             sign_password: None,
+            since_peer: None,
         },
     )
     .unwrap();

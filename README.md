@@ -54,7 +54,7 @@ If you use Claude Code or Claude Desktop daily, you've probably hit at least one
 
 ### Install
 
-> **Status: beta** (`0.4.5`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
+> **Status: beta** (`0.4.6`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
 
 You'll need a recent **Rust toolchain** ([rustup.rs](https://rustup.rs)) and **Node 20+** with **pnpm** ([pnpm.io](https://pnpm.io)). No other system dependencies.
 
@@ -180,6 +180,10 @@ claudepot experimental board                        # durable agent-written
                                                     # is self-declared, not
                                                     # authenticated.
 claudepot export / import                           # *.claudepot.tar.zst bundles
+                    export --since-peer <id>        # ship only what changed
+                    import --mode=merge             # union into an existing
+                            --prefer-imported|-target #  project; refuses an
+                                                    #  id collision otherwise
 claudepot migrate   inspect | undo
 claudepot doctor                                    # health check
 claudepot status                                    # ground-truth auth status

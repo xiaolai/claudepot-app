@@ -207,6 +207,18 @@ pub fn snapshot_file(bundle_id: &str, target: &Path) -> Result<Option<PathBuf>, 
         .map(|e| format!(".{}", e.to_string_lossy()))
         .unwrap_or_default();
     let snap = dir.join(format!("{key}{suffix}"));
+    // First snapshot of this target wins, and later ones are no-ops.
+    //
+    // The name is deterministic per `(bundle_id, target)`, so a target
+    // touched twice in one import — `~/.claude.json` and
+    // `history.jsonl` are written once per project, and a bundle may
+    // carry several — would otherwise have its pre-import snapshot
+    // overwritten by mid-import bytes on the second write. Rollback
+    // restores LIFO, and every step for that target points at this one
+    // path, so the content it holds must be the *pre-import* state.
+    if snap.exists() {
+        return Ok(Some(snap));
+    }
     fs::copy(target, &snap).map_err(MigrateError::from)?;
     Ok(Some(snap))
 }

@@ -50,6 +50,14 @@ pub struct ExportArgs {
     /// Optional minisign signature over the manifest sha256.
     #[arg(long, value_name = "KEYFILE")]
     pub sign: Option<String>,
+    /// Export only what changed since the last export to this peer.
+    /// The id is yours to choose — any stable label for the receiving
+    /// machine (e.g. `laptop`). Omit for a full bundle.
+    ///
+    /// Files removed since that export ride along as tombstones, which
+    /// the importer reports and never acts on.
+    #[arg(long, value_name = "PEER_ID")]
+    pub since_peer: Option<String>,
 }
 
 /// `project export <project-prefix>... [opts]`
@@ -64,6 +72,7 @@ pub fn export(ctx: &AppContext, args: ExportArgs) -> Result<()> {
         no_file_history,
         encrypt,
         sign: sign_keyfile,
+        since_peer,
     } = args;
     if project_prefixes.is_empty() {
         return Err(anyhow!("at least one project-prefix is required"));
@@ -130,6 +139,7 @@ pub fn export(ctx: &AppContext, args: ExportArgs) -> Result<()> {
         encrypt_passphrase,
         sign_keyfile,
         sign_password,
+        since_peer,
         account_stubs,
     };
 
