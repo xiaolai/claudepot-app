@@ -29,7 +29,26 @@ import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
 export const dynamic = "force-dynamic";
 
 export async function generateStaticParams() {
-  return (await getAllTags()).map((t) => ({ slug: t.slug }));
+  try {
+    return (await getAllTags()).map((t) => ({ slug: t.slug }));
+  } catch (err) {
+    // No reachable database at build time. Two real cases: a Preview
+    // deployment, which has no NEON_DATABASE_URL (the variable is scoped
+    // to Development and Production), and a Neon cold start racing the
+    // production build.
+    //
+    // Returning [] is safe *because of* `force-dynamic` above — these
+    // params are a prerender hint, not the route's only entry, so every
+    // slug still renders on demand and unknown ones still reach
+    // notFound(). The only thing lost is a warm cache on first hit.
+    // Throwing instead fails the whole build, which trades that warm
+    // cache for no site at all.
+    console.warn(
+      "[c/[slug]] generateStaticParams: no tags prerendered (database unreachable at build time)",
+      err,
+    );
+    return [];
+  }
 }
 
 export default async function TagPage({

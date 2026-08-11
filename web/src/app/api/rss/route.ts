@@ -3,6 +3,11 @@ import { NextResponse } from "next/server";
 import { getSubmissionsByHot } from "@/db/queries";
 import { escapeXml as escape } from "@/lib/escape-xml";
 
+// Rendered per request, not at build — same reasoning as sitemap.ts: a
+// prerendered feed goes stale at deploy time, and building it makes the
+// database a hard build dependency.
+export const dynamic = "force-dynamic";
+
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://claudepot.com";
 
 export async function GET() {
