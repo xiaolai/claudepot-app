@@ -174,6 +174,18 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     `(size, mtime_ns)` rather than a high-water mark, because
     `session slim` rewrites transcripts *smaller* in place and
     retention deletes them outright; a watermark skips both.
+  - `automations.json` — the **legacy v1** agents file, read only by
+    the v1 → v2 migration in `AgentStore::open_at` and never written.
+    v2 is `agents.json`. Kept documented because it still exists on
+    any install that predates the rename, and a stray file in the data
+    dir with no entry here reads as unexplained.
+  - `cc_tips_catalog.json` — cache of the tips catalog extracted from
+    the CC binary. Owned by `claudepot-core::cc_tips::catalog`. Pure
+    cache: safe to delete, rebuilt on next extraction. Resolved
+    through `paths::claudepot_data_dir()` rather than a hand-built
+    `$HOME/.claudepot` — the hardcoded form bypassed both the
+    `CLAUDEPOT_DATA_DIR` override and the test-isolation guard, which
+    let a test write into the developer's live data root.
 
 ## Pricing (Activities → Cost, and every "on API" figure)
 

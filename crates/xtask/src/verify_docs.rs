@@ -24,7 +24,12 @@
 //!    page, and the spelled-out count matches;
 //! 3. every `*.db` filename under the Claudepot data dir appears in
 //!    AGENTS.md;
-//! 4. every documented screenshot exists and its two committed copies
+//! 4. every `*.json` state file joined onto `claudepot_data_dir()`
+//!    appears in AGENTS.md — the JSON half of the same claim, which
+//!    went unchecked until 2026-08-12 while AGENTS.md asserted the
+//!    whole data-dir list was gated. `migrate-peers.json` was added
+//!    and the gate stayed green;
+//! 5. every documented screenshot exists and its two committed copies
 //!    are byte-identical.
 //!
 //! Screenshot *freshness* is deliberately not here — see
@@ -93,6 +98,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_cli_verbs(repo, &mut problems)?;
     check_settings_panes(repo, &mut problems)?;
     check_data_dir_databases(repo, &mut problems)?;
+    check_data_dir_json_state(repo, &mut problems)?;
     // Screenshot *freshness* is `cargo xtask verify-screenshots`, on
     // demand — see that function for why it is not a pull-request gate.
     check_screenshot_pairs(repo, &mut problems)?;
@@ -100,7 +106,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
 
     if problems.is_empty() {
         println!(
-            "verify-docs: ok — CLI verbs, Settings panes, databases and the \
+            "verify-docs: ok — CLI verbs, Settings panes, databases, data-dir JSON state and the \
              cc-env spec all in sync"
         );
         return Ok(());
@@ -271,22 +277,52 @@ fn check_settings_panes(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
 // ─── 3. Databases under the data dir ─────────────────────────────────
 
 /// `*.db` filenames joined onto `claudepot_data_dir()` anywhere in core.
+/// Everything before the file's `#[cfg(test)] mod …` block.
+///
+/// Test modules are full of scratch names (`test.db`, `fresh.db`,
+/// `a.db`) that nobody should document, and a check that reports those
+/// trains people to ignore it.
+///
+/// Cutting at the first `#[cfg(test)]` — what this did originally — is
+/// wrong, and was silently losing coverage. `#[cfg(test)]` also marks
+/// individual methods and fields: `agent/store.rs` carries one at line
+/// 791 while its test module starts at 1280, so ~490 lines of
+/// production code (including `agents_file_path()`, which builds
+/// `agents.json`) sat outside the scan. The cut must therefore be the
+/// attribute that introduces a *module*, not any occurrence of it.
+fn production_only(text: &str) -> &str {
+    let mut from = 0usize;
+    while let Some(i) = text[from..].find("#[cfg(test)]") {
+        let at = from + i;
+        let after = text[at + "#[cfg(test)]".len()..].trim_start();
+        if after.starts_with("mod ") || after.starts_with("pub mod ") {
+            return &text[..at];
+        }
+        from = at + "#[cfg(test)]".len();
+    }
+    text
+}
+
 fn shipped_databases(repo: &Path) -> Result<BTreeSet<String>> {
     let mut out = BTreeSet::new();
     let root = repo.join("crates/claudepot-core/src");
     walk_rs(&root, &mut |text| {
-        // Production code only. Test modules are full of scratch names
-        // (`test.db`, `fresh.db`, `a.db`) that no one should document,
-        // and a check that reports those trains people to ignore it.
-        // This repo puts `#[cfg(test)] mod tests` at the end of a file,
-        // so truncating there is both simple and accurate.
-        let text = match text.find("#[cfg(test)]") {
-            Some(i) => &text[..i],
-            None => text,
-        };
-        let mut rest = text;
-        while let Some(i) = rest.find(".join(\"") {
-            rest = &rest[i + 7..];
+        let text = production_only(text);
+        let mut from = 0usize;
+        while let Some(i) = text[from..].find(".join(\"") {
+            let at = from + i;
+            from = at + 7;
+            // Deliberately NOT anchored on `claudepot_data_dir()` the way
+            // the JSON scan is: most databases are reached through their
+            // own path helper rather than a direct join, so anchoring
+            // would lose most of the coverage. `.db` is unambiguous
+            // enough to match loosely — except for tempdir scratch files,
+            // which always come through `dir.path().join(…)` and are the
+            // one shape that must be excluded.
+            if text[..at].ends_with(".path()") {
+                continue;
+            }
+            let rest = &text[from..];
             if let Some(end) = rest.find('"') {
                 let name = &rest[..end];
                 if name.ends_with(".db") {
@@ -319,6 +355,88 @@ fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<(
         if !agents.contains(&db) {
             problems.push(format!(
                 "`{db}` lives under the Claudepot data dir but AGENTS.md never names it \
+                 — an agent reading AGENTS.md will not know it exists"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// JSON state files under the Claudepot data dir, as the source
+/// actually builds them.
+///
+/// Anchored on `claudepot_data_dir()` rather than on the `.json`
+/// suffix, which is the whole difference from [`shipped_databases`].
+/// `.db` is unambiguous — nothing else in this codebase ends in it —
+/// but `.json` names CC's `settings.json`, `~/.claude.json`, bundle
+/// entries like `manifest.json` and `tombstones.json`, and generated
+/// specs. Matching the suffix alone would report a dozen files that do
+/// not belong in AGENTS.md's data-dir list, and a check that cries wolf
+/// is one people learn to skip.
+///
+/// **Known limit:** only the direct `claudepot_data_dir().join("x.json")`
+/// chain is detected. A path assembled through an intermediate
+/// binding (`let d = claudepot_data_dir(); d.join(…)`) is missed. No
+/// such site exists today — the assertion below fails loudly if the
+/// detector ever stops finding the files AGENTS.md documents, which is
+/// what turns this from a check that *cannot* fail into one that has
+/// been watched failing.
+fn json_state_in(text: &str, out: &mut BTreeSet<String>) {
+    const ANCHOR: &str = "claudepot_data_dir()";
+    // Enough to clear a rustfmt line break plus indentation between the
+    // anchor and its `.join(`, and short enough that an unrelated
+    // `.join("x.json")` further down the function is not swept in.
+    const WINDOW: usize = 160;
+
+    let mut from = 0usize;
+    while let Some(i) = text[from..].find(ANCHOR) {
+        let start = from + i + ANCHOR.len();
+        from = start;
+        let window = &text[start..text.len().min(start + WINDOW)];
+        let Some(j) = window.find(".join(\"") else {
+            continue;
+        };
+        let rest = &window[j + 7..];
+        if let Some(end) = rest.find('"') {
+            let name = &rest[..end];
+            if name.ends_with(".json") {
+                out.insert(name.to_string());
+            }
+        }
+    }
+}
+
+fn shipped_json_state(repo: &Path) -> Result<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+    let root = repo.join("crates/claudepot-core/src");
+    walk_rs(&root, &mut |text| {
+        json_state_in(production_only(text), &mut out)
+    })?;
+    Ok(out)
+}
+
+fn check_data_dir_json_state(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let agents = read(repo, "AGENTS.md")?;
+    let shipped = shipped_json_state(repo)?;
+
+    // Guard against the detector silently finding nothing — a heuristic
+    // that matches zero sites reports "all documented" forever. AGENTS.md
+    // has named `agents.json` since the noun shipped, so its absence
+    // means the anchor pattern moved, not that the file did.
+    if !shipped.contains("agents.json") {
+        problems.push(
+            "the data-dir JSON detector found no `agents.json` — the \
+             `claudepot_data_dir().join(…)` pattern it anchors on has changed, so \
+             this check is now blind. Fix `shipped_json_state`, not AGENTS.md"
+                .to_string(),
+        );
+        return Ok(());
+    }
+
+    for name in shipped {
+        if !agents.contains(&name) {
+            problems.push(format!(
+                "`{name}` lives under the Claudepot data dir but AGENTS.md never names it \
                  — an agent reading AGENTS.md will not know it exists"
             ));
         }
@@ -556,5 +674,71 @@ enum AccountAction {
         assert_eq!(spelled(13), Some("Thirteen"));
         assert_eq!(spelled(14), Some("Fourteen"));
         assert_eq!(spelled(99), None);
+    }
+
+    /// The bug this replaced: cutting at the *first* `#[cfg(test)]`
+    /// silently dropped every production item after an attributed
+    /// method. `agent/store.rs` has one at line 791 and its test module
+    /// at 1280, so `agents_file_path()` — which builds `agents.json` —
+    /// was outside the scan entirely.
+    #[test]
+    fn production_only_cuts_at_the_test_module_not_an_attributed_item() {
+        let src = "\
+fn keep_me() {}
+impl S {
+    #[cfg(test)]
+    fn helper() {}
+}
+fn also_keep_me() {}
+#[cfg(test)]
+mod tests {
+    fn scratch() {}
+}
+";
+        let kept = production_only(src);
+        assert!(
+            kept.contains("also_keep_me"),
+            "production item after an attributed method must survive"
+        );
+        assert!(!kept.contains("scratch"), "the test module must be cut");
+    }
+
+    #[test]
+    fn production_only_is_identity_without_a_test_module() {
+        let src = "fn only() {}\n";
+        assert_eq!(production_only(src), src);
+    }
+
+    #[test]
+    fn json_state_matches_only_data_dir_joins() {
+        let mut out = BTreeSet::new();
+        json_state_in(
+            r#"
+            fn a() -> PathBuf { claudepot_data_dir().join("agents.json") }
+            fn b() -> PathBuf { crate::paths::claudepot_data_dir().join("routes.json") }
+            // Not the data dir: CC's own settings, and a bundle entry.
+            fn c() -> PathBuf { config_dir.join("settings.json") }
+            fn d() -> PathBuf { staged.join("manifest.json") }
+            // Not JSON.
+            fn e() -> PathBuf { claudepot_data_dir().join("corpus.db") }
+            "#,
+            &mut out,
+        );
+        assert_eq!(
+            out.into_iter().collect::<Vec<_>>(),
+            vec!["agents.json".to_string(), "routes.json".to_string()]
+        );
+    }
+
+    /// rustfmt breaks the chain across lines once the receiver is long
+    /// enough; the scan has to survive that or it goes quietly blind.
+    #[test]
+    fn json_state_survives_a_wrapped_chain() {
+        let mut out = BTreeSet::new();
+        json_state_in(
+            "crate::paths::claudepot_data_dir()\n            .join(\"usage_alert_state.json\")",
+            &mut out,
+        );
+        assert!(out.contains("usage_alert_state.json"));
     }
 }
