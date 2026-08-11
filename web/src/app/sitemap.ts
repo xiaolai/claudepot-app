@@ -2,6 +2,14 @@ import type { MetadataRoute } from "next";
 
 import { getSitemapSubmissions, getAllTags } from "@/db/queries";
 
+// Rendered per request, not at build. Two reasons, both load-bearing:
+// a build-time sitemap freezes at deploy time and goes stale as
+// submissions land, and generating it at build makes the database a
+// hard build dependency — which is how a Preview deployment (no
+// NEON_DATABASE_URL; the variable is scoped to Development and
+// Production) and a Neon cold start could each fail the whole build.
+export const dynamic = "force-dynamic";
+
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://claudepot.com";
 
 // Static product-docs routes under /app — mirrors the on-disk
