@@ -43,10 +43,12 @@
   "pnpm": {
     "overrides": {
       "@babel/core": "^7.29.6",
-      "dompurify": "3.4.12",
+      "dompurify": "3.4.13",
       "esbuild": "^0.28.1",
-      "postcss": "8.5.18",
-      "undici": "^7.28.0",
+      "mermaid": "^11.16.1",
+      "nanoid": "^3.3.17",
+      "postcss": "8.5.23",
+      "undici": "^7.29.0",
       "uuid": "11.1.1"
     }
   },
