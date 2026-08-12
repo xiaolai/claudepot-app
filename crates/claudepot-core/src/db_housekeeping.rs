@@ -19,6 +19,12 @@ use std::time::Duration;
 /// Filenames Claudepot writes inside its data dir. Kept exhaustive
 /// so future stores added to `claudepot-core` show up here too —
 /// missing one only means a small `*.db-wal` leak, never data loss.
+///
+/// "Kept exhaustive" was aspirational until 2026-08-12: `boards.db`
+/// and `corpus.db` had both shipped without being added, so both were
+/// leaking WAL sidecars. `cargo xtask verify-docs` now cross-checks
+/// this list against the `.db` filenames it finds in source, so the
+/// next omission fails a gate instead of relying on someone noticing.
 pub(crate) const KNOWN_DB_FILENAMES: &[&str] = &[
     "sessions.db",
     "activity_metrics.db",
@@ -26,6 +32,8 @@ pub(crate) const KNOWN_DB_FILENAMES: &[&str] = &[
     "accounts.db",
     "keys.db",
     "env-vault.db",
+    "boards.db",
+    "corpus.db",
 ];
 
 /// Short busy_timeout for the throw-away connections. If another

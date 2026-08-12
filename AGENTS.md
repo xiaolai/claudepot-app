@@ -179,6 +179,11 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     v2 is `agents.json`. Kept documented because it still exists on
     any install that predates the rename, and a stray file in the data
     dir with no entry here reads as unexplained.
+  - `pricing-cache.json` — cached result of the live pricing scrape.
+    Owned by `claudepot-core::pricing` (`CACHE_FILENAME`). Pure cache:
+    safe to delete, refetched on next scrape. Distinct from
+    `pricing-history.json`, which is an append-only record of observed
+    rate *changes* and is not regenerable — see "## Pricing".
   - `cc_tips_catalog.json` — cache of the tips catalog extracted from
     the CC binary. Owned by `claudepot-core::cc_tips::catalog`. Pure
     cache: safe to delete, rebuilt on next extraction. Resolved

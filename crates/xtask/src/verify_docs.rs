@@ -39,7 +39,7 @@
 //! thing and forgot to say so", which is the whole observed failure.
 
 use anyhow::{bail, Context, Result};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Screenshots, and the source whose UI they depict.
@@ -290,6 +290,55 @@ fn check_settings_panes(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
 /// production code (including `agents_file_path()`, which builds
 /// `agents.json`) sat outside the scan. The cut must therefore be the
 /// attribute that introduces a *module*, not any occurrence of it.
+/// `const NAME: &str = "value";` declarations in one file.
+///
+/// Needed because filenames are not always literals at the join site.
+/// `board/mod.rs` writes
+/// `claudepot_data_dir().join(BOARDS_DB_FILENAME)`, and a scan that
+/// only reads string literals is structurally blind to it — which is
+/// how `boards.db` stayed out of `KNOWN_DB_FILENAMES` long enough to
+/// leak WAL sidecars, with a docs gate reporting green the whole time.
+fn const_strings(text: &str) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for line in text.lines() {
+        let l = line.trim_start();
+        let l = l.strip_prefix("pub ").unwrap_or(l);
+        let l = l.strip_prefix("pub(crate) ").unwrap_or(l);
+        let Some(rest) = l.strip_prefix("const ") else {
+            continue;
+        };
+        let Some((name, tail)) = rest.split_once(':') else {
+            continue;
+        };
+        let Some(v) = tail
+            .split_once('"')
+            .and_then(|(_, r)| r.find('"').map(|e| r[..e].to_string()))
+        else {
+            continue;
+        };
+        out.insert(name.trim().to_string(), v);
+    }
+    out
+}
+
+/// The filename passed to `.join(…)`, whether written as a literal or
+/// as a const declared in the same file. `None` for anything else —
+/// a variable, an expression, a `format!` — which the caller skips.
+fn join_arg(after_join: &str, consts: &BTreeMap<String, String>) -> Option<String> {
+    let rest = after_join.trim_start();
+    if let Some(r) = rest.strip_prefix('"') {
+        return r.find('"').map(|e| r[..e].to_string());
+    }
+    let ident: String = rest
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    if ident.is_empty() {
+        return None;
+    }
+    consts.get(&ident).cloned()
+}
+
 fn production_only(text: &str) -> &str {
     let mut from = 0usize;
     while let Some(i) = text[from..].find("#[cfg(test)]") {
@@ -307,11 +356,12 @@ fn shipped_databases(repo: &Path) -> Result<BTreeSet<String>> {
     let mut out = BTreeSet::new();
     let root = repo.join("crates/claudepot-core/src");
     walk_rs(&root, &mut |text| {
+        let consts = const_strings(text);
         let text = production_only(text);
         let mut from = 0usize;
-        while let Some(i) = text[from..].find(".join(\"") {
+        while let Some(i) = text[from..].find(".join(") {
             let at = from + i;
-            from = at + 7;
+            from = at + 6;
             // Deliberately NOT anchored on `claudepot_data_dir()` the way
             // the JSON scan is: most databases are reached through their
             // own path helper rather than a direct join, so anchoring
@@ -322,11 +372,9 @@ fn shipped_databases(repo: &Path) -> Result<BTreeSet<String>> {
             if text[..at].ends_with(".path()") {
                 continue;
             }
-            let rest = &text[from..];
-            if let Some(end) = rest.find('"') {
-                let name = &rest[..end];
+            if let Some(name) = join_arg(&text[from..], &consts) {
                 if name.ends_with(".db") {
-                    out.insert(name.to_string());
+                    out.insert(name);
                 }
             }
         }
@@ -349,13 +397,61 @@ fn walk_rs(dir: &Path, f: &mut impl FnMut(&str)) -> Result<()> {
     Ok(())
 }
 
+/// The `KNOWN_DB_FILENAMES` const, as declared in `db_housekeeping`.
+fn known_db_filenames(src: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let Some(start) = src.find("KNOWN_DB_FILENAMES") else {
+        return out;
+    };
+    let body = &src[start..];
+    let Some(end) = body.find("];") else {
+        return out;
+    };
+    let mut rest = &body[..end];
+    while let Some(i) = rest.find('"') {
+        rest = &rest[i + 1..];
+        if let Some(j) = rest.find('"') {
+            let name = &rest[..j];
+            if name.ends_with(".db") {
+                out.insert(name.to_string());
+            }
+            rest = &rest[j + 1..];
+        }
+    }
+    out
+}
+
 fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let agents = read(repo, "AGENTS.md")?;
-    for db in shipped_databases(repo)? {
-        if !agents.contains(&db) {
+    let shipped = shipped_databases(repo)?;
+
+    // The WAL-cleanup list must cover every database that actually
+    // ships. Its own doc comment calls it exhaustive, and it was not:
+    // `boards.db` and `corpus.db` both shipped without being added, so
+    // both leaked `*.db-wal` sidecars until 2026-08-12. Nothing catches
+    // that at runtime — the leak is small and silent, which is exactly
+    // the kind of omission a gate has to notice instead of a person.
+    let housekeeping = read(repo, "crates/claudepot-core/src/db_housekeeping.rs")?;
+    let known = known_db_filenames(&housekeeping);
+    if known.is_empty() {
+        problems.push(
+            "could not parse `KNOWN_DB_FILENAMES` from db_housekeeping.rs — the WAL-cleanup \
+             cross-check is blind. Fix `known_db_filenames`, not the const"
+                .to_string(),
+        );
+    }
+
+    for db in &shipped {
+        if !agents.contains(db.as_str()) {
             problems.push(format!(
                 "`{db}` lives under the Claudepot data dir but AGENTS.md never names it \
                  — an agent reading AGENTS.md will not know it exists"
+            ));
+        }
+        if !known.is_empty() && !known.contains(db) {
+            problems.push(format!(
+                "`{db}` ships but is absent from `KNOWN_DB_FILENAMES` in db_housekeeping.rs \
+                 — its `*.db-wal` sidecar will never be cleaned up"
             ));
         }
     }
@@ -381,7 +477,7 @@ fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<(
 /// detector ever stops finding the files AGENTS.md documents, which is
 /// what turns this from a check that *cannot* fail into one that has
 /// been watched failing.
-fn json_state_in(text: &str, out: &mut BTreeSet<String>) {
+fn json_state_in(text: &str, consts: &BTreeMap<String, String>, out: &mut BTreeSet<String>) {
     const ANCHOR: &str = "claudepot_data_dir()";
     // Enough to clear a rustfmt line break plus indentation between the
     // anchor and its `.join(`, and short enough that an unrelated
@@ -393,14 +489,12 @@ fn json_state_in(text: &str, out: &mut BTreeSet<String>) {
         let start = from + i + ANCHOR.len();
         from = start;
         let window = &text[start..text.len().min(start + WINDOW)];
-        let Some(j) = window.find(".join(\"") else {
+        let Some(j) = window.find(".join(") else {
             continue;
         };
-        let rest = &window[j + 7..];
-        if let Some(end) = rest.find('"') {
-            let name = &rest[..end];
+        if let Some(name) = join_arg(&window[j + 6..], consts) {
             if name.ends_with(".json") {
-                out.insert(name.to_string());
+                out.insert(name);
             }
         }
     }
@@ -410,7 +504,8 @@ fn shipped_json_state(repo: &Path) -> Result<BTreeSet<String>> {
     let mut out = BTreeSet::new();
     let root = repo.join("crates/claudepot-core/src");
     walk_rs(&root, &mut |text| {
-        json_state_in(production_only(text), &mut out)
+        let consts = const_strings(text);
+        json_state_in(production_only(text), &consts, &mut out)
     })?;
     Ok(out)
 }
@@ -703,6 +798,38 @@ mod tests {
         assert!(!kept.contains("scratch"), "the test module must be cut");
     }
 
+    /// The blindness that let `boards.db` ship unlisted: its filename
+    /// is a const, so `.join(BOARDS_DB_FILENAME)` carries no literal
+    /// for a string scan to find.
+    #[test]
+    fn join_arg_resolves_a_const_filename() {
+        let consts = const_strings("pub const BOARDS_DB_FILENAME: &str = \"boards.db\";\n");
+        assert_eq!(
+            consts.get("BOARDS_DB_FILENAME").map(String::as_str),
+            Some("boards.db")
+        );
+        assert_eq!(
+            join_arg("BOARDS_DB_FILENAME)", &consts).as_deref(),
+            Some("boards.db")
+        );
+        // Literals still work, and an unresolvable expression is skipped
+        // rather than guessed at.
+        assert_eq!(join_arg("\"x.db\")", &consts).as_deref(), Some("x.db"));
+        assert_eq!(join_arg("some_var)", &consts), None);
+    }
+
+    #[test]
+    fn json_state_resolves_a_const_filename() {
+        let consts = const_strings("const CACHE_FILENAME: &str = \"pricing-cache.json\";\n");
+        let mut out = BTreeSet::new();
+        json_state_in(
+            "claudepot_data_dir().join(CACHE_FILENAME)",
+            &consts,
+            &mut out,
+        );
+        assert!(out.contains("pricing-cache.json"));
+    }
+
     #[test]
     fn production_only_is_identity_without_a_test_module() {
         let src = "fn only() {}\n";
@@ -722,6 +849,7 @@ mod tests {
             // Not JSON.
             fn e() -> PathBuf { claudepot_data_dir().join("corpus.db") }
             "#,
+            &BTreeMap::new(),
             &mut out,
         );
         assert_eq!(
@@ -737,6 +865,7 @@ mod tests {
         let mut out = BTreeSet::new();
         json_state_in(
             "crate::paths::claudepot_data_dir()\n            .join(\"usage_alert_state.json\")",
+            &BTreeMap::new(),
             &mut out,
         );
         assert!(out.contains("usage_alert_state.json"));
