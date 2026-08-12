@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../api", () => ({
@@ -60,6 +60,20 @@ function input(): HTMLElement {
 }
 
 describe("CommandPalette — keyboard activation targets the visible row", () => {
+  // Pin the optional-section state. Boards is the optional tenth
+  // section, off by default and persisted in localStorage — so the
+  // palette renders nine rows or ten depending on what a previous test
+  // in this file left behind. That is the real cause of the
+  // intermittent `expected 9 to be 10`: the row set moved underneath
+  // the test, and no amount of flushing async renders touches it.
+  //
+  // Clearing rather than setting "0": the module also keeps an
+  // in-memory mirror for when storage is unavailable, and an absent key
+  // exercises the same default-off path the app boots into.
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it("Enter on the initially-selected row runs that row, not another category's", () => {
     const h = renderPalette();
 
