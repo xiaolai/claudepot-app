@@ -6,7 +6,27 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.8 — beta (unreleased)
+## 0.4.9 — beta (unreleased)
+
+### Fixed
+
+- **Per-model rate limits were invisible.** Anthropic moved the
+  per-model windows out of the `seven_day_<model>` keys — which now
+  return null on every account — into a generic `limits[]` array that
+  nothing parsed. The Activities and Keys usage views show them again.
+  Thanks to @zhuligs.
+- **An auto-rotation rule on the 7d-Opus or 7d-Sonnet window could
+  never fire, and said "no data" rather than saying so.** Same retired
+  fields as above. The audit reported a transient-sounding skip every
+  tick, so a rule the user believed was armed sat inert indefinitely.
+  It now states plainly that the rule can never fire and needs
+  rewriting against the 5h or 7d window. The replacement data is
+  deliberately not wired up yet: the entry carrying it has no model
+  attribution, and guessing would swap the account on the wrong signal.
+- A test-isolation gap that let one `desktop_backend::swap` test race
+  its siblings and fail intermittently on CI.
+
+## 0.4.8 — beta (released 2026-08-12)
 
 ### Added
 
