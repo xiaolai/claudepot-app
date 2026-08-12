@@ -169,6 +169,11 @@ fn skip_reason_user_text(r: &SkipReason) -> String {
     match r {
         SkipReason::NoActiveSnapshot => "active account has no usage data yet".into(),
         SkipReason::NoWindowData => "the trigger window has no data on the active account".into(),
+        // Says "never", not "not yet" — this rule needs rewriting, and
+        // the sentence has to make that unmistakable.
+        SkipReason::WindowRetiredUpstream => "this rule can never fire — Anthropic no longer \
+             reports the window it watches. Rewrite it against the 5h or 7d window."
+            .into(),
         SkipReason::MinIntervalNotElapsed { secs_since_last } => {
             format!("min-interval guard ({secs_since_last}s since last swap)")
         }

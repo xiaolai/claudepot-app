@@ -46,7 +46,23 @@ pub enum SkipReason {
     /// data (status != Ok or window absent).
     NoActiveSnapshot,
     /// Trigger window not present in active account's snapshot.
+    ///
+    /// Transient by nature: a fetch failed, or the account has not been
+    /// polled yet. The next tick may well succeed.
     NoWindowData,
+    /// The trigger window is one upstream no longer reports at all, so
+    /// the rule can **never** fire — not this tick, not any tick.
+    ///
+    /// Distinct from [`Self::NoWindowData`] on purpose. Both produce a
+    /// skip, but they call for opposite responses: `NoWindowData` says
+    /// wait, this says the rule is dead and needs rewriting. Reporting
+    /// a permanent condition with a transient-sounding reason is how a
+    /// guard the user believes is armed sits inert indefinitely, which
+    /// is the dangerous direction for a rotation rule.
+    ///
+    /// See [`window_is_retired`] for which windows this covers and how
+    /// that was established.
+    WindowRetiredUpstream,
     /// `min_interval_secs` rejected the fire (too soon after last swap).
     MinIntervalNotElapsed { secs_since_last: i64 },
     /// `max_swaps_per_window` cap reached for the current cycle.
@@ -189,7 +205,17 @@ fn evaluate_one(
             return RuleDecision::Skip {
                 rule_id: rule.id.clone(),
                 reason: Some(SkipReasonRecord {
-                    reason: SkipReason::NoWindowData,
+                    // A retired window is reported as such even though
+                    // the immediate symptom is identical to a missing
+                    // one — absent data. The distinction is not
+                    // observable here, which is exactly why it has to
+                    // come from `window_is_retired` rather than from
+                    // the snapshot.
+                    reason: if window_is_retired(window) {
+                        SkipReason::WindowRetiredUpstream
+                    } else {
+                        SkipReason::NoWindowData
+                    },
                     trigger: trigger_summary_below(rule, 0.0),
                     from_email: from_email.to_string(),
                     to_email: None,
@@ -323,6 +349,30 @@ fn window_resets_at(
     kind: UsageWindowKind,
 ) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     pick_window(u, kind).and_then(|w| w.resets_at)
+}
+
+/// Windows Anthropic no longer reports, so a rule targeting one can
+/// never fire.
+///
+/// Established by observation, not inference: a live `/api/oauth/usage`
+/// fetch on 2026-08-12 returned `seven_day_opus`, `seven_day_sonnet`,
+/// `seven_day_cowork`, `seven_day_oauth_apps` and `seven_day_omelette`
+/// **all null**, while `seven_day` and `five_hour` still carried real
+/// numbers. The per-model data moved into the generic `limits[]` array
+/// (see `oauth::usage::UsageLimit`).
+///
+/// Deliberately **not** wired to `limits[]` yet. The replacement entry
+/// is `kind = "weekly_scoped"`, and its `scope` is null on every
+/// account observed so far — so there is no way to tell whether a given
+/// scoped limit refers to Opus or Sonnet. Guessing would swap the
+/// user's account on the wrong signal, which is strictly worse than
+/// refusing to fire. When `scope` starts carrying a model, map it here
+/// and delete the corresponding arm.
+fn window_is_retired(kind: UsageWindowKind) -> bool {
+    matches!(
+        kind,
+        UsageWindowKind::SevenDayOpus | UsageWindowKind::SevenDaySonnet
+    )
 }
 
 fn pick_window(u: &UsageWindows, kind: UsageWindowKind) -> Option<&WindowSnapshot> {
@@ -1395,6 +1445,90 @@ mod tests {
                 SkipReason::NoCandidate(NoCandidateReason::OnlyActive)
             )),
             d => panic!("expected OnlyActive skip, not a self-swap; got {d:?}"),
+        }
+    }
+
+    /// A rule on a window Anthropic no longer reports must say it can
+    /// **never** fire, not that data is merely missing this tick.
+    ///
+    /// The two look identical from inside `evaluate` — both are an
+    /// absent window — which is exactly why the distinction has to come
+    /// from `window_is_retired`. Reporting a permanent fault as a
+    /// transient one leaves the user believing a guard is armed while
+    /// it sits inert, which is the dangerous direction here.
+    #[test]
+    fn a_rule_on_a_retired_window_reports_that_it_can_never_fire() {
+        let active = Uuid::new_v4();
+        let snap = build_snapshot(vec![(
+            active,
+            snap_account("a@x.com", Some(95.0), Some(40.0), true),
+        )]);
+        let rule = RotationRule {
+            id: "opus".into(),
+            enabled: true,
+            trigger: Trigger::UtilizationThreshold {
+                // Null on every live account since 2026-08; the data
+                // moved to `limits[]` with no model attribution.
+                window: UsageWindowKind::SevenDayOpus,
+                pct: 80,
+            },
+            action: Action::RotateTo {
+                selector: Selector::LeastUsed {
+                    window: UsageWindowKind::SevenDayOpus,
+                    candidates: vec!["b@x.com".into()],
+                },
+            },
+            mode: RotationMode::Confirm,
+            guards: RotationGuards::default(),
+        };
+        let decisions = evaluate(&[rule], &snap, active, &[], fixed_now());
+        match &decisions[0] {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => assert!(
+                matches!(rec.reason, SkipReason::WindowRetiredUpstream),
+                "expected WindowRetiredUpstream, got {:?}",
+                rec.reason
+            ),
+            d => panic!("expected a skip, got {d:?}"),
+        }
+    }
+
+    /// The counterpart: a window that still exists but has no data is
+    /// transient and must keep saying so.
+    #[test]
+    fn a_live_window_with_no_data_still_reports_transient() {
+        let active = Uuid::new_v4();
+        let snap = build_snapshot(vec![(active, snap_account("a@x.com", None, None, true))]);
+        let rule = RotationRule {
+            id: "5h".into(),
+            enabled: true,
+            trigger: Trigger::UtilizationThreshold {
+                window: UsageWindowKind::FiveHour,
+                pct: 80,
+            },
+            action: Action::RotateTo {
+                selector: Selector::LeastUsed {
+                    window: UsageWindowKind::FiveHour,
+                    candidates: vec!["b@x.com".into()],
+                },
+            },
+            mode: RotationMode::Confirm,
+            guards: RotationGuards::default(),
+        };
+        let decisions = evaluate(&[rule], &snap, active, &[], fixed_now());
+        match &decisions[0] {
+            RuleDecision::Skip {
+                reason: Some(rec), ..
+            } => assert!(
+                matches!(
+                    rec.reason,
+                    SkipReason::NoWindowData | SkipReason::NoActiveSnapshot
+                ),
+                "a live window must not be reported as retired, got {:?}",
+                rec.reason
+            ),
+            d => panic!("expected a skip, got {d:?}"),
         }
     }
 
