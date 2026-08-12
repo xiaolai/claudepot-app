@@ -6,7 +6,28 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.7 — beta (unreleased)
+## 0.4.8 — beta (unreleased)
+
+### Added
+
+- **Replace a stored key without losing the row.** The Keys pane could
+  add, remove, rename, copy and probe, but not rotate — replacing a key
+  meant remove-then-re-add, which minted a new id and reset the
+  creation date, destroying the answer to "how long has this credential
+  been in service" at exactly the moment you were asking it. Label,
+  account and age now survive; only the secret changes. Any earlier
+  verification result is cleared, because it described a secret that no
+  longer exists.
+
+### Fixed
+
+- **Pasted secrets could survive an early return.** `key_api_add` and
+  `key_oauth_add` scrubbed their working copy only on the success path,
+  so a failure to open the key store dropped the secret unscrubbed —
+  `String`'s own drop does not zero memory. All four add/rotate paths
+  now scrub on every exit.
+
+## 0.4.7 — beta (released 2026-08-12)
 
 ### Fixed
 
