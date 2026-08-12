@@ -82,8 +82,8 @@ describe("CleanupPane", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Preview$/i }));
     await waitFor(() => {
       expect(screen.getByTestId("prune-preview")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Prune → Trash/i })).not.toBeDisabled();
     });
-    expect(screen.getByRole("button", { name: /Prune → Trash/i })).not.toBeDisabled();
   });
 
   it("Prune → Trash calls sessionPruneStart with the same filter shape", async () => {
