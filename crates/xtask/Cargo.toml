@@ -18,3 +18,11 @@ serde_json.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+# Real parsing for the data-dir scans in `verify_docs`. String matching
+# there produced three distinct blindness bugs — truncating at the first
+# `#[cfg(test)]`, seeing only string literals, and resolving consts only
+# within one file — each fix a heuristic layered on the last. `syn` is
+# already vendored transitively (serde_derive, thiserror) and xtask is
+# workspace automation that never ships, so the cost is build time in a
+# dev tool and the payoff is that all three classes become unreachable.
+syn = { version = "2", features = ["full", "visit", "parsing"] }

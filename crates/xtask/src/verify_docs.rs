@@ -39,7 +39,7 @@
 //! thing and forgot to say so", which is the whole observed failure.
 
 use anyhow::{bail, Context, Result};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Screenshots, and the source whose UI they depict.
@@ -290,114 +290,6 @@ fn check_settings_panes(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
 /// production code (including `agents_file_path()`, which builds
 /// `agents.json`) sat outside the scan. The cut must therefore be the
 /// attribute that introduces a *module*, not any occurrence of it.
-/// `const NAME: &str = "value";` declarations in one file.
-///
-/// Needed because filenames are not always literals at the join site.
-/// `board/mod.rs` writes
-/// `claudepot_data_dir().join(BOARDS_DB_FILENAME)`, and a scan that
-/// only reads string literals is structurally blind to it — which is
-/// how `boards.db` stayed out of `KNOWN_DB_FILENAMES` long enough to
-/// leak WAL sidecars, with a docs gate reporting green the whole time.
-fn const_strings(text: &str) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    for line in text.lines() {
-        let l = line.trim_start();
-        let l = l.strip_prefix("pub ").unwrap_or(l);
-        let l = l.strip_prefix("pub(crate) ").unwrap_or(l);
-        let Some(rest) = l.strip_prefix("const ") else {
-            continue;
-        };
-        let Some((name, tail)) = rest.split_once(':') else {
-            continue;
-        };
-        let Some(v) = tail
-            .split_once('"')
-            .and_then(|(_, r)| r.find('"').map(|e| r[..e].to_string()))
-        else {
-            continue;
-        };
-        out.insert(name.trim().to_string(), v);
-    }
-    out
-}
-
-/// The filename passed to `.join(…)`, whether written as a literal or
-/// as a const declared in the same file. `None` for anything else —
-/// a variable, an expression, a `format!` — which the caller skips.
-fn join_arg(after_join: &str, consts: &BTreeMap<String, String>) -> Option<String> {
-    let rest = after_join.trim_start();
-    if let Some(r) = rest.strip_prefix('"') {
-        return r.find('"').map(|e| r[..e].to_string());
-    }
-    let ident: String = rest
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    if ident.is_empty() {
-        return None;
-    }
-    consts.get(&ident).cloned()
-}
-
-fn production_only(text: &str) -> &str {
-    let mut from = 0usize;
-    while let Some(i) = text[from..].find("#[cfg(test)]") {
-        let at = from + i;
-        let after = text[at + "#[cfg(test)]".len()..].trim_start();
-        if after.starts_with("mod ") || after.starts_with("pub mod ") {
-            return &text[..at];
-        }
-        from = at + "#[cfg(test)]".len();
-    }
-    text
-}
-
-fn shipped_databases(repo: &Path) -> Result<BTreeSet<String>> {
-    let mut out = BTreeSet::new();
-    let root = repo.join("crates/claudepot-core/src");
-    walk_rs(&root, &mut |text| {
-        let consts = const_strings(text);
-        let text = production_only(text);
-        let mut from = 0usize;
-        while let Some(i) = text[from..].find(".join(") {
-            let at = from + i;
-            from = at + 6;
-            // Deliberately NOT anchored on `claudepot_data_dir()` the way
-            // the JSON scan is: most databases are reached through their
-            // own path helper rather than a direct join, so anchoring
-            // would lose most of the coverage. `.db` is unambiguous
-            // enough to match loosely — except for tempdir scratch files,
-            // which always come through `dir.path().join(…)` and are the
-            // one shape that must be excluded.
-            if text[..at].ends_with(".path()") {
-                continue;
-            }
-            if let Some(name) = join_arg(&text[from..], &consts) {
-                if name.ends_with(".db") {
-                    out.insert(name);
-                }
-            }
-        }
-    })?;
-    Ok(out)
-}
-
-fn walk_rs(dir: &Path, f: &mut impl FnMut(&str)) -> Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            walk_rs(&path, f)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                f(&text);
-            }
-        }
-    }
-    Ok(())
-}
-
-/// The `KNOWN_DB_FILENAMES` const, as declared in `db_housekeeping`.
 fn known_db_filenames(src: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let Some(start) = src.find("KNOWN_DB_FILENAMES") else {
@@ -423,7 +315,7 @@ fn known_db_filenames(src: &str) -> BTreeSet<String> {
 
 fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let agents = read(repo, "AGENTS.md")?;
-    let shipped = shipped_databases(repo)?;
+    let shipped = crate::data_dir_scan::scan(&repo.join("crates/claudepot-core/src"))?.dbs;
 
     // The WAL-cleanup list must cover every database that actually
     // ships. Its own doc comment calls it exhaustive, and it was not:
@@ -458,61 +350,9 @@ fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<(
     Ok(())
 }
 
-/// JSON state files under the Claudepot data dir, as the source
-/// actually builds them.
-///
-/// Anchored on `claudepot_data_dir()` rather than on the `.json`
-/// suffix, which is the whole difference from [`shipped_databases`].
-/// `.db` is unambiguous — nothing else in this codebase ends in it —
-/// but `.json` names CC's `settings.json`, `~/.claude.json`, bundle
-/// entries like `manifest.json` and `tombstones.json`, and generated
-/// specs. Matching the suffix alone would report a dozen files that do
-/// not belong in AGENTS.md's data-dir list, and a check that cries wolf
-/// is one people learn to skip.
-///
-/// **Known limit:** only the direct `claudepot_data_dir().join("x.json")`
-/// chain is detected. A path assembled through an intermediate
-/// binding (`let d = claudepot_data_dir(); d.join(…)`) is missed. No
-/// such site exists today — the assertion below fails loudly if the
-/// detector ever stops finding the files AGENTS.md documents, which is
-/// what turns this from a check that *cannot* fail into one that has
-/// been watched failing.
-fn json_state_in(text: &str, consts: &BTreeMap<String, String>, out: &mut BTreeSet<String>) {
-    const ANCHOR: &str = "claudepot_data_dir()";
-    // Enough to clear a rustfmt line break plus indentation between the
-    // anchor and its `.join(`, and short enough that an unrelated
-    // `.join("x.json")` further down the function is not swept in.
-    const WINDOW: usize = 160;
-
-    let mut from = 0usize;
-    while let Some(i) = text[from..].find(ANCHOR) {
-        let start = from + i + ANCHOR.len();
-        from = start;
-        let window = &text[start..text.len().min(start + WINDOW)];
-        let Some(j) = window.find(".join(") else {
-            continue;
-        };
-        if let Some(name) = join_arg(&window[j + 6..], consts) {
-            if name.ends_with(".json") {
-                out.insert(name);
-            }
-        }
-    }
-}
-
-fn shipped_json_state(repo: &Path) -> Result<BTreeSet<String>> {
-    let mut out = BTreeSet::new();
-    let root = repo.join("crates/claudepot-core/src");
-    walk_rs(&root, &mut |text| {
-        let consts = const_strings(text);
-        json_state_in(production_only(text), &consts, &mut out)
-    })?;
-    Ok(out)
-}
-
 fn check_data_dir_json_state(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let agents = read(repo, "AGENTS.md")?;
-    let shipped = shipped_json_state(repo)?;
+    let shipped = crate::data_dir_scan::scan(&repo.join("crates/claudepot-core/src"))?.jsons;
 
     // Guard against the detector silently finding nothing — a heuristic
     // that matches zero sites reports "all documented" forever. AGENTS.md
@@ -522,7 +362,7 @@ fn check_data_dir_json_state(repo: &Path, problems: &mut Vec<String>) -> Result<
         problems.push(
             "the data-dir JSON detector found no `agents.json` — the \
              `claudepot_data_dir().join(…)` pattern it anchors on has changed, so \
-             this check is now blind. Fix `shipped_json_state`, not AGENTS.md"
+             this check is now blind. Fix `data_dir_scan`, not AGENTS.md"
                 .to_string(),
         );
         return Ok(());
@@ -769,105 +609,5 @@ enum AccountAction {
         assert_eq!(spelled(13), Some("Thirteen"));
         assert_eq!(spelled(14), Some("Fourteen"));
         assert_eq!(spelled(99), None);
-    }
-
-    /// The bug this replaced: cutting at the *first* `#[cfg(test)]`
-    /// silently dropped every production item after an attributed
-    /// method. `agent/store.rs` has one at line 791 and its test module
-    /// at 1280, so `agents_file_path()` — which builds `agents.json` —
-    /// was outside the scan entirely.
-    #[test]
-    fn production_only_cuts_at_the_test_module_not_an_attributed_item() {
-        let src = "\
-fn keep_me() {}
-impl S {
-    #[cfg(test)]
-    fn helper() {}
-}
-fn also_keep_me() {}
-#[cfg(test)]
-mod tests {
-    fn scratch() {}
-}
-";
-        let kept = production_only(src);
-        assert!(
-            kept.contains("also_keep_me"),
-            "production item after an attributed method must survive"
-        );
-        assert!(!kept.contains("scratch"), "the test module must be cut");
-    }
-
-    /// The blindness that let `boards.db` ship unlisted: its filename
-    /// is a const, so `.join(BOARDS_DB_FILENAME)` carries no literal
-    /// for a string scan to find.
-    #[test]
-    fn join_arg_resolves_a_const_filename() {
-        let consts = const_strings("pub const BOARDS_DB_FILENAME: &str = \"boards.db\";\n");
-        assert_eq!(
-            consts.get("BOARDS_DB_FILENAME").map(String::as_str),
-            Some("boards.db")
-        );
-        assert_eq!(
-            join_arg("BOARDS_DB_FILENAME)", &consts).as_deref(),
-            Some("boards.db")
-        );
-        // Literals still work, and an unresolvable expression is skipped
-        // rather than guessed at.
-        assert_eq!(join_arg("\"x.db\")", &consts).as_deref(), Some("x.db"));
-        assert_eq!(join_arg("some_var)", &consts), None);
-    }
-
-    #[test]
-    fn json_state_resolves_a_const_filename() {
-        let consts = const_strings("const CACHE_FILENAME: &str = \"pricing-cache.json\";\n");
-        let mut out = BTreeSet::new();
-        json_state_in(
-            "claudepot_data_dir().join(CACHE_FILENAME)",
-            &consts,
-            &mut out,
-        );
-        assert!(out.contains("pricing-cache.json"));
-    }
-
-    #[test]
-    fn production_only_is_identity_without_a_test_module() {
-        let src = "fn only() {}\n";
-        assert_eq!(production_only(src), src);
-    }
-
-    #[test]
-    fn json_state_matches_only_data_dir_joins() {
-        let mut out = BTreeSet::new();
-        json_state_in(
-            r#"
-            fn a() -> PathBuf { claudepot_data_dir().join("agents.json") }
-            fn b() -> PathBuf { crate::paths::claudepot_data_dir().join("routes.json") }
-            // Not the data dir: CC's own settings, and a bundle entry.
-            fn c() -> PathBuf { config_dir.join("settings.json") }
-            fn d() -> PathBuf { staged.join("manifest.json") }
-            // Not JSON.
-            fn e() -> PathBuf { claudepot_data_dir().join("corpus.db") }
-            "#,
-            &BTreeMap::new(),
-            &mut out,
-        );
-        assert_eq!(
-            out.into_iter().collect::<Vec<_>>(),
-            vec!["agents.json".to_string(), "routes.json".to_string()]
-        );
-    }
-
-    /// rustfmt breaks the chain across lines once the receiver is long
-    /// enough; the scan has to survive that or it goes quietly blind.
-    #[test]
-    fn json_state_survives_a_wrapped_chain() {
-        let mut out = BTreeSet::new();
-        json_state_in(
-            "crate::paths::claudepot_data_dir()\n            .join(\"usage_alert_state.json\")",
-            &BTreeMap::new(),
-            &mut out,
-        );
-        assert!(out.contains("usage_alert_state.json"));
     }
 }
