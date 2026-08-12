@@ -50,7 +50,9 @@
     "copyShellAria": "Copy shell command for {{label}}",
     "expired": "Expired",
     "daysShort": "{{days}}d",
-    "keyLabelAria": "Key label"
+    "keyLabelAria": "Key label",
+    "replaceTitle": "Replace key…",
+    "replaceAria": "Replace the key stored for {{label}}"
   },
   "addModal": {
     "title": "Add key",
@@ -122,5 +124,15 @@
     "nameAria": "New secret name",
     "valueAria": "New secret value",
     "addSecret": "Add secret"
+  },
+  "replace": {
+    "title": "Replace key — {{label}}",
+    "description": "The label, account and creation date stay as they are. Only the stored secret is replaced, and any earlier verification result is cleared.",
+    "confirm": "Replace key",
+    "cancel": "Cancel",
+    "working": "Replacing…",
+    "needToken": "Paste the new key to continue.",
+    "failed": "Could not replace the key.",
+    "inputAria": "New key for {{label}}"
   }
 }

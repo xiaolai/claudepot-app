@@ -14,6 +14,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
+import { ReplaceKeyModal } from "./keys/ReplaceKeyModal";
 import { Input } from "../components/primitives/Input";
 import { SectionLabel } from "../components/primitives/SectionLabel";
 import { SkeletonRows } from "../components/primitives/Skeleton";
@@ -188,6 +189,12 @@ export function KeysSection() {
   }, [pendingRemoval, pushToast, refresh, t]);
 
 
+  const [replacing, setReplacing] = useState<{
+    kind: "api" | "oauth";
+    uuid: string;
+    label: string;
+  } | null>(null);
+
   const onRename = useCallback(
     async (kind: "api" | "oauth", uuid: string, label: string) => {
       try {
@@ -293,6 +300,9 @@ export function KeysSection() {
           }
           onRemove={(row) => setPendingRemoval({ kind: "api", row })}
           onRename={(row, label) => onRename("api", row.uuid, label)}
+          onReplace={(row) =>
+            setReplacing({ kind: "api", uuid: row.uuid, label: row.label })
+          }
           onAddRequested={() => setAdding(true)}
         />
 
@@ -304,6 +314,9 @@ export function KeysSection() {
           onRemove={(row) => setPendingRemoval({ kind: "oauth", row })}
           onOpenUsage={setUsageModalFor}
           onRename={(row, label) => onRename("oauth", row.uuid, label)}
+          onReplace={(row) =>
+            setReplacing({ kind: "oauth", uuid: row.uuid, label: row.label })
+          }
           onAddRequested={() => setAdding(true)}
         />
 
@@ -327,6 +340,16 @@ export function KeysSection() {
           confirmDanger
           onCancel={() => setPendingRemoval(null)}
           onConfirm={() => void confirmRemoval()}
+        />
+      )}
+
+      {replacing && (
+        <ReplaceKeyModal
+          kind={replacing.kind}
+          uuid={replacing.uuid}
+          label={replacing.label}
+          onClose={() => setReplacing(null)}
+          onReplaced={() => void refresh()}
         />
       )}
 
@@ -362,6 +385,7 @@ function ApiKeysTable({
   onProbe,
   onRemove,
   onRename,
+  onReplace,
   onAddRequested,
 }: {
   rows: ApiKeySummary[];
@@ -370,6 +394,7 @@ function ApiKeysTable({
   onProbe: (row: ApiKeySummary) => void;
   onRemove: (row: ApiKeySummary) => void;
   onRename: (row: ApiKeySummary, label: string) => Promise<void>;
+  onReplace: (row: ApiKeySummary) => void;
   onAddRequested: () => void;
 }) {
   const { t } = useTranslation("keys");
@@ -475,6 +500,17 @@ function ApiKeysTable({
                       aria-label={t("list.copyAria", { label: row.label })}
                       onClick={() => onCopy(row)}
                     />
+                    {/* `refresh` is not a perfect fit for "replace a
+                        secret" — no glyph is — so the tooltip carries the
+                        verb, per rules/icon-buttons.md. Kept icon-only to
+                        preserve the row's rhythm; the action opens a modal,
+                        so a misclick destroys nothing. */}
+                    <IconButton
+                      glyph={NF.refresh}
+                      title={t("list.replaceTitle")}
+                      aria-label={t("list.replaceAria", { label: row.label })}
+                      onClick={() => onReplace(row)}
+                    />
                     <IconButton
                       glyph={NF.trash}
                       title={t("list.removeTitle")}
@@ -500,6 +536,7 @@ function OauthTokensTable({
   onRemove,
   onOpenUsage,
   onRename,
+  onReplace,
   onAddRequested,
 }: {
   rows: OauthTokenSummary[];
@@ -509,6 +546,7 @@ function OauthTokensTable({
   onRemove: (row: OauthTokenSummary) => void;
   onOpenUsage: (row: OauthTokenSummary) => void;
   onRename: (row: OauthTokenSummary, label: string) => Promise<void>;
+  onReplace: (row: OauthTokenSummary) => void;
   onAddRequested: () => void;
 }) {
   const { t } = useTranslation("keys");
@@ -628,6 +666,17 @@ function OauthTokensTable({
                       title={t("list.copyTitle")}
                       aria-label={t("list.copyAria", { label: row.label })}
                       onClick={() => onCopy(row)}
+                    />
+                    {/* `refresh` is not a perfect fit for "replace a
+                        secret" — no glyph is — so the tooltip carries the
+                        verb, per rules/icon-buttons.md. Kept icon-only to
+                        preserve the row's rhythm; the action opens a modal,
+                        so a misclick destroys nothing. */}
+                    <IconButton
+                      glyph={NF.refresh}
+                      title={t("list.replaceTitle")}
+                      aria-label={t("list.replaceAria", { label: row.label })}
+                      onClick={() => onReplace(row)}
                     />
                     <IconButton
                       glyph={NF.trash}
