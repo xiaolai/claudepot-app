@@ -261,10 +261,17 @@ describe("MoveSessionModal", () => {
     await user.type(screen.getByRole("combobox"), "/already/there");
     await user.click(screen.getByRole("option", { name: /Use this folder/ }));
 
-    await waitFor(() =>
-      expect(screen.getByText(/Existing folder/i)).toBeInTheDocument(),
-    );
-    expect(screen.getByRole("button", { name: /Move to there/i })).toBeEnabled();
+    // Both assertions live inside the wait. The badge and the button
+    // are separate state updates, so waiting only for the badge and
+    // then asserting the button synchronously races whichever render
+    // lands second — that is the intermittent failure CI saw on
+    // 2026-08-12 (`Unable to find … /Move to there/i`), not a timeout.
+    await waitFor(() => {
+      expect(screen.getByText(/Existing folder/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Move to there/i }),
+      ).toBeEnabled();
+    });
   });
 
   it("refuses a path that is a file, stating the reason inline", async () => {

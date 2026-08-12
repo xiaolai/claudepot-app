@@ -71,8 +71,8 @@ describe("SessionContextPanel", () => {
     );
     await waitFor(() => {
       expect(screen.getByTestId("category-claude-md")).toBeInTheDocument();
+      expect(screen.getByTestId("category-tool-output")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("category-tool-output")).toBeInTheDocument();
     // reported total appears.
     expect(screen.getByText(/42,000 total/)).toBeInTheDocument();
   });

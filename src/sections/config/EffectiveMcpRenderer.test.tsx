@@ -71,8 +71,8 @@ describe("EffectiveMcpRenderer", () => {
     render(<EffectiveMcpRenderer cwd="/" />);
     await waitFor(() => {
       expect(screen.getByText("foo")).toBeInTheDocument();
+      expect(screen.getByText("pending")).toBeInTheDocument();
     });
-    expect(screen.getByText("pending")).toBeInTheDocument();
   });
 
   it("server row expands via keyboard (Enter) and exposes aria-expanded", async () => {
