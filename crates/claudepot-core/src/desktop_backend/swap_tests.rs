@@ -443,6 +443,24 @@ async fn test_switch_no_outgoing_skips_snapshot() {
 
 #[tokio::test]
 async fn test_switch_not_installed_returns_error() {
+    // Every other test in this file takes this lock; this one did not,
+    // which is why it flaked on CI (Windows, 2026-08-12) while passing
+    // on the same commit when re-run.
+    //
+    // The mock itself is deterministic — `is_installed()` is just
+    // `data_dir_path.is_some()`, and that is `None` here — so the
+    // assertion can only fail if `switch` returns some *other* error
+    // first. It can: without the lock this test runs concurrently with
+    // siblings that mutate the shared `CLAUDEPOT_DATA_DIR`, so the
+    // account-store open can fail under it and the result is an error
+    // that simply is not `NotInstalled`.
+    //
+    // Worth stating plainly: nothing about this is Windows-specific.
+    // Windows only lost the race more often. The same gap would surface
+    // anywhere given different scheduling, which is exactly why
+    // re-running until green is not a fix.
+    let _lock = crate::testing::lock_data_dir();
+    let _env_dir = setup_test_data_dir();
     let (store, _db_dir) = test_store();
     let tgt = make_account("t@example.com");
     store.insert(&tgt).unwrap();
