@@ -7,6 +7,7 @@
 //!
 //! See `parity-harness/README.md` for the full design.
 
+mod data_dir_scan;
 mod screenshot_fixture;
 mod verify_docs;
 
