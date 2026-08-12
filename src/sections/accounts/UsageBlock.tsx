@@ -159,6 +159,15 @@ export function UsageBlock({
       emph: false,
       tooltip: t("usage.rows.coworkTooltip"),
     },
+    // Model-scoped windows (e.g. the weekly Fable limit). The server
+    // names the model, so the label interpolates rather than resolving
+    // a fixed key. `?? []` guards a usage entry cached by an older
+    // build, which has no such field.
+    ...(usage.scoped_limits ?? []).map((s) => ({
+      label: t("usage.rows.scopedWeekly", { model: s.label }),
+      w: { utilization: s.utilization, resets_at: s.resets_at },
+      emph: false,
+    })),
   ].filter((r) => r.w) as typeof rows;
 
   return (

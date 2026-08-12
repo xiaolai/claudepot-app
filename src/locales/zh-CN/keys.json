@@ -91,7 +91,8 @@
     "sevenDayOauthApps": "7 天 · OAuth 应用",
     "sevenDayCowork": "7 天 · Cowork",
     "extraUsage": "额外用量",
-    "close": "关闭"
+    "close": "关闭",
+    "scopedWeekly": "7 天 · {{model}}"
   },
   "vault": {
     "title": "机密保险库",

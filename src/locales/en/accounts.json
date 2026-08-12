@@ -252,7 +252,8 @@
       "apps": "7d apps",
       "appsTooltip": "Third-party OAuth apps authorized against this account (IDEs, tools, etc).",
       "cowork": "7d cowork",
-      "coworkTooltip": "Cowork / shared-seat pool usage."
+      "coworkTooltip": "Cowork / shared-seat pool usage.",
+      "scopedWeekly": "7d {{model}}"
     },
     "extra": {
       "label": "Extra usage",

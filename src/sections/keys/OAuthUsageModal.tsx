@@ -118,7 +118,7 @@ export function OAuthUsageModal({
   );
 }
 
-function UsageBody({ usage }: { usage: AccountUsage }) {
+export function UsageBody({ usage }: { usage: AccountUsage }) {
   const { t } = useTranslation("keys");
   // Render-time lookups, not a module constant — a language switch has
   // to reach these labels without a remount.
@@ -129,6 +129,17 @@ function UsageBody({ usage }: { usage: AccountUsage }) {
     [t("usageModal.sevenDaySonnet"), usage.seven_day_sonnet],
     [t("usageModal.sevenDayOauthApps"), usage.seven_day_oauth_apps],
     [t("usageModal.sevenDayCowork"), usage.seven_day_cowork],
+    // Model-scoped windows (e.g. the weekly Fable limit). The server
+    // names the model, so the label interpolates rather than resolving
+    // a fixed key. `?? []` guards a usage entry cached by an older
+    // build, which has no such field.
+    ...(usage.scoped_limits ?? []).map(
+      (s) =>
+        [
+          t("usageModal.scopedWeekly", { model: s.label }),
+          { utilization: s.utilization, resets_at: s.resets_at },
+        ] as [string, UsageWindow | null],
+    ),
   ];
 
   // Render-if-nonzero per design rules — drop rows that have no window.

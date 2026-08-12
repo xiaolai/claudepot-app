@@ -14,6 +14,19 @@ pub struct UsageWindowDto {
     pub resets_at: Option<String>, // RFC3339; null when the window has no reset yet
 }
 
+/// A model-scoped rate limit (e.g. the weekly Fable window).
+///
+/// Carries its own `label` because the server names the model — there
+/// is no fixed field per model any more, so the UI cannot look up a
+/// static i18n key for it.
+#[derive(Serialize, Clone)]
+pub struct ScopedLimitDto {
+    /// Server-supplied model name, rendered verbatim ("Fable").
+    pub label: String,
+    pub utilization: f64,
+    pub resets_at: Option<String>,
+}
+
 /// Extra-usage (monthly overage billing) info.
 #[derive(Serialize, Clone)]
 pub struct ExtraUsageDto {
@@ -48,6 +61,10 @@ pub struct AccountUsageDto {
     /// Usage attributed to cowork / shared-seat pool. Null on
     /// personal plans; GUI renders render-if-nonzero.
     pub seven_day_cowork: Option<UsageWindowDto>,
+    /// Model-scoped windows from the server's `limits[]`. Empty when
+    /// the account has none, so render-if-nonzero hides the rows with
+    /// no special case.
+    pub scoped_limits: Vec<ScopedLimitDto>,
     pub extra_usage: Option<ExtraUsageDto>,
 }
 
@@ -66,6 +83,14 @@ impl AccountUsageDto {
             seven_day_sonnet: map_window(&r.seven_day_sonnet),
             seven_day_oauth_apps: map_window(&r.seven_day_oauth_apps),
             seven_day_cowork: map_window(&r.seven_day_cowork),
+            scoped_limits: r
+                .scoped_limits()
+                .map(|(label, l)| ScopedLimitDto {
+                    label: label.to_string(),
+                    utilization: l.percent,
+                    resets_at: l.resets_at.as_ref().map(|t| t.to_rfc3339()),
+                })
+                .collect(),
             extra_usage: r.extra_usage.as_ref().map(|e| ExtraUsageDto {
                 is_enabled: e.is_enabled,
                 monthly_limit: e.monthly_limit,
@@ -156,5 +181,44 @@ impl UsageEntryDto {
                 error_detail: Some(msg),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudepot_core::oauth::usage::UsageResponse;
+
+    #[test]
+    fn maps_model_scoped_limits_to_rows_and_drops_plan_level_ones() {
+        let json = r#"{
+            "five_hour": {"utilization": 31.0, "resets_at": "2026-08-12T04:40:00+00:00"},
+            "limits": [
+                {"kind": "session", "percent": 31, "scope": null, "is_active": true},
+                {"kind": "weekly_scoped", "percent": 23,
+                 "resets_at": "2026-08-16T15:59:59+00:00",
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+                 "is_active": false}
+            ]
+        }"#;
+        let resp: UsageResponse = serde_json::from_str(json).unwrap();
+        let dto = AccountUsageDto::from_response(&resp);
+
+        assert_eq!(dto.scoped_limits.len(), 1);
+        assert_eq!(dto.scoped_limits[0].label, "Fable");
+        assert_eq!(dto.scoped_limits[0].utilization, 23.0);
+        assert!(dto.scoped_limits[0]
+            .resets_at
+            .as_deref()
+            .unwrap()
+            .starts_with("2026-08-16T15:59:59"));
+    }
+
+    #[test]
+    fn scoped_limits_is_empty_when_the_server_sends_none() {
+        let resp: UsageResponse =
+            serde_json::from_str(r#"{"five_hour": {"utilization": 1.0}}"#).unwrap();
+        let dto = AccountUsageDto::from_response(&resp);
+        assert!(dto.scoped_limits.is_empty());
     }
 }

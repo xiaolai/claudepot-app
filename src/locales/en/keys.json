@@ -91,7 +91,8 @@
     "sevenDayOauthApps": "7-day · OAuth apps",
     "sevenDayCowork": "7-day · Cowork",
     "extraUsage": "Extra usage",
-    "close": "Close"
+    "close": "Close",
+    "scopedWeekly": "7-day · {{model}}"
   },
   "vault": {
     "title": "Secret vault",
