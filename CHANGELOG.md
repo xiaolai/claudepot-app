@@ -6,7 +6,38 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.6 — beta (unreleased)
+## 0.4.7 — beta (unreleased)
+
+### Fixed
+
+- **`boards.db` and `corpus.db` were leaking WAL sidecars.** Neither
+  was in `KNOWN_DB_FILENAMES`, the list that drives `*.db-wal` cleanup,
+  despite its doc comment calling itself exhaustive. Both sidecars are
+  present on disk on a real install, so this was live rather than
+  theoretical.
+- **Every Vercel Preview deployment had failed for 16 days.**
+  `NEON_DATABASE_URL` is scoped to Development and Production only, and
+  three routes queried the database at build time. `sitemap.ts` and
+  `api/rss` now render per request — they are feeds over changing
+  content, so prerendering both froze them at deploy time and made the
+  database a hard build dependency. That also removes a production
+  hazard: a Neon cold start could fail the production build outright.
+- All 32 Dependabot advisories cleared across both lockfiles. Several
+  had runtime reach in `web/` — `ip-address` under `express-rate-limit`,
+  `js-yaml` as a direct dependency, `undici` via `@vercel/blob`.
+
+### Changed
+
+- `cargo xtask verify-docs` now parses the source instead of matching
+  strings, and covers all three crates that write to the data dir plus
+  `.jsonl` alongside `.json`. The previous scan went blind five distinct
+  ways; every one was a scope or representation limit rather than a
+  logic error. Four undocumented data-dir files were found and
+  documented in the process.
+- A commit touching nothing under `web/` no longer triggers a Next.js
+  build on Vercel.
+
+## 0.4.6 — beta (released 2026-08-11)
 
 ### Added
 
