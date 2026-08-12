@@ -23,14 +23,33 @@
 //! tree. Consts are collected across the whole crate in a first pass, so
 //! cross-module indirection resolves too.
 //!
+//! Parsing removed the representation bugs. It did not, on its own,
+//! fix **scope** bugs, and those turned out to be the ones that
+//! mattered. Measured against the real `~/.claudepot` rather than
+//! reasoned about:
+//!
+//! 4. **Only one crate was scanned.** Three write to the data dir —
+//!    `src-tauri/src/preferences.rs` joins `preferences.json` directly,
+//!    and the CLI reaches several databases the same way. Core-only
+//!    passed on those because core happens to name them too.
+//! 5. **Only `.json` was asked about.** `.jsonl` is the append-only log
+//!    shape and two real files use it. `"x.jsonl".ends_with(".json")`
+//!    is false, so neither was even a near miss — both sat on disk,
+//!    undocumented, indefinitely.
+//!
 //! # What it deliberately does not do
 //!
 //! No const *expression* evaluation: `concat!`, `format!`, and a name
-//! built from parts all resolve to `None` and are skipped rather than
-//! guessed at. If that ever hides a real file, the blindness guards in
-//! `verify_docs` fail loudly rather than passing green — a scan that
-//! silently matches nothing is the failure mode this module exists to
-//! make impossible.
+//! built from parts resolve to `None` and are skipped rather than
+//! guessed at. This is a real limit but **not a live one** — a sweep of
+//! all three crates found zero data-dir joins of that shape. It is
+//! recorded as a boundary, not advertised as the next thing to fix;
+//! saying so once cost a round of attention that the two scope bugs
+//! above deserved.
+//!
+//! The blindness guards in `verify_docs` remain the backstop: a scan
+//! that silently matches nothing is the failure mode this module exists
+//! to make impossible.
 
 use anyhow::{Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,10 +72,29 @@ pub struct DataDirFiles {
     pub jsons: BTreeSet<String>,
 }
 
-/// Parse every `.rs` file under `core_src` and report what it writes.
-pub fn scan(core_src: &Path) -> Result<DataDirFiles> {
+/// Crates that write into the Claudepot data dir.
+///
+/// All three, not just core. `src-tauri/src/preferences.rs` joins
+/// `preferences.json` onto the data dir directly, and the CLI reaches
+/// several databases the same way. Scanning core alone reported green
+/// on those only because core happens to name them too — a file added
+/// solely in the Tauri or CLI crate would have been invisible, which is
+/// the same "green for the wrong reason" this scan exists to prevent.
+const SCANNED_CRATES: &[&str] = &[
+    "crates/claudepot-core/src",
+    "crates/claudepot-cli/src",
+    "src-tauri/src",
+];
+
+/// Parse every `.rs` file in every crate that writes to the data dir.
+pub fn scan(repo: &Path) -> Result<DataDirFiles> {
     let mut files = Vec::new();
-    collect_files(core_src, &mut files)?;
+    for rel in SCANNED_CRATES {
+        let root = repo.join(rel);
+        if root.is_dir() {
+            collect_files(&root, &mut files)?;
+        }
+    }
 
     let parsed: Vec<syn::File> = files
         .iter()
@@ -182,15 +220,44 @@ fn mentions_data_dir(expr: &syn::Expr) -> bool {
     f.0
 }
 
-/// Is the receiver a tempdir handle — `dir.path()`, `td.path()`?
+/// JSON-shaped state, which on disk means `.json` *and* `.jsonl`.
+///
+/// `.jsonl` is not a variant spelling — it is the append-only log
+/// shape, and two real files use it (`cc_tips_snapshots.jsonl`,
+/// `doctor-parse-failures.jsonl`). Both sat undocumented because the
+/// scan only asked about `.json`, and `"x.jsonl".ends_with(".json")`
+/// is false, so neither was ever a near miss.
+fn is_json_state(name: &str) -> bool {
+    name.ends_with(".json") || name.ends_with(".jsonl")
+}
+
+/// Is the receiver a scratch location rather than the data dir?
+///
+/// Two shapes, both meaning "explicitly not where we keep state":
+///
+/// - `dir.path()` — a `TempDir` handle. Test scratch files (`test.db`,
+///   `a.db`) are all rooted this way.
+/// - `std::env::temp_dir()` — the system temp dir.
+///   `src-tauri/src/lib.rs:399` uses it for a
+///   `claudepot-memory_changes.db` fallback, which the unanchored `.db`
+///   match reported as a data-dir database until this covered it.
 ///
 /// Structural, where the old scan matched the literal text `.path()`.
-/// Test scratch files (`test.db`, `a.db`) are all rooted this way, and
-/// they are the one shape a loose `.db` match must exclude.
-fn is_tempdir_receiver(expr: &syn::Expr) -> bool {
+/// This exclusion is the cost of leaving `.db` unanchored; it is worth
+/// paying because anchoring `.db` would lose the databases reached
+/// through their own path helpers, which is most of them.
+fn is_scratch_receiver(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::MethodCall(m) => m.method == "path",
-        syn::Expr::Reference(r) => is_tempdir_receiver(&r.expr),
+        syn::Expr::Call(c) => match &*c.func {
+            syn::Expr::Path(p) => p
+                .path
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "temp_dir"),
+            _ => false,
+        },
+        syn::Expr::Reference(r) => is_scratch_receiver(&r.expr),
         _ => false,
     }
 }
@@ -225,10 +292,10 @@ impl<'ast> Visit<'ast> for JoinVisitor<'_> {
         if node.method == "join" && node.args.len() == 1 {
             if let Some(name) = self.filename(&node.args[0]) {
                 if name.ends_with(".db") {
-                    if !is_tempdir_receiver(&node.receiver) {
+                    if !is_scratch_receiver(&node.receiver) {
                         self.out.dbs.insert(name);
                     }
-                } else if name.ends_with(".json") && mentions_data_dir(&node.receiver) {
+                } else if is_json_state(&name) && mentions_data_dir(&node.receiver) {
                     self.out.jsons.insert(name);
                 }
             }
@@ -327,7 +394,7 @@ mod tests {
     /// Tempdir scratch files are excluded by receiver shape, not by
     /// matching the text `.path()`.
     #[test]
-    fn tempdir_rooted_databases_are_excluded() {
+    fn scratch_rooted_databases_are_excluded() {
         let out = scan_src(r#"fn t() -> PathBuf { dir.path().join("a.db") }"#);
         assert!(out.dbs.is_empty());
     }
@@ -347,6 +414,27 @@ mod tests {
             out.jsons.into_iter().collect::<Vec<_>>(),
             vec!["routes.json".to_string()]
         );
+    }
+
+    /// Scope bug 5: `.jsonl` is a real data-dir shape, and it is not a
+    /// suffix of `.json`, so it was never even a near miss.
+    #[test]
+    fn jsonl_counts_as_json_state() {
+        let out = scan_src(
+            r#"fn t() -> PathBuf { claudepot_data_dir().join("doctor-parse-failures.jsonl") }"#,
+        );
+        assert!(out.jsons.contains("doctor-parse-failures.jsonl"));
+    }
+
+    /// `std::env::temp_dir()` is a scratch location, not the data dir.
+    /// The unanchored `.db` match reported `src-tauri`'s fallback
+    /// database until the exclusion covered this shape too.
+    #[test]
+    fn system_temp_dir_databases_are_excluded() {
+        let out = scan_src(
+            r#"fn t() -> PathBuf { std::env::temp_dir().join("claudepot-memory_changes.db") }"#,
+        );
+        assert!(out.dbs.is_empty());
     }
 
     /// A name the scan cannot resolve is skipped, never guessed at.

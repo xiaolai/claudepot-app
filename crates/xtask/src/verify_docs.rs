@@ -315,7 +315,7 @@ fn known_db_filenames(src: &str) -> BTreeSet<String> {
 
 fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let agents = read(repo, "AGENTS.md")?;
-    let shipped = crate::data_dir_scan::scan(&repo.join("crates/claudepot-core/src"))?.dbs;
+    let shipped = crate::data_dir_scan::scan(repo)?.dbs;
 
     // The WAL-cleanup list must cover every database that actually
     // ships. Its own doc comment calls it exhaustive, and it was not:
@@ -352,7 +352,7 @@ fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<(
 
 fn check_data_dir_json_state(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let agents = read(repo, "AGENTS.md")?;
-    let shipped = crate::data_dir_scan::scan(&repo.join("crates/claudepot-core/src"))?.jsons;
+    let shipped = crate::data_dir_scan::scan(repo)?.jsons;
 
     // Guard against the detector silently finding nothing — a heuristic
     // that matches zero sites reports "all documented" forever. AGENTS.md

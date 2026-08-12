@@ -179,6 +179,16 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     v2 is `agents.json`. Kept documented because it still exists on
     any install that predates the rename, and a stray file in the data
     dir with no entry here reads as unexplained.
+  - `cc_tips_snapshots.jsonl` — append-only log converting CC's
+    counter-only tips state (`tipsHistory`, `numStartups` — integers,
+    no timestamps) into wall-clock time. Owned by
+    `claudepot-core::cc_tips::history`; see `dev-docs/cc-tips-ledger.md`
+    §6. Append-only: deleting it loses the time mapping for past
+    counters, which cannot be reconstructed.
+  - `doctor-parse-failures.jsonl` — append-only log of inputs
+    `cc doctor` could not parse, for diagnosing the user's environment.
+    Owned by `claudepot-core::cc_doctor::parse_failures`. Safe to
+    delete; it is diagnostic history, not state anything reads back.
   - `pricing-cache.json` — cached result of the live pricing scrape.
     Owned by `claudepot-core::pricing` (`CACHE_FILENAME`). Pure cache:
     safe to delete, refetched on next scrape. Distinct from
