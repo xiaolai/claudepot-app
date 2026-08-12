@@ -102,8 +102,24 @@ fi
 
 # Is this host answering right now? BatchMode so a missing key fails
 # fast instead of prompting into a hook with no usable tty.
+# `exit`, not `true`. Both shells have `exit` as a builtin; `true` is a
+# Unix-ism and does not exist in `cmd.exe`, which is the login shell on
+# the Windows validator. The probe therefore failed on a perfectly
+# healthy Windows host — `'true' is not recognized as an internal or
+# external command` — and the gate reported "offline, or cannot reach
+# GitHub" when neither was true.
+#
+# That silently disabled Windows validation for v0.4.6 through v0.4.9:
+# four releases where the hook printed a reassuring "deferring to CI"
+# for a host that was reachable, had cargo 1.95.0, could resolve the
+# commit on GitHub, and would have compiled it. Verified after the fix:
+# `exit` returns 0 on both the Windows and the Linux validator.
+#
+# The lesson is the one already in this file's header about the v0.3.1
+# misreport: a probe that reports a healthy host as broken is worse than
+# no probe, because the fallback it triggers looks like diligence.
 host_reachable() {
-  ssh -o ConnectTimeout=8 -o BatchMode=yes "$1" true >/dev/null 2>&1
+  ssh -o ConnectTimeout=8 -o BatchMode=yes "$1" exit >/dev/null 2>&1
 }
 
 # Has CI already gone green for this exact COMMIT?

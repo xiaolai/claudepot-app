@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../api", () => ({
   api: {
@@ -114,18 +114,34 @@ describe("CommandPalette — keyboard activation targets the visible row", () =>
     expect(tabbable[0]!.tagName).toBe("INPUT");
   });
 
-  it("every visible row activates the same handler by Enter as by click", () => {
+  // `api.projectList` / `api.sessionSearch` are mocked async, so the
+  // palette re-renders when they resolve. Without flushing, a
+  // resolution can land between capturing the row list and asserting
+  // against it — the row set shifts underneath the test and it fails
+  // intermittently, which is exactly what CI saw on 2026-08-12.
+  //
+  // Flushing after every render makes the row set settled by
+  // construction rather than by luck.
+  const settle = async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  };
+
+  it("every visible row activates the same handler by Enter as by click", async () => {
     // Walk the whole list with ArrowDown; at each stop, the keyboard
     // path and the click path must agree. This is the invariant the
     // original bug broke: clicking a row was correct, pressing Enter
     // on the same row was not.
     renderPalette();
+    await settle();
     const rowsSeen = screen.getAllByRole("option").map((r) => r.textContent ?? "");
     cleanup();
     expect(rowsSeen.length).toBeGreaterThan(3);
 
     for (let target = 0; target < rowsSeen.length; target++) {
       const viaKeyboard = renderPalette();
+      await settle();
       for (let i = 0; i < target; i++) {
         fireEvent.keyDown(input(), { key: "ArrowDown" });
       }
@@ -135,6 +151,7 @@ describe("CommandPalette — keyboard activation targets the visible row", () =>
       cleanup();
 
       const viaClick = renderPalette();
+      await settle();
       const row = screen
         .getAllByRole("option")
         .find((r) => (r.textContent ?? "") === highlighted);
