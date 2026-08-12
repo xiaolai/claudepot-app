@@ -50,7 +50,9 @@
     "copyShellAria": "复制 {{label}} 的 shell 命令",
     "expired": "已过期",
     "daysShort": "{{days}} 天",
-    "keyLabelAria": "密钥标签"
+    "keyLabelAria": "密钥标签",
+    "replaceTitle": "替换密钥…",
+    "replaceAria": "替换为 {{label}} 存储的密钥"
   },
   "addModal": {
     "title": "添加密钥",
@@ -122,5 +124,15 @@
     "nameAria": "新机密名称",
     "valueAria": "新机密值",
     "addSecret": "添加机密"
+  },
+  "replace": {
+    "title": "替换密钥 — {{label}}",
+    "description": "标签、账户和创建日期保持不变。只替换所存储的密钥，并清除此前的验证结果。",
+    "confirm": "替换密钥",
+    "cancel": "取消",
+    "working": "替换中…",
+    "needToken": "粘贴新密钥以继续。",
+    "failed": "无法替换该密钥。",
+    "inputAria": "{{label}} 的新密钥"
   }
 }

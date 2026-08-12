@@ -27,6 +27,19 @@ export const keyApi = {
   keyApiRename: (uuid: string, label: string) =>
     invoke<void>("key_api_rename", { uuid, label }),
   /**
+   * Rotate an API key's secret, keeping the row.
+   *
+   * Distinct from remove-then-add: `uuid`, `label`, the account binding
+   * and `created_at` all survive, so the row's age — the thing you
+   * actually want when deciding whether to rotate — is not reset by
+   * rotating. Probe state is cleared, because the old verdict described
+   * a secret that no longer exists.
+   *
+   * Inbound-only: the secret crosses to Rust and nothing comes back.
+   */
+  keyApiUpdateSecret: (uuid: string, token: string) =>
+    invoke<void>("key_api_update_secret", { uuid, token }),
+  /**
    * Copy the full API key value to the OS clipboard. The raw secret
    * never returns to JS — Rust writes the clipboard directly and
    * schedules a 30-second self-clear. Returns a receipt the UI can
@@ -58,6 +71,9 @@ export const keyApi = {
   /** Rename an OAuth token. See `keyApiRename`. */
   keyOauthRename: (uuid: string, label: string) =>
     invoke<void>("key_oauth_rename", { uuid, label }),
+  /** Rotate an OAuth token's secret. See `keyApiUpdateSecret`. */
+  keyOauthUpdateSecret: (uuid: string, token: string) =>
+    invoke<void>("key_oauth_update_secret", { uuid, token }),
   /**
    * Sibling of `keyApiCopy` — same Rust-side clipboard write, same
    * receipt shape, same 30-second self-clear contract.

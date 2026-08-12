@@ -198,6 +198,36 @@ impl KeyStore {
         Ok(())
     }
 
+    /// Rotate an API key's secret in place, keeping the row.
+    ///
+    /// `uuid`, `label`, `account_uuid` and `created_at` all survive —
+    /// that is the whole point. Rotating by remove-and-re-add mints a
+    /// new uuid and resets `created_at`, which destroys the answer to
+    /// "how long has this credential been in service", exactly when the
+    /// user is asking it.
+    ///
+    /// Probe state is deliberately **cleared**, not carried over: the
+    /// old result describes a secret that no longer exists here, and
+    /// leaving it would render a stale green tick against a key nothing
+    /// has verified.
+    pub fn update_api_secret(
+        &self,
+        uuid: Uuid,
+        token_preview: &str,
+        secret: &str,
+    ) -> Result<(), KeyError> {
+        let updated = self.db().execute(
+            "UPDATE api_keys \
+             SET secret = ?1, token_preview = ?2, last_probed_at = NULL, last_probe_status = NULL \
+             WHERE uuid = ?3",
+            params![secret, token_preview, uuid.to_string()],
+        )?;
+        if updated == 0 {
+            return Err(KeyError::NotFound(uuid.to_string()));
+        }
+        Ok(())
+    }
+
     // API keys have no probe command today — per-key usage isn't
     // available through the public API. The `last_probed_at` /
     // `last_probe_status` columns on the row remain reserved so a
@@ -294,6 +324,32 @@ impl KeyStore {
         let updated = self.db().execute(
             "UPDATE oauth_tokens SET label = ?1 WHERE uuid = ?2",
             params![label, uuid.to_string()],
+        )?;
+        if updated == 0 {
+            return Err(KeyError::NotFound(uuid.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Rotate an OAuth token's secret in place. See
+    /// [`Self::update_api_secret`] for why the row survives and why
+    /// probe state is cleared rather than carried.
+    ///
+    /// OAuth rows *do* have a live probe path (`key_oauth_probe`), so
+    /// clearing matters more here than on the API side: a rotated token
+    /// that kept its old `last_probe_status` would show verified before
+    /// anything had checked it.
+    pub fn update_oauth_secret(
+        &self,
+        uuid: Uuid,
+        token_preview: &str,
+        secret: &str,
+    ) -> Result<(), KeyError> {
+        let updated = self.db().execute(
+            "UPDATE oauth_tokens \
+             SET secret = ?1, token_preview = ?2, last_probed_at = NULL, last_probe_status = NULL \
+             WHERE uuid = ?3",
+            params![secret, token_preview, uuid.to_string()],
         )?;
         if updated == 0 {
             return Err(KeyError::NotFound(uuid.to_string()));
@@ -475,6 +531,82 @@ mod tests {
         store.rename_oauth_token(tok.uuid, "new").unwrap();
         let list = store.list_oauth_tokens().unwrap();
         assert_eq!(list[0].label, "new");
+    }
+
+    /// The whole reason rotation is not remove-and-re-add: identity and
+    /// provenance survive.
+    #[test]
+    fn update_api_secret_rotates_in_place_and_keeps_identity() {
+        let (store, _dir) = tmp_store();
+        let account = Uuid::new_v4();
+        let key = store
+            .insert_api_key("prod", "sk-ant-api03-old…z", account, "sk-ant-api03-old")
+            .unwrap();
+
+        store
+            .update_api_secret(key.uuid, "sk-ant-api03-new…z", "sk-ant-api03-new")
+            .unwrap();
+
+        let after = store.find_api_key(key.uuid).unwrap().expect("row survives");
+        assert_eq!(after.uuid, key.uuid, "uuid is preserved");
+        assert_eq!(after.label, "prod", "label is preserved");
+        assert_eq!(after.account_uuid, account, "account binding is preserved");
+        assert_eq!(
+            after.created_at, key.created_at,
+            "created_at is preserved — rotating must not reset the age of the row"
+        );
+        assert_eq!(after.token_preview, "sk-ant-api03-new…z");
+        assert_eq!(
+            store.find_api_secret(key.uuid).unwrap(),
+            "sk-ant-api03-new",
+            "the secret is actually replaced"
+        );
+        assert_eq!(store.list_api_keys().unwrap().len(), 1, "no duplicate row");
+    }
+
+    /// A rotated token must not inherit the old secret's verdict.
+    #[test]
+    fn update_oauth_secret_clears_stale_probe_state() {
+        let (store, _dir) = tmp_store();
+        let account = Uuid::new_v4();
+        let tok = store
+            .insert_oauth_token("ci", "sk-ant-oat01-old…z", account, "sk-ant-oat01-old")
+            .unwrap();
+        // Simulate a prior successful probe against the OLD secret.
+        store
+            .db()
+            .execute(
+                "UPDATE oauth_tokens SET last_probed_at = ?1, last_probe_status = 'ok' WHERE uuid = ?2",
+                params!["2026-01-01T00:00:00Z", tok.uuid.to_string()],
+            )
+            .unwrap();
+
+        store
+            .update_oauth_secret(tok.uuid, "sk-ant-oat01-new…z", "sk-ant-oat01-new")
+            .unwrap();
+
+        let after = store
+            .find_oauth_token(tok.uuid)
+            .unwrap()
+            .expect("row survives");
+        assert_eq!(after.created_at, tok.created_at);
+        assert!(
+            after.last_probed_at.is_none() && after.last_probe_status.is_none(),
+            "probe state must clear — the old verdict described a secret that is gone"
+        );
+    }
+
+    #[test]
+    fn update_secret_returns_not_found_for_unknown_uuid() {
+        let (store, _dir) = tmp_store();
+        assert!(matches!(
+            store.update_api_secret(Uuid::new_v4(), "p", "s"),
+            Err(KeyError::NotFound(_))
+        ));
+        assert!(matches!(
+            store.update_oauth_secret(Uuid::new_v4(), "p", "s"),
+            Err(KeyError::NotFound(_))
+        ));
     }
 
     #[test]

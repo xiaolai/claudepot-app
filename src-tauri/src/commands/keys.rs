@@ -333,6 +333,66 @@ pub async fn key_oauth_remove(uuid: String) -> Result<(), ErrorDto> {
     keys.remove_oauth_token(id).map_err(ErrorDto::from)
 }
 
+/// Rotate an API key's secret, keeping the row.
+///
+/// Inbound secret, so the same zeroization contract as `key_api_add`
+/// applies: the IPC-bridge `String` is scrubbed on every exit path,
+/// success and error alike, and the owned copy inside `_inner` is
+/// scrubbed before it returns. Nothing flows back out — the reply is
+/// `()`, not the key.
+#[tauri::command]
+pub async fn key_api_update_secret(uuid: String, mut token: String) -> Result<(), ErrorDto> {
+    let result = key_api_update_secret_inner(&uuid, token.trim()).await;
+    token.zeroize();
+    result
+}
+
+async fn key_api_update_secret_inner(uuid: &str, token: &str) -> Result<(), ErrorDto> {
+    let id = parse_row_uuid(uuid)?;
+    if !matches!(classify_token(token), Some(KeyPrefix::ApiKey)) {
+        return Err(ErrorDto::with_params(
+            codes::KEYS_NOT_AN_API_KEY,
+            json!({ "prefix": "sk-ant-api03-" }),
+            "not an API key — expected a value starting with `sk-ant-api03-`",
+        ));
+    }
+    let mut secret_buf = token.to_string();
+    let preview = token_preview(&secret_buf);
+    let keys = open_keys_store()?;
+    let outcome = keys
+        .update_api_secret(id, &preview, &secret_buf)
+        .map_err(ErrorDto::from);
+    secret_buf.zeroize();
+    outcome
+}
+
+/// Rotate an OAuth token's secret. See `key_api_update_secret`.
+#[tauri::command]
+pub async fn key_oauth_update_secret(uuid: String, mut token: String) -> Result<(), ErrorDto> {
+    let result = key_oauth_update_secret_inner(&uuid, token.trim()).await;
+    token.zeroize();
+    result
+}
+
+async fn key_oauth_update_secret_inner(uuid: &str, token: &str) -> Result<(), ErrorDto> {
+    let id = parse_row_uuid(uuid)?;
+    if !matches!(classify_token(token), Some(KeyPrefix::OauthToken)) {
+        return Err(ErrorDto::with_params(
+            codes::KEYS_NOT_AN_OAUTH_TOKEN,
+            json!({ "prefix": "sk-ant-oat01-" }),
+            "not an OAuth token — expected a value starting with `sk-ant-oat01-`",
+        ));
+    }
+    let mut secret_buf = token.to_string();
+    let preview = token_preview(&secret_buf);
+    let keys = open_keys_store()?;
+    let outcome = keys
+        .update_oauth_secret(id, &preview, &secret_buf)
+        .map_err(ErrorDto::from);
+    secret_buf.zeroize();
+    outcome
+}
+
 /// Rename an API key. Label is user-owned metadata — resolution and
 /// lookup key off `uuid`, never the label, so renames are a pure
 /// display-layer change.
