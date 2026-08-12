@@ -696,6 +696,15 @@ fn skip_reason_to_outcome(r: &SkipReason) -> (RotationOutcome, String) {
             RotationOutcome::SkippedGuard,
             "trigger window had no data".into(),
         ),
+        // Shares `SkippedGuard` with the transient skips, so the
+        // permanence has to live in the message. A dedicated outcome
+        // would sort better in the audit pane, but adding a variant
+        // ripples through serde and the UI for what is, today, a
+        // two-window problem; the sentence carries it.
+        SkipReason::WindowRetiredUpstream => (
+            RotationOutcome::SkippedGuard,
+            "rule can never fire — upstream no longer reports this window".into(),
+        ),
         SkipReason::MinIntervalNotElapsed { secs_since_last } => (
             RotationOutcome::SkippedGuard,
             format!("min_interval_secs not elapsed (last swap {secs_since_last}s ago)"),
