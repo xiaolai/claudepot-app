@@ -295,6 +295,7 @@ mod tests {
             seven_day_cowork: None,
             iguana_necktie: None,
             extra_usage: None,
+            limits: Vec::new(),
             unknown: HashMap::new(),
         }
     }
@@ -495,6 +496,7 @@ mod tests {
             seven_day_cowork: None,
             iguana_necktie: None,
             extra_usage: None,
+            limits: Vec::new(),
             unknown: HashMap::new(),
         };
         let crossings = st.apply_crossings(uuid, &r, &[80], &all_kinds());
@@ -525,6 +527,7 @@ mod tests {
             seven_day_cowork: None,
             iguana_necktie: None,
             extra_usage: None,
+            limits: Vec::new(),
             unknown: HashMap::new(),
         };
         let umbrella_only = vec![UsageWindowKind::FiveHour, UsageWindowKind::SevenDay];

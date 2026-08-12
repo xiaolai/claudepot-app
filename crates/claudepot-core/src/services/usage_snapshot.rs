@@ -260,6 +260,7 @@ mod tests {
             seven_day_cowork: None,
             iguana_necktie: None,
             extra_usage: None,
+            limits: Vec::new(),
             unknown: Default::default(),
         }
     }

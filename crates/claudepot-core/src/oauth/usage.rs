@@ -42,10 +42,89 @@ pub struct UsageResponse {
     pub iguana_necktie: Option<UsageWindow>,
     #[serde(default)]
     pub extra_usage: Option<ExtraUsage>,
+    /// Model- and surface-scoped rate limits. Added 2026-08: Anthropic
+    /// moved per-model windows out of the `seven_day_<model>` keys —
+    /// which now come back `null` on every observed account — and into
+    /// this generic array. Untyped, it landed in `unknown` and never
+    /// reached the UI.
+    ///
+    /// `deserialize_with` swallows a reshaped array: a parse error here
+    /// would blank the whole usage panel, and a missing row is a far
+    /// better failure than a missing panel.
+    #[serde(default, deserialize_with = "lenient_limits")]
+    pub limits: Vec<UsageLimit>,
     /// Catch-all for any future field Anthropic adds — keeps the
     /// response parseable so UI doesn't blank when the wire grows.
     #[serde(flatten)]
     pub unknown: HashMap<String, serde_json::Value>,
+}
+
+/// One entry of `/api/oauth/usage`'s `limits[]`.
+///
+/// `kind` is `session` | `weekly_all` | `weekly_scoped` in every
+/// observation, but stays a `String`: a new kind must not fail the
+/// parse.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UsageLimit {
+    pub kind: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub percent: f64,
+    /// `normal` | `warning` observed. Not rendered yet.
+    #[serde(default)]
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub resets_at: Option<DateTime<FixedOffset>>,
+    #[serde(default)]
+    pub scope: Option<LimitScope>,
+    /// Whether this limit is the currently binding one.
+    #[serde(default)]
+    pub is_active: bool,
+}
+
+/// What a limit is scoped to. `surface` is opaque: null in every
+/// observation, and inventing a shape for it would be guessing.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LimitScope {
+    #[serde(default)]
+    pub model: Option<LimitModel>,
+    #[serde(default)]
+    pub surface: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LimitModel {
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Server-supplied, already human-readable ("Fable"). Rendered
+    /// verbatim — it is a proper noun in every locale.
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+/// Tolerate any `limits` value that is not a well-formed array.
+fn lenient_limits<'de, D>(deserializer: D) -> Result<Vec<UsageLimit>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(raw).unwrap_or_default())
+}
+
+impl UsageResponse {
+    /// Limits carrying a usable model name — the ones with no
+    /// plan-level equivalent already on screen.
+    ///
+    /// `session` and `weekly_all` restate `five_hour` and `seven_day`
+    /// to the percent, so yielding them would double-render two rows
+    /// the UI already draws. Yields `(display_name, limit)`.
+    pub fn scoped_limits(&self) -> impl Iterator<Item = (&str, &UsageLimit)> {
+        self.limits.iter().filter_map(|l| {
+            let name = l.scope.as_ref()?.model.as_ref()?.display_name.as_deref()?;
+            (!name.is_empty()).then_some((name, l))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -246,5 +325,113 @@ mod tests {
         assert_eq!(extra.monthly_limit, Some(15000.0));
         assert_eq!(extra.used_credits, Some(1911.0));
         assert_eq!(extra.currency.as_deref(), Some("GBP"));
+    }
+
+    /// The 2026-08 wire shape: model-scoped limits moved out of the
+    /// `seven_day_<model>` keys into a generic `limits[]` array. Both
+    /// observed accounts return exactly three entries, and `scope` is
+    /// non-null only on `weekly_scoped`.
+    #[test]
+    fn limits_array_parses_with_model_scope() {
+        let json = r#"{
+            "five_hour": {"utilization": 31.0, "resets_at": "2026-08-12T04:40:00+00:00"},
+            "seven_day": {"utilization": 13.0, "resets_at": "2026-08-16T16:00:00+00:00"},
+            "limits": [
+                {"kind": "session", "group": "session", "percent": 31,
+                 "severity": "normal", "resets_at": "2026-08-12T04:40:00+00:00",
+                 "scope": null, "is_active": true},
+                {"kind": "weekly_all", "group": "weekly", "percent": 13,
+                 "severity": "normal", "resets_at": "2026-08-16T16:00:00+00:00",
+                 "scope": null, "is_active": false},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 23,
+                 "severity": "normal", "resets_at": "2026-08-16T15:59:59+00:00",
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+                 "is_active": false}
+            ]
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(usage.limits.len(), 3);
+        assert_eq!(usage.limits[2].kind, "weekly_scoped");
+        assert_eq!(usage.limits[2].percent, 23.0);
+        assert_eq!(usage.limits[2].severity.as_deref(), Some("normal"));
+        assert!(usage.limits[2].resets_at.is_some());
+    }
+
+    /// `session` restates `five_hour` and `weekly_all` restates
+    /// `seven_day`, to the percent. Appending them would double-render
+    /// rows already on screen, so only model-scoped entries survive.
+    #[test]
+    fn scoped_limits_keeps_only_model_scoped_entries() {
+        let json = r#"{
+            "limits": [
+                {"kind": "session", "percent": 31, "scope": null, "is_active": true},
+                {"kind": "weekly_all", "percent": 13, "scope": null, "is_active": false},
+                {"kind": "weekly_scoped", "percent": 80,
+                 "severity": "warning",
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+                 "is_active": true}
+            ]
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        let scoped: Vec<_> = usage.scoped_limits().collect();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].0, "Fable");
+        assert_eq!(scoped[0].1.percent, 80.0);
+        assert_eq!(scoped[0].1.severity.as_deref(), Some("warning"));
+    }
+
+    /// A scope with no usable model name is not a row we can label, so
+    /// it must not reach the UI as a blank-titled entry.
+    #[test]
+    fn scoped_limits_skips_scope_without_display_name() {
+        let json = r#"{
+            "limits": [
+                {"kind": "weekly_scoped", "percent": 5,
+                 "scope": {"model": {"id": "abc", "display_name": null}, "surface": null},
+                 "is_active": false},
+                {"kind": "weekly_scoped", "percent": 6,
+                 "scope": {"model": null, "surface": null}, "is_active": false}
+            ]
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(usage.scoped_limits().count(), 0);
+    }
+
+    /// Back-compat: servers that never send `limits` must still parse,
+    /// and must not report phantom rows.
+    #[test]
+    fn response_without_limits_yields_no_scoped_rows() {
+        let json = r#"{"five_hour": {"utilization": 1.0}}"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        assert!(usage.limits.is_empty());
+        assert_eq!(usage.scoped_limits().count(), 0);
+    }
+
+    /// Forward-compat, and the reason every field is defaulted: a
+    /// reshaped entry must degrade to an empty list rather than fail
+    /// the whole parse and blank the usage panel.
+    #[test]
+    fn malformed_limits_does_not_blank_the_rest_of_the_response() {
+        let json = r#"{
+            "five_hour": {"utilization": 7.0},
+            "limits": "not-an-array"
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(usage.five_hour.unwrap().utilization, 7.0);
+        assert!(usage.limits.is_empty());
+    }
+
+    /// Entries omitting optional keys entirely (not just null) parse.
+    #[test]
+    fn limit_entry_accepts_missing_optional_fields() {
+        let json = r#"{"limits": [{"kind": "session", "percent": 0}]}"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        let l = &usage.limits[0];
+        assert_eq!(l.kind, "session");
+        assert!(l.group.is_none());
+        assert!(l.severity.is_none());
+        assert!(l.resets_at.is_none());
+        assert!(l.scope.is_none());
+        assert!(!l.is_active);
     }
 }
