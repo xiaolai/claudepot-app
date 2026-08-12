@@ -6,7 +6,22 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.9 — beta (unreleased)
+## 0.4.10 — beta (unreleased)
+
+### Fixed
+
+- **The Windows release gate had been silently skipping itself for four
+  releases.** Its reachability probe ran a command that does not exist
+  in `cmd.exe`, so it failed on a perfectly healthy validator and the
+  hook reported the host as offline. v0.4.6 through v0.4.9 all shipped
+  with Windows verification quietly deferred to CI. Developer-facing
+  only — no effect on the app.
+- Five flaky tests, each fixed at its cause rather than by re-running:
+  four assertion races that waited for one element then synchronously
+  asserted another, and a command-palette test whose row count depended
+  on whether an earlier test had left the optional Boards section on.
+
+## 0.4.9 — beta (released 2026-08-12)
 
 ### Fixed
 
