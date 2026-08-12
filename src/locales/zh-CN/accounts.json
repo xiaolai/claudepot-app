@@ -249,7 +249,8 @@
       "apps": "7 天应用",
       "appsTooltip": "已授权此账户的第三方 OAuth 应用（IDE、工具等）。",
       "cowork": "7 天 cowork",
-      "coworkTooltip": "Cowork / 共享席位池用量。"
+      "coworkTooltip": "Cowork / 共享席位池用量。",
+      "scopedWeekly": "7 天 {{model}}"
     },
     "extra": {
       "label": "额外用量",

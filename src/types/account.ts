@@ -184,6 +184,15 @@ export interface ExtraUsage {
   currency: string | null;
 }
 
+/** A model-scoped rate-limit window (e.g. the weekly Fable limit).
+ *  The server names the model, so the label ships with the data
+ *  rather than resolving to a fixed i18n key. */
+export interface ScopedLimit {
+  label: string;
+  utilization: number;
+  resets_at: string | null;
+}
+
 export interface AccountUsage {
   five_hour: UsageWindow | null;
   seven_day: UsageWindow | null;
@@ -193,6 +202,9 @@ export interface AccountUsage {
   seven_day_oauth_apps: UsageWindow | null;
   /** Cowork / shared-seat usage pool (render-if-nonzero). */
   seven_day_cowork: UsageWindow | null;
+  /** Model-scoped windows from the server's `limits[]` (render-if-nonzero).
+   *  Optional: a usage entry cached by an older build has no such key. */
+  scoped_limits?: ScopedLimit[];
   extra_usage: ExtraUsage | null;
 }
 

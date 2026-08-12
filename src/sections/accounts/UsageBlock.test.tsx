@@ -91,3 +91,51 @@ describe("UsageBlock contextual actions", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
+
+describe("UsageBlock model-scoped rows", () => {
+  const base = {
+    five_hour: { utilization: 31, resets_at: null },
+    seven_day: { utilization: 13, resets_at: null },
+    seven_day_opus: null,
+    seven_day_sonnet: null,
+    seven_day_oauth_apps: null,
+    seven_day_cowork: null,
+    extra_usage: null,
+  };
+
+  it("renders a row for each model-scoped limit the server reports", () => {
+    render(
+      <UsageBlock
+        entry={mkEntry({
+          status: "ok",
+          usage: {
+            ...base,
+            scoped_limits: [
+              { label: "Fable", utilization: 23, resets_at: null },
+            ],
+          },
+        })}
+        onVerify={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("7d Fable")).toBeInTheDocument();
+  });
+
+  it("renders no scoped rows when the server reports none", () => {
+    render(
+      <UsageBlock
+        entry={mkEntry({
+          status: "ok",
+          usage: { ...base, scoped_limits: [] },
+        })}
+        onVerify={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("5h window")).toBeInTheDocument();
+    expect(screen.queryByText(/7d Fable/)).not.toBeInTheDocument();
+  });
+});
