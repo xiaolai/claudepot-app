@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api } from "../../api";
@@ -43,9 +43,14 @@ export function ReplaceKeyModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Belt and braces: if the modal unmounts by any path other than
-  // submit (Esc, backdrop, parent re-render), drop the secret too.
-  useEffect(() => () => setToken(""), []);
+  // Clears the secret *synchronously* before closing. A `setToken("")`
+  // in an unmount cleanup does nothing — React drops state updates to a
+  // component that is going away — so scrubbing has to happen on the
+  // path that triggers the close, not after it.
+  const handleClose = useCallback(() => {
+    setToken("");
+    onClose();
+  }, [onClose]);
 
   const onSubmit = useCallback(async () => {
     if (!token.trim() || busy) return;
@@ -65,8 +70,11 @@ export function ReplaceKeyModal({
   }, [busy, kind, onClose, onReplaced, t, token, uuid]);
 
   return (
-    <Modal open onClose={onClose} width="md">
-      <ModalHeader title={t("replace.title", { label })} onClose={onClose} />
+    <Modal open onClose={busy ? undefined : handleClose} width="md">
+      <ModalHeader
+        title={t("replace.title", { label })}
+        onClose={busy ? undefined : handleClose}
+      />
       <ModalBody>
         <p style={{ marginTop: 0, color: "var(--fg-muted)" }}>
           {t("replace.description")}
@@ -97,7 +105,7 @@ export function ReplaceKeyModal({
         ) : null}
       </ModalBody>
       <ModalFooter>
-        <Button onClick={onClose} disabled={busy}>
+        <Button onClick={handleClose} disabled={busy}>
           {t("replace.cancel")}
         </Button>
         <Button

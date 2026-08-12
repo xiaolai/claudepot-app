@@ -46,7 +46,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use uuid::Uuid;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// 30-second self-clear deadline for clipboard payloads written by
 /// `key_*_copy*`. Mirrors the legacy JS `CLIPBOARD_CLEAR_MS` so the UX
@@ -259,14 +259,17 @@ async fn key_api_add_inner(
     // Local owned copy so we can zeroize after persistence — `token`
     // is a borrow into the IPC arg buffer; `key_api_add` (the public
     // wrapper) is responsible for scrubbing that buffer on return.
-    let mut secret_buf = token.to_string();
-    let preview = token_preview(&secret_buf);
+    // `Zeroizing` scrubs on drop, which matters because the lines below
+    // can return early via `?`. The previous `let mut … ; zeroize()`
+    // shape only scrubbed on the success path, so a store-open failure
+    // left the secret sitting in freed memory.
+    let secret_buf = Zeroizing::new(token.to_string());
+    let preview = token_preview(secret_buf.as_str());
     let keys = open_keys_store()?;
     let outcome = keys
-        .insert_api_key(label, &preview, account_id, &secret_buf)
+        .insert_api_key(label, &preview, account_id, secret_buf.as_str())
         .map(|row| api_summary(row, &email_map))
         .map_err(ErrorDto::from);
-    secret_buf.zeroize();
     outcome
 }
 
@@ -305,14 +308,17 @@ async fn key_oauth_add_inner(
     let email_map = account_email_map(&accounts)?;
     let account_id = parse_account_uuid(account_uuid, &email_map)?;
 
-    let mut secret_buf = token.to_string();
-    let preview = token_preview(&secret_buf);
+    // `Zeroizing` scrubs on drop, which matters because the lines below
+    // can return early via `?`. The previous `let mut … ; zeroize()`
+    // shape only scrubbed on the success path, so a store-open failure
+    // left the secret sitting in freed memory.
+    let secret_buf = Zeroizing::new(token.to_string());
+    let preview = token_preview(secret_buf.as_str());
     let keys = open_keys_store()?;
     let outcome = keys
-        .insert_oauth_token(label, &preview, account_id, &secret_buf)
+        .insert_oauth_token(label, &preview, account_id, secret_buf.as_str())
         .map(|row| oauth_summary(row, &email_map))
         .map_err(ErrorDto::from);
-    secret_buf.zeroize();
     outcome
 }
 
@@ -356,13 +362,16 @@ async fn key_api_update_secret_inner(uuid: &str, token: &str) -> Result<(), Erro
             "not an API key — expected a value starting with `sk-ant-api03-`",
         ));
     }
-    let mut secret_buf = token.to_string();
-    let preview = token_preview(&secret_buf);
+    // `Zeroizing` scrubs on drop, which matters because the lines below
+    // can return early via `?`. The previous `let mut … ; zeroize()`
+    // shape only scrubbed on the success path, so a store-open failure
+    // left the secret sitting in freed memory.
+    let secret_buf = Zeroizing::new(token.to_string());
+    let preview = token_preview(secret_buf.as_str());
     let keys = open_keys_store()?;
     let outcome = keys
-        .update_api_secret(id, &preview, &secret_buf)
+        .update_api_secret(id, &preview, secret_buf.as_str())
         .map_err(ErrorDto::from);
-    secret_buf.zeroize();
     outcome
 }
 
@@ -383,13 +392,16 @@ async fn key_oauth_update_secret_inner(uuid: &str, token: &str) -> Result<(), Er
             "not an OAuth token — expected a value starting with `sk-ant-oat01-`",
         ));
     }
-    let mut secret_buf = token.to_string();
-    let preview = token_preview(&secret_buf);
+    // `Zeroizing` scrubs on drop, which matters because the lines below
+    // can return early via `?`. The previous `let mut … ; zeroize()`
+    // shape only scrubbed on the success path, so a store-open failure
+    // left the secret sitting in freed memory.
+    let secret_buf = Zeroizing::new(token.to_string());
+    let preview = token_preview(secret_buf.as_str());
     let keys = open_keys_store()?;
     let outcome = keys
-        .update_oauth_secret(id, &preview, &secret_buf)
+        .update_oauth_secret(id, &preview, secret_buf.as_str())
         .map_err(ErrorDto::from);
-    secret_buf.zeroize();
     outcome
 }
 
