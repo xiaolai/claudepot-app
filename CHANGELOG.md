@@ -6,7 +6,59 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.11 — beta (unreleased)
+## 0.4.12 — beta (released 2026-08-14)
+
+### Fixed
+
+- **Switching Claude Desktop from the tray told you nothing, including
+  when it failed.** The tray emitted four events the app never
+  subscribed to, so a Desktop swap left the account cards showing the
+  previous binding, and a swap or launch that *failed* produced no
+  toast, no banner and no message anywhere — the click simply appeared
+  to do nothing. The equivalent CLI actions had carried full feedback
+  the whole time. Desktop swaps now refresh the cards and report
+  success and failure the same way, and the tray names the account it
+  switched to. Unlike the CLI swap there is no Undo: reversing a
+  Desktop switch is not symmetric with performing one.
+- **Databases could refuse to open with "database is locked" when
+  Claudepot's windows, the CLI and the MCP server started together.**
+  Switching a database into WAL mode needs a brief exclusive lock, and
+  SQLite does not apply `busy_timeout` to that one step — so the first
+  process to open a file could lose the race and fail outright rather
+  than wait. Measured at 2 failures per 320 concurrent first-opens.
+  Affected every Claudepot database.
+- **Global → Config → Effective MCP read the wrong file** on installs
+  carrying a legacy `~/.claude/.config.json`, reporting no user-scope
+  MCP servers while Claude Code was actively applying them. The config
+  preview beside it read the correct file, so the same pane disagreed
+  with itself.
+- **The Claude Code tips ledger reported zero startups** for anyone
+  using `CLAUDE_CONFIG_DIR` or that same legacy config file — it read
+  `~/.claude.json` regardless of where Claude Code actually keeps its
+  global config. Because those counters feed an append-only log, past
+  zeroes cannot be reconstructed; the ledger is correct from this
+  release forward.
+- **`corpus.db`'s write-ahead log had no size bound.** The largest
+  database Claudepot keeps was the one store that configured its own
+  SQLite pragmas by hand, and silently omitted the two that cap WAL
+  growth — the same shape as the incident that put those caps in place.
+- `boards.db` migrations now decide what to apply while holding the
+  write lock. Harmless today, since the only migration is idempotent,
+  but boards hold data that exists nowhere else and the next migration
+  would not have been.
+
+### Changed
+
+- Developer-facing, no effect on the app: three classes of defect above
+  were invisible because nothing checked for them, so each now has a
+  gate. `cargo xtask verify-docs` fails a database opened without the
+  standard pragmas, and fails an event channel the backend emits with
+  no subscriber in the frontend. The web suite discovers its test files
+  instead of running a hand-written list — three test files, 45
+  assertions, had never run anywhere. Every one of these gates was
+  checked by breaking the thing it watches and confirming it goes red.
+
+## 0.4.11 — beta (released 2026-08-14)
 
 ### Fixed
 
