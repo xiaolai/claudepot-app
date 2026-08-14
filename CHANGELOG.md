@@ -6,6 +6,27 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.4.13 — beta (released 2026-08-15)
+
+### Fixed
+
+- **The Dock icon shipped in 0.4.12 was a black square.** The macOS 26
+  layered icon referenced its two layers as SVG, and `actool` renders
+  a layer carrying an SVG filter — the plate's grain and sheen — as
+  near-black, while compiling without a warning and exiting 0. The
+  layers are now rasterised to PNG before compiling.
+
+  A second fault was hiding behind the first: layer groups draw
+  **top-first**, so the full-canvas plate listed ahead of the block
+  occluded it completely. Fixing only the black would have produced a
+  blank plate.
+
+  `scripts/verify-icons.py` now renders the layered icon and checks the
+  pixels — that it is not near-black, and that the block is actually
+  visible. Both faults are caught; neither was visible to any check
+  that only inspects the input files, which is why 0.4.12 passed
+  everything and still shipped wrong.
+
 ## 0.4.12 — beta (released 2026-08-14)
 
 ### Changed

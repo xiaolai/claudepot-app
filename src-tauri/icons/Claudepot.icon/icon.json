@@ -6,20 +6,7 @@
     {
       "layers" : [
         {
-          "image-name" : "plate.svg",
-          "name" : "Plate"
-        }
-      ],
-      "specular" : false,
-      "translucency" : {
-        "enabled" : false,
-        "value" : 0.5
-      }
-    },
-    {
-      "layers" : [
-        {
-          "image-name" : "block.svg",
+          "image-name" : "block.png",
           "name" : "Block"
         }
       ],
@@ -28,6 +15,19 @@
         "opacity" : 0.5
       },
       "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "image-name" : "plate.png",
+          "name" : "Plate"
+        }
+      ],
+      "specular" : false,
       "translucency" : {
         "enabled" : false,
         "value" : 0.5
