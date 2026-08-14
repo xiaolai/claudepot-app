@@ -33,17 +33,74 @@
 //! to sit here was redundant (clippy's `duplicated_attributes` lint
 //! caught it in Rust 1.92).
 
+// Everything below the release no-op is debug-only, imports and the
+// embedded PNG included. Without these gates a release build carries a
+// 728 KB `include_bytes!` it can never reach, and warns about five
+// unused imports on top.
+#[cfg(debug_assertions)]
 use objc2::{rc::Retained, AllocAnyThread, MainThreadMarker};
+#[cfg(debug_assertions)]
 use objc2_app_kit::{NSApplication, NSImage};
+#[cfg(debug_assertions)]
 use objc2_foundation::NSData;
 
-/// Embedded 512×512 source. Big enough that every Dock-relevant
-/// size (96, 128, 144, 160, 256) is a downsample with plenty of
-/// pixels to filter from, not an upscale.
-const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
+/// Embedded 1024×1024 source, and deliberately **not** the bundle's
+/// `icon.png`.
+///
+/// The two paths are inverses of each other, which is the classic way
+/// to get a macOS icon wrong:
+///
+/// | Path | What it wants |
+/// |---|---|
+/// | bundle `.icns` | **full bleed** — the system applies the squircle mask, the inset and the shadow |
+/// | `setApplicationIconImage` (here) | **everything already applied** — drawn verbatim at the slot size |
+///
+/// So this file carries the squircle and the inset itself: the artwork
+/// occupies 824/1024 = 0.805 of the canvas, Apple's measured tile
+/// fraction, with a superellipse corner rather than a circular arc.
+/// `scripts/regen-icons.sh` builds it; `scripts/verify-icons.py`
+/// asserts the geometry.
+///
+/// The previous artwork hid the distinction by baking a squircle into
+/// the SVG at 416/512 of the canvas, so the same file happened to work
+/// in both roles. The current icon set is full-bleed by design — right
+/// for the bundle — and handing it here unmodified renders a
+/// hard-edged square about 22% larger than every neighbouring Dock
+/// icon.
+///
+/// 1024 rather than 512 because every Dock-relevant size (96, 128,
+/// 144, 160, 256) is then a downsample with plenty of pixels to filter
+/// from, never an upscale.
+#[cfg(debug_assertions)]
+const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/icon-dock.png");
 
-/// Override the application icon on the main thread. Call once
-/// during `setup()`.
+/// Override the application icon on the main thread.
+///
+/// # Debug builds only — and that is the whole point
+///
+/// A packaged app gets its Dock icon from the bundle: macOS 26 from
+/// `Contents/Resources/Assets.car` (the compiled `Claudepot.icon`,
+/// which is what earns the Liquid Glass treatment), and macOS 25 and
+/// earlier from `icon.icns`. `setApplicationIconImage` **replaces**
+/// whatever that produced with a flat bitmap, so leaving it on in
+/// release would throw away the glass rendering the layered icon
+/// exists to get — the system can only light an icon that still has
+/// separable layers at composite time, and a PNG handed to this API
+/// has none.
+///
+/// It stays in debug because an unbundled `cargo run` binary has no
+/// bundle at all: no `Assets.car`, no `.icns`, no `Info.plist`. The
+/// Dock shows the generic `exec` tile, and this is the only thing that
+/// replaces it.
+///
+/// The cost is real and worth naming: pre-26 release builds lose the
+/// crispness fix this function was originally written for (the `.icns`
+/// 128 layer downscaled bilinearly at the Dock's default 96 px). They
+/// fall back to the full `.icns` ladder, which is good but not
+/// Lanczos-from-512. Restoring it means gating on the OS version
+/// rather than the build profile — do that if pre-26 softness is worth
+/// the extra branch, but never re-enable it unconditionally.
+#[cfg(debug_assertions)]
 pub fn override_application_icon() {
     // `MainThreadMarker::new_unchecked` + `setApplicationIconImage` are
     // main-thread-only; off the main thread they are UB. `setup()` runs
@@ -76,3 +133,13 @@ pub fn override_application_icon() {
     // an `NSImage` is the documented contract.
     unsafe { app.setApplicationIconImage(Some(&image)) };
 }
+
+/// Release builds: the bundle owns the Dock icon. See the debug
+/// variant above for why overriding it would be a regression rather
+/// than an improvement.
+///
+/// A no-op function rather than `#[cfg]` at each call site, so callers
+/// stay readable and a new one cannot accidentally reintroduce the
+/// override in release by forgetting the attribute.
+#[cfg(not(debug_assertions))]
+pub fn override_application_icon() {}

@@ -43,7 +43,9 @@
     "publisher": "HANDO K.K.",
     "homepage": "https://github.com/xiaolai/claudepot-app",
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "infoPlist": "Info.plist",
+      "files": { "Resources/Assets.car": "icons/Assets.car" }
     },
     "linux": {
       "deb": {

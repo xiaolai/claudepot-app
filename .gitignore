@@ -61,6 +61,12 @@ typescript
 # the working tree that no other clone has and CI never sees — the same
 # never-ran-anywhere failure the web suite's hand-listed runner had.
 !/scripts/check-envvar-layout.test.mjs
+# Icon pipeline. `regen-icons.sh` was already excepted below; these two are
+# the other half of it — the macOS 26 layered-icon compile step, and the
+# structural checker both it and AGENTS.md tell you to run. A committed
+# `Assets.car` that no one can rebuild is worse than no Assets.car.
+!/scripts/build-macos-glass-icon.sh
+!/scripts/verify-icons.py
 # Locale-catalog gate. ci.yml runs it via `pnpm check:catalogs`, so the same
 # rule as the entry above applies with teeth: leaving it out points a
 # committed CI step at a file a fresh clone does not have, and the job fails

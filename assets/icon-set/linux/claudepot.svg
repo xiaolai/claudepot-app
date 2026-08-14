@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.55" numOctaves="3" seed="11"></feTurbulence>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.929 0 0 0 0 0.914 0 0 0 0 0.894 0.55 0.35 0.10 0 0.05"></feColorMatrix>
+    </filter>
+    <clipPath id="base">
+      <rect x="64" y="64" width="896" height="896" rx="120"></rect>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#base)">
+    <rect x="64" y="64" width="896" height="896" fill="#D9D5CF"></rect>
+    <rect x="64" y="64" width="896" height="896" filter="url(#grain)"></rect>
+  </g>
+  <path fill="#F7B47C" d="M512 296 L232 450 L512 604 Z"></path>
+  <path fill="#E8833A" d="M512 296 L792 450 L512 604 Z"></path>
+  <path fill="#C0642A" d="M232 450 L512 604 L512 828 L232 674 Z"></path>
+  <path fill="#9A4F1B" d="M792 450 L512 604 L512 828 L792 674 Z"></path>
+</svg>

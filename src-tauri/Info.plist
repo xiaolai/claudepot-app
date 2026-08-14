@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated Info.plist by tauri.conf.json's
+  `bundle.macOS.infoPlist`. Tauri owns every other key in there; this file adds
+  only the one it has no setting for.
+
+  CFBundleIconName points at the app icon inside Contents/Resources/Assets.car,
+  which is how macOS 26 finds the layered icon and gives it the Liquid Glass
+  treatment. It is the name of the `.icon` document — Claudepot.icon — with the
+  extension dropped, and `actool --app-icon` bakes that same name into the
+  catalogue, so the three must be renamed together.
+
+  Tauri's own CFBundleIconFile (icons/icon.icns) is left in place and is not
+  redundant: macOS 26 prefers the catalogue, and everything older ignores
+  CFBundleIconName entirely and falls back to the .icns. `minimumSystemVersion`
+  is 10.15, so that fallback is load-bearing for most of the supported range.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIconName</key>
+	<string>Claudepot</string>
+</dict>
+</plist>

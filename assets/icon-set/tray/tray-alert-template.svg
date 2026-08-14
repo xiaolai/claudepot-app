@@ -1,0 +1,38 @@
+<!--
+  Menu-bar template, alert state.
+
+  Same 800-unit viewBox as tray-template.svg, and that is the point:
+  an identical viewBox size means the BLOCK renders at an identical
+  size in both states, so the icon does not jump when the badge
+  appears or clears.
+
+  Making that possible needed one artwork change. The badge sat at
+  (852, 204) r132, reaching (984, 72) — so block-plus-badge spanned
+  792 units against the block's own 640. Any viewBox tight enough to
+  make the plain block a sensible menubar size clipped the badge, and
+  any viewBox loose enough to contain the badge left the block small.
+  Moving the badge to (760, 310) tucks it against the block's top-right
+  corner instead of floating off it.
+
+  The badge position is constrained, not chosen by eye: within this
+  viewBox it must satisfy cx + r <= 900 and cy - r >= 172 to keep a
+  12-unit margin off the tile edge. An earlier attempt at (792, 264)
+  reached x=924 against a right edge of 912 and rendered flush to the
+  pixel boundary — measurably clipped, which is why the ink box is
+  asserted below rather than eyeballed.
+
+  The badge is otherwise unchanged: same radius, same knocked-out ring
+  (mask circle) separating it from the block, so it still reads as a
+  separate element at 22pt rather than merging into the silhouette.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="112 160 800 800">
+  <defs>
+    <mask id="seams">
+      <rect x="112" y="160" width="800" height="800" fill="#FFFFFF"></rect>
+      <path d="M512 320 L512 864 M192 432 L512 608 M832 432 L512 608" stroke="#000000" stroke-width="48" fill="none"></path>
+      <circle cx="760" cy="310" r="196" fill="#000000"></circle>
+    </mask>
+  </defs>
+  <path mask="url(#seams)" fill="#000000" d="M512 256 L832 432 L832 688 L512 864 L192 688 L192 432 Z"></path>
+  <circle cx="760" cy="310" r="132" fill="#000000"></circle>
+</svg>

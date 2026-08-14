@@ -890,23 +890,94 @@ Always verify claims against CC source at `~/github/claude_code_src/src` before 
 ## Icon assets
 
 Full post-mortem of the v0.1.13–0.1.19 Dock-blur arc is in
-`dev-docs/icon-design-notes.md`. Load-bearing rules:
+`dev-docs/icon-design-notes.md`.
 
-- **SVG must use a power-of-2-friendly grid.** Cell sizes 16, 24,
-  32, 64 in a 512-px viewBox. Avoid 22, 28, 30 — they don't divide
-  128/256 cleanly and rsvg AA-softens at every Dock size.
+**The authored set lives in `assets/icon-set/`** — isometric block on
+an anodised plate, every coordinate a multiple of 16 on a 1024 grid.
+That directory is the source; `src-tauri/icons/` holds only what
+`scripts/regen-icons.sh` derives from it, plus the two masters the
+script reads directly (`icon.svg`, `icon-flat.svg`). There is
+deliberately no second copy of the artwork anywhere: the previous
+`pixel-*` masters were deleted when this landed rather than left
+beside it, because two plausible masters in one directory is how the
+wrong one gets regenerated from.
+
+Load-bearing rules:
+
+- **SVG must use a power-of-2-friendly grid.** The current set is on
+  16-unit multiples in a 1024 viewBox. Avoid 22, 28, 30 — they don't
+  divide 128/256 cleanly and rsvg AA-softens at every Dock size.
 - **Generate raster icons via `scripts/regen-icons.sh`,
   not `pnpm tauri icon`.** The latter uses lossy resampling for
   some `.icns` layers and produces ~50 dead-byte files for targets
   we don't ship (iOS, Android, MSIX). Our script uses
   `rsvg-convert` + `iconutil` + a manual ICO struct-pack that
   embeds PNG-compressed layers verbatim.
+- **Three masters, not one, and the split is not cosmetic:**
+  - `icon.svg` — plated master with an `feTurbulence` grain, used at
+    48 px and up.
+  - `icon-flat.svg` — same artwork, solid plate, no filter. Used
+    **below 48 px**. The grain is computed at render size, so it
+    coarsens relative to the tile as the tile shrinks and reads as
+    dirt rather than as a finish. A single-source ladder cannot
+    express this.
+  - `assets/icon-set/windows/icon-glyph.svg` — plateless, for
+    `icon.ico`. Windows draws no enclosure and shows the icon against
+    chrome of every shade, so the plate would read as a grey card
+    floating behind the block.
+- **Tray icons are generated too** (`tray-icon{,Alert}{Template,Mono}@2x.png`,
+  44×44). Template is inverted by macOS to match the menubar; Mono is
+  the same alpha filled `#808080` because Windows and Linux have no
+  template concept and a pure-black glyph vanishes on a dark taskbar.
+- **A tray icon's size is how much of the tile it INKS, not the tile.**
+  The 44×44 canvas is fixed; what the user sees is the glyph's bounding
+  box within it. The tray SVGs therefore carry a cropped `viewBox`
+  (800 of the 1024 authoring canvas) rather than the full canvas —
+  framed at 1024 the block inked 64%w × 61%h and read as visibly
+  undersized against the previous icon's 86% × 75%. Both variants share
+  one viewBox *size* so the block does not change scale when the alert
+  badge appears; the badge was moved inward to (760, 310) to fit,
+  because a badge floating at the far corner forces a viewBox loose
+  enough to shrink the block. `verify-icons.py` asserts the ink
+  fraction and that nothing touches the tile edge — every dimension
+  check passed while the icon was too small, so the coverage assertion
+  is the one that matters.
+- **`scripts/verify-icons.py` is the structural gate** — 34 checks over
+  the PNG ladder, the `.icns` layer list, ICO layer encoding, tray
+  sizes, and the grain floor. It catches the failures that still look
+  like valid files on disk: an ICO whose layers are raw BMP, an `.icns`
+  missing the 128/256 layers the Dock reaches for, a small raster that
+  kept the grain. Run it after any icon change. It needs no GUI; what
+  it explicitly does **not** check is how the artwork looks, which is
+  what launching the app is for.
+- **The bundle path and the `setIcon` path want OPPOSITE artwork, and
+  swapping them is the classic macOS icon bug:**
+
+  | Path | Wants |
+  |---|---|
+  | bundle `.icns` / `bundle.icon` list | **full bleed** — macOS applies the squircle mask, inset and shadow |
+  | `setApplicationIconImage` (`dock_icon.rs`) | **everything already applied** — drawn verbatim at slot size, no mask, no inset, no shadow |
+
+  So `dock_icon.rs` embeds `icon-dock.png`, **not** `icon.png`: 1024
+  canvas, artwork inset to 824/1024 = 0.805 (Apple's measured tile
+  fraction), superellipse corner (`|x/a|^n + |y/a|^n = 1`, n = 5) rather
+  than a circular arc, which meets the straight edge with a curvature
+  discontinuity and reads boxy beside real icons. A full-bleed image on
+  this path renders as a hard square measured **~22% larger** than every
+  neighbouring Dock icon.
+
+  The pre-2026-08 artwork hid the distinction by baking a squircle into
+  the SVG at 416/512 = 0.813 of the canvas, so one file happened to
+  serve both roles. The current set is full-bleed by design — correct
+  for the bundle — which is exactly why the second asset now exists.
+  Reference: `~/.claude/agents/icon-smith/specs.md`, measured against
+  macOS 26.5.
 - **`src-tauri/src/dock_icon.rs` calls `setApplicationIconImage`
-  with `icon.png` (512×512) at startup on macOS.** This is required
-  — Tauri's runtime only does this in dev mode. Without it, prod
-  Dock at default size (96 px on Retina) renders the `.icns` 128
-  layer downscaled bilinearly and looks visibly soft. The 512-px
-  source means every Dock size is a clean Lanczos downsample.
+  at startup on macOS.** This is required — Tauri's runtime only does
+  this in dev mode. Without it, prod Dock at default size (96 px on
+  Retina) renders the `.icns` 128 layer downscaled bilinearly and looks
+  visibly soft. The 1024-px source means every Dock size is a clean
+  Lanczos downsample.
 - **`pnpm tauri icon`'s output paths are `.gitignore`'d** so a
   stray invocation can't re-stage MSIX/iOS/Android dead bytes.
 

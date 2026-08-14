@@ -8,6 +8,29 @@ Versioning scheme:
 
 ## 0.4.12 — beta (released 2026-08-14)
 
+### Changed
+
+- **New app icon** — an isometric block on an anodised plate, replacing
+  the pixel-art house. It reaches every surface it should: the Dock,
+  the menu-bar tray, the Windows and Linux bundles, the site favicon
+  and the README.
+
+  On macOS 26 it ships as a **layered icon**, so the system draws the
+  Liquid Glass treatment — squircle, shadow, and a specular highlight
+  on the block itself. That is not something a `.icns` can carry: a
+  `.icns` is finished bitmaps, and the system can only light an icon
+  that still has separate layers when it composites. macOS 25 and
+  earlier keep the `.icns`, which stays in the bundle for them.
+
+  Several surfaces deliberately get different artwork, because the
+  platforms disagree about what they want. Windows gets the plateless
+  glyph, since it draws no enclosure of its own and the plate would
+  read as a grey card floating behind the block. Rasters below 48 px
+  come from a grain-free master, because the plate texture is computed
+  at render size and turns to dirt as the tile shrinks. The menu-bar
+  glyph is framed tighter than the authoring canvas so it does not sit
+  undersized next to its neighbours.
+
 ### Fixed
 
 - **Switching Claude Desktop from the tray told you nothing, including
