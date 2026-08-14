@@ -1592,9 +1592,34 @@ async fn test_verify_all_with_progress_skips_accounts_without_credentials() {
 }
 
 /// Stagger only fires BETWEEN calls — not before the first or after
-/// the last. With N=3 accounts the total elapsed time should be
-/// >= 2 * 200ms but the first event fires immediately.
-#[tokio::test]
+/// the last. With N=3 accounts that is exactly two 200 ms sleeps.
+///
+/// # Why the clock is paused
+///
+/// This measured `std::time::Instant` around the whole pass and
+/// asserted `elapsed < 900ms`. That bound is not a claim about the
+/// code: the window also contains three `verify_account_identity`
+/// calls, each doing keychain and store work whose cost belongs to
+/// the machine, not to the stagger logic. On a loaded
+/// `windows-latest` runner it measured 981 ms against an expected
+/// ~400 ms of actual sleeping, and failed — while the identical tree
+/// passed on the same workflow minutes earlier. A wall-clock upper
+/// bound cannot distinguish "three sleeps" from "two sleeps on a busy
+/// runner", which is precisely the distinction the test exists to
+/// make.
+///
+/// `start_paused = true` gives tokio a virtual clock that
+/// auto-advances only when the runtime is idle. Every
+/// `tokio::time::sleep` therefore costs its exact nominal duration and
+/// real work costs zero, so `tokio::time::Instant` measures *the sum
+/// of the sleeps* and nothing else. The assertions below are then
+/// exact rather than tolerant, which also makes them stricter: the old
+/// 900 ms ceiling would have accepted a third stagger, the 401 ms one
+/// cannot.
+///
+/// Raising the ceiling instead would have bought green by loosening a
+/// threshold, and the next slow runner would have taken it back.
+#[tokio::test(start_paused = true)]
 async fn test_verify_all_with_progress_uses_200ms_stagger_only_between_calls() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
@@ -1616,19 +1641,24 @@ async fn test_verify_all_with_progress_uses_200ms_stagger_only_between_calls() {
     let fetcher = VerifyFetcher::new().returns("any", "a1@example.com");
     let sink = RecordingVerifySink::new();
 
-    let start = std::time::Instant::now();
+    // `tokio::time::Instant`, not `std::time::Instant` — only the
+    // former follows the paused clock. Using std here would measure
+    // real time again and reintroduce exactly the flake above.
+    let start = tokio::time::Instant::now();
     verify_all_with_progress(&store, &fetcher, &sink).await;
     let elapsed = start.elapsed();
 
-    // Two stagger gaps for 3 accounts → >= 400ms minimum.
+    // Two stagger gaps for 3 accounts → 400 ms of virtual time.
     assert!(
-        elapsed >= std::time::Duration::from_millis(380),
-        "stagger should add ~400ms; elapsed={elapsed:?}"
+        elapsed >= std::time::Duration::from_millis(400),
+        "stagger should add 400ms of sleeping; elapsed={elapsed:?}"
     );
-    // Sanity upper bound — we shouldn't sleep before the first or
-    // after the last (would push elapsed above 600ms+jitter).
+    // And no sleep before the first call or after the last. Under a
+    // paused clock only sleeps advance time, so a third stagger would
+    // land this at 600 ms — a 1 ms ceiling over the expected value is
+    // now a meaningful assertion rather than a tolerance.
     assert!(
-        elapsed < std::time::Duration::from_millis(900),
+        elapsed < std::time::Duration::from_millis(401),
         "no extra stagger before first / after last; elapsed={elapsed:?}"
     );
 
