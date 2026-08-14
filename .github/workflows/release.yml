@@ -233,6 +233,57 @@ jobs:
         run: |
           pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg,updater
 
+      # Tauri signs, notarizes and staples the .app, and signs the .dmg — but it
+      # never notarizes the disk image itself. A signed-but-unnotarized dmg is
+      # refused by `spctl -t open` with "Unnotarized Developer ID", so the
+      # download is rejected before the stapled app inside is ever assessed.
+      # Must run before "Stage GUI artifacts" so the staged copy is the stapled one.
+      - name: Notarize and staple DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          # Fail closed. A missing secret must not silently skip notarization
+          # and ship an unnotarized dmg behind a green build.
+          test -n "$APPLE_TEAM_ID" || { echo "FAIL: APPLE_TEAM_ID is empty"; exit 1; }
+
+          DMG=$(ls target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -1)
+          echo "Notarizing $DMG"
+
+          # notarytool has no internal retry and Apple's notary service drops
+          # connections intermittently: a timed-out *status poll* fails the step
+          # after the upload has already succeeded and been accepted.
+          # $1 is a log label; the rest is the command. The label exists so the
+          # failure message never echoes the expanded argv — the shell expands
+          # $APPLE_APP_PASSWORD before retry() is entered, so echoing "$*" would
+          # write the app-specific password into the build log.
+          retry() {
+            label="$1"; shift
+            for i in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "attempt $i failed, retrying in 10s: $label" >&2
+              sleep 10
+            done
+            echo "FAIL: gave up after 5 attempts: $label" >&2
+            return 1
+          }
+
+          retry "notarytool submit" xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          retry "stapler staple" xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+
+          # The gate. Must print `accepted` / `source=Notarized Developer ID`.
+          # No `|| true` — a rejected dmg has to fail the build.
+          spctl -a -vv -t open --context context:primary-signature "$DMG"
+
       - name: Stage GUI artifacts
         run: |
           set -eu
