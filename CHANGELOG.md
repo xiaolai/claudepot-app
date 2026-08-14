@@ -6,7 +6,25 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.10 — beta (unreleased)
+## 0.4.11 — beta (unreleased)
+
+### Fixed
+
+- **Downloaded `.dmg` files were rejected by Gatekeeper.** Tauri
+  notarizes and staples the `.app` and signs the disk image, but never
+  notarizes the image itself — so macOS refused the download with
+  "Unnotarized Developer ID" before the stapled app inside was ever
+  assessed. Fresh downloads only; in-app updates were never affected.
+  Applies from this release onward, so a `.dmg` from 0.4.10 or earlier
+  still shows the warning.
+- **Verifying the active account could sign you out of a running Claude
+  Code session.** The private-slot fallback spent the slot's single-use
+  refresh token even when a live `claude` might still be holding that
+  same token in memory, retiring it and forcing a re-login. The
+  live-session gate that already protected the keychain path now covers
+  the slot path too. Thanks to @zhuligs.
+
+## 0.4.10 — beta (released 2026-08-12)
 
 ### Fixed
 
