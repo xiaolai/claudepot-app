@@ -80,3 +80,9 @@ caregiver = ["dep:lettre"]
 
 [dev-dependencies]
 claudepot-core = { path = ".", features = ["caregiver"] }
+# `test-util` enables tokio's pausable clock (`#[tokio::test(start_paused
+# = true)]`). Used by the stagger tests, which assert how many 200 ms
+# sleeps a pass performs — a claim about the CODE that a wall-clock
+# measurement cannot make on a shared CI runner without also measuring
+# the runner. Dev-only; the shipped binaries do not carry it.
+tokio = { workspace = true, features = ["test-util"] }
