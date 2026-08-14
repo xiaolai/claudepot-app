@@ -56,12 +56,19 @@ async fn run_tick(app: &AppHandle) {
     // cannot silently kill *every* orchestrator for the GUI's
     // lifetime. The previous shape — `loop { run_tick().await;
     // sleep().await; }` with zero panic isolation — meant a malformed
-    // `result.json`, an unmanaged `app.state::<…>()` call, or any
-    // subprocess panic stopped permission revert + PR refresh + the
-    // event orchestrator + snapshot writer + rotation all at once.
+    // `result.json` or any subprocess panic stopped permission revert
+    // + PR refresh + the event orchestrator + snapshot writer +
+    // rotation all at once.
     // Note `panic = "abort"` in the release profile defeats this in
     // production binaries, but the guard still pays off in dev,
     // tests, and any future profile change.
+    //
+    // Managed-state lookups are deliberately NOT left to that guard.
+    // This comment used to list "an unmanaged `app.state::<…>()` call"
+    // among the things it covered, while every such call sat OUTSIDE
+    // the guarded futures — and `catch_unwind` could not have helped
+    // in release regardless. They now use `try_state` and degrade with
+    // a log, which works under `panic = "abort"` too.
 
     // Revert any expired permission grants first — this is independent
     // of account state, so it must run before the early returns below
@@ -150,18 +157,33 @@ async fn run_tick(app: &AppHandle) {
     // than five minutes from now. Nothing to do — and no network — when
     // every slot is still valid. Never touches the active account; see
     // `token_refresh_orchestrator::pick`.
+    //
+    // `try_state`, not `state`: the latter PANICS when the type is not
+    // managed. This block sat OUTSIDE `guarded` while `guarded`'s own
+    // comment named "an unmanaged `app.state::<…>()` call" as one of
+    // the things it protected against — so the one hazard it called
+    // out by name was the one it could not catch. Worse, `guarded`
+    // relies on `catch_unwind`, which `panic = "abort"` makes a no-op
+    // in the shipped release profile. A `Result`-shaped miss degrades
+    // this tick and logs; a panic takes the whole GUI down.
+    if let Some(orch) =
+        app.try_state::<Arc<crate::token_refresh_orchestrator::TokenRefreshOrchestrator>>()
     {
-        let orch = app.state::<Arc<crate::token_refresh_orchestrator::TokenRefreshOrchestrator>>();
         let orch: Arc<_> = Arc::clone(&orch);
         guarded(
             "token_refresh_orchestrator",
             async move { orch.tick(app).await },
         )
         .await;
+    } else {
+        tracing::warn!("usage_snapshot: TokenRefreshOrchestrator not managed; skipping refresh");
     }
 
+    let Some(cache_state) = app.try_state::<UsageCache>() else {
+        tracing::warn!("usage_snapshot: UsageCache not managed; skipping this tick");
+        return;
+    };
     let outcomes = {
-        let cache_state = app.state::<UsageCache>();
         let cache: &UsageCache = &cache_state;
         cache.fetch_batch_detailed_verified(&store, &uuids).await
     };
@@ -201,13 +223,21 @@ async fn run_tick(app: &AppHandle) {
     // mode (auto / confirm). When no rules exist, the orchestrator
     // returns immediately — zero overhead for users who don't opt in.
     if let Some(active_uuid) = active_cli_uuid(&accounts) {
-        let orchestrator = app.state::<Arc<RotationOrchestrator>>();
-        let orchestrator: Arc<RotationOrchestrator> = Arc::clone(&orchestrator);
-        guarded(
-            "rotation_orchestrator",
-            orchestrator.tick(app, &snapshot, active_uuid),
-        )
-        .await;
+        // `try_state` for the same reason as above — see the
+        // token-refresh block.
+        match app.try_state::<Arc<RotationOrchestrator>>() {
+            Some(orchestrator) => {
+                let orchestrator: Arc<RotationOrchestrator> = Arc::clone(&orchestrator);
+                guarded(
+                    "rotation_orchestrator",
+                    orchestrator.tick(app, &snapshot, active_uuid),
+                )
+                .await;
+            }
+            None => {
+                tracing::warn!("usage_snapshot: RotationOrchestrator not managed; skipping")
+            }
+        }
     }
 }
 

@@ -84,9 +84,16 @@ if [ "$rust_only" -eq 0 ]; then
   # pixels — which is exactly how that pane shipped with its entire editable
   # list invisible. Needs `pnpm tauri dev` running; skipped, not failed, when
   # it isn't (exit 2 means "could not run").
+  #
+  # `--self-test` first forces the pane to 0px and fails if the
+  # assertions DON'T fire. Since CI can never run this guard, a run
+  # that merely reports "ok" tells you nothing about whether the guard
+  # still works; this makes every local run also a run of the guard
+  # against a known-bad layout. The pure `evaluate()` half is covered
+  # in CI by `scripts/check-envvar-layout.test.mjs`.
   step "env-vars pane layout (live app)"
   layout_rc=0
-  node scripts/check-envvar-layout.mjs || layout_rc=$?
+  node scripts/check-envvar-layout.mjs --self-test || layout_rc=$?
   case "$layout_rc" in
     0) ok "envvar layout" ;;
     2) printf '\033[1;33m• skipped — app not running (pnpm tauri dev)\033[0m\n' ;;

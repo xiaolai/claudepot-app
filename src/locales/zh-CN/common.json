@@ -148,7 +148,10 @@
     "cliSwitchedTitleRestart": "CLI → {{email}} — 重启 Claude Code 后生效",
     "cliSwitchedBodyRestart": "重启 Claude Code 后生效。打开 Claudepot 可撤销。",
     "cliSwitchedBodyUndo": "10 秒内打开 Claudepot 可撤销。",
-    "undoFailed": "撤销失败：未找到 {{email}}"
+    "undoFailed": "撤销失败：未找到 {{email}}",
+    "desktopSwitchedTitle": "Desktop → {{email}}",
+    "desktopSwitchedBody": "Claude Desktop 未重新启动；请重启以加载新会话。",
+    "desktopReconciled_other": "已校正 {{count}} 个 Desktop 绑定"
   },
   "status": {
     "keychain": {

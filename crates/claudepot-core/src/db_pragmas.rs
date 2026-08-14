@@ -17,7 +17,7 @@
 //!   forcing it on globally could activate dormant constraints
 //!   in stores that later gain FK schemas without review.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, ErrorCode};
 use std::time::Duration;
 
 /// Cap each WAL file at 64 MB after every successful checkpoint.
@@ -34,6 +34,14 @@ pub(crate) const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 /// helper sets it centrally so new stores inherit it for free.
 pub(crate) const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Retry schedule for the WAL-mode transition, in milliseconds.
+///
+/// Sums to ~3.2 s, comfortably inside [`BUSY_TIMEOUT`] — a caller that
+/// already tolerates a 5-second wait on writer contention is not
+/// surprised by this one, and bounding it below that keeps the open
+/// path's worst case unchanged.
+const WAL_SWITCH_BACKOFF_MS: &[u64] = &[2, 5, 10, 20, 40, 80, 160, 320, 640, 960, 960];
+
 /// Apply Claudepot's standard SQLite pragmas to a fresh connection.
 ///
 /// Idempotent: safe to call repeatedly on the same connection.
@@ -41,19 +49,102 @@ pub(crate) const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// any schema DDL — see store call sites for the full ordering
 /// (open → pragmas → optional FK opt-in → schema → sidecar
 /// materialization → chmod).
-///
-/// `busy_timeout` is set first so the subsequent `PRAGMA
-/// journal_mode=WAL` (which needs a momentary exclusive lock to
-/// switch modes) can wait on a concurrent claudepot process
-/// instead of returning `SQLITE_BUSY` immediately.
 pub fn apply_standard_pragmas(conn: &Connection) -> rusqlite::Result<()> {
     conn.busy_timeout(BUSY_TIMEOUT)?;
+    enter_wal_mode(conn)?;
     conn.execute_batch(&format!(
-        "PRAGMA journal_mode=WAL;\n\
-         PRAGMA wal_autocheckpoint=1000;\n\
+        "PRAGMA wal_autocheckpoint=1000;\n\
          PRAGMA journal_size_limit={WAL_SIZE_LIMIT_BYTES};"
     ))?;
     Ok(())
+}
+
+/// Is this the "someone else holds the file" error?
+fn is_busy(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(ffi, _)
+            if matches!(ffi.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+    )
+}
+
+fn journal_mode(conn: &Connection) -> rusqlite::Result<String> {
+    conn.pragma_query_value(None, "journal_mode", |r| r.get::<_, String>(0))
+}
+
+/// Put the connection into WAL mode, retrying while another process
+/// holds the file.
+///
+/// # `busy_timeout` does not cover this, whatever it looks like
+///
+/// This helper used to be one `execute_batch` beginning `PRAGMA
+/// journal_mode=WAL`, with a comment claiming `busy_timeout` was set
+/// first precisely so that statement "can wait on a concurrent
+/// claudepot process instead of returning `SQLITE_BUSY` immediately."
+/// That is not what SQLite does. Switching **into** WAL needs a
+/// momentary exclusive lock, and the busy handler is **not** invoked
+/// for it — the statement fails immediately with `SQLITE_BUSY`
+/// ("database is locked") no matter how long the timeout is.
+///
+/// Measured, not reasoned about: 8 threads opening one fresh
+/// `boards.db` concurrently, over 40 rounds, produced 2 hard failures
+/// out of 320 opens. That is the documented deployment for
+/// `boards.db` — GUI, CLI and the MCP subprocess all open it directly
+/// with no channel between them — and `sessions.db` and `corpus.db`
+/// follow the same access pattern. The user-visible shape was a store
+/// that intermittently refused to open with "database is locked".
+///
+/// Two properties make the retry cheap:
+///
+/// - **The transition happens once per file, ever.** Re-issuing the
+///   pragma against a database already in WAL is a no-op that takes no
+///   exclusive lock, so the early return below is the path taken on
+///   every open after the first. Steady state costs one pragma read.
+/// - **Losing the race is self-resolving.** Whoever won it left the
+///   file in WAL, so the loser's next check succeeds rather than
+///   needing the lock at all.
+///
+/// Exhausting the schedule returns the underlying busy error rather
+/// than proceeding: a connection silently left in `delete` journal
+/// mode would take the *store's* write lock for whole transactions
+/// instead of WAL's per-writer one, which converts a rare open failure
+/// into a permanent, invisible concurrency regression.
+fn enter_wal_mode(conn: &Connection) -> rusqlite::Result<()> {
+    let mut last_busy: Option<rusqlite::Error> = None;
+
+    for (i, delay) in WAL_SWITCH_BACKOFF_MS.iter().enumerate() {
+        // Already there — the common path, and the reason a retry loop
+        // costs nothing in steady state.
+        if journal_mode(conn)?.eq_ignore_ascii_case("wal") {
+            return Ok(());
+        }
+        // `journal_mode` returns the resulting mode as a row, so this
+        // needs the `_and_check` form; plain `pragma_update` rejects a
+        // statement that returns results.
+        match conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get::<_, String>(0)) {
+            Ok(mode) if mode.eq_ignore_ascii_case("wal") => return Ok(()),
+            // Reported some other mode. Not an error per se — retry and
+            // let the loop's own verification decide.
+            Ok(_) => {}
+            Err(e) if is_busy(&e) => last_busy = Some(e),
+            Err(e) => return Err(e),
+        }
+        if i + 1 < WAL_SWITCH_BACKOFF_MS.len() {
+            std::thread::sleep(Duration::from_millis(*delay));
+        }
+    }
+
+    // One last look: the winner of the race may have landed between
+    // our final attempt and here.
+    if journal_mode(conn)?.eq_ignore_ascii_case("wal") {
+        return Ok(());
+    }
+    Err(last_busy.unwrap_or_else(|| {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("could not switch journal_mode to WAL".to_string()),
+        )
+    }))
 }
 
 #[cfg(test)]
@@ -134,6 +225,55 @@ mod tests {
         apply_standard_pragmas(&conn).unwrap();
         let after = pragma_i64(&conn, "synchronous");
         assert_eq!(before, after);
+    }
+
+    /// The regression this helper's retry loop exists for.
+    ///
+    /// `boards.db` is opened directly and concurrently by the GUI, the
+    /// CLI and the MCP subprocess with no channel between them;
+    /// `sessions.db` and `corpus.db` share that pattern. Before the
+    /// retry, racing the *first* open of a file — the one that has to
+    /// perform the `delete` → `wal` transition — failed outright with
+    /// `SQLITE_BUSY`, because SQLite does not run the busy handler for
+    /// that transition however large `busy_timeout` is.
+    ///
+    /// Measured at 2 failures per 320 opens before the fix, so the
+    /// thread count and round count here are chosen to make a
+    /// regression fail reliably rather than occasionally.
+    #[test]
+    fn concurrent_first_open_never_returns_busy() {
+        for round in 0..40 {
+            let dir = TempDir::new().expect("tempdir");
+            let path = dir.path().join("concurrent.db");
+            let errors = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let path = path.clone();
+                    let errors = std::sync::Arc::clone(&errors);
+                    std::thread::spawn(move || {
+                        let conn = Connection::open(&path).expect("open");
+                        if let Err(e) = apply_standard_pragmas(&conn) {
+                            errors.lock().unwrap().push(e.to_string());
+                            return;
+                        }
+                        // And the connection really is in WAL — not
+                        // silently left in `delete`, which would take
+                        // whole-database write locks in production.
+                        assert_eq!(pragma_string(&conn, "journal_mode").to_lowercase(), "wal");
+                    })
+                })
+                .collect();
+            for h in handles {
+                h.join().expect("worker panicked");
+            }
+
+            let errors = errors.lock().unwrap();
+            assert!(
+                errors.is_empty(),
+                "round {round}: concurrent open failed: {errors:?}"
+            );
+        }
     }
 
     #[test]

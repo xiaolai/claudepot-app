@@ -229,13 +229,28 @@ impl CorpusIndex {
                 .open(path);
         }
         let conn = Connection::open(path)?;
-        // `busy_timeout` matters: the GUI and the CLI both open this
-        // file, and `corpus index` holds write transactions. Without it
-        // a concurrent `corpus status` fails instantly with SQLITE_BUSY.
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; \
-             PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
-        )?;
+        // WAL + `busy_timeout` + the WAL size bounds, from the one
+        // helper every other store uses. `busy_timeout` matters here in
+        // particular: the GUI and the CLI both open this file, and
+        // `corpus index` holds write transactions, so without it a
+        // concurrent `corpus status` fails instantly with SQLITE_BUSY.
+        //
+        // This used to hand-roll the pragma batch and, in doing so,
+        // omitted `journal_size_limit` / `wal_autocheckpoint` — leaving
+        // the LARGEST database in the app (≈880 MB with a bulk-insert
+        // indexer) as the only one outside the bound that exists
+        // because `sessions.db-wal` once reached 6.3 GB. Hand-rolling
+        // is what made that divergence invisible; call the helper.
+        crate::db_pragmas::apply_standard_pragmas(&conn)?;
+        // Beyond the standard set: FK enforcement (corpus_files /
+        // corpus_exchanges / corpus_tool_calls all cascade from
+        // corpus_sessions) and `synchronous=NORMAL`. NORMAL is safe
+        // here and nowhere else in this crate — the corpus is derived
+        // data, rebuildable by one ~5-minute pass, so trading the FULL
+        // fsync for indexing throughput costs nothing a rebuild can't
+        // restore. Credential stores must stay at FULL; see
+        // `db_pragmas`' module docs for why that decision is per-store.
+        conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(SCHEMA)?;
         // WAL sidecars are created by SQLite at the umask, so tighten
         // them too — they hold the same content as the main file.
@@ -627,6 +642,59 @@ mod tests {
 
     fn corpus() -> CorpusIndex {
         CorpusIndex::in_memory().unwrap()
+    }
+
+    /// The WAL of the largest database in the app must be bounded.
+    ///
+    /// This file used to hand-roll its pragma batch and, in doing so,
+    /// silently omitted `journal_size_limit` and `wal_autocheckpoint`
+    /// — the two that exist because `sessions.db-wal` once reached
+    /// 6.3 GB. `cargo xtask verify-docs` now refuses a
+    /// `Connection::open` that skips `apply_standard_pragmas`, but a
+    /// static check proves the CALL happened, not that the connection
+    /// ended up configured. Assert the observable state as well: the
+    /// two layers fail for different reasons, and the silent-failure
+    /// history here has earned both.
+    ///
+    /// File-backed on purpose — `open_in_memory` downgrades
+    /// `journal_mode` to `memory`, so an in-memory assertion would be
+    /// green for a reason unrelated to the bug.
+    #[test]
+    fn open_bounds_the_wal_and_keeps_foreign_keys_on() {
+        let tmp = TempDir::new().unwrap();
+        let c = CorpusIndex::open(&tmp.path().join("corpus.db")).unwrap();
+        let db = c.conn();
+
+        let mode: String = db
+            .pragma_query_value(None, "journal_mode", |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+
+        let limit: i64 = db
+            .pragma_query_value(None, "journal_size_limit", |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            limit,
+            crate::db_pragmas::WAL_SIZE_LIMIT_BYTES,
+            "corpus.db-wal has no size bound — the 2026-05-24 shape"
+        );
+
+        let autockpt: i64 = db
+            .pragma_query_value(None, "wal_autocheckpoint", |r| r.get(0))
+            .unwrap();
+        assert_eq!(autockpt, 1000);
+
+        let busy: i64 = db
+            .pragma_query_value(None, "busy_timeout", |r| r.get(0))
+            .unwrap();
+        assert_eq!(busy, 5000, "GUI + CLI + MCP all open this file");
+
+        // Not part of the standard set, and still required here: the
+        // corpus_* children cascade from corpus_sessions.
+        let fk: i64 = db
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
     }
 
     #[test]

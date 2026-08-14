@@ -56,7 +56,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
-/// Filenames the crate joins onto its data dir.
+/// What the data-dir-writing crates do with their files: which ones
+/// they name, and whether each database they open is set up correctly.
 #[derive(Debug, Default)]
 pub struct DataDirFiles {
     /// Every `*.db`. Not restricted to `claudepot_data_dir()` receivers:
@@ -70,6 +71,30 @@ pub struct DataDirFiles {
     /// `~/.claude.json` and bundle entries like `manifest.json`, and a
     /// check that cries wolf is one people learn to skip.
     pub jsons: BTreeSet<String>,
+    /// Production functions that call `Connection::open` **without**
+    /// reaching `apply_standard_pragmas`. See [`UnpragmadOpen`].
+    pub unpragmad_opens: Vec<UnpragmadOpen>,
+}
+
+/// A `Connection::open` that never reaches `apply_standard_pragmas`.
+///
+/// `db_pragmas` exists because `sessions.db-wal` once reached 6.3 GB,
+/// and its module doc says every store "should call" the helper. That
+/// was enforced by nobody: `corpus.rs` hand-rolled its own pragma batch
+/// and omitted `journal_size_limit` + `wal_autocheckpoint`, which left
+/// the largest database in the app — ~880 MB, bulk-insert indexer,
+/// opened concurrently by GUI, CLI and the MCP subprocess — as the one
+/// store outside the bound. The omission was invisible precisely
+/// because the file *looked* like it configured itself properly.
+///
+/// A hand-rolled batch that happens to be right today is still a
+/// divergence tomorrow, so the rule is the helper, not the pragmas.
+#[derive(Debug)]
+pub struct UnpragmadOpen {
+    /// Repo-relative path of the file.
+    pub file: String,
+    /// The enclosing function's name.
+    pub function: String,
 }
 
 /// Crates that write into the Claudepot data dir.
@@ -122,7 +147,78 @@ pub fn scan(repo: &Path) -> Result<DataDirFiles> {
     for f in &parsed {
         v.visit_file(f);
     }
+
+    // Pass 3 — which whole FILES are test-only, resolved from the
+    // `#[cfg(test)] mod foo;` declarations that pull them in.
+    let test_only = test_only_files(&files, &parsed);
+
+    // Pass 4 — pragma discipline, per file so the report can name one.
+    for (path, f) in files.iter().zip(&parsed) {
+        if test_only.contains(path) {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
+        let mut p = PragmaVisitor {
+            file: rel,
+            out: &mut v.out.unpragmad_opens,
+        };
+        p.visit_file(f);
+    }
     Ok(v.out)
+}
+
+/// Files that exist only under `cfg(test)`, because the `mod foo;` that
+/// pulls them in carries the attribute.
+///
+/// `is_cfg_test` works on nodes *within* a file, which is enough for an
+/// inline `#[cfg(test)] mod tests { … }` and blind to the other half of
+/// the convention: `shared_memory/migration_tests.rs` is 700 lines of
+/// pure test code whose only `#[cfg(test)]` sits on the `mod` line in
+/// its parent. Judging by filename (`*_tests.rs`) would work today and
+/// is precisely the kind of heuristic this module's history is a list
+/// of; resolving the declaration is the same amount of code and cannot
+/// drift.
+///
+/// Both layouts Rust allows for `mod foo;` are resolved: `foo.rs`
+/// beside the declaring file, and `foo/mod.rs` below it.
+fn test_only_files(files: &[PathBuf], parsed: &[syn::File]) -> BTreeSet<PathBuf> {
+    struct Collector<'a> {
+        dir: PathBuf,
+        out: &'a mut BTreeSet<PathBuf>,
+    }
+    impl<'ast> Visit<'ast> for Collector<'_> {
+        fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+            // `content: None` is `mod foo;` — a declaration pointing at
+            // another file. An inline `mod foo { … }` is already
+            // handled by the visitors' own `is_cfg_test` checks.
+            if node.content.is_none() && is_cfg_test(&node.attrs) {
+                let name = node.ident.to_string();
+                self.out.insert(self.dir.join(format!("{name}.rs")));
+                self.out.insert(self.dir.join(&name).join("mod.rs"));
+            }
+            syn::visit::visit_item_mod(self, node);
+        }
+    }
+
+    let mut out = BTreeSet::new();
+    for (path, f) in files.iter().zip(parsed) {
+        let dir = match path.file_name().and_then(|n| n.to_str()) {
+            // `mod.rs` and `lib.rs`/`main.rs` declare siblings of
+            // themselves; any other file declares children in a
+            // same-named subdirectory.
+            Some("mod.rs") | Some("lib.rs") | Some("main.rs") => {
+                path.parent().unwrap_or(Path::new("")).to_path_buf()
+            }
+            _ => path.with_extension(""),
+        };
+        let mut c = Collector { dir, out: &mut out };
+        c.visit_file(f);
+    }
+    out
 }
 
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
@@ -304,6 +400,107 @@ impl<'ast> Visit<'ast> for JoinVisitor<'_> {
     }
 }
 
+// ─── Pragma discipline ───────────────────────────────────────────────
+
+/// Does this block contain a call whose path ends in `tail`?
+///
+/// Tail matching on the last N segments, so `Connection::open` and
+/// `rusqlite::Connection::open` resolve alike, and
+/// `apply_standard_pragmas` matches with or without its
+/// `crate::db_pragmas::` prefix.
+///
+/// The `Connection` segment is load-bearing: matching a bare `open`
+/// would sweep in `File::open`, `OpenOptions::…::open` and every other
+/// unrelated opener in three crates, and a gate that cries wolf is one
+/// people learn to pass with an `#[allow]`.
+fn calls_path_ending_in(block: &syn::Block, tail: &[&str]) -> bool {
+    struct Finder<'a>(&'a [&'a str], bool);
+    impl<'ast> Visit<'ast> for Finder<'_> {
+        fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(p) = &*node.func {
+                let segs: Vec<String> = p
+                    .path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect();
+                if segs.len() >= self.0.len()
+                    && segs[segs.len() - self.0.len()..]
+                        .iter()
+                        .zip(self.0)
+                        .all(|(a, b)| a == b)
+                {
+                    self.1 = true;
+                }
+            }
+            syn::visit::visit_expr_call(self, node);
+        }
+    }
+    let mut v = Finder(tail, false);
+    v.visit_block(block);
+    v.1
+}
+
+/// Flags production functions that open a SQLite connection without
+/// routing it through `db_pragmas::apply_standard_pragmas`.
+///
+/// Two open shapes are deliberately NOT flagged, because neither wants
+/// the standard set:
+///
+/// - `open_in_memory` — WAL silently downgrades to `memory` journal
+///   mode on a connection with no file behind it, so the pragmas are
+///   meaningless rather than missing.
+/// - `open_with_flags` — `db_housekeeping::checkpoint_one` uses it
+///   precisely to avoid `SQLITE_OPEN_CREATE`, and sets its own short
+///   busy timeout because backing off fast is the point there.
+///
+/// Both are matched on the method *name*, so this is a structural
+/// exemption rather than an allowlist that can rot.
+struct PragmaVisitor<'a> {
+    file: String,
+    out: &'a mut Vec<UnpragmadOpen>,
+}
+
+impl PragmaVisitor<'_> {
+    fn check(&mut self, name: String, attrs: &[syn::Attribute], block: &syn::Block) -> bool {
+        if is_cfg_test(attrs) {
+            return false;
+        }
+        if calls_path_ending_in(block, &["Connection", "open"])
+            && !calls_path_ending_in(block, &["apply_standard_pragmas"])
+        {
+            self.out.push(UnpragmadOpen {
+                file: self.file.clone(),
+                function: name,
+            });
+        }
+        true
+    }
+}
+
+impl<'ast> Visit<'ast> for PragmaVisitor<'_> {
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if is_cfg_test(&node.attrs) {
+            return;
+        }
+        syn::visit::visit_item_mod(self, node);
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if !self.check(node.sig.ident.to_string(), &node.attrs, &node.block) {
+            return;
+        }
+        syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if !self.check(node.sig.ident.to_string(), &node.attrs, &node.block) {
+            return;
+        }
+        syn::visit::visit_impl_item_fn(self, node);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,6 +639,131 @@ mod tests {
     fn unresolvable_names_are_skipped() {
         let out = scan_src(r#"fn t(name: &str) -> PathBuf { claudepot_data_dir().join(name) }"#);
         assert!(out.jsons.is_empty() && out.dbs.is_empty());
+    }
+
+    // ─── Pragma discipline ───────────────────────────────────────────
+
+    fn pragma_scan(src: &str) -> Vec<UnpragmadOpen> {
+        let f = syn::parse_file(src).expect("parse");
+        let mut out = Vec::new();
+        PragmaVisitor {
+            file: "x.rs".into(),
+            out: &mut out,
+        }
+        .visit_file(&f);
+        out
+    }
+
+    /// The `corpus.rs` shape: a real store that configures itself by
+    /// hand. It looks deliberate, which is exactly why nobody noticed
+    /// it had dropped two of the four pragmas.
+    #[test]
+    fn hand_rolled_pragmas_do_not_satisfy_the_rule() {
+        let out = pragma_scan(
+            r#"
+            impl S {
+                pub fn open(path: &Path) -> Result<Self> {
+                    let conn = Connection::open(path)?;
+                    conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+                    Ok(Self { conn })
+                }
+            }
+            "#,
+        );
+        assert_eq!(out.len(), 1, "hand-rolled batch must still be flagged");
+        assert_eq!(out[0].function, "open");
+    }
+
+    #[test]
+    fn calling_the_helper_satisfies_the_rule() {
+        for call in [
+            "apply_standard_pragmas(&db)?;",
+            "crate::db_pragmas::apply_standard_pragmas(&db)?;",
+        ] {
+            let out = pragma_scan(&format!(
+                "impl S {{ pub fn open(p: &Path) -> R {{ let db = Connection::open(p)?; {call} Ok(()) }} }}"
+            ));
+            assert!(out.is_empty(), "should accept `{call}`");
+        }
+    }
+
+    /// `rusqlite::Connection::open` is the same call with a prefix.
+    #[test]
+    fn a_qualified_connection_path_is_still_an_open() {
+        let out =
+            pragma_scan("fn f(p: &Path) -> R { let c = rusqlite::Connection::open(p)?; Ok(()) }");
+        assert_eq!(out.len(), 1);
+    }
+
+    /// The two exempt shapes, and the reason each is exempt: WAL is
+    /// meaningless in memory, and `checkpoint_one` wants its own short
+    /// busy timeout so it can back off fast.
+    #[test]
+    fn in_memory_and_flagged_opens_are_exempt() {
+        let out = pragma_scan(
+            r#"
+            fn a() -> R { let c = Connection::open_in_memory()?; Ok(()) }
+            fn b(p: &Path) -> R { let c = Connection::open_with_flags(p, flags)?; Ok(()) }
+            "#,
+        );
+        assert!(out.is_empty(), "got {out:?}");
+    }
+
+    /// Unrelated openers must not be swept in — the check keys on
+    /// `Connection`, not on the bare method name.
+    #[test]
+    fn other_open_calls_are_not_database_opens() {
+        let out = pragma_scan(
+            r#"
+            fn a(p: &Path) -> R { let f = File::open(p)?; Ok(()) }
+            fn b(p: &Path) -> R { let f = std::fs::File::open(p)?; Ok(()) }
+            "#,
+        );
+        assert!(out.is_empty(), "got {out:?}");
+    }
+
+    /// Test fixtures open connections constantly and correctly do not
+    /// pragma them; flagging those would train people to ignore this.
+    #[test]
+    fn test_code_is_not_held_to_the_rule() {
+        let out = pragma_scan(
+            r#"
+            #[cfg(test)]
+            mod tests {
+                fn fixture(p: &Path) { let c = Connection::open(p).unwrap(); }
+            }
+            #[cfg(test)]
+            fn helper(p: &Path) { let c = Connection::open(p).unwrap(); }
+            "#,
+        );
+        assert!(out.is_empty(), "got {out:?}");
+    }
+
+    /// `shared_memory/migration_tests.rs` in miniature: a whole file of
+    /// test code whose only `#[cfg(test)]` is on the parent's `mod`
+    /// line. Both file layouts Rust permits must resolve.
+    #[test]
+    fn a_cfg_test_mod_declaration_marks_the_whole_file() {
+        let decl =
+            syn::parse_file("pub mod real;\n#[cfg(test)]\npub mod migration_tests;\n").unwrap();
+        let dir = PathBuf::from("/repo/src/shared_memory");
+        let out = test_only_files(&[dir.join("mod.rs")], &[decl]);
+
+        assert!(out.contains(&dir.join("migration_tests.rs")));
+        assert!(out.contains(&dir.join("migration_tests").join("mod.rs")));
+        assert!(
+            !out.contains(&dir.join("real.rs")),
+            "a plain `mod` declaration must not be marked test-only"
+        );
+    }
+
+    /// A non-`mod.rs` file declares its children in a same-named
+    /// subdirectory, not beside itself.
+    #[test]
+    fn child_modules_of_a_leaf_file_resolve_into_its_subdirectory() {
+        let decl = syn::parse_file("#[cfg(test)]\nmod swap_tests;\n").unwrap();
+        let out = test_only_files(&[PathBuf::from("/repo/src/desktop_backend.rs")], &[decl]);
+        assert!(out.contains(&PathBuf::from("/repo/src/desktop_backend/swap_tests.rs")));
     }
 
     /// A wrapped chain is a tree, so line breaks are irrelevant — the

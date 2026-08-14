@@ -15,7 +15,12 @@ export default defineConfig({
     },
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
+    // `scripts/` is included so the repo's guard scripts can have their
+    // *judgement* unit-tested even when their *measurement* needs a GUI
+    // session CI does not have. `check-envvar-layout.mjs` is the case
+    // that motivated it: nobody had ever watched it fail, so nothing
+    // distinguished it from a guard that could not fail.
+    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.{ts,mjs}"],
     // Vitest's 5000 ms default was never calibrated for this suite's
     // heaviest files. `App.test.tsx` calls `vi.resetModules()` in
     // `beforeEach` and re-imports the ENTIRE App module graph per test

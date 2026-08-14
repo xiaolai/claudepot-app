@@ -1419,19 +1419,47 @@ fn row_to_board(db: &Connection, board_id: &str) -> Result<Board, BoardError> {
 /// A version newer than this build understands is an error, not a
 /// best-effort read: an older Claudepot writing rows under a newer
 /// schema's assumptions is how user data gets silently mangled.
+///
+/// # The decision is re-read INSIDE the transaction
+///
+/// This store is opened directly by the GUI, the CLI, the MCP server
+/// subprocess and any script, with no channel between them (see the
+/// module docs). Deciding from a version read *before* `BEGIN
+/// IMMEDIATE` lets two processes both observe the pre-migration number
+/// and both run the same migration: the first commits, the second
+/// re-applies it to an already-migrated database.
+///
+/// That was survivable only by accident. v1 is `CREATE TABLE IF NOT
+/// EXISTS`, so a double-apply is a no-op — but the comment below
+/// promises the next migration will "ALTER and backfill", and a
+/// backfill applied twice corrupts rows in a file whose whole premise
+/// is that it holds user data existing nowhere else.
+///
+/// The read outside the lock is kept as a **fast path only**. It is
+/// safe there because the version is monotonic: "already current" can
+/// never become "needs migrating", so an early return on that answer
+/// cannot be racing anything. Every answer that leads to a *write* is
+/// re-derived under the lock, where the loser of a race sees the
+/// version the winner committed and does nothing. Taking `BEGIN
+/// IMMEDIATE` unconditionally would be simpler and wrong in the other
+/// direction — it would serialize every `open()` behind any concurrent
+/// writer, on the common path where there is nothing to migrate.
 fn migrate(db: &Connection) -> Result<(), BoardError> {
-    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version > SCHEMA_VERSION {
-        return Err(BoardError::SchemaTooNew {
-            found: version,
-            supported: SCHEMA_VERSION,
-        });
-    }
-    if version == SCHEMA_VERSION {
+    if !needs_migration(read_version(db)?)? {
         return Ok(());
     }
+
+    // `busy_timeout` (via `apply_standard_pragmas`) applies at `BEGIN
+    // IMMEDIATE`, so a concurrent migration is waited on, not raced.
     db.execute_batch("BEGIN IMMEDIATE;")?;
+
     let apply = |db: &Connection| -> Result<(), BoardError> {
+        // Authoritative re-read: whatever we saw above is now stale by
+        // however long we waited for the write lock.
+        let version = read_version(db)?;
+        if !needs_migration(version)? {
+            return Ok(());
+        }
         if version < 1 {
             db.execute_batch(SCHEMA_V1)?;
         }
@@ -1440,6 +1468,7 @@ fn migrate(db: &Connection) -> Result<(), BoardError> {
         db.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
         Ok(())
     };
+
     match apply(db) {
         Ok(()) => {
             db.execute_batch("COMMIT;")?;
@@ -1450,6 +1479,27 @@ fn migrate(db: &Connection) -> Result<(), BoardError> {
             Err(e)
         }
     }
+}
+
+fn read_version(db: &Connection) -> Result<i64, BoardError> {
+    Ok(db.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+}
+
+/// `Ok(true)` when this build must migrate, `Ok(false)` when the file
+/// is already current, `Err` when it was written by a newer build.
+///
+/// One function so the fast path and the under-lock re-read cannot
+/// disagree — two copies of a three-way comparison, in the code that
+/// decides whether to rewrite user data, is how the fast path ends up
+/// meaning something subtly different from the authoritative one.
+fn needs_migration(version: i64) -> Result<bool, BoardError> {
+    if version > SCHEMA_VERSION {
+        return Err(BoardError::SchemaTooNew {
+            found: version,
+            supported: SCHEMA_VERSION,
+        });
+    }
+    Ok(version < SCHEMA_VERSION)
 }
 
 #[cfg(test)]
@@ -1538,6 +1588,73 @@ mod tests {
             BoardStore::open(&path),
             Err(BoardError::SchemaTooNew { found: 999, .. })
         ));
+    }
+
+    /// `needs_migration` is the one three-way comparison both the fast
+    /// path and the under-lock re-read consult. Locking its boundaries
+    /// separately is what stops the two from drifting apart.
+    #[test]
+    fn needs_migration_covers_all_three_answers() {
+        assert!(matches!(needs_migration(0), Ok(true)), "fresh file");
+        assert!(
+            matches!(needs_migration(SCHEMA_VERSION), Ok(false)),
+            "already current — the early-return the fast path relies on"
+        );
+        assert!(matches!(
+            needs_migration(SCHEMA_VERSION + 1),
+            Err(BoardError::SchemaTooNew { .. })
+        ));
+    }
+
+    /// Many processes opening one boards.db concurrently is the normal
+    /// case — GUI, CLI and the MCP subprocess all open it directly with
+    /// no channel between them. Every one must land on a consistent
+    /// schema, and the rows written through them must all survive.
+    ///
+    /// This passed before the fix too, because v1 is `CREATE TABLE IF
+    /// NOT EXISTS` and double-applying it is a no-op. It is here as the
+    /// regression guard for the migration *after* this one: the moment
+    /// a `version < 2` arm does an ALTER or a backfill, a re-applied
+    /// migration stops being harmless and this is the shape that
+    /// catches it.
+    #[test]
+    fn concurrent_opens_converge_on_one_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("boards.db");
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let s = BoardStore::open(&path).expect("concurrent open must succeed");
+                    let b = s
+                        .create_board(&format!("b{i}"), &BoardSpec::empty(), &[runs_series()])
+                        .expect("create");
+                    s.push(&push_req(
+                        &b.board_id,
+                        vec![row("2026-07-31T00:00:00+00:00", i as f64)],
+                    ))
+                    .expect("push");
+                    b.board_id
+                })
+            })
+            .collect();
+
+        let ids: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        let s = BoardStore::open(&path).unwrap();
+        let v: i64 = s
+            .db()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        for id in &ids {
+            assert_eq!(
+                s.row_count(id, "runs").unwrap(),
+                1,
+                "a concurrent writer's row was lost"
+            );
+        }
     }
 
     #[test]

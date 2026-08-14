@@ -36,12 +36,18 @@
 // No `screenshot-fixture` needed — that exists so screenshots don't capture
 // real data, and this writes nothing to disk.
 //
-// Usage:  node scripts/check-envvar-layout.mjs [--debug]
+// Usage:  node scripts/check-envvar-layout.mjs [--debug] [--self-test]
+//
+//         --self-test first forces `.envvar-list` to 0px and asserts the
+//         assertions REPORT that, then restores the pane and runs for real.
+//         Use it whenever you touch this script or the pane: CI cannot run
+//         this guard, so proving it still bites is a manual step or nothing.
 // Exit:   0 assertions pass · 1 an assertion failed · 2 could not run
 //         (2 is "app not running" — callers should skip, not fail)
 
 const PORT = process.env.MCP_BRIDGE_PORT ?? 9223;
 const DEBUG = process.argv.includes("--debug");
+const SELF_TEST = process.argv.includes("--self-test");
 
 let seq = 0;
 const pending = new Map();
@@ -180,12 +186,89 @@ async function main() {
     })()`,
   );
 
+  // --self-test: prove the assertions can still FAIL before trusting
+  // that they passed.
+  //
+  // This guard cannot run in CI — it needs a macOS GUI session, a Vite
+  // server and a debug build carrying the MCP bridge — so nobody has
+  // ever watched it go red, and a check nobody has watched fail is
+  // indistinguishable from one that cannot fail. `AGENTS.md` names
+  // this script as the example of that decay. It is the same reason
+  // `check:catalogs` takes `CLAUDEPOT_LOCALES_DIR`: exercising the
+  // gate must itself be one command.
+  //
+  // Injecting the ORIGINAL fault rather than a synthetic one: the
+  // shipped bug was `.envvar-list` resolving to 0px, so that is what
+  // gets reproduced.
+  let selfTest = null;
+  if (SELF_TEST) {
+    await js(
+      ws,
+      `(() => {
+        const s = document.createElement('style');
+        s.id = '__envvar_selftest__';
+        s.textContent = '.envvar-list { height: 0 !important; min-height: 0 !important; flex: 0 0 0 !important; }';
+        document.head.appendChild(s);
+        return true;
+      })()`,
+    );
+    await new Promise((r) => setTimeout(r, 250));
+    const broken = await js(ws, MEASURE);
+    await js(
+      ws,
+      `(() => {
+        document.getElementById('__envvar_selftest__')?.remove();
+        return true;
+      })()`,
+    );
+    await new Promise((r) => setTimeout(r, 250));
+    selfTest = evaluate(broken, broken);
+  }
+
   ws.close();
   if (DEBUG) {
     console.error("collapsed:", JSON.stringify(collapsed, null, 2));
     console.error("expanded:", JSON.stringify(expanded, null, 2));
   }
 
+  if (SELF_TEST) {
+    if (selfTest.length === 0) {
+      console.error(
+        "envvar-layout: SELF-TEST FAILED — the pane was forced to 0px and the " +
+          "assertions still passed. This guard is inert; fix it before trusting " +
+          "a green run.",
+      );
+      process.exit(1);
+    }
+    console.error(
+      `envvar-layout: self-test ok — a 0px list produced ${selfTest.length} ` +
+        `failure(s), so the assertions still bite.`,
+    );
+  }
+
+  const failures = evaluate(collapsed, expanded);
+  if (failures.length) {
+    console.error("envvar-layout: FAILED");
+    for (const f of failures) console.error(`  ✗ ${f}`);
+    process.exit(1);
+  }
+  console.error(
+    `envvar-layout: ok — collapsed ${collapsed.listHeight}px ` +
+      `(${collapsed.visibleRows}/${collapsed.totalRows} rows), ` +
+      `expanded ${expanded.listHeight}px ` +
+      `(${expanded.visibleRows}/${expanded.totalRows} rows), ` +
+      `1 scroller, ${collapsed.bucketCount} bucket(s) inside it`,
+  );
+}
+
+/**
+ * The assertions, as a pure function of two measurements.
+ *
+ * Extracted from `main` so `--self-test` can run them against a
+ * deliberately-broken layout. Inline, they could only ever be executed
+ * on whatever the app happened to render.
+ */
+function evaluate(collapsed, expanded) {
   const failures = [];
   for (const [state, m] of [["collapsed", collapsed], ["expanded", expanded]]) {
     if (!(m.listHeight > 0)) {
@@ -215,21 +298,21 @@ async function main() {
     );
   }
 
-  if (failures.length) {
-    console.error("envvar-layout: FAILED");
-    for (const f of failures) console.error(`  ✗ ${f}`);
-    process.exit(1);
-  }
-  console.error(
-    `envvar-layout: ok — collapsed ${collapsed.listHeight}px ` +
-      `(${collapsed.visibleRows}/${collapsed.totalRows} rows), ` +
-      `expanded ${expanded.listHeight}px ` +
-      `(${expanded.visibleRows}/${expanded.totalRows} rows), ` +
-      `1 scroller, ${r.bucketCount} bucket(s) inside it`,
-  );
+  return failures;
 }
 
-main().catch((e) => {
-  console.error(`envvar-layout: ${e.message}`);
-  process.exit(e.code === 2 ? 2 : 1);
-});
+// Auto-run only when invoked directly, so `evaluate` can be imported
+// and exercised without a GUI session. The assertions are the part of
+// this script most worth checking and the part hardest to reach: the
+// measurement needs a running app, the judgement does not.
+export { evaluate };
+
+if (
+  process.argv[1] &&
+  import.meta.url === new URL(`file://${process.argv[1]}`).href
+) {
+  main().catch((e) => {
+    console.error(`envvar-layout: ${e.message}`);
+    process.exit(e.code === 2 ? 2 : 1);
+  });
+}

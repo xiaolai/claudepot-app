@@ -108,19 +108,19 @@ fn json_kind(v: &Value) -> &'static str {
     }
 }
 
-/// Resolve CC's `.claude.json` location identically to
-/// `discover::collect_redacted_user_config`. CC stores this file at
-/// `$CLAUDE_CONFIG_DIR/.claude.json` when the env var is set, otherwise
-/// `$HOME/.claude.json` — note this is a SIBLING of `$HOME/.claude/`,
-/// NOT a child of it. Resolving via `claude_config_dir().join(...)`
-/// would land at `~/.claude/.claude.json`, which CC never writes, so
-/// every MCP read would see an empty map.
+/// Resolve CC's global config location.
+///
+/// Delegates to `paths::global_claude_json_target` rather than
+/// re-deriving it. The hand-rolled version this replaces handled
+/// `CLAUDE_CONFIG_DIR` but silently dropped the legacy
+/// `<claude_config_dir>/.config.json` branch — which is the FIRST
+/// thing `getGlobalClaudeFile` (`env.ts:14-26`) checks — while its own
+/// comment claimed parity with that function. On a machine carrying
+/// the legacy file, the MCP reads below saw an empty map for a file CC
+/// was actively applying, and `collect_redacted_user_config` (which
+/// did check it) pointed at a different file on the same pane.
 fn resolve_claude_json_path() -> PathBuf {
-    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join(".claude.json")
+    crate::paths::global_claude_json_target()
 }
 
 fn non_empty_or_none(v: Value) -> Option<Value> {
