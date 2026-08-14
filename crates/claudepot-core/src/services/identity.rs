@@ -194,7 +194,8 @@ pub async fn verify_account_identity_with_probe(
     // rotated token in place, rather than rotating the stale private-slot
     // copy (which would orphan CC's session → forced re-login). Only when
     // CC's keychain holds no usable blob do we fall through to the
-    // private-slot check below (there is nothing live to protect then).
+    // private-slot check below — and that fallthrough is gated on the
+    // live-session probe too (see the `ProfileCheck::Rejected` arm).
     if active_cli_matches(store, uuid)? {
         if let Some(outcome) =
             verify_active_via_keychain(&account.email, platform, fetcher, refresher, probe).await
@@ -233,6 +234,33 @@ pub async fn verify_account_identity_with_probe(
     let outcome = match run_profile_check(&blob, fetcher).await {
         ProfileCheck::Ok(actual) => classify(&account.email, actual),
         ProfileCheck::Rejected => {
+            // Live-session gate — the same rule `resolve_cc_identity`
+            // applies to the keychain, applied here to the slot.
+            //
+            // Reaching this arm as the ACTIVE account means the keychain
+            // resolver returned `None` (CC's blob unreadable/unparseable),
+            // not that CC is gone. CC's keychain was last populated FROM
+            // this slot, so a live `claude` may still hold this very
+            // refresh token in memory: spending it here retires the token
+            // CC holds, its next refresh fails, and the user is forced to
+            // re-login — the exact bug the keychain-path gate prevents.
+            //
+            // Re-read the active pointer rather than reusing the check
+            // above: the profile round-trip since then is long enough for
+            // a concurrent swap, and this is the instant that matters.
+            // Failing closed on a corrupt pointer is the point.
+            if active_cli_matches(store, uuid)? && probe.is_cc_running().await {
+                tracing::info!(
+                    account = %uuid,
+                    "active account with a live claude session — declining to spend the slot's \
+                     single-use refresh token"
+                );
+                let outcome = VerifyOutcome::NetworkError;
+                store
+                    .update_verification(uuid, &outcome)
+                    .map_err(|e| VerifyError::Store(e.to_string()))?;
+                return Ok(outcome);
+            }
             // 401 — try one refresh, then re-check. If refresh fails, it's
             // Rejected. If refresh succeeds but the new profile email
             // doesn't match the label, Drift (and we DON'T save).
@@ -1148,6 +1176,94 @@ mod tests {
             VerifyOutcome::Ok {
                 email: "alice@example.com".into()
             }
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// The keychain-empty fallback is NOT exempt from the live-session gate.
+    ///
+    /// `verify_active_via_keychain` returns `None` when CC's keychain read
+    /// yields nothing parseable, and the caller then falls through to the
+    /// private-slot path. That fallthrough spends the slot's single-use
+    /// refresh token with no gate and no keychain write-back — so a
+    /// keychain read that comes up empty *while a `claude` process is
+    /// live* retires the token CC still holds in memory, and CC's next
+    /// refresh fails. "Nothing live to protect" is an assumption about the
+    /// keychain, but the probe is the only thing that actually knows.
+    #[tokio::test]
+    async fn active_account_live_session_gate_applies_to_slot_fallback() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
+
+        let platform = MockKeychain::empty(); // read came up empty
+        let fetcher = MockFetcher::rejecting(); // /profile → 401
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &platform,
+            &fetcher,
+            &NeverRefresher,
+            &LiveProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::NetworkError,
+            "a live claude session must make this transient, never Rejected"
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// The gate on the fallback is conditional, not a blanket ban. Same
+    /// setup as the test above with NO live session: the refresh still
+    /// happens and still lands in the slot. Pairs with it so a fix that
+    /// simply stops refreshing the fallback path is caught.
+    #[tokio::test]
+    async fn slot_fallback_still_refreshes_without_a_live_session() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        swap::save_private(uuid, &crate::testing::fresh_blob_json())
+            .await
+            .unwrap();
+
+        let platform = MockKeychain::empty();
+        let fetcher = MockFetcher {
+            email: Mutex::new(Some("alice@example.com".into())),
+            err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
+        };
+        let refresher = MockRefresher::ok_with("sk-ant-oat01-slot", "sk-ant-ort01-slot");
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &platform,
+            &fetcher,
+            &refresher,
+            &crate::cli_backend::swap::NoLiveSessionProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
+        let saved = swap::load_private(uuid).await.unwrap();
+        assert!(
+            saved.contains("sk-ant-oat01-slot"),
+            "no live session → the rotated blob is persisted to the slot"
         );
         swap::delete_private(uuid).await.unwrap();
     }
