@@ -135,6 +135,78 @@ else:
         check(dock.read_bytes() != bundle.read_bytes(),
               "dock asset differs from the full-bleed bundle icon")
 
+print("\nmacOS 26 layered icon (Claudepot.icon → Assets.car)")
+# THE check this file was missing when a black icon shipped in 0.4.12.
+#
+# Everything else here inspects files that are inputs. A layered icon
+# is different: the picture is produced by Apple's renderer at
+# composite time, so every input can be individually valid and the
+# result still be wrong. Both 0.4.12 bugs were invisible to file
+# inspection —
+#
+#   1. SVG layers carrying `filter`/`feTurbulence`/gradients rendered
+#      near-BLACK. rsvg handles them; actool's SVG path evidently does
+#      not, and it reports nothing.
+#   2. Group order is TOP-FIRST. With the full-canvas plate listed
+#      first it occluded the block entirely, giving a blank plate.
+#
+# So render it and look at the pixels.
+dot_icon = ICONS / "Claudepot.icon"
+car = ICONS / "Assets.car"
+ICTOOL = Path("/Applications/Xcode.app/Contents/Applications/"
+              "Icon Composer.app/Contents/Executables/ictool")
+
+check(dot_icon.is_dir(), "Claudepot.icon exists")
+check(car.is_file() and car.stat().st_size > 100_000,
+      "Assets.car is present and non-trivial",
+      f"{car.stat().st_size if car.is_file() else 'missing'} bytes")
+
+# Layers must be PNG. An SVG layer is the black-icon bug.
+if dot_icon.is_dir():
+    svg_layers = sorted(p.name for p in (dot_icon / "Assets").glob("*.svg"))
+    check(not svg_layers,
+          "no SVG layers (actool renders filtered SVG as black)",
+          f"found {svg_layers}")
+
+if not ICTOOL.is_file():
+    print("  skip ictool not installed — rendered check unavailable")
+elif not dot_icon.is_dir():
+    pass
+else:
+    try:
+        from PIL import Image as _R
+    except ImportError:
+        print("  skip Pillow not installed — rendered check unavailable")
+    else:
+        out = Path("/tmp/cp-icon-verify.png")
+        r = subprocess.run(
+            [str(ICTOOL), str(dot_icon), "--export-image",
+             "--output-file", str(out), "--platform", "macOS",
+             "--rendition", "Default", "--width", "512", "--height", "512",
+             "--scale", "1"],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0 or not out.is_file():
+            check(False, "ictool renders the layered icon", r.stderr.strip()[:200])
+        else:
+            im = _R.open(out).convert("RGB")
+            px = list(im.getdata())
+            # Not black. The 0.4.12 icon averaged ~(46,46,47).
+            avg = tuple(sum(c[i] for c in px) // len(px) for i in range(3))
+            check(sum(avg) > 200,
+                  "rendered icon is not near-black",
+                  f"mean RGB {avg} — a filtered SVG layer renders black")
+            # The brand mark must actually be present. A plate with the
+            # block occluded is light, uniform, and passes the test
+            # above — so look for terracotta specifically.
+            warm = sum(1 for r_, g_, b_ in px
+                       if r_ > 120 and r_ - b_ > 45 and r_ - g_ > 18)
+            frac = warm / len(px)
+            check(frac > 0.05,
+                  "the block is visible in the render (brand colour present)",
+                  f"only {frac:.1%} warm pixels — group order is top-first; "
+                  f"a full-canvas plate listed first occludes the block")
+
 print("\nmacOS .icns")
 icns = ICONS / "icon.icns"
 if not icns.is_file():
