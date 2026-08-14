@@ -194,10 +194,7 @@ pub async fn desktop_adopt(
     uuid: String,
     overwrite: bool,
     lock: tauri::State<'_, crate::state::DesktopOpState>,
-    app: tauri::AppHandle,
 ) -> Result<dto::DesktopAdoptOutcome, ErrorDto> {
-    use tauri::Emitter;
-
     let _guard = lock.0.lock().await;
 
     let target_uuid = Uuid::parse_str(&uuid).map_err(|e| {
@@ -236,7 +233,10 @@ pub async fn desktop_adopt(
     .await
     .map_err(ErrorDto::from)?;
 
-    let _ = app.emit(crate::events::DESKTOP_ADOPTED, &outcome.account_email);
+    // No event: the renderer invoked this command and gets the same
+    // facts back in `DesktopAdoptOutcome`. The `desktop-adopted`
+    // channel that used to fire here never had a subscriber, because
+    // there was nothing for one to learn.
     Ok(dto::DesktopAdoptOutcome {
         account_email: outcome.account_email,
         captured_items: outcome.captured_items,
@@ -251,10 +251,7 @@ pub async fn desktop_adopt(
 pub async fn desktop_clear(
     keep_snapshot: bool,
     lock: tauri::State<'_, crate::state::DesktopOpState>,
-    app: tauri::AppHandle,
 ) -> Result<dto::DesktopClearOutcome, ErrorDto> {
-    use tauri::Emitter;
-
     let _guard = lock.0.lock().await;
 
     let store = open_account_store()?;
@@ -265,7 +262,8 @@ pub async fn desktop_clear(
         .await
         .map_err(ErrorDto::from)?;
 
-    let _ = app.emit(crate::events::DESKTOP_CLEARED, &outcome.email);
+    // No event — see `desktop_adopt`. `DesktopClearOutcome` already
+    // carries everything `desktop-cleared` announced.
     Ok(dto::DesktopClearOutcome {
         email: outcome.email,
         snapshot_kept: outcome.snapshot_kept,
@@ -314,14 +312,12 @@ pub async fn sync_from_current_desktop(
 #[tauri::command]
 pub async fn desktop_launch(
     lock: tauri::State<'_, crate::state::DesktopOpState>,
-    app: tauri::AppHandle,
 ) -> Result<(), ErrorDto> {
-    use tauri::Emitter;
     let _guard = lock.0.lock().await;
     let platform =
         claudepot_core::desktop_backend::create_platform().ok_or_else(desktop_unsupported)?;
-    // `DesktopSwapError` carries its own code.
+    // `DesktopSwapError` carries its own code. No event — see
+    // `desktop_adopt`; `Ok(())` here IS "Desktop is running now".
     platform.launch().await.map_err(ErrorDto::from)?;
-    let _ = app.emit(crate::events::DESKTOP_RUNNING_CHANGED, true);
     Ok(())
 }

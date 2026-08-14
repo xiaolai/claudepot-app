@@ -148,7 +148,11 @@
     "cliSwitchedTitleRestart": "CLI → {{email}} — restart Claude Code to apply",
     "cliSwitchedBodyRestart": "Restart Claude Code to apply. Open Claudepot to undo.",
     "cliSwitchedBodyUndo": "Open Claudepot within 10 s to undo.",
-    "undoFailed": "Undo failed: {{email}} not found"
+    "undoFailed": "Undo failed: {{email}} not found",
+    "desktopSwitchedTitle": "Desktop → {{email}}",
+    "desktopSwitchedBody": "Claude Desktop was not relaunched; restart it to pick up the new session.",
+    "desktopReconciled_one": "Reconciled {{count}} Desktop binding",
+    "desktopReconciled_other": "Reconciled {{count}} Desktop bindings"
   },
   "status": {
     "keychain": {

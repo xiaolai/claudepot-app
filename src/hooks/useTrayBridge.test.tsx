@@ -237,6 +237,120 @@ describe("useTrayBridge — tray-cli-switch-failed", () => {
   });
 });
 
+// The Desktop half of the tray bridge. Every one of these channels
+// was emitted by the backend with NO subscriber in `src/`, so a tray
+// Desktop swap silently left the account cards stale and a failed one
+// produced no signal at all. These lock the parity with the CLI
+// channels above.
+describe("useTrayBridge — tray Desktop channels", () => {
+  it("subscribes to every Desktop channel the backend emits", async () => {
+    const bus = setupBus();
+    renderHook(() => useTrayBridge(makeArgs()));
+    await Promise.resolve();
+
+    for (const ch of [
+      "tray-desktop-switched",
+      "tray-desktop-switch-failed",
+      "tray-desktop-launch-failed",
+      "desktop-reconciled",
+    ]) {
+      expect(bus.has(ch), `${ch} has no subscriber`).toBe(true);
+    }
+  });
+
+  it("tray-desktop-switched refreshes the cards and names the account", async () => {
+    const bus = setupBus();
+    const args = makeArgs();
+    renderHook(() => useTrayBridge(args));
+    await Promise.resolve();
+
+    bus.fire("tray-desktop-switched", { to_email: "b@example.com" });
+
+    // The refresh is the load-bearing half: without it the
+    // `is_desktop_active` badge keeps pointing at the old account.
+    expect(args.refreshAccounts).toHaveBeenCalled();
+    const call = args.emit.mock.calls[0][0];
+    expect(call.category).toBe("accountSwitched");
+    expect(call.title).toBe("Desktop → b@example.com");
+    // The tray always swaps with no_launch=true, so the body must say
+    // Desktop was not relaunched.
+    expect(call.body).toContain("not relaunched");
+    // No Undo: reversing a Desktop swap is not symmetric with doing it.
+    expect(call.toastAction).toBeUndefined();
+  });
+
+  it("still refreshes when the switched payload is unrecognizable", async () => {
+    const bus = setupBus();
+    const args = makeArgs();
+    renderHook(() => useTrayBridge(args));
+    await Promise.resolve();
+
+    bus.fire("tray-desktop-switched", { wrong: "shape" });
+    expect(args.refreshAccounts).toHaveBeenCalledTimes(1);
+    expect(args.emit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["tray-desktop-switch-failed", "Desktop switch failed"],
+    ["tray-desktop-launch-failed", "Desktop launch failed"],
+  ])("%s surfaces an error entry carrying the detail", async (ch, title) => {
+    const bus = setupBus();
+    const args = makeArgs();
+    renderHook(() => useTrayBridge(args));
+    await Promise.resolve();
+
+    bus.fire(ch, "Desktop is running");
+    const call = args.emit.mock.calls[0][0];
+    expect(call.kind).toBe("error");
+    expect(call.title).toBe(title);
+    expect(call.body).toBe("Desktop is running");
+  });
+
+  it.each(["tray-desktop-switch-failed", "tray-desktop-launch-failed"])(
+    "%s falls back to 'unknown' rather than a blank body",
+    async (ch) => {
+      const bus = setupBus();
+      const args = makeArgs();
+      renderHook(() => useTrayBridge(args));
+      await Promise.resolve();
+
+      bus.fire(ch, "");
+      expect(args.emit.mock.calls[0][0].body).toBe("unknown");
+    },
+  );
+
+  it("desktop-reconciled refreshes and reports only when flags flipped", async () => {
+    const bus = setupBus();
+    const args = makeArgs();
+    renderHook(() => useTrayBridge(args));
+    await Promise.resolve();
+
+    // Nothing changed — the tray runs this on demand, and "no work
+    // needed" is not worth a notification.
+    bus.fire("desktop-reconciled", 0);
+    expect(args.emit).not.toHaveBeenCalled();
+    expect(args.refreshAccounts).not.toHaveBeenCalled();
+
+    bus.fire("desktop-reconciled", 2);
+    expect(args.refreshAccounts).toHaveBeenCalledTimes(1);
+    expect(args.emit.mock.calls[0][0].title).toBe(
+      "Reconciled 2 Desktop bindings",
+    );
+  });
+
+  it("desktop-reconciled pluralizes a single flip", async () => {
+    const bus = setupBus();
+    const args = makeArgs();
+    renderHook(() => useTrayBridge(args));
+    await Promise.resolve();
+
+    bus.fire("desktop-reconciled", 1);
+    expect(args.emit.mock.calls[0][0].title).toBe(
+      "Reconciled 1 Desktop binding",
+    );
+  });
+});
+
 describe("useTrayBridge — tray routing", () => {
   it("cp-activity-open-session resolves the transcript and jumps to projects", async () => {
     const bus = setupBus();

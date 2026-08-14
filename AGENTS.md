@@ -66,7 +66,22 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
 - Eight SQLite files live in `~/.claudepot/` (override with
   `CLAUDEPOT_DATA_DIR`; the authoritative list is whatever joins onto
   `claudepot_core::paths::claudepot_data_dir()`, and
-  `cargo xtask verify-docs` fails when this list drifts from it):
+  `cargo xtask verify-docs` fails when this list drifts from it).
+
+  **Every one of them opens through
+  `claudepot-core::db_pragmas::apply_standard_pragmas`**, and
+  `verify-docs` fails a `Connection::open` that doesn't. Hand-rolling
+  the pragma batch is the failure, not getting it wrong: `corpus.rs`
+  hand-rolled a batch that *looked* deliberate and silently omitted
+  `journal_size_limit` + `wal_autocheckpoint`, leaving the largest
+  database in the app outside the bound that exists because
+  `sessions.db-wal` once reached 6.3 GB. The helper also retries the
+  `delete` → `wal` transition, because SQLite does **not** run the busy
+  handler for it — `busy_timeout` does not cover that statement, and
+  racing the first open of a file failed outright with "database is
+  locked" (measured: 2 failures per 320 concurrent opens). Per-store
+  extras like `synchronous=NORMAL` or `foreign_keys=ON` go in a second
+  batch *after* the helper, never instead of it.
   - `accounts.db` — authoritative account + verification state, linked to Keychain.
   - `boards.db` — durable agent-written boards (grid spec, typed
     series, rows). Owned by `claudepot-core::board::store`. **User
@@ -402,6 +417,29 @@ All writes go through `claudepot-core::settings_mutex`, the one
 serialized read-modify-write boundary for CC's settings files — see
 below.
 
+## Locating CC's global config — one resolver, two meanings
+
+Two different questions, and picking the wrong one is a silent bug:
+
+| You mean | Call |
+|---|---|
+| the file at `$HOME/.claude.json` | `paths::claude_json_path()` |
+| the file **CC will actually read** | `paths::global_claude_json_target()` (or `resolved_global_claude_json()` when "it doesn't exist" is a distinct answer) |
+
+The second mirrors CC's `getGlobalClaudeFile` (`utils/env.ts:14-26`):
+legacy `<config_dir>/.config.json` wins when present, else
+`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`. **Never
+hand-roll that three-way check** — it was re-implemented three times
+and two copies were wrong. `config_view::effective_io` dropped the
+legacy branch while claiming parity in its own comment, so Config →
+Effective MCP read the wrong file and showed no user-scope servers
+while the preview beside it read the right one; `cc_tips::history`
+hardcoded the home sibling, so under `CLAUDE_CONFIG_DIR` the tips
+ledger reported `num_startups: 0` forever — into
+`cc_tips_snapshots.jsonl`, which is append-only and unreconstructable.
+`claude_json_path()` is correct only where the home sibling is
+genuinely the target (project-move rewriting the `projects` map).
+
 ## Command palette (⌘K)
 
 `src/components/CommandPalette.tsx` + `usePaletteActions` +
@@ -511,7 +549,17 @@ parity is asserted on plural *bases*, since zh legitimately carries
 only `_other` where en carries `_one` + `_other`. Point
 `CLAUDEPOT_LOCALES_DIR` at a fixture to exercise the gate itself — a
 check nobody has watched fail is indistinguishable from one that
-cannot fail, which is precisely what `check:envvar-layout` had become.
+cannot fail.
+
+`check:envvar-layout` was the standing example of that decay: it drives
+the real app over the debug-only MCP bridge, so CI cannot run it and
+nobody had ever seen it go red. It now has both halves covered —
+`node scripts/check-envvar-layout.mjs --self-test` forces `.envvar-list`
+to 0px against the live pane and fails if the assertions *don't* fire,
+and `scripts/check-envvar-layout.test.mjs` unit-tests the pure
+`evaluate()` half in CI. Split the judgement out of the measurement in
+any guard of this shape; the measurement may need a screen, the
+judgement never does.
 
 ## Settings-file mutation boundary
 
@@ -771,6 +819,23 @@ See `dev-docs/implementation-plan.md` for the full plan.
   `op-progress::<op_id>` channels → the op-progress modal subscribes
   by op_id. The `RunningOps` map on the backend is the polling
   backstop; see `src-tauri/src/ops.rs`.
+- **Every event channel `src-tauri/src/events.rs` declares must have a
+  subscriber in `src/`**, and `cargo xtask verify-docs` fails when one
+  doesn't. Seven had none: the four tray→Desktop channels
+  (`tray-desktop-switched`, `tray-desktop-switch-failed`,
+  `tray-desktop-launch-failed`, `desktop-reconciled`), so a tray
+  Desktop swap left the account cards stale and a *failed* one produced
+  no toast, no banner, nothing — while the CLI sibling had toast, OS
+  banner and Undo; plus three (`desktop-adopted`, `desktop-cleared`,
+  `desktop-running-changed`) that only re-announced what the invoking
+  command had already returned, now deleted. `events.rs` had a test
+  called "wire-contract lock" that compared each constant to its own
+  literal — a tautology inside one crate cannot see the far end of a
+  cross-boundary contract. Deliberate non-subscriptions go in
+  `UNSUBSCRIBED_BY_DESIGN` in `verify_docs.rs` **with the reason**;
+  entries there are validated in both directions, so one cannot outlive
+  its rationale. A tray action emits because nothing returns to a
+  caller — if nobody listens, the click silently does nothing.
 
 ## Web (claudepot.com)
 
@@ -797,6 +862,18 @@ records to `76.76.21.21`. Phase-1 plan and full migration log in
 
 CI: `.github/workflows/ci-web.yml` runs typecheck + tests on
 `web/**` changes (no build — Vercel handles the build per push).
+
+`pnpm test` here is `node scripts/run-tests.mjs`, which **discovers**
+`tests/*.test.ts` rather than listing them. It used to be 23 filenames
+chained with `&&`, so adding a test file did not add it to the suite —
+and three never ran anywhere: `username.test.ts` (reserved names and
+self-rename cooldown, the impersonation surface of a public site),
+`editorial-routing.test.ts`, and `social-format.test.ts`. All three
+passed once run, which is the bad case: 45 assertions looked like
+coverage while CI was green without them. A list of files is a cache of
+the directory; read the directory. `tests/integration/` stays out on
+purpose — it needs `--env-file=.env.local` and a live Neon connection,
+so it keeps its own `test:integration` script.
 
 The `web/.tokenize/` config currently runs the hook in
 `{"mode": "maintainer", "strictness": "advisory"}` — it flags

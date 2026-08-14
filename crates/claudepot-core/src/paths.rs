@@ -37,16 +37,53 @@ pub fn claude_json_path() -> Option<PathBuf> {
 /// file CC is actively applying.
 ///
 /// Returns the first candidate that exists; `None` when neither does.
+/// Use [`global_claude_json_target`] when you need the path regardless
+/// of existence.
 pub fn resolved_global_claude_json() -> Option<PathBuf> {
+    let p = global_claude_json_target();
+    p.is_file().then_some(p)
+}
+
+/// [`resolved_global_claude_json`] without the existence requirement:
+/// the path CC *would* read, whether or not anything is there yet.
+///
+/// # This is THE resolver — do not hand-roll a fourth one
+///
+/// The distinction from [`claude_json_path`] is subtle enough that it
+/// was independently re-implemented three times, and two copies were
+/// wrong:
+///
+/// - `config_view::effective_io::resolve_claude_json_path` handled
+///   `CLAUDE_CONFIG_DIR` but dropped the legacy `.config.json` branch,
+///   while its own comment claimed parity with `getGlobalClaudeFile`.
+///   On a machine carrying that legacy file, Config → Effective MCP
+///   read the wrong file and showed no user-scope servers, while the
+///   config preview beside it read the right one.
+/// - `cc_tips::history::read_tips_history` hardcoded
+///   `$HOME/.claude.json`, so under `CLAUDE_CONFIG_DIR` the tips
+///   ledger reported `num_startups: 0` and an empty history forever —
+///   and its output feeds `cc_tips_snapshots.jsonl`, which is
+///   append-only and cannot be reconstructed after the fact.
+///
+/// Both now call this. A new caller meaning "the file CC reads" calls
+/// this too; a fresh copy of the three-way resolution is a review
+/// finding.
+///
+/// One shape is deliberately NOT modelled: `fileSuffixForOauthConfig`
+/// (`constants/oauth.ts:18`) can make the filename
+/// `.claude-staging-oauth.json` and friends. The suffix is empty for
+/// production, so modelling it would add a branch no shipped user
+/// reaches.
+pub fn global_claude_json_target() -> PathBuf {
     let legacy = claude_config_dir().join(".config.json");
     if legacy.is_file() {
-        return Some(legacy);
+        return legacy;
     }
-    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
+    std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .or_else(dirs::home_dir)?;
-    let primary = base.join(".claude.json");
-    primary.is_file().then_some(primary)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".claude.json")
 }
 
 /// Claude Desktop data directory (macOS / Windows). Returns None on Linux.
@@ -268,6 +305,66 @@ mod tests {
         } else {
             assert!(result.is_none());
         }
+    }
+
+    /// The three-way resolution CC's `getGlobalClaudeFile` performs.
+    ///
+    /// Each branch is asserted separately because the copies that
+    /// drifted did so by dropping exactly one of them: `effective_io`
+    /// lost the legacy branch, `cc_tips` lost both.
+    #[test]
+    fn global_claude_json_target_honors_the_config_dir() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config-dir");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &cfg);
+
+        // No legacy file → `$CLAUDE_CONFIG_DIR/.claude.json`, NOT the
+        // home sibling. This is the branch `cc_tips` was missing.
+        assert_eq!(global_claude_json_target(), cfg.join(".claude.json"));
+
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+    }
+
+    #[test]
+    fn global_claude_json_target_prefers_the_legacy_config_json() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config-dir");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &cfg);
+
+        // Both candidates present: legacy wins, exactly as
+        // `getGlobalClaudeFile` checks it first. This is the branch
+        // `effective_io` was missing.
+        std::fs::write(cfg.join(".config.json"), b"{}").unwrap();
+        std::fs::write(cfg.join(".claude.json"), b"{}").unwrap();
+        assert_eq!(global_claude_json_target(), cfg.join(".config.json"));
+
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+    }
+
+    /// The existence-checked wrapper must agree with the target, and
+    /// must report `None` only when nothing is there.
+    #[test]
+    fn resolved_global_claude_json_tracks_the_target() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config-dir");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &cfg);
+
+        assert_eq!(resolved_global_claude_json(), None, "nothing on disk yet");
+
+        std::fs::write(cfg.join(".claude.json"), b"{}").unwrap();
+        assert_eq!(
+            resolved_global_claude_json(),
+            Some(global_claude_json_target()),
+            "once it exists the two must name the same file"
+        );
+
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
     }
 
     #[test]

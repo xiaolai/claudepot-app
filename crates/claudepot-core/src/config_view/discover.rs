@@ -831,19 +831,12 @@ pub fn collect_policy_managed_files() -> Vec<FileNode> {
 /// var is unset). Surface the actual file so the preview points to the
 /// authoritative location.
 pub fn collect_redacted_user_config() -> Option<FileNode> {
-    let legacy = claude_config_dir().join(".config.json");
-    let primary_base = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    let primary = primary_base.join(".claude.json");
-    let p = if legacy.is_file() {
-        legacy
-    } else if primary.is_file() {
-        primary
-    } else {
-        return None;
-    };
+    // `resolved_global_claude_json` is the one implementation of this
+    // three-way resolution; the copy that used to live here was right,
+    // but two of the other three copies were not (see that function's
+    // docs). `None` means CC has no global config at all, which is why
+    // this wants the existence-checked form rather than the target.
+    let p = crate::paths::resolved_global_claude_json()?;
     let meta = std::fs::metadata(&p).ok()?;
     let size = meta.len();
     let mtime = mtime_ns(&meta);

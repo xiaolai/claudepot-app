@@ -98,14 +98,45 @@ pub const AGENT_EVENT_BURST_CAPPED: &str = "agent-event-burst-capped";
 /// A watched config-tree file changed; payload is the tree patch.
 pub const CONFIG_TREE_PATCH: &str = "config-tree-patch";
 
-/// Desktop slot adopted an account's session files.
-pub const DESKTOP_ADOPTED: &str = "desktop-adopted";
+// `desktop-adopted`, `desktop-cleared` and `desktop-running-changed`
+// used to live here. All three were emitted from the Tauri *command*
+// the renderer had just invoked, so the caller already had the outcome
+// in the command's return value and nobody ever subscribed. Deleted
+// rather than wired up: an event whose only purpose is to re-announce
+// what the caller just learned is noise, and a channel with no
+// subscriber reads to the next author as a contract they must not
+// break.
+//
+// The tray channels below are different — nothing returns to a caller
+// there, because the click happened outside the webview.
 
-/// Desktop slot cleared.
-pub const DESKTOP_CLEARED: &str = "desktop-cleared";
+/// Tray → Desktop swap succeeded. Payload: [`TrayDesktopSwitched`].
+///
+/// The tray performs the swap with `no_launch=true` and cannot render
+/// anything itself, so this is the *only* route by which the main
+/// window learns the Desktop binding moved.
+pub const TRAY_DESKTOP_SWITCHED: &str = "tray-desktop-switched";
 
-/// Claude Desktop process started or stopped.
-pub const DESKTOP_RUNNING_CHANGED: &str = "desktop-running-changed";
+/// Tray → Desktop swap failed. Payload: the error message.
+pub const TRAY_DESKTOP_SWITCH_FAILED: &str = "tray-desktop-switch-failed";
+
+/// Tray → Launch Claude Desktop failed. Payload: the error message.
+pub const TRAY_DESKTOP_LAUNCH_FAILED: &str = "tray-desktop-launch-failed";
+
+/// Tray → Desktop flag reconcile finished. Payload: how many account
+/// flags flipped, so the renderer can stay quiet when nothing changed.
+pub const DESKTOP_RECONCILED: &str = "desktop-reconciled";
+
+/// Payload of [`TRAY_DESKTOP_SWITCHED`].
+///
+/// Carries the account so the toast can name it. The emit used to be
+/// `()`, which left the renderer unable to say *which* account it had
+/// switched to even once it started listening — mirroring
+/// `tray-cli-switched`, whose payload has always named the target.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TrayDesktopSwitched {
+    pub to_email: String,
+}
 
 /// Full live-session roster snapshot.
 pub const LIVE_ALL: &str = "live-all";
@@ -117,36 +148,43 @@ pub fn live_channel(session_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    //! Wire-contract lock: the renderer subscribes by exact string,
-    //! so any drift in these values is a frontend-visible break.
-    //! Update `src/` listeners in the same change if one of these
-    //! assertions ever needs to move.
+    //! # Why the old "wire-contract lock" test is gone
+    //!
+    //! It read `assert_eq!(DESKTOP_ADOPTED, "desktop-adopted")` — every
+    //! constant compared to its own literal, twenty-one times. That
+    //! catches a rename and nothing else, while its docstring claimed
+    //! to protect a contract with the renderer.
+    //!
+    //! It could not, and did not. Seven of the channels it "locked"
+    //! had **zero** subscribers in `src/`: four tray/Desktop ones where
+    //! that meant swap failures vanished silently, and three that were
+    //! pure dead weight. A tautology cannot notice the other end of the
+    //! contract is missing, which is the only failure that had actually
+    //! occurred.
+    //!
+    //! The real check is cross-boundary and now lives in
+    //! `cargo xtask verify-docs`, which greps `src/` for every channel
+    //! this file declares. What remains here is the part that is
+    //! genuinely local: the naming convention for per-instance
+    //! channels, and the shape of payloads the renderer destructures.
 
     use super::*;
 
+    /// Payload shapes the renderer destructures by field name. Unlike
+    /// the channel strings, these are not greppable from the frontend,
+    /// so a serde rename would be invisible until runtime.
     #[test]
-    fn test_channel_constants_match_frontend_contract() {
-        assert_eq!(OP_TERMINAL, "cp-op-terminal");
-        assert_eq!(UPDATES_CYCLE_COMPLETE, "updates::cycle-complete");
-        assert_eq!(SERVICE_STATUS_UPDATED, "service-status::updated");
-        assert_eq!(ROTATION_SUGGESTED, "rotation-suggested");
-        assert_eq!(ROTATION_STALLED, "rotation-stalled");
-        assert_eq!(ROTATION_APPLIED, "rotation-applied");
-        assert_eq!(ROTATION_FAILED, "rotation-failed");
-        assert_eq!(ROTATION_BREAKER_TRIPPED, "rotation-breaker-tripped");
-        assert_eq!(PERMISSION_REVERTED, "permission-reverted");
-        assert_eq!(PERMISSION_BREAKER_TRIPPED, "permission-breaker-tripped");
-        assert_eq!(USAGE_THRESHOLD_CROSSED, "usage-threshold-crossed");
-        assert_eq!(USAGE_REFETCH, "usage::refetch");
-        assert_eq!(MEMORY_CHANGED, "memory:changed");
-        assert_eq!(AGENT_EVENT_DISPATCHED, "agent-event-dispatched");
-        assert_eq!(AGENT_EVENT_FAILED, "agent-event-failed");
-        assert_eq!(AGENT_EVENT_BURST_CAPPED, "agent-event-burst-capped");
-        assert_eq!(CONFIG_TREE_PATCH, "config-tree-patch");
-        assert_eq!(DESKTOP_ADOPTED, "desktop-adopted");
-        assert_eq!(DESKTOP_CLEARED, "desktop-cleared");
-        assert_eq!(DESKTOP_RUNNING_CHANGED, "desktop-running-changed");
-        assert_eq!(LIVE_ALL, "live-all");
+    fn tray_desktop_switched_serializes_the_account_it_switched_to() {
+        let json = serde_json::to_value(TrayDesktopSwitched {
+            to_email: "someone@example.com".into(),
+        })
+        .expect("serialize");
+        assert_eq!(
+            json.get("to_email").and_then(|v| v.as_str()),
+            Some("someone@example.com"),
+            "useTrayBridge reads `to_email`; renaming the field silently \
+             degrades the toast to the unknown-account branch"
+        );
     }
 
     #[test]

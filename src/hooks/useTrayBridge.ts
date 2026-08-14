@@ -16,6 +16,15 @@ import type { AccountSummary } from "../types";
  *     actions routed through the shell's confirmation modal flow
  *   - `tray-cli-switched` / `tray-cli-switch-failed` — one-click CLI
  *     swap feedback (toast with Undo + OS banner mirror)
+ *   - `tray-desktop-switched` / `tray-desktop-switch-failed` /
+ *     `tray-desktop-launch-failed` / `desktop-reconciled` — the same
+ *     feedback for the Desktop slot
+ *
+ * Every channel the backend emits for a tray action is handled here.
+ * That is now enforced by `cargo xtask verify-docs`, which fails when
+ * a channel declared in `src-tauri/src/events.rs` has no subscriber
+ * anywhere in `src/` — the four Desktop channels above were emitted
+ * for releases with nobody listening.
  *
  * Every subscription is registered once for the shell's lifetime —
  * useTauriEvent(s) hold handlers in refs, so the unstable arg
@@ -29,6 +38,11 @@ interface TrayCliSwitchedPayload {
   to_email: string;
   from_email: string | null;
   cc_was_running: boolean;
+}
+
+/** Payload of `tray-desktop-switched` (`events.rs::TrayDesktopSwitched`). */
+interface TrayDesktopSwitchedPayload {
+  to_email: string;
 }
 
 export function useTrayBridge(args: {
@@ -201,17 +215,93 @@ export function useTrayBridge(args: {
       });
     },
     "tray-cli-switch-failed": (ev: TauriEvent<string>) => {
-      const detail =
-        typeof ev?.payload === "string" && ev.payload.length > 0
-          ? ev.payload
-          : i18n.t("ui.unknown");
       void emit({
         category: "accountSwitched",
         kind: "error",
         title: i18n.t("account.cliSwitchFailed"),
-        body: detail,
+        body: detailOf(ev),
+        target: { kind: "app", route: { section: "accounts" } },
+      });
+    },
+
+    // Tray → Desktop feedback. The CLI channels above had all of this
+    // and the Desktop ones had none: nothing in the renderer
+    // subscribed, so a tray Desktop swap left the account cards
+    // showing the previous binding, and a FAILED swap produced no
+    // signal anywhere — no toast, no banner, no log the user can see.
+    // The only recovery was `useDesktopIdentitySync`, which is
+    // throttled to one probe per five minutes AND only fires on window
+    // focus, so a swap performed while the window was already visible
+    // stayed invisible indefinitely.
+    //
+    // No Undo here, unlike the CLI swap. Undoing a Desktop switch is
+    // not symmetric with performing one — the previous session's files
+    // are in a snapshot dir that may or may not still hold them — so
+    // offering a one-click reversal would promise more than the
+    // backend guarantees.
+    "tray-desktop-switched": (ev: TauriEvent<TrayDesktopSwitchedPayload>) => {
+      const p = ev.payload;
+      // Always refresh, even when the payload is unrecognizable: the
+      // `is_desktop_active` flags in the cards are stale either way,
+      // and a stale badge is the more misleading of the two failures.
+      void refreshAccounts();
+      if (!p || typeof p.to_email !== "string") return;
+      void emit({
+        category: "accountSwitched",
+        title: i18n.t("tray.desktopSwitchedTitle", { email: p.to_email }),
+        // The tray always swaps with `no_launch=true`, so Desktop is
+        // never relaunched by this path — say so, or the user stares
+        // at a Desktop window still showing the old account.
+        body: i18n.t("tray.desktopSwitchedBody"),
+        target: { kind: "app", route: { section: "accounts" } },
+      });
+    },
+    "tray-desktop-switch-failed": (ev: TauriEvent<string>) => {
+      void emit({
+        category: "accountSwitched",
+        kind: "error",
+        title: i18n.t("account.desktopSwitchFailed"),
+        body: detailOf(ev),
+        target: { kind: "app", route: { section: "accounts" } },
+      });
+    },
+    "tray-desktop-launch-failed": (ev: TauriEvent<string>) => {
+      void emit({
+        category: "accountSwitched",
+        kind: "error",
+        // `components:` prefix — `toasts.*` is not in the default
+        // `common` namespace, and the typed `t()` is what caught it.
+        title: i18n.t("components:toasts.desktopLaunchFailed"),
+        body: detailOf(ev),
+        target: { kind: "app", route: { section: "accounts" } },
+      });
+    },
+    // Reconcile flips `is_desktop_active` in the store, so the cards
+    // are stale whenever it changed anything. Silent at zero flips:
+    // the tray runs this on demand and "nothing needed fixing" is not
+    // worth a notification.
+    "desktop-reconciled": (ev: TauriEvent<number>) => {
+      const flips = typeof ev?.payload === "number" ? ev.payload : 0;
+      if (flips <= 0) return;
+      void refreshAccounts();
+      void emit({
+        category: "accountSwitched",
+        title: i18n.t("tray.desktopReconciled", { count: flips }),
         target: { kind: "app", route: { section: "accounts" } },
       });
     },
   });
+}
+
+/**
+ * Error text from a string-payload channel, falling back to "unknown".
+ *
+ * Four channels needed the identical guard; the fallback matters
+ * because an empty payload would otherwise render an error toast with
+ * a blank body, which reads as a UI bug rather than as a failed swap.
+ */
+function detailOf(ev: TauriEvent<string>): string {
+  return typeof ev?.payload === "string" && ev.payload.length > 0
+    ? ev.payload
+    : i18n.t("ui.unknown");
 }

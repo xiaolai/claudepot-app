@@ -671,7 +671,7 @@ fn handle_desktop_launch(app: &AppHandle) {
         };
         if let Err(e) = platform.launch().await {
             tracing::warn!("tray desktop-launch failed: {e}");
-            let _ = app.emit("tray-desktop-launch-failed", e.to_string());
+            let _ = app.emit(crate::events::TRAY_DESKTOP_LAUNCH_FAILED, e.to_string());
         }
     });
 }
@@ -693,7 +693,7 @@ fn handle_desktop_reconcile(app: &AppHandle) {
                         tracing::warn!("tray rebuild after desktop reconcile failed: {e}");
                     }
                 }
-                let _ = app.emit("desktop-reconciled", outcome.flag_flips.len());
+                let _ = app.emit(crate::events::DESKTOP_RECONCILED, outcome.flag_flips.len());
             }
             Err(e) => tracing::warn!("tray desktop-reconcile failed: {e}"),
         }
@@ -841,18 +841,25 @@ fn handle_desktop_switch(app: &AppHandle, uuid_str: &str) {
                 return;
             }
         };
-        match crate::commands::desktop::desktop_use(email, true, lock).await {
+        match crate::commands::desktop::desktop_use(email.clone(), true, lock).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after desktop switch failed: {e}");
                 }
-                let _ = app.emit("tray-desktop-switched", ());
+                // Payload names the account: the main window has no
+                // other way to learn a tray click moved the Desktop
+                // binding, so an empty payload left it unable to say
+                // which one even after it started listening.
+                let _ = app.emit(
+                    crate::events::TRAY_DESKTOP_SWITCHED,
+                    crate::events::TrayDesktopSwitched { to_email: email },
+                );
             }
             Err(e) => {
                 // `desktop_use` now rejects with an `ErrorDto`; the
                 // English lives in `message` (see `dto_error.rs`).
                 tracing::warn!("tray desktop_use failed: {}", e.message);
-                let _ = app.emit("tray-desktop-switch-failed", e.message);
+                let _ = app.emit(crate::events::TRAY_DESKTOP_SWITCH_FAILED, e.message);
             }
         }
     });

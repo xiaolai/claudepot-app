@@ -44,12 +44,23 @@ pub struct TipsHistoryRead {
     pub tips_history: BTreeMap<String, u32>,
 }
 
+/// Read CC's `numStartups` + `tipsHistory` from its global config.
+///
+/// The default resolves through `paths::global_claude_json_target`,
+/// NOT a hand-built `$HOME/.claude.json`. CC reads these two counters
+/// out of `getGlobalConfig()` → `getGlobalClaudeFile()`
+/// (`utils/env.ts:14-26`), which honours `CLAUDE_CONFIG_DIR` and
+/// prefers a legacy `<config_dir>/.config.json`. Pointing at the home
+/// sibling regardless meant that on any install using either, this
+/// returned `num_startups: 0` and an empty history — indistinguishable
+/// from "you have never seen a tip".
+///
+/// That is worse here than in a normal reader: these counters are the
+/// input to `cc_tips_snapshots.jsonl`, the append-only log that
+/// converts CC's counter-only state into wall-clock time. A zero
+/// recorded today cannot be reconstructed later.
 pub fn read_tips_history(global_config_path: Option<PathBuf>) -> TipsResult<TipsHistoryRead> {
-    let path = global_config_path.unwrap_or_else(|| {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("/"))
-            .join(".claude.json")
-    });
+    let path = global_config_path.unwrap_or_else(crate::paths::global_claude_json_target);
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -256,6 +267,57 @@ mod tests {
             num_startups: n,
             tips_history: th,
         }
+    }
+
+    /// The default path must be the file CC actually reads.
+    ///
+    /// This hardcoded `$HOME/.claude.json`, so under
+    /// `CLAUDE_CONFIG_DIR` it read a file CC never writes and returned
+    /// zeroes — reported to the user as "no tip has ever been shown".
+    /// Asserting on the *counters* rather than on the resolved path is
+    /// deliberate: a test that only checked which path was chosen
+    /// would pass again the moment someone reintroduced a second
+    /// resolver that happens to agree on this one input.
+    #[test]
+    fn the_default_config_path_follows_claude_config_dir() {
+        let _lock = crate::testing::lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config-dir");
+        std::fs::create_dir_all(&cfg).unwrap();
+
+        // What CC would have written there.
+        std::fs::write(
+            cfg.join(".claude.json"),
+            br#"{"numStartups": 42, "tipsHistory": {"ide-hotkey": 7}}"#,
+        )
+        .unwrap();
+
+        std::env::set_var("CLAUDE_CONFIG_DIR", &cfg);
+        let got = read_tips_history(None).expect("read");
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+
+        assert_eq!(
+            got.num_startups, 42,
+            "read the home sibling instead of $CLAUDE_CONFIG_DIR/.claude.json"
+        );
+        assert_eq!(got.tips_history.get("ide-hotkey"), Some(&7));
+    }
+
+    /// And the legacy branch, which `getGlobalClaudeFile` checks first.
+    #[test]
+    fn the_default_config_path_prefers_the_legacy_config_json() {
+        let _lock = crate::testing::lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config-dir");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join(".config.json"), br#"{"numStartups": 99}"#).unwrap();
+        std::fs::write(cfg.join(".claude.json"), br#"{"numStartups": 1}"#).unwrap();
+
+        std::env::set_var("CLAUDE_CONFIG_DIR", &cfg);
+        let got = read_tips_history(None).expect("read");
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+
+        assert_eq!(got.num_startups, 99, "legacy .config.json must win");
     }
 
     #[test]

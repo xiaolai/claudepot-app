@@ -30,7 +30,12 @@
 //!    whole data-dir list was gated. `migrate-peers.json` was added
 //!    and the gate stayed green;
 //! 5. every documented screenshot exists and its two committed copies
-//!    are byte-identical.
+//!    are byte-identical;
+//! 6. every `Connection::open` in production code reaches
+//!    `db_pragmas::apply_standard_pragmas`. Not a docs fact, but the
+//!    same shape of failure and it belongs beside check 3: that one
+//!    gates WAL *cleanup* coverage, this one gates WAL *growth* bounds,
+//!    and `corpus.db` was missing from both for as long as it existed.
 //!
 //! Screenshot *freshness* is deliberately not here — see
 //! [`verify_screenshots`], which is on demand.
@@ -99,6 +104,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_settings_panes(repo, &mut problems)?;
     check_data_dir_databases(repo, &mut problems)?;
     check_data_dir_json_state(repo, &mut problems)?;
+    check_event_channels_have_listeners(repo, &mut problems)?;
     // Screenshot *freshness* is `cargo xtask verify-screenshots`, on
     // demand — see that function for why it is not a pull-request gate.
     check_screenshot_pairs(repo, &mut problems)?;
@@ -344,6 +350,279 @@ fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<(
             problems.push(format!(
                 "`{db}` ships but is absent from `KNOWN_DB_FILENAMES` in db_housekeeping.rs \
                  — its `*.db-wal` sidecar will never be cleaned up"
+            ));
+        }
+    }
+
+    // Layer 1 of the same WAL defense: the housekeeping list bounds
+    // *cleanup at startup*, `apply_standard_pragmas` bounds *growth*.
+    // A store that skips the helper is covered only by the startup
+    // pass, which backs off after 1s whenever another process holds
+    // the file — exactly the situation a long index run creates.
+    // `corpus.rs` hand-rolled its pragmas and silently dropped
+    // `journal_size_limit` / `wal_autocheckpoint` for as long as it
+    // existed, on the largest database in the app.
+    let scan = crate::data_dir_scan::scan(repo)?;
+    for open in &scan.unpragmad_opens {
+        problems.push(format!(
+            "`{}::{}` calls `Connection::open` without `db_pragmas::apply_standard_pragmas` \
+             — its WAL has no size bound. Call the helper rather than hand-rolling a pragma \
+             batch; a hand-rolled batch that is right today is a divergence tomorrow",
+            open.file, open.function
+        ));
+    }
+    Ok(())
+}
+
+// ─── 7. Event channels have a subscriber ─────────────────────────────
+
+/// Channels the renderer deliberately does not subscribe to, and why.
+///
+/// An exception has to be written down somewhere a reader will find it
+/// *while looking at the failure*, or the next person deletes a real
+/// subscriber and assumes the red gate is the usual noise. Both
+/// directions are validated in [`check_event_channels_have_listeners`],
+/// so an entry cannot outlive the reason for it.
+const UNSUBSCRIBED_BY_DESIGN: &[(&str, &str)] = &[(
+    "agent-event-dispatched",
+    "a successful event-agent run already lands in RunHistoryPanel with its structured \
+     output; a toast per fire would spam every settled-session narration. \
+     `useAgentEventToasts.ts` documents it and its test asserts the channel stays unsubscribed",
+)];
+
+/// Channel names declared as `pub const … : &str = "…"` in `events.rs`,
+/// plus any emitted as a bare literal elsewhere in the Tauri crate.
+///
+/// Both halves matter: the tray and app-menu files historically kept
+/// their channel strings at the emit site rather than in `events.rs`,
+/// and three of the four channels that turned out to have no listener
+/// were exactly those.
+fn declared_channels(repo: &Path) -> Result<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+
+    let events = read(repo, "src-tauri/src/events.rs")?;
+    for line in events.lines() {
+        let t = line.trim();
+        if !t.starts_with("pub const ") || !t.contains("&str") {
+            continue;
+        }
+        if let Some(v) = t.split('"').nth(1) {
+            out.insert(v.to_string());
+        }
+    }
+
+    let mut files = Vec::new();
+    collect_rs(&repo.join("src-tauri/src"), &mut files)?;
+    for f in files {
+        let src = std::fs::read_to_string(&f)?;
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("emit(\"") {
+            rest = &rest[i + "emit(\"".len()..];
+            if let Some(j) = rest.find('"') {
+                out.insert(rest[..j].to_string());
+                rest = &rest[j + 1..];
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let p = entry?.path();
+        if p.is_dir() {
+            collect_rs(&p, out)?;
+        } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
+/// Strip `//` and `/* */` comments, without being fooled by the same
+/// characters inside a string literal.
+///
+/// Needed because the thing being searched for is a channel *name*,
+/// and prose mentions one constantly — `useTrayBridge`'s own header
+/// comment lists all four Desktop channels. Searching raw text made
+/// the gate pass with every real subscriber deleted, which is the
+/// failure it exists to catch.
+fn strip_ts_comments(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    // `Some(q)` while inside a string opened with quote byte `q`.
+    let mut quote: Option<u8> = None;
+
+    while i < b.len() {
+        let c = b[i];
+        if let Some(q) = quote {
+            // Skip an escaped character wholesale so `"\\\""` does not
+            // read as the end of the string.
+            if c == b'\\' && i + 1 < b.len() {
+                out.push(c as char);
+                out.push(b[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if c == q {
+                quote = None;
+            }
+            out.push(c as char);
+            i += 1;
+            continue;
+        }
+        if c == b'"' || c == b'\'' || c == b'`' {
+            quote = Some(c);
+            out.push(c as char);
+            i += 1;
+            continue;
+        }
+        if c == b'/' && i + 1 < b.len() {
+            if b[i + 1] == b'/' {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if b[i + 1] == b'*' {
+                i += 2;
+                while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(b.len());
+                continue;
+            }
+        }
+        // Non-ASCII bytes are copied as-is; only ASCII delimiters
+        // matter to this scanner, and the search is for ASCII channel
+        // names.
+        out.push(c as char);
+        i += 1;
+    }
+    out
+}
+
+/// Comment-stripped concatenation of every **shipped** `.ts`/`.tsx`
+/// file under `src/`.
+///
+/// Two exclusions, both established by deleting the real subscribers
+/// and checking the gate actually goes red:
+///
+/// - **Test files.** A test that fires a channel names it, so
+///   `useTrayBridge.test.tsx` alone satisfied "somebody references
+///   `tray-desktop-switched`" while the shipped hook subscribed to
+///   nothing.
+/// - **Comments.** With tests excluded the gate *still* passed,
+///   because the hook's own header comment lists the channels it
+///   handles. A doc mention is not a subscription.
+fn frontend_sources(repo: &Path) -> Result<String> {
+    fn is_test_file(p: &Path) -> bool {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.contains(".test.") || n.contains(".spec."))
+    }
+
+    fn walk(dir: &Path, buf: &mut String) -> Result<()> {
+        // `src/test/` is fixtures and harness setup, not shipped code.
+        if dir.file_name().and_then(|n| n.to_str()) == Some("test") {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(dir)? {
+            let p = entry?.path();
+            if p.is_dir() {
+                walk(&p, buf)?;
+            } else if matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("ts") | Some("tsx")
+            ) && !is_test_file(&p)
+            {
+                buf.push_str(&strip_ts_comments(&std::fs::read_to_string(&p)?));
+                buf.push('\n');
+            }
+        }
+        Ok(())
+    }
+    let mut buf = String::new();
+    walk(&repo.join("src"), &mut buf)?;
+    Ok(buf)
+}
+
+/// Every backend-emitted channel must be named somewhere in `src/`.
+///
+/// # Why this is a gate and not a unit test
+///
+/// `events.rs` carried a test called "wire-contract lock" whose body
+/// was `assert_eq!(DESKTOP_ADOPTED, "desktop-adopted")` twenty-one
+/// times over — each constant compared to its own literal. It could
+/// only ever catch a rename, while its docstring claimed to protect
+/// the contract with the renderer.
+///
+/// It did not. Seven declared channels had zero subscribers in `src/`:
+/// `tray-desktop-switched`, `tray-desktop-switch-failed`,
+/// `tray-desktop-launch-failed` and `desktop-reconciled` (so a tray
+/// Desktop swap left the UI stale and a FAILED one produced no signal
+/// anywhere), plus `desktop-adopted`, `desktop-cleared` and
+/// `desktop-running-changed` (dead weight — the invoking command
+/// already returned the same facts). A tautology inside one crate
+/// cannot see the other end of a cross-boundary contract; only a check
+/// that reads both sides can.
+///
+/// Deliberately a *name* search rather than a listener-registration
+/// parse: the renderer reaches channels through `useTauriEvent`,
+/// `useTauriEvents` object keys, and shared constants in
+/// `lib/events.ts`. Matching the string covers all three, and the
+/// failure being prevented is "nobody mentions this at all".
+fn check_event_channels_have_listeners(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let declared = declared_channels(repo)?;
+    if declared.len() < 10 {
+        problems.push(format!(
+            "only parsed {} event channels from src-tauri — the listener cross-check is \
+             effectively blind. Fix `declared_channels`, not the events",
+            declared.len()
+        ));
+        return Ok(());
+    }
+    let frontend = frontend_sources(repo)?;
+
+    // The allowlist is kept honest in both directions below: an entry
+    // naming a channel that no longer exists, or one that has since
+    // gained a subscriber, is itself a drift. Otherwise silencing this
+    // gate would be a one-line edit with no cost, which is how a gate
+    // stops meaning anything.
+    for (ch, _) in UNSUBSCRIBED_BY_DESIGN {
+        if !declared.contains(*ch) {
+            problems.push(format!(
+                "`{ch}` is listed in UNSUBSCRIBED_BY_DESIGN but is no longer emitted \
+                 — delete the stale entry"
+            ));
+        }
+    }
+
+    for ch in &declared {
+        if let Some((_, why)) = UNSUBSCRIBED_BY_DESIGN.iter().find(|(c, _)| c == ch) {
+            if frontend.contains(&format!("\"{ch}\"")) {
+                problems.push(format!(
+                    "`{ch}` is listed in UNSUBSCRIBED_BY_DESIGN ({why}) but the renderer now \
+                     subscribes to it — remove the entry or the subscription"
+                ));
+            }
+            continue;
+        }
+        // Quoted forms only. Every real subscription spells the
+        // channel as a `"…"` / `'…'` literal — `useTauriEvent("x", …)`,
+        // a `useTauriEvents({ "x": … })` key, or a shared constant in
+        // `lib/events.ts`. Requiring the quotes is a second, cheaper
+        // guard against a bare mention counting as a subscriber.
+        let quoted = [format!("\"{ch}\""), format!("'{ch}'")];
+        if !quoted.iter().any(|q| frontend.contains(q.as_str())) {
+            problems.push(format!(
+                "channel `{ch}` is emitted by the backend but named nowhere under `src/` \
+                 — either the renderer is missing a subscriber (a tray action that \
+                 silently does nothing) or the channel is dead and should be deleted"
             ));
         }
     }
