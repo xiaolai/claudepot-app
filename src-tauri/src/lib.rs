@@ -1379,6 +1379,31 @@ pub fn run() {
             std::process::exit(1);
         })
         .run(|app, event| {
+            // Re-apply the Dock icon once the app is actually up.
+            //
+            // `setup()` also calls this, and that call alone is not
+            // enough: it runs before the run loop starts, so NSApp may
+            // not own a Dock tile yet and `setApplicationIconImage` is
+            // then discarded in silence — no error, no log, the generic
+            // `exec` tile stays. The same discard happens whenever the
+            // activation policy is `Accessory`, which `setup()` may
+            // have just set: an accessory app has no tile to paint.
+            //
+            // `Ready` fires after AppKit has finished launching, so a
+            // tile exists by definition. Both calls are kept: the early
+            // one wins the race on a cold launch where the tile is
+            // already there, and this one covers the case where it was
+            // not. Setting the same image twice is free.
+            //
+            // NOTE: this does NOT cover the Dock reappearing later when
+            // the user flips "hide dock icon" off — that path re-enters
+            // `Regular` from `preferences.rs` and needs its own
+            // re-apply. See the call there.
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Ready) {
+                dock_icon::override_application_icon();
+            }
+
             // Dock-icon click with no visible window (#43).
             //
             // The red ✕ does not close this app, it hides the window —

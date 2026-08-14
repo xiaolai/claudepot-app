@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 1024 1024">
+  <defs>
+    <mask id="seams">
+      <rect width="1024" height="1024" fill="#FFFFFF"></rect>
+      <path d="M512 256 L512 864 M192 432 L512 608 M832 432 L512 608" stroke="#000000" stroke-width="48" fill="none"></path>
+    </mask>
+  </defs>
+  <path mask="url(#seams)" fill="#000000" d="M512 256 L832 432 L832 688 L512 864 L192 688 L192 432 Z"></path>
+</svg>

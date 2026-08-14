@@ -13,8 +13,4 @@
   <rect width="1024" height="1024" fill="#D9D5CF"></rect>
   <rect width="1024" height="1024" filter="url(#grain)"></rect>
   <rect width="1024" height="1024" fill="url(#sheen)"></rect>
-  <path fill="#F7B47C" d="M512 256 L192 432 L512 608 Z"></path>
-  <path fill="#E8833A" d="M512 256 L832 432 L512 608 Z"></path>
-  <path fill="#C0642A" d="M192 432 L512 608 L512 864 L192 688 Z"></path>
-  <path fill="#9A4F1B" d="M832 432 L512 608 L512 864 L832 688 Z"></path>
 </svg>

@@ -451,6 +451,21 @@ pub async fn preferences_set_hide_dock_icon(
                 format!("set_activation_policy: {e}"),
             )
         })?;
+        // Re-apply the Dock icon when a tile comes back.
+        //
+        // `setApplicationIconImage` paints a tile; with no tile it is
+        // discarded in silence. An `Accessory` app has none, so every
+        // override applied while the Dock icon was hidden is gone by
+        // the time the user turns it back on — and the tile returns
+        // showing the generic executable icon in dev, or the
+        // IconServices render of the `.icns` in prod, rather than our
+        // squircled 1024 source.
+        //
+        // Only on the way back to `Regular`: applying it while going
+        // the other way would be the same discarded call again.
+        if !hide {
+            crate::dock_icon::override_application_icon();
+        }
     }
     let snapshot = {
         let mut p = state.0.lock().map_err(lock_poisoned)?;
