@@ -191,19 +191,59 @@ mod spawn_stdio_tests {
     ///
     /// Two failures from one line, and the visible one was the harmless
     /// half.
+    ///
+    /// # Why this drives `git --version` and not `current_branch`
+    ///
+    /// The first version of this test asserted `current_branch` returns
+    /// `Some` inside this crate's own directory. It passed locally and
+    /// failed on all three CI platforms, because GitHub Actions checks
+    /// out a DETACHED HEAD — `git branch --show-current` then prints
+    /// nothing and `Ok(None)` is the correct answer, which `current_branch`
+    /// documents. The test could not tell "stdout was not captured" from
+    /// "there is no current branch", and CI sits permanently in the state
+    /// it could not distinguish.
+    ///
+    /// `git --version` has none of that coupling: non-empty on every
+    /// platform, exit 0, and it does not care whether the working
+    /// directory is a repository at all. It isolates the one thing that
+    /// broke — whether this helper collects a child's stdout.
     #[tokio::test]
-    async fn current_branch_actually_captures_stdout() {
-        // This crate lives in a git repo, so the answer must be Some.
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        match current_branch(root).await {
-            Ok(Some(branch)) => assert!(!branch.trim().is_empty()),
-            Ok(None) => panic!(
-                "current_branch returned None inside a git repo — stdout is not \
-                 being captured (spawn() inherits; use piped stdio)"
-            ),
+    async fn run_with_timeout_captures_child_stdout() {
+        let out = match run_with_timeout(Command::new("git").arg("--version"), "git").await {
+            Ok(out) => out,
             // `git` genuinely absent is not this bug.
-            Err(GhError::MissingCli(_)) => {}
+            Err(GhError::MissingCli(_)) => return,
             Err(e) => panic!("unexpected error: {e:?}"),
-        }
+        };
+        assert!(out.status.success(), "git --version should exit 0");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains("git version"),
+            "stdout was not captured (spawn() inherits; the child wrote to the \
+             terminal and wait_with_output() collected nothing) — got {text:?}"
+        );
+    }
+
+    /// The stderr half of the same contract. `fatal: not a git
+    /// repository` was reaching the user's console; it must land in the
+    /// captured buffer instead, where callers can ignore it deliberately.
+    #[tokio::test]
+    async fn run_with_timeout_captures_child_stderr() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = match run_with_timeout(
+            Command::new("git").arg("-C").arg(dir.path()).args(["rev-parse", "HEAD"]),
+            "git",
+        )
+        .await
+        {
+            Ok(out) => out,
+            Err(GhError::MissingCli(_)) => return,
+            Err(e) => panic!("unexpected error: {e:?}"),
+        };
+        assert!(!out.status.success(), "a non-repo should exit non-zero");
+        assert!(
+            !out.stderr.is_empty(),
+            "stderr was not captured — git's complaint went to the terminal"
+        );
     }
 }
