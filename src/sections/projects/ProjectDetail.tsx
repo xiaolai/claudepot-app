@@ -26,6 +26,7 @@ import { sessionEventMs } from "../../lib/sessionTime";
 import { MoveSessionModal } from "./MoveSessionModal";
 import { PermissionPanel } from "./PermissionPanel";
 import { ProjectEnvPanel } from "./ProjectEnvPanel";
+import { SkeletonList } from "../../components/primitives/Skeleton";
 import {
   estimatedRateHint,
   formatCost,
@@ -276,10 +277,7 @@ export function ProjectDetail({
   if (loading && !detail) {
     return (
       <main className="content">
-        <div className="skeleton-container">
-          <div className="skeleton skeleton-header" />
-          <div className="skeleton skeleton-card" />
-        </div>
+        <SkeletonList rows={1} />
       </main>
     );
   }

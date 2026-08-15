@@ -20,6 +20,7 @@ import type {
 } from "../../types";
 import { formatSize } from "./format";
 import { NF } from "../../icons";
+import { SkeletonList } from "../../components/primitives/Skeleton";
 
 type State =
   | { kind: "loading" }
@@ -261,12 +262,10 @@ export function CleanOrphansModal({
 }
 
 function SkeletonPreview() {
-  return (
-    <div className="skeleton-container">
-      <div className="skeleton skeleton-header" />
-      <div className="skeleton skeleton-card" />
-    </div>
-  );
+  // Was hand-rolled `.skeleton-container` markup identical to what the
+  // primitive emits — minus its role="status" / aria-live /
+  // screen-reader label, so this placeholder announced nothing.
+  return <SkeletonList rows={1} />;
 }
 
 function Preview({

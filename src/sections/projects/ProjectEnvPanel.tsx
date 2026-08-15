@@ -15,6 +15,7 @@ import { NF } from "../../icons";
 import { i18n } from "../../lib/i18n";
 import { renderError } from "../../lib/i18n-error";
 import { useAppState } from "../../providers/AppStateProvider";
+import { SkeletonRows } from "../../components/primitives/Skeleton";
 
 /**
  * Per-project `.env*` view — the *movement* layer, not an editor.
@@ -128,7 +129,11 @@ export function ProjectEnvPanel({
     return (
       <section className="detail-section">
         <h3>{t("env.heading")}</h3>
-        <p className="muted small">{t("shared.loading")}</p>
+        {/* Was a one-line `Loading…`. The panel's own comment records
+            what that cost: a re-render "briefly collapsed the panel to
+            Loading…, displacing the Sessions section below by ~108px".
+            A skeleton of the panel's shape holds the height instead. */}
+        <SkeletonRows rows={3} label={t("shared.loading")} />
       </section>
     );
   }

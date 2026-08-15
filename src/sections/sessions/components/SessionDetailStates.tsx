@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { EmptyState as EmptyStatePrimitive } from "../../../components/primitives/EmptyState";
 
 /**
  * Shared state cells for the session-detail viewer. Both the loading
@@ -29,18 +30,11 @@ export function LoadingPane({ children }: { children: ReactNode }) {
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: "var(--sp-8)",
-        padding: "var(--sp-48)",
-        color: "var(--fg-muted)",
-        fontSize: "var(--fs-sm)",
-      }}
-    >
-      {children}
-    </div>
+    <EmptyStatePrimitive
+      body={children}
+      // Callers pass their own message as children; a session view
+      // with no content has no generic next step.
+      action={null}
+    />
   );
 }

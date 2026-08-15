@@ -11,6 +11,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { sharedMemoryApi } from "../../api/sharedMemory";
 import type { Decision, Evidence, LessonRow } from "../../api/sharedMemory";
 import { Button } from "../../components/primitives/Button";
+import { EmptyState as EmptyStatePrimitive } from "../../components/primitives/EmptyState";
 import { Input } from "../../components/primitives/Input";
 import { Glyph } from "../../components/primitives/Glyph";
 import { CopyButton } from "../../components/CopyButton";
@@ -738,24 +739,28 @@ function KnowEmptyState({
     ) : null;
   }
 
+  // Renders THROUGH the primitive but keeps its own branching: which
+  // filter caused the emptiness, and therefore which clear-action to
+  // offer, is real logic and does not belong in a generic component's
+  // props. The primitive owns the shape; this owns the reasoning.
+  //
+  // `action` can legitimately be null here — the last branch offers
+  // nothing when no filter is active, which is the "explicit null a
+  // reviewer can see" case the primitive's required prop exists for.
   return (
-    <div
-      style={{
-        border: "var(--sp-px) dashed var(--line)",
-        borderRadius: "var(--r-3)",
-        padding: "var(--sp-24)",
-        textAlign: "center",
-        color: "var(--fg-muted)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--sp-8)",
-        alignItems: "center",
-      }}
-    >
-      <p style={{ margin: 0 }}>{title}</p>
-      {detail && <p style={{ margin: 0, fontSize: "var(--fs-sm)" }}>{detail}</p>}
-      {action}
-    </div>
+    <EmptyStatePrimitive
+      body={
+        <>
+          <p style={{ margin: 0 }}>{title}</p>
+          {detail && (
+            <p style={{ margin: "var(--sp-8) 0 0", fontSize: "var(--fs-sm)" }}>
+              {detail}
+            </p>
+          )}
+        </>
+      }
+      action={action}
+    />
   );
 }
 

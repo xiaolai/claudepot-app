@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
+import { EmptyState as EmptyStatePrimitive } from "../../components/primitives/EmptyState";
 import { NF } from "../../icons";
 import { api } from "../../api";
 import { renderError } from "../../lib/i18n-error";
@@ -299,12 +300,14 @@ function SeverityDot({ severity }: { severity: DoctorSeverity }) {
 function EmptyState() {
   const { t } = useTranslation("settings");
   return (
-    <div style={emptyStyle}>
-      <Glyph g={NF.info} color="var(--fg-faint)" />
-      <span style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
-        {t("health.noSections")}
-      </span>
-    </div>
+    <EmptyStatePrimitive
+      variant="inline"
+      glyph={NF.info}
+      body={t("health.noSections")}
+      // Nothing to offer: the pane is populated, this note just says
+      // the current filter matched none of it.
+      action={null}
+    />
   );
 }
 

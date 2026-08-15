@@ -107,6 +107,39 @@ section keeps the design pass cheap and the a11y story simple.
 - **Credentials never rendered** — tokens/secrets are always
   truncated (`sk-ant-oat01-Abc…xyz`). Never log, never toast.
 
+## Empty and loading states
+
+**One `<EmptyState>`**, in `components/primitives/`. Five components
+were called `EmptyState`, shared no code, and disagreed about what one
+is — some had a title and body, some a CTA, some were a bare `<p>`.
+Empty states are the first thing a new user sees in most sections, so
+first-run quality varied by whichever section they landed on.
+
+`action` is **required**, and `action={null}` is the way to say there
+is no next step. An empty state without one is usually a missing
+feature rather than a missing string, so the decision belongs where a
+reviewer can see it.
+
+Two variants, matching the two real shapes: `block` (a section or pane
+with nothing in it) and `inline` (a note inside an otherwise-populated
+pane). A third variant per call site is how the original five happened
+— `align="start"` covers left-aligned prose.
+
+Branching logic stays with the caller. `KnowView`'s empty state works
+out *which* filter emptied the view and offers the matching clear
+action; that reasoning does not belong in a generic component's props.
+The primitive owns the shape, the caller owns the reasoning.
+
+**Any surface with a known shape gets a skeleton of that shape.** Only
+genuinely unknown-shape content gets text. A one-line `Loading…` in a
+laid-out pane makes the layout jump when data lands —
+`ProjectEnvPanel` carries a comment recording that a re-render
+"briefly collapsed the panel to Loading…, displacing the Sessions
+section below by ~108px". Use `SkeletonList` (with header) or
+`SkeletonRows` (surface has its own header); both carry the
+`role="status"` and screen-reader label that hand-rolled
+`.skeleton-container` markup silently omitted.
+
 ## Accessibility floor
 
 - Every interactive element is keyboard-reachable and shows a

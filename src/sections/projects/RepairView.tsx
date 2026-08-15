@@ -9,6 +9,7 @@ import type { JournalEntry } from "../../types";
 import { RepairEntry } from "./RepairEntry";
 import { RepairConfirmDialogs, type PendingAction } from "./RepairConfirmDialogs";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
+import { SkeletonRows } from "../../components/primitives/Skeleton";
 
 export function RepairView({
   onBack,
@@ -132,7 +133,7 @@ export function RepairView({
       )}
 
       {loading && entries.length === 0 && (
-        <div className="skeleton-container"><div className="skeleton skeleton-card" /></div>
+        <SkeletonRows rows={1} />
       )}
       {error && (
         <div className="banner warn" role="alert">

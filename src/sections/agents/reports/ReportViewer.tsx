@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { renderError } from "../../../lib/i18n-error";
 import { Button } from "../../../components/primitives/Button";
 import { Modal } from "../../../components/primitives/Modal";
+import { SkeletonRows } from "../../../components/primitives/Skeleton";
 
 interface Props {
   /** Absolute path to the report file. `null` closes the viewer. */
@@ -83,9 +84,8 @@ export function ReportViewer({ path, onClose }: Props) {
             {t("report.readError", { error })}
           </div>
         ) : body === null ? (
-          <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-sm)" }}>
-            {t("loading")}
-          </div>
+          // Was a one-line `Loading…`, which collapsed the report pane to a single row and made the layout jump when the body arrived.
+          <SkeletonRows rows={6} label={t("loading")} />
         ) : (
           <pre
             style={{

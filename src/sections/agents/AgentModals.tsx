@@ -21,6 +21,7 @@ import type {
   SchedulerCapabilitiesDto,
 } from "../../types";
 import { AgentForm } from "./AgentForm";
+import { SkeletonRows } from "../../components/primitives/Skeleton";
 
 interface AddProps {
   open: boolean;
@@ -331,9 +332,8 @@ export function EditAgentModal({
             onCancel={onClose}
           />
         ) : (
-          <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-sm)" }}>
-            {t("loading")}
-          </div>
+          // Was a one-line `Loading…` inside a modal body — the dialog resized as the form landed.
+          <SkeletonRows rows={4} label={t("loading")} />
         )}
       </ModalBody>
     </Modal>
@@ -433,9 +433,8 @@ export function ReviewInstallModal({
       />
       <ModalBody>
         {!details || !s ? (
-          <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-sm)" }}>
-            {t("loading")}
-          </div>
+          // Was a one-line `Loading…` inside a modal body — the dialog resized as the form landed.
+          <SkeletonRows rows={4} label={t("loading")} />
         ) : (
           <div
             style={{
