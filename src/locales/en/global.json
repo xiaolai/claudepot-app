@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "ariaLabel": "Global views",
-    "config": "Config",
+    "ariaLabel": "Claude Code views",
+    "config": "Files",
     "memory": "Memory",
     "tips": "Tips",
     "updates": "Updates"

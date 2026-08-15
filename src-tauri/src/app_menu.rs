@@ -173,7 +173,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let nav_agents = MenuItemBuilder::with_id("app-menu:nav:automations", tr("menu.navAgents"))
         .build(app)
         .map_err(|e| format!("nav-agents: {e}"))?;
-    let nav_global = MenuItemBuilder::with_id("app-menu:nav:global", tr("menu.navGlobal"))
+    let nav_global = MenuItemBuilder::with_id("app-menu:nav:config", tr("menu.navConfig"))
         .build(app)
         .map_err(|e| format!("nav-global: {e}"))?;
     let nav_settings = MenuItemBuilder::with_id("app-menu:nav:settings", tr("menu.navSettings"))

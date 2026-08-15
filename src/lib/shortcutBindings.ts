@@ -61,7 +61,7 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutSpec[] = [
   // a long time that "There is no ⌘F" — true when written, and stale
   // since a section wired one. Undocumented working shortcuts are the
   // same defect as documented dead ones, just harder to notice.
-  { keys: ["⌘", "F"], labelKey: "focusFilter", key: "f", scopeSectionId: "global" },
+  { keys: ["⌘", "F"], labelKey: "focusFilter", key: "f", scopeSectionId: "config" },
   { keys: ["⌘", ","], labelKey: "settingsStandard", key: "," },
   { keys: ["⌃", "⌥", "⌘", "B"], labelKey: "toggleBoards", key: "b" },
 ];

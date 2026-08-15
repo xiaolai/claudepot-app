@@ -91,7 +91,7 @@ describe("App shell — paper-mono", () => {
     expect(await screen.findByText("Accounts")).toBeInTheDocument();
     expect(screen.getByText("Projects")).toBeInTheDocument();
     expect(screen.getByText("Activities")).toBeInTheDocument();
-    expect(screen.getByText("Global")).toBeInTheDocument();
+    expect(screen.getByText("Config")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 

@@ -61,6 +61,21 @@ import {
   triggerGlobalTab,
 } from "../lib/networkPanelDeepLink";
 
+/**
+ * The Files tab, found by its stable id rather than its label.
+ *
+ * These queried `name: /config/i`, which broke the moment the label
+ * changed — the section is now "Config" and its first tab was renamed
+ * to "Files" so the two would stop reading as the same thing. A test
+ * that pins a translated label is asserting the copy, not the
+ * behaviour.
+ */
+function configTab(): HTMLElement {
+  const el = document.getElementById("global-tab-config");
+  if (!el) throw new Error("global-tab-config is not rendered");
+  return el;
+}
+
 describe("GlobalSection — env-vars deep link", () => {
   it("forces the Config tab and opens the pane for node:virtual:env-vars", async () => {
     // Start on Updates, which is where the link is clicked from.
@@ -77,7 +92,7 @@ describe("GlobalSection — env-vars deep link", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /config/i })).toHaveAttribute(
+      expect(configTab()).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -139,7 +154,7 @@ describe("GlobalSection — ⌘K tab deep link", () => {
       <GlobalSection subRoute="node:virtual:env-vars" onSubRouteChange={onSubRouteChange} />,
     );
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /config/i })).toBeInTheDocument();
+      expect(configTab()).toBeInTheDocument();
     });
     // A node: route must survive a tab deep link untouched.
     expect(onSubRouteChange).not.toHaveBeenCalledWith(null);
@@ -150,7 +165,7 @@ describe("GlobalSection — ⌘K tab deep link", () => {
     triggerGlobalTab("nonsense");
     render(<GlobalSection subRoute={null} onSubRouteChange={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /config/i })).toHaveAttribute(
+      expect(configTab()).toHaveAttribute(
         "aria-selected",
         "true",
       );

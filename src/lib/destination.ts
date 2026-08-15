@@ -85,6 +85,12 @@ export const LEGACY_SECTION_IDS: Readonly<Record<string, string>> = {
   "third-party": "third-party",
   automations: "automations",
   "shared-memory": "shared-memory",
+  // `global` was a container named after an engineering scope, holding
+  // four unrelated panels. Its Config panel became the section; Tips and
+  // Updates moved to Settings -> About. A user whose last section was
+  // `global` lands on Config, which is what they were almost certainly
+  // looking at — it was the default tab.
+  global: "config",
 };
 
 /** `section/tab/sub` — the canonical wire form. */

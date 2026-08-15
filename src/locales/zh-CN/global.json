@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "ariaLabel": "全局视图",
-    "config": "配置",
+    "ariaLabel": "Claude Code 视图",
+    "config": "文件",
     "memory": "记忆",
     "tips": "提示",
     "updates": "更新"
