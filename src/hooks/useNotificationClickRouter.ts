@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { api } from "../api";
+import { triggerSettingsTab } from "../lib/networkPanelDeepLink";
 import {
   consumeRecentTarget,
   type NotificationTarget,
@@ -132,7 +133,18 @@ export function useNotificationClickRouter(args: {
         setSection("projects");
         return;
       }
-      if (r.section === "settings" || r.section === "events") {
+      if (r.section === "settings") {
+        setSection("settings");
+        // Route the subroute too. `NotificationTarget` has carried a
+        // `sub` since it was written and this router dropped it, so a
+        // notification naming a pane opened whichever pane the user
+        // last had. The one producer is the transcript-retention boot
+        // check — the warning that CC is deleting history — which
+        // asked for Settings → Retention and landed anywhere.
+        if (r.sub) triggerSettingsTab(r.sub);
+        return;
+      }
+      if (r.section === "events") {
         setSection(r.section);
       }
     };
