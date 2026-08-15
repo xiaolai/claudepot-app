@@ -10,7 +10,25 @@ export function isEditable(el: Element | null): boolean {
   if (!el) return false;
   const tag = el.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  return (el as HTMLElement).isContentEditable === true;
+  // `isContentEditable` is the authoritative test in a real browser —
+  // it is computed, so it also catches editability inherited from an
+  // ancestor. It is NOT sufficient on its own: jsdom does not
+  // implement the property, so under test a `contenteditable` element
+  // reads as non-editable.
+  //
+  // That gap is why this union exists rather than the single line it
+  // used to be. `useSection` carried a local copy that checked the
+  // attribute as well, so consolidating onto this "canonical"
+  // predicate initially made the gate *weaker* than the fork it
+  // replaced, and a test that had been guarding ⌘4-over-contenteditable
+  // went red. The shared predicate has to be the strongest of the
+  // copies it absorbs, or consolidation is a regression wearing a
+  // tidy-up's clothes.
+  if ((el as HTMLElement).isContentEditable === true) return true;
+  const attr = el.getAttribute("contenteditable");
+  // Per HTML, a bare `contenteditable` and `contenteditable=""` both
+  // mean true; `plaintext-only` is editable too.
+  return attr === "" || attr === "true" || attr === "plaintext-only";
 }
 
 /** True when a modal is open or an editable surface has focus. */

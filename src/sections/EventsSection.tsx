@@ -641,7 +641,7 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
       style={{
         width: 240,
         flexShrink: 0,
-        borderRight: "var(--bw-subhair) solid var(--border)",
+        borderRight: "var(--bw-subhair) solid var(--line)",
         padding: "var(--sp-16)",
         display: "flex",
         flexDirection: "column",
@@ -756,7 +756,7 @@ function FilterGroup({
           fontSize: "var(--fs-xs)",
           textTransform: "uppercase",
           letterSpacing: "var(--ls-wide)",
-          color: "var(--muted)",
+          color: "var(--fg-muted)",
         }}
       >
         {label}
@@ -789,7 +789,7 @@ function Header({
         alignItems: "center",
         justifyContent: "space-between",
         padding: "var(--sp-12) var(--sp-16)",
-        borderBottom: "var(--bw-subhair) solid var(--border)",
+        borderBottom: "var(--bw-subhair) solid var(--line)",
         gap: "var(--sp-12)",
       }}
     >
@@ -808,7 +808,7 @@ function Header({
           <span
             style={{
               fontSize: "var(--fs-sm)",
-              color: "var(--muted)",
+              color: "var(--fg-muted)",
             }}
           >
             {t("header.total", { value: formatNumber(counts.total) })}
@@ -945,7 +945,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
       }}
       style={{
         padding: "var(--sp-12) var(--sp-16)",
-        borderBottom: "var(--bw-subhair) solid var(--border)",
+        borderBottom: "var(--bw-subhair) solid var(--line)",
         cursor: "pointer",
         display: "flex",
         gap: "var(--sp-12)",
@@ -985,7 +985,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
           <time
             style={{
               fontSize: "var(--fs-xs)",
-              color: "var(--muted)",
+              color: "var(--fg-muted)",
               flexShrink: 0,
               fontVariantNumeric: "tabular-nums",
             }}
@@ -997,7 +997,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
           <div
             style={{
               fontSize: "var(--fs-xs)",
-              color: "var(--muted)",
+              color: "var(--fg-muted)",
               marginTop: "var(--sp-2)",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -1028,7 +1028,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
             gap: "var(--sp-8)",
             marginTop: "var(--sp-6)",
             fontSize: "var(--fs-xs)",
-            color: "var(--muted)",
+            color: "var(--fg-muted)",
             flexWrap: "wrap",
           }}
         >
@@ -1099,7 +1099,7 @@ function severityColors(s: SeverityLabel): { bg: string; fg: string } {
       return { bg: "var(--bg-elev)", fg: "var(--fg)" };
     case "INFO":
     default:
-      return { bg: "var(--bg-elev)", fg: "var(--muted)" };
+      return { bg: "var(--bg-elev)", fg: "var(--fg-muted)" };
   }
 }
 
@@ -1148,7 +1148,7 @@ function rangeBucket(sinceMs: number): number {
 const inputStyle: React.CSSProperties = {
   fontSize: "var(--fs-sm)",
   padding: "var(--sp-4) var(--sp-8)",
-  border: "var(--bw-subhair) solid var(--border)",
+  border: "var(--bw-subhair) solid var(--line)",
   borderRadius: "var(--r-1)",
   background: "var(--bg)",
   color: "var(--fg)",
@@ -1163,7 +1163,7 @@ const selectStyle: React.CSSProperties = {
 const btnStyle: React.CSSProperties = {
   fontSize: "var(--fs-sm)",
   padding: "var(--sp-4) var(--sp-12)",
-  border: "var(--bw-subhair) solid var(--border)",
+  border: "var(--bw-subhair) solid var(--line)",
   borderRadius: "var(--r-1)",
   background: "var(--bg)",
   color: "var(--fg)",
@@ -1176,7 +1176,7 @@ const emptyStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  color: "var(--muted)",
+  color: "var(--fg-muted)",
   fontSize: "var(--fs-sm)",
   padding: "var(--sp-32)",
   textAlign: "center",

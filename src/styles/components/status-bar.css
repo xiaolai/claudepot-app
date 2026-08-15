@@ -18,12 +18,12 @@
   margin-bottom: var(--sp-12);
   border-radius: var(--r-2);
   font-size: var(--fs-sm);
-  color: var(--text);
+  color: var(--fg);
 }
 
 .status-bar.info {
-  background: var(--surface);
-  border: var(--bw-subhair) solid var(--border);
+  background: var(--bg-raised);
+  border: var(--bw-subhair) solid var(--line);
 }
 
 .status-bar.warning {
@@ -33,7 +33,7 @@
 
 .status-bar.error {
   background: var(--bad-weak);
-  border: var(--bw-subhair) solid color-mix(in srgb, var(--bad) 30%, transparent);
+  border: var(--bw-subhair) solid color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .status-bar-text {
@@ -51,7 +51,7 @@
 }
 
 .status-bar.error .status-bar-action {
-  background: var(--bad);
+  background: var(--danger);
   color: var(--on-color);
   border-color: transparent;
 }
@@ -88,24 +88,15 @@
   background: transparent;
 }
 
-.status-bar-toggle .icon {
-  margin-right: 0;
-  flex-shrink: 0;
-}
-
 .status-bar-verifying {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-4);
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--fg-muted);
   font-style: italic;
   margin-left: auto;
   flex-shrink: 0;
-}
-
-.status-bar-verifying .icon {
-  margin-right: 0;
 }
 
 .status-bar-spin {
@@ -137,13 +128,7 @@
   font-size: var(--fs-sm);
 }
 
-.status-bar-item .icon {
-  margin-right: 0;
-  flex-shrink: 0;
-  margin-top: var(--sp-px);
-}
-
-.status-bar-item.error svg { color: var(--bad); }
+.status-bar-item.error svg { color: var(--danger); }
 .status-bar-item.warning svg { color: var(--warn); }
 
 .status-bar-item-content {
@@ -156,6 +141,6 @@
 
 .status-bar-detail {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 

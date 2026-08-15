@@ -107,7 +107,7 @@ export function NotificationBell({ onMouseDown }: NotificationBellProps) {
               padding: "0 var(--sp-2)",
               borderRadius: "var(--r-pill)",
               background: "var(--accent)",
-              color: "var(--accent-text)",
+              color: "var(--on-color)",
               fontSize: "var(--fs-3xs)",
               fontWeight: 600,
               lineHeight: "var(--sp-12)",

@@ -42,7 +42,7 @@ export function TemplateSampleReport({ templateId }: Props) {
           padding: "var(--sp-12)",
           border: "var(--bw-hair) solid var(--line)",
           borderRadius: "var(--r-2)",
-          color: "var(--fg-2)",
+          color: "var(--fg-muted)",
           fontSize: "var(--fs-sm)",
         }}
       >

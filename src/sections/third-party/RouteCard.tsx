@@ -60,7 +60,7 @@ export function RouteCard({
           style={{
             margin: 0,
             fontSize: "var(--fs-md)",
-            color: "var(--fg-strong)",
+            color: "var(--fg)",
             fontWeight: 600,
           }}
         >

@@ -1446,7 +1446,7 @@ function DiagnosticLogsPane({
     >
       <div
         style={{
-          fontSize: "var(--fs-14)",
+          fontSize: "var(--fs-md)",
           fontWeight: 600,
           color: "var(--fg)",
         }}
@@ -1455,8 +1455,8 @@ function DiagnosticLogsPane({
       </div>
       <div
         style={{
-          fontSize: "var(--fs-12)",
-          color: "var(--fg-mute)",
+          fontSize: "var(--fs-sm)",
+          color: "var(--fg-muted)",
           lineHeight: 1.5,
         }}
       >

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Modal, ModalHeader, ModalBody } from "./primitives/Modal";
 import { Kbd } from "./primitives/Kbd";
 import { useEnabledSections } from "../hooks/useEnabledSections";
+import { GLOBAL_SHORTCUTS, sectionNumber } from "../lib/shortcutBindings";
 
 interface ShortcutBinding {
   keys: string[];
@@ -32,16 +33,27 @@ interface ShortcutGroup {
  * which is the exact drift this file was written to stop, one level up.
  */
 function navigationItems(
-  enabled: readonly { label: string }[],
+  enabled: readonly { id: string; label: string }[],
   tc: TFunction<"components">,
 ): ShortcutBinding[] {
+  // Numbers come from `sectionNumber` — position in the FULL registry,
+  // the same source `useSection` binds against. Deriving them from the
+  // *enabled* list (this function's previous shape) is what let the
+  // documentation and the binding disagree the moment an optional
+  // section was toggled: Boards ships off and sits ninth, so enabling
+  // it moved Settings off ⌘9, and both this modal and the hook
+  // silently agreed on the wrong thing together.
+  //
+  // Still filtered by `enabled`: a switched-off section's number is
+  // reserved but inert, and documenting a dead key is the ⌘F mistake.
+  const numbered = enabled
+    .map((s) => ({ n: sectionNumber(s.id), label: s.label }))
+    .filter((x): x is { n: number; label: string } => x.n !== null)
+    .sort((a, b) => a.n - b.n)
+    .map((x) => ({ keys: ["⌘", String(x.n)], label: x.label }));
+
   return [
-    // Enabled list: a switched-off section has no ⌘ number, so listing
-    // one would document a binding that does not exist.
-    ...enabled.slice(0, 9).map((s, i) => ({
-      keys: ["⌘", String(i + 1)],
-      label: s.label,
-    })),
+    ...numbered,
     { keys: ["⌘", ","], label: tc("shortcuts.settingsStandard") },
     { keys: ["⌃", "⌥", "⌘", "B"], label: tc("shortcuts.toggleBoards") },
   ];
@@ -58,31 +70,28 @@ function navigationItems(
  */
 function otherGroups(
   tc: TFunction<"components">,
-  scopeAccounts: string,
+  /** Section id -> its localized label, for a binding's scope note. */
+  scopeFor: (sectionId: string) => string,
 ): ShortcutGroup[] {
   return [
     {
       title: tc("shortcuts.groupGlobal"),
-      items: [
-        { keys: ["⌘", "K"], label: tc("shortcuts.openPalette") },
-        { keys: ["⌘", "/"], label: tc("shortcuts.showShortcuts") },
-        { keys: ["⌘", "R"], label: tc("shortcuts.refreshSection") },
-        {
-          keys: ["⌘", "N"],
-          label: tc("shortcuts.addAccount"),
-          scope: scopeAccounts,
-        },
-        // ⌘F was listed here as "Focus filter (where exposed)" but no
-        // section ever wired it — the hook option existed and nothing
-        // passed it. Documenting a shortcut that does nothing is worse
-        // than not documenting it.
-        {
-          keys: ["⌘", "⇧", "C"],
-          label: tc("shortcuts.copyEmail"),
-          scope: scopeAccounts,
-        },
-        { keys: ["⌘", "⇧", "L"], label: tc("shortcuts.focusLive") },
-      ],
+      // Rendered FROM `GLOBAL_SHORTCUTS`, not hand-listed beside it.
+      // This block used to duplicate the table entry-for-entry, which
+      // made the "one table" claim false in the worst way: the
+      // verify-docs gate validated the table, the user saw this list,
+      // and nothing compared them. The table was dead code that a
+      // build gate was busily checking.
+      items: GLOBAL_SHORTCUTS.map((b) => ({
+        keys: b.keys,
+        // One cast, at the boundary. i18next's typed `t()` cannot
+        // check a key built at runtime, so the compile-time guarantee
+        // for these is replaced by `shortcutBindings.test.ts`, which
+        // asserts every labelKey resolves in BOTH catalogs — a missing
+        // one fails a test instead of rendering its own key.
+        label: tc(`shortcuts.${b.labelKey}` as "shortcuts.openPalette"),
+        scope: b.scopeSectionId ? scopeFor(b.scopeSectionId) : undefined,
+      })),
     },
     {
       title: tc("shortcuts.groupModals"),
@@ -132,11 +141,11 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
     {
       title: tc("shortcuts.groupNavigation"),
       items: navigationItems(
-        enabled.map((s) => ({ label: t(s.labelKey) })),
+        enabled.map((s) => ({ id: s.id, label: t(s.labelKey) })),
         tc,
       ),
     },
-    ...otherGroups(tc, t("sections.accounts")),
+    ...otherGroups(tc, (id) => t(`sections.${id}` as "sections.accounts")),
   ];
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={titleId}>

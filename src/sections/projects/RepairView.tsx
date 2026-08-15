@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { renderError } from "../../lib/i18n-error";
 import { useOperations } from "../../hooks/useOperations";
@@ -9,6 +8,9 @@ import type { JournalEntry } from "../../types";
 import { RepairEntry } from "./RepairEntry";
 import { RepairConfirmDialogs, type PendingAction } from "./RepairConfirmDialogs";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
+import { SkeletonRows } from "../../components/primitives/Skeleton";
+import { Glyph } from "../../components/primitives/Glyph";
+import { NF } from "../../icons";
 
 export function RepairView({
   onBack,
@@ -125,14 +127,14 @@ export function RepairView({
         <header className="repair-header">
           <button type="button" className="icon-btn" onClick={onBack}
             aria-label={t("repair.backTitle")} title={t("repair.backTitle")}>
-            <Icon name="arrow-left" size={14} />
+            <Glyph g={NF.arrowL} style={{ fontSize: 14 }} />
           </button>
-          <h2><Icon name="wrench" size={14} /> {t("repair.heading")}</h2>
+          <h2><Glyph g={NF.tools} style={{ fontSize: 14 }} /> {t("repair.heading")}</h2>
         </header>
       )}
 
       {loading && entries.length === 0 && (
-        <div className="skeleton-container"><div className="skeleton skeleton-card" /></div>
+        <SkeletonRows rows={1} />
       )}
       {error && (
         <div className="banner warn" role="alert">
@@ -141,7 +143,7 @@ export function RepairView({
       )}
       {!loading && !error && entries.length === 0 && (
         <div className="empty">
-          <Icon name="wrench" size={32} />
+          <Glyph g={NF.tools} style={{ fontSize: 32 }} />
           <h2>{t("repair.allClear")}</h2>
           <p className="muted">{t("repair.noPending")}</p>
         </div>

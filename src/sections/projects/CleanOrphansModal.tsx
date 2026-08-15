@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { renderError } from "../../lib/i18n-error";
 import { CopyButton } from "../../components/CopyButton";
@@ -20,6 +19,8 @@ import type {
 } from "../../types";
 import { formatSize } from "./format";
 import { NF } from "../../icons";
+import { SkeletonList } from "../../components/primitives/Skeleton";
+import { Glyph } from "../../components/primitives/Glyph";
 
 type State =
   | { kind: "loading" }
@@ -206,7 +207,7 @@ export function CleanOrphansModal({
 
         {state.kind === "error" && (
           <div className="clean-error" role="alert">
-            <Icon name="alert-triangle" size={14} />
+            <Glyph g={NF.warn} style={{ fontSize: 14 }} />
             <div>
               <strong>{t("clean.errorHeading")}</strong>
               <p className="mono small">{state.message}</p>
@@ -261,12 +262,10 @@ export function CleanOrphansModal({
 }
 
 function SkeletonPreview() {
-  return (
-    <div className="skeleton-container">
-      <div className="skeleton skeleton-header" />
-      <div className="skeleton skeleton-card" />
-    </div>
-  );
+  // Was hand-rolled `.skeleton-container` markup identical to what the
+  // primitive emits — minus its role="status" / aria-live /
+  // screen-reader label, so this placeholder announced nothing.
+  return <SkeletonList rows={1} />;
 }
 
 function Preview({
@@ -302,7 +301,7 @@ function Preview({
 
       {data.unreachable_skipped > 0 && (
         <div className="clean-unreachable" role="status">
-          <Icon name="wifi-off" size={14} />
+          <Glyph g={NF.wifiOff} style={{ fontSize: 14 }} />
           <span>
             <Trans
               ns="projects"
@@ -374,7 +373,7 @@ function OrphanRow({ info }: { info: ProjectInfo }) {
       </div>
       {info.is_empty && (
         <span className="project-tag empty" title={t("clean.emptyDirTitle")}>
-          <Icon name="circle-dashed" size={11} /> {t("status.empty")}
+          <Glyph g={NF.dotCircle} style={{ fontSize: 11 }} /> {t("status.empty")}
         </span>
       )}
     </li>
@@ -439,7 +438,7 @@ function Result({ result }: { result: CleanResult }) {
 
       {result.orphans_skipped_live > 0 && (
         <div className="clean-unreachable" role="status">
-          <Icon name="alert-triangle" size={14} />
+          <Glyph g={NF.warn} style={{ fontSize: 14 }} />
           <span>
             <Trans
               ns="projects"

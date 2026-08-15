@@ -1,5 +1,5 @@
 /* Status-bar chips — small, button-shaped ambient-state indicators
-   at the right end of the var(--s-6) status bar. Each chip is one click
+   at the right end of the var(--sp-24) status bar. Each chip is one click
    away from the UI that resolves it (running ops → progress modal,
    pending journals → Repair view). Plain text segments live next
    to chips but never wear chip styling — see AppStatusBar.tsx for

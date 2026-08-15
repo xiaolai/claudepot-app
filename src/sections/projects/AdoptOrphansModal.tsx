@@ -1,7 +1,6 @@
 import { useCallback, useId, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
@@ -18,6 +17,8 @@ import type {
   OrphanedProject,
 } from "../../types";
 import { formatSize } from "./format";
+import { Glyph } from "../../components/primitives/Glyph";
+import { NF } from "../../icons";
 
 type RowState =
   | { kind: "idle" }
@@ -193,7 +194,7 @@ export function AdoptOrphansModal({
 
                 {state.kind === "done" && (
                   <p className="adopt-orphans-row-status ok">
-                    <Icon name="check" size={12} />{" "}
+                    <Glyph g={NF.check} style={{ fontSize: 12 }} />{" "}
                     {t("adopt.adoptedStatus", {
                       moved: state.report.sessionsMoved,
                       attempted: state.report.sessionsAttempted,
@@ -207,7 +208,7 @@ export function AdoptOrphansModal({
                 )}
                 {state.kind === "removed" && (
                   <p className="adopt-orphans-row-status ok">
-                    <Icon name="check" size={12} />{" "}
+                    <Glyph g={NF.check} style={{ fontSize: 12 }} />{" "}
                     {t("adopt.removedStatus", {
                       count: state.report.sessionsDiscarded,
                       size: formatSize(state.report.totalSizeBytes),
@@ -216,7 +217,7 @@ export function AdoptOrphansModal({
                 )}
                 {state.kind === "error" && (
                   <p className="adopt-orphans-row-status bad">
-                    <Icon name="alert-circle" size={12} /> {state.message}
+                    <Glyph g={NF.alertCircle} style={{ fontSize: 12 }} /> {state.message}
                   </p>
                 )}
               </li>

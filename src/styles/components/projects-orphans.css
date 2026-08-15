@@ -24,13 +24,13 @@
   padding: var(--sp-8) var(--sp-12);
   margin-bottom: var(--sp-12);
   border-radius: var(--r-3);
-  background: color-mix(in srgb, var(--muted) 8%, transparent);
-  border: var(--bw-subhair) solid var(--border);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--fg-muted) 8%, transparent);
+  border: var(--bw-subhair) solid var(--line);
+  color: var(--fg-muted);
   font-size: var(--fs-sm);
   line-height: var(--lh-body);
 }
-.clean-modal .clean-unreachable strong { color: var(--text); }
+.clean-modal .clean-unreachable strong { color: var(--fg); }
 
 .clean-orphan-list {
   list-style: none;
@@ -38,7 +38,7 @@
   margin: 0 0 var(--sp-10) 0;
   max-height: var(--list-max-height-sm);
   overflow-y: auto;
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
 }
 
@@ -48,7 +48,7 @@
   justify-content: space-between;
   gap: var(--sp-8);
   padding: var(--sp-5) var(--sp-10);
-  border-bottom: var(--bw-subhair) solid var(--border);
+  border-bottom: var(--bw-subhair) solid var(--line);
 }
 .clean-orphan-row:last-child { border-bottom: none; }
 
@@ -95,7 +95,7 @@
   height: var(--sp-6);
   margin: var(--sp-12) auto;
   max-width: var(--progress-track-max);
-  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  background: color-mix(in srgb, var(--fg-muted) 15%, transparent);
   border-radius: var(--r-pill);
   overflow: hidden;
 }
@@ -109,7 +109,7 @@
   width: var(--sp-18);
   height: var(--sp-18);
   margin: var(--sp-12) auto;
-  border: var(--bw-focus) solid color-mix(in srgb, var(--muted) 25%, transparent);
+  border: var(--bw-focus) solid color-mix(in srgb, var(--fg-muted) 25%, transparent);
   border-top-color: var(--accent);
   border-radius: var(--r-pill);
   animation: clean-spin 0.8s linear infinite;
@@ -129,7 +129,7 @@
   padding: var(--sp-10) var(--sp-12);
   border-radius: var(--r-3);
   background: var(--bad-weak);
-  color: var(--bad);
+  color: var(--danger);
 }
 .clean-modal .clean-error strong { display: block; margin-bottom: var(--sp-4); }
 .clean-modal .clean-error p { margin: var(--sp-2) 0; }
@@ -144,7 +144,7 @@
 .clean-modal .clean-snapshots {
   margin-top: var(--sp-12);
   padding-top: var(--sp-12);
-  border-top: var(--bw-subhair) solid var(--border);
+  border-top: var(--bw-subhair) solid var(--line);
 }
 .clean-modal .clean-snapshots .field-label {
   margin-bottom: var(--sp-2);
@@ -198,7 +198,7 @@
   display: grid;
   gap: var(--sp-3);
   font-size: var(--fs-sm);
-  color: var(--text);
+  color: var(--fg);
 }
 
 .op-terminal-detail code.mono { font-size: var(--fs-xs); }

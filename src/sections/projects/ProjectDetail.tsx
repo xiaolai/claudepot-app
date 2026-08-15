@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { renderError } from "../../lib/i18n-error";
 import { CopyButton } from "../../components/CopyButton";
@@ -26,6 +25,10 @@ import { sessionEventMs } from "../../lib/sessionTime";
 import { MoveSessionModal } from "./MoveSessionModal";
 import { PermissionPanel } from "./PermissionPanel";
 import { ProjectEnvPanel } from "./ProjectEnvPanel";
+import { SkeletonList } from "../../components/primitives/Skeleton";
+import { Button } from "../../components/primitives/Button";
+import { NF } from "../../icons";
+import { Glyph } from "../../components/primitives/Glyph";
 import {
   estimatedRateHint,
   formatCost,
@@ -276,10 +279,7 @@ export function ProjectDetail({
   if (loading && !detail) {
     return (
       <main className="content">
-        <div className="skeleton-container">
-          <div className="skeleton skeleton-header" />
-          <div className="skeleton skeleton-card" />
-        </div>
+        <SkeletonList rows={1} />
       </main>
     );
   }
@@ -311,7 +311,7 @@ export function ProjectDetail({
               aria-label={t("detail.backToList")}
               title={t("detail.backToList")}
             >
-              <Icon name="arrow-left" size={14} />
+              <Glyph g={NF.arrowL} style={{ fontSize: 14 }} />
             </button>
           )}
           <h2 className="selectable" title={info.original_path}>
@@ -363,9 +363,9 @@ export function ProjectDetail({
           )}
         </div>
         <div className="project-detail-actions">
-          <button
-            type="button"
-            className="btn"
+          <Button
+            variant="subtle"
+            glyph={NF.folderOpen}
             title={t("detail.revealTitle", {
               name: fileManagerName(appStatus?.platform),
             })}
@@ -377,28 +377,32 @@ export function ProjectDetail({
               });
             }}
           >
-            <Icon name="folder-open" />{fileManagerName(appStatus?.platform)}
-          </button>
-          <button type="button" className="btn" title={t("detail.renameTitle")}
-            onClick={() => onRename(info.original_path)}>
-            <Icon name="pencil" />{t("detail.rename")}
-          </button>
+            {fileManagerName(appStatus?.platform)}
+          </Button>
+          <Button
+            variant="subtle"
+            glyph={NF.edit}
+            title={t("detail.renameTitle")}
+            onClick={() => onRename(info.original_path)}
+          >
+            {t("detail.rename")}
+          </Button>
           {onOpenInConfig && status !== "unreachable" && status !== "orphan" && (
-            <button
-              type="button"
-              className="btn"
+            <Button
+              variant="subtle"
+              glyph={NF.fileCode}
               title={t("detail.configTitle")}
               onClick={() => onOpenInConfig(info.original_path)}
             >
-              <Icon name="file-code" />{t("detail.config")}
-            </button>
+              {t("detail.config")}
+            </Button>
           )}
         </div>
       </header>
 
       {status === "unreachable" && (
         <div className="project-hint unreachable" role="status">
-          <Icon name="wifi-off" size={14} />
+          <Glyph g={NF.wifiOff} style={{ fontSize: 14 }} />
           <span>
             {t("detail.unreachableHint")}
           </span>
@@ -456,17 +460,16 @@ export function ProjectDetail({
 
       {noContent && status !== "alive" && status !== "unreachable" && (
         <div className="project-hint cleanup" role="status">
-          <Icon name="info" size={14} />
+          <Glyph g={NF.info} style={{ fontSize: 14 }} />
           <span>{t("detail.cleanupHint")}</span>
           {onOpenMaintenance && (
-            <button
-              type="button"
-              className="btn"
+            <Button
+              variant="subtle"
               onClick={onOpenMaintenance}
               title={t("detail.goMaintenanceTitle")}
             >
               {t("detail.goMaintenance")}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -823,7 +826,7 @@ function SessionListPane({
                   onMenuButton(e, s.session_id);
                 }}
               >
-                <Icon name="more-vertical" size={12} />
+                <Glyph g={NF.ellipsis} style={{ fontSize: 12 }} />
               </button>
             </li>
             );
@@ -832,13 +835,12 @@ function SessionListPane({
       )}
       {hiddenCount > 0 && (
         <div className="session-list-more">
-          <button
-            type="button"
-            className="btn"
+          <Button
+            variant="subtle"
             onClick={() => setLimit((n) => n + PAGE_SIZE)}
           >
             {t("detail.showMore", { n: Math.min(hiddenCount, PAGE_SIZE) })}
-          </button>
+          </Button>
           <span className="muted small">
             {t("detail.moreHidden", { n: hiddenCount })}
           </span>

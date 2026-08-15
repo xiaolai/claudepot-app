@@ -58,7 +58,7 @@
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-6) var(--sp-8);
-  border-radius: var(--rad-sm);
+  border-radius: var(--r-2);
   cursor: pointer;
   outline: none;
 }
@@ -126,7 +126,7 @@
 .memory-pane__viewtoggle {
   display: inline-flex;
   border: var(--sp-px) solid var(--line);
-  border-radius: var(--rad-sm);
+  border-radius: var(--r-2);
   overflow: hidden;
 }
 
@@ -155,7 +155,7 @@
 .memory-pane__content {
   background: var(--bg-sunken);
   border: var(--sp-px) solid var(--line);
-  border-radius: var(--rad-md);
+  border-radius: var(--r-3);
   padding: var(--sp-12) var(--sp-16);
   max-height: var(--memory-viewer-max-height);
   overflow: auto;
@@ -165,7 +165,7 @@
   margin: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  line-height: var(--lh-normal);
+  line-height: var(--lh-body);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -184,7 +184,7 @@
   padding: var(--sp-4);
   background: var(--bg-raised);
   border: var(--sp-px) solid var(--line);
-  border-radius: var(--rad-md);
+  border-radius: var(--r-3);
   box-shadow: var(--shadow-popover);
   display: flex;
   flex-direction: column;
@@ -195,7 +195,7 @@
   padding: var(--sp-4) var(--sp-8);
   background: transparent;
   border: 0;
-  border-radius: var(--rad-sm);
+  border-radius: var(--r-2);
   font-size: var(--fs-xs);
   color: var(--fg);
   cursor: pointer;
@@ -224,7 +224,7 @@
 }
 
 .memory-pane__changerow {
-  border-radius: var(--rad-sm);
+  border-radius: var(--r-2);
 }
 
 .memory-pane__changetoggle {
@@ -235,7 +235,7 @@
   padding: var(--sp-4) var(--sp-8);
   background: transparent;
   border: 0;
-  border-radius: var(--rad-sm);
+  border-radius: var(--r-2);
   color: var(--fg);
   text-align: left;
   font-size: var(--fs-2xs);
@@ -279,7 +279,7 @@
   padding: var(--sp-8) var(--sp-12);
   background: var(--bg-sunken);
   border: var(--sp-px) solid var(--line);
-  border-radius: var(--rad-sm);
+  border-radius: var(--r-2);
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   line-height: var(--lh-tight);

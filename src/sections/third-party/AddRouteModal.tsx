@@ -41,7 +41,7 @@ export function AddRouteModal({ open, onClose, onCreated }: AddRouteModalProps) 
               margin: 0,
               fontSize: "var(--fs-lg)",
               fontWeight: 600,
-              color: "var(--fg-strong)",
+              color: "var(--fg)",
             }}
           >
             {t("addModal.title")}
@@ -170,7 +170,7 @@ export function EditRouteModal({
               margin: 0,
               fontSize: "var(--fs-lg)",
               fontWeight: 600,
-              color: "var(--fg-strong)",
+              color: "var(--fg)",
             }}
           >
             {t("editModal.title")}

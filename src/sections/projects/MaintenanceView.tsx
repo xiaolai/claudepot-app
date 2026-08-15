@@ -1,12 +1,14 @@
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Icon } from "../../components/Icon";
 import type { CleanResult } from "../../types";
 import { useAppState } from "../../providers/AppStateProvider";
 import { AbandonedCleanupCard } from "./AbandonedCleanupCard";
 import { GcCard } from "./GcCard";
 import { RepairView } from "./RepairView";
 import { CleanOrphansModal } from "./CleanOrphansModal";
+import { Button } from "../../components/primitives/Button";
+import { Glyph } from "../../components/primitives/Glyph";
+import { NF } from "../../icons";
 
 /**
  * Merged Clean + Repair view (P2.2). Always visible from the
@@ -52,16 +54,19 @@ export function MaintenanceView({
       {/* Clean section */}
       <section className="maintenance-section">
         <div className="maintenance-section-header">
-          <Icon name="trash-2" size={14} />
+          <Glyph g={NF.trash} style={{ fontSize: 14 }} />
           <h2>{t("maint.cleanHeading")}</h2>
         </div>
         <p className="muted maintenance-desc">
           {t("maint.cleanDesc")}
         </p>
-        <button className="btn primary" onClick={() => setCleanOpen(true)}
-          title={t("maint.previewTitle")}>
+        <Button
+          variant="solid"
+          onClick={() => setCleanOpen(true)}
+          title={t("maint.previewTitle")}
+        >
           {t("maint.previewCleanup")}
-        </button>
+        </Button>
       </section>
 
       {/* Recovery-artifact cleanup — hidden when there's nothing
@@ -84,7 +89,7 @@ export function MaintenanceView({
       {/* Repair section — reuse existing RepairView without the back button */}
       <section className="maintenance-section">
         <div className="maintenance-section-header">
-          <Icon name="wrench" size={14} />
+          <Glyph g={NF.tools} style={{ fontSize: 14 }} />
           <h2>{t("maint.repairHeading")}</h2>
         </div>
         <RepairView

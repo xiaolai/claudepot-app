@@ -60,11 +60,11 @@ export function CandidateChecklist({
         margin: 0,
         padding: "var(--sp-8)",
         background: "var(--bg-raised)",
-        borderRadius: "var(--rad-sm)",
+        borderRadius: "var(--r-2)",
         display: "flex",
         flexDirection: "column",
         gap: "var(--sp-4)",
-        maxHeight: "var(--candidate-list-max-h, var(--sp-160))",
+        maxHeight: "var(--size-list-max)",
         overflow: "auto",
       }}
     >
@@ -129,7 +129,7 @@ export function inputStyle(): CSSProperties {
   return {
     padding: "var(--sp-6) var(--sp-8)",
     border: "var(--bw-hair) solid var(--line)",
-    borderRadius: "var(--rad-sm)",
+    borderRadius: "var(--r-2)",
     background: "var(--bg-raised)",
     color: "var(--fg)",
     fontFamily: "inherit",

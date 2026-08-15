@@ -163,7 +163,7 @@ export function GcCard({
         {!daysValid && (
           <span
             className="muted small"
-            style={{ color: "var(--bad)" }}
+            style={{ color: "var(--danger)" }}
             role="status"
           >
             {t("gc.daysRange", { min: GC_DAYS_MIN, max: GC_DAYS_MAX })}

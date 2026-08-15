@@ -107,6 +107,39 @@ section keeps the design pass cheap and the a11y story simple.
 - **Credentials never rendered** — tokens/secrets are always
   truncated (`sk-ant-oat01-Abc…xyz`). Never log, never toast.
 
+## Empty and loading states
+
+**One `<EmptyState>`**, in `components/primitives/`. Five components
+were called `EmptyState`, shared no code, and disagreed about what one
+is — some had a title and body, some a CTA, some were a bare `<p>`.
+Empty states are the first thing a new user sees in most sections, so
+first-run quality varied by whichever section they landed on.
+
+`action` is **required**, and `action={null}` is the way to say there
+is no next step. An empty state without one is usually a missing
+feature rather than a missing string, so the decision belongs where a
+reviewer can see it.
+
+Two variants, matching the two real shapes: `block` (a section or pane
+with nothing in it) and `inline` (a note inside an otherwise-populated
+pane). A third variant per call site is how the original five happened
+— `align="start"` covers left-aligned prose.
+
+Branching logic stays with the caller. `KnowView`'s empty state works
+out *which* filter emptied the view and offers the matching clear
+action; that reasoning does not belong in a generic component's props.
+The primitive owns the shape, the caller owns the reasoning.
+
+**Any surface with a known shape gets a skeleton of that shape.** Only
+genuinely unknown-shape content gets text. A one-line `Loading…` in a
+laid-out pane makes the layout jump when data lands —
+`ProjectEnvPanel` carries a comment recording that a re-render
+"briefly collapsed the panel to Loading…, displacing the Sessions
+section below by ~108px". Use `SkeletonList` (with header) or
+`SkeletonRows` (surface has its own header); both carry the
+`role="status"` and screen-reader label that hand-rolled
+`.skeleton-container` markup silently omitted.
+
 ## Accessibility floor
 
 - Every interactive element is keyboard-reachable and shows a
@@ -118,7 +151,13 @@ section keeps the design pass cheap and the a11y story simple.
 - Listboxes: `<ul role="listbox">` + `<li role="option" tabIndex={0}
   aria-selected>`.
 - Respect `prefers-reduced-motion`, `prefers-contrast: more`, and
-  `prefers-reduced-transparency`.
+  `prefers-reduced-transparency`. All three are implemented in
+  `tokens.css`; `prefers-contrast: more` was the one this list
+  committed to and the stylesheets never delivered, until 2026-08-15.
+  Its overrides sit **after** the legacy alias block on purpose — a
+  media query adds no specificity, so an override written above
+  `--focus-ring`'s declaration loses on source order and silently does
+  nothing.
 - Never use `window.confirm / alert / prompt` — unreliable in Tauri
   webviews. Use the `Modal` + `ConfirmDialog` primitives.
 
@@ -146,5 +185,50 @@ modal that won't dismiss. Its four-modifier combo makes accidental
 firing while typing a non-issue. Any *further* exception needs the
 same treatment: written here, not just commented at the call site.
 
-There is no ⌘F. It was listed here and in the shortcuts modal for a
-long time while no section ever wired it.
+**Bindings live in one table.** `src/lib/shortcutBindings.ts` is the
+list; `ShortcutsModal` renders from it and `cargo xtask verify-docs`
+asserts every `key` in it is compared against somewhere in `src/`.
+This exists because the docs and the code drifted in both directions:
+
+- **⌘F was documented for years with no handler.** That is the case
+  this rule used to record — and it has since inverted. A section
+  *did* wire ⌘F (ConfigSection, focus the content search), so the
+  claim "there is no ⌘F" became false and stayed in this file
+  regardless. Documenting a dead shortcut and failing to document a
+  live one are the same defect; only the second is hard to notice.
+- **⌘\ shipped undocumented**, surfaced only in the sidebar toggle's
+  tooltip.
+
+**⌘-numbers are positions in the full registry, not in the visible
+list.** A section's number is a property of that section, so toggling
+an optional section never renumbers its neighbours. The cost is that
+⌘9 is inert while Boards is off, and Settings — tenth — has no number
+and keeps ⌘,. Before this, enabling Boards silently moved Settings off
+⌘9, which is exactly the muscle-memory break the registry comment
+claimed Boards' ninth position avoided.
+
+## Open questions — not yet decided, not yet shipped
+
+Lifted from `dev-docs/archive/macos-native-design-system.md` when that
+document was retired (see its header). They are recorded here as
+**questions**, not specifications: neither describes shipped
+behaviour, and the archived file's specifications were wrong about
+this product in every other respect.
+
+**Context menus.** Apple's HIG expects a right-click menu on every
+interactive object; the app currently has `.context-menu-item` styling
+and the ⌘K palette, but no general context-menu contract. If one is
+added, the archived draft's proposed targets are a reasonable starting
+list (account card, project row, token badge), and the hard
+requirement is keyboard navigability — arrows, Enter, Escape — because
+a mouse-only menu is worse than none for the surfaces that already
+have keyboard paths.
+
+**Liquid Glass / macOS Tahoe.** Tahoe applies glass to toolbars,
+sidebars and popovers automatically, and an explicit
+`NSVisualEffectView` *blocks* it. Relevant to this app only if the
+window chrome is ever revisited; paper-mono is deliberately flat, so
+adopting glass would be a change of register rather than a fix. Noted
+because the accessibility behaviour is automatic and useful either
+way: Reduce Transparency frosts it, Increase Contrast makes it opaque
+with a border, Reduce Motion disables the elastic effects.

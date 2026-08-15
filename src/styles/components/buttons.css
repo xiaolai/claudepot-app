@@ -17,15 +17,15 @@
   font-weight: 400;
   height: var(--btn-h-legacy);
   padding: var(--sp-1) var(--sp-12);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
-  background: var(--surface);
-  color: var(--text);
+  background: var(--bg-raised);
+  color: var(--fg);
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
   transition: background var(--dur-hover) var(--ease-out);
-  box-shadow: var(--shadow-subtle);
+  box-shadow: var(--shadow-sm);
   /* Button labels should never break mid-word. In
      `.project-detail-actions` three buttons ("Open in Finder",
      "Rename…", "Open in Config") were wrapping to two lines when
@@ -67,6 +67,30 @@
 }
 
 .btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Keyboard-focus safety net.
+ *
+ * Every interactive element gets the ring by default, so an author who
+ * hand-rolls a <button> cannot ship one that is invisible to keyboard
+ * users. `.pm-focus` and `.btn` below become belt-and-braces rather
+ * than the only line of defence.
+ *
+ * This is a net, not the mechanism: it was added after an audit found
+ * 75 of 127 hand-rolled buttons without `.pm-focus`, 39 of them with
+ * no className at all — so no class-based rule could ever have reached
+ * them. Chasing call sites was never going to converge; several of the
+ * unringed ones were added in the same week the rule was written down.
+ *
+ * Lowest possible specificity (one element / one attribute selector)
+ * so any component rule that wants a different ring simply wins. The
+ * `:where()` keeps specificity at 0 for the role variant, which
+ * otherwise would outrank a plain class.
+ */
+button:focus-visible,
+:where([role="button"], [role="option"], [role="menuitem"]):focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -127,7 +151,7 @@
 }
 
 .btn.danger {
-  color: var(--bad);
+  color: var(--danger);
 }
 
 .btn.danger:hover:not(:disabled) {
@@ -135,14 +159,14 @@
 }
 
 .btn.danger.primary {
-  background: var(--bad);
+  background: var(--danger);
   color: var(--on-color);
   border-color: transparent;
 }
 
 .btn.danger.primary:hover:not(:disabled) {
   filter: brightness(0.92);
-  background: var(--bad);
+  background: var(--danger);
   color: var(--on-color);
 }
 
@@ -160,13 +184,13 @@
   border: none;
   border-radius: var(--r-2);
   background: transparent;
-  color: var(--muted);
+  color: var(--fg-muted);
   box-shadow: none;
 }
 
 .icon-btn:hover:not(:disabled) {
   background: var(--bg-hover-soft);
-  color: var(--text);
+  color: var(--fg);
 }
 
 .icon-btn:active:not(:disabled) {

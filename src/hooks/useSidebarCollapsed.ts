@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
  * Pattern mirrors `useTheme` so the keys and lifecycle are familiar.
  */
 import { SIDEBAR_COLLAPSED_KEY as KEY } from "../lib/storageKeys";
+import { isShortcutContextBlocked } from "./useGlobalShortcuts";
 
 function read(): boolean {
   try {
@@ -43,22 +44,23 @@ export function useSidebarCollapsed(): {
   }, [collapsed, setCollapsed]);
 
   // Cmd/Ctrl + \ — VSCode convention for "toggle sidebar". Bypasses
-  // the global-shortcut hook because this is shell-level chrome, not
+  // the global-shortcut *hook* because this is shell-level chrome, not
   // a per-section action, and uses a punctuation key rather than a
   // letter so it never conflicts with letter-based section shortcuts.
+  //
+  // It does NOT bypass the shared gate. This handler used to re-derive
+  // the check inline and tested editable focus only — never
+  // `[role="dialog"]` — so ⌘\ collapsed the sidebar out from under an
+  // open modal. That is precisely the bug class
+  // `isShortcutContextBlocked` was extracted to kill, reintroduced by
+  // the newest shortcut in the app. Bypassing the hook is fine;
+  // bypassing the predicate is not.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.shiftKey || e.altKey) return;
       if (e.key !== "\\") return;
-      const el = document.activeElement;
-      const tag = el?.tagName;
-      const editable =
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        (el as HTMLElement | null)?.isContentEditable === true;
-      if (editable) return;
+      if (isShortcutContextBlocked()) return;
       e.preventDefault();
       toggle();
     };

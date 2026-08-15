@@ -44,7 +44,7 @@ export function RuleRow({
         padding: "var(--sp-12) var(--sp-16)",
         background: "var(--bg-raised)",
         border: "var(--bw-hair) solid var(--line)",
-        borderRadius: "var(--rad-md)",
+        borderRadius: "var(--r-3)",
         opacity: rule.enabled ? 1 : 0.6,
       }}
     >
@@ -115,7 +115,7 @@ export function EmptyRulesPanel({ hasAccounts }: { hasAccounts: boolean }) {
         padding: "var(--sp-20)",
         background: "var(--bg-raised)",
         border: "var(--bw-hair) dashed var(--line)",
-        borderRadius: "var(--rad-md)",
+        borderRadius: "var(--r-3)",
         color: "var(--fg-muted)",
         fontSize: "var(--fs-sm)",
       }}
@@ -133,7 +133,7 @@ export function AuditTable({ entries }: { entries: RotationAuditEntry[] }) {
     <div
       style={{
         border: "var(--bw-hair) solid var(--line)",
-        borderRadius: "var(--rad-md)",
+        borderRadius: "var(--r-3)",
         overflow: "hidden",
       }}
     >

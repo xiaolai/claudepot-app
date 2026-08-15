@@ -397,7 +397,7 @@ export function RotationRuleModal({
               gap: "var(--sp-8)",
               padding: "var(--sp-12)",
               background: "var(--bg-sunken)",
-              borderRadius: "var(--rad-md)",
+              borderRadius: "var(--r-3)",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -424,7 +424,7 @@ export function RotationRuleModal({
                   fontSize: "var(--fs-xs)",
                   padding: "var(--sp-8)",
                   background: dry.wouldFire ? "var(--accent-soft, var(--bg-raised))" : "var(--bg-raised)",
-                  borderRadius: "var(--rad-sm)",
+                  borderRadius: "var(--r-2)",
                 }}
               >
                 <div>
@@ -448,9 +448,9 @@ export function RotationRuleModal({
               style={{
                 padding: "var(--sp-8) var(--sp-12)",
                 background: "var(--bad-weak, var(--bg-raised))",
-                color: "var(--bad, var(--danger))",
+                color: "var(--danger)",
                 fontSize: "var(--fs-sm)",
-                borderRadius: "var(--rad-sm)",
+                borderRadius: "var(--r-2)",
               }}
             >
               {error}

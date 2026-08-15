@@ -14,7 +14,7 @@
 
 .usage-bar-container {
   height: var(--sp-3);
-  background: var(--border);
+  background: var(--line);
   border-radius: var(--r-pill);
   flex: 1;
   overflow: hidden;
@@ -38,7 +38,7 @@
 .usage-bar-label {
   font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--fg-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -58,8 +58,8 @@
   padding: var(--sp-1) var(--sp-5);
   font-size: var(--fs-2xs);
   font-weight: 500;
-  color: var(--muted);
-  background: var(--border);
+  color: var(--fg-muted);
+  background: var(--line);
   border-radius: var(--r-pill);
   vertical-align: baseline;
 }
@@ -108,7 +108,7 @@
   gap: var(--sp-8);
   padding: var(--sp-10) var(--sp-12);
   background: var(--warn-weak);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
 }
 
@@ -118,11 +118,6 @@
   gap: var(--sp-6);
   font-size: var(--fs-sm);
   line-height: var(--lh-base);
-}
-
-.usage-unavailable-body .icon {
-  flex-shrink: 0;
-  margin-top: var(--sp-px);
 }
 
 .usage-unavailable-action {

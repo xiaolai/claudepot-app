@@ -27,6 +27,8 @@
     "addAccount": "Add account",
     "copyEmail": "Copy first matching email",
     "focusLive": "Focus Live sessions strip",
+    "toggleSidebar": "Show / hide the sidebar",
+    "focusFilter": "Focus the content search",
     "closeDialog": "Close dialog",
     "cycleFocus": "Cycle focus (trapped)",
     "moveSelection": "Move selection",
@@ -47,7 +49,7 @@
     "removeAccountTitle": "Remove account?",
     "removeAccountConfirm": "Remove",
     "removeAccountBody": "Remove <b>{{email}}</b>?",
-    "removeAccountNote": "Deletes credentials and Desktop profile. Active CLI/Desktop pointers will be cleared. You'll have a few seconds to undo from the toast."
+    "removeAccountNote": "Deletes credentials and Desktop profile. Active CLI/Desktop pointers will be cleared. Nothing is removed until the undo window elapses — closing the toast cancels."
   },
   "quit": {
     "title_one": "{{count}} operation in progress",

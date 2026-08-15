@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { Icon } from "./Icon";
 import type { Toast } from "../hooks/useToasts";
+import { Glyph } from "../components/primitives/Glyph";
+import { NF } from "../icons";
 
 /**
  * Toast queue renderer. Each toast carries its OWN ARIA role rather
@@ -55,7 +56,7 @@ export function ToastContainer({
             aria-label={tr("toasts.dismiss")}
             title={tr("toasts.dismiss")}
           >
-            <Icon name="x" size={14} />
+            <Glyph g={NF.x} style={{ fontSize: 14 }} />
           </button>
         </div>
       ))}

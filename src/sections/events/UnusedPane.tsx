@@ -118,7 +118,7 @@ export function UnusedPane({
       <p
         style={{
           padding: "var(--sp-8) var(--sp-16)",
-          color: "var(--fg-dim)",
+          color: "var(--fg-muted)",
           fontSize: "var(--fs-xs)",
           margin: 0,
         }}
@@ -148,7 +148,7 @@ function EmptyHint({
     <div
       style={{
         padding: "var(--sp-24) var(--sp-16)",
-        color: danger ? "var(--danger)" : "var(--fg-dim)",
+        color: danger ? "var(--danger)" : "var(--fg-muted)",
         fontSize: "var(--fs-xs)",
       }}
     >

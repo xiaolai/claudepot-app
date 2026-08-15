@@ -108,6 +108,10 @@ function AppShell() {
   const { section, subRoute, setSection, setSubRoute } = useSection(
     sectionIds[0],
     enabledIds,
+    // Numbering comes from the FULL registry so a section's ⌘ number is
+    // a property of the section, not of which neighbours happen to be
+    // visible. `enabledIds` still decides whether the number resolves.
+    sectionIds,
   );
   /**
    * Transcript file to open when ProjectsSection next mounts. Written

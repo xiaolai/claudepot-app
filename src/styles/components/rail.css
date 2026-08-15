@@ -14,14 +14,14 @@
   align-items: center;
   gap: var(--sp-4);
   padding: var(--sp-12) 0 var(--sp-8);
-  background: var(--chrome);
+  background: var(--bg-sunken);
   /* No right border — rail and sidebar share --chrome and should read
      as one continuous surface. The only visible vertical separator in
      the chrome is the one between sidebar and content. */
 }
 
 /* The button is purely a click target — no visual chrome. The active
-   fill, hover tint, and focus ring all live on the inner .icon span,
+   fill and hover tint live on the item itself,
    so they hug the glyph tightly rather than painting a large empty
    box around it. Font-baseline offset then becomes invisible because
    there's no "dead space" in the indicator to reveal it. */
@@ -37,45 +37,14 @@
   background: transparent !important;
   border: 0;
   box-shadow: none;
-  color: var(--muted);
+  color: var(--fg-muted);
   cursor: default;
 }
-.section-rail-item:focus-visible {
-  outline: none;            /* focus ring lives on the .icon */
-}
-
-/* The span carries the visual indicator and is a grid container so
-   the glyph lands at the geometric center regardless of font metrics.
-   !important on the sizing/centering rules because the inline styles
-   from <Icon size={18}> override font-size — we don't care, our grid
-   sizing wins. */
-.section-rail-item .icon {
-  font-size: var(--fs-lg) !important;
-  line-height: var(--lh-flat) !important;
-  width: var(--sp-24) !important;
-  height: var(--sp-24) !important;
-  display: grid !important;
-  place-items: center !important;
-  border-radius: var(--r-2);
-  vertical-align: 0;
-  transition: background var(--dur-hover) var(--ease-out),
-              color var(--dur-hover) var(--ease-out);
-}
-
-.section-rail-item:hover .icon {
-  background: var(--accent-weak);
-  color: var(--text);
-}
-
-.section-rail-item.active .icon {
-  background: var(--accent-weak);
-  color: var(--accent);
-}
-
-.section-rail-item:focus-visible .icon {
-  outline: var(--bw-hair) solid color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: var(--focus-outline-offset-flush);
-}
+/* No `outline: none` here any more. It delegated the ring to an inner
+   `.icon` span that no component has emitted since the Lucide port, so
+   rail items had NO focus indicator at all — the suppression outlived
+   the thing it was suppressing in favour of. They now take the global
+   `button:focus-visible` ring from buttons.css. */
 
 /* ---------- section submenu (popover) ---------- */
 
@@ -83,8 +52,8 @@
   position: fixed;
   min-width: var(--menu-min-width);
   padding: var(--sp-4);
-  background: var(--surface);
-  border: var(--bw-subhair) solid var(--border);
+  background: var(--bg-raised);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-3);
   box-shadow: var(--shadow-popover);
   z-index: var(--z-popover);
@@ -98,14 +67,14 @@
   background: transparent;
   border: 0;
   border-radius: var(--r-1);
-  color: var(--text);
+  color: var(--fg);
   font-size: var(--fs-sm);
   cursor: default;
 }
 
 .section-submenu-item:hover,
 .section-submenu-item:focus-visible {
-  background: var(--accent-weak);
+  background: var(--accent-soft);
   outline: none;
 }
 

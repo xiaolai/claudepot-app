@@ -8,6 +8,7 @@ import { SkeletonRows } from "../../components/primitives/Skeleton";
 import { api } from "../../api";
 import { renderError } from "../../lib/i18n-error";
 import type { ProtectedPath } from "../../types";
+import { Button } from "../../components/primitives/Button";
 
 interface Props {
   pushToast: (kind: "info" | "error", text: string) => void;
@@ -242,15 +243,14 @@ export function ProtectedPathsPane({ pushToast }: Props) {
           aria-invalid={addError != null}
           aria-describedby={addError ? "protected-add-error" : undefined}
         />
-        <button
-          type="button"
-          className="btn primary"
+        <Button
+          variant="solid"
           onClick={handleAdd}
           disabled={busy || draft.trim().length === 0}
           title={t("protected.addTitle")}
         >
           {t("protected.add")}
-        </button>
+        </Button>
       </div>
       {addError ? (
         <p id="protected-add-error" className="settings-inline-error" role="alert">
@@ -270,15 +270,20 @@ export function ProtectedPathsPane({ pushToast }: Props) {
       ) : null}
 
       <div className="settings-actions">
-        <button
-          type="button"
-          className="btn outline"
+        {/* Was `className="btn outline"` — no `.outline` rule exists in
+            any stylesheet, so this silently rendered as a plain `.btn`
+            and the author never got the outline treatment they asked
+            for. Deleting the dead class would have removed the evidence
+            and kept the wrong appearance; the primitive has a real
+            `outline` variant, so use it. */}
+        <Button
+          variant="outline"
           onClick={handleReset}
           disabled={busy || loading}
           title={t("protected.resetTitle")}
         >
           {t("protected.reset")}
-        </button>
+        </Button>
         {(busy || loading) && (
           <span className="muted small settings-inline-hint">
             {loading ? t("shared.loading") : t("protected.working")}

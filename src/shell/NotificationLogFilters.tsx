@@ -100,7 +100,7 @@ export function NotificationLogFilters({
           width: "100%",
           fontSize: "var(--fs-xs)",
           padding: "var(--sp-4) var(--sp-8)",
-          border: "var(--bw-subhair) solid var(--border)",
+          border: "var(--bw-subhair) solid var(--line)",
           borderRadius: "var(--r-1)",
           background: "var(--bg-sunken)",
           color: "var(--fg)",
@@ -127,7 +127,7 @@ export function NotificationLogFilters({
                 ...chipStyle,
                 background: active ? "var(--accent-soft)" : "transparent",
                 color: active ? "var(--accent-ink)" : "var(--fg-muted)",
-                borderColor: active ? "var(--accent-border)" : "var(--border)",
+                borderColor: active ? "var(--accent-border)" : "var(--line)",
               }}
             >
               {opt.label}
@@ -171,7 +171,7 @@ export function NotificationLogFilters({
 const chipStyle: CSSProperties = {
   fontSize: "var(--fs-3xs)",
   padding: "var(--sp-2) var(--sp-6)",
-  border: "var(--bw-subhair) solid var(--border)",
+  border: "var(--bw-subhair) solid var(--line)",
   borderRadius: "var(--r-pill)",
   background: "transparent",
   color: "var(--fg-muted)",
@@ -183,7 +183,7 @@ const chipStyle: CSSProperties = {
 const selectStyle: CSSProperties = {
   fontSize: "var(--fs-3xs)",
   padding: "var(--sp-2) var(--sp-4)",
-  border: "var(--bw-subhair) solid var(--border)",
+  border: "var(--bw-subhair) solid var(--line)",
   borderRadius: "var(--r-1)",
   background: "var(--bg-sunken)",
   color: "var(--fg-muted)",

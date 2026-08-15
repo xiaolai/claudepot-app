@@ -38,8 +38,8 @@ function Frame({
   return (
     <section
       style={{
-        border: "var(--bw-hair) solid var(--border)",
-        borderRadius: "var(--radius-sm)",
+        border: "var(--bw-hair) solid var(--line)",
+        borderRadius: "var(--r-2)",
         background: "var(--bg-raised)",
         padding: "var(--sp-12)",
         minWidth: 0,
@@ -164,7 +164,7 @@ function Bars({ points, max }: { points: { x: string; y: number | null }[]; max:
               flex: 1,
               height: "var(--board-bar-h)",
               background: "var(--bg-sunken)",
-              borderRadius: "var(--radius-xs)",
+              borderRadius: "var(--r-1)",
               overflow: "hidden",
             }}
           >

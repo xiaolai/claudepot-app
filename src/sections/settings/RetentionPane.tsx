@@ -9,6 +9,7 @@ import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
 import { renderError, toastError } from "../../lib/i18n-error";
+import { SkeletonList } from "../../components/primitives/Skeleton";
 
 // Settings → Retention.
 //
@@ -108,7 +109,10 @@ export function RetentionPane({
   }
 
   if (!report) {
-    return <div style={{ color: "var(--fg-faint)" }}>{t("shared.loading")}</div>;
+    // A shaped placeholder, not one line: this pane reports what is
+    // scheduled for deletion, and a surface that collapses to a single
+    // grey row reads as "nothing to report" rather than "not loaded".
+    return <SkeletonList rows={3} label={t("shared.loading")} />;
   }
 
   const { state, risk, is_durable_archive } = report;

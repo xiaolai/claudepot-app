@@ -265,7 +265,7 @@ export function RenameProjectModal({
 
         <GroupCard
           label={
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-5)", color: "var(--bad)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-5)", color: "var(--danger)" }}>
               <Glyph g={NF.warn} size="var(--fs-xs)" /> {t("rename.dangerZone")}
             </span>
           }
@@ -356,7 +356,7 @@ export function RenameProjectModal({
                   </li>
                 )}
                 {conflict && (
-                  <li style={{ color: "var(--bad)" }}>
+                  <li style={{ color: "var(--danger)" }}>
                     <strong style={{ fontWeight: 600 }}>{t("rename.conflictLabel")}</strong> {conflict}
                     {collision === "none" && (
                       <>

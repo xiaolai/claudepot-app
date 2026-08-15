@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
+import { EmptyState as EmptyStatePrimitive } from "../components/primitives/EmptyState";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
@@ -412,28 +413,14 @@ export function AgentsSection() {
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   const { t } = useTranslation("agents");
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: "var(--sp-12)",
-        padding: "var(--sp-32) var(--sp-16)",
-        border: "var(--bw-hair) dashed var(--line)",
-        borderRadius: "var(--r-3)",
-        color: "var(--fg-2)",
-        textAlign: "center",
-      }}
-    >
-      <h3 style={{ margin: 0, fontSize: "var(--fs-md)", color: "var(--fg)" }}>
-        {t("section.emptyTitle")}
-      </h3>
-      <p style={{ margin: 0, fontSize: "var(--fs-sm)", maxWidth: "60ch" }}>
-        {t("section.emptyBody")}
-      </p>
-      <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
-        {t("section.addAgent")}
-      </Button>
-    </div>
+    <EmptyStatePrimitive
+      title={t("section.emptyTitle")}
+      body={t("section.emptyBody")}
+      action={
+        <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
+          {t("section.addAgent")}
+        </Button>
+      }
+    />
   );
 }

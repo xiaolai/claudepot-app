@@ -301,9 +301,9 @@ export function MoveSessionModal({
               gap: "var(--sp-6)",
               margin: 0,
               padding: "var(--sp-8) var(--sp-10)",
-              border: "var(--bw-hair) solid var(--bad)",
+              border: "var(--bw-hair) solid var(--danger)",
               background: "var(--bad-weak)",
-              color: "var(--bad)",
+              color: "var(--danger)",
               borderRadius: "var(--r-2)",
               fontSize: "var(--fs-xs)",
             }}

@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { Icon } from "../../components/Icon";
 import type { JournalEntry, JournalStatus } from "../../types";
+import { Button } from "../../components/primitives/Button";
+import { NF } from "../../icons";
 
 /** Status → user-facing copy, resolved at render time. */
 function statusCopy(t: TFunction<"projects">, s: JournalStatus): string {
@@ -79,25 +80,41 @@ export function RepairEntry({
         // `stale` (lock present but no live owner) entries get the
         // mutating actions; `running` is render-only.
         <div className="repair-entry-actions">
-          <button type="button" className="btn" title={t("repair.resumeTitle")} onClick={onResume}>
-            <Icon name="rotate-ccw" />{t("repair.resume")}
-          </button>
-          <button type="button" className="btn" title={t("repair.rollbackTitle")} onClick={onRollback}>
-            <Icon name="undo" />{t("repair.rollback")}
-          </button>
+          <Button
+            variant="subtle"
+            glyph={NF.restore}
+            title={t("repair.resumeTitle")}
+            onClick={onResume}
+          >
+            {t("repair.resume")}
+          </Button>
+          <Button
+            variant="subtle"
+            glyph={NF.restore}
+            title={t("repair.rollbackTitle")}
+            onClick={onRollback}
+          >
+            {t("repair.rollback")}
+          </Button>
           {e.status === "stale" && onBreakLock && (
-            <button
-              type="button"
-              className="btn warn"
+            <Button
+              variant="warn"
+              glyph={NF.unlock}
               title={t("repair.breakLockBtnTitle")}
               onClick={onBreakLock}
             >
-              <Icon name="unlock" />{t("repair.breakLock")}
-            </button>
+              {t("repair.breakLock")}
+            </Button>
           )}
-          <button type="button" className="btn danger" title={t("repair.abandonTitle")} onClick={onAbandon}>
-            <Icon name="ban" />{t("repair.abandon")}
-          </button>
+          <Button
+            variant="subtle"
+            danger
+            glyph={NF.ban}
+            title={t("repair.abandonTitle")}
+            onClick={onAbandon}
+          >
+            {t("repair.abandon")}
+          </Button>
         </div>
       )}
     </li>

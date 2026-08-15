@@ -58,7 +58,7 @@ export function GroupCard({
   children: ReactNode;
   tone?: "neutral" | "danger";
 }) {
-  const border = tone === "danger" ? "var(--bad)" : "var(--line)";
+  const border = tone === "danger" ? "var(--danger)" : "var(--line)";
   const background = tone === "danger" ? "var(--bad-weak)" : "transparent";
   return (
     <div

@@ -198,6 +198,11 @@ export interface NotificationEvent {
     label: string;
     onPress: () => void;
     onCommit?: () => void;
+    /**
+     * Manual close (X) CANCELS `onCommit` instead of firing it.
+     * Destructive deferred actions only — see `useToasts`.
+     */
+    cancelOnDismiss?: boolean;
     timeoutMs?: number;
   };
   /**

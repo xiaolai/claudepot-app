@@ -7,6 +7,7 @@ export type ButtonVariant =
   | "ghost"
   | "subtle"
   | "outline"
+  | "warn"
   | "accent";
 
 export type ButtonSize = "sm" | "md" | "lg";
@@ -80,7 +81,17 @@ export function Button({
   const [press, setPress] = useState(false);
 
   const s = SIZES[size];
-  const paint = variantPaint(variant, { hover, active, danger });
+  // `disabled` suppresses hover and press before they reach the paint.
+  // Guarding only the setters would still leave a stale `true` painted
+  // if a button becomes disabled while the pointer is over it — which
+  // is the common case, since buttons disable *in response to* the
+  // click that is happening under that pointer.
+  const paint = variantPaint(variant, {
+    hover: hover && !disabled,
+    active,
+    danger,
+  });
+  const pressed = press && !disabled;
 
   return (
     <button
@@ -89,12 +100,12 @@ export function Button({
       disabled={disabled}
       autoFocus={autoFocus}
       onClick={disabled ? undefined : onClick}
-      onMouseEnter={() => setHover(true)}
+      onMouseEnter={() => !disabled && setHover(true)}
       onMouseLeave={() => {
         setHover(false);
         setPress(false);
       }}
-      onMouseDown={() => setPress(true)}
+      onMouseDown={() => !disabled && setPress(true)}
       onMouseUp={() => setPress(false)}
       className="pm-focus"
       {...aria}
@@ -113,7 +124,7 @@ export function Button({
         border: paint.border,
         opacity: disabled ? "var(--opacity-disabled)" : 1,
         cursor: disabled ? "not-allowed" : "pointer",
-        transform: press
+        transform: pressed
           ? "translateY(var(--press-shift))"
           : "none",
         transition:
@@ -153,6 +164,17 @@ function variantPaint(
         bg: hover ? "var(--bg-hover)" : "transparent",
         color: fg ?? "var(--fg)",
         border: `var(--bw-hair) solid ${danger ? "var(--danger)" : "var(--line-strong)"}`,
+      };
+    case "warn":
+      // Legacy `.btn.warn` carried amber text on a neutral fill for
+      // cautionary-but-not-destructive actions (break a stale lock).
+      // paper-mono had no equivalent, so migrating those call sites to
+      // `subtle` would have silently dropped the signal — a migration
+      // that loses information is not finished, it is lossy.
+      return {
+        bg: hover ? "var(--warn-weak)" : "var(--bg-sunken)",
+        color: "var(--warn)",
+        border: "var(--bw-hair) solid var(--line)",
       };
     case "accent":
       return {

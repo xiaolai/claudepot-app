@@ -43,6 +43,7 @@ import { useLifecycleClassification } from "../hooks/useLifecycleClassification"
 import { DisabledScopeView } from "./config/DisabledScopeView";
 import { EnvVarsPane } from "./config/envvars/EnvVarsPane";
 import { useAppState } from "../providers/AppStateProvider";
+import { isShortcutContextBlocked } from "../hooks/useGlobalShortcuts";
 
 import {
   CONFIG_ANCHOR_STORAGE_KEY,
@@ -342,14 +343,25 @@ export function ConfigSection({
   // 2026-04-24, T3 H1).
   const searchUnlistenersRef = useRef<Array<() => void>>([]);
 
-  // ⌘F focuses the content-search input. Esc clears it. Respects the
-  // same modal / input gate as useSection so shortcuts never fire
-  // over a modal or while typing in a text field.
+  // ⌘F focuses the content-search input. Esc clears it.
+  //
+  // Uses the shared gate. This handler carried the fourth private copy
+  // of it — it queried `[role="dialog"]` directly and did its own
+  // `activeElement` handling — and was missed by the audit that found
+  // the other three, because it lives under `src/sections/` rather
+  // than `src/hooks/`. The build gate now scans all of `src/` for
+  // exactly that reason.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       if (e.key !== "f") return;
-      if (document.querySelector('[role="dialog"]')) return;
+      // Note the deliberate ordering: the "already focused" check runs
+      // AFTER the shared gate but is not redundant with it — the gate
+      // blocks while any editable has focus, and the search field is
+      // itself editable, so re-pressing ⌘F inside the field is caught
+      // by the gate rather than by this line. It stays as a guard for
+      // the non-editable-focus path.
+      if (isShortcutContextBlocked()) return;
       const el = document.activeElement as HTMLElement | null;
       if (el === searchInputRef.current) return; // already there
       e.preventDefault();

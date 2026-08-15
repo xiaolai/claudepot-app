@@ -14,12 +14,12 @@
   border-radius: var(--r-3);
   border: var(--bw-subhair) solid var(--warn);
   background: var(--warn-weak);
-  color: var(--text);
+  color: var(--fg);
   font-size: var(--fs-sm);
 }
 
 .banner strong {
-  color: var(--text);
+  color: var(--fg);
 }
 
 .banner em {
@@ -67,7 +67,7 @@
 }
 .banner-bad {
   background: var(--bad-weak);
-  border-color: var(--bad);
+  border-color: var(--danger);
 }
 .banner-body {
   flex: 1;
@@ -82,7 +82,7 @@
 }
 .banner-hint {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .adopt-orphans-modal {
@@ -104,9 +104,9 @@
   flex-direction: column;
   gap: var(--sp-6);
   padding: var(--sp-10) var(--sp-12);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-3);
-  background: var(--surface);
+  background: var(--bg-raised);
 }
 .adopt-orphans-row-head {
   display: flex;
@@ -129,10 +129,10 @@
   min-width: 0;
   height: var(--sp-28);
   padding: 0 var(--sp-10);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
   background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
@@ -144,7 +144,7 @@
   font-size: var(--fs-xs);
 }
 .adopt-orphans-row-status.ok { color: var(--ok); }
-.adopt-orphans-row-status.bad { color: var(--bad); }
+.adopt-orphans-row-status.bad { color: var(--danger); }
 
 /* Session list inside ProjectDetail.
  * Mirrors the project-list `.sidebar-item` rhythm so users read
@@ -170,7 +170,7 @@
   transition: background var(--dur-fast) var(--ease-out);
 }
 .session-row:hover {
-  background: var(--hover-bg);
+  background: var(--bg-hover);
 }
 .session-row-text {
   display: flex;
@@ -181,12 +181,12 @@
 .session-row-name {
   font-size: var(--fs-sm);
   font-weight: 500;
-  color: var(--text);
+  color: var(--fg);
   line-height: 1.3;
 }
 .session-row-meta {
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--fg-muted);
   line-height: 1.3;
 }
 .session-row-menu-btn {
@@ -198,7 +198,7 @@
   justify-content: center;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--fg-muted);
   border-radius: var(--r-1);
   transition: background var(--dur-fast) var(--ease-out),
               color var(--dur-fast) var(--ease-out);
@@ -206,11 +206,11 @@
 /* Visible at rest so the affordance is not hidden behind hover.
  * Darkens slightly on row hover to reinforce the active row. */
 .session-row:hover .session-row-menu-btn {
-  color: var(--text);
+  color: var(--fg);
 }
 .session-row-menu-btn:hover {
-  background: var(--accent-weak);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--fg);
 }
 .session-row-menu-btn:focus-visible {
   outline: var(--bw-focus) solid var(--accent);
@@ -238,7 +238,7 @@
   background: var(--bg-sunken);
   border: var(--bw-hair) solid var(--line);
   border-radius: var(--r-1);
-  color: var(--text);
+  color: var(--fg);
 }
 .session-filter:focus-visible {
   outline: var(--bw-focus) solid var(--accent);

@@ -30,7 +30,12 @@ export function HookUsageLine({
         style={{
           fontSize: "var(--fs-2xs)",
           color: "transparent",
-          height: "var(--lh-2xs)",
+          // Reserves one line of --fs-2xs text. Was `var(--lh-2xs)`,
+          // which does not exist — so `height` was dropped entirely
+          // and the spacer collapsed. The line-height scale is
+          // unitless and cannot serve as a height; the font size is
+          // the glyph box this is holding open.
+          height: "var(--fs-2xs)",
         }}
         aria-hidden
       >

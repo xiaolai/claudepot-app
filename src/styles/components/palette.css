@@ -45,8 +45,8 @@
   width: var(--modal-width-md);
   max-width: calc(100vw - var(--sp-48));
   max-height: var(--popover-max-height);
-  background: var(--surface);
-  border: var(--bw-subhair) solid var(--border);
+  background: var(--bg-raised);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-4);
   box-shadow: var(--shadow-overlay);
   display: flex;
@@ -60,11 +60,11 @@
   align-items: center;
   gap: var(--sp-8);
   padding: var(--sp-10) var(--sp-14);
-  border-bottom: var(--bw-subhair) solid var(--border);
+  border-bottom: var(--bw-subhair) solid var(--line);
 }
 
 .palette-search-icon {
-  color: var(--muted);
+  color: var(--fg-muted);
   flex-shrink: 0;
 }
 
@@ -73,21 +73,21 @@
   border: none;
   background: transparent;
   font-size: var(--fs-md);
-  color: var(--text);
+  color: var(--fg);
   outline: none;
   min-width: 0;
 }
 
 .palette-input::placeholder {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .palette-kbd {
   font-size: var(--fs-2xs);
   padding: var(--sp-2) var(--sp-6);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-1);
-  color: var(--muted);
+  color: var(--fg-muted);
   font-family: var(--font-mono);
   flex-shrink: 0;
 }
@@ -106,7 +106,7 @@
 .palette-empty {
   padding: var(--sp-16);
   text-align: center;
-  color: var(--muted);
+  color: var(--fg-muted);
   font-size: var(--fs-sm);
   list-style: none;
 }
@@ -116,7 +116,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: var(--ls-wide);
-  color: var(--muted);
+  color: var(--fg-muted);
   padding: var(--sp-8) var(--sp-10) var(--sp-4);
   list-style: none;
 }
@@ -137,7 +137,7 @@
   background: transparent;
   border: 0;
   border-radius: var(--r-2);
-  color: var(--text);
+  color: var(--fg);
   font-size: var(--fs-sm);
   height: auto;
   box-shadow: none;
@@ -147,7 +147,7 @@
 }
 
 .palette-item-glyph {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .palette-item.selected {
@@ -176,7 +176,7 @@
 
 .palette-item-detail {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--fg-muted);
   flex-shrink: 0;
 }
 
@@ -196,7 +196,7 @@
   position: fixed;
   min-width: var(--menu-min-width);
   padding: var(--sp-4);
-  background: var(--surface);
+  background: var(--bg-raised);
   border: 0;
   border-radius: var(--r-3);
   box-shadow: var(--shadow-popover);
@@ -211,7 +211,7 @@
   background: transparent;
   border: 0;
   border-radius: var(--r-1);
-  color: var(--text);
+  color: var(--fg);
   font-size: var(--fs-xs);
   font-weight: 400;
   height: auto;
@@ -223,33 +223,33 @@
  * the row color alone is the hover signal. */
 .context-menu-item:hover:not(:disabled),
 .context-menu-item.focused:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 10%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
 }
 
 .context-menu-item:focus-visible {
   outline: none;
   /* Slightly stronger than hover so keyboard focus is distinguishable
    * from mouse-over without introducing a second color dimension. */
-  background: color-mix(in srgb, var(--text) 15%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--fg) 15%, transparent);
+  color: var(--fg);
 }
 
 .context-menu-item:disabled {
-  color: var(--muted);
+  color: var(--fg-muted);
   opacity: 0.5;
 }
 
 .context-menu-item.danger {
-  color: var(--bad);
+  color: var(--danger);
 }
 
 /* Destructive items keep the red FOREGROUND as the semantic signal.
  * Background follows the same neutral hover rhythm as other items —
  * the color is on the text, not the fill. */
 .context-menu-item.danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--bad) 10%, transparent);
-  color: var(--bad);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
 }
 
 /* Separators hidden per user decision (2026-04-19). Kept in the
@@ -304,7 +304,7 @@
   width: var(--sp-22);
   height: var(--sp-22);
   border-radius: 50%;
-  background: var(--accent-weak);
+  background: var(--accent-soft);
   color: var(--accent);
   font-size: var(--fs-sm);
   font-weight: 600;
@@ -334,13 +334,9 @@
 .onboarding-step-detail code {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  background: var(--surface);
+  background: var(--bg-raised);
   padding: var(--sp-1) var(--sp-6);
   border-radius: var(--r-1);
-}
-
-.onboarding-step-detail .icon {
-  margin-right: 0;
 }
 
 .onboarding-repeat-hint {

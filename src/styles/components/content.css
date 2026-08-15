@@ -29,7 +29,7 @@
   gap: var(--sp-8);
   padding-bottom: var(--sp-16);
   margin-bottom: var(--sp-16);
-  border-bottom: var(--bw-subhair) solid var(--border);
+  border-bottom: var(--bw-subhair) solid var(--line);
 }
 
 .toolbar-title {
@@ -51,7 +51,7 @@
   align-items: center;
   gap: var(--sp-6);
   padding: var(--sp-3) var(--sp-10);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
   background: transparent;
   font-size: var(--fs-xs);
@@ -59,7 +59,7 @@
 
 .pill.active {
   border-color: var(--accent);
-  background: var(--accent-weak);
+  background: var(--accent-soft);
 }
 
 .pill.disabled {
@@ -70,7 +70,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--fg-muted);
   font-size: var(--fs-2xs);
 }
 

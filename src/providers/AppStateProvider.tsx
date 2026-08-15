@@ -196,6 +196,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               onPress: onUndo,
               onCommit: opts?.onCommit,
               timeoutMs: opts?.undoMs,
+              cancelOnDismiss: opts?.cancelOnDismiss,
             }
           : undefined,
         // Audit-fix Medium #9: forward durationMs through to the

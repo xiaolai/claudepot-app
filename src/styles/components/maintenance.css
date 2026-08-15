@@ -11,7 +11,7 @@
 
 .maintenance-section {
   padding: var(--sp-16) var(--sp-24);
-  border-bottom: var(--bw-subhair) solid var(--border);
+  border-bottom: var(--bw-subhair) solid var(--line);
 }
 
 .maintenance-section:last-child {
@@ -29,10 +29,6 @@
   font-size: var(--fs-base);
   font-weight: 500;
   margin: 0;
-}
-
-.maintenance-section-header .icon {
-  color: var(--muted);
 }
 
 .maintenance-desc {
@@ -66,7 +62,7 @@
   align-items: center;
   gap: var(--sp-8);
   padding: 0 var(--sp-20) var(--sp-12);
-  border-bottom: var(--bw-subhair) solid var(--border);
+  border-bottom: var(--bw-subhair) solid var(--line);
 }
 
 .repair-header h2 {
@@ -88,7 +84,7 @@
 
 .repair-entry {
   padding: var(--sp-10) var(--sp-12);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
   display: grid;
   gap: var(--sp-4);
@@ -105,7 +101,7 @@
 
 .repair-entry-actions {
   padding-top: var(--sp-6);
-  border-top: var(--bw-subhair) dashed var(--border);
+  border-top: var(--bw-subhair) dashed var(--line);
   font-style: italic;
 }
 
@@ -115,7 +111,7 @@
   display: flex;
   gap: var(--sp-6);
   padding-top: var(--sp-8);
-  border-top: var(--bw-subhair) solid var(--border);
+  border-top: var(--bw-subhair) solid var(--line);
   font-style: normal;
 }
 
@@ -139,10 +135,10 @@
   padding: var(--sp-6) var(--sp-8);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
   background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
 }
 
 .type-to-confirm input:focus-visible {
@@ -181,16 +177,16 @@
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   font-weight: 600;
-  color: var(--muted);
+  color: var(--fg-muted);
   text-transform: capitalize;
 }
 
 .phase-pending { opacity: 0.5; }
-.phase-running { background: var(--accent-weak); }
+.phase-running { background: var(--accent-soft); }
 .phase-running .phase-label { color: var(--accent); font-weight: 500; }
 .phase-complete .phase-label { color: var(--ok); }
 .phase-error { background: var(--bad-weak); }
-.phase-error .phase-label { color: var(--bad); font-weight: 600; }
+.phase-error .phase-label { color: var(--danger); font-weight: 600; }
 
 .op-terminal {
   padding: var(--sp-10) var(--sp-12);
@@ -198,6 +194,6 @@
   margin: var(--sp-8) 0;
 }
 .op-terminal.ok { background: var(--ok-weak); color: var(--ok); }
-.op-terminal.bad { background: var(--bad-weak); color: var(--bad); }
+.op-terminal.bad { background: var(--bad-weak); color: var(--danger); }
 .op-terminal.info { background: var(--info-weak); color: var(--info); }
 

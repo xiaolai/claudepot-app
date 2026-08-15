@@ -92,17 +92,6 @@
 
   /* ── 4px-grid shortcuts — for recipes that prefer grid-step
         naming. These alias the --sp-N scale. ─────────────────── */
-  --s-0:  var(--sp-0);
-  --s-1:  var(--sp-4);
-  --s-2:  var(--sp-8);
-  --s-3:  var(--sp-12);
-  --s-4:  var(--sp-16);
-  --s-5:  var(--sp-20);
-  --s-6:  var(--sp-24);
-  --s-8:  var(--sp-32);
-  --s-10: var(--sp-40);
-  --s-12: var(--sp-48);
-  --s-16: var(--sp-64);
 
   /* ── Type scale (all mono) ──────────────────────────────── */
   --fs-4xs:  8px;   /* dot glyph, finest decoration */
@@ -339,6 +328,18 @@
      breadcrumb icon. */
   --chrome-inset-left:     88px;
 
+  /* Vertical centre of the native traffic lights, as reported by
+     AppKit. `src/lib/trafficLights.ts` overrides this at runtime on
+     macOS; the default centres on the chrome so the offset computed
+     from it is zero before mount and on every other platform.
+
+     Declared here rather than left to a `var(--x, fallback)` at the
+     call site: an undeclared token reads as a typo, and the one
+     consumer was deleted as "an undeclared token" during a token
+     sweep, silently pinning the chrome to a constant zero. A runtime
+     channel that is not registered has no way to say it is real. */
+  --traffic-light-center-y: calc(var(--chrome-height) / 2);
+
   /* ── Durations ──────────────────────────────────────────── */
   --dur-fast:    80ms;
   --dur-base:    120ms;
@@ -381,7 +382,6 @@
   --board-bar-value-w: 48px;
   --board-widget-min-w: 320px;
   --board-spark-stroke-w: 1.5;
-  --radius-xs: 2px;
 
 }
 
@@ -546,7 +546,34 @@
   }
 }
 
-/* ─── Legacy token aliases ────────────────────────────────────
+/* Component dimensions that are not spacing. `--sp-*` tops out at
+   96px and means "gap / padding"; a scrollable list's max height is a
+   size. It was written as `var(--sp-160)`, which does not exist, so
+   `max-height` was dropped and the candidate list grew unbounded. */
+:root {
+  --size-list-max: 160px;
+}
+
+/* ─── Derived surface + status tokens ─────────────────────────
+   These were filed under a heading that called them "legacy aliases"
+   awaiting deletion. They are not aliases: each is a real definition
+   with no paper-mono equivalent to migrate to, and deleting the block
+   as written would have broken every consumer.
+
+   The genuine aliases that shared this block — `--text`, `--muted`,
+   `--border`, `--surface`, `--bad` and five others — were single
+   `var()` indirections, and are gone: their 218 references were
+   rewritten to the paper-mono token after proving each pair resolves
+   to the same value in BOTH themes. Nine more had zero consumers and
+   were deleted outright.
+
+   What remains is `color-mix()` derivations and focus geometry. If one
+   ever gains a paper-mono equivalent, migrate it the same way — prove
+   the resolved values match per theme first, because a mapping that
+   is right in light and wrong in dark is exactly how `--accent-text`
+   shipped dark ink on terracotta.
+   ──────────────────────────────────────────────────────────── */
+:root {
    Unported components (banners, running-op strip, confirm-dangerous,
    rename/clean/adopt/move modals, repair view, operation-progress)
    still read the previous rule-set's names. Alias them to the
@@ -554,65 +581,90 @@
    port without a color rewrite. As each component migrates, drop
    its legacy-alias use; when the last reference is gone, delete
    the alias block below.
-   ──────────────────────────────────────────────────────────── */
-:root {
-  /* Surfaces */
-  --surface:     var(--bg-raised);
-  --chrome:      var(--bg-sunken);
-  --border:      var(--line);
-  --hover-bg:    var(--bg-hover);
-
-  /* Text */
-  --text:        var(--fg);
-  --muted:       var(--fg-muted);
-  --tertiary:    var(--fg-ghost);
-
-  /* Accent family */
-  --accent-weak: var(--accent-soft);
-  --accent-text: var(--bg-raised);
-
-  /* Status (old naming) */
-  --bad:         var(--danger);
+     as `var(--bg-raised)` it followed the theme while the accent it
+     sits on did not, so the notification badge and the env-var control
+     rendered near-black ink (oklch 19%) on terracotta in dark mode
+     while solid Buttons beside them rendered white. `--on-color` is
+     theme-invariant, which is the property this role requires. */
   --bad-weak:    color-mix(in oklch, var(--danger) 12%, transparent);
   --ok-weak:     color-mix(in oklch, var(--ok) 12%, transparent);
   --warn-weak:   color-mix(in oklch, var(--warn) 12%, transparent);
   --info-weak:   color-mix(in oklch, var(--info) 12%, transparent);
-
-  /* Hover/selected fills — derived from --fg so they invert correctly
      with the theme. Replaces the earlier scattered rgba(0,0,0,0.04) /
      rgba(255,255,255,0.05) literals that bypassed [data-theme]. */
   --bg-hover-soft:     color-mix(in oklch, var(--fg) 6%,  transparent);
   --bg-hover-firm:     color-mix(in oklch, var(--fg) 10%, transparent);
   --bg-selected-firm:  color-mix(in oklch, var(--fg) 14%, transparent);
-
-  /* Focus-ring offsets — outline pattern (input/list/row controls).
      The box-shadow ring (filled chrome controls) keeps using
      --focus-ring above. */
   --focus-outline-offset:        2px;
   --focus-outline-offset-tight: -2px;
   --focus-outline-offset-flush:  1px;
   --focus-outline-offset-flat:   0;
-
-  /* Focus ring — previous system shipped a single combined variable */
   --focus-ring: 0 0 0 3px var(--accent-border);
-
-  /* Elevation (old naming) */
-  --shadow-0:      none;
-  --shadow-1:      var(--shadow-sm);
-  --shadow-2:      var(--shadow-md);
-  --shadow-3:      var(--shadow-overlay);
-  --shadow-subtle: var(--shadow-sm);
-
-  /* Selection / grouped bg — legacy component references */
-  --selection:           var(--accent-soft);
-  --selection-inactive:  var(--bg-hover);
-  --grouped-bg:          var(--bg-sunken);
-
-  /* Mask opacity anchors — used in mask-image gradients where the
      value is mask alpha, not a visible color. `#000` means "fully
      shown"; `transparent` (no token needed) means "fully clipped". */
-  --mask-opaque:         #000;
+   declared down there, and a media query adds no specificity — so an
+   override written above it loses on source order and silently does
+   nothing. The first draft of this block sat before the aliases and
+   was inert for exactly that reason. */
 }
+
+/* ─── Increase Contrast (prefers-contrast: more) ──────────────
+   macOS System Settings › Accessibility › Display › Increase
+   Contrast. `design.md`'s accessibility floor commits to honouring
+   this alongside `prefers-reduced-motion` and
+   `prefers-reduced-transparency` — and the other two were
+   implemented while this one never was. The only mention of it
+   anywhere in the stylesheets was a comment in `sidebar.css`
+   asserting the selected-row treatment "survives prefers-contrast:
+   more", which nothing was making true.
+
+   Separators carry almost all of the structure in a hairline design
+   (1px borders, small radii, flat rows), so strengthening the two
+   line tokens is most of the work. The focus ring widens with them:
+   a ring tuned for a low-contrast border reads as decoration once
+   the borders around it darken.
+
+   Overrides land here, in the one file allowed to declare tokens,
+   rather than as per-component media queries — a component-level
+   copy would be the same drift class the token file exists to
+   prevent.
+   ──────────────────────────────────────────────────────────── */
+@media (prefers-contrast: more) {
+  :root,
+  [data-theme="light"] {
+    --line:        oklch(72% 0.006 60);
+    --line-strong: oklch(55% 0.008 60);
+    --fg-muted:    oklch(38% 0.010 60);
+    --focus-ring:  0 0 0 3px var(--accent);
+  }
+
+  [data-theme="dark"] {
+    --line:        oklch(48% 0.010 60);
+    --line-strong: oklch(62% 0.012 60);
+    --fg-muted:    oklch(78% 0.010 60);
+    --focus-ring:  0 0 0 3px var(--accent);
+  }
+}
+
+/* The system-preference path needs its own block: the rules above key
+   on the explicit `[data-theme="dark"]` attribute, which is absent
+   when the user has never touched the in-app theme toggle. Without
+   this, Increase Contrast would silently apply the LIGHT overrides to
+   a system-dark window — darkening lines that need to lighten, i.e.
+   reducing contrast under a setting whose entire purpose is to raise
+   it. This mirrors how the base dark palette is already declared
+   twice for the same reason. */
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --line:        oklch(48% 0.010 60);
+    --line-strong: oklch(62% 0.012 60);
+    --fg-muted:    oklch(78% 0.010 60);
+    --focus-ring:  0 0 0 3px var(--accent);
+  }
+}
+
 
 /* ─── Base reset ──────────────────────────────────────────── */
 *,

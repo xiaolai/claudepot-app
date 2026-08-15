@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
+import { EmptyState as EmptyStatePrimitive } from "../components/primitives/EmptyState";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
@@ -286,7 +287,7 @@ export function ThirdPartySection() {
             role="alert"
             style={{
               padding: "var(--sp-12) var(--sp-16)",
-              border: "var(--bw-hair) solid var(--danger-border, var(--line))",
+              border: "var(--bw-hair) solid var(--line)",
               borderRadius: "var(--r-2)",
               color: "var(--fg)",
               fontSize: "var(--fs-sm)",
@@ -469,35 +470,33 @@ export function ThirdPartySection() {
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   const { t } = useTranslation("providers");
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "flex-start",
-        gap: "var(--sp-16)",
-        padding: "var(--sp-32)",
-        maxWidth: 720,
-        color: "var(--fg)",
-        fontSize: "var(--fs-sm)",
-        lineHeight: "var(--lh-loose)",
-      }}
-    >
-      <p style={{ margin: 0 }}>{t("empty.intro")}</p>
-      <p style={{ margin: 0 }}>
-        {/* The four wrapper names are examples, not data the user
-            supplied — they stay inside the sentence so a translator
-            can move them, and all four share one <code> mapping. */}
-        <Trans
-          ns="providers"
-          i18nKey="empty.wrappers"
-          components={{
-            code: <code style={{ color: "var(--fg-strong)" }} />,
-          }}
-        />
-      </p>
-      <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
-        {t("empty.addFirst")}
-      </Button>
-    </div>
+    <EmptyStatePrimitive
+      // Left-aligned: the body is two paragraphs of explanation, not a
+      // one-line "nothing here". Centering prose of this length reads
+      // as a poster rather than an instruction.
+      align="start"
+      body={
+        <>
+          <p style={{ margin: 0 }}>{t("empty.intro")}</p>
+          <p style={{ margin: "var(--sp-16) 0 0" }}>
+            {/* The four wrapper names are examples, not data the user
+                supplied — they stay inside the sentence so a translator
+                can move them, and all four share one <code> mapping. */}
+            <Trans
+              ns="providers"
+              i18nKey="empty.wrappers"
+              components={{
+                code: <code style={{ color: "var(--fg)" }} />,
+              }}
+            />
+          </p>
+        </>
+      }
+      action={
+        <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
+          {t("empty.addFirst")}
+        </Button>
+      }
+    />
   );
 }

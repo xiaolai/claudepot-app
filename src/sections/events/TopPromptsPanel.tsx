@@ -63,17 +63,13 @@ function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
     <li
       style={{
         display: "grid",
-        gridTemplateColumns: "var(--rank-col) minmax(0, 1fr) auto auto",
+        gridTemplateColumns: "var(--sp-28) minmax(0, 1fr) auto auto",
         alignItems: "center",
         gap: "var(--sp-10)",
         padding: "var(--sp-6) var(--sp-8)",
         background: "var(--bg-raised)",
         border: "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-1)",
-        // 28px column fits two-digit ordinals at the current font.
-        // Uses the existing `--sp-28` spacing token rather than a
-        // bare literal so the value flows through the design system.
-        ["--rank-col" as keyof React.CSSProperties]: "var(--sp-28)",
       } as React.CSSProperties}
     >
       <div

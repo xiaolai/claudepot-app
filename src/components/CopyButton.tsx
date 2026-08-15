@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Icon } from "./Icon";
+import { Glyph } from "../components/primitives/Glyph";
+import { NF } from "../icons";
 
 /**
  * One-click clipboard copy with a 1.5s success/fail glyph swap.
@@ -54,9 +55,9 @@ export function CopyButton({
     <button className="copy-btn" onClick={copy}
       title={t("primitives.copyToClipboard")}
       aria-label={ariaLabel ?? t("primitives.copyValue", { text })}>
-      {state === "copied" ? <Icon name="check" size={13} /> :
-       state === "failed" ? <Icon name="alert-triangle" size={13} /> :
-       <Icon name="copy" size={13} />}
+      {state === "copied" ? <Glyph g={NF.check} style={{ fontSize: 13 }} /> :
+       state === "failed" ? <Glyph g={NF.warn} style={{ fontSize: 13 }} /> :
+       <Glyph g={NF.copy} style={{ fontSize: 13 }} />}
     </button>
   );
 }
