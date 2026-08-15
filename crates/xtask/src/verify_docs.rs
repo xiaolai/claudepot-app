@@ -723,6 +723,44 @@ fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()>
     Ok(())
 }
 
+/// Custom-property names DECLARED in `src` — i.e. `--x:` anywhere, not
+/// only at the start of a line.
+///
+/// The line-initial form worked only because `tokens.css` happens to
+/// put one declaration per line. A guard that depends on the
+/// formatting of the file it inspects is one reflow away from
+/// silently checking nothing, and the fixture tests caught exactly
+/// that: `:root { --fg: red; }` on one line parsed as zero
+/// declarations, so every reference looked undefined.
+///
+/// Requiring the `:` is what separates a declaration from a
+/// reference — `var(--fg)` and `var(--fg, red)` are followed by `)`
+/// or `,`, never `:`.
+fn declared_properties(src: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let b = src.as_bytes();
+    let mut i = 0usize;
+    while let Some(rel) = src[i..].find("--") {
+        let at = i + rel;
+        let name_start = at + 2;
+        let mut j = name_start;
+        while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-') {
+            j += 1;
+        }
+        if j > name_start {
+            let mut k = j;
+            while k < b.len() && (b[k] as char).is_whitespace() {
+                k += 1;
+            }
+            if k < b.len() && b[k] == b':' {
+                out.insert(format!("--{}", &src[name_start..j]));
+            }
+        }
+        i = j.max(at + 2);
+    }
+    out
+}
+
 /// Every `var(--token)` in the app must name a token `tokens.css`
 /// actually declares.
 ///
@@ -744,15 +782,7 @@ fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()>
 /// nothing anywhere reported it.
 fn check_no_undefined_tokens(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let tokens_src = strip_comments(&read(repo, "src/styles/tokens.css")?);
-    let mut declared: BTreeSet<String> = BTreeSet::new();
-    for line in tokens_src.lines() {
-        let t = line.trim();
-        if let Some(rest) = t.strip_prefix("--") {
-            if let Some((name, _)) = rest.split_once(':') {
-                declared.insert(format!("--{}", name.trim()));
-            }
-        }
-    }
+    let declared = declared_properties(&tokens_src);
     if declared.is_empty() {
         problems.push("tokens.css declares no custom properties — the check cannot run".into());
         return Ok(());
@@ -1069,14 +1099,7 @@ fn check_contrast_overrides_win(repo: &Path, problems: &mut Vec<String>) -> Resu
     // Tokens set inside those blocks, and the last block's end.
     let mut overridden: BTreeSet<String> = BTreeSet::new();
     for (s0, e0) in &blocks {
-        for line in src[*s0..*e0].lines() {
-            let t = line.trim();
-            if let Some(rest) = t.strip_prefix("--") {
-                if let Some((name, _)) = rest.split_once(':') {
-                    overridden.insert(format!("--{}", name.trim()));
-                }
-            }
-        }
+        overridden.extend(declared_properties(&src[*s0..*e0]));
     }
     let last_end = blocks.iter().map(|(_, e)| *e).max().unwrap_or(0);
 
@@ -1089,21 +1112,15 @@ fn check_contrast_overrides_win(repo: &Path, problems: &mut Vec<String>) -> Resu
     // Any plain declaration of those tokens after the last block wins
     // the cascade and makes the override inert.
     for (n, line) in src[last_end..].lines().enumerate() {
-        let t = line.trim();
-        let Some(rest) = t.strip_prefix("--") else {
-            continue;
-        };
-        let Some((name, _)) = rest.split_once(':') else {
-            continue;
-        };
-        let token = format!("--{}", name.trim());
-        if overridden.contains(&token) {
-            problems.push(format!(
-                "tokens.css re-declares {token} after the prefers-contrast block \
+        for token in declared_properties(line) {
+            if overridden.contains(&token) {
+                problems.push(format!(
+                    "tokens.css re-declares {token} after the prefers-contrast block \
                  (line ~{}); a media query adds no specificity, so the accessibility \
                  override is inert",
-                src[..last_end].lines().count() + n
-            ));
+                    src[..last_end].lines().count() + n
+                ));
+            }
         }
     }
     Ok(())
@@ -1474,5 +1491,277 @@ enum AccountAction {
         assert_eq!(spelled(13), Some("Thirteen"));
         assert_eq!(spelled(14), Some("Fourteen"));
         assert_eq!(spelled(99), None);
+    }
+}
+
+// ─── guard self-tests ────────────────────────────────────────────────
+//
+// Every check in this file reports a problem by NOT reporting one: a
+// guard that has stopped working is indistinguishable from a clean
+// repo. Six of the guards written for the 2026-08 UX-audit branch
+// passed over a deliberately planted defect on their first draft —
+// three were satisfied by a comment naming the thing they check for,
+// one parsed 2 of 9 entries, one could never flag anything because it
+// counted braces from the wrong origin, and one compared only the
+// items that had not regressed. Each was found by hand-sabotaging the
+// tree and watching for red.
+//
+// AGENTS.md already names this failure and prescribes the fix, for
+// `check:envvar-layout`: "Split the judgement out of the measurement
+// in any guard of this shape; the measurement may need a screen, the
+// judgement never does." These guards are pure judgement over file
+// contents, so the sabotage belongs in CI rather than in someone's
+// memory. Each test below plants the exact defect its guard exists to
+// catch and fails if the guard stays quiet — plus a clean-fixture
+// counterpart, so a check that flags everything cannot pass either.
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use std::fs;
+
+    /// Minimal synthetic repo. Only the files a given check reads need
+    /// to exist; each test writes what it needs on top.
+    fn repo() -> tempfile::TempDir {
+        let d = tempfile::tempdir().expect("tempdir");
+        for sub in ["src/hooks", "src/lib", "src/styles", "src/sections"] {
+            fs::create_dir_all(d.path().join(sub)).unwrap();
+        }
+        d
+    }
+
+    fn write(d: &tempfile::TempDir, rel: &str, body: &str) {
+        let p = d.path().join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+
+    fn run(
+        f: impl Fn(&Path, &mut Vec<String>) -> Result<()>,
+        d: &tempfile::TempDir,
+    ) -> Vec<String> {
+        let mut problems = Vec::new();
+        f(d.path(), &mut problems).expect("check ran");
+        problems
+    }
+
+    // ── shortcut gate ────────────────────────────────────────────────
+
+    const GATED: &str = r#"
+        import { isShortcutContextBlocked } from "./useGlobalShortcuts";
+        window.addEventListener("keydown", (e) => {
+          if (!e.metaKey) return;
+          if (isShortcutContextBlocked()) return;
+        });
+    "#;
+
+    #[test]
+    fn shortcut_gate_accepts_a_hook_using_the_shared_predicate() {
+        let d = repo();
+        write(&d, "src/hooks/useThing.ts", GATED);
+        assert!(run(check_shortcut_gate_is_shared, &d).is_empty());
+    }
+
+    #[test]
+    fn shortcut_gate_catches_a_local_re_derivation() {
+        let d = repo();
+        write(
+            &d,
+            "src/hooks/useThing.ts",
+            r#"
+            window.addEventListener("keydown", (e) => {
+              if (!e.metaKey) return;
+              if (document.activeElement) return;
+            });
+        "#,
+        );
+        assert_eq!(run(check_shortcut_gate_is_shared, &d).len(), 1);
+    }
+
+    /// The first draft was satisfied by a COMMENT naming the predicate,
+    /// so it reported green over a reintroduced ⌘\ bug.
+    #[test]
+    fn shortcut_gate_is_not_satisfied_by_a_comment() {
+        let d = repo();
+        write(
+            &d,
+            "src/hooks/useThing.ts",
+            r#"
+            // Deliberately does not call isShortcutContextBlocked here.
+            window.addEventListener("keydown", (e) => {
+              if (!e.metaKey) return;
+              if (document.activeElement) return;
+            });
+        "#,
+        );
+        assert_eq!(run(check_shortcut_gate_is_shared, &d).len(), 1);
+    }
+
+    /// Focus traps listen for bare Tab and MUST keep working while a
+    /// modal is open — the opposite of what this gate enforces.
+    #[test]
+    fn shortcut_gate_ignores_non_modifier_handlers() {
+        let d = repo();
+        write(&d, "src/hooks/useThing.ts", GATED); // keeps the scan non-empty
+        write(
+            &d,
+            "src/hooks/useFocusTrap.ts",
+            r#"
+            window.addEventListener("keydown", (e) => {
+              if (e.key !== "Tab") return;
+            });
+        "#,
+        );
+        assert!(run(check_shortcut_gate_is_shared, &d).is_empty());
+    }
+
+    /// A scan that matches nothing must fail loudly, not pass.
+    #[test]
+    fn shortcut_gate_reports_when_it_scanned_nothing() {
+        let d = repo();
+        assert_eq!(run(check_shortcut_gate_is_shared, &d).len(), 1);
+    }
+
+    // ── contrast overrides ───────────────────────────────────────────
+
+    const CONTRAST_OK: &str = r#"
+        :root { --line: red; --focus-ring: 0 0 0 3px blue; }
+        @media (prefers-contrast: more) {
+          :root { --line: black; --focus-ring: 0 0 0 3px black; }
+        }
+    "#;
+
+    #[test]
+    fn contrast_accepts_overrides_declared_last() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", CONTRAST_OK);
+        assert!(run(check_contrast_overrides_win, &d).is_empty());
+    }
+
+    /// A media query adds no specificity, so a later plain declaration
+    /// wins and the accessibility override silently does nothing.
+    #[test]
+    fn contrast_catches_a_later_plain_redeclaration() {
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            &format!("{CONTRAST_OK}\n:root {{ --focus-ring: 0 0 0 3px blue; }}\n"),
+        );
+        let p = run(check_contrast_overrides_win, &d);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].contains("--focus-ring"));
+    }
+
+    #[test]
+    fn contrast_reports_a_missing_block() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --line: red; }");
+        assert_eq!(run(check_contrast_overrides_win, &d).len(), 1);
+    }
+
+    // ── shortcut table ───────────────────────────────────────────────
+
+    #[test]
+    fn shortcut_table_accepts_a_binding_with_a_handler() {
+        let d = repo();
+        write(&d, "src/lib/shortcutBindings.ts", r#"{ key: "k" },"#);
+        write(&d, "src/hooks/useShell.ts", r#"if (e.key === "k") open();"#);
+        assert!(run(check_shortcut_table_has_handlers, &d).is_empty());
+    }
+
+    /// The ⌘F mistake: documented, never wired.
+    #[test]
+    fn shortcut_table_catches_a_binding_with_no_handler() {
+        let d = repo();
+        write(&d, "src/lib/shortcutBindings.ts", r#"{ key: "q" },"#);
+        write(&d, "src/hooks/useShell.ts", r#"if (e.key === "k") open();"#);
+        assert_eq!(run(check_shortcut_table_has_handlers, &d).len(), 1);
+    }
+
+    /// The first draft only read `key:` at the start of a line, so it
+    /// parsed 2 of 9 single-line entries and asserted almost nothing.
+    #[test]
+    fn shortcut_table_parses_entries_that_share_a_line() {
+        let d = repo();
+        write(
+            &d,
+            "src/lib/shortcutBindings.ts",
+            r#"export const A = [{ keys: ["x"], labelKey: "a", key: "q" }];"#,
+        );
+        write(&d, "src/hooks/useShell.ts", r#"if (e.key === "k") open();"#);
+        assert_eq!(
+            run(check_shortcut_table_has_handlers, &d).len(),
+            1,
+            "a single-line entry must still be parsed"
+        );
+    }
+
+    /// Shift reports an uppercase `e.key`; comparing either case counts.
+    #[test]
+    fn shortcut_table_accepts_an_uppercase_comparison() {
+        let d = repo();
+        write(&d, "src/lib/shortcutBindings.ts", r#"{ key: "c" },"#);
+        write(&d, "src/sections/S.tsx", r#"if (e.key === "C") copy();"#);
+        assert!(run(check_shortcut_table_has_handlers, &d).is_empty());
+    }
+
+    // ── undefined tokens ─────────────────────────────────────────────
+
+    #[test]
+    fn tokens_accept_a_declared_reference() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(&d, "src/sections/S.tsx", r#"color: "var(--fg)""#);
+        assert!(run(check_no_undefined_tokens, &d).is_empty());
+    }
+
+    /// A misspelled token is not a raw value, so the no-raw-values rule
+    /// never sees it; CSS drops the declaration and the element inherits.
+    #[test]
+    fn tokens_catch_an_undeclared_reference() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(&d, "src/sections/S.tsx", r#"color: "var(--fg-2)""#);
+        let p = run(check_no_undefined_tokens, &d);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].contains("--fg-2"));
+    }
+
+    /// `var(--x, fallback)` is legitimate even when `--x` is absent.
+    #[test]
+    fn tokens_allow_a_var_with_a_fallback() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(&d, "src/sections/S.tsx", r#"color: "var(--maybe, red)""#);
+        assert!(run(check_no_undefined_tokens, &d).is_empty());
+    }
+
+    /// Locally-scoped properties are valid. The first draft reported
+    /// `--rank-col` as undefined when it is set on the element that
+    /// reads it — and its quote detection took the pattern's last
+    /// character instead of its first, so no local ever matched.
+    #[test]
+    fn tokens_allow_a_locally_declared_property() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(
+            &d,
+            "src/sections/S.tsx",
+            r#"style={{ ["--rank-col"]: "8px", width: "var(--rank-col)" }}"#,
+        );
+        assert!(run(check_no_undefined_tokens, &d).is_empty());
+    }
+
+    /// Three guards in one branch were fooled by their own docs.
+    #[test]
+    fn tokens_ignore_references_inside_comments() {
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            ":root { --fg: red; }\n/* was var(--sp-160), which does not exist */",
+        );
+        write(&d, "src/sections/S.tsx", r#"color: "var(--fg)""#);
+        assert!(run(check_no_undefined_tokens, &d).is_empty());
     }
 }

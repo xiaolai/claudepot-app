@@ -26,3 +26,9 @@ uuid.workspace = true
 # workspace automation that never ships, so the cost is build time in a
 # dev tool and the payoff is that all three classes become unreachable.
 syn = { version = "2", features = ["full", "visit", "parsing"] }
+
+[dev-dependencies]
+# Fixture trees for the verify-docs guard tests. Each guard is pure
+# judgement over file contents, so it can be exercised against a
+# synthetic repo in CI — see the module tests in src/verify_docs.rs.
+tempfile.workspace = true
