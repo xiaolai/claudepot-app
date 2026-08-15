@@ -1,26 +1,45 @@
 <!--
   Menu-bar template, plain state.
 
-  The viewBox CROPS the 1024 authoring canvas to 800 units centred on
-  the block, rather than rendering the full canvas. Framed at 1024 the
-  block filled only 64%w x 61%h of the 44px tile against the previous
-  icon's 86% x 75%, and read as visibly undersized in the menubar.
-  At 800 it is 80%w x 76%h — the height matches the old glyph almost
-  exactly, which is the axis that matters in a fixed-height menubar.
+  The viewBox CROPS the 1024 authoring canvas rather than rendering all
+  of it, because in the menubar the tile is padding and the block is the
+  icon.
 
-  800 rather than something tighter because the alert variant shares
-  this number: same viewBox size means the block is the same size in
-  both states, so toggling the badge does not make it jump. See the
-  note in tray-alert-template.svg.
+  WHY THE CROP IS THIS TIGHT. `tray-icon` normalises whatever we hand it
+  to eighteen points tall, preserving aspect:
 
-  Artwork geometry is untouched — this is a framing change only.
+      let icon_height: f64 = 18.0;
+      let icon_width = (width as f64) / (height as f64 / icon_height);
+
+  The pixel size of the tile is therefore irrelevant — only the FRACTION
+  of the tile the block inks decides how large it renders. Measured
+  against the two neighbours in this menubar:
+
+      ChatGPT.app    94.4% of tile  ->  17.0pt of glyph
+      Claudepot      77.3%          ->  13.9pt      (an 800 viewBox)
+      Claude.app     70.8%          ->  12.7pt
+
+  Same ink height in the file, three different sizes on screen. At 672
+  the block inks 90.5% and renders 16.3pt, which is the neighbourhood
+  the other menubar icons live in.
+
+  672 rather than tighter because the ALERT variant shares this number:
+  an identical viewBox size means the block renders at an identical size
+  in both states, so toggling the badge does not make it jump. The badge
+  is what sets the floor — see the derivation in
+  tray-alert-template.svg.
+
+  Artwork geometry is untouched apart from the -48 y shift that centred
+  the block on the 1024 canvas (its bbox centre was 560 against a centre
+  of 512, which read as low in the Dock). The block is centred in this
+  viewBox: 16 units of margin left and right, 32 top and bottom.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="112 160 800 800">
+<svg xmlns="http://www.w3.org/2000/svg" width="672" height="672" viewBox="176 176 672 672">
   <defs>
     <mask id="seams">
-      <rect x="112" y="160" width="800" height="800" fill="#FFFFFF"></rect>
-      <path d="M512 256 L512 864 M192 432 L512 608 M832 432 L512 608" stroke="#000000" stroke-width="48" fill="none"></path>
+      <rect x="176" y="176" width="672" height="672" fill="#FFFFFF"></rect>
+      <path d="M512 208 L512 816 M192 384 L512 560 M832 384 L512 560" stroke="#000000" stroke-width="48" fill="none"></path>
     </mask>
   </defs>
-  <path mask="url(#seams)" fill="#000000" d="M512 256 L832 432 L832 688 L512 864 L192 688 L192 432 Z"></path>
+  <path mask="url(#seams)" fill="#000000" d="M512 208 L832 384 L832 640 L512 816 L192 640 L192 384 Z"></path>
 </svg>

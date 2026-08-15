@@ -2,8 +2,8 @@
   <defs>
     <mask id="seams">
       <rect width="1024" height="1024" fill="#FFFFFF"></rect>
-      <path d="M512 256 L512 864 M192 432 L512 608 M832 432 L512 608" stroke="#000000" stroke-width="48" fill="none"></path>
+      <path d="M512 208 L512 816 M192 384 L512 560 M832 384 L512 560" stroke="#000000" stroke-width="48" fill="none"></path>
     </mask>
   </defs>
-  <path mask="url(#seams)" fill="#000000" d="M512 256 L832 432 L832 688 L512 864 L192 688 L192 432 Z"></path>
+  <path mask="url(#seams)" fill="#000000" d="M512 208 L832 384 L832 640 L512 816 L192 640 L192 384 Z"></path>
 </svg>

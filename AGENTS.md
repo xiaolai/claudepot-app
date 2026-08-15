@@ -938,20 +938,28 @@ Load-bearing rules:
   44×44). Template is inverted by macOS to match the menubar; Mono is
   the same alpha filled `#808080` because Windows and Linux have no
   template concept and a pure-black glyph vanishes on a dark taskbar.
-- **A tray icon's size is how much of the tile it INKS, not the tile.**
-  The 44×44 canvas is fixed; what the user sees is the glyph's bounding
-  box within it. The tray SVGs therefore carry a cropped `viewBox`
-  (800 of the 1024 authoring canvas) rather than the full canvas —
-  framed at 1024 the block inked 64%w × 61%h and read as visibly
-  undersized against the previous icon's 86% × 75%. Both variants share
-  one viewBox *size* so the block does not change scale when the alert
-  badge appears; the badge was moved inward to (760, 310) to fit,
-  because a badge floating at the far corner forces a viewBox loose
-  enough to shrink the block. `verify-icons.py` asserts the ink
-  fraction and that nothing touches the tile edge — every dimension
-  check passed while the icon was too small, so the coverage assertion
-  is the one that matters.
-- **`scripts/verify-icons.py` is the structural gate** — 34 checks over
+  - **`tray-icon` normalises the tile to 18 points tall, so the tile's
+    pixel size is irrelevant and its padding is pure loss.** The crate
+    hard-codes `let icon_height: f64 = 18.0` and derives width from the
+    aspect ratio, so only the FRACTION of the tile the glyph inks decides
+    how large it lands in the menubar. Measured against its neighbours:
+    ChatGPT.app inks 94.4% and renders 17.0pt; Claude.app inks 70.8% and
+    renders 12.8pt. Claudepot inked 77% and rendered 13.9pt — visibly
+    smaller, while passing every dimension check, because those checks
+    asserted a tile fraction rather than the thing the user sees. The
+    tray SVGs carry a cropped `viewBox` (672 of the 1024 authoring
+    canvas) and now render 16.4pt. Both variants share one viewBox
+    *size* so the block does not change scale when the alert badge
+    appears, and **the badge sets the floor on how tight the crop can
+    go** — it moved inward to (692, 332) to buy it. Its margin is derived
+    in RENDERED PIXELS and converted back: a unit here is 44/672 px, so a
+    first attempt at a 12-unit margin measured 0.79px, antialiasing
+    closed it, and the badge rendered touching two tile edges.
+    `verify-icons.py` asserts the rendered POINT HEIGHT and that nothing
+    touches the tile edge — every dimension check passed while the icon
+    was too small, so the rendered-height assertion is the one that
+    matters.
+- **`scripts/verify-icons.py` is the structural gate** — 56 checks over
   the PNG ladder, the `.icns` layer list, ICO layer encoding, tray
   sizes, and the grain floor. It catches the failures that still look
   like valid files on disk: an ICO whose layers are raw BMP, an `.icns`
