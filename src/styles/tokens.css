@@ -192,15 +192,9 @@
   --toast-max-width:       min(560px, calc(100vw - var(--sp-48)));
   /* Vertical anchor for the toast queue. Sits one comfortable em
      above the status bar so toasts read as bottom chrome rather than
-     overlay clutter. Single source for `.toasts` (CSS) and the echo
-     segment that lives in the status bar — anything that wants the
-     same anchor reads from here. */
+     overlay clutter. Anything that wants the same anchor reads from
+     here. */
   --toast-bottom:          calc(var(--statusbar-height) + var(--sp-16));
-  /* Status-bar echo — the dismissed-toast text the bar replays for a
-     few seconds. Capped narrower than `--toast-max-width` because the
-     bar is only 24 px tall and a wider strip would steam-roll the
-     surrounding segments. */
-  --toast-echo-max-width:  min(60%, 480px);
 
   /* Side/context panels — the visible-context aside in the Sessions
      section sits at this fixed width so the transcript column has a
@@ -574,27 +568,24 @@
    shipped dark ink on terracotta.
    ──────────────────────────────────────────────────────────── */
 :root {
-   Unported components (banners, running-op strip, confirm-dangerous,
-   rename/clean/adopt/move modals, repair view, operation-progress)
-   still read the previous rule-set's names. Alias them to the
-   closest paper-mono equivalent so they keep rendering during the
-   port without a color rewrite. As each component migrates, drop
-   its legacy-alias use; when the last reference is gone, delete
-   the alias block below.
-     as `var(--bg-raised)` it followed the theme while the accent it
-     sits on did not, so the notification badge and the env-var control
-     rendered near-black ink (oklch 19%) on terracotta in dark mode
-     while solid Buttons beside them rendered white. `--on-color` is
-     theme-invariant, which is the property this role requires. */
+  /* Unported components (banners, running-op strip, confirm-dangerous,
+     rename/clean/adopt/move modals, repair view, operation-progress)
+     still read the previous rule-set names. Alias them to the
+     closest paper-mono equivalent so they keep rendering during the
+     port without a color rewrite. As each component migrates, drop
+     its legacy-alias use; when the last reference is gone, delete
+     the alias block below. */
   --bad-weak:    color-mix(in oklch, var(--danger) 12%, transparent);
   --ok-weak:     color-mix(in oklch, var(--ok) 12%, transparent);
   --warn-weak:   color-mix(in oklch, var(--warn) 12%, transparent);
   --info-weak:   color-mix(in oklch, var(--info) 12%, transparent);
+  /* Hover/selected fills — derived from --fg so they invert correctly
      with the theme. Replaces the earlier scattered rgba(0,0,0,0.04) /
      rgba(255,255,255,0.05) literals that bypassed [data-theme]. */
   --bg-hover-soft:     color-mix(in oklch, var(--fg) 6%,  transparent);
   --bg-hover-firm:     color-mix(in oklch, var(--fg) 10%, transparent);
   --bg-selected-firm:  color-mix(in oklch, var(--fg) 14%, transparent);
+  /* Focus-ring offsets — outline pattern (input/list/row controls).
      The box-shadow ring (filled chrome controls) keeps using
      --focus-ring above. */
   --focus-outline-offset:        2px;
@@ -602,13 +593,13 @@
   --focus-outline-offset-flush:  1px;
   --focus-outline-offset-flat:   0;
   --focus-ring: 0 0 0 3px var(--accent-border);
-     value is mask alpha, not a visible color. `#000` means "fully
-     shown"; `transparent` (no token needed) means "fully clipped". */
+}
+
+/* Placed AFTER the legacy alias block on purpose. `--focus-ring` is
    declared down there, and a media query adds no specificity — so an
    override written above it loses on source order and silently does
    nothing. The first draft of this block sat before the aliases and
    was inert for exactly that reason. */
-}
 
 /* ─── Increase Contrast (prefers-contrast: more) ──────────────
    macOS System Settings › Accessibility › Display › Increase

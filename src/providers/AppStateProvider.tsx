@@ -11,7 +11,6 @@ import { api } from "../api";
 import { i18n } from "../lib/i18n";
 import {
   useToasts,
-  type DismissedToast,
   type Toast,
 } from "../hooks/useToasts";
 import { useRefresh } from "../hooks/useRefresh";
@@ -41,14 +40,6 @@ interface AppStateValue {
    * (Phase 1 → Phase 3). New code should prefer `emit({...})`.
    */
   emit: EmitFn;
-  /**
-   * Last toast that fully dismissed. The status bar reads this and
-   * echoes the message for a few seconds so the user can re-read what
-   * just scrolled by — `null` once the echo has been cleared.
-   */
-  lastDismissed: DismissedToast | null;
-  /** Clear the echo segment when its fade window elapses. */
-  clearLastDismissed: () => void;
 
   // Refresh state — single source shared between AppShell banner and
   // AccountsSection so there's only one `/profile` + `/verify_all`
@@ -140,8 +131,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     toasts,
     pushToast: pushToastPrimitive,
     dismissToast,
-    lastDismissed,
-    clearLastDismissed,
   } = useToasts();
   const {
     status,
@@ -314,8 +303,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       pushToast,
       emit,
       dismissToast,
-      lastDismissed,
-      clearLastDismissed,
       status,
       accounts,
       loadError,
@@ -350,8 +337,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       pushToast,
       emit,
       dismissToast,
-      lastDismissed,
-      clearLastDismissed,
       status,
       accounts,
       loadError,

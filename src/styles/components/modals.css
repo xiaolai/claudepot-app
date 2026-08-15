@@ -79,7 +79,7 @@
 
 /* ---------- toasts (paper-mono, bottom-center, above status bar) ----------
    Single transient-notification surface across the app, anchored to
-   `--toast-bottom` so it pairs with the status-bar echo strip
+   `--toast-bottom` so it sits above the status bar
    (AppStatusBar.tsx) instead of competing with it. Stack flows
    downward so the newest toast sits closest to the status bar — the
    user's eye-line for "what just happened" — and older toasts get

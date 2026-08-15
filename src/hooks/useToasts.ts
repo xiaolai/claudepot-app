@@ -20,26 +20,17 @@ export type Toast = {
 };
 
 /**
- * Last toast that fully dismissed (post-exit-animation removal). Used
- * by the status bar's echo segment so the user can re-read what just
- * scrolled by without the message blocking the UI. The status bar
- * gates display on `at` — recent dismissals show, older ones fade out
- * naturally. `null` means no echo (either none has happened yet, or
- * the consumer chose to clear it).
+ * The bell popover is the durable record of what happened; the
+ * status bar used to replay a dismissed toast there for six seconds
+ * as truncated, pointer-inert, aria-hidden text. Two surfaces for one
+ * event, and the second could not be acted on. See rules/design.md's
+ * signal budget.
  */
-export type DismissedToast = {
-  text: string;
-  kind: "info" | "error";
-  /** epoch-ms when the toast finished its exit animation. */
-  at: number;
-};
 
 let toastCounter = 0;
 
 export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [lastDismissed, setLastDismissed] =
-    useState<DismissedToast | null>(null);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   // Deferred commits live OUTSIDE the toast state so `dismissToast`
   // can run them without reading `toasts` (stale closure) and without
@@ -68,21 +59,7 @@ export function useToasts() {
   }, []);
 
   const removeToast = useCallback((id: number) => {
-    // Capture the toast's text + kind before it leaves so the status
-    // bar can echo it. We snapshot from the array INSIDE the setter so
-    // we read the live value without taking a stale closure on
-    // `toasts`.
-    setToasts((t) => {
-      const leaving = t.find((x) => x.id === id);
-      if (leaving) {
-        setLastDismissed({
-          text: leaving.text,
-          kind: leaving.kind,
-          at: Date.now(),
-        });
-      }
-      return t.filter((x) => x.id !== id);
-    });
+    setToasts((t) => t.filter((x) => x.id !== id));
     timersRef.current.delete(id);
   }, []);
 
@@ -268,15 +245,10 @@ export function useToasts() {
     [dismissToast],
   );
 
-  /** Clear the echo. Used when the status bar's fade window elapses
-   *  so the segment unmounts cleanly rather than re-rendering empty. */
-  const clearLastDismissed = useCallback(() => setLastDismissed(null), []);
 
   return {
     toasts,
     pushToast,
     dismissToast,
-    lastDismissed,
-    clearLastDismissed,
   };
 }

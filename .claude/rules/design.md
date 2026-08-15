@@ -135,9 +135,48 @@ imports `useSessionLive`. Do not fold it into this table.
   not in a tooltip.
 - **One signal per surface** — a given event fires exactly one of:
   toast, banner, inline note, `RunningOpStrip`, modal. No status
-  spray.
+  spray. The rule constrains what one event does; the **signal
+  budget** below constrains how many surfaces exist to do it on.
 - **Credentials never rendered** — tokens/secrets are always
   truncated (`sk-ant-oat01-Abc…xyz`). Never log, never toast.
+
+## Signal budget
+
+`One signal per surface` is written per event, and per event the code is
+careful. It does not constrain the surface *count*, and eleven mount
+before any section renders: `HealthPill`, `StatusIssuesBanner`,
+`NetworkUnreachablePanel`, `AppStatusBar` (live segment, counts,
+`RunningOpsChip`, `PendingJournalsChip`, `ServiceStatusDot`),
+`NotificationBell` + popover, `ToastContainer`, `OperationProgressHost`,
+`SidebarLiveStrip`, `SidebarBgBadge` — then sections add `AnomalyBanner`,
+`OrphanBanner`, `UpdatesPanel`.
+
+**Every indicator belongs to exactly one tier, and one event may occupy
+each tier at most once:**
+
+| Tier | Surface | Lifetime |
+|---|---|---|
+| **Ephemeral** | toast (foreground) *or* OS banner (background) — never both | seconds |
+| **Ambient** | one chip / dot / badge / row for ongoing state | while the state holds |
+| **Durable** | exactly one notification-log row | until dismissed |
+| **Blocking** | one modal, or one banner, only when action is required | until acted on |
+
+These tiers are a **view of the existing P0–P3 router**
+(`lib/notifications/types.ts`), not a second urgency system. Priority
+decides *whether* a surface fires; the tier decides *which one*. A
+parallel taxonomy is how two systems drift apart, so a new indicator
+names its tier rather than inventing a level.
+
+**A modal owns its operation.** While an op's progress modal is open it
+holds the ambient tier for that op, so `RunningOpsChip` filters it out —
+otherwise one rename renders as "1 op" in the status bar directly
+beneath the modal already showing its phases.
+
+**The bell is the "what did I miss" surface.** The status bar used to
+replay a dismissed toast for six seconds as truncated, pointer-inert,
+`aria-hidden` text: a second ephemeral surface, unactionable, sitting
+next to the durable record that already held it. Deleted — do not
+reintroduce a replay anywhere.
 
 ## Empty and loading states
 

@@ -144,7 +144,16 @@ function AppShell() {
   const consentGate = useActivityConsentGate();
   const { summary: pendingSummary, refresh: refreshPendingBanner } =
     usePendingJournals();
-  const { ops: runningOps } = useRunningOps();
+  const { active: activeOp } = useOperations();
+  const { ops: allRunningOps } = useRunningOps();
+  // One signal per event (rules/design.md). While an op's progress
+  // modal is open, the modal owns that op — the status-bar chip must
+  // not also count it, or a single rename renders as "1 op" in the bar
+  // beneath the modal already showing its phases.
+  const runningOps = useMemo(
+    () => allRunningOps.filter((o) => o.op_id !== activeOp?.opId),
+    [allRunningOps, activeOp?.opId],
+  );
   // First-run network reachability gate. Probes api.anthropic.com
   // once on mount; renders the unreachable panel below the
   // StatusIssuesBanner when the probe fails AND the user hasn't

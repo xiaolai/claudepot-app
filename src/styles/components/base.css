@@ -68,10 +68,6 @@ pre {
   user-select: text;
 }
 
-/* ---------- nerd-font icons ---------- */
-/* Icons are glyphs in the body mono font (JetBrainsMono NF Mono). Size
-   set via font-size inline from the <Icon size={n}
-
 /* ---------- utilities ---------- */
 
 .muted  { color: var(--fg-muted); }
