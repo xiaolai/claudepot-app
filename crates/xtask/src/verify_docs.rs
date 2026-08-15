@@ -35,7 +35,14 @@
 //!    `db_pragmas::apply_standard_pragmas`. Not a docs fact, but the
 //!    same shape of failure and it belongs beside check 3: that one
 //!    gates WAL *cleanup* coverage, this one gates WAL *growth* bounds,
-//!    and `corpus.db` was missing from both for as long as it existed.
+//!    and `corpus.db` was missing from both for as long as it existed;
+//! 7. the website's hand-copied icon assets still track
+//!    `assets/icon-set/`. `scripts/regen-icons.sh` covers the app
+//!    ladder only, so the web copies are maintained by memory — and in
+//!    v0.4.12 memory missed one: the favicon was redrawn and the nav
+//!    logo was left pointing at `pixel-*` masters that the same commit
+//!    deleted. claudepot.com served two different marks for two
+//!    releases.
 //!
 //! Screenshot *freshness* is deliberately not here — see
 //! [`verify_screenshots`], which is on demand.
@@ -108,12 +115,13 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     // Screenshot *freshness* is `cargo xtask verify-screenshots`, on
     // demand — see that function for why it is not a pull-request gate.
     check_screenshot_pairs(repo, &mut problems)?;
+    check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
 
     if problems.is_empty() {
         println!(
-            "verify-docs: ok — CLI verbs, Settings panes, databases, data-dir JSON state and the \
-             cc-env spec all in sync"
+            "verify-docs: ok — CLI verbs, Settings panes, databases, data-dir JSON state, web \
+             icon assets and the cc-env spec all in sync"
         );
         return Ok(());
     }
@@ -706,6 +714,87 @@ fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()>
                     "{shot} differs between assets/screenshots and web/public/screenshots"
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// The website's icon assets are hand-copied from `assets/icon-set/`,
+/// and nothing regenerates them — `scripts/regen-icons.sh` covers the
+/// app ladder only. This asserts they still track their masters.
+///
+/// # Why this exists
+///
+/// The v0.4.12 icon redesign updated `web/src/app/icon.svg` and
+/// `apple-icon.png` and missed `web/public/claudepot-logo.svg`. For two
+/// releases claudepot.com served the new mark in the browser tab and
+/// the retired pixel house in its own nav — while the file it was
+/// derived from had been deleted from the repo. Nothing failed,
+/// because nothing was looking.
+///
+/// # The two checks are deliberately different shapes
+///
+/// The favicon is a **byte copy** of the flat master, so byte equality
+/// is the honest assertion. The nav logo is not and cannot be: it
+/// carries a provenance comment and a squared viewBox, because it is
+/// composited onto a themed page rather than into a tab strip. Byte
+/// equality there would force one of the two to be wrong. What must
+/// hold is that the *artwork* matches — so this compares the block's
+/// path geometry, which is what changes when the mark is redrawn.
+fn check_web_icon_provenance(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    // Favicon: a straight copy of the plated flat master.
+    let master = repo.join("assets/icon-set/app-icon-flat.svg");
+    let favicon = repo.join("web/src/app/icon.svg");
+    match (std::fs::read(&master), std::fs::read(&favicon)) {
+        (Ok(a), Ok(b)) if a != b => problems.push(
+            "web/src/app/icon.svg has drifted from assets/icon-set/app-icon-flat.svg \
+             (the favicon is a byte copy of that master — re-copy it)"
+                .to_string(),
+        ),
+        (Err(_), _) => problems.push("assets/icon-set/app-icon-flat.svg is missing".to_string()),
+        (_, Err(_)) => problems.push("web/src/app/icon.svg is missing".to_string()),
+        _ => {}
+    }
+
+    // Nav logo: same artwork, different framing — compare geometry.
+    let glyph = repo.join("assets/icon-set/windows/icon-glyph.svg");
+    let logo = repo.join("web/public/claudepot-logo.svg");
+    let (Ok(glyph_src), Ok(logo_src)) = (
+        std::fs::read_to_string(&glyph),
+        std::fs::read_to_string(&logo),
+    ) else {
+        problems.push(
+            "assets/icon-set/windows/icon-glyph.svg or web/public/claudepot-logo.svg is missing"
+                .to_string(),
+        );
+        return Ok(());
+    };
+
+    let paths = |s: &str| -> Vec<String> {
+        s.match_indices(" d=\"")
+            .filter_map(|(i, m)| {
+                let rest = &s[i + m.len()..];
+                rest.find('"').map(|end| rest[..end].trim().to_string())
+            })
+            .collect()
+    };
+    let want = paths(&glyph_src);
+    if want.is_empty() {
+        problems.push(
+            "assets/icon-set/windows/icon-glyph.svg has no <path d=…> — the logo check \
+             cannot run, so it must not silently pass"
+                .to_string(),
+        );
+        return Ok(());
+    }
+    let have = paths(&logo_src);
+    for d in &want {
+        if !have.contains(d) {
+            problems.push(format!(
+                "web/public/claudepot-logo.svg is missing a block face from \
+                 assets/icon-set/windows/icon-glyph.svg (path starting `{}`) — re-derive it",
+                d.chars().take(28).collect::<String>()
+            ));
         }
     }
     Ok(())
