@@ -36,7 +36,11 @@ const isInTauri = (): boolean =>
 const apply = (m: TrafficLightMetrics): void => {
   const root = document.documentElement;
   root.style.setProperty("--traffic-light-center-y", `${m.center_y}px`);
-  root.style.setProperty("--traffic-light-right", `${m.right}px`);
+  // `--traffic-light-right` used to be published here and was never
+  // read by anything: `m.right` is consumed directly below. A runtime
+  // write with no consumer is indistinguishable from one whose
+  // consumer was deleted by mistake, which is why the build now
+  // rejects both.
   // Override the static `--chrome-inset-left` token (88px design
   // value) with the actual right edge + a 12px breath so the
   // breadcrumb sits a consistent gap from whichever traffic-light

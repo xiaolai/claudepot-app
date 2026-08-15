@@ -328,6 +328,18 @@
      breadcrumb icon. */
   --chrome-inset-left:     88px;
 
+  /* Vertical centre of the native traffic lights, as reported by
+     AppKit. `src/lib/trafficLights.ts` overrides this at runtime on
+     macOS; the default centres on the chrome so the offset computed
+     from it is zero before mount and on every other platform.
+
+     Declared here rather than left to a `var(--x, fallback)` at the
+     call site: an undeclared token reads as a typo, and the one
+     consumer was deleted as "an undeclared token" during a token
+     sweep, silently pinning the chrome to a constant zero. A runtime
+     channel that is not registered has no way to say it is real. */
+  --traffic-light-center-y: calc(var(--chrome-height) / 2);
+
   /* ── Durations ──────────────────────────────────────────── */
   --dur-fast:    80ms;
   --dur-base:    120ms;

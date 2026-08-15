@@ -47,10 +47,11 @@ export function WindowChrome({
   const { t } = useTranslation("shell");
   const stopDrag = (e: MouseEvent) => e.stopPropagation();
   // Pin every chrome child onto the OS-reported traffic-light
-  // centerline. Defaulted to 0 (no shift) when the var isn't set —
-  // non-macOS or pre-mount.
+  // centerline. `--traffic-light-center-y` is declared in tokens.css
+  // and overridden at runtime by `lib/trafficLights.ts`; its default
+  // centres on the chrome, so this is 0 pre-mount and off macOS.
   const trafficLightOffset =
-    "calc(var(--chrome-height) / 2 - var(--chrome-height) / 2)";
+    "calc(var(--traffic-light-center-y) - var(--chrome-height) / 2)";
   return (
     <div
       data-tauri-drag-region
