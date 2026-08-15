@@ -6,6 +6,113 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.4.15 — beta (unreleased)
+
+An external UX/UI audit, worked through in passes. Most of what follows
+is a defect the audit found or one found while fixing it; several had
+been shipping silently for a long time, because nothing failed when they
+did.
+
+### Fixed
+
+- **The transcript-retention warning did not open the pane it named.**
+  `NotificationTarget` has carried `{ section, sub }` since it was
+  written, and the click router matched on the section and discarded
+  `sub` — one branch handling two shapes, only one of which has a
+  subroute. The sole producer is the boot check that warns Claude Code's
+  `cleanupPeriodDays` is deleting transcript history, the only CC
+  setting that destroys user data. It asked for Settings → Retention and
+  opened whichever pane you last had.
+
+- **View → Agents in the macOS menu bar did nothing.** The menu emitted
+  the label (`agents`) while the section id is `automations`, kept for
+  localStorage compatibility. The item was built, shown, and inert. A
+  menu item that does nothing is indistinguishable from a slow app,
+  which is why it survived.
+
+- **The Dock icon fell back to the generic black executable icon** after
+  turning "hide dock icon" back off. The re-apply for that transition
+  already existed and its comment described the symptom exactly — it
+  just ran on a tokio worker, and `setApplicationIconImage` is
+  main-thread-only, so the guard logged an error and skipped. A written,
+  reviewed fix discarded at runtime on every use.
+
+- **GitHub PR badges had never rendered for anyone.** The helper spawned
+  `git` and called `wait_with_output()`, but `spawn()` inherits stdio —
+  only `output()` implies `piped()`. Nothing was captured, so
+  `current_branch` answered "no branch" for every repository. The
+  visible half was `pnpm tauri dev` printing a bare branch name per
+  project, interleaved with `fatal: not a git repository`.
+
+- **Every card in the Activities live strip was inert.** `LiveSessionCard`
+  draws a `<button>` and takes an optional click handler; the strip
+  passed none. It looked clickable and did nothing.
+
+- **⌘⇧L did nothing while the sidebar was collapsed** — the live strip
+  is unmounted in that state, so the shortcut queried a node that did
+  not exist. It now expands first, then focuses.
+
+- **⌘\ collapsed the sidebar out from under an open modal**, along with
+  three other copies of the shortcut gate that had each re-derived a
+  weaker check.
+
+- **75 of 127 buttons had no focus ring**, the rail's focus indicator was
+  delegated to a class nothing has emitted since the Lucide port, and
+  `prefers-contrast: more` was committed to in the design rules with
+  zero rules implementing it.
+
+- **92 references to 15 tokens that were never declared.** CSS drops a
+  declaration naming an undefined custom property, so each was silently
+  doing nothing and the element inherited instead. A misspelled token is
+  not a raw value — it reads as correct in review and fails invisibly.
+
+- **`tokens.css` had five comment blocks with no opener.** A line-based
+  codemod removing dead tokens had also eaten the line each comment
+  opened on, leaving prose loose inside `:root { }` where CSS parses it
+  as invalid declarations and drops it in silence.
+
+### Changed
+
+- **Global is now Config.** It was an engineering scope promoted to a
+  navigation label, sitting beside nouns the user owns. Saved positions
+  migrate; ⌘8 is unchanged.
+
+- **Live session state has one surface per job.** Five things rendered
+  the same data with no indication which was authoritative: the status
+  bar is now a count and not a control, the sidebar strip owns the list,
+  and Activities owns history and cost.
+
+- **One cursor policy: default everywhere except a real hyperlink.** It
+  had contradicted itself four ways, so two adjacent buttons produced
+  two cursors. `not-allowed` is gone — macOS never displays it, and
+  where a control faked disabled with a `role` it was the only cue the
+  control was dead.
+
+- **The dismissed-toast echo is gone.** It replayed a toast for six
+  seconds as truncated, pointer-inert, `aria-hidden` text, beside the
+  notification bell whose entire job is being the durable record.
+
+- **The Dock icon block is centred.** It sat 48 units low on the 1024
+  canvas — a 256px top margin against 160px at the bottom.
+
+- **The menubar icon renders 16.4pt instead of 13.9pt.** `tray-icon`
+  normalises the tile to 18 points tall, so tile padding is pure loss;
+  measured against neighbours in the same menubar, ours was the small
+  one despite an identical file size.
+
+### Internal
+
+- Guards for the classes above, each verified by planting the defect and
+  watching the check fail: CSS comment balance, cursor policy,
+  menu-navigation targets, layered-icon layer freshness, undeclared
+  tokens, the shared shortcut gate per handler, and the tray's rendered
+  point height rather than a tile fraction the old icon sat comfortably
+  inside while looking small.
+
+- The `xtask` self-tests now run in CI. They were added to prove the
+  guards could fail and then excluded from the test job, so none of them
+  had ever executed on a push.
+
 ## 0.4.14 — beta (released 2026-08-15)
 
 ### Fixed
