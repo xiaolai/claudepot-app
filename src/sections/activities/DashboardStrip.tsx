@@ -2,10 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../../lib/i18n";
 import { api } from "../../api";
-import { useDaemonStatus } from "../../hooks/useDaemonStatus";
-import { useSessionLive } from "../../hooks/useSessionLive";
 import { renderError } from "../../lib/i18n-error";
-import { compactModelLabel } from "../../lib/modelLabel";
 import { sessionEventMs } from "../../lib/sessionTime";
 import type { PriceTableDto, SessionRow } from "../../types";
 import {
@@ -36,13 +33,10 @@ import {
  */
 export function DashboardStrip() {
   const { t } = useTranslation("activities");
-  const live = useSessionLive();
   // Background CC supervisor + detached worker count. Surfaces in
   // the "Live" card when > 0 so the user sees the full picture of
   // active CC processes, not just the foreground ones their terminals
   // are attached to. See `dev-docs/cc-daemon-research.md`.
-  const { status: daemon } = useDaemonStatus();
-  const bgWorkers = daemon?.running ? daemon.bgWorkers ?? 0 : 0;
   const { table: priceTable, loading: priceLoading } = usePriceTable();
   const [allSessions, setAllSessions] = useState<SessionRow[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -81,7 +75,6 @@ export function DashboardStrip() {
     };
   }, []);
 
-  const liveStats = useMemo(() => deriveLiveStats(live), [live]);
   const rollups = useMemo(
     () => deriveDayMonthRollups(allSessions ?? [], table),
     [allSessions, table],
@@ -109,39 +102,13 @@ export function DashboardStrip() {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
         gap: "var(--sp-12)",
         padding: "var(--sp-16) var(--sp-24)",
         borderBottom: "var(--bw-hair) solid var(--line)",
         background: "var(--bg-sunken)",
       }}
     >
-      <StatCard label={t("dashboard.live")}>
-        {liveStats.running > 0 ? (
-          <>
-            <BigValue
-              value={liveStats.running}
-              suffix={t("dashboard.running")}
-            />
-            {liveStats.models.length > 0 && (
-              <Subline>{liveStats.models.join(" · ")}</Subline>
-            )}
-            {bgWorkers > 0 && (
-              <Subline>{t("dashboard.bgWorkers", { count: bgWorkers })}</Subline>
-            )}
-          </>
-        ) : bgWorkers > 0 ? (
-          <>
-            <BigValue
-              value={bgWorkers}
-              suffix={t("dashboard.bgWorkerSuffix", { count: bgWorkers })}
-            />
-            <Subline>{t("dashboard.foregroundIdle")}</Subline>
-          </>
-        ) : (
-          <IdleValue>{t("dashboard.idle")}</IdleValue>
-        )}
-      </StatCard>
 
       <StatCard label={t("dashboard.today")}>
         {allSessions === null ? (
@@ -230,34 +197,6 @@ export function DashboardStrip() {
 
 // ---------- pure stat derivation ----------
 
-interface LiveStats {
-  running: number;
-  /** Model mix chips like `Opus 4.7 · 2`. Only models with ≥1 session. */
-  models: string[];
-}
-
-function deriveLiveStats(
-  live: ReturnType<typeof useSessionLive>,
-): LiveStats {
-  // Count sessions that are actively working OR paused on a user
-  // prompt. An idle session that just wrapped up isn't "live" for
-  // the dashboard's purposes.
-  const active = live.filter(
-    (s) => s.status === "busy" || s.status === "waiting",
-  );
-  const byModel = new Map<string, number>();
-  for (const s of active) {
-    const m = liveModelLabel(s.model);
-    if (!m) continue;
-    byModel.set(m, (byModel.get(m) ?? 0) + 1);
-  }
-  return {
-    running: active.length,
-    models: Array.from(byModel.entries()).map(
-      ([m, n]) => `${m}${n > 1 ? ` × ${n}` : ""}`,
-    ),
-  };
-}
 
 interface Rollup {
   sessions: number;
@@ -364,13 +303,6 @@ function startOfLocalMonthMs(d: Date): number {
   return x.getTime();
 }
 
-/** Compact model label for the Live card, tolerating the `null` model a
- *  session carries before its first assistant event. The shortening
- *  itself lives in `lib/modelLabel`. */
-function liveModelLabel(raw: string | null): string | null {
-  if (!raw) return null;
-  return compactModelLabel(raw) || null;
-}
 
 function formatTokensHuman(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;

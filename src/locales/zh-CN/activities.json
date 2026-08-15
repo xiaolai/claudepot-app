@@ -161,12 +161,6 @@
     "estimatedTitle": "估算值：该模型尚未收录进费率表，因此按其家族当前费率计算。"
   },
   "dashboard": {
-    "live": "实时",
-    "running": "运行中",
-    "bgWorkers_other": "+ {{count}} 个后台进程",
-    "bgWorkerSuffix_other": "个后台进程",
-    "foregroundIdle": "前台空闲",
-    "idle": "空闲",
     "today": "今天",
     "thisMonth": "本月",
     "loading": "加载中…",

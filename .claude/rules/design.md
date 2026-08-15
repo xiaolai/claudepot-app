@@ -92,6 +92,38 @@ hybrid — render as a table and lift the verbs into a row kebab
 (`NF.ellipsis`). Don't add a density toggle: one container per
 section keeps the design pass cheap and the a11y story simple.
 
+## Live-session surfaces — one job each
+
+Five surfaces rendered the same `useSessionLive` data: the sidebar
+strip, the status-bar segment, an Activities strip, the Activities
+dashboard's Live card, and the tray. Each had its own vocabulary and
+its own click target, and nothing said which was authoritative. Ambient
+presence in the chrome is right; five renderings of one hook is not.
+
+| Surface | Job | Not its job |
+|---|---|---|
+| **Status bar** | the count, as plain text | the model mix; being a control |
+| **Sidebar strip** | the canonical in-window list; click opens the transcript | history, cost |
+| **Activities** | history and cost — today/month rollups | liveness |
+| **Tray** | liveness while the window is closed | anything the window already shows |
+| **Project rows / session header** | *contextual* liveness for the thing you are looking at | global liveness |
+
+Two rules follow, and both were violated before this was written down:
+
+- **A surface that only reports state is not a control.** The status-bar
+  segment was a button that jumped to Activities — but the sidebar strip
+  directly above it already opens the live list, and Activities
+  independently remembers its last tab, so clicking "live" could land on
+  Cost.
+- **A card that takes an `onClick?` must be given one.** `LiveSessionCard`
+  rendered a `<button>` and the Activities strip passed no handler, so
+  every card in it was inert. Both are deleted; if a live card returns,
+  it takes a required handler.
+
+**Boards is not a live surface.** Its "live" label means *updated within
+five minutes* and its data comes from polling `boards.db` — it never
+imports `useSessionLive`. Do not fold it into this table.
+
 ## Non-negotiables
 
 - **One primary action per view** (one `solid` / one `.btn.primary`).

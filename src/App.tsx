@@ -164,7 +164,7 @@ function AppShell() {
     requestDesktopSignOut,
   } = useAppState();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
-  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } =
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar, setCollapsed: setSidebarCollapsed } =
     useSidebarCollapsed();
 
   // Binding derived from the same source of truth AccountsSection
@@ -193,7 +193,13 @@ function AppShell() {
   const openShortcuts = useCallback(() => setShowShortcuts(true), []);
 
   // ⌘, / ⌘K / ⌘/ / ⌃⌥⌘L / ⌘⇧L. (⌘1..⌘9 lives in useSection.)
-  useShellShortcuts({ setSection, openPalette, openShortcuts, pushToast });
+  useShellShortcuts({
+    setSection,
+    openPalette,
+    openShortcuts,
+    pushToast,
+    expandSidebar: () => setSidebarCollapsed(false),
+  });
 
   // Window-event bridges: `claudepot:navigate-section` (cross-section
   // deep links) + `cp-goto-session` (palette session search).
@@ -453,7 +459,6 @@ function AppShell() {
         }}
         pendingSummary={onRepairSubview ? null : pendingSummary}
         onOpenRepair={() => setSection("projects", "repair")}
-        onOpenLive={() => setSection("events")}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={toggleSidebar}
       />

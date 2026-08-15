@@ -7,7 +7,7 @@ import {
   vi,
 } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { AppStatusBar, formatLiveSegment, modelMix } from "./AppStatusBar";
+import { AppStatusBar, formatLiveSegment } from "./AppStatusBar";
 import type { LiveSessionSummary } from "../types";
 
 function mkSession(overrides: Partial<LiveSessionSummary> = {}): LiveSessionSummary {
@@ -33,57 +33,34 @@ describe("AppStatusBar helpers", () => {
       expect(formatLiveSegment([])).toBeNull();
     });
 
-    it("drops the model-mix tail when every session has unknown model", () => {
-      // Unknown-model sessions are counted in the live segment but are
-      // not surfaced in the mix — a lone "?" letterform reads as an
-      // error indicator at a glance.
-      const segment = formatLiveSegment([mkSession({ model: null })]);
-      expect(segment).toBe("● 1 live");
+    it("renders a count and nothing else", () => {
+      expect(formatLiveSegment([mkSession({ model: null })])).toBe("● 1 live");
     });
 
-    it("renders the mix even when some sessions are still unknown", () => {
-      const segment = formatLiveSegment([
+    /**
+     * The model mix (`· OPUS 2, SON 1`) used to ride along here.
+     *
+     * Five surfaces rendered the same `useSessionLive` data and none of
+     * them said which was authoritative, so each now has one job:
+     * status bar = the count, sidebar strip = the list, Activities =
+     * history and cost. The bar's own comment had already conceded the
+     * mix "reads as opaque jargon to a new user".
+     */
+    it("does NOT append a model mix", () => {
+      const sessions = [
+        mkSession({ model: "claude-opus-4-7" }),
+        mkSession({ model: "claude-opus-4-7" }),
+        mkSession({ model: "claude-sonnet-4-6" }),
+      ];
+      expect(formatLiveSegment(sessions)).toBe("● 3 live");
+    });
+
+    it("counts unknown-model sessions like any other", () => {
+      const sessions = [
         mkSession({ model: null }),
-        mkSession({ model: null }),
         mkSession({ model: "claude-opus-4-7" }),
-      ]);
-      // Three live total, only one known family → no "? 2" tail.
-      expect(segment).toBe("● 3 live · OPUS 1");
-    });
-
-    it("renders counts with family markers", () => {
-      const sessions = [
-        mkSession({ model: "claude-opus-4-7" }),
-        mkSession({ model: "claude-opus-4-7" }),
-        mkSession({ model: "claude-sonnet-4-6" }),
       ];
-      expect(formatLiveSegment(sessions)).toBe("● 3 live · OPUS 2, SON 1");
-    });
-  });
-
-  describe("modelMix", () => {
-    it("groups by family", () => {
-      const sessions = [
-        mkSession({ model: "claude-opus-4-7" }),
-        mkSession({ model: "claude-opus-4-7-20251001" }),
-        mkSession({ model: "claude-sonnet-4-6" }),
-        mkSession({ model: "claude-haiku-4-5" }),
-      ];
-      expect(modelMix(sessions)).toEqual(["OPUS 2", "HAI 1", "SON 1"]);
-    });
-
-    it("sorts by count desc then key asc", () => {
-      const sessions = [
-        mkSession({ model: "claude-sonnet-4-6" }),
-        mkSession({ model: "claude-haiku-4-5" }),
-      ];
-      // Ties break alphabetically: HAI before SON.
-      expect(modelMix(sessions)).toEqual(["HAI 1", "SON 1"]);
-    });
-
-    it("truncates unmapped long models", () => {
-      const sessions = [mkSession({ model: "some-very-long-id" })];
-      expect(modelMix(sessions)[0]).toBe("some-ve… 1");
+      expect(formatLiveSegment(sessions)).toBe("● 2 live");
     });
   });
 });

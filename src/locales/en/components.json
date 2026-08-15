@@ -221,16 +221,6 @@
     "bgWorkers_one": "{{count}} bg worker",
     "bgWorkers_other": "{{count}} bg workers"
   },
-  "liveCards": {
-    "heading": "Live sessions",
-    "headingCount": "Live sessions ({{n}})",
-    "empty": "No sessions writing right now.",
-    "cardAria": "Live session {{id}} in {{project}}, status {{status}}",
-    "error": "error",
-    "stuck": "stuck",
-    "model": "Model",
-    "idle": "Time since last delta"
-  },
   "liveDot": {
     "errored": "Errored",
     "waiting": "Waiting",

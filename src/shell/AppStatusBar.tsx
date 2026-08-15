@@ -42,8 +42,6 @@ export interface AppStatusBarProps {
   pendingSummary?: PendingJournalsSummary | null;
   /** Click target for the pending chip — typically jumps to Projects → Repair. */
   onOpenRepair?: () => void;
-  /** Click target for the live-sessions segment — typically jumps to Activity. */
-  onOpenLive?: () => void;
   /** Current sidebar-collapse state — drives the leftmost toggle's glyph
    *  and aria-label. Omitting the prop hides the toggle entirely. */
   sidebarCollapsed?: boolean;
@@ -52,11 +50,15 @@ export interface AppStatusBarProps {
 }
 
 /**
- * Bottom tokens.s[6] chrome — the single ambient-state surface for the app.
+ * Bottom 24px chrome — the single ambient-state surface for the app.
+ *
+ * ("tokens.s[6]" stood here in place of "24px" since 0610b1e0 — an old
+ * codemod rewrote a literal inside prose. It was the only instance.)
  *
  * Layout, left → right:
- *   1. Live sessions segment (`● 3 live · OPUS 2, SON 1`) — text/link
- *      when `onOpenLive` is wired, plain text otherwise.
+ *   1. Live sessions segment (`● 3 live`) — a count, as plain text.
+ *      Ambient state, never a control: the sidebar strip directly above
+ *      already opens the live list.
  *   2. Aggregate counts — `N projects · N sessions` — passed in via `stats`.
  *      Each segment is `null`-elidable so we never render `0 projects`.
  *   3. Right cluster of action chips: `[● N op]` running-ops chip +
@@ -76,7 +78,6 @@ export function AppStatusBar({
   onReopenOp,
   pendingSummary,
   onOpenRepair,
-  onOpenLive,
   sidebarCollapsed,
   onToggleSidebar,
 }: AppStatusBarProps) {
@@ -199,7 +200,7 @@ export function AppStatusBar({
       )}
 
       {liveSegment && (
-        <LiveSegment text={liveSegment} onClick={onOpenLive} />
+        <LiveSegment text={liveSegment} />
       )}
 
       {countSegments.map((seg, i) => (
@@ -317,58 +318,21 @@ export function AppStatusBar({
  *  filter); otherwise stays as plain text. Either way the bar's
  *  uppercase + wide-tracking is preserved so it reads as one of the
  *  ambient segments rather than a chip. */
-function LiveSegment({
-  text,
-  onClick,
-}: {
-  text: string;
-  onClick?: () => void;
-}) {
-  // The live segment text reads as opaque jargon to a new user
-  // ("● 3 live · OPUS 2, SON 1"). Tooltips spell out what the dot
-  // means and that the right-hand cluster groups by model family.
+function LiveSegment({ text }: { text: string }) {
+  // Ambient, not a control. It used to be a button that jumped to
+  // Activities — but the sidebar strip directly above it already opens
+  // the live list, and Activities independently remembers its last tab,
+  // so clicking "live" could land on Cost.
   const { t } = useTranslation("shell");
   const tip = t("statusbar.liveTip");
-  if (!onClick) {
-    return (
-      <span
-        title={tip}
-        aria-label={tip}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--sp-6)",
-        }}
-      >
-        {text}
-      </span>
-    );
-  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={t("statusbar.liveTipClick")}
-      aria-label={t("statusbar.liveTipClick")}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "var(--sp-6)",
-        background: "transparent",
-        border: 0,
-        padding: 0,
-        margin: 0,
-        height: "auto",
-        font: "inherit",
-        fontSize: "inherit",
-        color: "inherit",
-        letterSpacing: "inherit",
-        textTransform: "inherit",
-        cursor: "pointer",
-      }}
+    <span
+      title={tip}
+      aria-label={tip}
+      style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)" }}
     >
       {text}
-    </button>
+    </span>
   );
 }
 
@@ -381,39 +345,16 @@ export function formatLiveSegment(
   sessions: LiveSessionSummary[],
 ): string | null {
   if (sessions.length === 0) return null;
+  // Count only. The model mix (`· OPUS 2, SON 1`) moved out because
+  // five surfaces rendered the same `useSessionLive` data and none of
+  // them said which was authoritative. The status bar's job is now the
+  // glanceable number; the sidebar strip owns the list, and Activities
+  // owns history and cost. The bar's own comment already conceded the
+  // mix "reads as opaque jargon to a new user".
+  //
   // Plain function, not a component — reads the global i18n instance
   // directly. The rendering component re-renders on language change
   // (its useTranslation subscription), re-invoking this.
-  const label = i18n.t("shell:statusbar.live", { count: sessions.length });
-  const mix = modelMix(sessions);
-  if (mix.length === 0) {
-    return label;
-  }
-  return `${label} · ${mix.join(", ")}`;
+  return i18n.t("shell:statusbar.live", { count: sessions.length });
 }
 
-/** Group live sessions by 3-letter model family and format as
- *  "OPUS 2, SON 1" in descending count order. Sessions whose model is
- *  `null` (no assistant turn yet) are omitted — the status bar doesn't
- *  label them as "? N" because a solitary question mark reads as an
- *  error; the live-count segment still counts them. Unrecognised
- *  non-null models cluster under their raw id trimmed to 8 chars. */
-export function modelMix(sessions: LiveSessionSummary[]): string[] {
-  const counts = new Map<string, number>();
-  for (const s of sessions) {
-    const key = familyKey(s.model);
-    if (key == null) continue;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([k, n]) => `${k} ${n}`);
-}
-
-function familyKey(model: string | null): string | null {
-  if (!model) return null;
-  if (model.includes("opus")) return "OPUS";
-  if (model.includes("sonnet")) return "SON";
-  if (model.includes("haiku")) return "HAI";
-  return model.length > 8 ? model.slice(0, 7) + "…" : model;
-}
