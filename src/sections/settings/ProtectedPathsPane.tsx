@@ -243,15 +243,14 @@ export function ProtectedPathsPane({ pushToast }: Props) {
           aria-invalid={addError != null}
           aria-describedby={addError ? "protected-add-error" : undefined}
         />
-        <button
-          type="button"
-          className="btn primary"
+        <Button
+          variant="solid"
           onClick={handleAdd}
           disabled={busy || draft.trim().length === 0}
           title={t("protected.addTitle")}
         >
           {t("protected.add")}
-        </button>
+        </Button>
       </div>
       {addError ? (
         <p id="protected-add-error" className="settings-inline-error" role="alert">

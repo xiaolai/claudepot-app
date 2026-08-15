@@ -1,6 +1,7 @@
 import React from "react";
 import { i18n } from "./lib/i18n";
 import { redactSecrets } from "./lib/redactSecrets";
+import { Button } from "./components/primitives/Button";
 
 interface State {
   /** User-visible message — always pre-redacted and length-bounded. */
@@ -109,9 +110,9 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
             >
               {this.state.error}
             </p>
-            <button className="btn" onClick={this.reset}>
+            <Button variant="subtle" onClick={this.reset}>
               {i18n.t("errorBoundary.tryAgain", { ns: "components" })}
-            </button>
+            </Button>
           </div>
         );
       }
@@ -120,12 +121,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
           <div className="empty">
             <h2>{i18n.t("errorBoundary.title", { ns: "components" })}</h2>
             <p className="muted mono">{this.state.error}</p>
-            <button
-              className="btn primary"
+            <Button
+              variant="solid"
               onClick={() => window.location.reload()}
             >
               {i18n.t("errorBoundary.retry", { ns: "components" })}
-            </button>
+            </Button>
           </div>
         </main>
       );

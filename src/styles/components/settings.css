@@ -45,10 +45,6 @@
   gap: var(--sp-6);
 }
 
-.settings-group-title .icon {
-  margin-right: 0;
-}
-
 .settings-desc {
   font-size: var(--fs-sm);
   margin: 0 0 var(--sp-10);

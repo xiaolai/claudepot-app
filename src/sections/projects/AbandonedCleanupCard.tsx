@@ -10,9 +10,10 @@ import {
   ModalFooter,
   ModalHeader,
 } from "../../components/primitives/Modal";
-import { Icon } from "../../components/Icon";
 import type { AbandonedCleanupReport } from "../../types";
 import { formatSize } from "./format";
+import { Glyph } from "../../components/primitives/Glyph";
+import { NF } from "../../icons";
 
 /**
  * "Clean recovery artifacts" card — surfaces abandoned rename
@@ -90,7 +91,7 @@ export function AbandonedCleanupCard({
       return (
         <section className="maintenance-section">
           <div className="maintenance-section-header">
-            <Icon name="alert-circle" size={14} />
+            <Glyph g={NF.alertCircle} style={{ fontSize: 14 }} />
             <h2>{t("artifacts.heading")}</h2>
           </div>
           <p className="muted maintenance-desc">
@@ -125,7 +126,7 @@ export function AbandonedCleanupCard({
   return (
     <section className="maintenance-section">
       <div className="maintenance-section-header">
-        <Icon name="trash-2" size={14} />
+        <Glyph g={NF.trash} style={{ fontSize: 14 }} />
         <h2>{t("artifacts.heading")}</h2>
       </div>
       <p className="muted maintenance-desc">

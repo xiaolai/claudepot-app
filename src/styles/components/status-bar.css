@@ -88,11 +88,6 @@
   background: transparent;
 }
 
-.status-bar-toggle .icon {
-  margin-right: 0;
-  flex-shrink: 0;
-}
-
 .status-bar-verifying {
   display: inline-flex;
   align-items: center;
@@ -102,10 +97,6 @@
   font-style: italic;
   margin-left: auto;
   flex-shrink: 0;
-}
-
-.status-bar-verifying .icon {
-  margin-right: 0;
 }
 
 .status-bar-spin {
@@ -135,12 +126,6 @@
   gap: var(--sp-8);
   padding: var(--sp-4) 0;
   font-size: var(--fs-sm);
-}
-
-.status-bar-item .icon {
-  margin-right: 0;
-  flex-shrink: 0;
-  margin-top: var(--sp-px);
 }
 
 .status-bar-item.error svg { color: var(--danger); }

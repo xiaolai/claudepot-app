@@ -54,10 +54,6 @@
   overflow: hidden;
 }
 .project-filter-chip:first-child { border-left: none; }
-.project-filter-chip .icon {
-  margin: 0;
-  opacity: 0.75;
-}
 .project-filter-chip-text {
   display: inline-flex;
   align-items: baseline;
@@ -82,7 +78,6 @@
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--fg);
 }
-.project-filter-chip.selected .icon { opacity: 1; }
 .project-filter-chip:focus-visible {
   outline: var(--bw-focus) solid var(--accent);
   outline-offset: var(--focus-outline-offset-tight);
@@ -163,7 +158,6 @@
   border: var(--bw-subhair) solid var(--line);
 }
 .project-hint svg { flex-shrink: 0; margin-top: var(--sp-2); }
-.project-hint .icon { margin-right: 0; }
 .project-hint.cleanup {
   color: var(--warn);
   background: var(--warn-weak);

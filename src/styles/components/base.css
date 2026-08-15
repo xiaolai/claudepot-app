@@ -70,29 +70,7 @@ pre {
 
 /* ---------- nerd-font icons ---------- */
 /* Icons are glyphs in the body mono font (JetBrainsMono NF Mono). Size
-   set via font-size inline from the <Icon size={n}> component; color
-   inherits from the parent so one `color: var(--accent)` recolors
-   every icon beneath it. */
-.icon {
-  display: inline-block;
-  font-family: var(--font-mono);
-  font-feature-settings: normal;
-  font-variant: normal;
-  text-rendering: auto;
-  -webkit-font-smoothing: antialiased;
-  line-height: 1;
-  vertical-align: -0.125em;
-  flex-shrink: 0;
-}
-/* `.btn .icon` used to set margin-right in the nerd-font era; Lucide
-   SVGs don't carry the `.icon` class, so the new `gap: 6px` on `.btn`
-   (see above) is what actually puts air between icon and label. */
-.icon-btn .icon,
-.copy-btn .icon,
-.toast-close .icon,
-.project-filter-chip .icon {
-  margin-right: 0;
-}
+   set via font-size inline from the <Icon size={n}
 
 /* ---------- utilities ---------- */
 

@@ -76,10 +76,6 @@
   flex-shrink: 0;
 }
 
-.sidebar-search-icon.icon {
-  margin-right: 0;
-}
-
 .sidebar-search-input {
   flex: 1;
   border: none;
@@ -108,10 +104,6 @@
   color: var(--fg-muted);
   box-shadow: none;
   flex-shrink: 0;
-}
-
-.sidebar-search-clear .icon {
-  margin-right: 0;
 }
 
 .sidebar-search-clear:hover {
@@ -207,10 +199,6 @@
   opacity: 0;
   transition: opacity var(--dur-hover) var(--ease-out);
   flex-shrink: 0;
-}
-
-.sidebar-switch-btn .icon {
-  margin-right: 0;
 }
 
 .sidebar-item:hover .sidebar-switch-btn,

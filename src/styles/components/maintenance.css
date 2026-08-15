@@ -31,10 +31,6 @@
   margin: 0;
 }
 
-.maintenance-section-header .icon {
-  color: var(--fg-muted);
-}
-
 .maintenance-desc {
   font-size: var(--fs-sm);
   margin: 0 0 var(--sp-12);

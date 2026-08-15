@@ -7,6 +7,7 @@ export type ButtonVariant =
   | "ghost"
   | "subtle"
   | "outline"
+  | "warn"
   | "accent";
 
 export type ButtonSize = "sm" | "md" | "lg";
@@ -163,6 +164,17 @@ function variantPaint(
         bg: hover ? "var(--bg-hover)" : "transparent",
         color: fg ?? "var(--fg)",
         border: `var(--bw-hair) solid ${danger ? "var(--danger)" : "var(--line-strong)"}`,
+      };
+    case "warn":
+      // Legacy `.btn.warn` carried amber text on a neutral fill for
+      // cautionary-but-not-destructive actions (break a stale lock).
+      // paper-mono had no equivalent, so migrating those call sites to
+      // `subtle` would have silently dropped the signal — a migration
+      // that loses information is not finished, it is lossy.
+      return {
+        bg: hover ? "var(--warn-weak)" : "var(--bg-sunken)",
+        color: "var(--warn)",
+        border: "var(--bw-hair) solid var(--line)",
       };
     case "accent":
       return {

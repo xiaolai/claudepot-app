@@ -41,11 +41,6 @@
   display: flex;
   gap: var(--sp-8);
 }
-/* Inline button icons: --fs-md per design system */
-.detail-actions .icon,
-.project-detail-actions .icon {
-  font-size: var(--fs-md);
-}
 
 .detail-section {
   padding: var(--sp-12) 0;
@@ -89,11 +84,6 @@
 .collapsible-section-toggle:hover {
   color: var(--fg);
   background: transparent;
-}
-
-.collapsible-section-toggle .icon {
-  margin-right: 0;
-  flex-shrink: 0;
 }
 
 .collapsible-chevron {

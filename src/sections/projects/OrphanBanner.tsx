@@ -1,7 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { Icon } from "../../components/Icon";
 import type { OrphanedProject } from "../../types";
 import { formatSize } from "./format";
+import { Button } from "../../components/primitives/Button";
+import { Glyph } from "../../components/primitives/Glyph";
+import { NF } from "../../icons";
 
 /**
  * Persistent banner surfaced whenever `~/.claude/projects/` contains
@@ -38,16 +40,16 @@ export function OrphanBanner({
 
   return (
     <div className="banner banner-warn" role="alert">
-      <Icon name="alert-triangle" size={14} />
+      <Glyph g={NF.warn} style={{ fontSize: 14 }} />
       <div className="banner-body">
         <strong>{label}</strong>
         <span className="banner-hint">
           {t("orphans.hint")}
         </span>
       </div>
-      <button className="btn" onClick={onAdopt}>
+      <Button variant="subtle" onClick={onAdopt}>
         {t("orphans.reviewAdopt")}
-      </button>
+      </Button>
     </div>
   );
 }

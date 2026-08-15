@@ -339,10 +339,6 @@
   border-radius: var(--r-1);
 }
 
-.onboarding-step-detail .icon {
-  margin-right: 0;
-}
-
 .onboarding-repeat-hint {
   font-size: var(--fs-xs);
   margin-top: var(--sp-4);

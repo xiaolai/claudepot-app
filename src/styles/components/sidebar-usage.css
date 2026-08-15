@@ -120,11 +120,6 @@
   line-height: var(--lh-base);
 }
 
-.usage-unavailable-body .icon {
-  flex-shrink: 0;
-  margin-top: var(--sp-px);
-}
-
 .usage-unavailable-action {
   align-self: flex-start;
   display: inline-flex;

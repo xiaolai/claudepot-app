@@ -14,6 +14,7 @@
  */
 import {
   Archive,
+  ArrowLeft,
   ArrowRight,
   ArrowUpRight,
   Ban,
@@ -26,6 +27,7 @@ import {
   ChevronRight,
   ChevronUp,
   Circle,
+  CircleAlert,
   Clock,
   Copy,
   Cpu,
@@ -88,6 +90,7 @@ import {
   User,
   UserPlus,
   Users,
+  WifiOff,
   Wrench,
   X,
   XCircle,
@@ -174,6 +177,9 @@ export const NF = {
   eye:        Eye,
   eyeSlash:   EyeOff,
   warn:       TriangleAlert,
+  wifiOff:   WifiOff,
+  arrowL:    ArrowLeft,
+  alertCircle: CircleAlert,
   info:       Info,
   bell:       Bell,
   bolt:       Zap,
