@@ -3,6 +3,7 @@ import { api } from "../api";
 import { i18n } from "../lib/i18n";
 import { toastError } from "../lib/i18n-error";
 import { triggerSettingsTab } from "../lib/networkPanelDeepLink";
+import { decodeDestination } from "../lib/destination";
 import { useTauriEvent } from "./useTauriEvent";
 
 /**
@@ -27,18 +28,20 @@ export function useAppMenuRouter(args: {
     const cmd = event.payload;
     if (cmd.startsWith("app-menu:nav:")) {
       // Format: `app-menu:nav:<section>` or
-      // `app-menu:nav:<section>:<subtab>`. The optional subtab
-      // applies to sections that expose subtabs internally (today
-      // only Settings); routing it via `triggerSettingsTab` keeps
-      // the cold/hot-mount machinery in one place. Tray Health
-      // entry uses this form to land on Settings → Health.
-      const parts = cmd.substring("app-menu:nav:".length).split(":");
-      const section = parts[0];
-      if (section && enabledSectionIds().includes(section)) {
-        setSection(section);
-        const subtab = parts[1];
-        if (section === "settings" && subtab) {
-          triggerSettingsTab(subtab);
+      // `app-menu:nav:<section>:<subtab>`. The OS menu API carries a
+      // string and nothing else, which is why this transport exists at
+      // all — but the PARSING is now shared with every other one
+      // (`lib/destination`), so a level the menu can express cannot be
+      // a level the receiver silently drops. Tray Health uses this form
+      // to land on Settings → Health.
+      const dest = decodeDestination(cmd.substring("app-menu:nav:".length));
+      if (dest && enabledSectionIds().includes(dest.section)) {
+        setSection(dest.section);
+        if (dest.section === "settings" && dest.tab) {
+          // Settings panes reach their target through the cold-mount
+          // sessionStorage hint plus a hot-mount event; keeping that in
+          // one helper is why this is not a plain setSection subroute.
+          triggerSettingsTab(dest.tab);
         }
       }
       return;

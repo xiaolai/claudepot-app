@@ -123,6 +123,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_tokens_declared_only_in_tokens_css(repo, &mut problems)?;
     check_css_comments_balance(repo, &mut problems)?;
     check_cursor_policy(repo, &mut problems)?;
+    check_menu_nav_targets_exist(repo, &mut problems)?;
     check_optional_shortcut_callbacks_are_wired(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
@@ -1339,6 +1340,109 @@ fn check_tokens_declared_only_in_tokens_css(repo: &Path, problems: &mut Vec<Stri
         }
     }
     Ok(())
+}
+
+/// Every `app-menu:nav:<destination>` the Rust side emits must name a
+/// place the renderer can actually reach.
+///
+/// The tray and app menu serialise a destination through an OS API that
+/// carries only a string, so this is a cross-boundary contract with no
+/// compiler between the two halves — the same shape as the event
+/// channels, where seven had no subscriber at all. A menu item whose
+/// section was renamed does not fail: it silently does nothing when
+/// clicked, which is indistinguishable from a slow app.
+///
+/// Rust-side ids are checked against the registry, and a `settings`
+/// subtab against the shipped pane list.
+fn check_menu_nav_targets_exist(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let registry = read(repo, "src/sections/registry.tsx")?;
+    let sections: BTreeSet<String> = registry
+        .lines()
+        .filter_map(|l| {
+            let t = l.trim_start();
+            let rest = t.strip_prefix("id: \"")?;
+            rest.find('"').map(|e| rest[..e].to_string())
+        })
+        .collect();
+    if sections.is_empty() {
+        bail!("could not parse any section ids from registry.tsx — fix this check");
+    }
+    let panes = shipped_settings_panes(&read(repo, SETTINGS_PANES_SRC)?);
+
+    let mut rust: Vec<PathBuf> = Vec::new();
+    collect_rust_paths(&repo.join("src-tauri/src"), &mut rust);
+    let needle = "app-menu:nav:";
+    let mut seen = 0usize;
+    for path in rust {
+        let Ok(src) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let mut from = 0usize;
+        while let Some(rel_at) = src[from..].find(needle) {
+            let at = from + rel_at + needle.len();
+            // Stop at the first character an id cannot contain. Bounding
+            // on a quote alone swallowed prose when the needle appeared
+            // inside a comment, and reported the resulting garbage as a
+            // missing section.
+            let end = at
+                + src[at..]
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == ':'))
+                    .unwrap_or(0);
+            let payload = src[at..end].trim_end_matches(':');
+            from = end.max(at + 1);
+            if payload.is_empty() {
+                continue;
+            }
+            seen += 1;
+            let mut parts = payload.split(':');
+            let section = parts.next().unwrap_or("");
+            if !sections.contains(section) {
+                problems.push(format!(
+                    "{rel} emits `app-menu:nav:{payload}` but `{section}` is not a section \
+                     in registry.tsx — the menu item silently does nothing when clicked"
+                ));
+                continue;
+            }
+            if section == "settings" {
+                if let Some(tab) = parts.next() {
+                    if !panes.contains(tab) {
+                        problems.push(format!(
+                            "{rel} emits `app-menu:nav:{payload}` but `{tab}` is not a \
+                             Settings pane — the menu opens Settings on the wrong pane"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if seen == 0 {
+        problems.push(
+            "no `app-menu:nav:` payloads found under src-tauri/src — the scan is broken, \
+             not the codebase"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Every `.rs` file under `dir`, recursively.
+fn collect_rust_paths(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.filter_map(Result::ok) {
+        let path = e.path();
+        if path.is_dir() {
+            collect_rust_paths(&path, out);
+        } else if path.extension().is_some_and(|x| x == "rs") {
+            out.push(path);
+        }
+    }
 }
 
 /// `pointer` and `not-allowed` are gone from activation controls.
@@ -3440,5 +3544,69 @@ mod guard_tests {
             "// we used to set cursor: pointer here\nconst s = { color: \"red\" };",
         );
         assert_eq!(run(check_cursor_policy, &d), Vec::<String>::new());
+    }
+
+    fn menu_repo(rust: &str) -> tempfile::TempDir {
+        let d = repo();
+        write(
+            &d,
+            "src/sections/registry.tsx",
+            "export const sections = [\n  {\n    id: \"accounts\",\n  },\n  {\n    id: \"automations\",\n  },\n  {\n    id: \"settings\",\n  },\n];",
+        );
+        write(
+            &d,
+            "src/sections/settings/panes.ts",
+            "export const SETTINGS_PANES = [\n  { id: \"health\" },\n  { id: \"retention\" },\n];",
+        );
+        write(&d, "src-tauri/src/app_menu.rs", rust);
+        d
+    }
+
+    #[test]
+    fn menu_nav_accepts_real_destinations() {
+        let d = menu_repo(
+            r#"with_id("app-menu:nav:automations"); with_id("app-menu:nav:settings:health");"#,
+        );
+        assert_eq!(run(check_menu_nav_targets_exist, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn menu_nav_catches_a_section_that_does_not_exist() {
+        // The real one: the menu emitted the LABEL (`agents`) while the
+        // registry id is `automations`, kept for localStorage
+        // compatibility. View -> Agents was built, shown, and did
+        // nothing when clicked.
+        let d = menu_repo(r#"with_id("app-menu:nav:agents");"#);
+        let out = run(check_menu_nav_targets_exist, &d);
+        assert!(out.iter().any(|p| p.contains("not a section")), "{out:?}");
+    }
+
+    #[test]
+    fn menu_nav_catches_a_settings_pane_that_does_not_exist() {
+        let d = menu_repo(r#"with_id("app-menu:nav:settings:helth");"#);
+        let out = run(check_menu_nav_targets_exist, &d);
+        assert!(
+            out.iter().any(|p| p.contains("not a Settings pane")),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn menu_nav_reports_a_scan_that_matched_nothing() {
+        // Green because nothing was checked is the failure mode this
+        // whole file exists to avoid.
+        let d = menu_repo("fn main() {}");
+        let out = run(check_menu_nav_targets_exist, &d);
+        assert!(out.iter().any(|p| p.contains("scan is broken")), "{out:?}");
+    }
+
+    #[test]
+    fn menu_nav_ignores_the_needle_inside_prose() {
+        // Bounding the payload on a quote alone swallowed comment text
+        // and reported the garbage as a missing section.
+        let d = menu_repo(
+            "// the `app-menu:nav:` listener lives in App.tsx\nwith_id(\"app-menu:nav:automations\");",
+        );
+        assert_eq!(run(check_menu_nav_targets_exist, &d), Vec::<String>::new());
     }
 }

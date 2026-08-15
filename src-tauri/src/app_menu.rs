@@ -166,7 +166,11 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         MenuItemBuilder::with_id("app-menu:nav:third-party", tr("menu.navThirdParty"))
             .build(app)
             .map_err(|e| format!("nav-third-party: {e}"))?;
-    let nav_agents = MenuItemBuilder::with_id("app-menu:nav:agents", tr("menu.navAgents"))
+    // `automations`, not `agents`: the registry id predates the "Agents"
+    // label and is kept for localStorage compatibility. Emitting the
+    // LABEL meant View -> Agents named a section that does not exist,
+    // so the item was built, shown, and did nothing when clicked.
+    let nav_agents = MenuItemBuilder::with_id("app-menu:nav:automations", tr("menu.navAgents"))
         .build(app)
         .map_err(|e| format!("nav-agents: {e}"))?;
     let nav_global = MenuItemBuilder::with_id("app-menu:nav:global", tr("menu.navGlobal"))
