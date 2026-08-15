@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import struct
 import subprocess
+import shutil
+import tempfile
+import pathlib
 import sys
 from pathlib import Path
 
@@ -206,6 +209,43 @@ else:
                   "the block is visible in the render (brand colour present)",
                   f"only {frac:.1%} warm pixels — group order is top-first; "
                   f"a full-canvas plate listed first occludes the block")
+
+# The layer PNGs must still match the SVG masters they were rasterised
+# from. They are PNGs because actool renders a filtered layer SVG as
+# near-black (the 0.4.12 Dock icon), so the rasterisation step is not
+# optional — but it also means the layers are a COPY, and a copy goes
+# stale in silence. It did: the -48 centring shift moved the .icns, the
+# tray, the web mark and the ICO, and left block.png on the old low
+# geometry, so the Dock kept an icon nothing else agreed with. A stale
+# layer is a perfectly valid PNG and every existing check passed.
+#
+# Geometry rather than bytes: rsvg output can differ across versions,
+# and what actually drifts is the artwork's position, not its encoding.
+if shutil.which("rsvg-convert") is None:
+    print("  skip rsvg-convert not installed — layer freshness unchecked")
+else:
+    try:
+        from PIL import Image as _L  # noqa: PLC0415
+    except ImportError:
+        print("  skip Pillow not installed — layer freshness unchecked")
+    else:
+        for png, svg in (("plate.png", "layer-1-plate.svg"),
+                         ("block.png", "layer-2-glyph.svg")):
+            have = ICONS / "Claudepot.icon" / "Assets" / png
+            master = ROOT / "assets" / "icon-set" / "macos" / svg
+            if not (have.is_file() and master.is_file()):
+                check(False, f"{png} and its master both exist", "missing")
+                continue
+            with tempfile.TemporaryDirectory() as td:
+                fresh = pathlib.Path(td) / png
+                subprocess.run(["rsvg-convert", "-w", "1024", "-h", "1024",
+                                str(master), "-o", str(fresh)], check=True)
+                a = _L.open(have).convert("RGBA").getchannel("A").getbbox()
+                b = _L.open(fresh).convert("RGBA").getchannel("A").getbbox()
+            check(a == b,
+                  f"{png} matches {svg} (layer not stale)",
+                  f"ink box {a} but the master renders {b} — "
+                  f"re-run scripts/regen-icons.sh then build-macos-glass-icon.sh")
 
 print("\nmacOS .icns")
 icns = ICONS / "icon.icns"

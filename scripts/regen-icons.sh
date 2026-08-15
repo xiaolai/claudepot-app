@@ -243,8 +243,31 @@ for pair in "tray-icon:$TRAY_SVG" "tray-iconAlert:$TRAY_ALERT_SVG"; do
   echo "  wrote $ICONS_DIR/${name}Template@2x.png + ${name}Mono@2x.png"
 done
 
+# 6. macOS 26 layered icon layers.
+#
+#    These are PNGs and not SVGs on purpose: `actool` renders a layer
+#    SVG carrying a filter as near-black, which is how the 0.4.12 Dock
+#    icon shipped black. The plate has `feTurbulence` grain and a
+#    `radialGradient` sheen, so it is exactly the shape that fails.
+#    rsvg draws both correctly, so rasterising here and handing actool
+#    flat pixels sidesteps the whole class.
+#
+#    Regenerated HERE rather than by hand, because by hand is how they
+#    went stale: the -48 centring shift moved every other raster and
+#    left these two behind, so the Dock kept the old low block while
+#    the tray, .icns and web mark had all moved. Nothing failed —
+#    a stale layer is a valid PNG.
+LAYERS_DIR="$ICONS_DIR/Claudepot.icon/Assets"
+if [[ -d "$LAYERS_DIR" ]]; then
+  render 1024 assets/icon-set/macos/layer-1-plate.svg "$LAYERS_DIR/plate.png"
+  render 1024 assets/icon-set/macos/layer-2-glyph.svg "$LAYERS_DIR/block.png"
+  echo "  wrote $LAYERS_DIR/plate.png + block.png"
+  echo "  NOTE: run scripts/build-macos-glass-icon.sh to recompile Assets.car"
+fi
+
 echo ""
 echo "Done. Verify with:"
 echo "  file $ICONS_DIR/icon.ico"
 echo "  iconutil -c iconset $ICONS_DIR/icon.icns -o /tmp/check.iconset && ls /tmp/check.iconset"
+echo "  scripts/build-macos-glass-icon.sh   # recompile Assets.car from the layers"
 echo "  scripts/verify-icons.py"

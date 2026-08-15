@@ -463,8 +463,22 @@ pub async fn preferences_set_hide_dock_icon(
         //
         // Only on the way back to `Regular`: applying it while going
         // the other way would be the same discarded call again.
+        //
+        // Via `run_on_main_thread`, because this command is `async` and
+        // therefore runs on a tokio worker, while
+        // `setApplicationIconImage` is main-thread-only. Called
+        // directly, the main-thread guard inside
+        // `override_application_icon` logged an error and returned —
+        // so the re-apply this block exists for never happened, and
+        // the Dock kept exactly the generic executable icon the comment
+        // above describes. The fix was written; it just ran on the
+        // wrong thread.
         if !hide {
-            crate::dock_icon::override_application_icon();
+            if let Err(e) = app.run_on_main_thread(|| {
+                crate::dock_icon::override_application_icon();
+            }) {
+                tracing::warn!("preferences: could not re-apply the Dock icon: {e}");
+            }
         }
     }
     let snapshot = {

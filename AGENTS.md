@@ -959,7 +959,7 @@ Load-bearing rules:
     touches the tile edge — every dimension check passed while the icon
     was too small, so the rendered-height assertion is the one that
     matters.
-- **`scripts/verify-icons.py` is the structural gate** — 56 checks over
+- **`scripts/verify-icons.py` is the structural gate** — 58 checks over
   the PNG ladder, the `.icns` layer list, ICO layer encoding, tray
   sizes, and the grain floor. It catches the failures that still look
   like valid files on disk: an ICO whose layers are raw BMP, an `.icns`
