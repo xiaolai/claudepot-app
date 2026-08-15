@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.15 — beta (unreleased)
+## 0.4.15 — beta (released 2026-08-15)
 
 An external UX/UI audit, worked through in passes. Most of what follows
 is a defect the audit found or one found while fixing it; several had
