@@ -13,6 +13,7 @@ import {
 } from "../lib/storageKeys";
 import { requestIdle, cancelIdle } from "../lib/idle";
 import { isShortcutContextBlocked } from "./useGlobalShortcuts";
+import { canonicalSectionId } from "../lib/destination";
 
 function safeGet(key: string): string | null {
   try {
@@ -122,8 +123,13 @@ export function useSection<Id extends string>(
     //      launch" preference in Settings — authoritative.
     //   2. `claudepot.activeSection` — the section last navigated to.
     //   3. defaultId (already active, nothing to do).
-    const start = safeGet(START_KEY);
-    const stored = safeGet(STORAGE_KEY);
+    // Through `canonicalSectionId` so a RENAMED section restores to its
+    // new id instead of failing the `includes` check and dropping the
+    // user to Accounts. A stale id from an older build still falls back
+    // — the two cases look identical from here, and only the map can
+    // tell them apart.
+    const start = canonicalSectionId(safeGet(START_KEY));
+    const stored = canonicalSectionId(safeGet(STORAGE_KEY));
     const target: Id | null =
       start && (ids as readonly string[]).includes(start)
         ? (start as Id)

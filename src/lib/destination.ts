@@ -124,3 +124,23 @@ export function decodeDestination(raw: string): Destination | null {
 export function sameDestination(a: Destination, b: Destination): boolean {
   return a.section === b.section && a.tab === b.tab && a.sub === b.sub;
 }
+
+/**
+ * The id a stored section value means today.
+ *
+ * Restore paths read a raw string out of `localStorage` and check it
+ * against the current registry, silently falling back to Accounts when
+ * it does not match. That is correct for a stale id from an older
+ * build and *wrong* for a renamed one: the user is dropped somewhere
+ * else and their saved position is gone with no way to tell which
+ * happened.
+ *
+ * Every restore path goes through here so a rename has exactly one
+ * place to land. The map is identity today — the point is that it
+ * exists before the renames, not after.
+ */
+export function canonicalSectionId(stored: string | null | undefined): string | null {
+  if (!stored) return null;
+  return LEGACY_SECTION_IDS[stored] ?? stored;
+}
+

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Destination } from "./destination";
 import {
   LEGACY_SECTION_IDS,
+  canonicalSectionId,
   decodeDestination,
   encodeDestination,
   sameDestination,
@@ -95,5 +96,42 @@ describe("sameDestination", () => {
       sameDestination(a, { ...a, target: { kind: "project" as const, id: "/x" } }),
     ).toBe(true);
     expect(sameDestination(a, { section: "projects" })).toBe(false);
+  });
+});
+
+/**
+ * The property A3 and A1 depend on.
+ *
+ * Restore paths read a raw string from `localStorage` and check it
+ * against the current registry, falling back to Accounts when it does
+ * not match. For a stale id from an older build that is right. For a
+ * RENAMED one it silently discards the user's saved position, and the
+ * two are indistinguishable at the call site — which is why the rename
+ * map has to exist before the renames, not after.
+ */
+describe("canonicalSectionId", () => {
+  it("passes through an id the registry already knows", () => {
+    for (const id of sectionIds) {
+      expect(canonicalSectionId(id)).toBe(id);
+    }
+  });
+
+  it("resolves every legacy id to a section that exists", () => {
+    for (const legacy of Object.keys(LEGACY_SECTION_IDS)) {
+      const id = canonicalSectionId(legacy);
+      expect(sectionIds, `${legacy} resolves to a section that is gone`).toContain(id);
+    }
+  });
+
+  it("returns null for absent storage rather than a bare string", () => {
+    expect(canonicalSectionId(null)).toBeNull();
+    expect(canonicalSectionId(undefined)).toBeNull();
+    expect(canonicalSectionId("")).toBeNull();
+  });
+
+  it("leaves an unknown id alone so the caller's own fallback runs", () => {
+    // Not the map's job to invent a destination; the restore path
+    // already validates against the registry.
+    expect(canonicalSectionId("from-an-older-build")).toBe("from-an-older-build");
   });
 });
