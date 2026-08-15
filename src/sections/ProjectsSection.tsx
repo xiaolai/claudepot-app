@@ -910,7 +910,6 @@ function ProjectsListFilterBar({
                 background: active ? "var(--bg-raised)" : "transparent",
                 border: `var(--bw-hair) solid ${active ? "var(--line-strong)" : "var(--line)"}`,
                 borderRadius: "var(--r-1)",
-                cursor: "pointer",
               }}
             >
               {c.label} · {c.n}

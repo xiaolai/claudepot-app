@@ -287,7 +287,6 @@ const reportLinkStyle: React.CSSProperties = {
   border: "none",
   color: "var(--accent)",
   textDecoration: "underline",
-  cursor: "pointer",
   font: "inherit",
   padding: 0,
 };

@@ -214,7 +214,6 @@ export function TemplateInstallView({
               padding: 0,
               color: "var(--accent)",
               textDecoration: "underline",
-              cursor: "pointer",
               fontSize: "var(--fs-sm)",
             }}
           >

@@ -350,7 +350,6 @@ export function BoardsSection() {
                     padding: 0,
                     color: "inherit",
                     font: "inherit",
-                    cursor: "pointer",
                     textAlign: "left",
                   }}
                 >

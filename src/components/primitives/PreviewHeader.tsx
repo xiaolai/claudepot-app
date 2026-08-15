@@ -270,7 +270,6 @@ export function PreviewHeader({
                 border: "none",
                 borderLeft:
                   "var(--bw-hair) solid var(--accent-divider-ink)",
-                cursor: disabled || loading ? "not-allowed" : "pointer",
                 opacity: disabled || loading ? "var(--opacity-disabled)" : 1,
                 flexShrink: 0,
               }}
@@ -559,7 +558,6 @@ function MenuItem({
         border: "none",
         textAlign: "left",
         fontSize: "var(--fs-sm)",
-        cursor: "pointer",
         ...style,
       }}
     >

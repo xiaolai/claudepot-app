@@ -148,7 +148,6 @@ export function WindowChrome({
           borderRight: "var(--bw-hair) solid var(--line)",
           borderRadius: "var(--r-2)",
           minWidth: "var(--banner-min-width)",
-          cursor: "pointer",
         }}
       >
         <Glyph g={NF.search} />

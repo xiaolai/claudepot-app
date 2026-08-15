@@ -334,7 +334,6 @@ const ProjectRow = memo(function ProjectRow({
         borderLeft: active
           ? "var(--bw-strong) solid var(--accent)"
           : "var(--bw-strong) solid transparent",
-        cursor: "pointer",
         fontSize: "var(--fs-sm)",
         outline: "none",
       }}
@@ -387,7 +386,6 @@ const ProjectRow = memo(function ProjectRow({
                 background: "transparent",
                 border: "none",
                 padding: 0,
-                cursor: "pointer",
                 color: prBadgeColor(p.pr.state),
                 lineHeight: 0,
               }}
@@ -594,7 +592,6 @@ function SortHeader({
         letterSpacing: "var(--ls-wide)",
         textTransform: "uppercase",
         textAlign: "left",
-        cursor: "pointer",
         display: "inline-flex",
         alignItems: "center",
         gap: "var(--sp-4)",

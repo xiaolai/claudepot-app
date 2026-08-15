@@ -427,7 +427,6 @@ function Provenance({
             font: "inherit",
             fontSize: "var(--fs-sm)",
             color: "var(--accent)",
-            cursor: "pointer",
             textDecoration: "underline",
           }}
         >
@@ -517,7 +516,6 @@ function CrossLinks({
           font: "inherit",
           fontSize: "var(--fs-2xs)",
           color: "var(--fg-muted)",
-          cursor: "pointer",
         }}
       >
         {open ? t("know.card.hideLinks") : t("know.card.showLinks")}

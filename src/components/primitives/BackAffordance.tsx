@@ -58,7 +58,6 @@ export function BackAffordance({
         letterSpacing: "var(--ls-wide)",
         textTransform: "uppercase",
         color: "var(--fg-muted)",
-        cursor: "pointer",
         ...style,
       }}
     >

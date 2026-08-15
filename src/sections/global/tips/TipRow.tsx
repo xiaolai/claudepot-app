@@ -42,7 +42,6 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
         aria-expanded={open}
         style={{
           all: "unset",
-          cursor: "pointer",
           width: "100%",
           display: "grid",
           gridTemplateColumns: "auto 1fr",
@@ -147,7 +146,6 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
             <details>
               <summary
                 style={{
-                  cursor: "pointer",
                   fontSize: "var(--fs-2xs)",
                   color: "var(--fg-faint)",
                 }}

@@ -137,7 +137,6 @@ export function TargetButton({
             fontWeight: 500,
             letterSpacing: "var(--ls-wide)",
             textTransform: "uppercase",
-            cursor: bodyInert ? "default" : "pointer",
             opacity: state === "disabled" ? "var(--opacity-dimmed)" : 1,
           }}
         >
@@ -180,7 +179,6 @@ export function TargetButton({
                 background: "transparent",
                 color: "inherit",
                 border: "none",
-                cursor: "pointer",
               }}
             >
               <Glyph g={NF.chevronD} style={{ fontSize: "var(--fs-xs)" }} />

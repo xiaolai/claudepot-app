@@ -252,7 +252,6 @@ function SettingsNav({
                     ? "var(--bw-strong) solid var(--accent)"
                     : "var(--bw-strong) solid transparent",
                   textAlign: "left",
-                  cursor: "pointer",
                 }}
               >
                 <Glyph
@@ -582,7 +581,6 @@ function AppearancePane() {
                     ? "var(--bw-hair) solid var(--line)"
                     : "var(--bw-hair) solid transparent",
                   borderRadius: "var(--r-1)",
-                  cursor: "pointer",
                 }}
               >
                 {opt.glyph && <Glyph g={opt.glyph} />}
@@ -2037,7 +2035,6 @@ function UsageThresholdChips({
               border: "var(--bw-hair) solid var(--line)",
               background: on ? "var(--accent-soft)" : "transparent",
               color: on ? "var(--accent-ink)" : "var(--fg)",
-              cursor: "pointer",
             }}
           >
             {t}%
@@ -2386,7 +2383,6 @@ function Toggle({
         background: on ? "var(--accent)" : "var(--bg-active)",
         border: `var(--bw-hair) solid ${on ? "var(--accent)" : "var(--line-strong)"}`,
         position: "relative",
-        cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? "var(--opacity-disabled)" : 1,
         transition: "background var(--dur-base) var(--ease-linear)",
       }}

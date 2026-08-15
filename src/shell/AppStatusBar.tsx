@@ -150,7 +150,6 @@ export function AppStatusBar({
             border: "var(--bw-hair) solid transparent",
             borderRadius: "var(--r-1)",
             color: "var(--fg-muted)",
-            cursor: "pointer",
             // Pull the button slightly left so it sits against the
             // bar's left edge inset, matching where a status-bar
             // platform glyph usually anchors.

@@ -509,7 +509,6 @@ function TabButton({
         borderBottom: `var(--bw-strong) solid ${active ? "var(--accent)" : "transparent"}`,
         fontSize: "var(--fs-sm)",
         fontWeight: active ? 600 : 400,
-        cursor: "pointer",
         marginBottom: "calc(-1 * var(--bw-hair))",
       }}
     >
@@ -674,7 +673,6 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
                   display: "flex",
                   alignItems: "center",
                   gap: "var(--sp-8)",
-                  cursor: "pointer",
                   fontSize: "var(--fs-sm)",
                   color: "var(--fg)",
                 }}
@@ -942,7 +940,6 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
       style={{
         padding: "var(--sp-12) var(--sp-16)",
         borderBottom: "var(--bw-subhair) solid var(--line)",
-        cursor: "pointer",
         display: "flex",
         gap: "var(--sp-12)",
         alignItems: "flex-start",
@@ -1153,7 +1150,6 @@ const inputStyle: React.CSSProperties = {
 
 const selectStyle: React.CSSProperties = {
   ...inputStyle,
-  cursor: "pointer",
 };
 
 const btnStyle: React.CSSProperties = {
@@ -1163,7 +1159,6 @@ const btnStyle: React.CSSProperties = {
   borderRadius: "var(--r-1)",
   background: "var(--bg)",
   color: "var(--fg)",
-  cursor: "pointer",
   fontFamily: "inherit",
 };
 

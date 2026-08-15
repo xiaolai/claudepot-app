@@ -102,7 +102,6 @@ export function SidebarItem({
         textAlign: "left",
         transition:
           "background var(--dur-fast) var(--ease-linear), color var(--dur-fast) var(--ease-linear)",
-        cursor: "pointer",
         position: "relative",
       }}
     >

@@ -230,7 +230,7 @@ export function McpInstallerPane({
             <legend style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)", padding: 0 }}>
               {t("mcp.scope")}
             </legend>
-            <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start", cursor: "pointer" }}>
+            <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start" }}>
               <input
                 type="radio"
                 name="snippet-scope"
@@ -249,7 +249,7 @@ export function McpInstallerPane({
                 </span>
               </span>
             </label>
-            <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start", cursor: "pointer" }}>
+            <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start" }}>
               <input
                 type="radio"
                 name="snippet-scope"
@@ -335,7 +335,7 @@ export function McpInstallerPane({
             </div>
           )}
           <details style={{ marginTop: "var(--sp-4)" }}>
-            <summary style={{ cursor: "pointer", fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
+            <summary style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}>
               {t("mcp.preview")}
             </summary>
             {/* <pre> is already select-opted-in by base.css; the old

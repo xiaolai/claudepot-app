@@ -83,7 +83,7 @@ export function StatCard({ label, value, tone, hint, emphasis, onClick }: StatCa
         type="button"
         className="pm-focus"
         onClick={onClick}
-        style={{ ...boxStyle, cursor: "pointer", font: "inherit", color: "var(--fg)" }}
+        style={{ ...boxStyle, font: "inherit", color: "var(--fg)" }}
       >
         {inner}
       </button>

@@ -163,7 +163,6 @@ function ClampedPre({ text }: { text: string }) {
             color: "var(--fg-muted)",
             fontSize: "var(--fs-xs)",
             padding: "var(--sp-2) var(--sp-8)",
-            cursor: "pointer",
             letterSpacing: "var(--ls-wide)",
             textTransform: "uppercase",
           }}

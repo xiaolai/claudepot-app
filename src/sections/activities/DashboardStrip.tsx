@@ -516,7 +516,7 @@ function RateSourceChip({
         background: "transparent",
         border: `var(--bw-hair) solid ${error ? "var(--danger)" : "var(--line)"}`,
         borderRadius: "var(--r-1)",
-        cursor: loading ? "progress" : "pointer",
+        cursor: loading ? "progress" : undefined,
         opacity: loading ? 0.6 : 1,
       }}
     >

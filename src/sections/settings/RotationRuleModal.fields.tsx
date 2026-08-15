@@ -76,7 +76,6 @@ export function CandidateChecklist({
               alignItems: "center",
               gap: "var(--sp-8)",
               fontSize: "var(--fs-sm)",
-              cursor: "pointer",
             }}
           >
             <input
@@ -110,7 +109,6 @@ export function ModeRadio({
         alignItems: "center",
         gap: "var(--sp-6)",
         fontSize: "var(--fs-sm)",
-        cursor: "pointer",
       }}
     >
       <input

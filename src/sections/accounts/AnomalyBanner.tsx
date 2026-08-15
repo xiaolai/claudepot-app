@@ -79,7 +79,6 @@ export function AnomalyBanner({
           border: "var(--bw-hair) solid var(--line-strong)",
           borderRadius: "var(--r-1)",
           color: "var(--fg)",
-          cursor: disabled ? "not-allowed" : "pointer",
           whiteSpace: "nowrap",
           fontWeight: 500,
           opacity: disabled ? "var(--opacity-dimmed)" : 1,

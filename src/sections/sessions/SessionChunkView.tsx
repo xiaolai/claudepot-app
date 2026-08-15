@@ -422,7 +422,6 @@ export function ThinkingDetails({
           background: "var(--bg-sunken)",
           border: "var(--bw-hair) dashed var(--line)",
           borderRadius: "var(--r-2)",
-          cursor: "pointer",
           fontFamily: "var(--font)",
         }}
         aria-label={t("viewer.revealThinkingAria", { chars: text.length })}
@@ -444,7 +443,6 @@ export function ThinkingDetails({
     >
       <summary
         style={{
-          cursor: "pointer",
           fontSize: "var(--fs-xs)",
           color: "var(--fg-muted)",
           textTransform: "uppercase",

@@ -98,7 +98,6 @@ export function IconButton({
             : "transparent",
         color: active ? "var(--accent-ink)" : "var(--fg-muted)",
         opacity: disabled ? "var(--opacity-disabled)" : 1,
-        cursor: disabled ? "not-allowed" : "pointer",
         transition:
           "background var(--dur-fast) var(--ease-linear), color var(--dur-fast) var(--ease-linear)",
         border: "none",

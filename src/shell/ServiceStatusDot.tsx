@@ -93,7 +93,6 @@ export function ServiceStatusDot() {
           padding: 0,
           background: "transparent",
           border: 0,
-          cursor: "pointer",
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",

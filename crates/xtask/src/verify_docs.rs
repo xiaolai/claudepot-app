@@ -122,6 +122,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_runtime_tokens_are_registered(repo, &mut problems)?;
     check_tokens_declared_only_in_tokens_css(repo, &mut problems)?;
     check_css_comments_balance(repo, &mut problems)?;
+    check_cursor_policy(repo, &mut problems)?;
     check_optional_shortcut_callbacks_are_wired(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
@@ -1333,6 +1334,73 @@ fn check_tokens_declared_only_in_tokens_css(repo: &Path, problems: &mut Vec<Stri
                 problems.push(format!(
                     "{rel} declares {name} in an inline style — tokens.css is the one \
                      declaration site (rules/design.md)"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `pointer` and `not-allowed` are gone from activation controls.
+///
+/// The policy is `default` everywhere except a real hyperlink (see
+/// rules/design.md). It is a build gate because the previous state was
+/// four contradictory rules — a global `button { cursor: pointer }`
+/// reset, `body { cursor: default }`, `.btn { default }`, and the
+/// primitives at `pointer` / `not-allowed` — spread over 94
+/// declarations in 86 files. A rule that costs one line to violate and
+/// a full sweep to restore needs a gate, not a paragraph.
+///
+/// `not-allowed` is called out separately because macOS never displays
+/// it: it reads as web-form chrome, and where a control was faking
+/// disabled with a `role` rather than the native attribute, it was the
+/// ONLY cue that the control was dead.
+fn check_cursor_policy(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_ts_paths(&repo.join("src"), &mut files);
+    collect_css_paths(&repo.join("src"), &mut files);
+    if files.is_empty() {
+        problems.push("no sources found under src/ — the cursor-policy check cannot run".into());
+        return Ok(());
+    }
+    for path in files {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        // The one sanctioned pointer: it opens a URL in the browser,
+        // which is the single place the web affordance is correct.
+        if name.starts_with("ExternalLink") || name.contains(".test.") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let src = strip_comments(&raw);
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        for (needle, why) in [
+            (
+                "cursor: pointer",
+                "this is a desktop shell; macOS puts no hand cursor on a button",
+            ),
+            (
+                "cursor: \"pointer\"",
+                "this is a desktop shell; macOS puts no hand cursor on a button",
+            ),
+            (
+                "not-allowed",
+                "macOS never shows it, and it hides a missing aria-disabled",
+            ),
+        ] {
+            if src.contains(needle) {
+                problems.push(format!(
+                    "{rel} uses `{needle}` — {why} (rules/design.md cursor policy). Use \
+                     <ExternalLink> if this really opens a URL"
                 ));
             }
         }
@@ -3311,5 +3379,66 @@ mod guard_tests {
             "/* ─── spacing — the scale ─── */\n:root { --fg: red; }\n",
         );
         assert_eq!(run(check_css_comments_balance, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cursor_policy_accepts_a_clean_component() {
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            r#"const s = { color: "red" };"#,
+        );
+        assert_eq!(run(check_cursor_policy, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cursor_policy_catches_a_pointer_on_a_control() {
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            r#"const s = { cursor: "pointer" };"#,
+        );
+        let out = run(check_cursor_policy, &d);
+        assert!(out.iter().any(|p| p.contains("desktop shell")), "{out:?}");
+    }
+
+    #[test]
+    fn cursor_policy_catches_not_allowed_in_a_compound_condition() {
+        // The sweep's regex only handled single-identifier ternaries, so
+        // `disabled || loading ? "not-allowed" : "pointer"` survived it.
+        // The guard is what found that one.
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            r#"const s = { cursor: disabled || loading ? "not-allowed" : "pointer" };"#,
+        );
+        let out = run(check_cursor_policy, &d);
+        assert!(out.iter().any(|p| p.contains("not-allowed")), "{out:?}");
+    }
+
+    #[test]
+    fn cursor_policy_exempts_external_link() {
+        // The one place the web affordance is literally correct.
+        let d = repo();
+        write(
+            &d,
+            "src/components/primitives/ExternalLink.tsx",
+            r#"const s = { cursor: "pointer" };"#,
+        );
+        assert_eq!(run(check_cursor_policy, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cursor_policy_is_not_satisfied_by_a_comment() {
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            "// we used to set cursor: pointer here\nconst s = { color: \"red\" };",
+        );
+        assert_eq!(run(check_cursor_policy, &d), Vec::<String>::new());
     }
 }

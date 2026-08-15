@@ -80,7 +80,6 @@
 /* Collapses the name list only — never the heading, the explanation, or the
    version-mismatch text. */
 .envvar-undocumented-disclosure > summary {
-  cursor: pointer;
   font-size: var(--fs-xs);
   color: var(--fg-muted);
   padding: var(--sp-4) 0;

@@ -211,6 +211,31 @@ section below by ~108px". Use `SkeletonList` (with header) or
 `role="status"` and screen-reader label that hand-rolled
 `.skeleton-container` markup silently omitted.
 
+## Cursor policy
+
+**`default` everywhere except a real hyperlink.** This is a desktop
+shell, not a web page: macOS does not put a hand cursor on buttons, and
+one on ours read as web chrome. The only sanctioned `pointer` is
+`<ExternalLink>`, which opens a URL in the user's browser — the one
+place the web affordance is literally correct.
+
+It contradicted itself four ways before this was written down: the
+global reset gave every `button` a `pointer`, `body` said `default`,
+legacy `.btn` said `default`, and the `<Button>` / `<IconButton>`
+primitives said `pointer`, or `not-allowed` when disabled. Two adjacent
+buttons produced two cursors, and disabled produced a third.
+
+- **`not-allowed` is gone.** macOS never shows it, so it read as a web
+  form. Disabled state is carried by the native `disabled` attribute on
+  a `<button>`, or by `aria-disabled` on anything faking it — colour and
+  cursor may not be the only cue. `FilterPicker`'s `<li role="option">`
+  was relying on the cursor alone; it now sets `aria-disabled`.
+- **Cursors that carry information stay**: `text` on selectable copy,
+  `help` where a tooltip explains something, `progress` while a control
+  is working, and the resize cursors.
+- Changing only the reset and the two primitives does not establish the
+  policy — there were 94 `pointer` declarations across 86 files.
+
 ## Accessibility floor
 
 - Every interactive element is keyboard-reachable and shows a

@@ -496,7 +496,6 @@ function ProviderTabs({
               fontFamily: "inherit",
               fontSize: "var(--fs-sm)",
               fontWeight: active === kind ? 600 : 400,
-              cursor: disabled ? "not-allowed" : "pointer",
               opacity: disabled && active !== kind ? 0.4 : 1,
             }}
           >
@@ -734,7 +733,6 @@ function GatewayPresetsBar({
               background: "var(--bg-raised)",
               border: "var(--bw-hair) solid var(--line)",
               borderRadius: "var(--r-1)",
-              cursor: "pointer",
             }}
           >
             {p.label ?? t("presets.ollamaLabel")}

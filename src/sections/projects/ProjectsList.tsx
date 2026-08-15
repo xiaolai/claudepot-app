@@ -156,7 +156,6 @@ function ProjectRow({
         flexDirection: "column",
         gap: "var(--sp-2)",
         padding: "var(--sp-8) var(--sp-12)",
-        cursor: "pointer",
         background: selected ? "var(--bg-active)" : "transparent",
         color: selected ? "var(--accent-ink)" : "var(--fg)",
         borderLeft: selected

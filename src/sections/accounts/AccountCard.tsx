@@ -215,7 +215,6 @@ export function AccountCard({
                   borderRadius: "var(--r-1)",
                   padding: "0 var(--sp-6)",
                   height: "var(--kbd-h)",
-                  cursor: onOpenTokens ? "pointer" : "default",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "var(--sp-4)",

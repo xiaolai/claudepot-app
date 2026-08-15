@@ -294,7 +294,6 @@ function TemplateCard({
         borderRadius: "var(--r-2)",
         background: "var(--bg-raised)",
         color: "var(--fg)",
-        cursor: "pointer",
         font: "inherit",
       }}
     >
@@ -380,7 +379,6 @@ function FilterChip({
         background: active ? "var(--accent-soft)" : "var(--bg-raised)",
         borderRadius: "var(--r-1)",
         color: active ? "var(--accent-ink)" : "var(--fg-muted)",
-        cursor: "pointer",
         font: "inherit",
         fontSize: "var(--fs-2xs)",
       }}

@@ -392,7 +392,6 @@ function ToggleRow({
         display: "flex",
         alignItems: "flex-start",
         gap: "var(--sp-10)",
-        cursor: "pointer",
       }}
     >
       <input

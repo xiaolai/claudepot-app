@@ -155,7 +155,6 @@ export function Body({
             color: "var(--fg-muted)",
             fontSize: "var(--fs-xs)",
             padding: "var(--sp-2) var(--sp-8)",
-            cursor: "pointer",
             letterSpacing: "var(--ls-wide)",
             textTransform: "uppercase",
           }}
@@ -204,7 +203,6 @@ const FOLD_PREVIEW_BUTTON: CSSProperties = {
   background: "transparent",
   border: "none",
   padding: "var(--sp-4) 0 0",
-  cursor: "pointer",
   font: "inherit",
 };
 

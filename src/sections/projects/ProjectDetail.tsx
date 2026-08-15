@@ -332,7 +332,6 @@ export function ProjectDetail({
                 background: "transparent",
                 border: "none",
                 padding: 0,
-                cursor: "pointer",
                 color: info.pr.state === "open"
                   ? "var(--accent)"
                   : "var(--fg-muted)",
@@ -748,7 +747,7 @@ function SessionListPane({
               onClick={() => onOpen?.(s.session_id)}
               onContextMenu={(e) => onContextMenu(e, s.session_id)}
               onKeyDown={(e) => handleKeyDown(e, s.session_id)}
-              style={onOpen ? { cursor: "pointer" } : undefined}
+              
             >
               <div className="session-row-text">
                 {/* Lead with the opening prompt — that's what a human

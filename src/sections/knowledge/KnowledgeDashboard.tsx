@@ -320,7 +320,6 @@ function CoverageRowItem({
           background: "var(--bg-raised)",
           color: "var(--fg)",
           font: "inherit",
-          cursor: "pointer",
         }}
       >
         <span style={{ minWidth: 0 }}>
