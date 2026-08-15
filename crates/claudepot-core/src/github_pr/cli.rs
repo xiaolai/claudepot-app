@@ -142,6 +142,17 @@ async fn run_with_timeout(
     tool: &'static str,
 ) -> Result<std::process::Output, GhError> {
     cmd.kill_on_drop(true).no_window();
+    // Pipe both streams. `spawn()` inherits stdio — only `output()`
+    // implies `piped()` — so `wait_with_output()` below collected
+    // nothing and every helper in this module returned an empty stdout.
+    // `current_branch` therefore answered `None` for every repository
+    // and the PR badges never rendered, while the child's output went
+    // to the terminal instead: `pnpm tauri dev` printed a bare branch
+    // name per project, interleaved with `fatal: not a git repository`
+    // for the ones that were not repos. The console noise was the
+    // visible half of a bug whose other half was the whole feature.
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     // A Dock/Finder-launched app inherits a minimal PATH that lacks
     // Homebrew — where `gh` lives for nearly every user. Enrich it
     // so `git`/`gh` resolve regardless of how Claudepot was started.
@@ -160,5 +171,39 @@ async fn run_with_timeout(
         // reaps the child via kill_on_drop. Caller gets a typed
         // Timeout error and the orchestrator caches it as a miss.
         Err(_elapsed) => Err(GhError::Timeout(tool)),
+    }
+}
+
+#[cfg(test)]
+mod spawn_stdio_tests {
+    use super::*;
+
+    /// `spawn()` inherits stdio; only `output()` implies `piped()`.
+    ///
+    /// This module built its commands then called `cmd.spawn()` followed
+    /// by `wait_with_output()`. With inherited stdio there is nothing to
+    /// collect, so every helper here returned an empty stdout — meaning
+    /// `current_branch` answered `None` for every repository and the PR
+    /// badges never rendered at all. The child's output went to the
+    /// terminal instead: running `pnpm tauri dev` printed a bare branch
+    /// name per project, interleaved with `fatal: not a git repository`
+    /// for the ones that were not repos.
+    ///
+    /// Two failures from one line, and the visible one was the harmless
+    /// half.
+    #[tokio::test]
+    async fn current_branch_actually_captures_stdout() {
+        // This crate lives in a git repo, so the answer must be Some.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        match current_branch(root).await {
+            Ok(Some(branch)) => assert!(!branch.trim().is_empty()),
+            Ok(None) => panic!(
+                "current_branch returned None inside a git repo — stdout is not \
+                 being captured (spawn() inherits; use piped stdio)"
+            ),
+            // `git` genuinely absent is not this bug.
+            Err(GhError::MissingCli(_)) => {}
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
     }
 }
