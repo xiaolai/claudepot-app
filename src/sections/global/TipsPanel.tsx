@@ -110,7 +110,7 @@ export function TipsPanel() {
             padding: "var(--sp-12) var(--sp-14)",
             fontSize: "var(--fs-xs)",
             color: "var(--fg-muted)",
-            background: "var(--bg-warning-soft, var(--bg-sunken))",
+            background: "var(--bg-sunken)",
             border: "var(--bw-hair) solid var(--line-strong)",
             margin: "var(--sp-8) var(--sp-14)",
             borderRadius: "var(--r-2)",

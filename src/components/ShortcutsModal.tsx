@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Modal, ModalHeader, ModalBody } from "./primitives/Modal";
 import { Kbd } from "./primitives/Kbd";
 import { useEnabledSections } from "../hooks/useEnabledSections";
-import { sectionNumber } from "../lib/shortcutBindings";
+import { GLOBAL_SHORTCUTS, sectionNumber } from "../lib/shortcutBindings";
 
 interface ShortcutBinding {
   keys: string[];
@@ -70,46 +70,28 @@ function navigationItems(
  */
 function otherGroups(
   tc: TFunction<"components">,
-  scopeAccounts: string,
-  scopeConfig: string,
+  /** Section id -> its localized label, for a binding's scope note. */
+  scopeFor: (sectionId: string) => string,
 ): ShortcutGroup[] {
   return [
     {
       title: tc("shortcuts.groupGlobal"),
-      items: [
-        { keys: ["⌘", "K"], label: tc("shortcuts.openPalette") },
-        { keys: ["⌘", "/"], label: tc("shortcuts.showShortcuts") },
-        { keys: ["⌘", "R"], label: tc("shortcuts.refreshSection") },
-        {
-          keys: ["⌘", "N"],
-          label: tc("shortcuts.addAccount"),
-          scope: scopeAccounts,
-        },
-        // ⌘F was listed here as "Focus filter (where exposed)" but no
-        // section ever wired it — the hook option existed and nothing
-        // passed it. Documenting a shortcut that does nothing is worse
-        // than not documenting it.
-        {
-          keys: ["⌘", "⇧", "C"],
-          label: tc("shortcuts.copyEmail"),
-          scope: scopeAccounts,
-        },
-        { keys: ["⌘", "⇧", "L"], label: tc("shortcuts.focusLive") },
-        // Bound in `useSidebarCollapsed` since it was added, and
-        // surfaced only in the sidebar toggle's tooltip until now —
-        // the inverse of the ⌘F problem noted above: a working
-        // handler with no documentation.
-        { keys: ["⌘", "\\"], label: tc("shortcuts.toggleSidebar") },
-        // ⌘F focuses ConfigSection's content search. design.md said
-        // "There is no ⌘F" — true when written, stale since a section
-        // wired one. An undocumented working shortcut is the same
-        // defect as a documented dead one, just harder to notice.
-        {
-          keys: ["⌘", "F"],
-          label: tc("shortcuts.focusFilter"),
-          scope: scopeConfig,
-        },
-      ],
+      // Rendered FROM `GLOBAL_SHORTCUTS`, not hand-listed beside it.
+      // This block used to duplicate the table entry-for-entry, which
+      // made the "one table" claim false in the worst way: the
+      // verify-docs gate validated the table, the user saw this list,
+      // and nothing compared them. The table was dead code that a
+      // build gate was busily checking.
+      items: GLOBAL_SHORTCUTS.map((b) => ({
+        keys: b.keys,
+        // One cast, at the boundary. i18next's typed `t()` cannot
+        // check a key built at runtime, so the compile-time guarantee
+        // for these is replaced by `shortcutBindings.test.ts`, which
+        // asserts every labelKey resolves in BOTH catalogs — a missing
+        // one fails a test instead of rendering its own key.
+        label: tc(`shortcuts.${b.labelKey}` as "shortcuts.openPalette"),
+        scope: b.scopeSectionId ? scopeFor(b.scopeSectionId) : undefined,
+      })),
     },
     {
       title: tc("shortcuts.groupModals"),
@@ -163,7 +145,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
         tc,
       ),
     },
-    ...otherGroups(tc, t("sections.accounts"), t("sections.global")),
+    ...otherGroups(tc, (id) => t(`sections.${id}` as "sections.accounts")),
   ];
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={titleId}>

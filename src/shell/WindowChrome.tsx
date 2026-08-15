@@ -50,7 +50,7 @@ export function WindowChrome({
   // centerline. Defaulted to 0 (no shift) when the var isn't set —
   // non-macOS or pre-mount.
   const trafficLightOffset =
-    "calc(var(--traffic-light-center-y, calc(var(--chrome-height) / 2)) - var(--chrome-height) / 2)";
+    "calc(var(--chrome-height) / 2 - var(--chrome-height) / 2)";
   return (
     <div
       data-tauri-drag-region

@@ -109,7 +109,7 @@ jobs:
       # ~/.claudepot (on a dev box that once destroyed a live sessions.db).
       # The runner is the one seam that covers them all.
       # repo-invariants.sh guard 5 asserts this env var stays here.
-      - name: Tests (core + cli)
+      - name: Tests (core + cli + xtask)
         env:
           # `runner.temp` is expanded by Actions into the runner's NATIVE
           # path (D:\a\_temp on Windows, /home/runner/work/_temp on Linux).
@@ -118,7 +118,18 @@ jobs:
           # Rust resolves against the current drive — the exact foreign-path
           # class rules/paths.md exists to prevent.
           CLAUDEPOT_DATA_DIR: ${{ runner.temp }}
-        run: cargo test -p claudepot-core -p claudepot-cli
+        # `-p xtask` is load-bearing, not tidiness. xtask owns the
+        # verify-docs build gates, and every one of them reports a
+        # problem by NOT reporting one — a gate that has stopped working
+        # is indistinguishable from a clean repo. Its 38 fixture tests
+        # plant the specific defect each gate exists to catch.
+        #
+        # They were added in a commit whose message said "the sabotage
+        # belonged in CI, not in my memory of having done it once" — and
+        # then were not in CI, because this line named two crates. The
+        # clippy job already passes `-p xtask`, so the crate COMPILED on
+        # every run while none of its tests ever executed.
+        run: cargo test -p claudepot-core -p claudepot-cli -p xtask
 
       # The tauri crate carries real unit tests (orchestrators, DTOs,
       # preferences) plus an install smoke test that no other gate

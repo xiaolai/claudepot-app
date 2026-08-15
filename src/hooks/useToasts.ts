@@ -54,10 +54,16 @@ export function useToasts() {
   useEffect(() => {
     const timers = timersRef.current;
     const commits = commitsRef.current;
+    const cancels = cancelOnDismissRef.current;
     return () => {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
       commits.clear();
+      // Cleared alongside the commits it annotates. Ids are never
+      // reused, so a stale entry cannot mis-flag a later toast — this
+      // is a leak, not a correctness bug. It still goes, because the
+      // next reader has to work that out to know it is safe.
+      cancels.clear();
     };
   }, []);
 
@@ -203,6 +209,7 @@ export function useToasts() {
             // Superseded, not dismissed: the stale commit must never
             // fire ("latest wins"), so drop it silently.
             commitsRef.current.delete(s.id);
+            cancelOnDismissRef.current.delete(s.id);
           }
           return prev.filter((t) => t.dedupeKey !== opts.dedupeKey);
         });

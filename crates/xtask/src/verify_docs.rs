@@ -792,41 +792,14 @@ fn check_no_undefined_tokens(repo: &Path, problems: &mut Vec<String>) -> Result<
     collect_ts_paths(&repo.join("src"), &mut files);
     collect_css_paths(&repo.join("src"), &mut files);
 
-    // Custom properties can also be declared LOCALLY — on an element
-    // via a JSX style object (`["--rank-col"]: "var(--sp-28)"`) or in
-    // a component stylesheet rule. Those are valid and deliberately
-    // scoped; the first draft of this check knew only about
-    // tokens.css and reported `--rank-col` as undefined when it is set
-    // on the very element that reads it. Collect them first.
-    let mut local: BTreeSet<String> = BTreeSet::new();
-    {
-        let mut all: Vec<PathBuf> = Vec::new();
-        collect_ts_paths(&repo.join("src"), &mut all);
-        collect_css_paths(&repo.join("src"), &mut all);
-        for path in &all {
-            let Ok(src) = std::fs::read_to_string(path) else {
-                continue;
-            };
-            // `"--x":` / `'--x':` (JSX style key) and `--x:` (CSS decl).
-            for pat in ["\"--", "'--"] {
-                let mut from = 0usize;
-                while let Some(rel) = src[from..].find(pat) {
-                    let at = from + rel + pat.len();
-                    let end = src[at..]
-                        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-                        .map(|i| at + i)
-                        .unwrap_or(src.len());
-                    // The QUOTE is the pattern's first char, not its last —
-                    // `pat` is `"--`, so `next_back()` yields `-` and the
-                    // match could never succeed.
-                    if src[end..].starts_with(pat.chars().next().unwrap()) {
-                        local.insert(format!("--{}", &src[at..end]));
-                    }
-                    from = end.max(at + 1);
-                }
-            }
-        }
-    }
+    // NO local-property exemption. `design.md` says tokens.css is
+    // "the one place tokens are declared. No other file opens a
+    // `:root { }` block or redeclares `--*` custom properties." An
+    // earlier draft exempted locally-declared properties to silence a
+    // false positive on `--rank-col` — but per that rule `--rank-col`
+    // WAS the violation, and the exemption legitimised it rather than
+    // reporting it. Both call sites were removed instead, so the gate
+    // is now exactly as strict as the rule it enforces.
 
     let mut missing: BTreeSet<String> = BTreeSet::new();
     let mut scanned = 0usize;
@@ -849,10 +822,18 @@ fn check_no_undefined_tokens(repo: &Path, problems: &mut Vec<String>) -> Result<
                 .unwrap_or(src.len());
             let name = &src[at..end];
             scanned += 1;
-            // A `var(--x, fallback)` is legitimate even when --x is
-            // absent; only the bare form is a silent drop.
-            let bare = src[end..].starts_with(')');
-            if bare && !declared.contains(name) && !local.contains(name) {
+            // A fallback does NOT exempt the token. It hid four
+            // genuinely undeclared names — `--danger-border`,
+            // `--bg-warning-soft`, `--traffic-light-center-y` and
+            // `--bad` (deleted by this branch's own codemod, whose
+            // regex rewrote only the bare form). Each was a phantom
+            // override hook: read with a fallback, declared nowhere,
+            // so the fallback was the only value it ever took —
+            // which reads in review as a configurable value and is
+            // dead weight. A genuinely runtime-set property belongs
+            // in tokens.css, so there is no exemption to carve.
+            let referenced = src[end..].starts_with(')') || src[end..].starts_with(',');
+            if referenced && !declared.contains(name) {
                 missing.insert(format!(
                     "{} (first seen in {})",
                     name,
@@ -893,6 +874,19 @@ fn collect_css_paths(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Unescape a TypeScript string literal's contents.
+///
+/// Both sides of the shortcut check read raw source, so both see
+/// `\\` where the value is a single backslash — the ⌘\ binding. Applying
+/// this to only one side made the two halves disagree about that one
+/// key, which is precisely the binding the reverse check is named
+/// after.
+fn unescape_ts(raw: &str) -> String {
+    raw.replace("\\\\", "\\")
+        .replace("\\\"", "\"")
+        .replace("\\'", "'")
+}
+
 /// Every binding declared in `lib/shortcutBindings.ts` must have a
 /// handler, and every documented one must be reachable.
 ///
@@ -912,29 +906,7 @@ fn check_shortcut_table_has_handlers(repo: &Path, problems: &mut Vec<String>) ->
     let table = read(repo, "src/lib/shortcutBindings.ts")?;
     let table_code = strip_comments(&table);
 
-    // `key: "x"` entries in the table.
-    // `key: "x"` anywhere, not only at the start of a line. The first
-    // draft used `line.trim().strip_prefix("key: \"")`, which only saw
-    // the multi-line entries — 2 of the 9 bindings — so the check ran
-    // over a quarter of the table and passed a deliberately planted
-    // ⌘F. `labelKey: "` cannot collide: its `Key` is capitalised.
-    let mut declared: Vec<String> = Vec::new();
-    let mut from = 0usize;
-    while let Some(rel) = table_code[from..].find("key: \"") {
-        let at = from + rel;
-        let after = at + "key: \"".len();
-        // Reject `…someKey: "` — require a boundary before `key`.
-        let ok = table_code[..at]
-            .chars()
-            .next_back()
-            .is_none_or(|c| c.is_whitespace() || c == ',' || c == '{');
-        if ok {
-            if let Some(end) = table_code[after..].find('"') {
-                declared.push(table_code[after..after + end].to_string());
-            }
-        }
-        from = after;
-    }
+    let declared = parse_shortcut_table(&table_code);
     if declared.is_empty() {
         problems.push(
             "lib/shortcutBindings.ts declares no `key:` entries — the handler check \
@@ -950,37 +922,169 @@ fn check_shortcut_table_has_handlers(repo: &Path, problems: &mut Vec<String>) ->
     // src/sections/AccountsSection.tsx. Acting on that would have
     // deleted the documentation for a working feature, which is the
     // opposite of the mistake this check exists to catch.
-    let mut handler_src = String::new();
-    collect_ts_sources(&repo.join("src"), &mut handler_src)?;
+    let mut handler_files: Vec<PathBuf> = Vec::new();
+    collect_ts_paths(&repo.join("src"), &mut handler_files);
+    let mut handled: BTreeSet<Binding> = BTreeSet::new();
+    for path in handler_files {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        collect_handled_bindings(&strip_comments(&raw), &mut handled);
+    }
 
-    for key in declared {
-        // Match on the COMPARISON, not on a bare string literal.
-        // Single-letter needles like "c" or "r" occur constantly in a
-        // recursive scan of the whole tree, so a bare-literal search
-        // over src/ would pass everything and assert nothing.
-        //
-        // Shift reports an uppercase `e.key`, so handlers legitimately
-        // compare either case; accept both.
-        let upper = key.to_uppercase();
-        let found = [key.as_str(), upper.as_str()].iter().any(|k| {
-            [
-                format!("key === \"{k}\""),
-                format!("key !== \"{k}\""),
-                format!("key === '{k}'"),
-                format!("key !== '{k}'"),
-            ]
-            .iter()
-            .any(|n| handler_src.contains(n.as_str()))
-        });
-        if !found {
+    // Both directions compare the SAME tuple, produced by the same
+    // parser. They used to extract keys differently — the table side
+    // read the raw literal and the handler side unescaped it — so `\\`
+    // and `\` never matched and ⌘\, the binding this check is named
+    // after, was simultaneously reported missing in both directions.
+    for b in &declared {
+        if handled.contains(b) {
+            continue;
+        }
+        problems.push(format!(
+            "shortcutBindings.ts declares {} but no handler under src/ compares `e.key` \
+             against it under those modifiers — documenting a shortcut that does nothing \
+             is the ⌘F mistake",
+            b.describe()
+        ));
+    }
+    for b in &handled {
+        if declared.contains(b)
+            || UNDOCUMENTED_BY_DESIGN
+                .iter()
+                .any(|(x, _)| *x == b.describe())
+        {
+            continue;
+        }
+        problems.push(format!(
+            "a modifier-keyed handler binds {} but no entry in lib/shortcutBindings.ts \
+             declares it — an undocumented working shortcut is the ⌘\\ mistake, the \
+             mirror of the ⌘F one",
+            b.describe()
+        ));
+    }
+    // Validated in both directions, like UNSUBSCRIBED_BY_DESIGN: an
+    // exemption whose handler is gone is a stale rationale, and the
+    // next reader would take it as evidence the shortcut still exists.
+    for (combo, why) in UNDOCUMENTED_BY_DESIGN {
+        if !handled.iter().any(|b| b.describe() == *combo) {
             problems.push(format!(
-                "shortcutBindings.ts declares key {key:?} but nothing under src/ compares \
-                 `e.key` against it — documenting a shortcut that does nothing is the \
-                 ⌘F mistake"
+                "UNDOCUMENTED_BY_DESIGN still exempts {combo} ({why}) but no handler binds \
+                 it — delete the entry rather than leaving a rationale for nothing"
             ));
         }
     }
+
     Ok(())
+}
+
+/// A key plus the modifiers beyond ⌘/⌃ that must be held.
+///
+/// Shift and Alt are what separate two bindings on the same letter.
+/// Matching the bare key made ⌘⇧L indistinguishable from ⌃⌥⌘L, so
+/// deleting the ⌘⇧L handler left this check green — the other L
+/// answered for it.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Binding {
+    key: String,
+    shift: bool,
+    alt: bool,
+}
+
+impl Binding {
+    fn describe(&self) -> String {
+        let mut s = String::new();
+        if self.alt {
+            s.push('⌥');
+        }
+        if self.shift {
+            s.push('⇧');
+        }
+        s.push('⌘');
+        s.push_str(&self.key);
+        s
+    }
+}
+
+/// Shortcuts that work but are deliberately absent from the table,
+/// with the reason. Same contract as `UNSUBSCRIBED_BY_DESIGN`.
+const UNDOCUMENTED_BY_DESIGN: &[(&str, &str)] = &[(
+    "⌥⌘l",
+    "developer-mode toggle: rules/design.md makes it the one ungated \
+     shortcut precisely because it has no visible control, so listing it \
+     in the user-facing shortcuts modal would contradict the rule",
+)];
+
+/// `{ keys: [...], key: "x" }` entries from the bindings table.
+fn parse_shortcut_table(code: &str) -> BTreeSet<Binding> {
+    let mut out = BTreeSet::new();
+    // Each entry opens with `keys: [`; the chunk up to the next one
+    // holds that entry's modifier list and its `key:`.
+    let chunks: Vec<&str> = code.split("keys: [").skip(1).collect();
+    for chunk in chunks {
+        let Some(close) = chunk.find(']') else {
+            continue;
+        };
+        let keys = &chunk[..close];
+        let rest = &chunk[close..];
+        // `key: "x"` — `labelKey: "` cannot collide, its `Key` is
+        // capitalised. Line-initial matching only ever saw the
+        // multi-line entries, 2 of the 9.
+        let Some(rel) = rest.find("key: \"") else {
+            continue;
+        };
+        let after = rel + "key: \"".len();
+        let Some(end) = rest[after..].find('"') else {
+            continue;
+        };
+        out.insert(Binding {
+            key: unescape_ts(&rest[after..after + end]).to_lowercase(),
+            shift: keys.contains('⇧'),
+            alt: keys.contains('⌥'),
+        });
+    }
+    out
+}
+
+/// Modifier-keyed `e.key` comparisons in one file's source.
+///
+/// Every handler in this codebase has the same shape: an early-return
+/// guard naming the modifiers, then the key comparison, both inside one
+/// `(e: KeyboardEvent) =>` closure. The nearest preceding
+/// `KeyboardEvent` therefore bounds the guard that applies here — a
+/// fixed character window would leak across the four sibling closures
+/// in `useShellShortcuts`.
+fn collect_handled_bindings(src: &str, out: &mut BTreeSet<Binding>) {
+    if !src.contains("metaKey") && !src.contains("ctrlKey") {
+        return;
+    }
+    for pat in ["key === \"", "key !== \""] {
+        let mut from = 0usize;
+        while let Some(rel) = src[from..].find(pat) {
+            let at = from + rel + pat.len();
+            let Some(e) = src[at..].find('"') else { break };
+            // Unescape before measuring. `e.key !== "\\"` — the ⌘\
+            // binding — reads as TWO characters here, so a naive length
+            // test drops the one key this whole check is named after.
+            let k = unescape_ts(&src[at..at + e]);
+            from = at + e;
+            if k.chars().count() != 1 {
+                continue; // Enter / Escape / Tab — focus traps, not bindings
+            }
+            let scope = &src[src[..at].rfind("KeyboardEvent").unwrap_or(0)..at];
+            if !scope.contains("metaKey") && !scope.contains("ctrlKey") {
+                continue; // a bare key comparison inside a modifier-keyed file
+            }
+            // In a `if (…) return;` guard the sign is inverted: `!e.altKey`
+            // disqualifies the event unless Alt is held, so it REQUIRES
+            // Alt, while a bare `e.altKey` forbids it.
+            out.insert(Binding {
+                key: k.to_lowercase(),
+                shift: scope.contains("!e.shiftKey"),
+                alt: scope.contains("!e.altKey"),
+            });
+        }
+    }
 }
 
 /// Every non-test `.ts` / `.tsx` path under `dir`, recursively.
@@ -1006,35 +1110,6 @@ fn collect_ts_paths(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
-}
-
-/// Append every non-test `.ts` / `.tsx` source under `dir`, comments
-/// stripped, recursively.
-fn collect_ts_sources(dir: &Path, out: &mut String) -> Result<()> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Ok(());
-    };
-    for e in entries.filter_map(Result::ok) {
-        let path = e.path();
-        if path.is_dir() {
-            collect_ts_sources(&path, out)?;
-            continue;
-        }
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        if name.contains(".test.") {
-            continue;
-        }
-        if path.extension().is_some_and(|x| x == "ts" || x == "tsx") {
-            if let Ok(src) = std::fs::read_to_string(&path) {
-                out.push_str(&strip_comments(&src));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// A `@media (prefers-contrast: more)` override must appear AFTER the
@@ -1101,25 +1176,41 @@ fn check_contrast_overrides_win(repo: &Path, problems: &mut Vec<String>) -> Resu
     for (s0, e0) in &blocks {
         overridden.extend(declared_properties(&src[*s0..*e0]));
     }
-    let last_end = blocks.iter().map(|(_, e)| *e).max().unwrap_or(0);
-
     if overridden.is_empty() {
         problems
             .push("the prefers-contrast block sets no tokens — it cannot be doing anything".into());
         return Ok(());
     }
 
-    // Any plain declaration of those tokens after the last block wins
-    // the cascade and makes the override inert.
-    for (n, line) in src[last_end..].lines().enumerate() {
-        for token in declared_properties(line) {
-            if overridden.contains(&token) {
-                problems.push(format!(
-                    "tokens.css re-declares {token} after the prefers-contrast block \
-                 (line ~{}); a media query adds no specificity, so the accessibility \
-                 override is inert",
-                    src[..last_end].lines().count() + n
-                ));
+    // Per block, not against the last one only. There are two blocks —
+    // light and system-dark — and scanning only after the LAST meant a
+    // plain re-declaration sitting BETWEEN them defeated the first
+    // while passing the check. Each block is only as safe as what
+    // follows IT.
+    for (s0, e0) in &blocks {
+        let set_here = declared_properties(&src[*s0..*e0]);
+        if set_here.is_empty() {
+            continue;
+        }
+        let mut off = *e0;
+        for line in src[*e0..].lines() {
+            let at = off;
+            off += line.len() + 1;
+            // Declarations inside another prefers-contrast block are
+            // themselves overrides, not the plain declarations that
+            // would out-order this one.
+            if blocks.iter().any(|(a, b)| at >= *a && at <= *b) {
+                continue;
+            }
+            for token in declared_properties(line) {
+                if set_here.contains(&token) {
+                    problems.push(format!(
+                        "tokens.css re-declares {token} at line ~{} — after the \
+                         prefers-contrast block that overrides it. A media query adds no \
+                         specificity, so the accessibility override is inert",
+                        src[..at].lines().count()
+                    ));
+                }
             }
         }
     }
@@ -1154,24 +1245,42 @@ fn check_contrast_overrides_win(repo: &Path, problems: &mut Vec<String>) -> Resu
 /// inside a string literal fails closed (reports drift) rather than
 /// open.
 fn strip_comments(src: &str) -> String {
+    // Iterate CHARACTERS, not bytes. The first draft pushed
+    // `b[i] as char`, which shreds every multibyte character into three
+    // Latin-1 ones — so `⇧`, `⌥` and `⌘` never survived, and the
+    // shortcut table's modifier columns read as empty. Three guards
+    // share this helper; the other two compare ASCII identifiers and
+    // happened not to notice.
     let mut out = String::with_capacity(src.len());
-    let b = src.as_bytes();
-    let mut i = 0usize;
-    while i < b.len() {
-        if b[i] == b'/' && i + 1 < b.len() && b[i + 1] == b'/' {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
+    let mut it = src.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '/' {
+            match it.peek() {
+                Some('/') => {
+                    // Keep the newline: other checks are line-oriented.
+                    for c in it.by_ref() {
+                        if c == '\n' {
+                            out.push('\n');
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some('*') => {
+                    it.next();
+                    let mut prev = '\0';
+                    for c in it.by_ref() {
+                        if prev == '*' && c == '/' {
+                            break;
+                        }
+                        prev = c;
+                    }
+                    continue;
+                }
+                _ => {}
             }
-        } else if b[i] == b'/' && i + 1 < b.len() && b[i + 1] == b'*' {
-            i += 2;
-            while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
-                i += 1;
-            }
-            i = (i + 2).min(b.len());
-        } else {
-            out.push(b[i] as char);
-            i += 1;
         }
+        out.push(c);
     }
     out
 }
@@ -1211,7 +1320,10 @@ fn check_shortcut_gate_is_shared(repo: &Path, problems: &mut Vec<String>) -> Res
             // `isShortcutContextBlocked`. A guard that a comment can
             // satisfy is worse than none — it reports green over the
             // exact regression it was written for.
-            if !strip_comments(&src).contains("isShortcutContextBlocked") {
+            // Require the CALL, not the identifier. `contains` alone is
+            // satisfied by an unused import, a string literal, or a
+            // local stub — all of which leave the listener ungated.
+            if !strip_comments(&src).contains("isShortcutContextBlocked()") {
                 let rel = path.strip_prefix(repo).unwrap_or(&path).display();
                 problems.push(format!(
                     "{rel} registers a modifier-keyed keydown listener without importing \
@@ -1663,10 +1775,18 @@ mod guard_tests {
 
     #[test]
     fn shortcut_table_accepts_a_binding_with_a_handler() {
-        let d = repo();
-        write(&d, "src/lib/shortcutBindings.ts", r#"{ key: "k" },"#);
-        write(&d, "src/hooks/useShell.ts", r#"if (e.key === "k") open();"#);
-        assert!(run(check_shortcut_table_has_handlers, &d).is_empty());
+        let d = shortcut_repo(
+            r#"const A = [{ keys: ["⌘", "K"], labelKey: "a", key: "k" }];"#,
+            r#"const onKey = (e: KeyboardEvent) => {
+                 const mod = e.metaKey || e.ctrlKey;
+                 if (!mod || e.shiftKey || e.altKey) return;
+                 if (e.key === "k") open();
+               };"#,
+        );
+        assert_eq!(
+            run(check_shortcut_table_has_handlers, &d),
+            Vec::<String>::new()
+        );
     }
 
     /// The ⌘F mistake: documented, never wired.
@@ -1682,27 +1802,48 @@ mod guard_tests {
     /// parsed 2 of 9 single-line entries and asserted almost nothing.
     #[test]
     fn shortcut_table_parses_entries_that_share_a_line() {
-        let d = repo();
-        write(
-            &d,
-            "src/lib/shortcutBindings.ts",
-            r#"export const A = [{ keys: ["x"], labelKey: "a", key: "q" }];"#,
+        // The first parser read only line-initial `key: "`, which saw 2
+        // of the 9 real entries and passed a planted ⌘F.
+        let d = shortcut_repo(
+            r#"const A = [{ keys: ["⌘", "Q"], labelKey: "a", key: "q" }];"#,
+            r#"const onKey = (e: KeyboardEvent) => {
+                 const mod = e.metaKey || e.ctrlKey;
+                 if (!mod || e.shiftKey || e.altKey) return;
+                 if (e.key === "k") open();
+               };"#,
         );
-        write(&d, "src/hooks/useShell.ts", r#"if (e.key === "k") open();"#);
-        assert_eq!(
-            run(check_shortcut_table_has_handlers, &d).len(),
-            1,
-            "a single-line entry must still be parsed"
+        let out = run(check_shortcut_table_has_handlers, &d);
+        assert!(
+            out.iter().any(|p| p.contains("⌘q")),
+            "a single-line entry must still be parsed: {out:?}"
         );
     }
 
     /// Shift reports an uppercase `e.key`; comparing either case counts.
     #[test]
     fn shortcut_table_accepts_an_uppercase_comparison() {
+        // Shift reports an uppercase `e.key`, so a ⇧ binding compares
+        // the capital form.
         let d = repo();
-        write(&d, "src/lib/shortcutBindings.ts", r#"{ key: "c" },"#);
-        write(&d, "src/sections/S.tsx", r#"if (e.key === "C") copy();"#);
-        assert!(run(check_shortcut_table_has_handlers, &d).is_empty());
+        write(
+            &d,
+            "src/lib/shortcutBindings.ts",
+            r#"const A = [{ keys: ["⌘", "⇧", "C"], labelKey: "a", key: "c" }];"#,
+        );
+        write(&d, "src/hooks/useDevToggle.ts", DEV_TOGGLE);
+        write(
+            &d,
+            "src/sections/S.tsx",
+            r#"const onKey = (e: KeyboardEvent) => {
+                 const mod = e.metaKey || e.ctrlKey;
+                 if (!mod || !e.shiftKey || e.altKey) return;
+                 if (e.key === "C") copy();
+               };"#,
+        );
+        assert_eq!(
+            run(check_shortcut_table_has_handlers, &d),
+            Vec::<String>::new()
+        );
     }
 
     // ── undefined tokens ─────────────────────────────────────────────
@@ -1727,21 +1868,45 @@ mod guard_tests {
         assert!(p[0].contains("--fg-2"));
     }
 
-    /// `var(--x, fallback)` is legitimate even when `--x` is absent.
+    /// A fallback does NOT exempt an undeclared token.
+    ///
+    /// This test asserted the opposite until an audit found four
+    /// phantom override hooks hiding behind that exemption —
+    /// `--danger-border`, `--bg-warning-soft`,
+    /// `--traffic-light-center-y`, and `--bad`, which this branch's
+    /// own codemod had deleted while rewriting only the bare form.
+    /// Each was read with a fallback and declared nowhere, so the
+    /// fallback was the only value it ever took.
     #[test]
-    fn tokens_allow_a_var_with_a_fallback() {
+    fn tokens_catch_an_undeclared_reference_behind_a_fallback() {
         let d = repo();
         write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
         write(&d, "src/sections/S.tsx", r#"color: "var(--maybe, red)""#);
+        let p = run(check_no_undefined_tokens, &d);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].contains("--maybe"));
+    }
+
+    /// A DECLARED token with a fallback is still fine — the check is
+    /// about the token existing, not about fallbacks being forbidden.
+    #[test]
+    fn tokens_allow_a_declared_reference_with_a_fallback() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(&d, "src/sections/S.tsx", r#"color: "var(--fg, blue)""#);
         assert!(run(check_no_undefined_tokens, &d).is_empty());
     }
 
-    /// Locally-scoped properties are valid. The first draft reported
-    /// `--rank-col` as undefined when it is set on the element that
-    /// reads it — and its quote detection took the pattern's last
-    /// character instead of its first, so no local ever matched.
+    /// A locally-declared property is a `design.md` VIOLATION, not an
+    /// exemption.
+    ///
+    /// An earlier draft whitelisted these, to silence what looked like
+    /// a false positive on `--rank-col`. The rule says tokens.css is
+    /// "the one place tokens are declared", so `--rank-col` was the
+    /// violation and the whitelist legitimised it — a gate quietly
+    /// rewriting the rule it exists to enforce.
     #[test]
-    fn tokens_allow_a_locally_declared_property() {
+    fn tokens_catch_a_property_declared_outside_tokens_css() {
         let d = repo();
         write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
         write(
@@ -1749,7 +1914,9 @@ mod guard_tests {
             "src/sections/S.tsx",
             r#"style={{ ["--rank-col"]: "8px", width: "var(--rank-col)" }}"#,
         );
-        assert!(run(check_no_undefined_tokens, &d).is_empty());
+        let p = run(check_no_undefined_tokens, &d);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].contains("--rank-col"));
     }
 
     /// Three guards in one branch were fooled by their own docs.
@@ -1763,5 +1930,210 @@ mod guard_tests {
         );
         write(&d, "src/sections/S.tsx", r#"color: "var(--fg)""#);
         assert!(run(check_no_undefined_tokens, &d).is_empty());
+    }
+
+    // ── the fixes this round, each proved by the case that motivated it ──
+
+    #[test]
+    fn strip_comments_keeps_multibyte_characters() {
+        // `b[i] as char` shredded ⇧/⌥/⌘ into three Latin-1 chars, so the
+        // shortcut table's modifier columns read as empty and every
+        // binding looked like a bare ⌘ one.
+        let out = strip_comments("keys: [\"⌘\", \"⇧\", \"L\"], // ⌥ note\n");
+        assert!(out.contains('⇧'), "lost ⇧: {out:?}");
+        assert!(out.contains('⌘'));
+        assert!(!out.contains('⌥'), "comment survived: {out:?}");
+    }
+
+    const DEV_TOGGLE: &str = r#"
+        const onDevKey = (e: KeyboardEvent) => {
+          if (!e.metaKey || !e.ctrlKey || !e.altKey) return;
+          if (e.key !== "l" && e.key !== "L") return;
+        };
+    "#;
+
+    /// A fixture carrying the UNDOCUMENTED_BY_DESIGN handler, because
+    /// that list is validated in both directions: a fixture without it
+    /// legitimately reports the exemption as stale.
+    fn shortcut_repo(table: &str, handler: &str) -> tempfile::TempDir {
+        let d = repo();
+        write(&d, "src/lib/shortcutBindings.ts", table);
+        write(&d, "src/hooks/useThing.ts", handler);
+        write(&d, "src/hooks/useDevToggle.ts", DEV_TOGGLE);
+        d
+    }
+
+    #[test]
+    fn shortcuts_accept_a_table_matching_its_handlers() {
+        let d = shortcut_repo(
+            r#"export const GLOBAL_SHORTCUTS = [
+                 { keys: ["⌘", "⇧", "L"], labelKey: "focusLive", key: "l" },
+               ];"#,
+            &format!(
+                r#"{DEV_TOGGLE}
+                const onKey = (e: KeyboardEvent) => {{
+                  const mod = e.metaKey || e.ctrlKey;
+                  if (!mod || !e.shiftKey || e.altKey) return;
+                  if (e.key !== "l" && e.key !== "L") return;
+                }};"#
+            ),
+        );
+        assert_eq!(
+            run(check_shortcut_table_has_handlers, &d),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn shortcuts_catch_a_handler_answering_for_a_different_modifier() {
+        // The finding: matching the bare key let ⌃⌥⌘L stand in for ⌘⇧L,
+        // so deleting the ⌘⇧L handler kept this green.
+        let d = shortcut_repo(
+            r#"export const GLOBAL_SHORTCUTS = [
+                 { keys: ["⌘", "⇧", "L"], labelKey: "focusLive", key: "l" },
+               ];"#,
+            DEV_TOGGLE,
+        );
+        let out = run(check_shortcut_table_has_handlers, &d);
+        assert!(
+            out.iter()
+                .any(|p| p.contains("⇧⌘l") && p.contains("no handler")),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn shortcuts_catch_an_undocumented_handler() {
+        let d = shortcut_repo(
+            r#"export const GLOBAL_SHORTCUTS = [
+                 { keys: ["⌘", "K"], labelKey: "openPalette", key: "k" },
+               ];"#,
+            r#"const onKey = (e: KeyboardEvent) => {
+                 const mod = e.metaKey || e.ctrlKey;
+                 if (!mod || e.shiftKey || e.altKey) return;
+                 if (e.key === "k") return;
+                 if (e.key === "j") return;
+               };"#,
+        );
+        let out = run(check_shortcut_table_has_handlers, &d);
+        assert!(out.iter().any(|p| p.contains("⌘j")), "{out:?}");
+    }
+
+    #[test]
+    fn shortcuts_match_the_escaped_backslash_binding() {
+        // ⌘\ reads as TWO characters in source on both sides. Unescaping
+        // one side only made it report missing in both directions at
+        // once — the binding the whole check is named after.
+        let d = shortcut_repo(
+            r#"export const GLOBAL_SHORTCUTS = [
+                 { keys: ["⌘", "\\"], labelKey: "toggleSidebar", key: "\\" },
+               ];"#,
+            r#"const onKey = (e: KeyboardEvent) => {
+                 const mod = e.metaKey || e.ctrlKey;
+                 if (!mod || e.shiftKey || e.altKey) return;
+                 if (e.key !== "\\") return;
+               };"#,
+        );
+        assert_eq!(
+            run(check_shortcut_table_has_handlers, &d),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn shortcuts_reject_an_exemption_whose_handler_is_gone() {
+        // Same contract as UNSUBSCRIBED_BY_DESIGN: an entry may not
+        // outlive its rationale, or it reads as evidence the shortcut
+        // still exists. Deliberately does NOT use `shortcut_repo`,
+        // which writes the exempt handler.
+        let d = repo();
+        write(
+            &d,
+            "src/lib/shortcutBindings.ts",
+            r#"const A = [{ keys: ["⌘", "K"], labelKey: "a", key: "k" }];"#,
+        );
+        write(
+            &d,
+            "src/hooks/useThing.ts",
+            r#"const onKey = (e: KeyboardEvent) => {
+                 const mod = e.metaKey || e.ctrlKey;
+                 if (!mod || e.shiftKey || e.altKey) return;
+                 if (e.key === "k") return;
+               };"#,
+        );
+        let out = run(check_shortcut_table_has_handlers, &d);
+        assert!(
+            out.iter().any(|p| p.contains("UNDOCUMENTED_BY_DESIGN")),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn contrast_catches_a_redeclaration_between_two_blocks() {
+        // Scanning only after the LAST block let a plain re-declaration
+        // sitting between them defeat the first one silently.
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            r#"
+            :root { --focus-ring: 1px solid blue; }
+            @media (prefers-contrast: more) {
+              :root { --focus-ring: 3px solid black; }
+            }
+            :root { --focus-ring: 1px solid blue; }
+            @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+              :root { --line: white; }
+            }
+            "#,
+        );
+        let out = run(check_contrast_overrides_win, &d);
+        assert!(
+            out.iter()
+                .any(|p| p.contains("--focus-ring") && p.contains("inert")),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn contrast_accepts_overrides_that_come_last() {
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            r#"
+            :root { --focus-ring: 1px solid blue; --line: grey; }
+            @media (prefers-contrast: more) {
+              :root { --focus-ring: 3px solid black; }
+            }
+            @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+              :root { --line: white; }
+            }
+            "#,
+        );
+        assert_eq!(run(check_contrast_overrides_win, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn shortcut_gate_rejects_an_import_that_is_never_called() {
+        // The check was satisfied by the symbol appearing anywhere, so
+        // an unused import passed while the listener stayed ungated.
+        let d = repo();
+        write(
+            &d,
+            "src/hooks/useThing.ts",
+            r#"
+            import { isShortcutContextBlocked } from "./useGlobalShortcuts";
+            window.addEventListener("keydown", (e) => {
+              if (!e.metaKey) return;
+              if (document.activeElement) return;
+            });
+        "#,
+        );
+        let out = run(check_shortcut_gate_is_shared, &d);
+        assert!(
+            !out.is_empty(),
+            "an unused import must not satisfy the gate"
+        );
     }
 }

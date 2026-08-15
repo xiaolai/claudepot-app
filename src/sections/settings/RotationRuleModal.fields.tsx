@@ -64,7 +64,7 @@ export function CandidateChecklist({
         display: "flex",
         flexDirection: "column",
         gap: "var(--sp-4)",
-        maxHeight: "var(--candidate-list-max-h, var(--size-list-max))",
+        maxHeight: "var(--size-list-max)",
         overflow: "auto",
       }}
     >

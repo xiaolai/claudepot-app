@@ -287,7 +287,7 @@ export function ThirdPartySection() {
             role="alert"
             style={{
               padding: "var(--sp-12) var(--sp-16)",
-              border: "var(--bw-hair) solid var(--danger-border, var(--line))",
+              border: "var(--bw-hair) solid var(--line)",
               borderRadius: "var(--r-2)",
               color: "var(--fg)",
               fontSize: "var(--fs-sm)",

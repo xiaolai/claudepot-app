@@ -448,7 +448,7 @@ export function RotationRuleModal({
               style={{
                 padding: "var(--sp-8) var(--sp-12)",
                 background: "var(--bad-weak, var(--bg-raised))",
-                color: "var(--bad, var(--danger))",
+                color: "var(--danger)",
                 fontSize: "var(--fs-sm)",
                 borderRadius: "var(--r-2)",
               }}
