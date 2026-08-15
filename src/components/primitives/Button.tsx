@@ -80,7 +80,17 @@ export function Button({
   const [press, setPress] = useState(false);
 
   const s = SIZES[size];
-  const paint = variantPaint(variant, { hover, active, danger });
+  // `disabled` suppresses hover and press before they reach the paint.
+  // Guarding only the setters would still leave a stale `true` painted
+  // if a button becomes disabled while the pointer is over it — which
+  // is the common case, since buttons disable *in response to* the
+  // click that is happening under that pointer.
+  const paint = variantPaint(variant, {
+    hover: hover && !disabled,
+    active,
+    danger,
+  });
+  const pressed = press && !disabled;
 
   return (
     <button
@@ -89,12 +99,12 @@ export function Button({
       disabled={disabled}
       autoFocus={autoFocus}
       onClick={disabled ? undefined : onClick}
-      onMouseEnter={() => setHover(true)}
+      onMouseEnter={() => !disabled && setHover(true)}
       onMouseLeave={() => {
         setHover(false);
         setPress(false);
       }}
-      onMouseDown={() => setPress(true)}
+      onMouseDown={() => !disabled && setPress(true)}
       onMouseUp={() => setPress(false)}
       className="pm-focus"
       {...aria}
@@ -113,7 +123,7 @@ export function Button({
         border: paint.border,
         opacity: disabled ? "var(--opacity-disabled)" : 1,
         cursor: disabled ? "not-allowed" : "pointer",
-        transform: press
+        transform: pressed
           ? "translateY(var(--press-shift))"
           : "none",
         transition:

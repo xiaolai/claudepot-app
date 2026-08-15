@@ -569,7 +569,13 @@
 
   /* Accent family */
   --accent-weak: var(--accent-soft);
-  --accent-text: var(--bg-raised);
+  /* Ink that sits ON the accent fill. Must NOT be a background token:
+     as `var(--bg-raised)` it followed the theme while the accent it
+     sits on did not, so the notification badge and the env-var control
+     rendered near-black ink (oklch 19%) on terracotta in dark mode
+     while solid Buttons beside them rendered white. `--on-color` is
+     theme-invariant, which is the property this role requires. */
+  --accent-text: var(--on-color);
 
   /* Status (old naming) */
   --bad:         var(--danger);

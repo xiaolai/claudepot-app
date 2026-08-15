@@ -69,6 +69,9 @@ export function IconButton({
 }: IconButtonProps) {
   const [hover, setHover] = useState(false);
   const dim = resolveSize(size);
+  // Same reason as `Button`: guarding the setter alone leaves a stale
+  // `true` painted when a button disables while the pointer is on it.
+  const hovered = hover && !disabled;
   return (
     <button
       ref={ref}
@@ -77,7 +80,7 @@ export function IconButton({
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
       onMouseDown={onMouseDown}
-      onMouseEnter={() => setHover(true)}
+      onMouseEnter={() => !disabled && setHover(true)}
       onMouseLeave={() => setHover(false)}
       className="pm-focus"
       {...aria}
@@ -90,7 +93,7 @@ export function IconButton({
         borderRadius: "var(--r-2)",
         background: active
           ? "var(--bg-active)"
-          : hover
+          : hovered
             ? "var(--bg-hover)"
             : "transparent",
         color: active ? "var(--accent-ink)" : "var(--fg-muted)",

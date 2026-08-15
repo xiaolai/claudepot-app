@@ -115,13 +115,14 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     // Screenshot *freshness* is `cargo xtask verify-screenshots`, on
     // demand — see that function for why it is not a pull-request gate.
     check_screenshot_pairs(repo, &mut problems)?;
+    check_shortcut_gate_is_shared(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
 
     if problems.is_empty() {
         println!(
-            "verify-docs: ok — CLI verbs, Settings panes, databases, data-dir JSON state, web \
-             icon assets and the cc-env spec all in sync"
+            "verify-docs: ok — CLI verbs, Settings panes, databases, data-dir JSON state, the \
+             shortcut gate, web icon assets and the cc-env spec all in sync"
         );
         return Ok(());
     }
@@ -715,6 +716,115 @@ fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()>
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+/// Every `keydown` listener under `src/hooks/` must reach the shared
+/// shortcut gate rather than re-deriving it.
+///
+/// # Why this is a build gate and not a comment
+///
+/// `design.md` already says it in words — "The one predicate for that
+/// is `isShortcutContextBlocked()` … use it rather than re-deriving
+/// the check" — and `useGlobalShortcuts` carries a comment recording
+/// what the last violation cost. The rule was then broken **twice
+/// more**: `useSection` kept a behaviourally-equivalent copy, and
+/// `useSidebarCollapsed` shipped a *weaker* one that tested editable
+/// focus but never `[role="dialog"]`, so ⌘\ collapsed the sidebar out
+/// from under an open modal.
+///
+/// A convention that has been violated twice after being written down
+/// is not being enforced by being written down a third time.
+///
+/// Exempt: the file that defines the predicate, and hooks that touch
+/// `activeElement` for a purpose other than gating a shortcut (focus
+/// traps restore focus — they are not shortcut handlers, and they have
+/// no keydown-with-modifier shape).
+/// Remove `//` line comments and `/* */` block comments so a source
+/// scan tests code rather than prose. Deliberately naive — it does not
+/// parse strings — which is safe here because every caller is asking
+/// "does this file CALL x", and a false positive from an identifier
+/// inside a string literal fails closed (reports drift) rather than
+/// open.
+fn strip_comments(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let b = src.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        if b[i] == b'/' && i + 1 < b.len() && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if b[i] == b'/' && i + 1 < b.len() && b[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(b.len());
+        } else {
+            out.push(b[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn check_shortcut_gate_is_shared(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let dir = repo.join("src/hooks");
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => {
+            problems.push("src/hooks is unreadable — the shortcut-gate check cannot run".into());
+            return Ok(());
+        }
+    };
+    let mut scanned = 0usize;
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_some_and(|x| x == "ts" || x == "tsx") {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            // The definition site cannot import itself.
+            if name.starts_with("useGlobalShortcuts") || name.contains(".test.") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path)?;
+            let registers_keydown = src.contains("\"keydown\"") || src.contains("'keydown'");
+            // A *shortcut* is modifier-keyed. A bare-key keydown handler
+            // is something else and must not be swept in: `useFocusTrap`
+            // listens for Tab and is required to keep working while a
+            // modal is open, which is the exact opposite of what this
+            // gate enforces. Keying on the modifier separates the two by
+            // what they are rather than by a name allowlist.
+            let is_shortcut = src.contains("metaKey") || src.contains("ctrlKey");
+            if !registers_keydown || !is_shortcut {
+                continue;
+            }
+            scanned += 1;
+            // Comments are stripped before the check. Without this, the
+            // doc comment *explaining* the rule satisfies it: the first
+            // draft of this guard passed a deliberately reintroduced
+            // ⌘\ bug because the file still carried a comment naming
+            // `isShortcutContextBlocked`. A guard that a comment can
+            // satisfy is worse than none — it reports green over the
+            // exact regression it was written for.
+            if !strip_comments(&src).contains("isShortcutContextBlocked") {
+                problems.push(format!(
+                    "src/hooks/{name} registers a keydown listener without importing \
+                     isShortcutContextBlocked — re-deriving the gate is how ⌘\\ ended up \
+                     firing under an open modal (rules/design.md)"
+                ));
+            }
+        }
+    }
+    // A check that silently scanned nothing is indistinguishable from a
+    // check that passed.
+    if scanned == 0 {
+        problems.push(
+            "the shortcut-gate check matched no keydown listeners under src/hooks — \
+             the scan is broken, not the codebase"
+                .into(),
+        );
     }
     Ok(())
 }
