@@ -103,11 +103,17 @@ const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/icon-dock.png");
 #[cfg(debug_assertions)]
 pub fn override_application_icon() {
     // `MainThreadMarker::new_unchecked` + `setApplicationIconImage` are
-    // main-thread-only; off the main thread they are UB. `setup()` runs
-    // on the main thread, so this guard never trips in practice — but if
-    // that assumption ever breaks, log loudly and skip rather than
-    // corrupt or abort silently. The early return is what makes the
-    // `new_unchecked` below sound.
+    // main-thread-only; off the main thread they are UB. The early
+    // return is what makes the `new_unchecked` below sound.
+    //
+    // This guard DID trip, and the comment here used to say it never
+    // would: `preferences_set_hide_dock_icon` is an async command, so
+    // it called this from a tokio worker, and the re-apply it needed
+    // after switching back to `Regular` was logged and dropped. The
+    // Dock then showed the generic executable icon — the exact outcome
+    // that call site exists to prevent. Callers off the main thread go
+    // through `run_on_main_thread`; this stays a guard, not a router,
+    // because it has no `AppHandle` to route with.
     if !claudepot_core::main_thread::is_main_thread() {
         claudepot_core::main_thread::warn_if_off_main_thread(
             "dock_icon::override_application_icon",

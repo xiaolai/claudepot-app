@@ -1,38 +1,56 @@
 <!--
   Menu-bar template, alert state.
 
-  Same 800-unit viewBox as tray-template.svg, and that is the point:
-  an identical viewBox size means the BLOCK renders at an identical
-  size in both states, so the icon does not jump when the badge
-  appears or clears.
+  Same 672-unit viewBox as tray-template.svg, and that is the point: an
+  identical viewBox size means the BLOCK renders at an identical size in
+  both states, so the icon does not jump when the badge appears or
+  clears.
 
-  Making that possible needed one artwork change. The badge sat at
-  (852, 204) r132, reaching (984, 72) — so block-plus-badge spanned
-  792 units against the block's own 640. Any viewBox tight enough to
-  make the plain block a sensible menubar size clipped the badge, and
-  any viewBox loose enough to contain the badge left the block small.
-  Moving the badge to (760, 310) tucks it against the block's top-right
-  corner instead of floating off it.
+  THE BADGE SETS THE FLOOR ON HOW TIGHT THE CROP CAN BE, which is the
+  whole reason the plain icon was undersized. With the viewBox centred
+  on the block, the badge's top edge is what first collides with the
+  tile: at the old position (760, 310) r132 the crop could not go below
+  ~788 units without clipping it, so the block was stuck at 76% of the
+  tile and rendered 13.9pt against ChatGPT's 17.0pt. Padding is not free
+  here — `tray-icon` scales the whole tile to 18pt, so every unit of
+  margin is a unit the block does not get.
 
-  The badge position is constrained, not chosen by eye: within this
-  viewBox it must satisfy cx + r <= 900 and cy - r >= 172 to keep a
-  12-unit margin off the tile edge. An earlier attempt at (792, 264)
-  reached x=924 against a right edge of 912 and rendered flush to the
-  pixel boundary — measurably clipped, which is why the ink box is
-  asserted below rather than eyeballed.
+  Moving the badge inward to (692, 332) is what buys the crop. The
+  position is constrained, not chosen by eye: within a 672 viewBox
+  centred on the block (176..848 both axes) it must satisfy
+
+      cx + r <= 824   and   cy - r >= 200
+
+  to keep a 24-unit margin off the tile edge. (692, 332) r132 reaches
+  x=824 and y=200 exactly, so it sits at both limits — moving it further
+  out clips, and there is no slack to reclaim by nudging.
+
+  24 units and not 12: at this viewBox a unit is 44/672 px, so a
+  12-unit margin is 0.79px and antialiasing closed it. The first
+  attempt at (704, 320) measured an ink box of (1, 0, 44, 42) in a
+  44x44 tile — touching two edges. The margin has to be stated in
+  RENDERED pixels and converted back, not chosen in authoring units.
+
+  This continues a direction the previous revision started: the badge
+  was once at (852, 204), floating off the block's corner, and
+  block-plus-badge spanned 792 units against the block's own 640. Each
+  move tucks it closer in and buys back tile.
 
   The badge is otherwise unchanged: same radius, same knocked-out ring
   (mask circle) separating it from the block, so it still reads as a
-  separate element at 22pt rather than merging into the silhouette.
+  separate element rather than merging into the silhouette.
+
+  Block geometry carries the same -48 y shift as every other master —
+  its bbox centre was 560 against a canvas centre of 512.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="112 160 800 800">
+<svg xmlns="http://www.w3.org/2000/svg" width="672" height="672" viewBox="176 176 672 672">
   <defs>
     <mask id="seams">
-      <rect x="112" y="160" width="800" height="800" fill="#FFFFFF"></rect>
-      <path d="M512 320 L512 864 M192 432 L512 608 M832 432 L512 608" stroke="#000000" stroke-width="48" fill="none"></path>
-      <circle cx="760" cy="310" r="196" fill="#000000"></circle>
+      <rect x="176" y="176" width="672" height="672" fill="#FFFFFF"></rect>
+      <path d="M512 272 L512 816 M192 384 L512 560 M832 384 L512 560" stroke="#000000" stroke-width="48" fill="none"></path>
+      <circle cx="692" cy="332" r="196" fill="#000000"></circle>
     </mask>
   </defs>
-  <path mask="url(#seams)" fill="#000000" d="M512 256 L832 432 L832 688 L512 864 L192 688 L192 432 Z"></path>
-  <circle cx="760" cy="310" r="132" fill="#000000"></circle>
+  <path mask="url(#seams)" fill="#000000" d="M512 208 L832 384 L832 640 L512 816 L192 640 L192 384 Z"></path>
+  <circle cx="692" cy="332" r="132" fill="#000000"></circle>
 </svg>

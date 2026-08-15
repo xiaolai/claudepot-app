@@ -179,9 +179,15 @@ export const sections: readonly SectionDef[] = [
     render: () => <AgentsSection />,
   },
   {
-    id: "global",
-    labelKey: "sections.global",
-    glyph: NF.globe,
+    // Renamed from `global` — an engineering scope promoted to a
+    // navigation label, holding Config, Memory, Tips and Updates with
+    // nothing in common but the scope. Its neighbours are nouns the user
+    // owns; this one was an adjective. `LEGACY_SECTION_IDS` maps the old
+    // id, so a saved position still resolves instead of dropping the
+    // user to Accounts.
+    id: "config",
+    labelKey: "sections.config",
+    glyph: NF.fileCode,
     loader: importGlobal,
     render: (p) => (
       <GlobalSection

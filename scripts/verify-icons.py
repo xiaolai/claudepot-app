@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import struct
 import subprocess
+import shutil
+import tempfile
+import pathlib
 import sys
 from pathlib import Path
 
@@ -207,6 +210,43 @@ else:
                   f"only {frac:.1%} warm pixels — group order is top-first; "
                   f"a full-canvas plate listed first occludes the block")
 
+# The layer PNGs must still match the SVG masters they were rasterised
+# from. They are PNGs because actool renders a filtered layer SVG as
+# near-black (the 0.4.12 Dock icon), so the rasterisation step is not
+# optional — but it also means the layers are a COPY, and a copy goes
+# stale in silence. It did: the -48 centring shift moved the .icns, the
+# tray, the web mark and the ICO, and left block.png on the old low
+# geometry, so the Dock kept an icon nothing else agreed with. A stale
+# layer is a perfectly valid PNG and every existing check passed.
+#
+# Geometry rather than bytes: rsvg output can differ across versions,
+# and what actually drifts is the artwork's position, not its encoding.
+if shutil.which("rsvg-convert") is None:
+    print("  skip rsvg-convert not installed — layer freshness unchecked")
+else:
+    try:
+        from PIL import Image as _L  # noqa: PLC0415
+    except ImportError:
+        print("  skip Pillow not installed — layer freshness unchecked")
+    else:
+        for png, svg in (("plate.png", "layer-1-plate.svg"),
+                         ("block.png", "layer-2-glyph.svg")):
+            have = ICONS / "Claudepot.icon" / "Assets" / png
+            master = ROOT / "assets" / "icon-set" / "macos" / svg
+            if not (have.is_file() and master.is_file()):
+                check(False, f"{png} and its master both exist", "missing")
+                continue
+            with tempfile.TemporaryDirectory() as td:
+                fresh = pathlib.Path(td) / png
+                subprocess.run(["rsvg-convert", "-w", "1024", "-h", "1024",
+                                str(master), "-o", str(fresh)], check=True)
+                a = _L.open(have).convert("RGBA").getchannel("A").getbbox()
+                b = _L.open(fresh).convert("RGBA").getchannel("A").getbbox()
+            check(a == b,
+                  f"{png} matches {svg} (layer not stale)",
+                  f"ink box {a} but the master renders {b} — "
+                  f"re-run scripts/regen-icons.sh then build-macos-glass-icon.sh")
+
 print("\nmacOS .icns")
 icns = ICONS / "icon.icns"
 if not icns.is_file():
@@ -297,22 +337,36 @@ for name in ("tray-iconTemplate@2x.png", "tray-iconMono@2x.png",
     check(p.is_file() and png_size(p) == (44, 44), f"{name} is 44x44",
           f"got {png_size(p) if p.is_file() else 'missing'}")
 
-# How much of the tile the glyph actually INKS, which is what "the tray
-# icon looks too small" means. A 44x44 file whose artwork occupies 60%
-# of it passes every dimension check and still reads as undersized in
-# the menubar — that is exactly how this shipped and had to be caught
-# by eye. The window is anchored on the previous icon's measured
-# 86%w x 75%h, which looked right for two years.
+# The RENDERED height in points, which is what "the tray icon looks too
+# small" actually means. `tray-icon` normalises whatever we hand it to
+# eighteen points tall, preserving aspect:
 #
-# The upper bound matters as much as the lower: ink touching the tile
-# edge renders flush against the menubar with no optical padding.
+#     let icon_height: f64 = 18.0;
+#     let icon_width = (width as f64) / (height as f64 / icon_height);
+#
+# So the tile's pixel size is irrelevant and its padding is pure loss —
+# only the fraction of the tile the glyph inks decides how big it lands
+# in the menubar. Asserting the fraction alone hid that: 44x44 at 77%
+# passes any dimension check and still renders 13.9pt, which is how this
+# shipped visibly smaller than its neighbours.
+#
+# The band is anchored on measurements of the two apps sitting beside it
+# in this menubar, both read from their shipped @2x templates:
+#
+#     ChatGPT.app   94.4% of tile  ->  17.0pt
+#     Claude.app    70.8%          ->  12.8pt
+#
+# 15.0pt floor so we never drift back toward Claude.app's end; 17.5pt
+# ceiling because ink flush to the tile edge has no optical padding, and
+# the separate margin check below enforces the same thing structurally.
 try:
     from PIL import Image  # noqa: PLC0415 — optional, checked below
 except ImportError:
     print("  skip Pillow not installed — tray coverage unchecked")
 else:
-    for name, lo, hi in (("tray-iconTemplate@2x.png", 0.70, 0.90),
-                         ("tray-iconAlertTemplate@2x.png", 0.78, 0.95)):
+    TRAY_NORMALISED_PT = 18.0  # hard-coded by tray-icon's macOS impl
+    for name, lo, hi in (("tray-iconTemplate@2x.png", 15.0, 17.5),
+                         ("tray-iconAlertTemplate@2x.png", 15.0, 17.9)):
         p = ICONS / name
         if not p.is_file():
             check(False, f"{name} coverage", "missing")
@@ -324,9 +378,10 @@ else:
             continue
         fw = (box[2] - box[0]) / im.width
         fh = (box[3] - box[1]) / im.height
-        check(lo <= fw <= hi and lo <= fh <= hi,
-              f"{name} inks {lo:.0%}-{hi:.0%} of the tile",
-              f"got {fw:.0%}w x {fh:.0%}h")
+        rendered_pt = TRAY_NORMALISED_PT * fh
+        check(lo <= rendered_pt <= hi,
+              f"{name} renders {lo}-{hi}pt tall in the menubar",
+              f"got {rendered_pt:.1f}pt ({fh:.0%} of the tile)")
         check(box[0] > 0 and box[1] > 0
               and box[2] < im.width and box[3] < im.height,
               f"{name} keeps a margin off the tile edge",

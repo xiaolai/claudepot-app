@@ -18,7 +18,7 @@ describe("section registry — single source of truth", () => {
       ["keys", "sections.keys"],
       ["third-party", "sections.third-party"],
       ["automations", "sections.automations"],
-      ["global", "sections.global"],
+      ["config", "sections.config"],
       // Ninth on purpose so it takes ⌘9; see the registry comment.
       ["boards", "sections.boards"],
       ["settings", "sections.settings"],
@@ -39,7 +39,7 @@ describe("section registry — single source of truth", () => {
       "Keys",
       "Providers",
       "Agents",
-      "Global",
+      "Config",
       "Boards",
       "Settings",
     ]);
