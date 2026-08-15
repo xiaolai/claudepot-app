@@ -50,6 +50,11 @@ export type ToastPushFn = (
     durationMs?: number;
     undoLabel?: string;
     onCommit?: () => void;
+    /**
+     * Manual close (X) CANCELS `onCommit` instead of firing it.
+     * Destructive deferred actions only — see `useToasts`.
+     */
+    cancelOnDismiss?: boolean;
     dedupeKey?: string;
     _suppressLog?: boolean;
   },
@@ -229,6 +234,7 @@ export function buildEmit(deps: EmitDeps): EmitFn {
           undoLabel: action?.label,
           undoMs: action?.timeoutMs,
           onCommit: action?.onCommit,
+          cancelOnDismiss: action?.cancelOnDismiss,
           // Audit-fix Medium #9: forward toastDurationMs so callers
           // that previously passed `durationMs` directly to pushToast
           // (e.g. sticky error toasts that need to stay visible) keep

@@ -27,6 +27,8 @@
     "addAccount": "添加账户",
     "copyEmail": "复制第一个匹配的邮箱",
     "focusLive": "聚焦实时会话栏",
+    "toggleSidebar": "显示 / 隐藏侧边栏",
+    "focusFilter": "聚焦内容搜索",
     "closeDialog": "关闭对话框",
     "cycleFocus": "循环切换焦点（限对话框内）",
     "moveSelection": "移动选中项",
@@ -47,7 +49,7 @@
     "removeAccountTitle": "移除账户？",
     "removeAccountConfirm": "移除",
     "removeAccountBody": "移除 <b>{{email}}</b>？",
-    "removeAccountNote": "将删除凭据和 Claude Desktop 配置文件，当前的 CLI/Desktop 绑定也会被清除。提示消失前的几秒内你还可以撤销。"
+    "removeAccountNote": "将删除凭据与 Desktop 配置，并清除 CLI/Desktop 的活动指针。在撤销倒计时结束前不会真正删除 — 关闭提示即取消。"
   },
   "quit": {
     "title_other": "有 {{count}} 项操作正在进行",

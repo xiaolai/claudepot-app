@@ -21,6 +21,9 @@ interface Deps {
     opts?: {
       undoMs?: number;
       undoLabel?: string;
+      /** See `useToasts`: manual close cancels instead of committing.
+       *  For destructive deferred actions only. */
+      cancelOnDismiss?: boolean;
       onCommit?: () => void;
       dedupeKey?: string;
     },
@@ -259,6 +262,14 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
         undoMs: 5000,
         undoLabel: i18n.t("ui.undo"),
         dedupeKey: `rm-${a.uuid}`,
+        // Closing this toast CANCELS the removal rather than
+        // committing it. The default (commit on any dismissal) is
+        // right for a reversible deferred action like a Desktop
+        // switch; here it meant a user who had just been promised
+        // "a few seconds to undo" destroyed the account the instant
+        // they tidied the toast away — dismissing was indistinguishable
+        // from confirming, for the app's most destructive action.
+        cancelOnDismiss: true,
         onCommit: () => {
           if (undone) return;
           void performRemoveImmediate(a);

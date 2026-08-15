@@ -46,6 +46,8 @@ export function useToasts() {
   // side effects inside a state updater (StrictMode double-invokes
   // updaters — a commit in there would fire twice).
   const commitsRef = useRef<Map<number, () => void>>(new Map());
+  /** Toast ids whose manual dismissal cancels rather than commits. */
+  const cancelOnDismissRef = useRef<Set<number>>(new Set());
 
   // Clear all pending timers on unmount. Pending commits are dropped,
   // not fired — teardown is not a user decision to commit.
@@ -89,28 +91,40 @@ export function useToasts() {
    * ever reaching this path. Deleting from the map before invoking
    * makes re-entry (double-click, timer + X race) a no-op.
    */
-  const dismissToast = useCallback((id: number, opts?: { skipCommit?: boolean }) => {
-    const commit = commitsRef.current.get(id);
-    commitsRef.current.delete(id);
-    if (commit && !opts?.skipCommit) commit();
-    const timer = timersRef.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timersRef.current.delete(id);
-    }
-    setToasts((t) => t.map((x) => (x.id === id ? { ...x, exiting: true } : x)));
-    // Audit T4-4: the 150 ms exit-animation timer used to be a bare
-    // setTimeout outside `timersRef`. If the component unmounted during
-    // the exit window the timer would still fire `removeToast`,
-    // calling `setState` on a dead component (React 18: warning;
-    // future strict modes: error). Stash the exit timer in the same
-    // map so the unmount cleanup clears it like any other.
-    const exitTimer = setTimeout(() => {
-      timersRef.current.delete(id);
-      removeToast(id);
-    }, 150);
-    timersRef.current.set(id, exitTimer);
-  }, [removeToast]);
+  const dismissToast = useCallback(
+    (id: number, opts?: { skipCommit?: boolean; byTimer?: boolean }) => {
+      const commit = commitsRef.current.get(id);
+      commitsRef.current.delete(id);
+      // A destructive deferred action commits only when its window
+      // actually elapses. A user closing the toast is cancelling, not
+      // consenting — see `cancelOnDismiss`.
+      const userCancelled =
+        cancelOnDismissRef.current.has(id) && !opts?.byTimer;
+      cancelOnDismissRef.current.delete(id);
+      if (commit && !opts?.skipCommit && !userCancelled) commit();
+      const timer = timersRef.current.get(id);
+      if (timer) {
+        clearTimeout(timer);
+        timersRef.current.delete(id);
+      }
+      setToasts((t) =>
+        t.map((x) => (x.id === id ? { ...x, exiting: true } : x)),
+      );
+      // Audit T4-4: the 150 ms exit-animation timer used to be a bare
+      // setTimeout outside `timersRef`. If the component unmounted
+      // during the exit window the timer would still fire
+      // `removeToast`, calling `setState` on a dead component (React
+      // 18: warning; future strict modes: error). Stash the exit timer
+      // in the same map so the unmount cleanup clears it like any
+      // other.
+      const exitTimer = setTimeout(() => {
+        timersRef.current.delete(id);
+        removeToast(id);
+      }, 150);
+      timersRef.current.set(id, exitTimer);
+    },
+    [removeToast],
+  );
 
   /**
    * Push a toast. Options:
@@ -149,6 +163,20 @@ export function useToasts() {
         durationMs?: number;
         undoLabel?: string;
         onCommit?: () => void;
+        /**
+         * Make the manual close (X) CANCEL the pending commit instead
+         * of firing it. Off by default, so the existing deferred
+         * actions (desktop switch) keep committing on dismiss.
+         *
+         * Set this for **destructive** deferred actions. The default
+         * makes dismissing indistinguishable from confirming: a user
+         * who has just been told "you have a few seconds to undo"
+         * and then tidies the toast away destroys the thing
+         * immediately, losing the window they were promised. For a
+         * destructive action the safe reading of "close" is "I am
+         * done looking at this", not "yes, proceed now".
+         */
+        cancelOnDismiss?: boolean;
         dedupeKey?: string;
       },
     ) => {
@@ -181,6 +209,7 @@ export function useToasts() {
       }
       if (opts?.onCommit) {
         commitsRef.current.set(id, opts.onCommit);
+        if (opts.cancelOnDismiss) cancelOnDismissRef.current.add(id);
       }
       setToasts((t) => [
         ...t,
@@ -221,7 +250,10 @@ export function useToasts() {
           // visible ⇔ Undo still effective" an invariant, eliminating
           // the prior race between a parallel action timer and the
           // toast lifetime.
-          dismissToast(id);
+          // `byTimer` marks this as the window genuinely elapsing, so
+          // a destructive deferred action commits here and nowhere
+          // else.
+          dismissToast(id, { byTimer: true });
         }, delay);
         timersRef.current.set(id, timer);
       }

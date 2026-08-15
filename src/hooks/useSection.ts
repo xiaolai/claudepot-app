@@ -45,12 +45,31 @@ function safeSet(key: string, value: string): void {
  * doesn't wedge the UI. Sub-route values are NOT validated — each
  * section owns its own sub-route vocabulary.
  *
- * ⌘1..⌘9 binds to the first nine sections (ignored when other
- * modifiers are present).
+ * ⌘1..⌘9 binds to position in `numbered` — the FULL registry order —
+ * not to position in `ids`. The two are different lists and conflating
+ * them made a section's number depend on its neighbours' visibility:
+ * Boards ships off and sits ninth, so enabling it moved Settings off
+ * ⌘9 and handed the key to Boards. The registry comment justified
+ * Boards' position by saying an earlier slot "would renumber sections
+ * people already have in muscle memory" — which the toggle did anyway,
+ * just conditionally.
+ *
+ * Numbering by registry position makes every section's number a fixed
+ * property of the section. The cost is that ⌘9 is inert while Boards
+ * is off, and Settings (tenth) has no number at all — it keeps ⌘,
+ * which is the standard binding users reach for anyway. A key that
+ * does nothing is better than a key that does something different
+ * depending on a setting elsewhere.
+ *
+ * `ids` still governs *validity*: a number pointing at a disabled
+ * section navigates nowhere.
  */
 export function useSection<Id extends string>(
   defaultId: Id,
-  ids: readonly Id[]
+  ids: readonly Id[],
+  /** Full registry order. Defaults to `ids` so tests that only care
+   *  about validity need not pass it. */
+  numbered: readonly Id[] = ids,
 ): {
   section: Id;
   subRoute: string | null;
@@ -84,6 +103,11 @@ export function useSection<Id extends string>(
   useEffect(() => {
     idsRef.current = ids;
   }, [ids]);
+
+  const numberedRef = useRef(numbered);
+  useEffect(() => {
+    numberedRef.current = numbered;
+  }, [numbered]);
 
   // Set by any explicit `setSection`. Comparing `sectionRef` against
   // `defaultId` was not enough: navigating away and back to the
@@ -222,14 +246,18 @@ export function useSection<Id extends string>(
       if (isShortcutContextBlocked()) return;
       const n = Number.parseInt(e.key, 10);
       if (!Number.isInteger(n) || n < 1 || n > 9) return;
-      const target = ids[n - 1];
+      // Position in the full registry, then validity against the
+      // enabled list. A number whose section is switched off simply
+      // does nothing rather than sliding to the next visible section.
+      const target = numberedRef.current[n - 1];
       if (!target || target === sectionRef.current) return;
+      if (!(idsRef.current as readonly string[]).includes(target)) return;
       e.preventDefault();
       setSection(target);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ids, setSection]);
+  }, [setSection]);
 
   return { section, subRoute, setSection, setSubRoute };
 }

@@ -117,6 +117,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_screenshot_pairs(repo, &mut problems)?;
     check_shortcut_gate_is_shared(repo, &mut problems)?;
     check_contrast_overrides_win(repo, &mut problems)?;
+    check_shortcut_table_has_handlers(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
 
@@ -721,6 +722,150 @@ fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()>
     Ok(())
 }
 
+/// Every binding declared in `lib/shortcutBindings.ts` must have a
+/// handler, and every documented one must be reachable.
+///
+/// This closes both halves of a failure the codebase has now had in
+/// each direction:
+///
+/// - **⌘F** was listed in the shortcuts modal and in `design.md` for a
+///   long time while no section ever wired it. The hook accepted an
+///   `onFilter` option and nothing passed one.
+/// - **⌘\** was the mirror: bound in `useSidebarCollapsed` from the
+///   day it was added, surfaced only in a tooltip, absent from the
+///   modal and the rules file.
+///
+/// Both come from documentation and implementation being two lists.
+/// The table is now one list; this asserts the code still matches it.
+fn check_shortcut_table_has_handlers(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let table = read(repo, "src/lib/shortcutBindings.ts")?;
+    let table_code = strip_comments(&table);
+
+    // `key: "x"` entries in the table.
+    // `key: "x"` anywhere, not only at the start of a line. The first
+    // draft used `line.trim().strip_prefix("key: \"")`, which only saw
+    // the multi-line entries — 2 of the 9 bindings — so the check ran
+    // over a quarter of the table and passed a deliberately planted
+    // ⌘F. `labelKey: "` cannot collide: its `Key` is capitalised.
+    let mut declared: Vec<String> = Vec::new();
+    let mut from = 0usize;
+    while let Some(rel) = table_code[from..].find("key: \"") {
+        let at = from + rel;
+        let after = at + "key: \"".len();
+        // Reject `…someKey: "` — require a boundary before `key`.
+        let ok = table_code[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| c.is_whitespace() || c == ',' || c == '{');
+        if ok {
+            if let Some(end) = table_code[after..].find('"') {
+                declared.push(table_code[after..after + end].to_string());
+            }
+        }
+        from = after;
+    }
+    if declared.is_empty() {
+        problems.push(
+            "lib/shortcutBindings.ts declares no `key:` entries — the handler check \
+             cannot run, so it must not silently pass"
+                .into(),
+        );
+        return Ok(());
+    }
+
+    // Scan ALL of src/, recursively. The first draft looked only in
+    // src/hooks, src/components and src/shell and reported ⌘⇧C as
+    // unimplemented — its handler lives in
+    // src/sections/AccountsSection.tsx. Acting on that would have
+    // deleted the documentation for a working feature, which is the
+    // opposite of the mistake this check exists to catch.
+    let mut handler_src = String::new();
+    collect_ts_sources(&repo.join("src"), &mut handler_src)?;
+
+    for key in declared {
+        // Match on the COMPARISON, not on a bare string literal.
+        // Single-letter needles like "c" or "r" occur constantly in a
+        // recursive scan of the whole tree, so a bare-literal search
+        // over src/ would pass everything and assert nothing.
+        //
+        // Shift reports an uppercase `e.key`, so handlers legitimately
+        // compare either case; accept both.
+        let upper = key.to_uppercase();
+        let found = [key.as_str(), upper.as_str()].iter().any(|k| {
+            [
+                format!("key === \"{k}\""),
+                format!("key !== \"{k}\""),
+                format!("key === '{k}'"),
+                format!("key !== '{k}'"),
+            ]
+            .iter()
+            .any(|n| handler_src.contains(n.as_str()))
+        });
+        if !found {
+            problems.push(format!(
+                "shortcutBindings.ts declares key {key:?} but nothing under src/ compares \
+                 `e.key` against it — documenting a shortcut that does nothing is the \
+                 ⌘F mistake"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Every non-test `.ts` / `.tsx` path under `dir`, recursively.
+fn collect_ts_paths(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.filter_map(Result::ok) {
+        let path = e.path();
+        if path.is_dir() {
+            collect_ts_paths(&path, out);
+            continue;
+        }
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if name.contains(".test.") {
+            continue;
+        }
+        if path.extension().is_some_and(|x| x == "ts" || x == "tsx") {
+            out.push(path);
+        }
+    }
+}
+
+/// Append every non-test `.ts` / `.tsx` source under `dir`, comments
+/// stripped, recursively.
+fn collect_ts_sources(dir: &Path, out: &mut String) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for e in entries.filter_map(Result::ok) {
+        let path = e.path();
+        if path.is_dir() {
+            collect_ts_sources(&path, out)?;
+            continue;
+        }
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if name.contains(".test.") {
+            continue;
+        }
+        if path.extension().is_some_and(|x| x == "ts" || x == "tsx") {
+            if let Ok(src) = std::fs::read_to_string(&path) {
+                out.push_str(&strip_comments(&src));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// A `@media (prefers-contrast: more)` override must appear AFTER the
 /// plain declaration it overrides.
 ///
@@ -874,18 +1019,15 @@ fn strip_comments(src: &str) -> String {
 }
 
 fn check_shortcut_gate_is_shared(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
-    let dir = repo.join("src/hooks");
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => {
-            problems.push("src/hooks is unreadable — the shortcut-gate check cannot run".into());
-            return Ok(());
-        }
-    };
     let mut scanned = 0usize;
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.extension().is_some_and(|x| x == "ts" || x == "tsx") {
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_ts_paths(&repo.join("src"), &mut files);
+    if files.is_empty() {
+        problems.push("src/ is unreadable — the shortcut-gate check cannot run".into());
+        return Ok(());
+    }
+    for path in files {
+        {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             // The definition site cannot import itself.
             if name.starts_with("useGlobalShortcuts") || name.contains(".test.") {
@@ -912,8 +1054,9 @@ fn check_shortcut_gate_is_shared(repo: &Path, problems: &mut Vec<String>) -> Res
             // satisfy is worse than none — it reports green over the
             // exact regression it was written for.
             if !strip_comments(&src).contains("isShortcutContextBlocked") {
+                let rel = path.strip_prefix(repo).unwrap_or(&path).display();
                 problems.push(format!(
-                    "src/hooks/{name} registers a keydown listener without importing \
+                    "{rel} registers a modifier-keyed keydown listener without importing \
                      isShortcutContextBlocked — re-deriving the gate is how ⌘\\ ended up \
                      firing under an open modal (rules/design.md)"
                 ));

@@ -6,6 +6,7 @@ import {
   setSectionEnabled,
 } from "../lib/optionalSections";
 import { i18n } from "../lib/i18n";
+import { sectionNumber } from "../lib/shortcutBindings";
 
 // English section labels — tests run with the en locale active.
 const enShellT = i18n.getFixedT("en", "shell");
@@ -30,28 +31,66 @@ describe("ShortcutsModal — navigation reflects the real bindings", () => {
     return screen.getByText("Navigation").parentElement!;
   }
 
-  // `useSection` binds ⌘1..⌘9 by position, so only the first NINE
-  // sections have a number. This used to read `sections.length` because
-  // there happened to be exactly nine; adding Boards as a tenth made
-  // that coincidence load-bearing.
+  // ⌘1..⌘9 binds to position in the FULL registry, not in the visible
+  // list, so a section's number is a property of that section. Only
+  // the first nine registry entries have one at all.
   const BINDABLE = 9;
 
-
-  it("lists one row per BINDABLE section, in registry order, with its ⌘ number", () => {
+  it("gives each section the number its registry position implies", () => {
     const nav = renderNavGroup();
     const rows = within(nav).getAllByRole("listitem");
     // Assert on the NUMBERED rows, not the total. The list also carries
     // non-numbered aliases (⌘, and ⌃⌥⌘B), and a raw length check made
     // adding one of those look like a section-count regression.
-    const sections = enabledSections();
     const numbered = rows.filter((r) => /[1-9]/.test(r.textContent ?? ""));
-    expect(numbered).toHaveLength(Math.min(sections.length, BINDABLE));
 
-    sections.slice(0, BINDABLE).forEach((section, i) => {
-      const row = rows[i]!;
-      expect(row.textContent).toContain(enShellT(section.labelKey));
-      expect(row.textContent).toContain(String(i + 1));
+    // Visible sections that fall inside the first nine REGISTRY slots.
+    const expected = enabledSections()
+      .map((s) => ({ s, n: sectionNumber(s.id) }))
+      .filter((x) => x.n !== null);
+    expect(numbered).toHaveLength(expected.length);
+
+    expected.forEach(({ s, n }, i) => {
+      const row = numbered[i]!;
+      expect(row.textContent).toContain(enShellT(s.labelKey));
+      expect(row.textContent).toContain(String(n));
     });
+  });
+
+  /**
+   * The regression this change exists for. Boards ships off and sits
+   * ninth, so under position-in-the-VISIBLE-list numbering, enabling
+   * it moved Settings off ⌘9 and handed the key to Boards — the exact
+   * muscle-memory break the registry comment claimed Boards' ninth
+   * position avoided, just conditional on a setting.
+   *
+   * Asserted on every section enabled in BOTH states, including
+   * whether it has a number at all. An earlier version of this test
+   * compared only sections appearing in both *numbered lists*, which
+   * silently skipped the single section that regressed: under the bug
+   * Settings is pushed to tenth and drops out of the list entirely, so
+   * "present in both" excluded exactly the evidence.
+   */
+  it("does not renumber any section when an optional one is toggled", () => {
+    setSectionEnabled("boards", false);
+    const off = new Map(
+      enabledSections().map((s) => [s.id, sectionNumber(s.id)]),
+    );
+    setSectionEnabled("boards", true);
+    const on = new Map(
+      enabledSections().map((s) => [s.id, sectionNumber(s.id)]),
+    );
+
+    let compared = 0;
+    for (const [id, n] of off) {
+      if (!on.has(id)) continue; // only Boards itself changes visibility
+      compared += 1;
+      expect(on.get(id), `${id} was renumbered by toggling Boards`).toBe(n);
+    }
+    expect(compared).toBeGreaterThan(3);
+    // Settings must be in that comparison — it is the section the bug
+    // moved, so a test that silently dropped it would prove nothing.
+    expect(off.has("settings") && on.has("settings")).toBe(true);
   });
 
   it("does not claim a ⌘ number for a section past the ninth", () => {

@@ -152,8 +152,27 @@ modal that won't dismiss. Its four-modifier combo makes accidental
 firing while typing a non-issue. Any *further* exception needs the
 same treatment: written here, not just commented at the call site.
 
-There is no ⌘F. It was listed here and in the shortcuts modal for a
-long time while no section ever wired it.
+**Bindings live in one table.** `src/lib/shortcutBindings.ts` is the
+list; `ShortcutsModal` renders from it and `cargo xtask verify-docs`
+asserts every `key` in it is compared against somewhere in `src/`.
+This exists because the docs and the code drifted in both directions:
+
+- **⌘F was documented for years with no handler.** That is the case
+  this rule used to record — and it has since inverted. A section
+  *did* wire ⌘F (ConfigSection, focus the content search), so the
+  claim "there is no ⌘F" became false and stayed in this file
+  regardless. Documenting a dead shortcut and failing to document a
+  live one are the same defect; only the second is hard to notice.
+- **⌘\ shipped undocumented**, surfaced only in the sidebar toggle's
+  tooltip.
+
+**⌘-numbers are positions in the full registry, not in the visible
+list.** A section's number is a property of that section, so toggling
+an optional section never renumbers its neighbours. The cost is that
+⌘9 is inert while Boards is off, and Settings — tenth — has no number
+and keeps ⌘,. Before this, enabling Boards silently moved Settings off
+⌘9, which is exactly the muscle-memory break the registry comment
+claimed Boards' ninth position avoided.
 
 ## Open questions — not yet decided, not yet shipped
 

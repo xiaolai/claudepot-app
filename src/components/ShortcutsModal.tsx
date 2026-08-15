@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Modal, ModalHeader, ModalBody } from "./primitives/Modal";
 import { Kbd } from "./primitives/Kbd";
 import { useEnabledSections } from "../hooks/useEnabledSections";
+import { sectionNumber } from "../lib/shortcutBindings";
 
 interface ShortcutBinding {
   keys: string[];
@@ -32,16 +33,27 @@ interface ShortcutGroup {
  * which is the exact drift this file was written to stop, one level up.
  */
 function navigationItems(
-  enabled: readonly { label: string }[],
+  enabled: readonly { id: string; label: string }[],
   tc: TFunction<"components">,
 ): ShortcutBinding[] {
+  // Numbers come from `sectionNumber` — position in the FULL registry,
+  // the same source `useSection` binds against. Deriving them from the
+  // *enabled* list (this function's previous shape) is what let the
+  // documentation and the binding disagree the moment an optional
+  // section was toggled: Boards ships off and sits ninth, so enabling
+  // it moved Settings off ⌘9, and both this modal and the hook
+  // silently agreed on the wrong thing together.
+  //
+  // Still filtered by `enabled`: a switched-off section's number is
+  // reserved but inert, and documenting a dead key is the ⌘F mistake.
+  const numbered = enabled
+    .map((s) => ({ n: sectionNumber(s.id), label: s.label }))
+    .filter((x): x is { n: number; label: string } => x.n !== null)
+    .sort((a, b) => a.n - b.n)
+    .map((x) => ({ keys: ["⌘", String(x.n)], label: x.label }));
+
   return [
-    // Enabled list: a switched-off section has no ⌘ number, so listing
-    // one would document a binding that does not exist.
-    ...enabled.slice(0, 9).map((s, i) => ({
-      keys: ["⌘", String(i + 1)],
-      label: s.label,
-    })),
+    ...numbered,
     { keys: ["⌘", ","], label: tc("shortcuts.settingsStandard") },
     { keys: ["⌃", "⌥", "⌘", "B"], label: tc("shortcuts.toggleBoards") },
   ];
@@ -59,6 +71,7 @@ function navigationItems(
 function otherGroups(
   tc: TFunction<"components">,
   scopeAccounts: string,
+  scopeConfig: string,
 ): ShortcutGroup[] {
   return [
     {
@@ -82,6 +95,20 @@ function otherGroups(
           scope: scopeAccounts,
         },
         { keys: ["⌘", "⇧", "L"], label: tc("shortcuts.focusLive") },
+        // Bound in `useSidebarCollapsed` since it was added, and
+        // surfaced only in the sidebar toggle's tooltip until now —
+        // the inverse of the ⌘F problem noted above: a working
+        // handler with no documentation.
+        { keys: ["⌘", "\\"], label: tc("shortcuts.toggleSidebar") },
+        // ⌘F focuses ConfigSection's content search. design.md said
+        // "There is no ⌘F" — true when written, stale since a section
+        // wired one. An undocumented working shortcut is the same
+        // defect as a documented dead one, just harder to notice.
+        {
+          keys: ["⌘", "F"],
+          label: tc("shortcuts.focusFilter"),
+          scope: scopeConfig,
+        },
       ],
     },
     {
@@ -132,11 +159,11 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
     {
       title: tc("shortcuts.groupNavigation"),
       items: navigationItems(
-        enabled.map((s) => ({ label: t(s.labelKey) })),
+        enabled.map((s) => ({ id: s.id, label: t(s.labelKey) })),
         tc,
       ),
     },
-    ...otherGroups(tc, t("sections.accounts")),
+    ...otherGroups(tc, t("sections.accounts"), t("sections.global")),
   ];
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={titleId}>
