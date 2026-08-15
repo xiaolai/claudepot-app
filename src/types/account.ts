@@ -2,6 +2,8 @@
 // Sharded from src/types.ts to keep each domain's DTOs in its own
 // file; src/types/index.ts re-exports them. Mirrors src-tauri/src/dto.rs.
 
+import type { VerifyOutcomeKind } from "./ops";
+
 /**
  * Keychain-free subset of `AccountSummary`, returned by
  * `api.accountListBasic()`. Use when a caller needs just the
@@ -21,6 +23,15 @@ export interface AccountSummaryBasic {
   has_desktop_profile: boolean;
 }
 
+/**
+ * Every value `AccountSummary.verify_status` can hold.
+ *
+ * `VerifyOutcomeKind` (in `types/ops.ts`) covers the outcomes a verify
+ * *run* can produce; this adds `"never"`, which is the column's default
+ * before any run has happened and therefore cannot be an outcome.
+ */
+export type VerifyStatus = "never" | VerifyOutcomeKind;
+
 export interface AccountSummary {
   uuid: string;
   email: string;
@@ -35,8 +46,18 @@ export interface AccountSummary {
   token_status: string; // "valid (...)", "expired", "no credentials", ...
   token_remaining_mins: number | null;
   credentials_healthy: boolean; // true iff stored blob exists + parses
-  /** "never" | "ok" | "drift" | "rejected" | "network_error" */
-  verify_status: string;
+  /**
+   * Last persisted verification outcome. A union, not `string`: it is
+   * what makes the exhaustive `switch`es in the accounts UI compile-
+   * checked. As `string` this field let an unhandled status fall
+   * through to a **success** branch, so a state the user must act on
+   * rendered as "Verified".
+   *
+   * `"never"` is the pre-verification default and has no
+   * `VerifyOutcomeKind` counterpart; everything else mirrors
+   * `claudepot_core::account::VerifyOutcome::as_str`.
+   */
+  verify_status: VerifyStatus;
   /** Server-observed email for this slot (may differ from `email` → drift). */
   verified_email: string | null;
   verified_at: string | null; // RFC3339

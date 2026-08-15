@@ -82,17 +82,21 @@ pub struct Facts<'a> {
 /// - **It is the active CLI account** — that token belongs to Claude
 ///   Code, which rotates it on its own schedule. Refreshing it from a
 ///   background tick is the sign-out bug fixed in 0.2.10.
-/// - **`drift` or `rejected`** — already known-bad. Drift means the slot
-///   holds someone else's credentials, so refreshing would entrench a
-///   misfiling; rejected means the refresh token is dead and only a
-///   re-login helps. Retrying either every tick is pure noise.
+/// - **A terminal `verify_status`** — already known-bad, per
+///   [`VerifyOutcome::status_is_terminal`]. Drift means the slot holds
+///   someone else's credentials, so refreshing would entrench a
+///   misfiling; rejected means the refresh token is dead; signed_out
+///   means there is no refresh token at all. Only a re-login helps for
+///   any of them, so retrying every tick is pure noise.
 /// - **Not actually expired** — `/profile` would return 200 and the
 ///   refresh branch would never be reached, so the call would cost a
 ///   round-trip and heal nothing.
+///
+/// [`VerifyOutcome::status_is_terminal`]: crate::account::VerifyOutcome::status_is_terminal
 pub fn is_eligible(facts: &Facts<'_>, now_ms: i64) -> bool {
     facts.has_cli_credentials
         && !facts.is_active_cli
-        && !matches!(facts.verify_status, "drift" | "rejected")
+        && !crate::account::VerifyOutcome::status_is_terminal(facts.verify_status)
         && facts.expires_at_ms < now_ms
 }
 
@@ -188,9 +192,19 @@ mod tests {
         assert!(!is_eligible(&f, 1_000));
     }
 
+    /// Every terminal status must be skipped. `signed_out` is here
+    /// because a new terminal status that only *some* filters know
+    /// about is worse than none: the account would keep consuming a
+    /// tick every 11 minutes to re-attempt an exchange that cannot
+    /// succeed, forever, while the UI already calls it dead.
     #[test]
-    fn drifted_and_rejected_accounts_are_not_eligible() {
-        for status in ["drift", "rejected"] {
+    fn terminal_status_accounts_are_not_eligible() {
+        // Iterates the const rather than re-listing it. A hand-written
+        // copy here would keep passing on the day a fourth terminal
+        // status lands and this filter forgets it — which is precisely
+        // the failure the const exists to prevent, reintroduced by the
+        // test meant to guard against it.
+        for status in crate::account::VerifyOutcome::TERMINAL_STATUSES {
             let f = Facts {
                 verify_status: status,
                 ..eligible_facts()

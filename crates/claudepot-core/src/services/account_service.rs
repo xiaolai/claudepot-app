@@ -43,6 +43,15 @@ pub(crate) async fn register_from_current_with(
     let blob = CredentialBlob::from_json(&blob_str)
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
 
+    // A cleared sentinel is indistinguishable from "not signed in" for
+    // import purposes, and `NoCredentials` already says exactly that
+    // with the right next step. Without this the empty bearer 401s and
+    // the user gets "Couldn't confirm which account this login belongs
+    // to: …" — a diagnostic about a login that isn't there.
+    if blob.is_signed_out() {
+        return Err(RegisterError::NoCredentials);
+    }
+
     let prof = fetch_profile
         .fetch(&blob.claude_ai_oauth.access_token)
         .await
@@ -314,6 +323,22 @@ async fn resolve_cc_identity_locked(
         Err(_) => return Ok(None), // Unparseable — leave it alone.
     };
 
+    // CC's cleared-credentials sentinel. It parses, so without this it
+    // flows into the profile fetch below with an empty bearer, 401s, and
+    // ends up classified by whatever the 401 path decides — which, with
+    // a live `claude` running, is the transient live-session skip. That
+    // reported a state only a re-login can fix as a network blip the
+    // user should wait out (issue #74).
+    //
+    // Checked before the first network call because an empty bearer
+    // cannot succeed: there is no information a round-trip could add.
+    if blob_t0.is_signed_out() {
+        tracing::info!(
+            "CC's stored credentials are empty (cleared-credentials sentinel) — signed out"
+        );
+        return Err(RegisterError::CcSignedOut);
+    }
+
     if let Some(expected_refresh_token) = expected_refresh_token {
         if blob_t0.claude_ai_oauth.refresh_token != expected_refresh_token {
             return Err(RegisterError::CcChangedDuringRefresh);
@@ -361,6 +386,15 @@ async fn resolve_cc_identity_locked(
         }
         Err(_) => return Ok(None),
     };
+
+    // CC cleared itself between our snapshot and now. The same terminal
+    // answer as the entry check — re-tested here because this is a
+    // genuinely fresh read, and the reported failures landed within
+    // minutes of an expiry, exactly when this window is widest.
+    if latest_blob.is_signed_out() {
+        tracing::info!("CC cleared its stored credentials during this pass — signed out");
+        return Err(RegisterError::CcSignedOut);
+    }
 
     let expected_token_changed = match expected_refresh_token {
         Some(expected_refresh_token) => {
@@ -434,6 +468,29 @@ async fn resolve_cc_identity_locked(
     //
     // Probed lazily here rather than at entry so the happy path (token
     // still valid → Step 1 returns early) never pays the subprocess scan.
+    //
+    // Ordering is load-bearing: the empty-refresh-token check runs
+    // BEFORE the gate. The gate's entire rationale is "don't retire a
+    // single-use token CC still holds in memory" — with no token there
+    // is nothing to retire and nothing to protect, so consulting it
+    // first converts a terminal state into a transient one and hands
+    // the user a "wait for it to clear" that never clears. That
+    // inversion is the reported bug: the state was reported correctly
+    // only when nobody was using Claude Code.
+    // Reaching here means the access token was non-empty and the server
+    // refused it — `is_signed_out()` already returned above for the
+    // cleared sentinel. So this is `AuthRejected`, not `CcSignedOut`:
+    // a request WAS made and answered. `CcSignedOut` asserts CC cleared
+    // its own credentials and the account is untouched, and neither is
+    // established here. The check still runs BEFORE the live-session
+    // gate — that ordering is the fix; only the label differs.
+    if !latest_blob.can_refresh() {
+        tracing::info!(
+            "CC's stored refresh token is empty — nothing to exchange, re-login required"
+        );
+        return Err(RegisterError::AuthRejected);
+    }
+
     if !force_refresh && probe.is_cc_running().await {
         return Err(RegisterError::CcLiveRefreshSkipped);
     }
@@ -484,6 +541,14 @@ async fn resolve_cc_identity_locked(
             .ok_or(RegisterError::CcChangedDuringRefresh)?;
         let live_blob = CredentialBlob::from_json(live_blob_str)
             .map_err(|_| RegisterError::CcChangedDuringRefresh)?;
+        // CC signed itself out while we were refreshing. Terminal, and
+        // it must be said so here: without this the sentinel's empty
+        // bearer goes to `/profile`, 401s, and falls into the `_` arm
+        // below as `CcChangedDuringRefresh` — a "retry, nothing was
+        // lost" answer for a state no retry can fix.
+        if live_blob.is_signed_out() {
+            return Err(RegisterError::CcSignedOut);
+        }
         if live_blob.claude_ai_oauth.refresh_token != expected_refresh_token {
             match fetch_profile
                 .fetch(&live_blob.claude_ai_oauth.access_token)
@@ -529,6 +594,15 @@ async fn resolve_cc_identity_locked(
     };
     let live_blob = CredentialBlob::from_json(&live_blob_str)
         .map_err(|_| RegisterError::CcChangedDuringRefresh)?;
+    // Same sentinel check as the forced path above, for the same
+    // reason. This is the branch the original fix missed: a CAS miss
+    // whose winning writer was CC clearing itself reported
+    // `CcChangedDuringRefresh` → `NetworkError` → "couldn't confirm,
+    // wait" — the identical misreport the whole change removes, one
+    // branch over.
+    if live_blob.is_signed_out() {
+        return Err(RegisterError::CcSignedOut);
+    }
     let live_email = match fetch_profile
         .fetch(&live_blob.claude_ai_oauth.access_token)
         .await
@@ -846,6 +920,21 @@ pub enum RegisterError {
         "a live Claude Code session is running — skipped token refresh to avoid signing it out"
     )]
     CcLiveRefreshSkipped,
+    /// CC's keychain holds its **cleared-credentials sentinel**: the blob
+    /// parses, but both tokens are empty (see
+    /// [`CredentialBlob::is_signed_out`]). Claude Code signed *itself*
+    /// out without deleting the item.
+    ///
+    /// Terminal — only a re-login recovers it — and deliberately not
+    /// [`AuthRejected`]. Nothing was rejected: with an empty bearer no
+    /// request was ever sent, so a sentence about the server refusing
+    /// the login would describe an event that did not happen and send
+    /// the user to check an account that is fine.
+    ///
+    /// [`CredentialBlob::is_signed_out`]: crate::blob::CredentialBlob::is_signed_out
+    /// [`AuthRejected`]: RegisterError::AuthRejected
+    #[error("Claude Code signed itself out — its stored credentials are empty, so log in again")]
+    CcSignedOut,
 }
 
 /// Hand-written, wildcard-free: a new variant must be named here before
@@ -864,6 +953,10 @@ pub enum RegisterError {
 ///   Spending the single-use refresh token while `claude` is live would
 ///   sign that session out. It is strictly transient, and a UI that
 ///   renders it as a re-login prompt would be actively harmful.
+/// - **`CcSignedOut` is terminal but blameless.** CC cleared its own
+///   credentials; nothing was refused and nothing is wrong with the
+///   account. It says "log in again" without the "your login was
+///   rejected" story that `AuthRejected` carries.
 ///
 /// `AlreadyRegistered` crosses the account's email and uuid rather than
 /// one pre-composed English clause: the GUI names the existing account
@@ -883,6 +976,7 @@ impl crate::error_code::ErrorCode for RegisterError {
             RegisterError::AuthRejected => "account_register.auth_rejected",
             RegisterError::CcChangedDuringRefresh => "account_register.cc_changed_during_refresh",
             RegisterError::CcLiveRefreshSkipped => "account_register.cc_live_refresh_skipped",
+            RegisterError::CcSignedOut => "account_register.cc_signed_out",
         }
     }
 
@@ -892,7 +986,8 @@ impl crate::error_code::ErrorCode for RegisterError {
             | RegisterError::NotFound
             | RegisterError::AuthRejected
             | RegisterError::CcChangedDuringRefresh
-            | RegisterError::CcLiveRefreshSkipped => serde_json::json!({}),
+            | RegisterError::CcLiveRefreshSkipped
+            | RegisterError::CcSignedOut => serde_json::json!({}),
             RegisterError::CredentialRead(detail)
             | RegisterError::CredentialWrite(detail)
             | RegisterError::ProfileFetch(detail)
@@ -1288,7 +1383,28 @@ pub enum VerifyOutcomeKind {
     Ok,
     Drift,
     Rejected,
+    SignedOut,
     NetworkError,
+}
+
+impl VerifyOutcomeKind {
+    /// The wire string for this kind — the same token
+    /// `VerifyOutcome::as_str` produces and the TypeScript
+    /// `VerifyOutcomeKind` union spells.
+    ///
+    /// Exists so no surface has to re-spell them. `src-tauri`'s
+    /// progress sink kept its own `match` producing string literals,
+    /// which meant every new variant needed a hand edit in a second
+    /// place to avoid emitting a status the frontend cannot parse.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Drift => "drift",
+            Self::Rejected => "rejected",
+            Self::SignedOut => "signed_out",
+            Self::NetworkError => "network_error",
+        }
+    }
 }
 
 impl From<&crate::account::VerifyOutcome> for VerifyOutcomeKind {
@@ -1297,7 +1413,54 @@ impl From<&crate::account::VerifyOutcome> for VerifyOutcomeKind {
             crate::account::VerifyOutcome::Ok { .. } => Self::Ok,
             crate::account::VerifyOutcome::Drift { .. } => Self::Drift,
             crate::account::VerifyOutcome::Rejected => Self::Rejected,
+            crate::account::VerifyOutcome::SignedOut => Self::SignedOut,
             crate::account::VerifyOutcome::NetworkError => Self::NetworkError,
+        }
+    }
+}
+
+#[cfg(test)]
+mod verify_outcome_kind_tests {
+    use super::VerifyOutcomeKind;
+    use crate::account::VerifyOutcome;
+
+    /// The lifted kind and the full outcome must agree on every wire
+    /// string. They are separate types with separate `as_str`s — the
+    /// kind is what crosses to the webview — so this is the only thing
+    /// stopping the two from drifting into statuses the frontend
+    /// silently fails to match.
+    #[test]
+    fn kind_and_outcome_agree_on_every_wire_string() {
+        for outcome in [
+            VerifyOutcome::Ok {
+                email: "a@b.c".into(),
+            },
+            VerifyOutcome::Drift {
+                stored_email: "a@b.c".into(),
+                actual_email: "d@e.f".into(),
+            },
+            VerifyOutcome::Rejected,
+            VerifyOutcome::SignedOut,
+            VerifyOutcome::NetworkError,
+        ] {
+            assert_eq!(VerifyOutcomeKind::from(&outcome).as_str(), outcome.as_str());
+        }
+    }
+
+    /// `serde` renames to snake_case, and the frontend parses the
+    /// serialized form — so `as_str` has to match what serde emits, not
+    /// merely look like it.
+    #[test]
+    fn as_str_matches_the_serialized_form() {
+        for kind in [
+            VerifyOutcomeKind::Ok,
+            VerifyOutcomeKind::Drift,
+            VerifyOutcomeKind::Rejected,
+            VerifyOutcomeKind::SignedOut,
+            VerifyOutcomeKind::NetworkError,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(json, format!("\"{}\"", kind.as_str()));
         }
     }
 }
@@ -1398,6 +1561,9 @@ pub async fn verify_all_with_progress(
                         }
                         crate::account::VerifyOutcome::Rejected => {
                             Some("re-login required".to_string())
+                        }
+                        crate::account::VerifyOutcome::SignedOut => {
+                            Some("Claude Code signed itself out".to_string())
                         }
                         crate::account::VerifyOutcome::NetworkError => {
                             Some("/profile unreachable".to_string())

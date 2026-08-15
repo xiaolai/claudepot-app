@@ -44,6 +44,17 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
             .iter()
             .filter(|a| a.verify_status == "drift")
             .count();
+        // Terminal-but-not-drift (rejected / signed_out) still needs a
+        // human. Counted separately from `drift` because the exit codes
+        // differ — drift keeps its dedicated 2, everything else is 1 —
+        // but BOTH must be non-zero. Before this, an account needing
+        // re-login exited 0 in JSON mode and printed "All checks
+        // passed" in text mode.
+        let needs_login = report
+            .account_health
+            .iter()
+            .filter(|a| a.needs_attention() && a.verify_status != "drift")
+            .count();
         let expired = report
             .account_health
             .iter()
@@ -61,7 +72,7 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
         if drift > 0 {
             std::process::exit(2);
         }
-        if report.db_error.is_some() || expired > 0 || api_error {
+        if report.db_error.is_some() || expired > 0 || api_error || needs_login > 0 {
             std::process::exit(1);
         }
         return Ok(());
@@ -147,6 +158,12 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
     // Account health
     let mut expired_accounts = 0;
     let mut drift_accounts = 0;
+    // Terminal states that are not drift. Tracked separately from
+    // `drift_accounts` only because drift owns exit code 2; both feed
+    // `errors` below. Counting only drift is what let an account whose
+    // credentials were dead print its own bad news and still finish
+    // with "All checks passed."
+    let mut relogin_accounts = 0;
     if !report.account_health.is_empty() {
         println!("\n  Account health:");
         for a in &report.account_health {
@@ -177,7 +194,15 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
                     );
                 }
                 "rejected" => {
+                    relogin_accounts += 1;
                     println!("       verify: ✗ rejected (token revoked — re-login)");
+                }
+                "signed_out" => {
+                    relogin_accounts += 1;
+                    println!(
+                        "       verify: ✗ signed out (Claude Code cleared its \
+                         credentials — re-login)"
+                    );
                 }
                 "network_error" => {
                     println!("       verify: ? could not reach /profile last time");
@@ -234,6 +259,13 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
     // doctor exits non-zero (2) rather than merely warning.
     if drift_accounts > 0 {
         errors += drift_accounts;
+    }
+    // Rejected / signed-out accounts cannot work until the user logs in
+    // again. They are errors for the same reason drift is — a state no
+    // retry clears — and they keep exit code 1 because 2 is reserved
+    // for drift's distinct "wrong identity in the slot" meaning.
+    if relogin_accounts > 0 {
+        errors += relogin_accounts;
     }
 
     if errors > 0 {

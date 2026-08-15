@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
+import { verifyKind } from "./verifyStatus";
 import { relTime } from "./format";
 import type { VerifyLive } from "./useAccountHandlers";
 
@@ -32,11 +33,12 @@ export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
   // Accent (--accent-ink / terracotta) is reserved for the primary CTA
   // and selected state per design.md. A green check plus --ok tone
   // reads as "healthy" without over-claiming brand attention.
+  const kind = verifyKind(effectiveStatus);
   const verifyTone = isVerifying
     ? "var(--fg-muted)"
-    : effectiveStatus === "ok"
+    : kind === "ok"
       ? "var(--ok)"
-      : effectiveStatus === "drift" || effectiveStatus === "rejected"
+      : kind === "drift" || kind === "needsLogin"
         ? "var(--warn)"
         : "var(--fg-faint)";
 
@@ -45,19 +47,43 @@ export function HealthFooter({ account: a, verifyLive }: HealthFooterProps) {
   // signal (slot is misfiled to another email). For "ok" we append a
   // freshness suffix so a 3-day-old "verified" doesn't read as
   // reassurance.
+  // One exhaustive switch rather than a ternary chain. The chain was
+  // six deep by the time `signed_out` was added, and a status with no
+  // branch of its own fell through to "not yet verified" — which reads
+  // as "we haven't looked", the opposite of a terminal state.
   const verifyLabel = isVerifying
     ? t("footer.verifying")
-    : effectiveStatus === "ok"
-      ? a.verified_at
-        ? t("footer.verifiedAgo", { ago: relTime(a.verified_at) })
-        : t("footer.verified")
-      : effectiveStatus === "drift"
-        ? t("footer.drift", { email: a.verified_email ?? "?" })
-        : effectiveStatus === "rejected"
-          ? t("footer.tokenRejected")
-          : effectiveStatus === "network_error"
-            ? t("footer.profileUnreachable")
-            : t("footer.notYetVerified");
+    : verifyFooterLabel();
+
+  function verifyFooterLabel(): string {
+    switch (effectiveStatus) {
+      case "ok":
+        // "verified" alone reads as reassurance for a check that may be
+        // days old, so the freshness suffix is part of the label.
+        return a.verified_at
+          ? t("footer.verifiedAgo", { ago: relTime(a.verified_at) })
+          : t("footer.verified");
+      case "drift":
+        // Keeps the target email — that IS the load-bearing signal.
+        return t("footer.drift", { email: a.verified_email ?? "?" });
+      case "rejected":
+        return t("footer.tokenRejected");
+      case "signed_out":
+        return t("footer.signedOut");
+      case "network_error":
+        return t("footer.profileUnreachable");
+      case "never":
+        return t("footer.notYetVerified");
+      default:
+        return unknownStatusLabel(effectiveStatus);
+    }
+  }
+
+  /** Exhaustiveness guard — see `verifyStatus.ts`. */
+  function unknownStatusLabel(status: never): string {
+    void status;
+    return t("footer.notYetVerified");
+  }
 
   return (
     <div

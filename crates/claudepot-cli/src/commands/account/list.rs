@@ -29,6 +29,12 @@ pub async fn list(ctx: &AppContext) -> Result<()> {
     let accounts = ctx.store.list()?;
 
     // Collect UUIDs for accounts with credentials to batch-fetch usage.
+    //
+    // No terminal-status filter here: `fetch_batch` takes the store and
+    // applies `identity_gate` itself, so a drifted slot cannot reach
+    // `/usage` from this call site or any future one. Filtering here as
+    // well would be a second copy of that rule, and the copy is what
+    // goes stale.
     let uuids: Vec<uuid::Uuid> = accounts
         .iter()
         .filter(|a| a.has_cli_credentials)
@@ -39,7 +45,7 @@ pub async fn list(ctx: &AppContext) -> Result<()> {
         std::collections::HashMap::new()
     } else {
         ctx.usage_cache
-            .fetch_batch(&uuids)
+            .fetch_batch(&ctx.store, &uuids)
             .await
             .into_iter()
             .filter_map(|(id, result)| {

@@ -30,7 +30,9 @@ pub struct Account {
     /// `verify_status`. `None` means no verification has ever run.
     pub verified_at: Option<DateTime<Utc>>,
     /// Outcome of the last verification run. `"never"`, `"ok"`, `"drift"`,
-    /// `"rejected"` (token refused by server), or `"network_error"`.
+    /// `"rejected"` (token refused by server), `"signed_out"` (Claude Code
+    /// cleared its own credentials), or `"network_error"`. See
+    /// `account_verification` for which of these are terminal.
     pub verify_status: String,
 }
 

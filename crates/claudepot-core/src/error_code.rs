@@ -2141,6 +2141,7 @@ mod tests {
                 E::AuthRejected,
                 E::CcChangedDuringRefresh,
                 E::CcLiveRefreshSkipped,
+                E::CcSignedOut,
             ];
             for s in &samples {
                 match s {
@@ -2153,7 +2154,8 @@ mod tests {
                     | E::NotFound
                     | E::AuthRejected
                     | E::CcChangedDuringRefresh
-                    | E::CcLiveRefreshSkipped => {}
+                    | E::CcLiveRefreshSkipped
+                    | E::CcSignedOut => {}
                 }
             }
             samples
@@ -2182,7 +2184,10 @@ mod tests {
             let samples = vec![
                 E::NotFound,
                 E::NoCredentials("a@example.com".to_string()),
-                E::IdentityUnverified("a@example.com".to_string(), "drift".to_string()),
+                E::IdentityUnverified {
+                    email: "a@example.com".to_string(),
+                    status: "drift".to_string(),
+                },
                 E::Store("database is locked".to_string()),
                 E::Token("no stored credentials for this account".to_string()),
                 E::Request("/v1/messages returned 429".to_string()),
@@ -2191,7 +2196,7 @@ mod tests {
                 match s {
                     E::NotFound
                     | E::NoCredentials(_)
-                    | E::IdentityUnverified(_, _)
+                    | E::IdentityUnverified { .. }
                     | E::Store(_)
                     | E::Token(_)
                     | E::Request(_) => {}
@@ -2360,7 +2365,10 @@ mod tests {
         // translator answer "did that cost me anything" once, for two
         // opposite cases.
         use crate::services::wake_service::WakeError;
-        let refused = WakeError::IdentityUnverified("a@example.com".to_string(), "drift".into());
+        let refused = WakeError::IdentityUnverified {
+            email: "a@example.com".to_string(),
+            status: "drift".into(),
+        };
         let failed = WakeError::Request("/v1/messages returned 429".to_string());
         assert_ne!(refused.code(), failed.code());
         assert_eq!(refused.params()["status"], "drift");

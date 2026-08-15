@@ -321,6 +321,43 @@ async fn test_register_from_current_corrupt_blob() {
     assert!(matches!(result, Err(RegisterError::CredentialRead(_))));
 }
 
+/// Importing while CC holds its cleared-credentials sentinel must read
+/// as "not signed in", not as a failed profile lookup.
+///
+/// The sentinel PARSES, so it slips past the `CredentialRead` guard the
+/// corrupt-blob test above covers, and would otherwise present an empty
+/// bearer to `/profile`. The user then gets "Couldn't confirm which
+/// account this login belongs to: 401" — a diagnostic about a login
+/// that does not exist. `NoCredentials` already says the true thing and
+/// names the right next step.
+///
+/// Asserts on `seen_tokens` rather than only on the error, because the
+/// two failure modes produce different errors for the same reason and
+/// the distinction that matters is whether a request went out at all.
+#[tokio::test]
+async fn register_from_current_reads_a_cleared_sentinel_as_no_credentials() {
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+
+    let platform = MockPlatform::new(Some(crate::testing::signed_out_blob_json()));
+    let fetcher = MockProfileFetcher::ok("alice@example.com");
+
+    let result = register_from_current_with(&store, &platform, &fetcher).await;
+    assert!(
+        matches!(result, Err(RegisterError::NoCredentials)),
+        "expected NoCredentials, got {result:?}"
+    );
+    assert!(
+        fetcher.tokens_seen().is_empty(),
+        "an empty bearer must never reach /profile — there is no question it could answer"
+    );
+    assert!(
+        store.list().unwrap().is_empty(),
+        "nothing may be registered from a blob carrying no credentials"
+    );
+}
+
 // -- register_from_token_with tests --
 
 #[tokio::test]
@@ -1053,6 +1090,80 @@ async fn test_sync_race_cas_miss_aborts_when_live_blob_unverifiable() {
     assert!(
         swap::load_private(account.uuid).await.is_err(),
         "must not persist anything when live blob unverifiable"
+    );
+}
+
+/// CAS miss where the winning writer was **Claude Code clearing
+/// itself**. The live blob is the cleared sentinel: it parses, so
+/// before the fix it went to `/profile` with an empty bearer, 401'd,
+/// and surfaced as `CcChangedDuringRefresh` — a "nothing was lost,
+/// retry" answer that `identity` maps to a transient `NetworkError`.
+/// That is the reported bug's exact misreport, one branch over.
+///
+/// The `MockProfileFetcher::sequence` deliberately supplies only ONE
+/// response: reaching a second `/profile` call would exhaust it and
+/// fail loudly, which is how this asserts no empty bearer went out.
+#[tokio::test]
+async fn cas_miss_against_a_cleared_sentinel_is_terminal_not_retryable() {
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+    let account = insert_account(&store, "alice@example.com");
+    let _ = store.update_credentials_flag(account.uuid, false);
+
+    let our_blob = blob_json_with("sk-ant-oat01-stale", "sk-ant-ort01-stale");
+    let platform = MockPlatform::with_read_sequence(vec![
+        Some(our_blob.clone()),
+        Some(our_blob.clone()),
+        // CAS check: CC cleared its own credentials while we refreshed.
+        Some(crate::testing::signed_out_blob_json()),
+    ]);
+    let fetcher =
+        MockProfileFetcher::sequence(vec![Err(OAuthError::AuthFailed("401 Unauthorized".into()))]);
+    let refresher = MockRefresher::success();
+
+    let err = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
+        .await
+        .expect_err("a cleared sentinel is terminal");
+    assert!(
+        matches!(err, RegisterError::CcSignedOut),
+        "expected CcSignedOut (re-login), got {err:?} — CcChangedDuringRefresh \
+         would tell the user to retry a state no retry can fix"
+    );
+    assert_eq!(
+        fetcher.tokens_seen().len(),
+        1,
+        "the sentinel's empty bearer must not be sent to /profile"
+    );
+    assert!(
+        swap::load_private(account.uuid).await.is_err(),
+        "nothing may be persisted from a blob carrying no credentials"
+    );
+}
+
+/// The entry-level check: CC already holds the sentinel when the pass
+/// starts. Terminal before any network call at all.
+#[tokio::test]
+async fn a_cleared_sentinel_at_entry_is_terminal_without_a_profile_call() {
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+    insert_account(&store, "alice@example.com");
+
+    let platform = MockPlatform::new(Some(crate::testing::signed_out_blob_json()));
+    let fetcher = MockProfileFetcher::ok("alice@example.com");
+    let refresher = MockRefresher::success();
+
+    let err = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
+        .await
+        .expect_err("a cleared sentinel is terminal");
+    assert!(
+        matches!(err, RegisterError::CcSignedOut),
+        "expected CcSignedOut, got {err:?}"
+    );
+    assert!(
+        fetcher.tokens_seen().is_empty(),
+        "an empty bearer carries no question a round-trip could answer"
     );
 }
 

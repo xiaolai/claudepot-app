@@ -217,6 +217,7 @@ pub struct VerifyResultSummary {
     pub ok: usize,
     pub drift: usize,
     pub rejected: usize,
+    pub signed_out: usize,
     pub network_error: usize,
 }
 
@@ -237,7 +238,7 @@ pub struct VerifyAccountEvent {
     pub email: String,
     pub idx: usize,
     pub total: usize,
-    /// "ok" | "drift" | "rejected" | "network_error"
+    /// "ok" | "drift" | "rejected" | "signed_out" | "network_error"
     pub outcome: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -838,12 +839,11 @@ impl claudepot_core::services::account_service::VerifyProgressSink for TauriVeri
                 outcome,
                 detail,
             } => {
-                let outcome_str = match outcome {
-                    VerifyOutcomeKind::Ok => "ok",
-                    VerifyOutcomeKind::Drift => "drift",
-                    VerifyOutcomeKind::Rejected => "rejected",
-                    VerifyOutcomeKind::NetworkError => "network_error",
-                };
+                // Core owns the wire strings. A local `match` here was
+                // a second spelling of the same set, so a new variant
+                // needed a hand edit in two crates or the webview got a
+                // status its union does not contain.
+                let outcome_str = outcome.as_str();
                 // 1) Per-row typed event — sibling payload, NOT pipe-delimited
                 //    into `ProgressEvent.detail`.
                 let row_payload = VerifyAccountEvent {
@@ -878,6 +878,7 @@ impl claudepot_core::services::account_service::VerifyProgressSink for TauriVeri
                             VerifyOutcomeKind::Ok => r.ok += 1,
                             VerifyOutcomeKind::Drift => r.drift += 1,
                             VerifyOutcomeKind::Rejected => r.rejected += 1,
+                            VerifyOutcomeKind::SignedOut => r.signed_out += 1,
                             VerifyOutcomeKind::NetworkError => r.network_error += 1,
                         }
                     }

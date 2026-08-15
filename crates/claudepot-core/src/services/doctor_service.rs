@@ -47,12 +47,34 @@ pub struct AccountHealth {
     pub token_status: String,
     pub remaining_mins: Option<i64>,
     /// Last persisted verify_status on the account row: "never", "ok",
-    /// "drift", "rejected", "network_error". Populated from the DB — if
-    /// it says "drift", the doctor reports an error and exits non-zero.
-    /// Run `claudepot account verify` to refresh before trusting this
-    /// field as current.
+    /// "drift", "rejected", "signed_out", "network_error". Populated
+    /// from the DB — run `claudepot account verify` to refresh before
+    /// trusting this field as current.
     pub verify_status: String,
     pub verified_email: Option<String>,
+}
+
+impl AccountHealth {
+    /// True when this account needs a human before it can work again.
+    ///
+    /// Derived here rather than left to each consumer. The CLI doctor
+    /// re-derived it as `verify_status == "drift"` and therefore
+    /// counted neither `rejected` nor `signed_out` — an account needing
+    /// re-login printed its state and still ended the run with "All
+    /// checks passed" and exit 0. A health report whose exit code
+    /// disagrees with its own body is worse than no report, because
+    /// scripts read the code.
+    pub fn needs_attention(&self) -> bool {
+        crate::account::VerifyOutcome::status_is_terminal(&self.verify_status)
+    }
+
+    /// What the user must do to clear [`needs_attention`], or `None`
+    /// when nothing is wrong.
+    ///
+    /// [`needs_attention`]: AccountHealth::needs_attention
+    pub fn remedy(&self) -> Option<&'static str> {
+        crate::account::VerifyOutcome::status_remedy(&self.verify_status)
+    }
 }
 
 #[derive(Debug)]

@@ -40,14 +40,33 @@ pub enum WakeError {
     NoCredentials(String),
     /// The stored blob authenticates as a different account than the
     /// label claims. Spending quota here would bill the wrong identity.
-    #[error("{0} failed identity verification (status: {1}) — run `claudepot account verify` to reconcile")]
-    IdentityUnverified(String, String),
+    /// The remedy clause is computed from the status rather than
+    /// hardcoded: "run verify" is the fix for `drift` and a dead end
+    /// for `rejected` / `signed_out`, where only a re-login mints a
+    /// token. One sentence for all three sent two thirds of the users
+    /// who hit this to a command that cannot help them.
+    #[error(
+        "{email} failed identity verification (status: {status}) — {}",
+        remedy_for(status)
+    )]
+    IdentityUnverified { email: String, status: String },
     #[error("store error: {0}")]
     Store(String),
     #[error("could not obtain an access token: {0}")]
     Token(String),
     #[error("wake request failed: {0}")]
     Request(String),
+}
+
+/// Remedy clause for a refused status, for [`WakeError::IdentityUnverified`].
+///
+/// Falls back to the reconcile wording for any status not in the
+/// terminal set. That case is unreachable today — `eligibility` only
+/// constructs this variant for `UNVERIFIED_STATUSES` — but a fallback
+/// that names *some* action beats an empty clause if that ever changes.
+fn remedy_for(status: &str) -> &'static str {
+    crate::account::VerifyOutcome::status_remedy(status)
+        .unwrap_or("run `claudepot account verify` to reconcile")
 }
 
 /// Hand-written, wildcard-free: a new variant must be named here before
@@ -70,7 +89,7 @@ impl crate::error_code::ErrorCode for WakeError {
         match self {
             WakeError::NotFound => "wake.not_found",
             WakeError::NoCredentials(_) => "wake.no_credentials",
-            WakeError::IdentityUnverified(_, _) => "wake.identity_unverified",
+            WakeError::IdentityUnverified { .. } => "wake.identity_unverified",
             WakeError::Store(_) => "wake.store",
             WakeError::Token(_) => "wake.token",
             WakeError::Request(_) => "wake.request",
@@ -81,7 +100,7 @@ impl crate::error_code::ErrorCode for WakeError {
         match self {
             WakeError::NotFound => serde_json::json!({}),
             WakeError::NoCredentials(email) => serde_json::json!({ "email": email }),
-            WakeError::IdentityUnverified(email, status) => {
+            WakeError::IdentityUnverified { email, status } => {
                 serde_json::json!({ "email": email, "status": status })
             }
             // `Token` wraps the access-token *acquisition* failure, never
@@ -102,9 +121,15 @@ pub struct WakeReceipt {
     pub model: &'static str,
 }
 
-/// `verify_status` values that must never reach a billable request.
-/// Mirrors `UsageCache::identity_gate`'s rejection set.
-const UNVERIFIED_STATUSES: [&str; 2] = ["drift", "rejected"];
+/// `verify_status` values that must never reach a billable request:
+/// every status no retry can change.
+///
+/// Aliases [`VerifyOutcome::TERMINAL_STATUSES`] rather than restating
+/// it. `UsageCache::identity_gate` reads the same const, so the read
+/// gate and the write gate cannot disagree about which accounts are
+/// trustworthy — previously they were two hand-written literals kept
+/// in step by a test that only compared one of them to itself.
+const UNVERIFIED_STATUSES: [&str; 3] = crate::account::VerifyOutcome::TERMINAL_STATUSES;
 
 /// Is this account safe to spend quota on?
 ///
@@ -120,10 +145,10 @@ pub fn eligibility(
         return Err(WakeError::NoCredentials(email.to_string()));
     }
     if UNVERIFIED_STATUSES.contains(&verify_status) {
-        return Err(WakeError::IdentityUnverified(
-            email.to_string(),
-            verify_status.to_string(),
-        ));
+        return Err(WakeError::IdentityUnverified {
+            email: email.to_string(),
+            status: verify_status.to_string(),
+        });
     }
     Ok(())
 }
@@ -185,7 +210,7 @@ mod tests {
     #[test]
     fn a_drifted_account_is_refused_before_spending() {
         let err = eligibility(true, "drift", "a@b.com").unwrap_err();
-        assert!(matches!(err, WakeError::IdentityUnverified(_, _)));
+        assert!(matches!(err, WakeError::IdentityUnverified { .. }));
         assert!(err.to_string().contains("verify"), "must name the fix");
     }
 
@@ -193,7 +218,19 @@ mod tests {
     fn a_rejected_account_is_refused_before_spending() {
         assert!(matches!(
             eligibility(true, "rejected", "a@b.com").unwrap_err(),
-            WakeError::IdentityUnverified(_, _)
+            WakeError::IdentityUnverified { .. }
+        ));
+    }
+
+    /// A Claude Code that signed itself out cannot authenticate a
+    /// billable request either — the account is fine, but the token is
+    /// gone. Refusing here turns a guaranteed 401 into an actionable
+    /// message.
+    #[test]
+    fn a_signed_out_account_is_refused_before_spending() {
+        assert!(matches!(
+            eligibility(true, "signed_out", "a@b.com").unwrap_err(),
+            WakeError::IdentityUnverified { .. }
         ));
     }
 
@@ -208,11 +245,32 @@ mod tests {
         ));
     }
 
-    /// Locks the rejection set to `usage_cache::identity_gate`'s. If one
-    /// grows a status the other doesn't, reads and writes disagree about
-    /// which accounts are trustworthy.
+    /// The rejection set must be exactly the terminal statuses — no
+    /// more (refusing a transient blip would strand a healthy account),
+    /// no fewer (spending on a known-dead one is the bug this gate
+    /// exists for).
+    ///
+    /// Asserts the *predicate*, not a second copy of the literal. The
+    /// old form compared `UNVERIFIED_STATUSES` to an identical inline
+    /// array, so it could never fail for any reason a reader would care
+    /// about — including the divergence its own comment claimed to
+    /// catch.
     #[test]
-    fn the_rejection_set_matches_the_usage_gate() {
-        assert_eq!(UNVERIFIED_STATUSES, ["drift", "rejected"]);
+    fn the_rejection_set_is_exactly_the_terminal_statuses() {
+        use crate::account::VerifyOutcome;
+        for status in UNVERIFIED_STATUSES {
+            assert!(
+                VerifyOutcome::status_is_terminal(status),
+                "{status} is refused a billable request but is not terminal"
+            );
+            assert!(eligibility(true, status, "a@b.com").is_err());
+        }
+        for status in ["never", "ok", "network_error"] {
+            assert!(!VerifyOutcome::status_is_terminal(status));
+            assert!(
+                eligibility(true, status, "a@b.com").is_ok(),
+                "{status} is recoverable and must not be refused"
+            );
+        }
     }
 }

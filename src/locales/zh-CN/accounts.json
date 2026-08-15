@@ -96,6 +96,10 @@
       "title": "服务器拒绝了已保存的登录",
       "detail": "已保存的登录不再有效 — 请重新登录以修复。"
     },
+    "signedOut": {
+      "title": "Claude Code 已自行登出",
+      "detail": "Claude Code 清空了自己保存的凭据，已无内容可刷新。你的账户本身没有问题 — 重新登录即可恢复。"
+    },
     "broken": {
       "title": "已保存的登录缺失或损坏",
       "detail": "无法读取已保存的凭据文件。请重新登录或移除。"
@@ -153,7 +157,7 @@
     "unverifiedAria": "{{n}} 个未验证",
     "driftTitle": "{{n}} 个漂移 — 槽位错配，请重新登录或移除",
     "driftAria": "{{n}} 个漂移",
-    "brokenTitle": "{{n}} 个损坏 — 凭据被拒绝或无法读取",
+    "brokenTitle": "{{n}} 个损坏 — 已登出、被拒或无法读取",
     "brokenAria": "{{n}} 个损坏"
   },
   "footer": {
@@ -162,6 +166,7 @@
     "verifiedAgo": "已验证 · {{ago}}",
     "drift": "漂移 → {{email}}",
     "tokenRejected": "token 被拒绝",
+    "signedOut": "已登出",
     "profileUnreachable": "profile 不可达",
     "notYetVerified": "尚未验证",
     "token": "token {{status}}",
@@ -291,10 +296,12 @@
     "drift": "漂移：{{email}} 实际认证为 {{actual}}",
     "unknown": "未知",
     "rejected": "服务器拒绝了 {{email}} — 需要重新登录",
+    "signedOut": "Claude Code 已自行登出 {{email}} — 请重新登录",
     "networkError": "无法验证 {{email}} — /profile 不可达",
+    "unexpected": "无法解读 {{email}} 的验证结果 — 未能确认任何信息",
     "failed": "验证失败",
     "allOk": "全部 {{total}} 个账户已验证。",
-    "summaryBad": "验证：{{drift}} 个漂移、{{rejected}} 个被拒 — 见卡片横幅。",
+    "summaryBad": "验证：{{drift}} 个漂移、{{needsLogin}} 个需重新登录 — 见卡片横幅。",
     "allFailed": "全部验证失败",
     "switchingDesktop": "正在把 Desktop 切换到 {{email}}…"
   },

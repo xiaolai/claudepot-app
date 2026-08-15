@@ -92,11 +92,21 @@ export function useAccountHandlers({
           case "rejected":
             pushToast("error", t("verify.rejected", { email: a.email }));
             break;
+          case "signed_out":
+            pushToast("error", t("verify.signedOut", { email: a.email }));
+            break;
           case "network_error":
             pushToast("error", t("verify.networkError", { email: a.email }));
             break;
+          case "never":
           default:
-            pushToast("info", t("verify.ok", { email: a.email }));
+            // NOT a success toast. The old `default` pushed
+            // `verify.ok` ("Verified {{email}}"), so any status this
+            // build did not enumerate — including every future one —
+            // was announced to the user as a confirmed identity. A
+            // verify that returned something we cannot interpret has
+            // confirmed nothing, and saying so is the honest floor.
+            pushToast("error", t("verify.unexpected", { email: a.email }));
         }
         await refresh();
         // Only a verify that actually healed the account (status now
@@ -137,14 +147,24 @@ export function useAccountHandlers({
             outcomes: { ...s.outcomes, [uuid]: outcome },
           })),
       });
-      if (summary.drift + summary.rejected === 0) {
+      // `signed_out` counts toward "something is wrong" — omitting it
+      // would let a run that found a signed-out account report "all
+      // verified".
+      //
+      // It shares a counter with `rejected` because the summary line
+      // answers "how many need me?", and both do. The counter is named
+      // for that shared consequence rather than for either cause — the
+      // old wording said "rejected", which would have been a false
+      // account of every signed-out row. The card banner is where the
+      // two diverge, and the sentence points there.
+      if (summary.drift + summary.rejected + summary.signed_out === 0) {
         pushToast("info", t("verify.allOk", { total: summary.total }));
       } else {
         pushToast(
           "error",
           t("verify.summaryBad", {
             drift: summary.drift,
-            rejected: summary.rejected,
+            needsLogin: summary.rejected + summary.signed_out,
           }),
         );
       }

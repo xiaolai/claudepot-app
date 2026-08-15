@@ -3,19 +3,27 @@ import { Glyph } from "../../components/primitives/Glyph";
 import type { NfIcon } from "../../icons";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
+import { verifyKind } from "./verifyStatus";
 
 type Bucket = "ok" | "unverified" | "drift" | "broken";
 
 /**
- * Collapse the 7 raw account states into 4 user-facing buckets:
+ * Collapse the raw account states into 4 user-facing buckets:
  *
- *   ok         verify_status === "ok"          (green check)
- *   unverified "never" or "network_error"      (grey circle — we just don't know)
- *   drift      "drift"                         (warn — slot misfiled, worth attention)
- *   broken     rejected | bad blob             (danger — creds are dead, re-login required)
+ *   ok         verify_status === "ok"           (green check)
+ *   unverified "never" or "network_error"       (grey circle — we just don't know)
+ *   drift      "drift"                          (warn — slot misfiled, worth attention)
+ *   broken     rejected | signed_out | bad blob (danger — re-login required)
  *
  * Order matters: broken wins over drift wins over unverified wins over ok,
  * so a single anomalous account lands in its most severe bucket.
+ *
+ * `signed_out` (Claude Code cleared its own credentials) is "broken",
+ * not "unverified". The distinction is the whole point of the state:
+ * "unverified" means we could not check, and the honest response is to
+ * wait; "broken" means we checked and only a re-login recovers it. A
+ * terminal state sitting in the wait-and-see bucket is what left users
+ * watching for a self-heal that could not come.
  *
  * `token_status === "expired"` is intentionally NOT a "broken" signal:
  * the verify pass auto-refreshes via the OAuth refresh_token within a
@@ -24,12 +32,19 @@ type Bucket = "ok" | "unverified" | "drift" | "broken";
  * here false-alarms during the cold-paint window before verify runs.
  */
 function categorize(a: AccountSummary): Bucket {
+  // An unreadable blob is "broken" regardless of what the last verify
+  // pass recorded — there is nothing left to have an opinion about.
   if (!a.credentials_healthy) return "broken";
-  if (a.verify_status === "rejected") return "broken";
-  if (a.verify_status === "drift") return "drift";
-  if (a.verify_status === "ok") return "ok";
-  // Covers "never" and "network_error".
-  return "unverified";
+  switch (verifyKind(a.verify_status)) {
+    case "needsLogin":
+      return "broken";
+    case "drift":
+      return "drift";
+    case "ok":
+      return "ok";
+    case "unknown":
+      return "unverified";
+  }
 }
 
 function count(

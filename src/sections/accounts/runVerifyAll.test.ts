@@ -21,6 +21,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("../../api", () => ({
   api: {
     verifyAllAccountsStart: vi.fn(async () => "op-fake"),
+    // The backend backstop. Returns null by default so existing tests
+    // exercise the streamed-tally path unchanged; the reconcile tests
+    // below override it per-case.
+    verifyAllAccountsStatus: vi.fn(async () => null),
     accountList: vi.fn(async () => [
       {
         uuid: "u1",
@@ -39,6 +43,7 @@ vi.mock("../../api", () => ({
 }));
 
 import { emit } from "@tauri-apps/api/event";
+import { api } from "../../api";
 import { USAGE_REFETCH_EVENT } from "../../lib/events";
 import { runVerifyAll } from "./runVerifyAll";
 
@@ -107,6 +112,7 @@ describe("runVerifyAll", () => {
       ok: 1,
       drift: 1,
       rejected: 0,
+      signed_out: 0,
       network_error: 0,
     });
 
@@ -169,6 +175,86 @@ describe("runVerifyAll", () => {
     });
     await promise;
     expect(vi.mocked(emit)).toHaveBeenCalledWith(USAGE_REFETCH_EVENT);
+  });
+
+  // The op is started BEFORE `listen()` subscribes, and Tauri events
+  // are not buffered — so a row that resolves inside that window is
+  // never counted locally. Left unreconciled, a run that found
+  // problems resolves with zeros and the caller announces
+  // "All N accounts verified."
+  it("reconciles the tally from the backend when row events were missed", async () => {
+    vi.mocked(api.verifyAllAccountsStatus).mockResolvedValueOnce({
+      verify_results: {
+        total: 3,
+        ok: 1,
+        drift: 0,
+        rejected: 0,
+        signed_out: 2,
+        network_error: 0,
+      },
+    } as never);
+
+    const promise = runVerifyAll({
+      patchAccount: () => {},
+      setAccounts: () => {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    // Only ONE of the three rows was seen locally — the other two
+    // resolved before the listener existed.
+    capturedHandler!({
+      payload: {
+        op_id: "op-fake",
+        kind: "verify_account",
+        uuid: "u1",
+        email: "alice@example.com",
+        idx: 1,
+        total: 3,
+        outcome: "ok",
+      },
+    });
+    capturedHandler!({
+      payload: { op_id: "op-fake", phase: "op", status: "complete" },
+    });
+
+    const summary = await promise;
+    expect(summary.signed_out).toBe(2);
+    expect(summary.total).toBe(3);
+    // Without the reconcile this asserted 0 and the caller would have
+    // reported a clean run.
+    expect(summary.drift + summary.rejected + summary.signed_out).toBeGreaterThan(0);
+  });
+
+  it("keeps the streamed tally when the backstop is unavailable", async () => {
+    vi.mocked(api.verifyAllAccountsStatus).mockRejectedValueOnce(
+      new Error("op record already reaped"),
+    );
+
+    const promise = runVerifyAll({
+      patchAccount: () => {},
+      setAccounts: () => {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    capturedHandler!({
+      payload: {
+        op_id: "op-fake",
+        kind: "verify_account",
+        uuid: "u1",
+        email: "alice@example.com",
+        idx: 1,
+        total: 1,
+        outcome: "signed_out",
+      },
+    });
+    capturedHandler!({
+      payload: { op_id: "op-fake", phase: "op", status: "complete" },
+    });
+
+    // A failed backstop must not wipe what we did observe — degraded,
+    // not destroyed.
+    const summary = await promise;
+    expect(summary.signed_out).toBe(1);
   });
 
   it("does NOT emit usage::refetch when the op terminates with an error", async () => {

@@ -3,6 +3,7 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import { i18n } from "../../lib/i18n";
 import type { AccountSummary } from "../../types";
+import { requiresAttention } from "./verifyStatus";
 
 interface AnomalyBannerProps {
   account: AccountSummary;
@@ -11,7 +12,8 @@ interface AnomalyBannerProps {
 }
 
 /**
- * In-card warning strip. Triggers on drift / rejected / unhealthy —
+ * In-card warning strip. Triggers on drift / rejected / signed-out /
+ * unhealthy —
  * see `isAnomaly(a)`. Always exposes a "Re-login" button that fires
  * `onRelogin` (wired to `api.accountLogin`).
  *
@@ -91,16 +93,22 @@ export function AnomalyBanner({
 
 /**
  * True when the account is in a state that needs human attention.
- * The three cases match `anomalyCopy` below one-to-one. Locally
+ * The four cases match `anomalyCopy` below one-to-one. Locally
  * `expired` tokens are excluded — the verify pass refreshes them
  * automatically; if the refresh fails the row flips to `rejected`.
+ *
+ * `signed_out` had to be added here as well as to the copy: the banner
+ * is the only surface carrying the Re-login button, so a terminal state
+ * that fails this predicate is one the user cannot act on from the card
+ * at all. That was the visible half of issue #74 — an unverified chip,
+ * no banner, and nothing to click.
  */
 export function isAnomaly(a: AccountSummary): boolean {
-  return (
-    a.drift ||
-    a.verify_status === "rejected" ||
-    !a.credentials_healthy
-  );
+  // `a.drift` is kept alongside the status check because the DTO
+  // computes it separately (`verify_status === "drift"` backend-side);
+  // trusting only one of the two would make this predicate depend on
+  // which field happened to be refreshed last.
+  return a.drift || requiresAttention(a);
 }
 
 function anomalyCopy(
@@ -127,6 +135,16 @@ function anomalyCopy(
     return {
       title: i18n.t("anomaly.rejected.title", { ns: "accounts" }),
       detail: i18n.t("anomaly.rejected.detail", { ns: "accounts" }),
+    };
+  }
+  // Deliberately worded away from "rejected": nothing refused this
+  // login, because with empty tokens no request was ever made. Copy
+  // that blames the server or the account sends the user to check
+  // something that is fine.
+  if (a.verify_status === "signed_out") {
+    return {
+      title: i18n.t("anomaly.signedOut.title", { ns: "accounts" }),
+      detail: i18n.t("anomaly.signedOut.detail", { ns: "accounts" }),
     };
   }
   if (!a.credentials_healthy) {

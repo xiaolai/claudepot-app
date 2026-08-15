@@ -27,7 +27,10 @@ pub struct AccountSummary {
     /// DB's has_cli_credentials can lie after external state changes.
     pub credentials_healthy: bool,
     /// Last persisted verification outcome: "never" | "ok" | "drift" |
-    /// "rejected" | "network_error". Drives the drift badge in the UI.
+    /// "rejected" | "signed_out" | "network_error". Drives the drift
+    /// badge in the UI. "signed_out" is terminal like "rejected" — CC
+    /// cleared its own credentials — and is kept distinct because
+    /// nothing was refused, so the copy must not blame the account.
     pub verify_status: String,
     /// When verify_status != "never", the actual email `/api/oauth/profile`
     /// returned for THIS slot. Equals `email` when ok; differs on drift.
@@ -125,7 +128,7 @@ pub async fn summary_for_account(a: &claudepot_core::account::Account) -> Accoun
         verified_at: a.verified_at,
         // Derive from verify_status, not `verified_email != email`:
         // update_verification() preserves verified_email across
-        // rejected/network_error so a transient blip doesn't wipe
+        // rejected/signed_out/network_error so a transient blip doesn't wipe
         // history; comparing emails would spuriously paint stale
         // history as drift.
         drift: a.verify_status == "drift",

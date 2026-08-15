@@ -4,6 +4,7 @@
     "auth_rejected": "Claude Code's stored login has expired and couldn't be refreshed. Sign in again to recover it.",
     "cc_changed_during_refresh": "Claude Code changed its stored login while Claudepot was refreshing it. Nothing was lost — try again.",
     "cc_live_refresh_skipped": "A Claude Code session is running, so the token refresh was skipped rather than signing it out. It clears itself once that session refreshes — nothing to do.",
+    "cc_signed_out": "Claude Code signed itself out — it cleared its own stored credentials, so there is nothing left to refresh. Your account is fine; log in again to restore it.",
     "credential_read": "Couldn't read Claude Code's stored credentials: {{detail}}",
     "credential_write": "Couldn't write the credentials back: {{detail}}",
     "no_credentials": "Claude Code isn't signed in, so there are no credentials to import. Sign in there first, then add the account.",

@@ -60,6 +60,34 @@ pub fn expiring_soon_blob_json() -> String {
     sample_blob_json(chrono::Utc::now().timestamp_millis() + 120_000)
 }
 
+/// The **half-state**: a present-but-stale access token with no refresh
+/// token to renew it.
+///
+/// Distinct from [`signed_out_blob_json`] on purpose. `is_signed_out()`
+/// is FALSE here (the access token is non-empty), so this blob reaches
+/// the 401 branch and must come back `Rejected` — the server was asked
+/// and refused. Reporting it as signed-out would assert two things this
+/// state does not establish: that Claude Code cleared its own
+/// credentials, and that the account is otherwise fine.
+pub fn no_refresh_token_blob_json() -> String {
+    r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-stale","refreshToken":"","expiresAt":0,"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}"#
+        .to_string()
+}
+
+/// Claude Code's **cleared-credentials sentinel**: valid JSON, every key
+/// present, both tokens emptied and `expiresAt` zeroed, while `scopes` /
+/// `subscriptionType` / `rateLimitTier` survive intact.
+///
+/// Shaped from a real observation (issue #74) rather than invented — the
+/// surviving metadata fields are what make it parse cleanly and read as
+/// an ordinary expired blob. Every layer that must treat this as
+/// terminal tests against these exact bytes, so a fix at one layer and a
+/// different assumption at another cannot both look correct.
+pub fn signed_out_blob_json() -> String {
+    r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,"scopes":["user:inference","user:profile"],"subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}"#
+        .to_string()
+}
+
 /// Cross-platform absolute path safe to use as an `Agent::cwd` value
 /// in tests. Returns `/tmp` on Unix, `C:\Users\<user>\AppData\Local\Temp`
 /// on Windows — both pass `Path::is_absolute()`, which is the only

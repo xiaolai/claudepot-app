@@ -7,6 +7,7 @@ import type {
   OperationProgressEvent,
   VerifyAccountEvent,
   VerifyOutcomeKind,
+  VerifyResultSummary,
 } from "../../types";
 
 /**
@@ -44,13 +45,19 @@ export interface RunVerifyAllOptions {
   }) => void;
 }
 
-export interface VerifyAllOutcome {
-  total: number;
-  ok: number;
-  drift: number;
-  rejected: number;
-  network_error: number;
-}
+/**
+ * Alias, not a copy. This used to restate `VerifyResultSummary` field
+ * for field, so every new outcome needed two lockstep edits and a miss
+ * would have compiled — the counters simply would not have added up.
+ */
+export type VerifyAllOutcome = VerifyResultSummary;
+
+/** How often the terminal-event backstop asks the backend whether the
+ *  op has already finished. Slow enough to be free on the happy path
+ *  (finalize clears it on the first real event), fast enough that a
+ *  dropped terminal event does not strand the UI for a noticeable
+ *  time. */
+const TERMINAL_POLL_MS = 1500;
 
 export async function runVerifyAll(
   opts: RunVerifyAllOptions,
@@ -66,22 +73,53 @@ export async function runVerifyAll(
     ok: 0,
     drift: 0,
     rejected: 0,
+    signed_out: 0,
     network_error: 0,
   };
 
   return new Promise<VerifyAllOutcome>((resolve, reject) => {
     let unlistenFn: (() => void) | null = null;
     let settled = false;
+    // Declared before `finalize` so it can clear the timer; assigned
+    // after, because the poll callback calls `finalize`.
+    let poll: ReturnType<typeof setInterval>;
 
     const finalize = async (terminalErr: string | null) => {
       if (settled) return;
       settled = true;
+      clearInterval(poll);
       if (unlistenFn) {
         try {
           unlistenFn();
         } catch {
           /* ignore */
         }
+      }
+      // Reconcile the tally against the backend's own counters before
+      // anyone reads it.
+      //
+      // `verifyAllAccountsStart()` is awaited BEFORE `listen()`
+      // subscribes below, and Tauri events are not buffered — so a row
+      // that resolves inside that window is never counted here. The
+      // local tally then under-reports, and the caller's
+      // "drift + rejected + signed_out === 0" check announces "all
+      // verified" for a run that found problems. The backend's
+      // `RunningOps` entry counted every row regardless of who was
+      // listening, which is exactly what a backstop is for; this
+      // function simply never asked for it.
+      //
+      // Backend numbers win outright rather than being merged: they are
+      // complete by construction, while the local ones are complete
+      // only if nothing was dropped.
+      try {
+        const info = await api.verifyAllAccountsStatus(opId);
+        if (info?.verify_results) {
+          Object.assign(counts, info.verify_results);
+        }
+      } catch {
+        // Backstop unavailable — keep the streamed tally. It may
+        // under-count, which is why the reconcile exists, but it is
+        // strictly better than nothing.
       }
       // Always pull the fresh DB state so verified_email / token_health
       // / verify_status columns get into the UI even if a per-row event
@@ -121,7 +159,12 @@ export async function runVerifyAll(
         opts.onProgress?.({
           uuid: row.uuid,
           outcome: row.outcome as VerifyOutcomeKind,
-          done: counts.ok + counts.drift + counts.rejected + counts.network_error,
+          done:
+            counts.ok +
+            counts.drift +
+            counts.rejected +
+            counts.signed_out +
+            counts.network_error,
           total: row.total,
         });
         opts.patchAccount(row.uuid, {
@@ -143,6 +186,43 @@ export async function runVerifyAll(
         void finalize(detail);
       }
     };
+
+    // Polling backstop for the TERMINAL event.
+    //
+    // The reconcile in `finalize` repairs a dropped *row* event, but
+    // only once finalize runs — and finalize runs only when the
+    // terminal `op` event arrives. Since the op is started before
+    // `listen()` subscribes and Tauri buffers nothing, a short op can
+    // finish inside that window and the promise then never settles:
+    // the "Verify all" button stays disabled and the per-card pulses
+    // spin until the view is remounted.
+    //
+    // `RunningOps` on the backend already records the op's terminal
+    // status; this asks it. Cleared by `finalize`, so the happy path
+    // pays one interval at most.
+    poll = setInterval(() => {
+      if (settled) {
+        clearInterval(poll);
+        return;
+      }
+      api
+        .verifyAllAccountsStatus(opId)
+        .then((info) => {
+          // `null` means the op record is gone (reaped, or the app
+          // restarted). Either way nothing further will arrive, so
+          // stop waiting rather than poll forever.
+          if (info === null) {
+            void finalize(null);
+            return;
+          }
+          if (info.status === "complete") void finalize(null);
+          else if (info.status === "error")
+            void finalize(info.last_error ?? "verify failed");
+        })
+        .catch(() => {
+          // Transient IPC failure — the next tick tries again.
+        });
+    }, TERMINAL_POLL_MS);
 
     listen<OperationProgressEvent | VerifyAccountEvent>(channel, handler)
       .then((fn) => {

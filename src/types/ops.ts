@@ -75,7 +75,12 @@ export type LoginPhase =
 
 /** Per-account verify outcome — flat enum mirroring
  *  `claudepot_core::services::account_service::VerifyOutcomeKind`. */
-export type VerifyOutcomeKind = "ok" | "drift" | "rejected" | "network_error";
+export type VerifyOutcomeKind =
+  | "ok"
+  | "drift"
+  | "rejected"
+  | "signed_out"
+  | "network_error";
 
 /** Per-account event emitted on `op-progress::<op_id>` for VerifyAll
  *  ops. Sibling payload to `OperationProgressEvent` — distinguished by
@@ -97,6 +102,7 @@ export interface VerifyResultSummary {
   ok: number;
   drift: number;
   rejected: number;
+  signed_out: number;
   network_error: number;
 }
 

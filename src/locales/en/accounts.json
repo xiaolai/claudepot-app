@@ -98,6 +98,10 @@
       "title": "Server rejected the saved login",
       "detail": "The stored login is no longer valid — log in again to fix."
     },
+    "signedOut": {
+      "title": "Claude Code signed itself out",
+      "detail": "Claude Code cleared its own stored credentials, so there is nothing left to refresh. Your account is fine — log in again to restore it."
+    },
     "broken": {
       "title": "Saved login is missing or broken",
       "detail": "The stored credential file couldn't be read. Log in again or remove."
@@ -156,7 +160,7 @@
     "unverifiedAria": "{{n}} unverified",
     "driftTitle": "{{n}} drift — slot misfiled, re-login or remove",
     "driftAria": "{{n}} drift",
-    "brokenTitle": "{{n}} broken — credentials rejected or unreadable",
+    "brokenTitle": "{{n}} broken — signed out, rejected, or unreadable",
     "brokenAria": "{{n}} broken"
   },
   "footer": {
@@ -165,6 +169,7 @@
     "verifiedAgo": "verified · {{ago}}",
     "drift": "drift → {{email}}",
     "tokenRejected": "token rejected",
+    "signedOut": "signed out",
     "profileUnreachable": "profile unreachable",
     "notYetVerified": "not yet verified",
     "token": "token {{status}}",
@@ -294,10 +299,12 @@
     "drift": "Drift: {{email}} actually authenticates as {{actual}}",
     "unknown": "unknown",
     "rejected": "Server rejected {{email}} — re-login required",
+    "signedOut": "Claude Code signed itself out of {{email}} — log in again",
     "networkError": "Couldn't verify {{email}} — /profile unreachable",
+    "unexpected": "Couldn't interpret the verification result for {{email}} — nothing was confirmed",
     "failed": "Verify failed",
     "allOk": "All {{total}} accounts verified.",
-    "summaryBad": "Verify: {{drift}} drift, {{rejected}} rejected — see card banners.",
+    "summaryBad": "Verify: {{drift}} drift, {{needsLogin}} need re-login — see card banners.",
     "allFailed": "Verify-all failed",
     "switchingDesktop": "Switching Desktop to {{email}}…"
   },

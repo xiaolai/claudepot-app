@@ -47,6 +47,25 @@
 //! `VerifyOutcome::NetworkError` here. This mirrors the gate
 //! `swap::switch` already applies. Skipping is self-healing: CC refreshes
 //! on its next request and the following pass verifies normally.
+//!
+//! ## A blob with no tokens is checked BEFORE that gate
+//!
+//! CC's sign-out does not always delete its keychain item — it can
+//! overwrite it with a *cleared-credentials sentinel*: valid JSON, every
+//! key present, both tokens `""`, `expiresAt` zeroed. It parses, so it
+//! used to flow down the ordinary path, 401 on the empty bearer, and
+//! reach the live-session gate above — which reported it as transient.
+//! The result inverted with whether the user was working: correct
+//! ("re-login") only when no `claude` was running, and wrong ("couldn't
+//! confirm, wait") exactly when one was.
+//!
+//! The gate exists to avoid retiring a single-use token CC still holds.
+//! An empty refresh token is not a token, so there is nothing to
+//! protect and nothing an exchange could achieve. Both this module and
+//! `resolve_cc_identity_locked` therefore test
+//! `CredentialBlob::can_refresh` **before** consulting the probe, and
+//! return the terminal `VerifyOutcome::SignedOut`. Order is the fix;
+//! the check alone, placed after the gate, would change nothing.
 use crate::account::{AccountStore, VerifyOutcome};
 use crate::blob::CredentialBlob;
 use crate::cli_backend::swap;
@@ -231,6 +250,23 @@ pub async fn verify_account_identity_with_probe(
     let blob = CredentialBlob::from_json(&blob_str)
         .map_err(|e| VerifyError::CorruptBlob(e.to_string()))?;
 
+    // The slot holds a cleared sentinel — parses, but both tokens are
+    // empty. Terminal, and answerable without a network call: an empty
+    // bearer cannot authenticate. Checked here rather than only at the
+    // 401 branch so the pass costs nothing and, more importantly, so it
+    // never reaches the live-session gate below (see that arm).
+    if blob.is_signed_out() {
+        tracing::info!(
+            account = %uuid,
+            "private slot holds empty credentials — signed out, re-login required"
+        );
+        let outcome = VerifyOutcome::SignedOut;
+        store
+            .update_verification(uuid, &outcome)
+            .map_err(|e| VerifyError::Store(e.to_string()))?;
+        return Ok(outcome);
+    }
+
     let outcome = match run_profile_check(&blob, fetcher).await {
         ProfileCheck::Ok(actual) => classify(&account.email, actual),
         ProfileCheck::Rejected => {
@@ -249,6 +285,36 @@ pub async fn verify_account_identity_with_probe(
             // above: the profile round-trip since then is long enough for
             // a concurrent swap, and this is the instant that matters.
             // Failing closed on a corrupt pointer is the point.
+            //
+            // The empty-refresh-token check runs FIRST, for the same
+            // reason it does on the keychain path: the gate protects a
+            // single-use token CC may still hold, and there is no token
+            // here to protect. Consulting the gate first would report a
+            // terminal state as transient — which is what the reported
+            // bug did on this very branch, since a slot with no refresh
+            // token reaches it the moment `/profile` 401s.
+            //
+            // The outcome is `Rejected`, NOT `SignedOut`. Reaching here
+            // means the access token was non-empty and the server
+            // refused it — a request was made and answered — so the
+            // blob is not the cleared sentinel (`is_signed_out` already
+            // returned above for that). `SignedOut`'s copy tells the
+            // user CC cleared its own credentials and their account is
+            // fine; neither claim is established here, and the second
+            // could be false if the token was genuinely revoked.
+            // `SignedOut` means exactly `is_signed_out()`, nothing
+            // adjacent to it.
+            if !blob.can_refresh() {
+                tracing::info!(
+                    account = %uuid,
+                    "slot token refused and no refresh token to spend — re-login required"
+                );
+                let outcome = VerifyOutcome::Rejected;
+                store
+                    .update_verification(uuid, &outcome)
+                    .map_err(|e| VerifyError::Store(e.to_string()))?;
+                return Ok(outcome);
+            }
             if active_cli_matches(store, uuid)? && probe.is_cc_running().await {
                 tracing::info!(
                     account = %uuid,
@@ -417,6 +483,18 @@ async fn verify_active_via_keychain(
         Err(e @ RE::CcLiveRefreshSkipped) => {
             tracing::debug!("active-account verify: {e}");
             Some(VerifyOutcome::NetworkError)
+        }
+        // CC's keychain holds the cleared-credentials sentinel — it
+        // parses, but both tokens are empty. The SECOND terminal
+        // outcome, and the reason it needs to exist separately from
+        // `AuthRejected`: no request was refused because no request was
+        // possible. Reporting it as transient (which is what the
+        // live-session gate above used to do, since the sentinel
+        // reached that gate) leaves the user watching for a self-heal
+        // that cannot come.
+        Err(e @ RE::CcSignedOut) => {
+            tracing::info!("active-account verify: {e}");
+            Some(VerifyOutcome::SignedOut)
         }
         // resolve_cc_identity does not emit these today. They are listed
         // EXPLICITLY (no `_` wildcard) on purpose: adding a new variant to
@@ -1040,6 +1118,23 @@ mod tests {
         }
     }
 
+    /// Fetcher that fails the test if it is ever called. Proves a check
+    /// answered from the blob's own bytes rather than by asking the
+    /// server — which is the point of detecting the cleared sentinel
+    /// before the profile fetch: an empty bearer carries no question a
+    /// round-trip could answer.
+    struct NeverFetcher;
+
+    #[async_trait::async_trait]
+    impl ProfileFetcher for NeverFetcher {
+        async fn fetch_email(&self, access_token: &str) -> Result<String, OAuthError> {
+            panic!(
+                "/profile must not be called with a {}-char access token",
+                access_token.len()
+            );
+        }
+    }
+
     /// Refresher that fails the test if it is ever called. Proves the
     /// live-session gate declined to spend the single-use refresh token
     /// rather than merely discarding the result afterwards.
@@ -1266,6 +1361,208 @@ mod tests {
             "no live session → the rotated blob is persisted to the slot"
         );
         swap::delete_private(uuid).await.unwrap();
+    }
+
+    // ---- CC's cleared-credentials sentinel (issue #74) ----
+
+    /// THE reported bug. CC signed itself out, leaving a blob that
+    /// PARSES with both tokens empty, and a `claude` process is live.
+    ///
+    /// Before the fix the sentinel flowed to the live-session gate,
+    /// which returned `CcLiveRefreshSkipped` → `NetworkError` → an
+    /// "unverified" chip with no action offered, so the user waited for
+    /// a self-heal that can never arrive. The gate protects a
+    /// single-use refresh token CC still holds; here there is no token
+    /// to protect, which is why the emptiness check must run first.
+    ///
+    /// `NeverRefresher` also proves we never tried to spend `""`.
+    #[tokio::test]
+    async fn active_account_cleared_sentinel_is_terminal_even_with_a_live_session() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        store
+            .update_verification(
+                uuid,
+                &VerifyOutcome::Ok {
+                    email: "alice@example.com".into(),
+                },
+            )
+            .unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::signed_out_blob_json()));
+        // Panics if called: an empty bearer must not reach the network.
+        let fetcher = NeverFetcher;
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &platform,
+            &fetcher,
+            &NeverRefresher,
+            &LiveProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::SignedOut,
+            "a cleared sentinel is terminal; NetworkError here is the bug — \
+             it tells the user to wait for a recovery that cannot happen"
+        );
+        assert!(
+            platform.writes().is_empty(),
+            "nothing to heal — the keychain must not be touched"
+        );
+
+        let row = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(row.verify_status, "signed_out");
+        assert_eq!(
+            row.verified_email.as_deref(),
+            Some("alice@example.com"),
+            "last-known-good identity survives so the UI can name who to sign back in as"
+        );
+    }
+
+    /// The same sentinel with NO live session. It already reported a
+    /// terminal state before the fix — but as `Rejected`, which says
+    /// the server refused the login. Nothing was refused; no request
+    /// was possible. The outcome must be the same in both worlds, which
+    /// is the property the reported bug violated: correct only when
+    /// nobody was using Claude Code.
+    #[tokio::test]
+    async fn cleared_sentinel_reports_the_same_outcome_with_no_live_session() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::signed_out_blob_json()));
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &platform,
+            &NeverFetcher,
+            &NeverRefresher,
+            &crate::cli_backend::swap::NoLiveSessionProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::SignedOut,
+            "the outcome must not depend on whether the user happens to be working"
+        );
+    }
+
+    /// The private-slot path carries the same defect and the same fix:
+    /// its own live-session gate sits between a 401 and the refresh, so
+    /// a slot holding a sentinel reported `NetworkError` too.
+    ///
+    /// Not the active account here, so the keychain path is skipped
+    /// entirely and this exercises the slot branch on its own.
+    #[tokio::test]
+    async fn slot_holding_a_cleared_sentinel_is_terminal() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        swap::save_private(uuid, &crate::testing::signed_out_blob_json())
+            .await
+            .unwrap();
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &MockKeychain::empty(),
+            &NeverFetcher,
+            &NeverRefresher,
+            &LiveProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome, VerifyOutcome::SignedOut);
+        let row = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(row.verify_status, "signed_out");
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// The half-state: a slot whose access token is refused and whose
+    /// refresh token is empty. `is_signed_out()` is false (the access
+    /// token is non-empty), so this reaches the 401 branch — where
+    /// `can_refresh()` must still short-circuit ahead of the
+    /// live-session gate. Without that second check the entry check
+    /// alone would leave this case misreported as transient.
+    ///
+    /// The outcome is `Rejected`, not `SignedOut`: the server was asked
+    /// and said no. Calling it `SignedOut` would tell the user CC
+    /// cleared its own credentials and their account is fine — two
+    /// claims this branch has no evidence for.
+    #[tokio::test]
+    async fn slot_with_no_refresh_token_is_terminal_ahead_of_the_live_gate() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+        swap::save_private(uuid, &crate::testing::no_refresh_token_blob_json())
+            .await
+            .unwrap();
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &MockKeychain::empty(),
+            &MockFetcher::rejecting(), // /profile → 401
+            &NeverRefresher,
+            &LiveProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Rejected,
+            "terminal because nothing can be spent — but Rejected, since the \
+             server was asked and refused; SignedOut would over-claim"
+        );
+        swap::delete_private(uuid).await.unwrap();
+    }
+
+    /// The guard that keeps the fix honest. An expired token WITH a
+    /// live refresh token, and a live session, must still be the
+    /// transient live-session skip. If the sentinel check were written
+    /// loosely — keyed on `expires_at == 0`, or on the access token
+    /// alone — it would swallow this case and start telling users to
+    /// re-login every time a background tick met a working session.
+    #[tokio::test]
+    async fn an_expired_but_refreshable_slot_is_still_a_transient_skip() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        store.set_active_cli(uuid).unwrap();
+
+        let platform = MockKeychain::with(Some(&crate::testing::expired_blob_json()));
+
+        let outcome = verify_account_identity_with_probe(
+            &store,
+            uuid,
+            &platform,
+            &MockFetcher::rejecting(),
+            &NeverRefresher,
+            &LiveProbe,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            VerifyOutcome::NetworkError,
+            "this one really is transient — CC refreshes it on its next request"
+        );
     }
 
     /// F2 regression: a corrupt `active_cli` pointer must FAIL CLOSED —

@@ -126,9 +126,17 @@ impl TokenRefreshOrchestrator {
         for a in &accounts {
             // Cheap checks first — skip the keychain read for accounts
             // that can't qualify regardless of what the slot holds.
+            //
+            // The status test defers to `VerifyOutcome::status_is_terminal`
+            // rather than spelling the set again. `is_eligible` below
+            // applies the same rule, so an inline copy here is a second
+            // definition that only ever *pre-empts* the real one — it
+            // cannot change the outcome, only fall behind it, which is
+            // how a newly-terminal status ends up paying a keychain read
+            // every tick forever.
             if !a.has_cli_credentials
                 || Some(a.uuid) == active
-                || matches!(a.verify_status.as_str(), "drift" | "rejected")
+                || VerifyOutcome::status_is_terminal(&a.verify_status)
             {
                 continue;
             }

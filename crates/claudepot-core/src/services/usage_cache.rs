@@ -293,9 +293,21 @@ impl UsageCache {
         }
     }
 
-    /// Fetch usage for multiple accounts with stagger between requests.
+    /// Fetch usage for multiple accounts with stagger between requests,
+    /// refusing any account whose recorded identity is terminal.
+    ///
+    /// **Takes the store precisely so the gate cannot be skipped.** The
+    /// previous signature took only uuids, which left `identity_gate`
+    /// reachable from exactly one of the two batch entry points — and
+    /// the CLI's `account list` used the other one, so it fetched
+    /// `/usage` for drifted slots and attributed another person's
+    /// numbers to the labelled row (the H4 privacy finding). Filtering
+    /// at that call site would have fixed today's caller and left the
+    /// hole open for tomorrow's; requiring the store closes it by
+    /// construction.
     pub async fn fetch_batch(
         &self,
+        store: &crate::account::AccountStore,
         uuids: &[Uuid],
     ) -> HashMap<Uuid, Result<Option<UsageResponse>, UsageFetchError>> {
         let mut out = HashMap::new();
@@ -305,18 +317,25 @@ impl UsageCache {
                 tokio::time::sleep(BATCH_STAGGER).await;
             }
             first = false;
+            if let Err(e) = Self::identity_gate(store, uuid) {
+                out.insert(uuid, Err(e));
+                continue;
+            }
             out.insert(uuid, self.fetch_usage(uuid, false).await);
         }
         out
     }
 
     /// Check the store's recorded identity-verification status before
-    /// serving a usage token. Refuses when the slot is known-misfiled
-    /// ("drift") or the token was server-rejected ("rejected") — in
-    /// both cases the access token in the slot DOES NOT belong to
-    /// the labelled account, so serving /usage against it would
-    /// attribute another person's numbers to this UUID (audit H4,
-    /// privacy bug).
+    /// serving a usage token. Refuses every terminal status:
+    ///
+    /// - "drift" — the slot is misfiled, so the access token in it does
+    ///   NOT belong to the labelled account and serving /usage against
+    ///   it would attribute another person's numbers to this UUID
+    ///   (audit H4, privacy bug).
+    /// - "rejected" — the server refused the token.
+    /// - "signed_out" — Claude Code cleared its own credentials, so
+    ///   there is no token to present at all.
     ///
     /// "never" (first-time, no verify yet) and "network_error" are
     /// allowed — the periodic reconciliation pass (`verify_all_accounts`
@@ -328,13 +347,21 @@ impl UsageCache {
         uuid: Uuid,
     ) -> Result<(), UsageFetchError> {
         match store.find_by_uuid(uuid) {
-            Ok(Some(acct)) => match acct.verify_status.as_str() {
-                "drift" | "rejected" => Err(UsageFetchError::FetchFailed(format!(
-                    "identity gate: verify_status={}; run verify to reconcile",
-                    acct.verify_status
-                ))),
-                _ => Ok(()),
-            },
+            // Refuse exactly the terminal statuses, read from the one
+            // definition (`VerifyOutcome::TERMINAL_STATUSES`) that
+            // `wake_service` also uses — an inline list here is how the
+            // read gate and the write gate drift apart.
+            Ok(Some(acct))
+                if crate::account::VerifyOutcome::status_is_terminal(&acct.verify_status) =>
+            {
+                Err(UsageFetchError::FetchFailed(format!(
+                    "identity gate: verify_status={}; {}",
+                    acct.verify_status,
+                    crate::account::VerifyOutcome::status_remedy(&acct.verify_status)
+                        .unwrap_or("run verify to reconcile"),
+                )))
+            }
+            Ok(Some(_)) => Ok(()),
             Ok(None) => Err(UsageFetchError::FetchFailed(
                 "identity gate: account not in store".to_string(),
             )),
@@ -492,6 +519,18 @@ impl UsageCache {
         let blob = CredentialBlob::from_json(&blob_str)
             .map_err(|e| UsageFetchError::FetchFailed(format!("corrupt blob: {e}")))?;
 
+        // Checked BEFORE the expiry test, because the two answer
+        // different questions and the expiry test cannot answer this
+        // one. The observed sentinel zeroes `expiresAt`, so it happens
+        // to trip `is_expired` — but a variant that keeps a live-looking
+        // expiry (see `blob::tests::emptied_tokens_are_signed_out_even_
+        // with_a_live_looking_expiry`) sails past it and returns `""`
+        // as the bearer, which then reaches `/usage`.
+        if blob.is_signed_out() {
+            return Err(UsageFetchError::FetchFailed(
+                "Claude Code signed itself out — no access token to spend".to_string(),
+            ));
+        }
         if blob.is_expired(0) {
             return Err(UsageFetchError::TokenExpired);
         }
@@ -884,6 +923,62 @@ mod tests {
             cache.load_access_token(uuid).await,
             Err(UsageFetchError::TokenExpired)
         ));
+        crate::cli_backend::swap::delete_private(uuid)
+            .await
+            .unwrap();
+    }
+
+    /// A cleared sentinel must never yield a bearer.
+    ///
+    /// The observed sentinel zeroes `expiresAt`, so it *happens* to
+    /// trip the expiry guard — which is why the check has to come
+    /// first and be keyed on the tokens, not the clock.
+    #[tokio::test]
+    async fn load_access_token_refuses_a_cleared_sentinel() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let uuid = uuid::Uuid::new_v4();
+        crate::cli_backend::swap::save_private(uuid, &crate::testing::signed_out_blob_json())
+            .await
+            .unwrap();
+
+        let (fetcher, _) = MockFetcher::new(0.0);
+        let cache = UsageCache::with_fetcher(Box::new(fetcher));
+        let result = cache.load_access_token(uuid).await;
+        assert!(
+            matches!(result, Err(UsageFetchError::FetchFailed(_))),
+            "expected a signed-out refusal, got {result:?}"
+        );
+        crate::cli_backend::swap::delete_private(uuid)
+            .await
+            .unwrap();
+    }
+
+    /// The variant the expiry guard cannot catch: emptied tokens with a
+    /// live-looking expiry. Without the `is_signed_out` check this
+    /// returns `Ok(Some(""))` and an empty bearer reaches `/usage`.
+    /// This is the case that makes the check load-bearing rather than
+    /// merely tidy.
+    #[tokio::test]
+    async fn load_access_token_refuses_emptied_tokens_with_a_live_expiry() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let uuid = uuid::Uuid::new_v4();
+        let live_expiry = chrono::Utc::now().timestamp_millis() + 3_600_000;
+        let blob = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"","refreshToken":"","expiresAt":{live_expiry},"scopes":[]}}}}"#
+        );
+        crate::cli_backend::swap::save_private(uuid, &blob)
+            .await
+            .unwrap();
+
+        let (fetcher, _) = MockFetcher::new(0.0);
+        let cache = UsageCache::with_fetcher(Box::new(fetcher));
+        let result = cache.load_access_token(uuid).await;
+        assert!(
+            !matches!(result, Ok(Some(_))),
+            "an empty bearer must never be handed out, got {result:?}"
+        );
         crate::cli_backend::swap::delete_private(uuid)
             .await
             .unwrap();

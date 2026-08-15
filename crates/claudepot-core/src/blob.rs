@@ -89,6 +89,51 @@ impl CredentialBlob {
         let now_ms = chrono::Utc::now().timestamp_millis();
         self.claude_ai_oauth.expires_at < now_ms + (margin_secs * 1000)
     }
+
+    /// True when the blob parses but carries **no credentials at all** —
+    /// both token fields empty.
+    ///
+    /// This is Claude Code's *cleared-credentials sentinel*. On some
+    /// sign-out paths CC overwrites its keychain item rather than
+    /// deleting it, leaving valid JSON with every key present, both
+    /// tokens `""` and `expiresAt` zeroed, while `scopes` /
+    /// `subscriptionType` / `rateLimitTier` survive intact.
+    ///
+    /// The danger is precisely that it **parses**. Without this
+    /// predicate the sentinel flows down the ordinary path and reads as
+    /// a live account whose token merely expired — so a state only a
+    /// re-login can recover gets reported as a transient blip the user
+    /// is told to wait out. An empty bearer can never authenticate and
+    /// an empty refresh token can never be exchanged; callers must
+    /// treat this as terminal.
+    ///
+    /// Deliberately does **not** test `expires_at == 0`, even though the
+    /// observed sentinel zeroes it. A zeroed expiry is corroborating
+    /// evidence, not the thing that makes the state unrecoverable, and
+    /// requiring it would let a variant that keeps the old timestamp
+    /// slip through as "just expired" — the exact misreport.
+    ///
+    /// Deliberately **does** require the access token to be empty too. A
+    /// blob with a live access token and no refresh token authenticates
+    /// right now, so calling it "signed out" would be wrong; that state
+    /// is `can_refresh() == false` while this stays `false`.
+    pub fn is_signed_out(&self) -> bool {
+        self.claude_ai_oauth.access_token.is_empty()
+            && self.claude_ai_oauth.refresh_token.is_empty()
+    }
+
+    /// True when there is a refresh token to spend.
+    ///
+    /// `false` is terminal: no exchange can succeed, so both the refresh
+    /// itself *and the live-session gate that protects it* are pointless
+    /// work on a known-dead state. That gate exists to avoid retiring a
+    /// single-use token CC still holds in memory — with no token there
+    /// is nothing to retire and nothing to protect, so a caller that
+    /// consults the gate first converts a terminal state into a
+    /// transient one.
+    pub fn can_refresh(&self) -> bool {
+        !self.claude_ai_oauth.refresh_token.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -176,6 +221,84 @@ mod tests {
         let blob = CredentialBlob::from_json(&json).unwrap();
         assert!(!blob.is_expired(0)); // not expired without margin
         assert!(blob.is_expired(60)); // expired with 60s margin
+    }
+
+    /// The sentinel PARSES — that is the whole defect it causes. This
+    /// test states the premise every other assertion in this change
+    /// rests on: `from_json` is not the guard, so a guard has to exist
+    /// downstream of it.
+    #[test]
+    fn cleared_credentials_sentinel_parses_as_a_valid_blob() {
+        let blob = CredentialBlob::from_json(&crate::testing::signed_out_blob_json())
+            .expect("CC's cleared sentinel is valid JSON with every required key");
+        assert!(blob.claude_ai_oauth.access_token.is_empty());
+        assert!(blob.claude_ai_oauth.refresh_token.is_empty());
+        assert_eq!(blob.claude_ai_oauth.expires_at, 0);
+        // The surviving metadata is what makes it look like a real blob.
+        assert_eq!(blob.claude_ai_oauth.scopes.len(), 2);
+        assert_eq!(
+            blob.claude_ai_oauth.subscription_type.as_deref(),
+            Some("max")
+        );
+    }
+
+    #[test]
+    fn sentinel_is_signed_out_and_cannot_refresh() {
+        let blob = CredentialBlob::from_json(&crate::testing::signed_out_blob_json()).unwrap();
+        assert!(blob.is_signed_out());
+        assert!(!blob.can_refresh());
+        // It is also "expired" — which is exactly why it was mistaken
+        // for a transient state. Being expired must not be the signal.
+        assert!(blob.is_expired(300));
+    }
+
+    #[test]
+    fn a_healthy_blob_is_neither_signed_out_nor_unrefreshable() {
+        let blob = CredentialBlob::from_json(&crate::testing::fresh_blob_json()).unwrap();
+        assert!(!blob.is_signed_out());
+        assert!(blob.can_refresh());
+    }
+
+    /// An expired-but-refreshable blob is the case the sentinel check
+    /// must never swallow: it is recoverable without any user action,
+    /// and reporting it as "signed out" would send the user to a
+    /// re-login they do not need.
+    #[test]
+    fn an_expired_blob_with_a_refresh_token_is_not_signed_out() {
+        let blob = CredentialBlob::from_json(&crate::testing::expired_blob_json()).unwrap();
+        assert!(blob.is_expired(0));
+        assert!(!blob.is_signed_out());
+        assert!(blob.can_refresh());
+    }
+
+    /// The asymmetric half-state: a live access token with no refresh
+    /// token authenticates right now, so it is NOT signed out — but it
+    /// has nothing to spend once the access token dies. The two
+    /// predicates deliberately disagree here.
+    #[test]
+    fn live_access_token_without_a_refresh_token_is_not_signed_out() {
+        let json = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"sk-ant-oat01-live","refreshToken":"","expiresAt":{},"scopes":[]}}}}"#,
+            chrono::Utc::now().timestamp_millis() + 3_600_000
+        );
+        let blob = CredentialBlob::from_json(&json).unwrap();
+        assert!(!blob.is_signed_out(), "it can still authenticate");
+        assert!(!blob.can_refresh(), "but nothing can renew it");
+    }
+
+    /// Guard against "just check `expires_at == 0`". A sentinel variant
+    /// that kept the old timestamp would read as an ordinary expired
+    /// blob under that rule, which is the misreport this whole change
+    /// exists to remove.
+    #[test]
+    fn emptied_tokens_are_signed_out_even_with_a_live_looking_expiry() {
+        let json = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"","refreshToken":"","expiresAt":{},"scopes":[]}}}}"#,
+            chrono::Utc::now().timestamp_millis() + 3_600_000
+        );
+        let blob = CredentialBlob::from_json(&json).unwrap();
+        assert!(!blob.is_expired(0), "the expiry alone says 'healthy'");
+        assert!(blob.is_signed_out(), "the tokens say otherwise");
     }
 
     /// Debug output must never reveal the access or refresh token body.

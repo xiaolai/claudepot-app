@@ -100,4 +100,15 @@ describe("HealthFooter — verification indicator", () => {
     expect(screen.queryByText("not yet verified")).toBeNull();
     expect(screen.queryByText(/verifying…/i)).toBeNull();
   });
+
+  // A status with no branch of its own falls through to
+  // `notYetVerified` — which reads as "we haven't checked", the exact
+  // wait-and-see message that made issue #74 invisible. The footer must
+  // name it.
+  it("names a signed-out slot instead of falling back to 'not yet verified'", () => {
+    render(<HealthFooter account={mkAccount({ verify_status: "signed_out" })} />);
+    expect(screen.getByText("signed out")).toBeInTheDocument();
+    expect(screen.queryByText("not yet verified")).toBeNull();
+    expect(screen.queryByText("profile unreachable")).toBeNull();
+  });
 });
