@@ -620,6 +620,68 @@
   --mask-opaque:         #000;
 }
 
+/* Placed AFTER the legacy alias block on purpose. `--focus-ring` is
+   declared down there, and a media query adds no specificity — so an
+   override written above it loses on source order and silently does
+   nothing. The first draft of this block sat before the aliases and
+   was inert for exactly that reason. */
+
+/* ─── Increase Contrast (prefers-contrast: more) ──────────────
+   macOS System Settings › Accessibility › Display › Increase
+   Contrast. `design.md`'s accessibility floor commits to honouring
+   this alongside `prefers-reduced-motion` and
+   `prefers-reduced-transparency` — and the other two were
+   implemented while this one never was. The only mention of it
+   anywhere in the stylesheets was a comment in `sidebar.css`
+   asserting the selected-row treatment "survives prefers-contrast:
+   more", which nothing was making true.
+
+   Separators carry almost all of the structure in a hairline design
+   (1px borders, small radii, flat rows), so strengthening the two
+   line tokens is most of the work. The focus ring widens with them:
+   a ring tuned for a low-contrast border reads as decoration once
+   the borders around it darken.
+
+   Overrides land here, in the one file allowed to declare tokens,
+   rather than as per-component media queries — a component-level
+   copy would be the same drift class the token file exists to
+   prevent.
+   ──────────────────────────────────────────────────────────── */
+@media (prefers-contrast: more) {
+  :root,
+  [data-theme="light"] {
+    --line:        oklch(72% 0.006 60);
+    --line-strong: oklch(55% 0.008 60);
+    --fg-muted:    oklch(38% 0.010 60);
+    --focus-ring:  0 0 0 3px var(--accent);
+  }
+
+  [data-theme="dark"] {
+    --line:        oklch(48% 0.010 60);
+    --line-strong: oklch(62% 0.012 60);
+    --fg-muted:    oklch(78% 0.010 60);
+    --focus-ring:  0 0 0 3px var(--accent);
+  }
+}
+
+/* The system-preference path needs its own block: the rules above key
+   on the explicit `[data-theme="dark"]` attribute, which is absent
+   when the user has never touched the in-app theme toggle. Without
+   this, Increase Contrast would silently apply the LIGHT overrides to
+   a system-dark window — darkening lines that need to lighten, i.e.
+   reducing contrast under a setting whose entire purpose is to raise
+   it. This mirrors how the base dark palette is already declared
+   twice for the same reason. */
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --line:        oklch(48% 0.010 60);
+    --line-strong: oklch(62% 0.012 60);
+    --fg-muted:    oklch(78% 0.010 60);
+    --focus-ring:  0 0 0 3px var(--accent);
+  }
+}
+
+
 /* ─── Base reset ──────────────────────────────────────────── */
 *,
 *::before,

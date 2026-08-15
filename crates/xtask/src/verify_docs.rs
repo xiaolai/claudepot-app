@@ -116,6 +116,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     // demand — see that function for why it is not a pull-request gate.
     check_screenshot_pairs(repo, &mut problems)?;
     check_shortcut_gate_is_shared(repo, &mut problems)?;
+    check_contrast_overrides_win(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
 
@@ -715,6 +716,108 @@ fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()>
                     "{shot} differs between assets/screenshots and web/public/screenshots"
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// A `@media (prefers-contrast: more)` override must appear AFTER the
+/// plain declaration it overrides.
+///
+/// A media query adds **no specificity**, so `:root` inside one and
+/// `:root` outside it are equal and source order decides. The first
+/// draft of the Increase-Contrast block sat above the legacy alias
+/// section, where `--focus-ring` is declared — so the override lost
+/// the cascade and did nothing. The CSS parsed, the build passed, and
+/// the accessibility setting silently had no effect.
+///
+/// That is the failure this guards: not a syntax error, a no-op.
+///
+/// The first draft of *this check* was itself a no-op, for a related
+/// reason worth recording: it decided "am I still inside the media
+/// block" by counting braces from the block's start, so any later
+/// `:root {` made the count unbalanced and every subsequent
+/// declaration looked like it was inside. It reported green over a
+/// deliberately planted defect. It now brace-matches each block to its
+/// real end.
+fn check_contrast_overrides_win(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let src = read(repo, "src/styles/tokens.css")?;
+    let b = src.as_bytes();
+
+    // Locate every prefers-contrast block and its true end.
+    let mut blocks: Vec<(usize, usize)> = Vec::new();
+    let mut from = 0usize;
+    while let Some(rel) = src[from..].find("@media (prefers-contrast") {
+        let open_at = from + rel;
+        let Some(brace) = src[open_at..].find('{').map(|i| open_at + i) else {
+            break;
+        };
+        let mut depth = 0usize;
+        let mut i = brace;
+        while i < b.len() {
+            match b[i] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        blocks.push((open_at, i));
+        from = i + 1;
+    }
+
+    if blocks.is_empty() {
+        problems.push(
+            "tokens.css has no `prefers-contrast: more` block — design.md's accessibility \
+             floor commits to honouring it"
+                .into(),
+        );
+        return Ok(());
+    }
+
+    // Tokens set inside those blocks, and the last block's end.
+    let mut overridden: BTreeSet<String> = BTreeSet::new();
+    for (s0, e0) in &blocks {
+        for line in src[*s0..*e0].lines() {
+            let t = line.trim();
+            if let Some(rest) = t.strip_prefix("--") {
+                if let Some((name, _)) = rest.split_once(':') {
+                    overridden.insert(format!("--{}", name.trim()));
+                }
+            }
+        }
+    }
+    let last_end = blocks.iter().map(|(_, e)| *e).max().unwrap_or(0);
+
+    if overridden.is_empty() {
+        problems
+            .push("the prefers-contrast block sets no tokens — it cannot be doing anything".into());
+        return Ok(());
+    }
+
+    // Any plain declaration of those tokens after the last block wins
+    // the cascade and makes the override inert.
+    for (n, line) in src[last_end..].lines().enumerate() {
+        let t = line.trim();
+        let Some(rest) = t.strip_prefix("--") else {
+            continue;
+        };
+        let Some((name, _)) = rest.split_once(':') else {
+            continue;
+        };
+        let token = format!("--{}", name.trim());
+        if overridden.contains(&token) {
+            problems.push(format!(
+                "tokens.css re-declares {token} after the prefers-contrast block \
+                 (line ~{}); a media query adds no specificity, so the accessibility \
+                 override is inert",
+                src[..last_end].lines().count() + n
+            ));
         }
     }
     Ok(())

@@ -118,7 +118,13 @@ section keeps the design pass cheap and the a11y story simple.
 - Listboxes: `<ul role="listbox">` + `<li role="option" tabIndex={0}
   aria-selected>`.
 - Respect `prefers-reduced-motion`, `prefers-contrast: more`, and
-  `prefers-reduced-transparency`.
+  `prefers-reduced-transparency`. All three are implemented in
+  `tokens.css`; `prefers-contrast: more` was the one this list
+  committed to and the stylesheets never delivered, until 2026-08-15.
+  Its overrides sit **after** the legacy alias block on purpose — a
+  media query adds no specificity, so an override written above
+  `--focus-ring`'s declaration loses on source order and silently does
+  nothing.
 - Never use `window.confirm / alert / prompt` — unreliable in Tauri
   webviews. Use the `Modal` + `ConfirmDialog` primitives.
 
@@ -148,3 +154,29 @@ same treatment: written here, not just commented at the call site.
 
 There is no ⌘F. It was listed here and in the shortcuts modal for a
 long time while no section ever wired it.
+
+## Open questions — not yet decided, not yet shipped
+
+Lifted from `dev-docs/archive/macos-native-design-system.md` when that
+document was retired (see its header). They are recorded here as
+**questions**, not specifications: neither describes shipped
+behaviour, and the archived file's specifications were wrong about
+this product in every other respect.
+
+**Context menus.** Apple's HIG expects a right-click menu on every
+interactive object; the app currently has `.context-menu-item` styling
+and the ⌘K palette, but no general context-menu contract. If one is
+added, the archived draft's proposed targets are a reasonable starting
+list (account card, project row, token badge), and the hard
+requirement is keyboard navigability — arrows, Enter, Escape — because
+a mouse-only menu is worse than none for the surfaces that already
+have keyboard paths.
+
+**Liquid Glass / macOS Tahoe.** Tahoe applies glass to toolbars,
+sidebars and popovers automatically, and an explicit
+`NSVisualEffectView` *blocks* it. Relevant to this app only if the
+window chrome is ever revisited; paper-mono is deliberately flat, so
+adopting glass would be a change of register rather than a fix. Noted
+because the accessibility behaviour is automatic and useful either
+way: Reduce Transparency frosts it, Increase Contrast makes it opaque
+with a border, Reduce Motion disables the elastic effects.
