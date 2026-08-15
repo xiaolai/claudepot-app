@@ -120,6 +120,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_shortcut_table_has_handlers(repo, &mut problems)?;
     check_no_undefined_tokens(repo, &mut problems)?;
     check_runtime_tokens_are_registered(repo, &mut problems)?;
+    check_tokens_declared_only_in_tokens_css(repo, &mut problems)?;
     check_optional_shortcut_callbacks_are_wired(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
@@ -1262,6 +1263,80 @@ fn collect_ts_paths(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+/// `tokens.css` is the only place a custom property is declared.
+///
+/// `rules/design.md` says so in words — "No other file opens a
+/// `:root { }` block or redeclares `--*` custom properties" — and
+/// nothing enforced it. The rule had already been broken once:
+/// `--rank-col` was declared inline on a grid container and read two
+/// lines later, and the token check grew a "locally declared" exemption
+/// to stay quiet about it. Removing that exemption fixed the instance;
+/// this closes the class, so the next one cannot arrive unnoticed.
+///
+/// Runtime writes through `style.setProperty` are a different mechanism
+/// with its own check — they must name a token `tokens.css` declares,
+/// which is the opposite of declaring one elsewhere.
+fn check_tokens_declared_only_in_tokens_css(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let tokens_css = repo.join("src/styles/tokens.css");
+    let mut css: Vec<PathBuf> = Vec::new();
+    collect_css_paths(&repo.join("src"), &mut css);
+    for path in css {
+        if path == tokens_css {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        for (name, _) in declared_properties_at(&strip_comments(&raw)) {
+            problems.push(format!(
+                "{rel} declares {name} — tokens.css is the one declaration site \
+                 (rules/design.md). Add a semantic token there and reference it"
+            ));
+        }
+    }
+
+    let mut ts: Vec<PathBuf> = Vec::new();
+    collect_ts_paths(&repo.join("src"), &mut ts);
+    for path in ts {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let src = strip_comments(&raw);
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        // `["--x" as keyof React.CSSProperties]: …` — an inline style
+        // object declaring a property. `setProperty("--x", …)` is the
+        // runtime channel and is checked elsewhere.
+        let mut from = 0usize;
+        while let Some(at) = src[from..].find("[\"--").map(|i| from + i) {
+            from = at + 4;
+            let Some(end) = src[at + 2..].find('"').map(|i| at + 2 + i) else {
+                break;
+            };
+            let name = &src[at + 2..end];
+            let after = src[end + 1..].trim_start();
+            let closes = after.find(']').is_some_and(|b| {
+                src[end + 1..end + 1 + b].trim_end().is_empty() || after.starts_with("as ")
+            });
+            if closes && src[end..].contains("]:") {
+                problems.push(format!(
+                    "{rel} declares {name} in an inline style — tokens.css is the one \
+                     declaration site (rules/design.md)"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A custom property written at RUNTIME must be declared in
@@ -3034,6 +3109,64 @@ mod guard_tests {
         );
         assert_eq!(
             run(check_optional_shortcut_callbacks_are_wired, &d),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn declaration_site_accepts_tokens_css_alone() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(
+            &d,
+            "src/styles/components/base.css",
+            ".x { color: var(--fg); }",
+        );
+        assert_eq!(
+            run(check_tokens_declared_only_in_tokens_css, &d),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn declaration_site_catches_a_stray_stylesheet_declaration() {
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(&d, "src/styles/components/base.css", ".x { --stray: 3px; }");
+        let out = run(check_tokens_declared_only_in_tokens_css, &d);
+        assert!(out.iter().any(|p| p.contains("--stray")), "{out:?}");
+    }
+
+    #[test]
+    fn declaration_site_catches_an_inline_style_declaration() {
+        // The shape that earned the token check its "locally declared"
+        // exemption: `--rank-col` declared on a grid container and read
+        // two lines below.
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(
+            &d,
+            "src/sections/S.tsx",
+            r#"const a = { ["--rank-col" as keyof React.CSSProperties]: "28px" };"#,
+        );
+        let out = run(check_tokens_declared_only_in_tokens_css, &d);
+        assert!(out.iter().any(|p| p.contains("--rank-col")), "{out:?}");
+    }
+
+    #[test]
+    fn declaration_site_allows_a_runtime_setproperty() {
+        // The runtime channel is a different mechanism with its own
+        // check — it must NAME a declared token, the opposite of
+        // declaring one elsewhere.
+        let d = repo();
+        write(&d, "src/styles/tokens.css", ":root { --fg: red; }");
+        write(
+            &d,
+            "src/lib/runtime.ts",
+            r#"root.style.setProperty("--fg", "blue");"#,
+        );
+        assert_eq!(
+            run(check_tokens_declared_only_in_tokens_css, &d),
             Vec::<String>::new()
         );
     }
