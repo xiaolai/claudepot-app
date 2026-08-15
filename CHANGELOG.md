@@ -6,6 +6,66 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.4.14 — beta (unreleased)
+
+### Fixed
+
+- **Claude Code signing *itself* out was reported as a network blip
+  instead of a required re-login.** CC does not always delete its
+  keychain item on sign-out — it can overwrite it with a
+  *cleared-credentials sentinel*: valid JSON, every key present, both
+  OAuth tokens emptied, `expiresAt` zeroed. That blob **parses**, so it
+  flowed down the ordinary verification path and reached the
+  live-session gate, which correctly refuses to spend a single-use
+  refresh token while a `claude` process is running — and reports the
+  refusal as transient.
+
+  With no tokens there is nothing for that gate to protect, so the
+  refusal was protecting a token that did not exist. The outcome
+  inverted with whether you were working: an account only a re-login
+  could recover showed "unverified" with no action offered while
+  Claude Code was open, and reported correctly only when it was
+  closed. Verification now recognises the sentinel from the blob's own
+  bytes, before any network call and before that gate, and reports the
+  new terminal state `signed_out` — rendered as "Claude Code signed
+  itself out", distinct from a rejected token because nothing was
+  refused and your account is untouched.
+
+  Reported with a full byte-level diagnosis in
+  [#74](https://github.com/xiaolai/claudepot-app/issues/74).
+
+- **`claudepot doctor` could exit 0 while an account needed
+  re-login.** It counted only `drift` toward failure, so a `rejected`
+  account printed its own bad news and the run still ended "All checks
+  passed" — in both text and `--json` mode. Every terminal status now
+  counts.
+
+- **A verify that returned an unrecognised status announced
+  "Verified".** The accounts screen's fallback branch was a success
+  toast, so any status the build did not enumerate was reported as a
+  confirmed identity. It now reports that nothing was confirmed, and
+  the status type is a union so an unhandled case is a compile error.
+
+- **`claudepot account list` fetched usage for accounts whose slot
+  identity was unverified.** The identity gate that exists to stop a
+  drifted slot's numbers being attributed to the wrong row guarded
+  only one of the two batch entry points, and the CLI used the other.
+  The gate is now part of the batch call's signature, so it cannot be
+  bypassed.
+
+- **"Verify all" could report a clean run that was not clean, or hang.**
+  The operation started before its event listener subscribed, and
+  Tauri buffers nothing — so rows that resolved in that window went
+  uncounted, and a missed terminal event left the button disabled
+  indefinitely. The tally now reconciles against the backend's own
+  counters, and a polling backstop settles the run if the terminal
+  event is lost.
+
+- Usage and wake refusals told the user to "run verify" for every
+  terminal status. Verify clears `drift`; it can do nothing for a
+  rejected or signed-out account. The remedy is now derived from the
+  status.
+
 ## 0.4.13 — beta (released 2026-08-15)
 
 ### Fixed
