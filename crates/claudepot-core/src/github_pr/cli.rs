@@ -142,6 +142,17 @@ async fn run_with_timeout(
     tool: &'static str,
 ) -> Result<std::process::Output, GhError> {
     cmd.kill_on_drop(true).no_window();
+    // Pipe both streams. `spawn()` inherits stdio — only `output()`
+    // implies `piped()` — so `wait_with_output()` below collected
+    // nothing and every helper in this module returned an empty stdout.
+    // `current_branch` therefore answered `None` for every repository
+    // and the PR badges never rendered, while the child's output went
+    // to the terminal instead: `pnpm tauri dev` printed a bare branch
+    // name per project, interleaved with `fatal: not a git repository`
+    // for the ones that were not repos. The console noise was the
+    // visible half of a bug whose other half was the whole feature.
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     // A Dock/Finder-launched app inherits a minimal PATH that lacks
     // Homebrew — where `gh` lives for nearly every user. Enrich it
     // so `git`/`gh` resolve regardless of how Claudepot was started.
@@ -160,5 +171,82 @@ async fn run_with_timeout(
         // reaps the child via kill_on_drop. Caller gets a typed
         // Timeout error and the orchestrator caches it as a miss.
         Err(_elapsed) => Err(GhError::Timeout(tool)),
+    }
+}
+
+#[cfg(test)]
+mod spawn_stdio_tests {
+    use super::*;
+
+    /// `spawn()` inherits stdio; only `output()` implies `piped()`.
+    ///
+    /// This module built its commands then called `cmd.spawn()` followed
+    /// by `wait_with_output()`. With inherited stdio there is nothing to
+    /// collect, so every helper here returned an empty stdout — meaning
+    /// `current_branch` answered `None` for every repository and the PR
+    /// badges never rendered at all. The child's output went to the
+    /// terminal instead: running `pnpm tauri dev` printed a bare branch
+    /// name per project, interleaved with `fatal: not a git repository`
+    /// for the ones that were not repos.
+    ///
+    /// Two failures from one line, and the visible one was the harmless
+    /// half.
+    ///
+    /// # Why this drives `git --version` and not `current_branch`
+    ///
+    /// The first version of this test asserted `current_branch` returns
+    /// `Some` inside this crate's own directory. It passed locally and
+    /// failed on all three CI platforms, because GitHub Actions checks
+    /// out a DETACHED HEAD — `git branch --show-current` then prints
+    /// nothing and `Ok(None)` is the correct answer, which `current_branch`
+    /// documents. The test could not tell "stdout was not captured" from
+    /// "there is no current branch", and CI sits permanently in the state
+    /// it could not distinguish.
+    ///
+    /// `git --version` has none of that coupling: non-empty on every
+    /// platform, exit 0, and it does not care whether the working
+    /// directory is a repository at all. It isolates the one thing that
+    /// broke — whether this helper collects a child's stdout.
+    #[tokio::test]
+    async fn run_with_timeout_captures_child_stdout() {
+        let out = match run_with_timeout(Command::new("git").arg("--version"), "git").await {
+            Ok(out) => out,
+            // `git` genuinely absent is not this bug.
+            Err(GhError::MissingCli(_)) => return,
+            Err(e) => panic!("unexpected error: {e:?}"),
+        };
+        assert!(out.status.success(), "git --version should exit 0");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains("git version"),
+            "stdout was not captured (spawn() inherits; the child wrote to the \
+             terminal and wait_with_output() collected nothing) — got {text:?}"
+        );
+    }
+
+    /// The stderr half of the same contract. `fatal: not a git
+    /// repository` was reaching the user's console; it must land in the
+    /// captured buffer instead, where callers can ignore it deliberately.
+    #[tokio::test]
+    async fn run_with_timeout_captures_child_stderr() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = match run_with_timeout(
+            Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["rev-parse", "HEAD"]),
+            "git",
+        )
+        .await
+        {
+            Ok(out) => out,
+            Err(GhError::MissingCli(_)) => return,
+            Err(e) => panic!("unexpected error: {e:?}"),
+        };
+        assert!(!out.status.success(), "a non-repo should exit non-zero");
+        assert!(
+            !out.stderr.is_empty(),
+            "stderr was not captured — git's complaint went to the terminal"
+        );
     }
 }
