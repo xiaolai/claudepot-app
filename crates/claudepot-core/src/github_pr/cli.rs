@@ -231,7 +231,10 @@ mod spawn_stdio_tests {
     async fn run_with_timeout_captures_child_stderr() {
         let dir = tempfile::tempdir().expect("tempdir");
         let out = match run_with_timeout(
-            Command::new("git").arg("-C").arg(dir.path()).args(["rev-parse", "HEAD"]),
+            Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["rev-parse", "HEAD"]),
             "git",
         )
         .await
