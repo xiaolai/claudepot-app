@@ -1,23 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
-<rect x="7" y="2" width="2" height="1" fill="#C56F52"/>
-<rect x="6" y="3" width="4" height="1" fill="#C56F52"/>
-<rect x="5" y="4" width="6" height="1" fill="#C56F52"/>
-<rect x="4" y="5" width="8" height="1" fill="#C56F52"/>
-<rect x="3" y="6" width="10" height="1" fill="#C56F52"/>
-<rect x="2" y="7" width="12" height="1" fill="#C56F52"/>
-<rect x="1" y="8" width="4" height="1" fill="#C56F52"/>
-<rect x="6" y="8" width="4" height="1" fill="#C56F52"/>
-<rect x="11" y="8" width="4" height="1" fill="#C56F52"/>
-<rect x="3" y="9" width="2" height="1" fill="#C56F52"/>
-<rect x="5" y="9" width="1" height="1" fill="#585858"/>
-<rect x="6" y="9" width="4" height="1" fill="#C56F52"/>
-<rect x="10" y="9" width="1" height="1" fill="#585858"/>
-<rect x="11" y="9" width="2" height="1" fill="#C56F52"/>
-<rect x="3" y="10" width="10" height="1" fill="#C56F52"/>
-<rect x="3" y="11" width="10" height="1" fill="#C56F52"/>
-<rect x="3" y="12" width="10" height="1" fill="#C56F52"/>
-<rect x="3" y="13" width="2" height="1" fill="#C56F52"/>
-<rect x="6" y="13" width="1" height="1" fill="#C56F52"/>
-<rect x="9" y="13" width="1" height="1" fill="#C56F52"/>
-<rect x="11" y="13" width="2" height="1" fill="#C56F52"/>
+<!-- Derived from assets/icon-set/windows/icon-glyph.svg — the plateless
+     master. Do not hand-draw here; re-derive from that file.
+
+     Plateless on purpose, and NOT the plated app-icon-flat.svg that
+     web/src/app/icon.svg (the favicon) uses. The nav sits on the site's
+     own surface and the site is theme-aware (see styles/theme.css), so
+     a plated mark would be a #DCD8D2 card in a light nav and a glaring
+     one in a dark nav. That is the same reason the Windows icon drops
+     the plate — it "shows the icon against chrome of every shade, so
+     the plate would read as a grey card floating behind the block"
+     (AGENTS.md, Icon assets). A favicon keeps its plate because a tab
+     strip is an enclosure; a nav is not.
+
+     Theme-safe without a swap: the four block faces are warm terracotta
+     and read on both backgrounds, so one file serves both themes and
+     there is no second master to keep in step.
+
+     viewBox is squared to the 24/32px box the nav renders it into
+     (the Windows master's 800x768 would letterbox). 800x800 centred on
+     the block's midpoint (512, 560); the block inks ~80% of the width,
+     matching the Windows framing. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="112 160 800 800">
+  <path fill="#F7B47C" d="M512 256 L192 432 L512 608 Z"></path>
+  <path fill="#E8833A" d="M512 256 L832 432 L512 608 Z"></path>
+  <path fill="#C0642A" d="M192 432 L512 608 L512 864 L192 688 Z"></path>
+  <path fill="#9A4F1B" d="M832 432 L512 608 L512 864 L832 688 Z"></path>
 </svg>
