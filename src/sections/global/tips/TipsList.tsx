@@ -64,7 +64,7 @@ export function TipsList({
             fontSize: "var(--fs-xs)",
             background: "var(--bg-raised)",
             border: "var(--bw-hair) solid var(--line-strong)",
-            borderRadius: "var(--rad-2)",
+            borderRadius: "var(--r-2)",
             color: "var(--fg)",
           }}
         />

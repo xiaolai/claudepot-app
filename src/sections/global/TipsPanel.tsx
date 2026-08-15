@@ -113,7 +113,7 @@ export function TipsPanel() {
             background: "var(--bg-warning-soft, var(--bg-sunken))",
             border: "var(--bw-hair) solid var(--line-strong)",
             margin: "var(--sp-8) var(--sp-14)",
-            borderRadius: "var(--rad-2)",
+            borderRadius: "var(--r-2)",
             display: "flex",
             gap: "var(--sp-8)",
             alignItems: "flex-start",

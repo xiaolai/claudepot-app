@@ -340,7 +340,7 @@ function DurationSelect({
       style={{
         background: "var(--bg-raised)",
         border: "var(--bw-hair) solid var(--line-strong)",
-        borderRadius: "var(--radius-sm)",
+        borderRadius: "var(--r-2)",
         color: "var(--fg)",
         font: "inherit",
         fontSize: "var(--fs-sm)",

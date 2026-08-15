@@ -546,7 +546,34 @@
   }
 }
 
-/* ─── Legacy token aliases ────────────────────────────────────
+/* Component dimensions that are not spacing. `--sp-*` tops out at
+   96px and means "gap / padding"; a scrollable list's max height is a
+   size. It was written as `var(--sp-160)`, which does not exist, so
+   `max-height` was dropped and the candidate list grew unbounded. */
+:root {
+  --size-list-max: 160px;
+}
+
+/* ─── Derived surface + status tokens ─────────────────────────
+   These were filed under a heading that called them "legacy aliases"
+   awaiting deletion. They are not aliases: each is a real definition
+   with no paper-mono equivalent to migrate to, and deleting the block
+   as written would have broken every consumer.
+
+   The genuine aliases that shared this block — `--text`, `--muted`,
+   `--border`, `--surface`, `--bad` and five others — were single
+   `var()` indirections, and are gone: their 218 references were
+   rewritten to the paper-mono token after proving each pair resolves
+   to the same value in BOTH themes. Nine more had zero consumers and
+   were deleted outright.
+
+   What remains is `color-mix()` derivations and focus geometry. If one
+   ever gains a paper-mono equivalent, migrate it the same way — prove
+   the resolved values match per theme first, because a mapping that
+   is right in light and wrong in dark is exactly how `--accent-text`
+   shipped dark ink on terracotta.
+   ──────────────────────────────────────────────────────────── */
+:root {
    Unported components (banners, running-op strip, confirm-dangerous,
    rename/clean/adopt/move modals, repair view, operation-progress)
    still read the previous rule-set's names. Alias them to the
@@ -554,77 +581,34 @@
    port without a color rewrite. As each component migrates, drop
    its legacy-alias use; when the last reference is gone, delete
    the alias block below.
-   ──────────────────────────────────────────────────────────── */
-:root {
-  /* Surfaces */
-  --surface:     var(--bg-raised);
-  --chrome:      var(--bg-sunken);
-  --border:      var(--line);
-  --hover-bg:    var(--bg-hover);
-
-  /* Text */
-  --text:        var(--fg);
-  --muted:       var(--fg-muted);
-  --tertiary:    var(--fg-ghost);
-
-  /* Accent family */
-  --accent-weak: var(--accent-soft);
-  /* Ink that sits ON the accent fill. Must NOT be a background token:
      as `var(--bg-raised)` it followed the theme while the accent it
      sits on did not, so the notification badge and the env-var control
      rendered near-black ink (oklch 19%) on terracotta in dark mode
      while solid Buttons beside them rendered white. `--on-color` is
      theme-invariant, which is the property this role requires. */
-  --accent-text: var(--on-color);
-
-  /* Status (old naming) */
-  --bad:         var(--danger);
   --bad-weak:    color-mix(in oklch, var(--danger) 12%, transparent);
   --ok-weak:     color-mix(in oklch, var(--ok) 12%, transparent);
   --warn-weak:   color-mix(in oklch, var(--warn) 12%, transparent);
   --info-weak:   color-mix(in oklch, var(--info) 12%, transparent);
-
-  /* Hover/selected fills — derived from --fg so they invert correctly
      with the theme. Replaces the earlier scattered rgba(0,0,0,0.04) /
      rgba(255,255,255,0.05) literals that bypassed [data-theme]. */
   --bg-hover-soft:     color-mix(in oklch, var(--fg) 6%,  transparent);
   --bg-hover-firm:     color-mix(in oklch, var(--fg) 10%, transparent);
   --bg-selected-firm:  color-mix(in oklch, var(--fg) 14%, transparent);
-
-  /* Focus-ring offsets — outline pattern (input/list/row controls).
      The box-shadow ring (filled chrome controls) keeps using
      --focus-ring above. */
   --focus-outline-offset:        2px;
   --focus-outline-offset-tight: -2px;
   --focus-outline-offset-flush:  1px;
   --focus-outline-offset-flat:   0;
-
-  /* Focus ring — previous system shipped a single combined variable */
   --focus-ring: 0 0 0 3px var(--accent-border);
-
-  /* Elevation (old naming) */
-  --shadow-0:      none;
-  --shadow-1:      var(--shadow-sm);
-  --shadow-2:      var(--shadow-md);
-  --shadow-3:      var(--shadow-overlay);
-  --shadow-subtle: var(--shadow-sm);
-
-  /* Selection / grouped bg — legacy component references */
-  --selection:           var(--accent-soft);
-  --selection-inactive:  var(--bg-hover);
-  --grouped-bg:          var(--bg-sunken);
-
-  /* Mask opacity anchors — used in mask-image gradients where the
      value is mask alpha, not a visible color. `#000` means "fully
      shown"; `transparent` (no token needed) means "fully clipped". */
-  --mask-opaque:         #000;
-}
-
-/* Placed AFTER the legacy alias block on purpose. `--focus-ring` is
    declared down there, and a media query adds no specificity — so an
    override written above it loses on source order and silently does
    nothing. The first draft of this block sat before the aliases and
    was inert for exactly that reason. */
+}
 
 /* ─── Increase Contrast (prefers-contrast: more) ──────────────
    macOS System Settings › Accessibility › Display › Increase

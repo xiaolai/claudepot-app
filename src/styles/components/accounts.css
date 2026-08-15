@@ -27,7 +27,7 @@
 
 .detail-meta {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--fg-muted);
   margin-top: var(--sp-2);
 }
 
@@ -49,7 +49,7 @@
 
 .detail-section {
   padding: var(--sp-12) 0;
-  border-top: var(--bw-subhair) solid var(--border);
+  border-top: var(--bw-subhair) solid var(--line);
 }
 
 .detail-section-title {
@@ -57,7 +57,7 @@
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
-  color: var(--muted);
+  color: var(--fg-muted);
   margin: 0 0 var(--sp-8);
 }
 
@@ -65,7 +65,7 @@
 
 .collapsible-section {
   padding: 0;
-  border-top: var(--bw-subhair) solid var(--border);
+  border-top: var(--bw-subhair) solid var(--line);
 }
 
 .collapsible-section-toggle {
@@ -76,7 +76,7 @@
   padding: var(--sp-8) 0;
   background: transparent;
   border: none;
-  color: var(--muted);
+  color: var(--fg-muted);
   font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: none;
@@ -87,7 +87,7 @@
 }
 
 .collapsible-section-toggle:hover {
-  color: var(--text);
+  color: var(--fg);
   background: transparent;
 }
 
@@ -127,7 +127,7 @@
 }
 
 .detail-grid dt {
-  color: var(--muted);
+  color: var(--fg-muted);
   font-weight: 400;
   text-transform: none;
   font-size: var(--fs-sm);
@@ -152,7 +152,7 @@
 }
 
 .slot-badge.cli {
-  background: var(--accent-weak);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -178,7 +178,7 @@
 }
 
 .slot-icon.available {
-  color: var(--muted);
+  color: var(--fg-muted);
   opacity: 0.6;
 }
 
@@ -198,7 +198,7 @@
 
 .token-badge.bad {
   background: var(--bad-weak);
-  color: var(--bad);
+  color: var(--danger);
 }
 
 .token-badge.warn {
@@ -216,7 +216,7 @@
 }
 
 .status-dot.ok   { background: var(--ok); }
-.status-dot.bad  { background: var(--bad); }
+.status-dot.bad  { background: var(--danger); }
 .status-dot.warn { background: var(--warn); }
 
 /* ---------- verified identity row in AccountDetail ---------- */
@@ -228,11 +228,11 @@
   color: var(--ok);
 }
 .verify-line.bad {
-  color: var(--bad);
+  color: var(--danger);
   font-weight: 500;
 }
 .verify-line.muted {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 .verify-note {
   font-size: var(--fs-2xs);

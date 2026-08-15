@@ -25,7 +25,7 @@
 
 .settings-group {
   padding: var(--sp-12) 0;
-  border-top: var(--bw-subhair) solid var(--border);
+  border-top: var(--bw-subhair) solid var(--line);
 }
 
 .settings-group:first-of-type {
@@ -38,7 +38,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: var(--ls-wide);
-  color: var(--muted);
+  color: var(--fg-muted);
   margin: 0 0 var(--sp-8);
   display: flex;
   align-items: center;
@@ -67,10 +67,10 @@
   font: inherit;
   font-size: var(--fs-sm);
   padding: var(--sp-4) var(--sp-8);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
-  background: var(--surface);
-  color: var(--text);
+  background: var(--bg-raised);
+  color: var(--fg);
 }
 
 .settings-input-group {
@@ -83,10 +83,10 @@
   font: inherit;
   font-size: var(--fs-sm);
   padding: var(--sp-4) var(--sp-8);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
   background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
   width: var(--sp-60);
 }
 
@@ -110,8 +110,8 @@
   margin-top: var(--sp-8);
   padding: var(--sp-6) var(--sp-10);
   border-radius: var(--r-2);
-  background: var(--surface);
-  border: var(--bw-subhair) solid var(--border);
+  background: var(--bg-raised);
+  border: var(--bw-subhair) solid var(--line);
   font-size: var(--fs-sm);
 }
 
@@ -124,7 +124,7 @@
 }
 
 .settings-about-grid dt {
-  color: var(--muted);
+  color: var(--fg-muted);
   text-align: right;
 }
 
@@ -141,7 +141,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
   max-height: var(--list-max-height-md);
   overflow-y: auto;
@@ -152,7 +152,7 @@
   align-items: center;
   gap: var(--sp-8);
   padding: var(--sp-6) var(--sp-10);
-  border-bottom: var(--bw-subhair) solid var(--border);
+  border-bottom: var(--bw-subhair) solid var(--line);
 }
 
 .protected-row:last-child {
@@ -160,7 +160,7 @@
 }
 
 .protected-row:hover {
-  background: var(--hover-bg);
+  background: var(--bg-hover);
 }
 
 .protected-empty {
@@ -172,7 +172,7 @@
   flex: 1;
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  color: var(--text);
+  color: var(--fg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -199,7 +199,7 @@
 .settings-inline-error {
   margin: var(--sp-6) 0 0;
   font-size: var(--fs-xs);
-  color: var(--bad);
+  color: var(--danger);
 }
 
 .settings-inline-hint {
@@ -215,7 +215,7 @@
 
 .segmented-control {
   display: flex;
-  border: var(--bw-subhair) solid var(--border);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-2);
   overflow: hidden;
   background: color-mix(in srgb, var(--bg) 60%, transparent);
@@ -233,12 +233,12 @@
   height: var(--sp-24);
   padding: 0 var(--sp-12);
   border: none;
-  border-left: var(--bw-subhair) solid var(--border);
+  border-left: var(--bw-subhair) solid var(--line);
   border-radius: 0;
   background: transparent;
   font-size: var(--fs-xs);
   font-weight: 400;
-  color: var(--muted);
+  color: var(--fg-muted);
   box-shadow: none;
   white-space: nowrap;
   overflow: hidden;
@@ -250,13 +250,13 @@
 }
 
 .segmented-control-item:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--muted) 8%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--fg-muted) 8%, transparent);
+  color: var(--fg);
 }
 
 .segmented-control-item.selected {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--text);
+  color: var(--fg);
   font-weight: 500;
 }
 

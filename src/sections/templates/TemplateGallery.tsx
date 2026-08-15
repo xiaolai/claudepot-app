@@ -308,7 +308,7 @@ function TemplateCard({
         style={{
           margin: 0,
           fontSize: "var(--fs-sm)",
-          color: "var(--fg-2)",
+          color: "var(--fg-muted)",
           lineHeight: 1.45,
         }}
       >
@@ -379,7 +379,7 @@ function FilterChip({
         borderColor: active ? "var(--accent)" : "var(--line)",
         background: active ? "var(--accent-soft)" : "var(--bg-raised)",
         borderRadius: "var(--r-1)",
-        color: active ? "var(--accent-ink)" : "var(--fg-2)",
+        color: active ? "var(--accent-ink)" : "var(--fg-muted)",
         cursor: "pointer",
         font: "inherit",
         fontSize: "var(--fs-2xs)",

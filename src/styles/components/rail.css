@@ -14,7 +14,7 @@
   align-items: center;
   gap: var(--sp-4);
   padding: var(--sp-12) 0 var(--sp-8);
-  background: var(--chrome);
+  background: var(--bg-sunken);
   /* No right border — rail and sidebar share --chrome and should read
      as one continuous surface. The only visible vertical separator in
      the chrome is the one between sidebar and content. */
@@ -37,7 +37,7 @@
   background: transparent !important;
   border: 0;
   box-shadow: none;
-  color: var(--muted);
+  color: var(--fg-muted);
   cursor: default;
 }
 .section-rail-item:focus-visible {
@@ -63,12 +63,12 @@
 }
 
 .section-rail-item:hover .icon {
-  background: var(--accent-weak);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--fg);
 }
 
 .section-rail-item.active .icon {
-  background: var(--accent-weak);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -83,8 +83,8 @@
   position: fixed;
   min-width: var(--menu-min-width);
   padding: var(--sp-4);
-  background: var(--surface);
-  border: var(--bw-subhair) solid var(--border);
+  background: var(--bg-raised);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-3);
   box-shadow: var(--shadow-popover);
   z-index: var(--z-popover);
@@ -98,14 +98,14 @@
   background: transparent;
   border: 0;
   border-radius: var(--r-1);
-  color: var(--text);
+  color: var(--fg);
   font-size: var(--fs-sm);
   cursor: default;
 }
 
 .section-submenu-item:hover,
 .section-submenu-item:focus-visible {
-  background: var(--accent-weak);
+  background: var(--accent-soft);
   outline: none;
 }
 

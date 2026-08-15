@@ -58,7 +58,7 @@ export function NotificationLogEntry({ entry, onClick }: EntryRowProps) {
       className={clickable ? "pm-focus" : undefined}
       style={{
         padding: "var(--sp-8) var(--sp-12)",
-        borderBottom: "var(--bw-subhair) solid var(--border)",
+        borderBottom: "var(--bw-subhair) solid var(--line)",
         cursor: clickable ? "pointer" : "default",
         display: "flex",
         gap: "var(--sp-10)",

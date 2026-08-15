@@ -38,8 +38,8 @@ function Frame({
   return (
     <section
       style={{
-        border: "var(--bw-hair) solid var(--border)",
-        borderRadius: "var(--radius-sm)",
+        border: "var(--bw-hair) solid var(--line)",
+        borderRadius: "var(--r-2)",
         background: "var(--bg-raised)",
         padding: "var(--sp-12)",
         minWidth: 0,

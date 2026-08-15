@@ -492,7 +492,7 @@ function ProviderTabs({
               background:
                 active === kind ? "var(--bg-raised)" : "transparent",
               color:
-                active === kind ? "var(--fg-strong)" : "var(--fg-faint)",
+                active === kind ? "var(--fg)" : "var(--fg-faint)",
               fontFamily: "inherit",
               fontSize: "var(--fs-sm)",
               fontWeight: active === kind ? 600 : 400,

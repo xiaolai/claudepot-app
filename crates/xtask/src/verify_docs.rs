@@ -118,6 +118,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_shortcut_gate_is_shared(repo, &mut problems)?;
     check_contrast_overrides_win(repo, &mut problems)?;
     check_shortcut_table_has_handlers(repo, &mut problems)?;
+    check_no_undefined_tokens(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
 
@@ -720,6 +721,146 @@ fn check_screenshot_pairs(repo: &Path, problems: &mut Vec<String>) -> Result<()>
         }
     }
     Ok(())
+}
+
+/// Every `var(--token)` in the app must name a token `tokens.css`
+/// actually declares.
+///
+/// # Why this is not covered by the no-raw-values rule
+///
+/// `design.md` requires every colour, size and spacing to come from
+/// `tokens.css`, and the stylesheets obey it — no hex, rgb or hsl
+/// literal appears anywhere. But that rule only catches values that
+/// *look* wrong. A MISSPELLED token passes it perfectly: `var(--fg-2)`
+/// is not a raw value, reviews read it as a token, and CSS resolves an
+/// undefined custom property to nothing — so the declaration is
+/// dropped and the element silently inherits instead.
+///
+/// The 2026-08 token migration found 43 such references across 16
+/// invented names: `--fg-2` / `--fg-3` where the scale is
+/// `--fg-muted` / `--fg-faint`, `--rad-sm` / `--radius-sm` /
+/// `--rad-2` where it is `--r-0…--r-5`, `--fs-12` and `--fs-14`
+/// where it is `--fs-xs`. Every one rendered as an unset property and
+/// nothing anywhere reported it.
+fn check_no_undefined_tokens(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let tokens_src = strip_comments(&read(repo, "src/styles/tokens.css")?);
+    let mut declared: BTreeSet<String> = BTreeSet::new();
+    for line in tokens_src.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("--") {
+            if let Some((name, _)) = rest.split_once(':') {
+                declared.insert(format!("--{}", name.trim()));
+            }
+        }
+    }
+    if declared.is_empty() {
+        problems.push("tokens.css declares no custom properties — the check cannot run".into());
+        return Ok(());
+    }
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_ts_paths(&repo.join("src"), &mut files);
+    collect_css_paths(&repo.join("src"), &mut files);
+
+    // Custom properties can also be declared LOCALLY — on an element
+    // via a JSX style object (`["--rank-col"]: "var(--sp-28)"`) or in
+    // a component stylesheet rule. Those are valid and deliberately
+    // scoped; the first draft of this check knew only about
+    // tokens.css and reported `--rank-col` as undefined when it is set
+    // on the very element that reads it. Collect them first.
+    let mut local: BTreeSet<String> = BTreeSet::new();
+    {
+        let mut all: Vec<PathBuf> = Vec::new();
+        collect_ts_paths(&repo.join("src"), &mut all);
+        collect_css_paths(&repo.join("src"), &mut all);
+        for path in &all {
+            let Ok(src) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            // `"--x":` / `'--x':` (JSX style key) and `--x:` (CSS decl).
+            for pat in ["\"--", "'--"] {
+                let mut from = 0usize;
+                while let Some(rel) = src[from..].find(pat) {
+                    let at = from + rel + pat.len();
+                    let end = src[at..]
+                        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                        .map(|i| at + i)
+                        .unwrap_or(src.len());
+                    // The QUOTE is the pattern's first char, not its last —
+                    // `pat` is `"--`, so `next_back()` yields `-` and the
+                    // match could never succeed.
+                    if src[end..].starts_with(pat.chars().next().unwrap()) {
+                        local.insert(format!("--{}", &src[at..end]));
+                    }
+                    from = end.max(at + 1);
+                }
+            }
+        }
+    }
+
+    let mut missing: BTreeSet<String> = BTreeSet::new();
+    let mut scanned = 0usize;
+    for path in files {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        // Comments stripped. A comment EXPLAINING a token — including
+        // one explaining that the token does not exist — otherwise
+        // reads as a reference to it. This is the third guard in this
+        // change to have been fooled by its own documentation; the
+        // pattern is now assumed rather than discovered.
+        let src = strip_comments(&raw);
+        let mut from = 0usize;
+        while let Some(rel) = src[from..].find("var(--") {
+            let at = from + rel + 4;
+            let end = src[at..]
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .map(|i| at + i)
+                .unwrap_or(src.len());
+            let name = &src[at..end];
+            scanned += 1;
+            // A `var(--x, fallback)` is legitimate even when --x is
+            // absent; only the bare form is a silent drop.
+            let bare = src[end..].starts_with(')');
+            if bare && !declared.contains(name) && !local.contains(name) {
+                missing.insert(format!(
+                    "{} (first seen in {})",
+                    name,
+                    path.strip_prefix(repo).unwrap_or(&path).display()
+                ));
+            }
+            from = end;
+        }
+    }
+    if scanned == 0 {
+        problems.push(
+            "no var(--token) references found under src/ — the scan is broken, not the \
+             codebase"
+                .into(),
+        );
+    }
+    for m in missing {
+        problems.push(format!(
+            "{m} is referenced but never declared in tokens.css — CSS drops the whole \
+             declaration, so the element silently inherits instead"
+        ));
+    }
+    Ok(())
+}
+
+/// `.css` paths under `dir`, appended to `out`.
+fn collect_css_paths(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.filter_map(Result::ok) {
+        let path = e.path();
+        if path.is_dir() {
+            collect_css_paths(&path, out);
+        } else if path.extension().is_some_and(|x| x == "css") {
+            out.push(path);
+        }
+    }
 }
 
 /// Every binding declared in `lib/shortcutBindings.ts` must have a

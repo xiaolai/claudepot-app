@@ -534,7 +534,7 @@ export function AgentForm({
             spellCheck={false}
             style={{
               ...inputStyle(bypassWithoutTools),
-              fontFamily: "var(--ff-mono)",
+              fontFamily: "var(--font-mono)",
             }}
           />
           {bypassWithoutTools && (
@@ -589,7 +589,7 @@ export function AgentForm({
             onChange={(e) => setDisallowedToolsText(e.target.value)}
             placeholder="WebFetch Bash(rm *)"
             spellCheck={false}
-            style={{ ...inputStyle(), fontFamily: "var(--ff-mono)" }}
+            style={{ ...inputStyle(), fontFamily: "var(--font-mono)" }}
           />
           <Hint>{t("form.hints.disallowedTools")}</Hint>
         </Field>
@@ -859,7 +859,7 @@ function Group({
       <legend
         style={{
           fontSize: "var(--fs-xs)",
-          color: "var(--fg-2)",
+          color: "var(--fg-muted)",
           padding: "0 var(--sp-4)",
         }}
       >
@@ -884,7 +884,7 @@ function Field({
         flexDirection: "column",
         gap: "var(--sp-4)",
         fontSize: "var(--fs-xs)",
-        color: "var(--fg-2)",
+        color: "var(--fg-muted)",
       }}
     >
       <span>{label}</span>
@@ -904,7 +904,7 @@ function Hint({
     <span
       style={{
         fontSize: "var(--fs-2xs)",
-        color: kind === "error" ? "var(--danger)" : "var(--fg-3)",
+        color: kind === "error" ? "var(--danger)" : "var(--fg-faint)",
       }}
     >
       {children}
@@ -930,7 +930,7 @@ function Toggle({
         alignItems: "center",
         gap: "var(--sp-6)",
         fontSize: "var(--fs-xs)",
-        color: disabled ? "var(--fg-3)" : "var(--fg-2)",
+        color: disabled ? "var(--fg-faint)" : "var(--fg-muted)",
         cursor: disabled ? "not-allowed" : "pointer",
       }}
     >

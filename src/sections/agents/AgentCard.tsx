@@ -67,9 +67,9 @@ export function AgentCard({
         </h3>
         <span
           style={{
-            fontFamily: "var(--ff-mono)",
+            fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-xs)",
-            color: "var(--fg-3)",
+            color: "var(--fg-faint)",
           }}
         >
           {agent.name}
@@ -95,7 +95,7 @@ export function AgentCard({
             border: "var(--bw-hair) solid var(--warn)",
             borderRadius: "var(--r-2)",
             fontSize: "var(--fs-xs)",
-            color: "var(--fg-2)",
+            color: "var(--fg-muted)",
             background: "var(--bg)",
           }}
         >
@@ -108,7 +108,7 @@ export function AgentCard({
           style={{
             margin: 0,
             fontSize: "var(--fs-sm)",
-            color: "var(--fg-2)",
+            color: "var(--fg-muted)",
           }}
         >
           {agent.description}
@@ -121,25 +121,25 @@ export function AgentCard({
           gridTemplateColumns: "max-content 1fr",
           gap: "var(--sp-4) var(--sp-12)",
           fontSize: "var(--fs-xs)",
-          color: "var(--fg-2)",
+          color: "var(--fg-muted)",
         }}
       >
-        <span style={{ color: "var(--fg-3)" }}>{t("card.labels.cron")}</span>
-        <span style={{ fontFamily: "var(--ff-mono)" }}>
+        <span style={{ color: "var(--fg-faint)" }}>{t("card.labels.cron")}</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>
           {agent.cron ?? "—"}
         </span>
-        <span style={{ color: "var(--fg-3)" }}>{t("card.labels.cwd")}</span>
-        <span style={{ fontFamily: "var(--ff-mono)" }}>{agent.cwd}</span>
-        <span style={{ color: "var(--fg-3)" }}>{t("card.labels.binary")}</span>
+        <span style={{ color: "var(--fg-faint)" }}>{t("card.labels.cwd")}</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>{agent.cwd}</span>
+        <span style={{ color: "var(--fg-faint)" }}>{t("card.labels.binary")}</span>
         <span>
           {agent.binary_kind === "first_party"
             ? t("card.binaryFirstParty")
             : t("card.binaryRoute", { id: agent.binary_route_id ?? "?" })}
           {agent.model && (
-            <span style={{ color: "var(--fg-3)" }}> · {agent.model}</span>
+            <span style={{ color: "var(--fg-faint)" }}> · {agent.model}</span>
           )}
         </span>
-        <span style={{ color: "var(--fg-3)" }}>
+        <span style={{ color: "var(--fg-faint)" }}>
           {t("card.labels.permissions")}
         </span>
         <span>
@@ -147,8 +147,8 @@ export function AgentCard({
           {agent.allowed_tools.length > 0 && (
             <span
               style={{
-                color: "var(--fg-3)",
-                fontFamily: "var(--ff-mono)",
+                color: "var(--fg-faint)",
+                fontFamily: "var(--font-mono)",
                 marginLeft: "var(--sp-4)",
               }}
             >
@@ -158,7 +158,7 @@ export function AgentCard({
         </span>
         {agent.max_budget_usd !== null && (
           <>
-            <span style={{ color: "var(--fg-3)" }}>
+            <span style={{ color: "var(--fg-faint)" }}>
               {t("card.labels.budget")}
             </span>
             <span>${agent.max_budget_usd.toFixed(2)}</span>

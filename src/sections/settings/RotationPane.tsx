@@ -244,7 +244,7 @@ export function RotationPane({ pushToast }: Props) {
                 style={{
                   padding: "var(--sp-3) var(--sp-6)",
                   border: "var(--bw-hair) solid var(--line)",
-                  borderRadius: "var(--rad-sm)",
+                  borderRadius: "var(--r-2)",
                   background: "var(--bg-raised)",
                   color: "var(--fg)",
                   fontFamily: "inherit",

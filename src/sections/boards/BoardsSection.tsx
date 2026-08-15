@@ -401,8 +401,8 @@ function LiveBanner({ onApply }: { onApply: () => void }) {
         gap: "var(--sp-12)",
         padding: "var(--sp-8) var(--sp-12)",
         marginBottom: "var(--sp-8)",
-        border: "var(--bw-hair) solid var(--border)",
-        borderRadius: "var(--radius-sm)",
+        border: "var(--bw-hair) solid var(--line)",
+        borderRadius: "var(--r-2)",
         background: "var(--bg-raised)",
         fontSize: "var(--fs-sm)",
       }}

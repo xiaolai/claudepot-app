@@ -15,7 +15,7 @@
 .permission-grant-active {
   padding: var(--sp-10) var(--sp-12);
   border: var(--bw-hair) solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-2);
   background: var(--bg-raised);
 }
 
@@ -23,7 +23,7 @@
 
 .env-file-card {
   border: var(--bw-hair) solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-2);
   padding: var(--sp-10) var(--sp-12);
   margin-top: var(--sp-8);
   background: var(--bg-raised);
@@ -50,7 +50,7 @@
   align-items: center;
   gap: var(--sp-8);
   padding: var(--sp-4) 0;
-  border-bottom: var(--bw-subhair) solid var(--border);
+  border-bottom: var(--bw-subhair) solid var(--line);
   font-size: var(--fs-sm);
 }
 
@@ -97,7 +97,7 @@
 .env-inline-form select {
   background: var(--bg-sunken);
   border: var(--bw-hair) solid var(--line-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-2);
   color: var(--fg);
   font: inherit;
   font-size: var(--fs-sm);

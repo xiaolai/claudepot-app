@@ -108,7 +108,7 @@ const miniBtnStyle: CSSProperties = {
   fontSize: "var(--fs-2xs)",
   padding: "var(--sp-2) var(--sp-6)",
   background: "transparent",
-  border: "var(--bw-subhair) solid var(--border)",
+  border: "var(--bw-subhair) solid var(--line)",
   borderRadius: "var(--r-1)",
   color: "var(--fg-muted)",
   cursor: "pointer",

@@ -31,8 +31,8 @@
 .modal {
   width: var(--modal-width-sm);
   max-width: calc(100vw - var(--sp-48));
-  background: var(--surface);
-  border: var(--bw-subhair) solid var(--border);
+  background: var(--bg-raised);
+  border: var(--bw-subhair) solid var(--line);
   border-radius: var(--r-5);
   padding: var(--sp-20);
   box-shadow: var(--shadow-modal);
@@ -46,7 +46,7 @@
 
 .modal-body {
   font-size: var(--fs-sm);
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .modal-body code {
@@ -208,7 +208,7 @@
   padding: var(--sp-2);
   border: none;
   background: none;
-  color: var(--muted);
+  color: var(--fg-muted);
   opacity: 0.6;
   vertical-align: middle;
   width: auto;
@@ -230,7 +230,7 @@
   font-size: var(--fs-xs);
   margin-top: var(--sp-4);
   padding-left: 0;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 /* ---------- loading skeleton ---------- */
@@ -244,7 +244,7 @@
 }
 
 .skeleton {
-  background: var(--border);
+  background: var(--line);
   border-radius: var(--r-2);
   animation: skeleton-pulse var(--dur-pulse) var(--ease-in-out) infinite;
 }

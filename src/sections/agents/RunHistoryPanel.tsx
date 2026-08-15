@@ -74,14 +74,14 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
   }
   if (runs === null) {
     return (
-      <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-xs)" }}>
+      <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-xs)" }}>
         {t("runs.loading")}
       </div>
     );
   }
   if (runs.length === 0) {
     return (
-      <div style={{ color: "var(--fg-3)", fontSize: "var(--fs-xs)" }}>
+      <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-xs)" }}>
         {t("runs.empty")}
       </div>
     );
@@ -91,7 +91,7 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
     <>
       <Table
         density="compact"
-        style={{ fontSize: "var(--fs-2xs)", fontFamily: "var(--ff-mono)" }}
+        style={{ fontSize: "var(--fs-2xs)", fontFamily: "var(--font-mono)" }}
       >
         <thead>
           <tr>
@@ -116,7 +116,7 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
                 <tr
                   style={{
                     borderTop: "var(--bw-hair) solid var(--line)",
-                    color: ok ? "var(--fg-2)" : "var(--danger)",
+                    color: ok ? "var(--fg-muted)" : "var(--danger)",
                   }}
                 >
                   <Td>{symbol}</Td>
@@ -162,7 +162,7 @@ export function RunHistoryPanel({ agentId, refreshKey }: Props) {
                         </button>
                       ) : null}
                       {!structured && !report ? (
-                        <span style={{ color: "var(--fg-3)" }}>—</span>
+                        <span style={{ color: "var(--fg-faint)" }}>—</span>
                       ) : null}
                     </span>
                   </Td>
@@ -214,7 +214,7 @@ function StructuredResultPanel({ result }: { result: RunResultDto }) {
 
   if (rows.length === 0 && result.errors.length === 0) {
     return (
-      <div style={{ color: "var(--fg-3)", fontStyle: "italic" }}>
+      <div style={{ color: "var(--fg-faint)", fontStyle: "italic" }}>
         {t("runs.emptyResult")}
       </div>
     );
@@ -242,7 +242,7 @@ function StructuredResultPanel({ result }: { result: RunResultDto }) {
               key={k}
               style={{ display: "contents" }}
             >
-              <dt style={{ color: "var(--fg-3)", fontWeight: 500 }}>{k}</dt>
+              <dt style={{ color: "var(--fg-faint)", fontWeight: 500 }}>{k}</dt>
               {/* `.selectable` (base.css), not inline `userSelect:
                   "text"` — React omits the -webkit- prefix WKWebView
                   reads first, so the inline form never wins over the
@@ -251,7 +251,7 @@ function StructuredResultPanel({ result }: { result: RunResultDto }) {
                 className="selectable"
                 style={{
                   margin: 0,
-                  color: "var(--fg-2)",
+                  color: "var(--fg-muted)",
                   wordBreak: "break-all",
                 }}
               >
@@ -296,7 +296,7 @@ const structuredCellStyle: React.CSSProperties = {
   padding: "var(--sp-8) var(--sp-12)",
   background: "var(--bg-raised)",
   borderTop: "var(--bw-hair) solid var(--line)",
-  fontFamily: "var(--ff-mono)",
+  fontFamily: "var(--font-mono)",
   fontSize: "var(--fs-2xs)",
 };
 

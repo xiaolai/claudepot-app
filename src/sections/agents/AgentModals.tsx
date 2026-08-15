@@ -165,7 +165,7 @@ export function AddFromBuiltinTemplateModal({
             style={{
               margin: 0,
               fontSize: "var(--fs-sm)",
-              color: "var(--fg-2)",
+              color: "var(--fg-muted)",
             }}
           >
             {t("template.body", { name: templateName })}
@@ -188,7 +188,7 @@ export function AddFromBuiltinTemplateModal({
               spellCheck={false}
               autoFocus
               style={{
-                fontFamily: "var(--ff-mono)",
+                fontFamily: "var(--font-mono)",
                 fontSize: "var(--fs-sm)",
                 padding: "var(--sp-6) var(--sp-8)",
                 background: "var(--bg-raised)",
@@ -447,7 +447,7 @@ export function ReviewInstallModal({
               style={{
                 margin: 0,
                 fontSize: "var(--fs-sm)",
-                color: "var(--fg-2)",
+                color: "var(--fg-muted)",
               }}
             >
               {/* Two whole sentences, not a stitched fragment: the
@@ -473,7 +473,7 @@ export function ReviewInstallModal({
                   borderRadius: "var(--r-2)",
                   background: "var(--bg)",
                   fontSize: "var(--fs-sm)",
-                  color: "var(--fg-2)",
+                  color: "var(--fg-muted)",
                 }}
               >
                 <div
@@ -516,7 +516,7 @@ export function ReviewInstallModal({
                 }}
               >
                 <Tag tone="danger">bypassPermissions</Tag>
-                <span style={{ color: "var(--fg-2)" }}>
+                <span style={{ color: "var(--fg-muted)" }}>
                   {t("review.bypassBody")}
                 </span>
               </div>
@@ -528,7 +528,7 @@ export function ReviewInstallModal({
                   style={{
                     margin: 0,
                     whiteSpace: "pre-wrap",
-                    fontFamily: "var(--ff-mono)",
+                    fontFamily: "var(--font-mono)",
                     fontSize: "var(--fs-xs)",
                     color: "var(--fg)",
                   }}
@@ -538,7 +538,7 @@ export function ReviewInstallModal({
               </ReviewRow>
               {details.system_prompt && (
                 <ReviewRow label={t("review.rows.systemPrompt")}>
-                  <span style={{ fontFamily: "var(--ff-mono)" }}>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>
                     {details.system_prompt}
                   </span>
                 </ReviewRow>
@@ -550,7 +550,7 @@ export function ReviewInstallModal({
                 <span
                   className="selectable"
                   style={{
-                    fontFamily: "var(--ff-mono)",
+                    fontFamily: "var(--font-mono)",
                     userSelect: "text",
                   }}
                 >
@@ -566,18 +566,18 @@ export function ReviewInstallModal({
               </ReviewRow>
               <ReviewRow label={t("review.rows.allowedTools")}>
                 {s.allowed_tools.length > 0 ? (
-                  <span style={{ fontFamily: "var(--ff-mono)" }}>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>
                     {s.allowed_tools.join(", ")}
                   </span>
                 ) : (
-                  <span style={{ color: "var(--fg-3)" }}>
+                  <span style={{ color: "var(--fg-faint)" }}>
                     {t("review.values.none")}
                   </span>
                 )}
               </ReviewRow>
               {details.disallowed_tools.length > 0 && (
                 <ReviewRow label={t("review.rows.disallowedTools")}>
-                  <span style={{ fontFamily: "var(--ff-mono)" }}>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>
                     {details.disallowed_tools.join(", ")}
                   </span>
                 </ReviewRow>
@@ -603,7 +603,7 @@ export function ReviewInstallModal({
                       gap: "var(--sp-4)",
                     }}
                   >
-                    <span style={{ fontFamily: "var(--ff-mono)" }}>
+                    <span style={{ fontFamily: "var(--font-mono)" }}>
                       {details.run_as}
                     </span>
                     <span
@@ -718,7 +718,7 @@ function ReviewRow({
     <>
       <span
         style={{
-          color: "var(--fg-3)",
+          color: "var(--fg-faint)",
           fontSize: "var(--fs-xs)",
           paddingTop: "var(--sp-2)",
         }}

@@ -486,7 +486,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
               ns="providers"
               i18nKey="empty.wrappers"
               components={{
-                code: <code style={{ color: "var(--fg-strong)" }} />,
+                code: <code style={{ color: "var(--fg)" }} />,
               }}
             />
           </p>

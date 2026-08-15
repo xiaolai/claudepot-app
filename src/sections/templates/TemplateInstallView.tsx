@@ -172,7 +172,7 @@ export function TemplateInstallView({
         <p
           style={{
             margin: "var(--sp-4) 0 0",
-            color: "var(--fg-2)",
+            color: "var(--fg-muted)",
             fontSize: "var(--fs-sm)",
           }}
         >

@@ -75,7 +75,7 @@ export function CronInput({
           flexDirection: "column",
           gap: "var(--sp-4)",
           fontSize: "var(--fs-xs)",
-          color: "var(--fg-2)",
+          color: "var(--fg-muted)",
         }}
       >
         <span>{t("cron.label")}</span>
@@ -87,7 +87,7 @@ export function CronInput({
           placeholder="0 9 * * *"
           spellCheck={false}
           style={{
-            fontFamily: "var(--ff-mono)",
+            fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-sm)",
             padding: "var(--sp-6) var(--sp-8)",
             border: `var(--bw-hair) solid ${
@@ -116,11 +116,11 @@ export function CronInput({
             flexDirection: "column",
             gap: "var(--sp-2)",
             fontSize: "var(--fs-2xs)",
-            color: "var(--fg-2)",
-            fontFamily: "var(--ff-mono)",
+            color: "var(--fg-muted)",
+            fontFamily: "var(--font-mono)",
           }}
         >
-          <span style={{ color: "var(--fg-3)" }}>{t("cron.nextRuns")}</span>
+          <span style={{ color: "var(--fg-faint)" }}>{t("cron.nextRuns")}</span>
           {nextRuns.map((iso) => (
             <span key={iso}>{formatIso(iso)}</span>
           ))}

@@ -104,7 +104,7 @@ function Td({
       style={{
         padding: "var(--sp-4) var(--sp-8)",
         textAlign: align,
-        ...(dim ? { color: "var(--fg-dim)" } : null),
+        ...(dim ? { color: "var(--fg-muted)" } : null),
         ...(nowrap ? { whiteSpace: "nowrap" } : null),
       }}
     >
@@ -129,7 +129,7 @@ function Th({
         textAlign: align,
         padding: "var(--sp-4) var(--sp-8)",
         fontWeight: 400,
-        color: "var(--fg-dim)",
+        color: "var(--fg-muted)",
         ...(srOnly
           ? {
               position: "absolute",

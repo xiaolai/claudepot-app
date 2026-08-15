@@ -161,7 +161,7 @@ export function TipRow({ tip }: { tip: RenderedTip }) {
                   fontSize: "var(--fs-2xs)",
                   background: "var(--bg-sunken)",
                   border: "var(--bw-hair) solid var(--line)",
-                  borderRadius: "var(--rad-2)",
+                  borderRadius: "var(--r-2)",
                   overflowX: "auto",
                   maxHeight: 200,
                 }}

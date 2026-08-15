@@ -12,7 +12,7 @@
   .modal {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--surface);
+    background: var(--bg-raised);
   }
 }
 
@@ -33,7 +33,7 @@ html, #root {
   padding: 0;
   height: 100%;
   background: transparent;
-  color: var(--text);
+  color: var(--fg);
 }
 
 body {
@@ -96,7 +96,7 @@ pre {
 
 /* ---------- utilities ---------- */
 
-.muted  { color: var(--muted); }
+.muted  { color: var(--fg-muted); }
 .mono   {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -111,7 +111,7 @@ pre {
   position: relative;
   /* Hairline along the top of the webview — reads as the native title
      bar's bottom border, anchoring the chrome visually below it. */
-  border-top: var(--bw-subhair) solid var(--border);
+  border-top: var(--bw-subhair) solid var(--line);
 }
 
 /* ---------- footer (content pane bottom) ---------- */
@@ -119,7 +119,7 @@ pre {
 .content-footer {
   margin-top: auto;
   padding-top: var(--sp-12);
-  border-top: var(--bw-subhair) solid var(--border);
+  border-top: var(--bw-subhair) solid var(--line);
   display: flex;
   align-items: center;
   gap: var(--sp-8);
@@ -141,7 +141,7 @@ pre {
     min-width: unset;
     max-height: var(--sidebar-collapsed-max-h);
     border-right: none;
-    border-bottom: var(--bw-subhair) solid var(--border);
+    border-bottom: var(--bw-subhair) solid var(--line);
     padding-top: var(--sp-16);
   }
   .content {
