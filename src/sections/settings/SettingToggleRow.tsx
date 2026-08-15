@@ -87,7 +87,6 @@ export function SettingToggleRow({
               checked ? "var(--accent)" : "var(--line-strong)"
             }`,
             position: "relative",
-            cursor: disabled ? "not-allowed" : "pointer",
             opacity: disabled ? "var(--opacity-disabled)" : 1,
             transition: "background var(--dur-base) var(--ease-linear)",
           }}

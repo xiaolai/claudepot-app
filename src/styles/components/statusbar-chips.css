@@ -20,7 +20,6 @@
   font-size: var(--fs-2xs);
   letter-spacing: var(--ls-wide);
   text-transform: uppercase;
-  cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -121,7 +120,6 @@
   font-size: var(--fs-xs);
   color: var(--fg);
   text-align: left;
-  cursor: pointer;
   white-space: normal;
 }
 

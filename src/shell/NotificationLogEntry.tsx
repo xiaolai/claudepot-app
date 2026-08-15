@@ -59,7 +59,6 @@ export function NotificationLogEntry({ entry, onClick }: EntryRowProps) {
       style={{
         padding: "var(--sp-8) var(--sp-12)",
         borderBottom: "var(--bw-subhair) solid var(--line)",
-        cursor: clickable ? "pointer" : "default",
         display: "flex",
         gap: "var(--sp-10)",
         alignItems: "flex-start",

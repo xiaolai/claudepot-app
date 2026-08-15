@@ -92,6 +92,38 @@ hybrid — render as a table and lift the verbs into a row kebab
 (`NF.ellipsis`). Don't add a density toggle: one container per
 section keeps the design pass cheap and the a11y story simple.
 
+## Live-session surfaces — one job each
+
+Five surfaces rendered the same `useSessionLive` data: the sidebar
+strip, the status-bar segment, an Activities strip, the Activities
+dashboard's Live card, and the tray. Each had its own vocabulary and
+its own click target, and nothing said which was authoritative. Ambient
+presence in the chrome is right; five renderings of one hook is not.
+
+| Surface | Job | Not its job |
+|---|---|---|
+| **Status bar** | the count, as plain text | the model mix; being a control |
+| **Sidebar strip** | the canonical in-window list; click opens the transcript | history, cost |
+| **Activities** | history and cost — today/month rollups | liveness |
+| **Tray** | liveness while the window is closed | anything the window already shows |
+| **Project rows / session header** | *contextual* liveness for the thing you are looking at | global liveness |
+
+Two rules follow, and both were violated before this was written down:
+
+- **A surface that only reports state is not a control.** The status-bar
+  segment was a button that jumped to Activities — but the sidebar strip
+  directly above it already opens the live list, and Activities
+  independently remembers its last tab, so clicking "live" could land on
+  Cost.
+- **A card that takes an `onClick?` must be given one.** `LiveSessionCard`
+  rendered a `<button>` and the Activities strip passed no handler, so
+  every card in it was inert. Both are deleted; if a live card returns,
+  it takes a required handler.
+
+**Boards is not a live surface.** Its "live" label means *updated within
+five minutes* and its data comes from polling `boards.db` — it never
+imports `useSessionLive`. Do not fold it into this table.
+
 ## Non-negotiables
 
 - **One primary action per view** (one `solid` / one `.btn.primary`).
@@ -103,9 +135,48 @@ section keeps the design pass cheap and the a11y story simple.
   not in a tooltip.
 - **One signal per surface** — a given event fires exactly one of:
   toast, banner, inline note, `RunningOpStrip`, modal. No status
-  spray.
+  spray. The rule constrains what one event does; the **signal
+  budget** below constrains how many surfaces exist to do it on.
 - **Credentials never rendered** — tokens/secrets are always
   truncated (`sk-ant-oat01-Abc…xyz`). Never log, never toast.
+
+## Signal budget
+
+`One signal per surface` is written per event, and per event the code is
+careful. It does not constrain the surface *count*, and eleven mount
+before any section renders: `HealthPill`, `StatusIssuesBanner`,
+`NetworkUnreachablePanel`, `AppStatusBar` (live segment, counts,
+`RunningOpsChip`, `PendingJournalsChip`, `ServiceStatusDot`),
+`NotificationBell` + popover, `ToastContainer`, `OperationProgressHost`,
+`SidebarLiveStrip`, `SidebarBgBadge` — then sections add `AnomalyBanner`,
+`OrphanBanner`, `UpdatesPanel`.
+
+**Every indicator belongs to exactly one tier, and one event may occupy
+each tier at most once:**
+
+| Tier | Surface | Lifetime |
+|---|---|---|
+| **Ephemeral** | toast (foreground) *or* OS banner (background) — never both | seconds |
+| **Ambient** | one chip / dot / badge / row for ongoing state | while the state holds |
+| **Durable** | exactly one notification-log row | until dismissed |
+| **Blocking** | one modal, or one banner, only when action is required | until acted on |
+
+These tiers are a **view of the existing P0–P3 router**
+(`lib/notifications/types.ts`), not a second urgency system. Priority
+decides *whether* a surface fires; the tier decides *which one*. A
+parallel taxonomy is how two systems drift apart, so a new indicator
+names its tier rather than inventing a level.
+
+**A modal owns its operation.** While an op's progress modal is open it
+holds the ambient tier for that op, so `RunningOpsChip` filters it out —
+otherwise one rename renders as "1 op" in the status bar directly
+beneath the modal already showing its phases.
+
+**The bell is the "what did I miss" surface.** The status bar used to
+replay a dismissed toast for six seconds as truncated, pointer-inert,
+`aria-hidden` text: a second ephemeral surface, unactionable, sitting
+next to the durable record that already held it. Deleted — do not
+reintroduce a replay anywhere.
 
 ## Empty and loading states
 
@@ -139,6 +210,31 @@ section below by ~108px". Use `SkeletonList` (with header) or
 `SkeletonRows` (surface has its own header); both carry the
 `role="status"` and screen-reader label that hand-rolled
 `.skeleton-container` markup silently omitted.
+
+## Cursor policy
+
+**`default` everywhere except a real hyperlink.** This is a desktop
+shell, not a web page: macOS does not put a hand cursor on buttons, and
+one on ours read as web chrome. The only sanctioned `pointer` is
+`<ExternalLink>`, which opens a URL in the user's browser — the one
+place the web affordance is literally correct.
+
+It contradicted itself four ways before this was written down: the
+global reset gave every `button` a `pointer`, `body` said `default`,
+legacy `.btn` said `default`, and the `<Button>` / `<IconButton>`
+primitives said `pointer`, or `not-allowed` when disabled. Two adjacent
+buttons produced two cursors, and disabled produced a third.
+
+- **`not-allowed` is gone.** macOS never shows it, so it read as a web
+  form. Disabled state is carried by the native `disabled` attribute on
+  a `<button>`, or by `aria-disabled` on anything faking it — colour and
+  cursor may not be the only cue. `FilterPicker`'s `<li role="option">`
+  was relying on the cursor alone; it now sets `aria-disabled`.
+- **Cursors that carry information stay**: `text` on selectable copy,
+  `help` where a tooltip explains something, `progress` while a control
+  is working, and the resize cursors.
+- Changing only the reset and the two primitives does not establish the
+  policy — there were 94 `pointer` declarations across 86 files.
 
 ## Accessibility floor
 

@@ -363,7 +363,6 @@ export function NotificationLogPopover({
                       border: "var(--bw-hair) solid var(--line-strong)",
                       background: "var(--bg-raised)",
                       color: "var(--fg)",
-                      cursor: "pointer",
                     }}
                   >
                     {t("notifLog.showAmbient")}

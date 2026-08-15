@@ -325,7 +325,6 @@ function chipStyle(active: boolean) {
     border: `var(--bw-hair) solid ${active ? "var(--accent-border)" : "var(--line)"}`,
     borderRadius: "var(--r-1)",
     fontSize: "var(--fs-xs)",
-    cursor: "pointer",
   } as const;
 }
 

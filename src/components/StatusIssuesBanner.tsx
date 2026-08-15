@@ -112,7 +112,6 @@ function BannerRow({
             border: "var(--bw-hair) solid var(--line-strong)",
             borderRadius: "var(--r-1)",
             color: "var(--fg)",
-            cursor: "pointer",
             whiteSpace: "nowrap",
             fontWeight: 500,
             fontFamily: "inherit",
@@ -132,7 +131,6 @@ function BannerRow({
             border: "var(--bw-hair) solid var(--line)",
             borderRadius: "var(--r-1)",
             color: "var(--fg-muted)",
-            cursor: "pointer",
             whiteSpace: "nowrap",
             fontFamily: "inherit",
           }}
@@ -156,7 +154,6 @@ function BannerRow({
             color: "var(--fg-faint)",
             border: "none",
             borderRadius: "var(--r-1)",
-            cursor: "pointer",
             fontFamily: "inherit",
             flexShrink: 0,
           }}

@@ -399,7 +399,6 @@ export function AccountsSection({
               style={{
                 fontSize: "var(--fs-2xs)",
                 color: "var(--fg-faint)",
-                cursor: "pointer",
                 textTransform: "uppercase",
                 letterSpacing: "var(--ls-wide)",
               }}

@@ -158,7 +158,6 @@ const LiveRow = forwardRef<HTMLButtonElement, RowProps>(function LiveRow(
         border: "none",
         background: "transparent",
         textAlign: "left",
-        cursor: "pointer",
         borderRadius: "var(--r-1)",
         color: "var(--fg)",
         fontSize: "var(--fs-xs)",

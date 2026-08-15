@@ -59,7 +59,6 @@
   gap: var(--sp-2);
   padding: var(--sp-6) var(--sp-8);
   border-radius: var(--r-2);
-  cursor: pointer;
   outline: none;
 }
 
@@ -136,7 +135,6 @@
   border: 0;
   font-size: var(--fs-2xs);
   color: var(--fg-muted);
-  cursor: pointer;
 }
 
 .memory-pane__viewtoggle-btn:hover {
@@ -198,7 +196,6 @@
   border-radius: var(--r-2);
   font-size: var(--fs-xs);
   color: var(--fg);
-  cursor: pointer;
 }
 
 .memory-pane__openwith-item:hover:not(:disabled) {
@@ -239,7 +236,6 @@
   color: var(--fg);
   text-align: left;
   font-size: var(--fs-2xs);
-  cursor: pointer;
 }
 
 .memory-pane__changetoggle:hover:not(:disabled) {

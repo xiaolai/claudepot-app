@@ -266,7 +266,6 @@
   border-radius: var(--r-pill);
   border: var(--bw-hair) solid var(--line);
   background: var(--bg-sunken);
-  cursor: pointer;
   padding: 0;
   flex: none;
 }
@@ -323,7 +322,6 @@
   font: inherit;
   font-size: var(--fs-3xs);
   padding: var(--sp-2) var(--sp-8);
-  cursor: pointer;
 }
 
 .envvar-tristate-seg:last-child {

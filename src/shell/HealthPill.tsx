@@ -138,7 +138,6 @@ export function HealthPill({ onMouseDown }: HealthPillProps) {
         background: dotColor(severity),
         border: "none",
         borderRadius: "var(--r-pill)",
-        cursor: "pointer",
         flexShrink: 0,
       }}
     />

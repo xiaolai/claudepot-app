@@ -121,6 +121,8 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_no_undefined_tokens(repo, &mut problems)?;
     check_runtime_tokens_are_registered(repo, &mut problems)?;
     check_tokens_declared_only_in_tokens_css(repo, &mut problems)?;
+    check_css_comments_balance(repo, &mut problems)?;
+    check_cursor_policy(repo, &mut problems)?;
     check_optional_shortcut_callbacks_are_wired(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
@@ -1334,6 +1336,149 @@ fn check_tokens_declared_only_in_tokens_css(repo: &Path, problems: &mut Vec<Stri
                      declaration site (rules/design.md)"
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// `pointer` and `not-allowed` are gone from activation controls.
+///
+/// The policy is `default` everywhere except a real hyperlink (see
+/// rules/design.md). It is a build gate because the previous state was
+/// four contradictory rules — a global `button { cursor: pointer }`
+/// reset, `body { cursor: default }`, `.btn { default }`, and the
+/// primitives at `pointer` / `not-allowed` — spread over 94
+/// declarations in 86 files. A rule that costs one line to violate and
+/// a full sweep to restore needs a gate, not a paragraph.
+///
+/// `not-allowed` is called out separately because macOS never displays
+/// it: it reads as web-form chrome, and where a control was faking
+/// disabled with a `role` rather than the native attribute, it was the
+/// ONLY cue that the control was dead.
+fn check_cursor_policy(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_ts_paths(&repo.join("src"), &mut files);
+    collect_css_paths(&repo.join("src"), &mut files);
+    if files.is_empty() {
+        problems.push("no sources found under src/ — the cursor-policy check cannot run".into());
+        return Ok(());
+    }
+    for path in files {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        // The one sanctioned pointer: it opens a URL in the browser,
+        // which is the single place the web affordance is correct.
+        if name.starts_with("ExternalLink") || name.contains(".test.") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let src = strip_comments(&raw);
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        for (needle, why) in [
+            (
+                "cursor: pointer",
+                "this is a desktop shell; macOS puts no hand cursor on a button",
+            ),
+            (
+                "cursor: \"pointer\"",
+                "this is a desktop shell; macOS puts no hand cursor on a button",
+            ),
+            (
+                "not-allowed",
+                "macOS never shows it, and it hides a missing aria-disabled",
+            ),
+        ] {
+            if src.contains(needle) {
+                problems.push(format!(
+                    "{rel} uses `{needle}` — {why} (rules/design.md cursor policy). Use \
+                     <ExternalLink> if this really opens a URL"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every stylesheet's comment markers must balance.
+///
+/// A line-based codemod that deletes dead tokens will happily eat the
+/// line a comment OPENS on, because that line often names the very
+/// token being removed. The result is prose sitting loose inside a
+/// `:root { }` block: the CSS engine parses it as invalid declarations
+/// and silently drops them, so nothing renders differently and nothing
+/// fails. `tokens.css` shipped that way — five orphaned `*/` and one
+/// block with neither marker — through a migration whose own proof
+/// covered resolved token VALUES and said nothing about structure.
+///
+/// It is not cosmetic. `strip_comments` cannot strip a comment that
+/// never opens, so every guard reading this file sees prose as code.
+fn check_css_comments_balance(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_css_paths(&repo.join("src"), &mut files);
+    if files.is_empty() {
+        problems
+            .push("no stylesheets found under src/ — the comment-balance check cannot run".into());
+        return Ok(());
+    }
+    for path in files {
+        let Ok(src) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        // CSS comments do NOT nest: once inside one, `/*` is ordinary
+        // text. Counting depth reported `src/styles/components/*.css`
+        // — a glob inside App.css's header — as an opener and the file
+        // as unterminated. Track state, not depth.
+        let mut in_comment = false;
+        let mut open_line = 0usize;
+        let mut line = 1usize;
+        let b = src.as_bytes();
+        let mut i = 0usize;
+        while i < b.len() {
+            // Byte comparisons, never `src[i..]`: slicing a &str at an
+            // arbitrary byte index panics mid-character, and these files
+            // are full of em dashes and box-drawing glyphs. Same
+            // byte-vs-char trap that shredded ⇧/⌥/⌘ in strip_comments.
+            let two = |a: u8, c: u8| i + 1 < b.len() && b[i] == a && b[i + 1] == c;
+            if b[i] == b'\n' {
+                line += 1;
+                i += 1;
+            } else if !in_comment && two(b'/', b'*') {
+                in_comment = true;
+                open_line = line;
+                i += 2;
+            } else if in_comment && two(b'*', b'/') {
+                in_comment = false;
+                i += 2;
+            } else if !in_comment && two(b'*', b'/') {
+                problems.push(format!(
+                    "{rel}:{line} closes a comment that was never opened — a codemod most \
+                     likely deleted the line the comment opened on, leaving prose loose \
+                     inside a rule block where CSS drops it silently"
+                ));
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        if in_comment {
+            problems.push(format!(
+                "{rel}:{open_line} opens a comment that is never closed — everything after \
+                 it is swallowed, including real rules"
+            ));
         }
     }
     Ok(())
@@ -3169,5 +3314,131 @@ mod guard_tests {
             run(check_tokens_declared_only_in_tokens_css, &d),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn css_comments_accept_a_balanced_stylesheet() {
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            "/* header */\n:root { --fg: red; }\n",
+        );
+        assert_eq!(run(check_css_comments_balance, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn css_comments_catch_a_deleted_opening_line() {
+        // The real failure: a line-based codemod deletes a dead token
+        // and takes the line its comment OPENED on, because that line
+        // named the token. tokens.css shipped five of these.
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            ":root {\n   still describes something. */\n  --fg: red;\n}\n",
+        );
+        let out = run(check_css_comments_balance, &d);
+        assert!(out.iter().any(|p| p.contains("never opened")), "{out:?}");
+    }
+
+    #[test]
+    fn css_comments_catch_an_unclosed_comment() {
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            "/* opens and never closes\n:root { --fg: red; }\n",
+        );
+        let out = run(check_css_comments_balance, &d);
+        assert!(out.iter().any(|p| p.contains("never closed")), "{out:?}");
+    }
+
+    #[test]
+    fn css_comments_ignore_a_glob_inside_a_comment() {
+        // CSS comments do not nest. Counting depth read
+        // `src/styles/components/*.css` in App.css's header as a second
+        // opener and reported the file unterminated.
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            "/* shards live in src/styles/components/*.css */\n:root { --fg: red; }\n",
+        );
+        assert_eq!(run(check_css_comments_balance, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn css_comments_survive_multibyte_text() {
+        // `src[i..]` panics when a byte index lands mid-character, and
+        // these files are full of em dashes and box-drawing glyphs.
+        let d = repo();
+        write(
+            &d,
+            "src/styles/tokens.css",
+            "/* ─── spacing — the scale ─── */\n:root { --fg: red; }\n",
+        );
+        assert_eq!(run(check_css_comments_balance, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cursor_policy_accepts_a_clean_component() {
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            r#"const s = { color: "red" };"#,
+        );
+        assert_eq!(run(check_cursor_policy, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cursor_policy_catches_a_pointer_on_a_control() {
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            r#"const s = { cursor: "pointer" };"#,
+        );
+        let out = run(check_cursor_policy, &d);
+        assert!(out.iter().any(|p| p.contains("desktop shell")), "{out:?}");
+    }
+
+    #[test]
+    fn cursor_policy_catches_not_allowed_in_a_compound_condition() {
+        // The sweep's regex only handled single-identifier ternaries, so
+        // `disabled || loading ? "not-allowed" : "pointer"` survived it.
+        // The guard is what found that one.
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            r#"const s = { cursor: disabled || loading ? "not-allowed" : "pointer" };"#,
+        );
+        let out = run(check_cursor_policy, &d);
+        assert!(out.iter().any(|p| p.contains("not-allowed")), "{out:?}");
+    }
+
+    #[test]
+    fn cursor_policy_exempts_external_link() {
+        // The one place the web affordance is literally correct.
+        let d = repo();
+        write(
+            &d,
+            "src/components/primitives/ExternalLink.tsx",
+            r#"const s = { cursor: "pointer" };"#,
+        );
+        assert_eq!(run(check_cursor_policy, &d), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cursor_policy_is_not_satisfied_by_a_comment() {
+        let d = repo();
+        write(
+            &d,
+            "src/components/Thing.tsx",
+            "// we used to set cursor: pointer here\nconst s = { color: \"red\" };",
+        );
+        assert_eq!(run(check_cursor_policy, &d), Vec::<String>::new());
     }
 }

@@ -127,7 +127,7 @@ export function ActionCard({
                 color: "var(--fg-ghost)",
                 border: "var(--bw-hair) dashed var(--line-strong)",
                 borderRadius: "var(--r-1)",
-                cursor: disabledHint ? "help" : "not-allowed",
+                cursor: disabledHint ? "help" : undefined,
               }}
             >
               {ctaGlyph && <Glyph g={ctaGlyph} />}

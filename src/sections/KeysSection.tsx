@@ -627,7 +627,6 @@ function OauthTokensTable({
                       background: "transparent",
                       border: "none",
                       padding: 0,
-                      cursor: "pointer",
                     }}
                   >
                     <Tag

@@ -123,7 +123,6 @@ export function Button({
         color: paint.color,
         border: paint.border,
         opacity: disabled ? "var(--opacity-disabled)" : 1,
-        cursor: disabled ? "not-allowed" : "pointer",
         transform: pressed
           ? "translateY(var(--press-shift))"
           : "none",

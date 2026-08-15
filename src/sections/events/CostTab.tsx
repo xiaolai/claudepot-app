@@ -801,7 +801,6 @@ function UnpricedFooter({
           border: "var(--bw-hair) solid var(--line-strong)",
           borderRadius: "var(--r-1)",
           color: "var(--fg)",
-          cursor: "pointer",
           whiteSpace: "nowrap",
           fontFamily: "inherit",
         }}

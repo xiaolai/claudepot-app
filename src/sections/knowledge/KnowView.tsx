@@ -473,7 +473,6 @@ function ProjectGroup({
             background: "transparent",
             border: "none",
             padding: "var(--sp-6) 0",
-            cursor: "pointer",
             color: "var(--fg)",
             font: "inherit",
           }}

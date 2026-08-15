@@ -96,7 +96,6 @@ export function FilterChip({
         background: bg,
         border: `var(--bw-hair) solid ${bd}`,
         borderRadius: "var(--r-1)",
-        cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.6 : 1,
         transition:
           "background-color var(--dur-fast) var(--ease-linear), border-color var(--dur-fast) var(--ease-linear)",

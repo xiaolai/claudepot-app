@@ -931,7 +931,7 @@ function Toggle({
         gap: "var(--sp-6)",
         fontSize: "var(--fs-xs)",
         color: disabled ? "var(--fg-faint)" : "var(--fg-muted)",
-        cursor: disabled ? "not-allowed" : "pointer",
+        
       }}
     >
       <input

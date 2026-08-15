@@ -235,7 +235,6 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
         className="pm-focus"
         style={{
           borderBottom: "var(--bw-hair) solid var(--line)",
-          cursor: "pointer",
         }}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => {

@@ -209,7 +209,6 @@ function Collapsible({
             border: "none",
             padding: 0,
             color: "inherit",
-            cursor: "pointer",
             font: "inherit",
           }}
         >

@@ -133,7 +133,6 @@ export function OptionRow({
         gap: "var(--sp-8)",
         fontSize: "var(--fs-sm)",
         color: disabled ? "var(--fg-faint)" : "var(--fg)",
-        cursor: disabled ? "not-allowed" : "pointer",
         lineHeight: "var(--lh-body)",
       }}
     >
@@ -193,7 +192,6 @@ export function Disclosure({
           fontSize: "var(--fs-xs)",
           color: "var(--fg-muted)",
           listStyle: "none",
-          cursor: "pointer",
           userSelect: "none",
         }}
       >

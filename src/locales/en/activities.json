@@ -166,14 +166,6 @@
     "estimatedTitle": "Estimated: this model isn't in the rate table yet, so its family's current rate was used."
   },
   "dashboard": {
-    "live": "Live",
-    "running": "running",
-    "bgWorkers_one": "+ {{count}} bg worker",
-    "bgWorkers_other": "+ {{count}} bg workers",
-    "bgWorkerSuffix_one": "bg worker",
-    "bgWorkerSuffix_other": "bg workers",
-    "foregroundIdle": "foreground idle",
-    "idle": "idle",
     "today": "Today",
     "thisMonth": "This month",
     "loading": "loading…",

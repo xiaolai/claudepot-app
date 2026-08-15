@@ -308,7 +308,6 @@ export function RotationRuleModal({
           >
             <summary
               style={{
-                cursor: "pointer",
                 fontSize: "var(--fs-sm)",
                 color: "var(--fg-muted)",
               }}

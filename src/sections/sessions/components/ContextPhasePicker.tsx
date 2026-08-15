@@ -69,7 +69,6 @@ function PhaseButton({
         color: active ? "var(--accent-ink)" : "var(--fg-muted)",
         border: `var(--bw-hair) solid ${active ? "var(--accent-border)" : "var(--line)"}`,
         borderRadius: "var(--r-1)",
-        cursor: "pointer",
       }}
     >
       {label}

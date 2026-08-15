@@ -313,7 +313,6 @@ function Row({
             ? "2px solid var(--accent-border)"
             : "2px solid transparent",
           borderBottom: "var(--bw-hair) solid var(--line)",
-          cursor: "pointer",
           fontSize: "var(--fs-sm)",
         }}
       >

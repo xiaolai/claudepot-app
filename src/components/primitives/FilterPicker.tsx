@@ -242,6 +242,11 @@ function PickerRow({
       id={id}
       role="option"
       aria-selected={selected}
+      // `disabled` here strips the handlers but the element is an <li>,
+      // not a <button>, so nothing announces the state. `not-allowed`
+      // was carrying it alone — and colour/cursor may not be the only
+      // cue (design.md accessibility floor).
+      aria-disabled={disabled || undefined}
       tabIndex={-1}
       onClick={disabled ? undefined : onPick}
       onMouseMove={disabled ? undefined : onHover}
@@ -250,7 +255,7 @@ function PickerRow({
         alignItems: "baseline",
         gap: "var(--sp-8)",
         padding: "var(--sp-6) var(--sp-10)",
-        cursor: disabled ? "not-allowed" : "pointer",
+        
         // Active (cursor) and selected (picked) are different states and
         // both have to be visible at once: the user arrows past their own
         // current choice all the time.

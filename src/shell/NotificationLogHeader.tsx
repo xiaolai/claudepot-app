@@ -111,7 +111,6 @@ const miniBtnStyle: CSSProperties = {
   border: "var(--bw-subhair) solid var(--line)",
   borderRadius: "var(--r-1)",
   color: "var(--fg-muted)",
-  cursor: "pointer",
   fontFamily: "inherit",
   lineHeight: 1.3,
 };

@@ -66,7 +66,6 @@ export function SidebarTargetSwitcher({
           border: `var(--bw-hair) solid ${open ? "var(--accent-border)" : "var(--line)"}`,
           borderRadius: "var(--r-2)",
           textAlign: "left",
-          cursor: "pointer",
         }}
       >
         {/* Lead glyph was --fs-xl (22px) in the Nerd Font era; an
@@ -223,7 +222,6 @@ export function SidebarTargetSwitcher({
                 color: "var(--fg-muted)",
                 borderRadius: "var(--r-1)",
                 background: "transparent",
-                cursor: "pointer",
                 textAlign: "left",
               }}
             >

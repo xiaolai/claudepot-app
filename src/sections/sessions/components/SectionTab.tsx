@@ -54,7 +54,6 @@ export function SectionTab({
         background: active ? "var(--accent-soft)" : "var(--bg-sunken)",
         border: `var(--bw-hair) solid ${active ? "var(--accent-border)" : "var(--line)"}`,
         borderRadius: "var(--r-1)",
-        cursor: "pointer",
         whiteSpace: "nowrap",
         outlineOffset: 2,
       }}

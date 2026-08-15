@@ -36,8 +36,12 @@ export function useShellShortcuts(args: {
   openPalette: () => void;
   openShortcuts: () => void;
   pushToast: (kind: "info" | "error", text: string) => void;
+  /** Expand the sidebar. ⌘⇧L needs it: the live strip is not mounted
+   *  while collapsed, so the shortcut had nothing to focus and did
+   *  nothing at all in that state. */
+  expandSidebar?: () => void;
 }): void {
-  const { setSection, openPalette, openShortcuts, pushToast } = args;
+  const { setSection, openPalette, openShortcuts, pushToast, expandSidebar } = args;
 
   // ⌘, / ⌘K / ⌘/.
   useEffect(() => {
@@ -120,10 +124,13 @@ export function useShellShortcuts(args: {
     return () => window.removeEventListener("keydown", onBoardsKey);
   }, [pushToast, setSection]);
 
-  // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
-  // fallback until the Activity section lands (M4) and claims this
-  // shortcut. Ignores editable focus so typing "L" in the command
-  // palette isn't hijacked.
+  // ⌘⇧L — focus the first SidebarLiveStrip row.
+  //
+  // The sidebar is now the canonical in-window live list, so this
+  // shortcut has to be able to reach it from either state. The strip is
+  // unmounted while the sidebar is collapsed (previews need width), so
+  // the query below matched nothing and the shortcut silently did
+  // nothing — expand first, then focus once the strip has mounted.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -135,12 +142,19 @@ export function useShellShortcuts(args: {
       // Keyed on `data-live-strip` rather than the strip's aria-label,
       // which is translated — matching on it worked in English and
       // matched nothing in every other locale.
-      const firstRow = document.querySelector<HTMLButtonElement>(
-        "[data-live-strip] [role='option']",
-      );
-      firstRow?.focus();
+      const focusFirst = () =>
+        document
+          .querySelector<HTMLButtonElement>("[data-live-strip] [role='option']")
+          ?.focus();
+      if (document.querySelector("[data-live-strip]")) {
+        focusFirst();
+        return;
+      }
+      expandSidebar?.();
+      // One frame for React to commit the newly-mounted strip.
+      requestAnimationFrame(focusFirst);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [expandSidebar]);
 }

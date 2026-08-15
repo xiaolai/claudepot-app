@@ -175,7 +175,6 @@ const chipStyle: CSSProperties = {
   borderRadius: "var(--r-pill)",
   background: "transparent",
   color: "var(--fg-muted)",
-  cursor: "pointer",
   fontFamily: "inherit",
   lineHeight: 1.3,
 };
@@ -187,6 +186,5 @@ const selectStyle: CSSProperties = {
   borderRadius: "var(--r-1)",
   background: "var(--bg-sunken)",
   color: "var(--fg-muted)",
-  cursor: "pointer",
   fontFamily: "inherit",
 };

@@ -544,7 +544,16 @@ user must be able to type the phrase they are shown.
 
 **The gate:** `pnpm check:catalogs` (`scripts/check-catalogs.mjs`, wired
 into `ci.yml`) enforces en↔zh key parity, `{{placeholder}}` parity,
-`<Trans>` tag parity, no orphans, no empty values, valid JSON. Plural
+`<Trans>` tag parity, no orphans, no empty values, valid JSON.
+
+**"Orphan" there means a zh key with no en counterpart — a *cross-locale*
+check.** It does not detect a key that no source file references, and a
+green run is not evidence there are none: deleting the Activities live
+surfaces left 30 dead keys behind and the gate stayed green. Prune them
+by hand when you delete a component. A mechanical check is not offered
+because ~450 keys resolve dynamically — the whole `errors` namespace is
+keyed by Rust error code — so a reference scan would report hundreds of
+live keys as dead, and a gate that cries wolf gets bypassed. Plural
 parity is asserted on plural *bases*, since zh legitimately carries
 only `_other` where en carries `_one` + `_other`. Point
 `CLAUDEPOT_LOCALES_DIR` at a fixture to exercise the gate itself — a

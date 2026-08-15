@@ -197,7 +197,6 @@ function TabButton({
         color: active ? "var(--fg)" : "var(--fg-muted)",
         font: "inherit",
         fontWeight: active ? 600 : 400,
-        cursor: "pointer",
       }}
     >
       {children}

@@ -339,7 +339,6 @@ function ThinkingBody({
           background: "var(--bg-sunken)",
           border: "var(--bw-hair) dashed var(--line)",
           borderRadius: "var(--r-2)",
-          cursor: "pointer",
           fontFamily: "var(--font)",
         }}
         aria-label={t("viewer.revealThinkingAria", { chars: text.length })}

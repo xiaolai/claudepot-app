@@ -246,7 +246,6 @@ function EmbeddedStatusStrip({
           border: "none",
           color: "var(--fg-muted)",
           fontSize: "var(--fs-xs)",
-          cursor: "pointer",
           borderRadius: "var(--r-1)",
         }}
       >
@@ -1580,7 +1579,6 @@ function GroupHeaderButton({
         padding: `0 var(--sp-12) 0 ${leftPad}`,
         background: "transparent",
         border: "none",
-        cursor: "pointer",
         color: "var(--fg)",
         fontSize: "var(--fs-xs)",
         fontWeight: depth === 0 ? 500 : 400,
@@ -1649,7 +1647,6 @@ function VirtualRowButton({
         background: selected ? "var(--bg-active)" : "transparent",
         color: selected ? "var(--accent-ink)" : "var(--fg)",
         border: "none",
-        cursor: "pointer",
         fontSize: "var(--fs-xs)",
         fontWeight: depth === 0 ? 500 : 400,
         textAlign: "left",
@@ -1743,7 +1740,6 @@ function FileRowButton({
             ? "var(--fg-faint)"
             : "var(--fg)",
         border: "none",
-        cursor: "pointer",
         fontSize: "var(--fs-xs)",
         textAlign: "left",
       }}
@@ -2516,7 +2512,6 @@ function SearchResultsPane({
             color: "var(--fg)",
             border: "none",
             borderBottom: "var(--bw-hair) solid var(--line)",
-            cursor: "pointer",
             fontSize: "var(--fs-xs)",
           }}
         >
@@ -2650,7 +2645,6 @@ function AnchorPicker({
           background: "var(--bg)",
           color: "var(--fg)",
           fontSize: "var(--fs-xs)",
-          cursor: "pointer",
           maxWidth: "240px",
         }}
       >
@@ -2798,7 +2792,6 @@ function AnchorMenuItem({
         background: selected ? "var(--bg-active)" : "transparent",
         color: selected ? "var(--accent-ink)" : "var(--fg)",
         border: "none",
-        cursor: "pointer",
         fontSize: "var(--fs-xs)",
         textAlign: "left",
       }}

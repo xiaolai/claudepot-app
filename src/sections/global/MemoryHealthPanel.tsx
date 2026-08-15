@@ -107,7 +107,6 @@ export function MemoryHealthPanel() {
             border: "var(--bw-hair) solid var(--line-strong)",
             borderRadius: "var(--r-1)",
             color: "var(--fg)",
-            cursor: loading ? "default" : "pointer",
             opacity: loading ? 0.6 : 1,
             fontFamily: "inherit",
           }}

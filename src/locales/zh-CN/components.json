@@ -213,16 +213,6 @@
     "stuck": "卡住",
     "bgWorkers_other": "{{count}} 个后台工作进程"
   },
-  "liveCards": {
-    "heading": "实时会话",
-    "headingCount": "实时会话（{{n}}）",
-    "empty": "当前没有会话正在写入。",
-    "cardAria": "实时会话 {{id}}，项目 {{project}}，状态 {{status}}",
-    "error": "错误",
-    "stuck": "卡住",
-    "model": "模型",
-    "idle": "距上次更新的时间"
-  },
   "liveDot": {
     "errored": "出错",
     "waiting": "等待中",

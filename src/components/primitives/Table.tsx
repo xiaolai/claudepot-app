@@ -122,7 +122,6 @@ export function ThSort<K extends string>({
         letterSpacing: "var(--ls-wide)",
         textTransform: "uppercase",
         borderBottom: "var(--bw-hair) solid var(--line)",
-        cursor: "pointer",
         userSelect: "none",
       }}
     >

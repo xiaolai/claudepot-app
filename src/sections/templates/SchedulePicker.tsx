@@ -273,7 +273,6 @@ function Radio({
         display: "flex",
         alignItems: "center",
         gap: "var(--sp-8)",
-        cursor: "pointer",
         fontSize: "var(--fs-sm)",
         color: "var(--fg)",
       }}
