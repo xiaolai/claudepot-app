@@ -92,17 +92,6 @@
 
   /* ── 4px-grid shortcuts — for recipes that prefer grid-step
         naming. These alias the --sp-N scale. ─────────────────── */
-  --s-0:  var(--sp-0);
-  --s-1:  var(--sp-4);
-  --s-2:  var(--sp-8);
-  --s-3:  var(--sp-12);
-  --s-4:  var(--sp-16);
-  --s-5:  var(--sp-20);
-  --s-6:  var(--sp-24);
-  --s-8:  var(--sp-32);
-  --s-10: var(--sp-40);
-  --s-12: var(--sp-48);
-  --s-16: var(--sp-64);
 
   /* ── Type scale (all mono) ──────────────────────────────── */
   --fs-4xs:  8px;   /* dot glyph, finest decoration */
@@ -381,7 +370,6 @@
   --board-bar-value-w: 48px;
   --board-widget-min-w: 320px;
   --board-spark-stroke-w: 1.5;
-  --radius-xs: 2px;
 
 }
 
