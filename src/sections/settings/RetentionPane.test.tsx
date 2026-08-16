@@ -7,14 +7,16 @@ import { i18n } from "../../lib/i18n";
 const retentionReportMock = vi.fn();
 const retentionSetMock = vi.fn();
 const retentionClearMock = vi.fn();
-const retentionDisableMock = vi.fn();
 
+// No `retentionDisablePersistence` — the command was removed when CC
+// 2.1.233 started rejecting `cleanupPeriodDays: 0`. Deliberately not
+// stubbed: if the pane ever calls it again, this mock object is missing
+// the method and the test fails loudly rather than silently passing.
 vi.mock("../../api", () => ({
   api: {
     retentionReport: (...a: unknown[]) => retentionReportMock(...a),
     retentionSet: (...a: unknown[]) => retentionSetMock(...a),
     retentionClear: (...a: unknown[]) => retentionClearMock(...a),
-    retentionDisablePersistence: (...a: unknown[]) => retentionDisableMock(...a),
   },
 }));
 
@@ -52,7 +54,6 @@ describe("RetentionPane", () => {
     retentionReportMock.mockReset();
     retentionSetMock.mockReset();
     retentionClearMock.mockReset();
-    retentionDisableMock.mockReset();
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -129,24 +130,87 @@ describe("RetentionPane", () => {
     }
   });
 
-  it("gates disabling persistence behind a type-to-confirm", async () => {
+  // CC 2.1.233 rejects `cleanupPeriodDays: 0` and offers no
+  // settings-level way to stop persisting, so the control that used to
+  // write it is gone. This replaces "gates disabling persistence behind
+  // a type-to-confirm": the gate was correct for a capability that no
+  // longer exists.
+  it("offers no way to stop saving transcripts, and says why", async () => {
     retentionReportMock.mockResolvedValue(report());
     render(<RetentionPane pushToast={toast()} />);
-    const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole("button", { name: /stop saving transcripts entirely/i }),
-    );
-    // Dialog is up, but the destructive call must not fire until the
-    // phrase is typed.
-    const confirm = await screen.findByRole("button", {
-      name: /stop saving and delete/i,
-    });
-    await user.click(confirm);
-    expect(retentionDisableMock).not.toHaveBeenCalled();
+    await screen.findByRole("button", { name: "30 days" });
+    expect(
+      screen.queryByRole("button", { name: /stop saving/i }),
+    ).toBeNull();
+    // Absence alone is a worse outcome than an explanation: a user who
+    // set this once will come looking for it.
+    expect(
+      screen.getByText(/no longer any way to stop saving transcripts/i),
+    ).toBeInTheDocument();
+  });
 
-    await user.type(screen.getByRole("textbox"), "delete my transcripts");
-    await user.click(screen.getByRole("button", { name: /stop saving and delete/i }));
-    await waitFor(() => expect(retentionDisableMock).toHaveBeenCalled());
+  // A `0` written by an older Claudepot is still on disk for anyone who
+  // used the old control. It now suppresses cleanup rather than
+  // disabling persistence — the opposite of what they chose.
+  it("explains a legacy zero rather than reporting persistence as off", async () => {
+    retentionReportMock.mockResolvedValue(
+      report({
+        state: {
+          mode: "legacy_zero",
+          configured_days: 0,
+          effective_days: 30,
+          is_cc_default: false,
+          cleanup_suppressed: true,
+        },
+      }),
+    );
+    render(<RetentionPane pushToast={toast()} />);
+    expect(
+      await screen.findByText(/no longer accepts/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/transcripts are being written/i),
+    ).toBeInTheDocument();
+  });
+
+  // While cleanup is suppressed the transcripts are protected by
+  // accident, so a preset is not a preference — it re-arms deletion of
+  // the whole backlog in one tap.
+  it("confirms before a preset re-arms deletion on a suppressed setting", async () => {
+    retentionReportMock.mockResolvedValue(
+      report({
+        state: {
+          mode: "legacy_zero",
+          configured_days: 0,
+          effective_days: 30,
+          is_cc_default: false,
+          cleanup_suppressed: true,
+        },
+      }),
+    );
+    retentionSetMock.mockResolvedValue(report());
+    const user = userEvent.setup();
+    render(<RetentionPane pushToast={toast()} />);
+
+    await user.click(await screen.findByRole("button", { name: "30 days" }));
+    expect(retentionSetMock).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: /re-enable deletion/i }),
+    );
+    await waitFor(() => expect(retentionSetMock).toHaveBeenCalledWith(30));
+  });
+
+  // ...and the confirmation is scoped to that state only. An ordinary
+  // preset change must stay one click.
+  it("applies a preset immediately when cleanup is not suppressed", async () => {
+    retentionReportMock.mockResolvedValue(report());
+    retentionSetMock.mockResolvedValue(report());
+    render(<RetentionPane pushToast={toast()} />);
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "90 days" }));
+    await waitFor(() => expect(retentionSetMock).toHaveBeenCalledWith(90));
   });
 
   it("confirms before restoring the default that re-arms deletion", async () => {

@@ -13,12 +13,21 @@
 //! 1. **Sliding, not one-shot.** `getCutoffDate()` recomputes
 //!    `now - cleanupPeriodDays` on *every* run, so the loss is
 //!    continuous — roughly a day of corpus per day, forever.
-//! 2. **Its "off-looking" value is its worst value.** `0` does not mean
-//!    "no cleanup". It means *disable session persistence entirely and
-//!    delete existing transcripts at startup*. Every other key in the
-//!    file reads `0`/`false` as "do less"; this one reads it as "do the
-//!    maximum harm". So [`RetentionMode`] never renders `0` as an off
-//!    position — see [`RetentionMode::PersistenceDisabled`].
+//! 2. **Its "off-looking" value is not an off position — and no longer
+//!    a value at all.** `0` never meant "no cleanup". Through CC 2.1.88
+//!    it meant *disable session persistence entirely and delete existing
+//!    transcripts at startup*; CC 2.1.233 rejects it outright, with a
+//!    documented floor of 1. Either way `0` is not a stop on the
+//!    duration scale, which is why [`RetentionMode`] gives it its own
+//!    variant — see [`RetentionMode::LegacyZero`] for what a `0` still
+//!    sitting on disk does today, which is the opposite of what whoever
+//!    wrote it wanted.
+//!
+//!    **There is now no way to disable transcript persistence for an
+//!    interactive session at all.** `--no-session-persistence` is
+//!    `--print`-only and `persistSession: false` is an SDK option, so
+//!    this module offers no "stop saving" verb; offering one would mean
+//!    writing a value CC rejects and calling that success.
 //! 3. **Silent.** `cleanupOldSessionFiles()` computes an exact count of
 //!    the transcripts it just unlinked and its caller
 //!    (`cleanupOldMessageFilesInBackground`) discards the return value.
@@ -78,6 +87,15 @@ pub const DEFAULT_RISK_HORIZON_DAYS: i64 = 7;
 
 const MS_PER_DAY: i64 = 24 * 60 * 60 * 1_000;
 
+/// CC's floor for `cleanupPeriodDays`. Verified against the 2.1.233
+/// binary, which documents the key as "default: 30; minimum 1" and
+/// rejects `0` with its own message (see [`RetentionMode::LegacyZero`]).
+///
+/// Re-verify when the upstream watch (`dev-docs/cc-upstream-watch.md`)
+/// reports movement on this key: it was `0` for the whole life of this
+/// module before 2.1.233, and the change inverted a control.
+pub const MIN_CLEANUP_PERIOD_DAYS: i64 = 1;
+
 /// File extensions CC's `cleanupOldSessionFiles` unlinks by mtime.
 /// Both are checked at `utils/cleanup.ts` in the `entry.isFile()` arm.
 const CLEANED_EXTENSIONS: [&str; 2] = ["jsonl", "cast"];
@@ -93,16 +111,39 @@ pub enum RetentionMode {
     CcDefault,
     /// An explicit positive day count.
     Explicit,
-    /// `cleanupPeriodDays: 0` — CC writes no transcripts at all and
-    /// deletes existing ones at startup. Never an "off" position.
-    PersistenceDisabled,
-    /// A value CC's schema rejects: a negative number, or anything that is
-    /// not an integer at all (a string, a float, a bool, `null`). The key
-    /// is declared `z.number().nonnegative().int()`, so any of these
-    /// invalidates the whole settings file — which makes CC skip cleanup
-    /// entirely. See [`RetentionState::cleanup_suppressed`]: the transcripts
-    /// are safe, but only by accident, and "restore the default" would undo
-    /// it.
+    /// `cleanupPeriodDays: 0` — **a value current CC rejects.**
+    ///
+    /// Its own variant rather than a fold into [`Self::Invalid`] because
+    /// it is the one invalid value Claudepot itself used to write, on
+    /// purpose, behind a type-to-confirm gate. Up to some release between
+    /// 2.1.88 and 2.1.233 it meant "write no transcripts and delete the
+    /// existing ones at startup". CC 2.1.233 rejects it outright:
+    ///
+    /// > `cleanupPeriodDays must be at least 1. … To disable transcript
+    /// > writes entirely, remove this setting and use the
+    /// > --no-session-persistence CLI flag or the SDK
+    /// > persistSession:false option instead. (0 is rejected because it
+    /// > previously silently disabled all transcript writes, which users
+    /// > setting it to mean "never clean up" did not expect.)`
+    ///
+    /// So a `0` on disk today does the opposite of what whoever wrote it
+    /// intended: transcripts **are** being written, and cleanup is
+    /// suppressed because the key is present and fails validation. The
+    /// user believes persistence is off while CC accumulates history
+    /// forever. That inversion is why this keeps a distinct variant and
+    /// its own repair copy — folding it into `Invalid` would render it as
+    /// a typo to correct rather than a promise that was broken upstream.
+    LegacyZero,
+    /// A value CC's schema rejects: a number below 1, or anything that is
+    /// not an integer at all (a string, a float, a bool, `null`). CC
+    /// 2.1.233 documents the key as "default: 30; minimum 1", so any of
+    /// these invalidates the whole settings file — which makes CC skip
+    /// cleanup entirely. See [`RetentionState::cleanup_suppressed`]: the
+    /// transcripts are safe, but only by accident, and "restore the
+    /// default" would undo it.
+    ///
+    /// `0` is excluded here only because it gets [`Self::LegacyZero`];
+    /// mechanically CC treats the two identically.
     ///
     /// The non-integer half of this used to read as `CcDefault`, because the
     /// reader collapsed "absent" and "present but wrong type" into one
@@ -129,22 +170,43 @@ pub struct RetentionState {
     pub is_cc_default: bool,
     /// CC is currently not running cleanup at all.
     ///
-    /// `cleanupOldMessageFilesInBackground` bails before touching any
-    /// file when the settings file has validation errors *and* the raw
-    /// settings explicitly contain `cleanupPeriodDays`
-    /// (`utils/cleanup.ts:576-586`). A negative value triggers exactly
-    /// that: `z.number().nonnegative()` rejects it, and the key is by
-    /// definition present. So does a non-integer value, for the same
-    /// reason — `z.number().int()` rejects `"thirty"`, `30.5`, and `true`
-    /// alike.
+    /// CC bails before touching any file when the settings file has
+    /// validation errors *and* the raw settings explicitly contain
+    /// `cleanupPeriodDays`. Any value below `1` triggers exactly that,
+    /// and the key is by definition present. So does a non-integer
+    /// value, for the same reason — the schema rejects `"thirty"`,
+    /// `30.5`, and `true` alike.
     ///
-    /// Known limit: CC suppresses cleanup when the settings file has *any*
-    /// validation error while this key is present, including an error in an
-    /// unrelated key. Claudepot does not model CC's whole settings schema,
-    /// so it detects only errors in this key. A file that is invalid
-    /// elsewhere therefore reads here as "cleanup armed" when CC has in
-    /// fact suppressed it — an error in the safe direction (we warn about
-    /// deletion that is not happening) but not a complete one.
+    /// Re-verified against the 2.1.233 binary, which now says so in the
+    /// user's own words rather than only in code:
+    ///
+    /// > `Skipping cleanup: settings have validation errors but
+    /// > cleanupPeriodDays was explicitly set. Fix settings errors to
+    /// > enable cleanup.`
+    ///
+    /// That is a meaningful upgrade on the 2.1.88 behaviour this module
+    /// was written against, where the skip was entirely silent: CC now
+    /// tells the user (via `/doctor`) that
+    /// *"Transcript retention cleanup is paused until the settings
+    /// errors above are fixed"*. The pane's advice is unchanged and now
+    /// agrees with CC's: fix the value, never restore the default.
+    ///
+    /// Known limits, both in the safe direction:
+    ///
+    /// - CC suppresses cleanup when the settings file has *any*
+    ///   validation error while this key is present, including an error
+    ///   in an unrelated key. Claudepot does not model CC's whole
+    ///   settings schema, so it detects only errors in this key. A file
+    ///   invalid elsewhere reads here as "cleanup armed" when CC has in
+    ///   fact suppressed it.
+    /// - 2.1.233 adds two suppression causes Claudepot does not model at
+    ///   all: a settings file that cannot be read or parsed, and
+    ///   `--setting-sources` disabling the user-settings source while no
+    ///   enabled source provides the key. Both also read here as
+    ///   "cleanup armed".
+    ///
+    /// In every case we warn about deletion that is not happening, which
+    /// is the direction to be wrong in — but it is not complete.
     ///
     /// So an invalid value accidentally *protects* transcripts. That
     /// changes the advice completely — "restore the default" would
@@ -332,7 +394,11 @@ impl RetentionWarning {
 pub enum RetentionError {
     #[error("write CC settings")]
     Write(#[from] SettingsWriteError),
-    #[error("cleanupPeriodDays must be positive; got {0}. Use disable_persistence() to set 0.")]
+    #[error(
+        "cleanupPeriodDays must be at least 1; got {0}. Claude Code rejects \
+         anything lower, and a rejected value does not disable persistence — \
+         it makes CC skip cleanup entirely."
+    )]
     NonPositive(i64),
 }
 
@@ -343,17 +409,19 @@ pub enum RetentionError {
 /// from this module's header:
 ///
 /// - **`NonPositive` keeps its own code.** It is the guard that stops
-///   `0` from riding the duration scale — `0` means *write no
-///   transcripts and delete the existing ones at startup*, the single
-///   most destructive value, reachable only through the separately
-///   named `disable_persistence()` behind a type-to-confirm gate.
-///   Folding it into a generic "invalid value" code would let a
-///   translator write one sentence for two opposite stakes.
+///   `0` from riding the duration scale. CC now rejects `0` itself, so
+///   this is no longer the last line of defence it once was — but it is
+///   still the only place that can explain *why* the write was refused,
+///   and the stakes are not those of an ordinary out-of-range number:
+///   a `0` that reached the file suppresses cleanup and leaves the user
+///   believing persistence is off while CC keeps writing. Folding it
+///   into a generic "invalid value" code would let a translator write
+///   one sentence for two very different situations.
 /// - **Nothing here is the `cleanup_suppressed` case.** A value CC's
 ///   schema rejects *protects* transcripts and is reported as
-///   `RetentionMode::Invalid` state, never as an error — which is why
-///   no code in this impl may ever be given "restore the default"
-///   remediation copy. Restoring re-arms deletion.
+///   `RetentionMode::Invalid` / `RetentionMode::LegacyZero` state, never
+///   as an error — which is why no code in this impl may ever be given
+///   "restore the default" remediation copy. Restoring re-arms deletion.
 impl crate::error_code::ErrorCode for RetentionError {
     fn code(&self) -> &'static str {
         match self {
@@ -370,10 +438,9 @@ impl crate::error_code::ErrorCode for RetentionError {
             // `detail` is what makes the failure diagnosable; the
             // English `message` is unchanged either way.
             RetentionError::Write(e) => serde_json::json!({ "detail": e.to_string() }),
-            // The rejected day count. The English sentence names
-            // `disable_persistence()` because the CLI prints it
-            // verbatim; a GUI sentence has no such call and needs the
-            // number to say what the user typed.
+            // The rejected day count. The CLI prints the English
+            // sentence verbatim; a GUI sentence renders from the
+            // catalog and needs the number to say what the user typed.
             RetentionError::NonPositive(days) => serde_json::json!({ "days": days }),
         }
     }
@@ -406,8 +473,13 @@ fn state_from_configured(configured: SettingValue<i64>) -> RetentionState {
         // Present but not an integer — CC's schema rejects it and, with the
         // key present, skips cleanup entirely.
         SettingValue::Invalid => (RetentionMode::Invalid, CC_DEFAULT_CLEANUP_PERIOD_DAYS),
-        SettingValue::Present(0) => (RetentionMode::PersistenceDisabled, 0),
-        SettingValue::Present(d) if d < 0 => {
+        // Carries CC's nominal default rather than `0` for the same
+        // reason `Invalid` does: cleanup is suppressed, so this field is
+        // meaningless here, and a `0` sitting in it invites a caller to
+        // render "deletes everything after 0 days" — the exact claim
+        // that is no longer true.
+        SettingValue::Present(0) => (RetentionMode::LegacyZero, CC_DEFAULT_CLEANUP_PERIOD_DAYS),
+        SettingValue::Present(d) if d < 1 => {
             (RetentionMode::Invalid, CC_DEFAULT_CLEANUP_PERIOD_DAYS)
         }
         SettingValue::Present(d) => (RetentionMode::Explicit, d),
@@ -417,7 +489,10 @@ fn state_from_configured(configured: SettingValue<i64>) -> RetentionState {
         configured_days: configured.ok(),
         effective_days,
         is_cc_default: mode == RetentionMode::CcDefault,
-        cleanup_suppressed: mode == RetentionMode::Invalid,
+        // `LegacyZero` suppresses cleanup exactly as `Invalid` does: CC
+        // requires >= 1, so the key is present and fails validation,
+        // which is the documented skip condition.
+        cleanup_suppressed: matches!(mode, RetentionMode::Invalid | RetentionMode::LegacyZero),
     }
 }
 
@@ -590,15 +665,29 @@ fn mtime_ms(path: &Path) -> Option<i64> {
     i64::try_from(dur.as_millis()).ok()
 }
 
-/// Write an explicit positive retention window to
-/// `~/.claude/settings.json`.
+/// Write an explicit retention window to `~/.claude/settings.json`.
 ///
-/// Refuses `0` — that is not a longer/shorter setting on the same
-/// scale, it is "delete everything and stop persisting", and it must go
-/// through [`disable_persistence`] so no caller reaches it by passing a
-/// number through a slider.
+/// Refuses anything below `1`, which is CC's own floor — the 2.1.233
+/// binary states the key is "default: 30; minimum 1" and rejects `0`
+/// with a dedicated message. A rejected value does not disable
+/// anything; it invalidates the settings file and makes CC skip
+/// cleanup, so writing one is never a way to express intent.
+///
+/// **There is deliberately no "disable persistence" sibling to this
+/// function.** Current CC offers no settings-file route to disabling
+/// transcript writes, and the two routes it does offer are out of
+/// Claudepot's reach for the sessions this pane is about:
+/// `--no-session-persistence` is rejected outside `--print` mode
+/// (`Error: --no-session-persistence can only be used with --print
+/// mode.`), and `persistSession: false` is an SDK option. An
+/// interactive Claude Code session cannot have persistence turned off
+/// at all, so a control offering to do it would be a lie whatever it
+/// wrote.
 pub fn set_retention_days(days: i64) -> Result<(), RetentionError> {
-    if days <= 0 {
+    // For an integer these are the same set, so the variant keeps its
+    // name (and its error code, which the i18n catalog is keyed on);
+    // the constant is what states CC's actual rule.
+    if days < MIN_CLEANUP_PERIOD_DAYS {
         return Err(RetentionError::NonPositive(days));
     }
     mutate_settings(SettingsLayer::User, Path::new(""), |obj| {
@@ -611,24 +700,12 @@ pub fn set_retention_days(days: i64) -> Result<(), RetentionError> {
 }
 
 /// Remove the key so CC's 30-day default applies again.
+///
+/// This is also the repair for [`RetentionMode::LegacyZero`] — see
+/// [`set_retention_days`] for why there is no longer a "disable
+/// persistence" sibling to this function.
 pub fn clear_retention() -> Result<(), RetentionError> {
     clear_bool_setting(SettingsLayer::User, Path::new(""), CLEANUP_PERIOD_DAYS_KEY)?;
-    Ok(())
-}
-
-/// Write `cleanupPeriodDays: 0`: CC stops writing transcripts entirely
-/// and deletes the existing ones at next startup.
-///
-/// Separate from [`set_retention_days`] on purpose. This is the one call
-/// that destroys history, so it is named for what it does and cannot be
-/// reached by passing a value to the ordinary setter.
-pub fn disable_persistence() -> Result<(), RetentionError> {
-    mutate_settings(SettingsLayer::User, Path::new(""), |obj| {
-        obj.insert(
-            CLEANUP_PERIOD_DAYS_KEY.to_string(),
-            serde_json::Value::from(0),
-        );
-    })?;
     Ok(())
 }
 
@@ -664,19 +741,32 @@ mod tests {
         assert!(s.is_cc_default);
     }
 
+    /// `0` was a legal, maximally-destructive value through CC 2.1.88.
+    /// CC 2.1.233 rejects it (floor of 1), which inverts its effect: the
+    /// key is present and fails validation, so cleanup is suppressed and
+    /// transcripts accumulate instead of being destroyed. A `0` left on
+    /// disk by an older Claudepot is in exactly this state.
     #[test]
-    fn zero_is_persistence_disabled_not_off() {
+    fn zero_is_rejected_by_cc_and_suppresses_cleanup() {
         let s = state_from_configured(SettingValue::Present(0));
-        assert_eq!(s.mode, RetentionMode::PersistenceDisabled);
-        assert_eq!(s.effective_days, 0);
+        assert_eq!(s.mode, RetentionMode::LegacyZero);
+        assert!(
+            s.cleanup_suppressed,
+            "0 fails CC's minimum-1 schema with the key present, which is \
+             precisely CC's documented skip condition"
+        );
+        assert_eq!(
+            s.effective_days, CC_DEFAULT_CLEANUP_PERIOD_DAYS,
+            "must not be 0 — cleanup is suppressed, so a 0 here would \
+             invite a caller to render 'deletes after 0 days'"
+        );
         assert!(!s.is_cc_default);
     }
 
-    /// A negative value fails CC's `z.number().nonnegative()` schema.
-    /// `cleanupOldMessageFilesInBackground` then bails before deleting
-    /// anything, because settings have errors AND the raw key is
-    /// present — so an invalid value accidentally *protects*
-    /// transcripts.
+    /// A value below CC's floor of 1 fails its schema.
+    /// Cleanup then bails before deleting anything, because settings
+    /// have errors AND the raw key is present — so an invalid value
+    /// accidentally *protects* transcripts.
     #[test]
     fn negative_suppresses_cleanup_entirely() {
         let s = state_from_configured(SettingValue::Present(-1));
@@ -689,7 +779,9 @@ mod tests {
     fn valid_modes_do_not_suppress_cleanup() {
         for cfg in [
             SettingValue::Absent,
-            SettingValue::Present(0),
+            // `Present(0)` deliberately absent — no longer valid; see
+            // `zero_is_rejected_by_cc_and_suppresses_cleanup`.
+            SettingValue::Present(MIN_CLEANUP_PERIOD_DAYS),
             SettingValue::Present(30),
             SettingValue::Present(3650),
         ] {
@@ -803,13 +895,31 @@ mod tests {
         assert_eq!(resolve_retention().configured_days, None);
     }
 
+    /// There is no route to `0` at all any more, from any public entry
+    /// point in this module. `disable_persistence()` was deleted rather
+    /// than repointed: current CC offers no settings-file way to disable
+    /// transcript writes, so every possible implementation of that verb
+    /// would write a value CC rejects and report success.
+    ///
+    /// This is the regression guard for re-adding one. If a future CC
+    /// brings back a settings-level disable, this test should be
+    /// replaced deliberately — not deleted because it started failing.
     #[test]
-    fn disable_persistence_is_the_only_route_to_zero() {
+    fn no_public_writer_can_reach_zero() {
         let (_t, _l) = isolated();
-        disable_persistence().unwrap();
-        let s = resolve_retention();
-        assert_eq!(s.configured_days, Some(0));
-        assert_eq!(s.mode, RetentionMode::PersistenceDisabled);
+        for d in [0, -1, i64::MIN] {
+            assert!(set_retention_days(d).is_err(), "set_retention_days({d})");
+        }
+        assert_eq!(
+            resolve_retention().configured_days,
+            None,
+            "no failed write may leave a value behind"
+        );
+        // The one remaining writer that touches the key at all removes
+        // it, which is also the repair for a legacy zero.
+        set_retention_days(90).unwrap();
+        clear_retention().unwrap();
+        assert_eq!(resolve_retention().mode, RetentionMode::CcDefault);
     }
 
     /// This test used to assert the opposite — that a non-integer value
@@ -909,24 +1019,42 @@ mod tests {
         assert_eq!(r.total_transcripts, 3);
     }
 
+    /// Previously `persistence_disabled_puts_everything_at_risk`, which
+    /// asserted all three files were already deletable because a `0`
+    /// window put the cutoff at `now`. Under current CC the assertion
+    /// inverts: `0` is rejected, so cleanup is suppressed and *nothing*
+    /// is at risk however old it is — the scan pushes the cutoff to the
+    /// floor for exactly this case, same as [`RetentionMode::Invalid`].
+    ///
+    /// The transcripts are still counted, because the pane must be able
+    /// to say how much history is accumulating while the user believes
+    /// persistence is off.
     #[test]
-    fn persistence_disabled_puts_everything_at_risk() {
+    fn legacy_zero_scans_like_invalid_and_deletes_nothing() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
-        let r = scan_transcript_risk_in(
-            &root,
-            &state_from_configured(SettingValue::Present(0)),
-            now,
-            7,
-        );
-        assert_eq!(
-            r.already_deletable, 3,
-            "cutoff is now, so every file is past it"
-        );
-    }
+        let state = state_from_configured(SettingValue::Present(0));
+        let r = scan_transcript_risk_in(&root, &state, now, 7);
 
+        assert!(state.cleanup_suppressed);
+        assert_eq!(
+            r.already_deletable, 0,
+            "cleanup is suppressed, so the 60-day file is not on any timer"
+        );
+        assert_eq!(r.at_risk_within_horizon, 0);
+        assert_eq!(r.total_transcripts, 3, "but they are still counted");
+
+        // And the expiring boot check must stay silent: warning about
+        // deletion that is not happening is the failure this guards.
+        let report = RetentionReport {
+            state,
+            risk: r,
+            is_durable_archive: false,
+        };
+        assert!(warning(&report).is_none());
+    }
     #[test]
     fn oldest_ms_reports_the_earliest_surviving_transcript() {
         let tmp = TempDir::new().unwrap();

@@ -8,18 +8,27 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Note there is no plain "off". `0` is not a low value on the same
- * scale as `30` — it means "write no transcripts and delete the
- * existing ones", so it gets its own mode and its own command.
+ * Note there is no plain "off", and no way to write one. `0` is not a
+ * low value on the same scale as `30`: Claude Code's floor is `1`, and
+ * a `0` on disk fails validation, which makes CC skip cleanup entirely.
+ * Disabling transcript writes is not reachable from settings at all —
+ * `--no-session-persistence` is `--print`-only and `persistSession:
+ * false` is an SDK option — so there is no "stop saving" command here.
  */
 export type RetentionMode =
   /** Key absent — CC's 30-day default silently applies. */
   | "cc_default"
-  /** An explicit positive day count. */
+  /** An explicit day count of 1 or more. */
   | "explicit"
-  /** `cleanupPeriodDays: 0` — persistence disabled entirely. */
-  | "persistence_disabled"
-  /** Negative value; invalidates CC's settings schema. */
+  /**
+   * `cleanupPeriodDays: 0` — written by an older Claudepot, when CC
+   * still honoured it as "stop persisting". CC now rejects it, so it
+   * does the opposite: transcripts are written and cleanup is
+   * suppressed. Distinct from `invalid` because the repair copy differs
+   * — this is a promise that broke upstream, not a typo.
+   */
+  | "legacy_zero"
+  /** Below 1, or not an integer; invalidates CC's settings schema. */
   | "invalid";
 
 export interface RetentionState {
@@ -68,15 +77,12 @@ export const ccRetentionApi = {
       horizonDays: horizonDays ?? null,
     }),
 
-  /** Positive day counts only — the backend rejects 0 and negatives. */
+  /** Day counts of 1 or more — the backend rejects anything lower. */
   retentionSet: (days: number) =>
     invoke<RetentionReport>("retention_set", { days }),
 
-  /** Removes the key, re-arming CC's 30-day deletion. Confirm first. */
+  /** Removes the key, re-arming CC's 30-day deletion. Confirm first.
+   *  Also the repair for `legacy_zero`: clearing the key is the only
+   *  way to lift the validation error suppressing cleanup. */
   retentionClear: () => invoke<RetentionReport>("retention_clear"),
-
-  /** Writes 0: CC stops saving transcripts and deletes existing ones.
-   *  Destructive; must sit behind a ConfirmDialog. */
-  retentionDisablePersistence: () =>
-    invoke<RetentionReport>("retention_disable_persistence"),
 };

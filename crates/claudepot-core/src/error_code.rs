@@ -2052,18 +2052,27 @@ mod tests {
 
     #[test]
     fn zero_is_not_an_ordinary_out_of_range_retention_value() {
-        // AGENTS.md, "Transcript retention": `0` means *write no
-        // transcripts and delete the existing ones at startup*. It is
-        // not on the duration scale, and `set_retention_days` refuses
-        // it so that `disable_persistence()` stays the only way there.
-        // Its code must therefore stay distinct from any generic
-        // invalid-value code, and `days` must cross so a localized
-        // sentence can name what the user typed without re-parsing an
-        // English message that points at an internal API.
+        // AGENTS.md, "Transcript retention": `0` is not on the duration
+        // scale. Through CC 2.1.88 it meant *write no transcripts and
+        // delete the existing ones at startup*; CC 2.1.233 rejects it
+        // outright, which makes a `0` that reaches the file suppress
+        // cleanup while the user believes persistence is off. Both
+        // readings are far from "number slightly too small", so this
+        // code must stay distinct from any generic invalid-value code,
+        // and `days` must cross so a localized sentence can name what
+        // the user typed rather than re-parsing an English message.
         let e = crate::cc_retention::RetentionError::NonPositive(0);
         assert_eq!(e.code(), "cc_retention.non_positive");
         assert_eq!(e.params()["days"], 0);
-        assert!(e.to_string().contains("disable_persistence()"), "{e}");
+        // The message must not point at an internal API — the CLI
+        // prints it verbatim. `disable_persistence()` was deleted, and
+        // naming a removed function to a user is worse than saying
+        // nothing.
+        assert!(
+            !e.to_string().contains("disable_persistence"),
+            "must not name a removed internal API: {e}"
+        );
+        assert!(e.to_string().contains("at least 1"), "{e}");
     }
 
     #[test]

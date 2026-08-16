@@ -7,7 +7,6 @@ import type { RetentionReport } from "../../api/cc-retention";
 import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
 import { renderError, toastError } from "../../lib/i18n-error";
 import { SkeletonList } from "../../components/primitives/Skeleton";
 
@@ -23,12 +22,24 @@ import { SkeletonList } from "../../components/primitives/Skeleton";
 //
 //  1. Lead with the consequence on THIS machine, not the policy.
 //     Documentation loses to ignorance; a count that ticks does not.
-//  2. `0` is never a stop on the duration scale. It means "delete
-//     everything and stop persisting", so it lives behind a
-//     type-to-confirm gate and is worded as what it does.
+//  2. `0` is never a stop on the duration scale — and is no longer a
+//     value at all. CC's floor is 1; a `0` on disk fails validation and
+//     makes CC skip cleanup, so a user who once chose "stop saving" is
+//     now accumulating transcripts forever while believing the
+//     opposite. There is no "stop saving" control here any more,
+//     because CC offers no settings-level way to do it (see
+//     `claudepot_core::cc_retention`). The pane's job for that state is
+//     to explain the inversion and offer the repair.
 //  3. A long window is a BUFFER, not durability — the files still sit
 //     in CC's cache directory under CC's rules. Say so, or a big
 //     number reads as "solved".
+//
+// One rule added when rule 2 changed: **any action that lifts cleanup
+// suppression confirms first.** While suppressed, the transcripts are
+// protected by accident, and every route out of that state — a preset,
+// or restoring the default — re-arms deletion on the whole backlog. A
+// preset click is a one-tap destructive action in that state and
+// nowhere else.
 
 /** Stops on the scale. `0` is deliberately absent — see rule 2.
  *  Labels resolve through the catalog at access time so a locale
@@ -59,7 +70,13 @@ export function RetentionPane({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [confirmDisable, setConfirmDisable] = useState(false);
+  // Set only while cleanup is suppressed: the preset the user picked,
+  // held until they confirm re-arming deletion. Null in every other
+  // state, where a preset applies immediately as before.
+  const [confirmPreset, setConfirmPreset] = useState<{
+    days: number;
+    label: string;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -88,7 +105,7 @@ export function RetentionPane({
     } finally {
       setBusy(false);
       setConfirmClear(false);
-      setConfirmDisable(false);
+      setConfirmPreset(null);
     }
   };
 
@@ -120,18 +137,21 @@ export function RetentionPane({
   const oldest = fmtDate(risk.oldest_ms);
 
   // Headline severity: anything already past the cutoff is live loss.
+  // A legacy zero is NOT danger — nothing is being deleted in that
+  // state. It is a warning, because what the user believes is happening
+  // and what is happening have come apart.
   const severity =
-    state.mode === "persistence_disabled" || risk.already_deletable > 0
+    risk.already_deletable > 0
       ? "var(--danger)"
-      : atRiskTotal > 0
+      : atRiskTotal > 0 || state.cleanup_suppressed
         ? "var(--warn)"
         : "var(--fg-muted)";
 
   const modeLine =
     state.mode === "cc_default"
       ? t("retention.modeDefault", { days: state.effective_days })
-      : state.mode === "persistence_disabled"
-        ? t("retention.modeDisabled")
+      : state.mode === "legacy_zero"
+        ? t("retention.modeLegacyZero")
         : state.mode === "invalid"
           ? t("retention.modeInvalid", { days: state.configured_days })
           : t("retention.modeDays", { days: state.effective_days });
@@ -195,26 +215,33 @@ export function RetentionPane({
               {t("retention.risk.scanIncomplete")}
             </div>
           )}
-          {atRiskTotal === 0 &&
-            !risk.scan_incomplete &&
-            state.mode !== "persistence_disabled" && (
-              <div>
-                {t("retention.risk.nothing")}
-                {/* render-if-nonzero: never ship "0 transcripts". */}
-                {risk.total_transcripts > 0 && (
-                  <>
-                    {" "}
-                    {t("retention.risk.totalOnMachine", {
-                      count: risk.total_transcripts,
-                      num: formatNumber(risk.total_transcripts),
-                    })}
-                  </>
-                )}
-              </div>
-            )}
+          {atRiskTotal === 0 && !risk.scan_incomplete && (
+            <div>
+              {t("retention.risk.nothing")}
+              {/* render-if-nonzero: never ship "0 transcripts". */}
+              {risk.total_transcripts > 0 && (
+                <>
+                  {" "}
+                  {t("retention.risk.totalOnMachine", {
+                    count: risk.total_transcripts,
+                    num: formatNumber(risk.total_transcripts),
+                  })}
+                </>
+              )}
+            </div>
+          )}
+          {/* Both suppressed states protect transcripts by accident, but
+              they need different sentences: `invalid` is a value to
+              correct, `legacy_zero` is a control that used to work and
+              was withdrawn upstream. Telling a legacy-zero user to "fix
+              the value" would be advice they cannot act on — the value
+              was written by this app, on purpose, and the state they
+              chose no longer exists. */}
           {state.cleanup_suppressed && (
             <div style={{ color: "var(--warn)" }}>
-              {t("retention.risk.suppressed")}
+              {state.mode === "legacy_zero"
+                ? t("retention.risk.suppressedLegacyZero")
+                : t("retention.risk.suppressed")}
             </div>
           )}
           {oldest && (
@@ -264,12 +291,19 @@ export function RetentionPane({
                 variant={active ? "solid" : "outline"}
                 disabled={busy}
                 aria-pressed={active}
-                onClick={() =>
+                onClick={() => {
+                  // While cleanup is suppressed this button re-arms
+                  // deletion of the entire backlog, so it stops being a
+                  // preference and becomes a destructive action.
+                  if (state.cleanup_suppressed) {
+                    setConfirmPreset({ days: p.days, label: p.label });
+                    return;
+                  }
                   void run(
                     () => api.retentionSet(p.days),
                     t("retention.keepToast", { label: p.label }),
-                  )
-                }
+                  );
+                }}
               >
                 {p.label}
               </Button>
@@ -324,16 +358,6 @@ export function RetentionPane({
               {t("retention.restoreDefaultBtn")}
             </Button>
           )}
-          {state.mode !== "persistence_disabled" && (
-            <Button
-              variant="outline"
-              danger
-              disabled={busy}
-              onClick={() => setConfirmDisable(true)}
-            >
-              {t("retention.stopSavingBtn")}
-            </Button>
-          )}
         </div>
         <div
           style={{
@@ -343,6 +367,21 @@ export function RetentionPane({
           }}
         >
           {t("retention.dangerNote")}
+        </div>
+        {/* Why there is no "stop saving transcripts" button here any
+            more. Stated rather than silently removed: a user who set
+            that once will come looking for it, and the honest answer is
+            that Claude Code withdrew the capability, not that Claudepot
+            hid it. */}
+        <div
+          style={{
+            marginTop: "var(--sp-8)",
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-faint)",
+            lineHeight: "var(--lh-body)",
+          }}
+        >
+          {t("retention.noDisableNote")}
         </div>
       </div>
 
@@ -374,38 +413,36 @@ export function RetentionPane({
         />
       )}
 
-      {confirmDisable && (
-        <ConfirmDangerousAction
-          title={t("retention.confirmDisable.title")}
-          consequences={
-            <>
-              <p>
-                <Trans
-                  ns="settings"
-                  i18nKey="retention.confirmDisable.intro"
-                  components={{ code: <code /> }}
-                />
-              </p>
-              <ul>
-                <li>{t("retention.confirmDisable.li1")}</li>
-                <li>
-                  {risk.total_transcripts > 0
-                    ? t("retention.confirmDisable.li2Count", {
-                        num: formatNumber(risk.total_transcripts),
-                      })
-                    : t("retention.confirmDisable.li2")}
-                </li>
-              </ul>
-              <p>{t("retention.confirmDisable.outro")}</p>
-            </>
+      {/* Only reachable while cleanup is suppressed — see the preset
+          onClick. Elsewhere a preset is an ordinary preference and
+          applies without a dialog. */}
+      {confirmPreset && (
+        <ConfirmDialog
+          title={t("retention.confirmRearm.title", {
+            label: confirmPreset.label,
+          })}
+          body={
+            <Trans
+              ns="settings"
+              i18nKey={
+                risk.total_transcripts > 0
+                  ? "retention.confirmRearm.bodyCount"
+                  : "retention.confirmRearm.body"
+              }
+              components={{ strong: <strong /> }}
+              values={{
+                label: confirmPreset.label,
+                num: formatNumber(risk.total_transcripts),
+              }}
+            />
           }
-          confirmLabel={t("retention.confirmDisable.confirm")}
-          typeToConfirm={t("retention.confirmDisable.phrase")}
-          onCancel={() => setConfirmDisable(false)}
+          confirmLabel={t("retention.confirmRearm.confirm")}
+          confirmDanger
+          onCancel={() => setConfirmPreset(null)}
           onConfirm={() =>
             void run(
-              () => api.retentionDisablePersistence(),
-              t("retention.disabledToast"),
+              () => api.retentionSet(confirmPreset.days),
+              t("retention.keepToast", { label: confirmPreset.label }),
             )
           }
         />

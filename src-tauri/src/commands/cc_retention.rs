@@ -11,16 +11,18 @@
 //! directly rather than through a hand-mirrored DTO — same call as
 //! `auto_dream`.
 //!
-//! Note the deliberate asymmetry in the write surface: `retention_set`
-//! refuses `0`, and reaching zero requires the separately-named
-//! `retention_disable_persistence`. A renderer bug that passes a stray
-//! `0` through the ordinary setter must not be able to delete the
-//! user's history.
+//! The write surface is deliberately narrow: `retention_set` refuses
+//! anything below CC's floor of `1`, and there is **no** command that
+//! writes `0`. There used to be one (`retention_disable_persistence`);
+//! it was removed when CC 2.1.233 started rejecting `0`, because every
+//! possible implementation of that verb now writes a value CC refuses
+//! and reports success. See `claudepot_core::cc_retention` for the
+//! evidence and `RetentionMode::LegacyZero` for what a `0` written by
+//! an older Claudepot does today.
 
 use crate::dto_error::ErrorDto;
 use claudepot_core::cc_retention::{
-    clear_retention, disable_persistence, report, set_retention_days, RetentionReport,
-    DEFAULT_RISK_HORIZON_DAYS,
+    clear_retention, report, set_retention_days, RetentionReport, DEFAULT_RISK_HORIZON_DAYS,
 };
 
 fn now_ms() -> i64 {
@@ -40,33 +42,27 @@ pub async fn retention_report(horizon_days: Option<i64>) -> Result<RetentionRepo
     Ok(report(now_ms(), horizon))
 }
 
-/// `retention_set` — write an explicit positive retention window.
-/// Rejects `0` and negatives; zero is only reachable through
-/// [`retention_disable_persistence`].
+/// `retention_set` — write an explicit retention window. Rejects
+/// anything below CC's floor of `1`; there is no command that writes a
+/// lower value.
 #[tauri::command]
 pub async fn retention_set(days: i64) -> Result<RetentionReport, ErrorDto> {
     // The `write setting: ` prefix moves to the UI. What must not move
     // is the distinction core already draws: `0` is rejected here as
-    // `cc_retention.non_positive` — the most destructive value on this
-    // key, never an ordinary out-of-range number.
+    // `cc_retention.non_positive`, never as an ordinary out-of-range
+    // number — CC rejects it too, and a `0` that lands in the file
+    // suppresses cleanup rather than doing nothing.
     set_retention_days(days).map_err(ErrorDto::from)?;
     Ok(report(now_ms(), DEFAULT_RISK_HORIZON_DAYS))
 }
 
 /// `retention_clear` — remove the key so CC's 30-day default applies.
-/// This re-arms deletion, so the UI confirms before calling it.
+///
+/// This re-arms deletion, so the UI confirms before calling it. It is
+/// also the repair for a legacy `0`: removing the key is the only way
+/// to clear the validation error that is currently suppressing cleanup.
 #[tauri::command]
 pub async fn retention_clear() -> Result<RetentionReport, ErrorDto> {
     clear_retention().map_err(ErrorDto::from)?;
-    Ok(report(now_ms(), DEFAULT_RISK_HORIZON_DAYS))
-}
-
-/// `retention_disable_persistence` — write `cleanupPeriodDays: 0`.
-/// CC then writes no transcripts at all and deletes the existing ones
-/// at next startup. Named for what it does; the UI puts it behind a
-/// `ConfirmDialog` and never on the duration scale.
-#[tauri::command]
-pub async fn retention_disable_persistence() -> Result<RetentionReport, ErrorDto> {
-    disable_persistence().map_err(ErrorDto::from)?;
     Ok(report(now_ms(), DEFAULT_RISK_HORIZON_DAYS))
 }
