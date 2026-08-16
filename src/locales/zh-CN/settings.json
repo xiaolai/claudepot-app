@@ -393,7 +393,7 @@
       "oldest": "现存最早的对话：{{date}}。",
       "scanIncomplete": "Claude Code 的对话记录文件夹有一部分无法读取，这些数字只是下限，不是总数。",
       "silent": "Claude Code 会静默执行 — 它从不报告删除了什么。",
-      "suppressed": "由于这个值使设置文件无效，Claude Code 目前完全跳过清理。这是在无意中保护了你的对话记录 — 请改正这个值，而不要恢复默认值：恢复默认会重新启用删除。",
+      "suppressed": "Claude Code 完全跳过了清理，因为它无法校验设置。可能是 cleanupPeriodDays 的值被 Claude Code 拒绝，也可能是设置文件无法读取——Claudepot 无法分辨是哪一种。这只是意外地保护了你的对话记录。请修正设置文件，而不要恢复默认值，否则会重新启用删除。",
       "totalOnMachine_other": "这台机器上共有 {{num}} 条对话记录。",
       "suppressedLegacyZero": "这个值是在 Claude Code 还将 cleanupPeriodDays: 0 视为“停止保存对话记录”时写入的。它现在拒绝该值，因此实际情况恰恰相反：对话记录仍在写入，而清理因设置无效而被完全跳过。在下方选一个保留时长即可修复——这也会同时开始删除更早的记录。"
     },

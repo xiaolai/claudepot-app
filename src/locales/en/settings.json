@@ -396,7 +396,7 @@
       "oldest": "Oldest surviving conversation: {{date}}.",
       "scanIncomplete": "Part of Claude Code’s transcript folder couldn’t be read, so these counts are a floor, not a total.",
       "silent": "Claude Code does this silently — it never reports what it deleted.",
-      "suppressed": "Claude Code is skipping cleanup entirely because this value makes its settings file invalid. That is protecting your transcripts by accident — correct the value rather than restoring the default, which would re-arm deletion.",
+      "suppressed": "Claude Code is skipping cleanup entirely because it could not validate its settings. Either cleanupPeriodDays holds a value Claude Code rejects, or the settings file could not be read — Claudepot cannot tell which. That is protecting your transcripts by accident. Fix the settings file rather than restoring the default, which would re-arm deletion.",
       "totalOnMachine_one": "{{num}} transcript on this machine.",
       "totalOnMachine_other": "{{num}} transcripts on this machine.",
       "suppressedLegacyZero": "This was set when Claude Code still accepted cleanupPeriodDays: 0 as “stop saving transcripts”. It now rejects that value, so the opposite is happening: transcripts are being written, and cleanup is skipped entirely because the setting is invalid. Pick a window below to fix it — that also starts deletion of anything older."

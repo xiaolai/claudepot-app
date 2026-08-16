@@ -2530,6 +2530,16 @@ enum AccountAction {
 ///   "green" over zero rows;
 /// - a renamed or deleted core module leaves a row pointing at nothing,
 ///   which reads as coverage that does not exist.
+///
+/// **Scope of the owner check, stated because the earlier wording
+/// overclaimed it.** Only the FIRST `::` segment is resolved — the
+/// top-level module. `cc_retention::RetentionMode::Invalid` passes as
+/// long as `cc_retention` exists; a renamed *type* inside it is not
+/// caught here. Resolving deeper would mean parsing Rust paths into
+/// module/type/function forms against a moving codebase, and a guard
+/// that mis-resolves is worse than one with a stated limit, because it
+/// cries wolf and gets bypassed. The top segment is where the
+/// module-deleted-or-renamed failure actually lives.
 fn check_cc_watchlist(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let path = repo.join(crate::cc_drift::WATCHLIST_REL);
     let Ok(md) = std::fs::read_to_string(&path) else {

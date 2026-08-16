@@ -289,8 +289,16 @@ describe("RetentionPane", () => {
       }),
     );
     render(<RetentionPane pushToast={toast()} />);
+    // The load-bearing half: never point a suppressed user at "restore
+    // the default", which clears the error and re-arms deletion.
     expect(
-      await screen.findByText(/correct the value rather than restoring the default/i),
+      await screen.findByText(/rather than restoring the default/i),
+    ).toBeInTheDocument();
+    // And it must not assert WHY cleanup is suppressed. `resolve_retention`
+    // maps an unreadable settings file to `Invalid` too, so "this value is
+    // invalid" is a claim the pane may not have evidence for.
+    expect(
+      screen.getByText(/could not be read — Claudepot cannot tell which/i),
     ).toBeInTheDocument();
   });
 

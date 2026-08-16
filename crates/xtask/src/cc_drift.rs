@@ -265,12 +265,28 @@ pub fn group_hits(hits: &[Hit]) -> Vec<SurfaceReport> {
     out
 }
 
+/// What shape a pin's value has, and therefore what "stale" means.
+///
+/// Comparing every pin to the installed CC version treated
+/// `docs_fetched_at` (a date) as a version, so those rows reported
+/// "BEHIND 2.1.233" on every run forever — noise by construction, and
+/// noise is what teaches a reader to skim the report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinKind {
+    /// A CC version string, comparable to the installed one.
+    Version,
+    /// A date or hash. Freshness evidence — reported, never compared to
+    /// a version.
+    Freshness,
+}
+
 /// A version-pinned artifact and what it claims.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pin {
     pub artifact: String,
     pub field: String,
     pub value: String,
+    pub kind: PinKind,
     /// What silently stops working while this is stale. The point of
     /// the report: every one of these disables itself and says nothing.
     pub when_stale: String,
@@ -283,10 +299,14 @@ pub struct PinFinding {
     pub installed: String,
 }
 
-/// Which pins are behind the installed CC. Pure.
+/// Which **version** pins are behind the installed CC. Pure.
+///
+/// Freshness pins are deliberately excluded: a date can never equal a
+/// version, so including them guaranteed a permanent "BEHIND" row that
+/// carried no information.
 pub fn compare_pins(installed: &str, pins: &[Pin]) -> Vec<PinFinding> {
     pins.iter()
-        .filter(|p| p.value != installed)
+        .filter(|p| p.kind == PinKind::Version && p.value != installed)
         .map(|p| PinFinding {
             pin: (*p).clone(),
             installed: installed.to_string(),
@@ -300,7 +320,11 @@ pub fn compare_pins(installed: &str, pins: &[Pin]) -> Vec<PinFinding> {
 /// falling back to `claude --version`.
 fn installed_cc_version() -> Result<String> {
     if let Some(home) = std::env::var_os("HOME") {
-        let dir = Path::new(&home).join(".local/share/claude/versions");
+        let dir = Path::new(&home)
+            .join(".local")
+            .join("share")
+            .join("claude")
+            .join("versions");
         if let Ok(rd) = std::fs::read_dir(&dir) {
             let mut versions: Vec<String> = rd
                 .filter_map(|e| e.ok())
@@ -324,35 +348,60 @@ fn installed_cc_version() -> Result<String> {
         .context("could not parse `claude --version` output")
 }
 
-/// Read the pins this repo carries.
-fn read_pins(root: &Path) -> Result<Vec<Pin>> {
+/// Read the pins this repo carries, plus any artifact that could not be
+/// read.
+///
+/// The second return value is load-bearing. Skipping an unreadable pin
+/// silently let `run()` fall back to `since = installed`, which makes
+/// every release "not newer" and prints "0 releases newer" — a missing
+/// file rendering as a clean run. Absence must be reported, never
+/// absorbed.
+fn read_pins(root: &Path) -> Result<(Vec<Pin>, Vec<String>)> {
     let mut pins = Vec::new();
+    let mut problems = Vec::new();
 
     let parity = root.join("parity-harness/PINNED_CC_VERSION");
-    if let Ok(v) = std::fs::read_to_string(&parity) {
-        pins.push(Pin {
+    match std::fs::read_to_string(&parity) {
+        Ok(v) => pins.push(Pin {
             artifact: "parity-harness/PINNED_CC_VERSION".into(),
             field: "(file)".into(),
             value: v.trim().to_string(),
+            kind: PinKind::Version,
             when_stale: "settings-merge fixtures lock HISTORICAL parity only".into(),
-        });
+        }),
+        Err(e) => problems.push(format!(
+            "parity-harness/PINNED_CC_VERSION could not be read ({e}) — it is the \
+             default baseline for --since, so without it this run cannot say what \
+             range it covered"
+        )),
     }
 
     let ev_path = root.join("crates/claudepot-core/data/cc-env-evidence.json");
-    if let Ok(text) = std::fs::read_to_string(&ev_path) {
+    let ev_text = std::fs::read_to_string(&ev_path);
+    if ev_text.is_err() {
+        problems.push(
+            "cc-env-evidence.json could not be read — the env pane's build crosscheck \
+             state is unknown, not current"
+                .to_string(),
+        );
+    }
+    if let Ok(text) = ev_text {
         let ev: serde_json::Value =
             serde_json::from_str(&text).with_context(|| format!("parse {}", ev_path.display()))?;
-        for (field, when_stale) in [
+        for (field, kind, when_stale) in [
             (
                 "binary_crosscheck_version",
+                PinKind::Version,
                 "env pane hides present_in_build / undocumented_in_build ENTIRELY, with no message",
             ),
             (
                 "cc_source_read_at",
+                PinKind::Freshness,
                 "dated against the abandoned 2.1.88 mirror",
             ),
             (
                 "docs_fetched_at",
+                PinKind::Freshness,
                 "documented rows drift from the live docs page",
             ),
         ] {
@@ -361,12 +410,13 @@ fn read_pins(root: &Path) -> Result<Vec<Pin>> {
                     artifact: "cc-env-evidence.json".into(),
                     field: field.into(),
                     value: v.to_string(),
+                    kind,
                     when_stale: when_stale.into(),
                 });
             }
         }
     }
-    Ok(pins)
+    Ok((pins, problems))
 }
 
 /// Fetch the upstream changelog with `gh`, or read `--changelog <path>`.
@@ -437,20 +487,49 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
     let rows = parse_watchlist(&md)?;
 
     let installed = installed_cc_version()?;
-    let pins = read_pins(root)?;
-    let since = arg("--since")
-        .map(str::to_string)
-        .or_else(|| {
-            pins.iter()
-                .find(|p| p.artifact.contains("PINNED_CC_VERSION"))
-                .map(|p| p.value.clone())
-        })
-        .unwrap_or_else(|| installed.clone());
+    let (pins, pin_problems) = read_pins(root)?;
+
+    // A baseline we cannot establish must NOT silently become the
+    // installed version: `is_newer(rel, installed)` is false for every
+    // release, so the scan would print "0 releases newer" and read as a
+    // clean run. Absence of evidence is reported, never rendered green.
+    let since = arg("--since").map(str::to_string).or_else(|| {
+        pins.iter()
+            .filter(|p| p.kind == PinKind::Version)
+            .find(|p| p.artifact.contains("PINNED_CC_VERSION"))
+            .map(|p| p.value.clone())
+    });
 
     println!("cc-drift: installed Claude Code {installed}");
     println!("          {} watchlist rows\n", rows.len());
 
-    // ── pins ──
+    // ── artifacts we could not read ──
+    // Printed first and unconditionally: everything below is only as
+    // trustworthy as the inputs, and a skipped input used to be
+    // invisible.
+    if !pin_problems.is_empty() {
+        println!("PIN ARTIFACTS UNREADABLE — this report is incomplete:");
+        for p in &pin_problems {
+            println!("  ! {p}");
+        }
+        println!();
+    }
+
+    // ── freshness evidence (dates/hashes, never compared to a version) ──
+    let fresh: Vec<&Pin> = pins
+        .iter()
+        .filter(|p| p.kind == PinKind::Freshness)
+        .collect();
+    if !fresh.is_empty() {
+        println!("freshness evidence (not version-comparable):");
+        for p in &fresh {
+            println!("  {} · {} = {}", p.artifact, p.field, p.value);
+            println!("      → {}", p.when_stale);
+        }
+        println!();
+    }
+
+    // ── version pins ──
     let stale = compare_pins(&installed, &pins);
     if stale.is_empty() {
         println!("version pins: all current\n");
@@ -466,6 +545,20 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
     }
 
     // ── changelog ──
+    let Some(since) = since else {
+        // No baseline, so no range — and therefore no honest way to say
+        // "N releases newer" or "green". Stop here rather than print a
+        // number derived from a guess.
+        println!(
+            "changelog: NOT CHECKED — no baseline. Pass --since <version>, or restore \
+             parity-harness/PINNED_CC_VERSION.\n"
+        );
+        println!(
+            "This is a report, not a gate. It is INCOMPLETE — do not record it as a \
+             green run."
+        );
+        return Ok(());
+    };
     match load_changelog(arg("--changelog")) {
         Ok(text) => {
             let releases = parse_changelog(&text);
@@ -684,25 +777,59 @@ mod tests {
         }
     }
 
+    fn pin(artifact: &str, value: &str, kind: PinKind) -> Pin {
+        Pin {
+            artifact: artifact.into(),
+            field: "f".into(),
+            value: value.into(),
+            kind,
+            when_stale: "w".into(),
+        }
+    }
+
     #[test]
     fn pins_matching_the_installed_version_are_not_reported() {
         let pins = vec![
-            Pin {
-                artifact: "a".into(),
-                field: "f".into(),
-                value: "2.1.233".into(),
-                when_stale: "w".into(),
-            },
-            Pin {
-                artifact: "b".into(),
-                field: "f".into(),
-                value: "2.1.88".into(),
-                when_stale: "w".into(),
-            },
+            pin("a", "2.1.233", PinKind::Version),
+            pin("b", "2.1.88", PinKind::Version),
         ];
         let stale = compare_pins("2.1.233", &pins);
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0].pin.artifact, "b");
+    }
+
+    /// A date can never equal a version, so comparing freshness
+    /// evidence against the installed CC produced a permanent "BEHIND"
+    /// row carrying no information. Noise is what teaches a reader to
+    /// skim a report they are supposed to act on.
+    #[test]
+    fn freshness_pins_are_never_reported_as_behind_a_version() {
+        let pins = vec![
+            pin("cc-env-evidence.json", "2026-07-28", PinKind::Freshness),
+            pin("cc-env-evidence.json", "2026-04-01", PinKind::Freshness),
+            pin("parity", "2.1.88", PinKind::Version),
+        ];
+        let stale = compare_pins("2.1.233", &pins);
+        assert_eq!(stale.len(), 1, "only the version pin may be compared");
+        assert_eq!(stale[0].pin.artifact, "parity");
+    }
+
+    /// The defect this guards: with no baseline, `since` used to fall
+    /// back to the installed version, which makes `is_newer` false for
+    /// every release. The scan then printed "0 releases newer" — a
+    /// missing pin file rendering as a clean run.
+    #[test]
+    fn an_absent_baseline_cannot_masquerade_as_zero_new_releases() {
+        let rows = parse_watchlist(TABLE).unwrap();
+        let log = "## 2.1.233\n\n- Changed `cleanupPeriodDays` handling\n";
+        // What the old fallback did:
+        assert!(
+            scan_changelog(&rows, log, "2.1.233").is_empty(),
+            "since == installed hides every release — this is why the \
+             fallback was removed rather than made smarter"
+        );
+        // With a real baseline the same input is not silent.
+        assert!(!scan_changelog(&rows, log, "2.1.88").is_empty());
     }
 
     #[test]

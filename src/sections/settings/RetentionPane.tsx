@@ -55,6 +55,15 @@ const PRESETS: { days: number; label: string }[] = [
     get label() { return i18n.t("retention.preset3650", { ns: "settings" }); } },
 ];
 
+/** Resolve a preset's label at call time, so it follows a locale switch
+ *  rather than freezing whatever language was active when it was
+ *  stored. Falls back to the raw day count for a value not in PRESETS,
+ *  which cannot happen today but must not render "undefined" if it
+ *  ever does. */
+function presetLabel(days: number): string {
+  return PRESETS.find((p) => p.days === days)?.label ?? String(days);
+}
+
 function fmtDate(ms: number | null): string | null {
   if (ms == null) return null;
   return new Date(ms).toISOString().slice(0, 10);
@@ -73,10 +82,12 @@ export function RetentionPane({
   // Set only while cleanup is suppressed: the preset the user picked,
   // held until they confirm re-arming deletion. Null in every other
   // state, where a preset applies immediately as before.
-  const [confirmPreset, setConfirmPreset] = useState<{
-    days: number;
-    label: string;
-  } | null>(null);
+  // Stores `days` only, never the resolved label. A label captured here
+  // would freeze the language it was resolved in: switch locale while
+  // the dialog is open and the confirm text keeps the old one, the same
+  // class of bug as the module-level label constants i18n-plan warns
+  // about. The label is derived from PRESETS at render time.
+  const [confirmPresetDays, setConfirmPresetDays] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -105,7 +116,7 @@ export function RetentionPane({
     } finally {
       setBusy(false);
       setConfirmClear(false);
-      setConfirmPreset(null);
+      setConfirmPresetDays(null);
     }
   };
 
@@ -305,7 +316,7 @@ export function RetentionPane({
                   // deletion of the entire backlog, so it stops being a
                   // preference and becomes a destructive action.
                   if (state.cleanup_suppressed) {
-                    setConfirmPreset({ days: p.days, label: p.label });
+                    setConfirmPresetDays(p.days);
                     return;
                   }
                   void run(
@@ -425,10 +436,10 @@ export function RetentionPane({
       {/* Only reachable while cleanup is suppressed — see the preset
           onClick. Elsewhere a preset is an ordinary preference and
           applies without a dialog. */}
-      {confirmPreset && (
+      {confirmPresetDays !== null && (
         <ConfirmDialog
           title={t("retention.confirmRearm.title", {
-            label: confirmPreset.label,
+            label: presetLabel(confirmPresetDays),
           })}
           body={
             <Trans
@@ -440,18 +451,18 @@ export function RetentionPane({
               }
               components={{ strong: <strong /> }}
               values={{
-                label: confirmPreset.label,
+                label: presetLabel(confirmPresetDays),
                 num: formatNumber(risk.total_transcripts),
               }}
             />
           }
           confirmLabel={t("retention.confirmRearm.confirm")}
           confirmDanger
-          onCancel={() => setConfirmPreset(null)}
+          onCancel={() => setConfirmPresetDays(null)}
           onConfirm={() =>
             void run(
-              () => api.retentionSet(confirmPreset.days),
-              t("retention.keepToast", { label: confirmPreset.label }),
+              () => api.retentionSet(confirmPresetDays),
+              t("retention.keepToast", { label: presetLabel(confirmPresetDays) }),
             )
           }
         />

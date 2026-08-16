@@ -82,7 +82,8 @@ export const ccRetentionApi = {
     invoke<RetentionReport>("retention_set", { days }),
 
   /** Removes the key, re-arming CC's 30-day deletion. Confirm first.
-   *  Also the repair for `legacy_zero`: clearing the key is the only
-   *  way to lift the validation error suppressing cleanup. */
+   *  One of two repairs for `legacy_zero` — `retentionSet(days >= 1)`
+   *  also lifts the validation error, and is what the pane's presets
+   *  use. This one is the restore-the-default path specifically. */
   retentionClear: () => invoke<RetentionReport>("retention_clear"),
 };

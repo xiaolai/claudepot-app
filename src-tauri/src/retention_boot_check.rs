@@ -15,9 +15,14 @@
 //! notification log, and logs failures.
 //!
 //! Per `design.md`'s one-signal-per-surface rule this emits exactly one
-//! entry — routed by the existing `Category::TranscriptsExpiring` (P1)
-//! preferences, so a user who mutes the category is respected. No
-//! toast + banner + badge spray.
+//! entry, routed by the preferences of **whichever** of the two
+//! mutually-exclusive retention categories applies:
+//! `TranscriptsExpiring` when deletion is coming, and
+//! `TranscriptCleanupSuppressed` when it has been switched off. Both are
+//! P1. The split is what lets a user mute "conversations are expiring"
+//! without also muting "your retention setting is broken" — so routing
+//! must follow `category`, never a constant. No toast + banner + badge
+//! spray.
 //!
 //! There is deliberately no "dismissed" flag; see
 //! `cc_retention::RetentionWarning`'s docs for why gating on the
@@ -28,7 +33,7 @@ use claudepot_core::cc_retention::{
     RetentionWarning, DEFAULT_RISK_HORIZON_DAYS,
 };
 use claudepot_core::notification_log::NotificationKind;
-use claudepot_core::notifications::{Category, Priority, Surface};
+use claudepot_core::notifications::{Category, Surface};
 use tauri::{AppHandle, Manager};
 
 use crate::commands::notification::NotificationLogState;
@@ -56,19 +61,7 @@ fn run(app: &AppHandle) -> Result<(), String> {
     // Core guarantees they cannot both fire; the `else if` is belt and
     // braces so a future core change degrades to one entry rather than
     // two contradictory ones.
-    let (category, title, body) = if let Some(w) = warning(&rep) {
-        (
-            Category::TranscriptsExpiring,
-            tr("retention.title"),
-            warning_body(&w),
-        )
-    } else if let Some(s) = cleanup_suppressed_warning(&rep) {
-        (
-            Category::TranscriptCleanupSuppressed,
-            tr("retention.suppressedTitle"),
-            suppressed_body(&s),
-        )
-    } else {
+    let Some((category, title, body)) = choose_entry(&rep) else {
         // Nothing scheduled for deletion, and cleanup is running
         // normally. Staying silent is the whole point of gating on the
         // condition rather than the setting.
@@ -136,7 +129,11 @@ fn run(app: &AppHandle) -> Result<(), String> {
     log.log
         .append_routed(
             category,
-            Priority::P1Stalled,
+            // Derived, never restated. Both retention categories are
+            // P1 today; hardcoding that duplicated `Category::priority`
+            // and would have made the log lie the moment either one was
+            // re-prioritised.
+            category.priority(),
             // `Notice`, not `Error`: nothing has failed. Something is
             // scheduled to happen that the user has not been told
             // about. `NotificationKind` has no Warning variant.
@@ -188,6 +185,38 @@ fn suppressed_body(s: &CleanupSuppressedWarning) -> String {
     tr1(key, "count", &count)
 }
 
+/// Pick the one entry this boot check may emit, if any.
+///
+/// Split out of [`run`] so the **routing** is testable without a Tauri
+/// app handle. That matters more than it looks: the body text had
+/// parity tests from the start, but the category did not, and the
+/// category is what decides which mute preference applies. Sending the
+/// suppressed warning under `TranscriptsExpiring` would look completely
+/// correct in the bell and silently obey the wrong mute.
+///
+/// Returns `(category, title, body)`. The two conditions are mutually
+/// exclusive in core; the `else if` keeps that true here even if that
+/// ever changes, by preferring the "deletion is coming" entry.
+fn choose_entry(
+    rep: &claudepot_core::cc_retention::RetentionReport,
+) -> Option<(Category, String, String)> {
+    if let Some(w) = warning(rep) {
+        Some((
+            Category::TranscriptsExpiring,
+            tr("retention.title"),
+            warning_body(&w),
+        ))
+    } else {
+        cleanup_suppressed_warning(rep).map(|s| {
+            (
+                Category::TranscriptCleanupSuppressed,
+                tr("retention.suppressedTitle"),
+                suppressed_body(&s),
+            )
+        })
+    }
+}
+
 /// Localized banner body composed from [`RetentionWarning`]'s
 /// structured fields. Mirrors `RetentionWarning::message()` — which
 /// stays the CLI's English surface — branch for branch; under the `en`
@@ -222,6 +251,7 @@ fn warning_body(w: &RetentionWarning) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claudepot_core::cc_retention::{RetentionReport, RetentionState, TranscriptRisk};
 
     fn warning_fixture(
         already_deletable: u64,
@@ -272,6 +302,57 @@ mod tests {
             total_transcripts,
             scan_incomplete,
         }
+    }
+
+    /// Build a report directly rather than through core's private
+    /// `state_from_configured`; core's own tests already lock the
+    /// setting-value → mode mapping, and widening its API for a test in
+    /// another crate would be the wrong trade.
+    fn report_for(mode: RetentionMode, total: u64, deletable: u64) -> RetentionReport {
+        let suppressed = matches!(mode, RetentionMode::Invalid | RetentionMode::LegacyZero);
+        RetentionReport {
+            state: RetentionState {
+                mode,
+                configured_days: None,
+                effective_days: 30,
+                is_cc_default: mode == RetentionMode::CcDefault,
+                cleanup_suppressed: suppressed,
+            },
+            risk: TranscriptRisk {
+                total_transcripts: total,
+                already_deletable: deletable,
+                ..Default::default()
+            },
+            is_durable_archive: false,
+        }
+    }
+
+    /// The category is what selects the mute preference, so routing the
+    /// suppressed state under `TranscriptsExpiring` would look right in
+    /// the bell and obey the wrong preference. Body-text parity tests
+    /// cannot see that; this can.
+    #[test]
+    fn each_retention_state_routes_to_its_own_category() {
+        let expiring = report_for(RetentionMode::Explicit, 10, 4);
+        let (cat, _, _) = choose_entry(&expiring).expect("deletion coming must warn");
+        assert_eq!(cat, Category::TranscriptsExpiring);
+
+        let legacy_zero = report_for(RetentionMode::LegacyZero, 10, 0);
+        let (cat, _, body) = choose_entry(&legacy_zero).expect("suppressed must warn");
+        assert_eq!(cat, Category::TranscriptCleanupSuppressed);
+        assert!(body.contains("keeping every saved conversation"), "{body}");
+
+        let invalid = report_for(RetentionMode::Invalid, 10, 0);
+        let (cat, _, _) = choose_entry(&invalid).expect("invalid must warn");
+        assert_eq!(cat, Category::TranscriptCleanupSuppressed);
+    }
+
+    /// A quiet machine emits nothing at all — the whole reason this is
+    /// gated on the condition rather than on the setting.
+    #[test]
+    fn a_healthy_machine_emits_no_entry() {
+        assert!(choose_entry(&report_for(RetentionMode::Explicit, 10, 0)).is_none());
+        assert!(choose_entry(&report_for(RetentionMode::CcDefault, 0, 0)).is_none());
     }
 
     /// Same contract as `warning_body_matches_core_message_in_en`: core's

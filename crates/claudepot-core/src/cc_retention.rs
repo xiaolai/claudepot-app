@@ -484,10 +484,25 @@ impl CleanupSuppressedWarning {
                  Code now rejects it, so transcripts are being written and cleanup is \
                  switched off. Settings → Retention."
             ),
+            // Must NOT name a cause. `resolve_retention` maps an
+            // unreadable or unparseable settings file to
+            // `SettingValue::Invalid` on purpose (see its comment), so
+            // this arm covers two situations that look identical from
+            // here: a key we read and rejected, and a file we never
+            // read at all. Claiming "cleanupPeriodDays holds a value it
+            // rejects" is a fact we may not have — the same class of
+            // defect as reporting a failed scan as "nothing scheduled
+            // for deletion". CC itself keeps the two apart ("settings
+            // have validation errors but cleanupPeriodDays was
+            // explicitly set" vs "a settings file could not be read or
+            // parsed"); until Claudepot models that distinction, say
+            // only what is true of both.
             _ => format!(
                 "Claude Code has stopped deleting saved conversations ({count} on this \
-                 machine) because `cleanupPeriodDays` holds a value it rejects. Nothing \
-                 is being lost, but the protection is accidental. Settings → Retention."
+                 machine): it could not validate its settings. `cleanupPeriodDays` may \
+                 hold a value Claude Code rejects, or the settings file may be \
+                 unreadable — Claudepot cannot tell which. Nothing is being lost, but \
+                 the protection is accidental. Settings → Retention."
             ),
         }
     }
@@ -1182,20 +1197,22 @@ mod tests {
         assert!(cleanup_suppressed_warning(&report).is_some());
     }
 
+    /// Delegates to `rep` rather than re-constructing `RetentionReport`
+    /// — two helpers building the same struct is how one of them
+    /// quietly stops matching the other.
     fn report_with(
         mode_source: SettingValue<i64>,
         total: u64,
         incomplete: bool,
     ) -> RetentionReport {
-        RetentionReport {
-            state: state_from_configured(mode_source),
-            risk: TranscriptRisk {
+        rep(
+            state_from_configured(mode_source),
+            TranscriptRisk {
                 total_transcripts: total,
                 scan_incomplete: incomplete,
                 ..Default::default()
             },
-            is_durable_archive: false,
-        }
+        )
     }
 
     /// The two warnings partition the space: exactly one of them can
