@@ -116,6 +116,28 @@ cargo xtask cc-drift --changelog /tmp/CHANGELOG.md   # offline
 | same | `docs_fetched_at` / `docs_sha256` | docs rows drift from the live page |
 | same | `cc_source_read_at` | dated against the abandoned mirror |
 
+## Who runs it
+
+A Claudepot **agent** drafted as `cc-upstream-watch`, cron `0 9 1 * *`
+(09:00 on the 1st), `permission_mode: dontAsk` with tools narrowed to
+`Bash, Read, Write, Glob, Grep`, and the Claudepot memory server
+attached so it can read prior evidence and record its own.
+
+It lives in `~/.claudepot/agents.json`, which is outside the repo, so
+**this section is the only committed record of it.** Recreate with
+`claudepot agent draft --from-json <spec> --attach-memory --drafted-by <id>`;
+`cwd` is machine-specific, which is why the spec itself is not committed.
+
+A draft is inert — no scheduler artifact exists until a human arms it in
+Claudepot → Agents → "Review & install". That review is the security
+gate and no CLI verb bypasses it.
+
+The agent is an **auditor, not a fixer**. Its prompt forbids changing
+source, bumping the parity pin, and running `--rebuild-evidence`: a pin
+bump invalidates fixtures and rebuilding evidence rewrites a committed
+artifact, and both are human calls. The only file it writes is its own
+report.
+
 ## What a green run looks like
 
 **Record the negative result.** "Checked, unchanged" is what makes a
