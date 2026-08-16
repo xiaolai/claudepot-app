@@ -389,7 +389,7 @@
     "risk": {
       "deletable_other": "{{num}} 条对话记录将在 Claude Code 下次启动时被删除。",
       "horizon_other": "另有 {{num}} 条将在 {{days}} 天内越过删除线。",
-      "nothing": "没有内容被排定删除。",
+      "nothing": "没有对话记录被安排删除。",
       "oldest": "现存最早的对话：{{date}}。",
       "scanIncomplete": "Claude Code 的对话记录文件夹有一部分无法读取，这些数字只是下限，不是总数。",
       "silent": "Claude Code 会静默执行 — 它从不报告删除了什么。",
@@ -423,7 +423,8 @@
       "body": "Claude Code 目前正跳过清理，因此没有任何内容被删除。设置保留时长会<strong>重新启用删除</strong>：早于 {{label}} 的内容将在 Claude Code 下次启动时被清除。此操作无法撤销。",
       "bodyCount": "Claude Code 目前正跳过清理，因此没有任何内容被删除——当前保留着 {{num}} 份对话记录。设置保留时长会<strong>重新启用删除</strong>：早于 {{label}} 的内容将在 Claude Code 下次启动时被清除。此操作无法撤销。",
       "confirm": "设置并重新启用删除"
-    }
+    },
+    "scopeNote": "cleanupPeriodDays 并不只是对话记录的设置——Claude Code 会按同一时限清理 ~/.claude 下约二十个目录，包括 tasks、file-history、shell-snapshots 和 backups。Claudepot 统计的是无法再生的对话记录，其余目录不在此处显示。"
   },
   "health": {
     "refreshFailed": "健康检查刷新失败",

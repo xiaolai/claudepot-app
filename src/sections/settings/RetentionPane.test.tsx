@@ -86,7 +86,7 @@ describe("RetentionPane", () => {
     );
     render(<RetentionPane pushToast={toast()} />);
     expect(
-      await screen.findByText(/Nothing is scheduled for deletion/i),
+      await screen.findByText(/no saved conversations are scheduled for deletion/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/will be deleted the next time/i)).toBeNull();
     expect(screen.queryByText(/cross the cutoff/i)).toBeNull();
@@ -100,6 +100,23 @@ describe("RetentionPane", () => {
     expect(
       await screen.findByText(/disk usage cannot reveal this loss/i),
     ).toBeInTheDocument();
+  });
+
+  // `cleanupPeriodDays` is a global TTL over ~20 directories under
+  // ~/.claude (verified against the 2.1.233 binary), but this pane
+  // counts only conversations. Unscoped reassurance would therefore be
+  // false: plenty may be scheduled for deletion that we did not count.
+  it("scopes its reassurance to conversations and says what it omits", async () => {
+    retentionReportMock.mockResolvedValue(report());
+    render(<RetentionPane pushToast={toast()} />);
+    expect(
+      await screen.findByText(/no saved conversations are scheduled for deletion/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/not only a transcript setting/i),
+    ).toBeInTheDocument();
+    // The unscoped claim must not survive anywhere on the surface.
+    expect(screen.queryByText(/^Nothing is scheduled for deletion\.$/)).toBeNull();
   });
 
   it("says a longer window is not a backup", async () => {
@@ -252,7 +269,9 @@ describe("RetentionPane", () => {
       report({ risk: { total_transcripts: 0 } }),
     );
     render(<RetentionPane pushToast={toast()} />);
-    expect(await screen.findByText(/Nothing is scheduled for deletion/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/no saved conversations are scheduled for deletion/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/0 transcripts on this machine/i)).toBeNull();
   });
 

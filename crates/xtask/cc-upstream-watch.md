@@ -96,6 +96,7 @@ truncates mid-transfer, which diffs as "hundreds of pages removed".
 | CC surface | Claudepot owner | Grep tokens | Check |
 |---|---|---|---|
 | `cleanupPeriodDays` semantics + floor | `cc_retention` | `cleanupPeriodDays`, `session-persistence`, `persistSession` | binary strings; `claude --help`; `MIN_CLEANUP_PERIOD_DAYS` is the pin |
+| `cleanupPeriodDays` sweep scope | `cc_retention::TranscriptRisk` | `shell-snapshots`, `dump-prompts`, `file-history`, `retention sweep` | binary: grep the cleanup module's sweep fns. **Known gap** — we count `projects/` only; CC ages out ~20 dirs on this timer |
 | settings-validation → cleanup suppression | `cc_retention::RetentionMode::Invalid` / `LegacyZero` | `Skipping cleanup`, `validation errors` | binary strings |
 | env var catalog + `SAFE_ENV_VARS` | `cc_env`, `data/cc-env-spec.json` | `CLAUDE_*`, `ANTHROPIC_*`, `SAFE_ENV_VARS`, `PROVIDER_MANAGED` | `scripts/build-cc-env-spec.py --rebuild-evidence` then `--check` |
 | settings merge precedence | `config_view::effective_settings`, `parity-harness/` | `settings.local.json`, `managed-settings`, `--setting-sources`, `settingSources` | `cargo xtask verify-cc-parity` + re-pin |

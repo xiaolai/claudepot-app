@@ -222,8 +222,39 @@ pub struct RetentionState {
     pub cleanup_suppressed: bool,
 }
 
-/// Counts derived by walking the transcript tree the same way CC's
-/// cleanup does.
+/// Counts derived by walking the **transcript tree only**, the same way
+/// CC's cleanup walks `projects/`.
+///
+/// # `cleanupPeriodDays` is not a transcript setting
+///
+/// It is a global TTL. Verified against the 2.1.233 binary's cleanup
+/// module (every one of these is a sweep function gated on the same
+/// cutoff): `projects`, `tasks`, `shell-snapshots`, `backups`,
+/// `file-history`, `dump-prompts`, `session-env`, `uploads`, `shares`,
+/// `plans`, `telemetry`, `traces`, `debug`, `usage-data`,
+/// `feedback-bundles`, `feedback/drafts`, `startup-perf`,
+/// `mcp-discovery-cache`, `jobs`, `daemon/*`, `skills/.staging`.
+///
+/// CC 2.1.117's changelog announced three of those as an addition; the
+/// binary shows the set is far larger, which is why this note cites the
+/// binary and not the release note.
+///
+/// **This struct deliberately counts only `projects/`.** Transcripts are
+/// the irreplaceable part and the only part the pane can describe
+/// honestly — most of the rest is cache or diagnostics, and guessing at
+/// which of `file-history` or `dump-prompts` a given user would mourn
+/// would produce either false alarm or false reassurance.
+///
+/// The cost of that choice is that every count here is a **floor for
+/// the setting**, exact only for conversations. Callers must therefore
+/// scope their reassurance: "no saved conversations are scheduled for
+/// deletion" is true, "nothing is scheduled for deletion" is not. See
+/// `retention.risk.nothing` / `retention.scopeNote` in the catalog.
+///
+/// Widening this to a full accounting is real work (20 directories,
+/// different file types, different meanings) and would change the
+/// pane's model from "transcripts" to "everything CC ages out" — a
+/// redesign, not a count. Tracked as a watchlist row.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TranscriptRisk {
     /// Top-level `projects/<slug>/*.jsonl|*.cast` files — everything CC

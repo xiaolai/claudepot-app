@@ -252,6 +252,15 @@ export function RetentionPane({
           <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
             {t("retention.risk.silent")}
           </div>
+          {/* `cleanupPeriodDays` is a global TTL over ~20 directories
+              under ~/.claude, not a transcript setting — verified
+              against the 2.1.233 binary, see `TranscriptRisk`. The
+              counts above are conversations only, so without this the
+              pane's reassurance reads as "nothing anywhere is being
+              deleted", which is false. */}
+          <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
+            {t("retention.scopeNote")}
+          </div>
         </div>
       </div>
 
