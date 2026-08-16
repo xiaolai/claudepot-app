@@ -269,7 +269,10 @@ left to memory.
   elevated by hand-editing settings shows as elevated but *not*
   Claudepot-managed — the UI won't revert someone's own choice.
 - CC schema (`permissions.defaultMode`) verified against
-  `~/github/claude_code_src/src`.
+  `~/github/claude_code_src/src` — i.e. against **2.1.88**, and not
+  re-checked since. See "Reference" for why that mirror is no longer
+  authoritative, and `.claude/rules/cc-upstream-watch.md` for the row
+  that re-verifies this key.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 
@@ -947,7 +950,30 @@ corrupted non-CSS files before).
 ## Reference
 
 `dev-docs/kannon/reference.md` — 3400-line verified reference for CC/Desktop internals.
-Always verify claims against CC source at `~/github/claude_code_src/src` before coding.
+
+**Verify against the installed binary, not the source mirror.**
+`~/github/claude_code_src` is a third-party mirror pinned at **2.1.88**
+and abandoned upstream on 2026-04-15 — 145+ versions stale, and it does
+not move again. Treat it as archaeology. Telling every agent to "verify
+against CC source" there made it a *drift generator*: each pass would
+confidently confirm April's behaviour and report success.
+
+Claude Code ships as a bun-compiled binary that retains readable JS and
+string literals, so it is the authority:
+
+```bash
+strings -n 60 ~/.local/share/claude/versions/<ver> | grep '<pattern>'
+claude --help | grep -- '--<flag>'
+```
+
+That is how the `cleanupPeriodDays` inversion surfaced — the complete
+validation message sits in the binary in plain text, and contradicted
+both this repo's docs and the mirror.
+
+CC ships **~27 releases a month**, so any CC claim more than a few weeks
+old is a hypothesis. `.claude/rules/cc-upstream-watch.md` is the list of
+surfaces that drift and how to check each one;
+`dev-docs/cc-upstream-watch.md` is the routine's design.
 
 ## Icon assets
 

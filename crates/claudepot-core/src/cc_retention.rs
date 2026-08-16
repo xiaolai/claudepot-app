@@ -40,8 +40,13 @@
 //!
 //! # CC's resolution model
 //!
-//! Verified against `~/github/claude_code_src/src/utils/cleanup.ts:23`
-//! (`DEFAULT_CLEANUP_PERIOD_DAYS = 30`) and `:27`:
+//! Re-verified 2026-08-16 against the installed **2.1.233** binary,
+//! which documents the key as "default: 30; minimum 1". The older
+//! citation was `~/github/claude_code_src/src/utils/cleanup.ts:23`
+//! (`DEFAULT_CLEANUP_PERIOD_DAYS = 30`) and `:27` — still correct on the
+//! default, but that mirror is pinned at 2.1.88 and is exactly what
+//! missed the floor change. Check the binary, not the mirror; see
+//! `.claude/rules/cc-upstream-watch.md`.
 //!
 //! ```text
 //! const days = settings.cleanupPeriodDays ?? 30

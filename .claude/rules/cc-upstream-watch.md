@@ -1,0 +1,116 @@
+# Claude Code upstream watch — the surfaces that drift
+
+Claudepot mirrors Claude Code behaviour in ~20 places. **Claude Code
+ships ~27 releases a month** (measured: 488 npm versions, 23–30 every
+month of 2026). Nothing in this repo notices when one of those releases
+changes a behaviour we reimplemented.
+
+This file is the target list. It exists so a month of upstream change
+becomes a **token search** rather than a reading assignment — 658
+changelog bullets a month is not a control a human can operate.
+
+Design, cadence and the extractor details live in
+`dev-docs/cc-upstream-watch.md`. This file is the part that must be
+committed, because it is read on every run.
+
+## The rule
+
+**Every Claudepot surface that reimplements, parses, or depends on a
+Claude Code behaviour has a row here.** Adding a CC-facing module
+without adding a row is a review finding, the same way an event channel
+without a subscriber is.
+
+A row is only useful if it says how to *check* it. "Watch this" is not a
+check. A row names the grep tokens that would appear in a changelog or a
+`strings` dump, and the command that settles the question.
+
+## Verification authority — the installed binary, not the mirror
+
+`~/github/claude_code_src` is a third-party mirror pinned at **2.1.88**,
+abandoned upstream on 2026-04-15. Treat it as archaeology only. Anything
+it says about current behaviour is 145+ versions stale.
+
+CC ships as a bun-compiled binary that **retains readable JS and string
+literals**, so it is the authority:
+
+```bash
+strings -n 60 ~/.local/share/claude/versions/<ver> | grep '<pattern>'
+claude --help | grep -- '--<flag>'
+```
+
+That is how the `cleanupPeriodDays` inversion was found: the complete
+zod error message is sitting in the binary in plain text.
+
+## Signals, in the order they pay
+
+| Signal | Command | Catches |
+|---|---|---|
+| Changelog | `gh api repos/anthropics/claude-code/contents/CHANGELOG.md` | intent, rationale, **reverts and removals** |
+| Docs | `curl https://code.claude.com/docs/llms.txt` then per-page `.md` | documented-surface change |
+| Binary | `strings -n 6 <binary>` diffed against the previous version | **undocumented internals** |
+
+The binary is the one that pays: across two releases it surfaced 17 new
+`CLAUDE_*`/`ANTHROPIC_*` names of which the changelog announced 3.
+
+**Filter, or the diff is noise** — two releases produce ~57,000 new raw
+strings. `^(CLAUDE_|ANTHROPIC_)[A-Z0-9_]+$` reduces that to 17 real ones.
+There is no generic filter: a shape heuristic for settings keys returns
+dictionary words out of embedded data. Per-surface extractors, always.
+
+Do not fetch `llms-full.txt` with a bare `curl` — it is 7.5 MB and
+truncates mid-transfer, which diffs as "hundreds of pages removed".
+
+## The watchlist
+
+| CC surface | Claudepot owner | Grep tokens | Check |
+|---|---|---|---|
+| `cleanupPeriodDays` semantics + floor | `cc_retention` | `cleanupPeriodDays`, `session-persistence`, `persistSession` | binary strings; `claude --help`; `MIN_CLEANUP_PERIOD_DAYS` is the pin |
+| settings-validation → cleanup suppression | `cc_retention::RetentionMode::Invalid` / `LegacyZero` | `Skipping cleanup`, `validation errors` | binary strings |
+| env var catalog + `SAFE_ENV_VARS` | `cc_env`, `data/cc-env-spec.json` | `CLAUDE_*`, `ANTHROPIC_*`, `SAFE_ENV_VARS`, `PROVIDER_MANAGED` | `scripts/build-cc-env-spec.py --rebuild-evidence` then `--check` |
+| settings merge precedence | `config_view::effective_settings`, `parity-harness/` | `settings.local.json`, `managed-settings`, `policy`, `--setting-sources` | `cargo xtask verify-cc-parity` + re-pin |
+| `permissions.defaultMode` | `permission::settings` | `defaultMode`, `bypassPermissions`, `acceptEdits`, `plan` | binary strings for the mode wire strings |
+| `availableModels` / `enforceAvailableModels` | `available_models` | `availableModels`, `enforceAvailableModels` | binary strings |
+| model ids and rates | `pricing`, `session_live::pricing`, `src/costs.ts` | `claude-opus`, `claude-sonnet`, `claude-fable`, `claude-haiku`, `mythos` | changelog grep; add a `RatePeriod` **and** a vector to `rate-resolution-vectors.json` |
+| fast-mode billing (known gap) | `fast_mode_toggle`, `pricing` | `fastMode` | changelog grep |
+| auto-update channel | `updates::settings_bridge` | `autoUpdatesChannel`, `minimumVersion`, `autoUpdates` | binary strings |
+| auto-memory + consolidation | `settings_writer`, `memory_view`, `auto_dream` | `autoMemoryDirectory`, `autoDreamEnabled` | docs `memory.md` diff |
+| artifact toggle | `artifact_toggle` | `enableArtifact`, `disableArtifact` | binary strings |
+| commit/PR attribution | `attribution_settings` | `Co-Authored-By`, `includeCoAuthoredBy` | binary strings |
+| tips ledger shape | `cc_tips::catalog`, `cc_tips::history` | `tipsHistory`, `numStartups`, `spinnerTipsEnabled` | re-run catalog extraction |
+| `claude doctor` output | `cc_doctor` | — | run it, diff against the parser |
+| `claude daemon status` output | `cc_daemon` | — | run it, diff against the parser |
+| transcript JSONL schema | `session_index`, `session_live`, `corpus` | `sidechain`, `toolUseResult`, `subagents/` | parse newest transcripts; count unknown record kinds |
+| path-keyed global state | `project::move_project` P4–P10 | `installed_plugins.json`, `history.jsonl`, `projects[` | `rules/cc-state-move-blast-radius.md` invariant |
+| `claude -p` flag surface | `agent::shim` | `--output-format`, `--model`, `--fallback-model`, `--allowedTools`, `--disallowed-tools`, `--system-prompt`, `--append-system-prompt`, `--add-dir`, `--mcp-config`, `--include-partial-messages`, `--bare` | grep `claude --help` per flag |
+| credentials keychain item | `cli_backend/keychain` | `Claude Code-credentials` | binary strings |
+| MCP config scope resolution | `config_view::effective_mcp`, `mcp_snippet` | `mcpServers`, `getMcpConfigsByScope` | docs `mcp.md` diff |
+| global config file resolution | `paths::global_claude_json_target` | `getGlobalClaudeFile`, `.config.json` | binary strings |
+
+## Version pins that go stale silently
+
+These artifacts **disable themselves** on a version mismatch and say
+nothing. That is correct behaviour and a reporting gap: check them by
+hand until `cargo xtask cc-drift` exists.
+
+| Artifact | Pin field | Failure mode when stale |
+|---|---|---|
+| `parity-harness/PINNED_CC_VERSION` | the file | fixtures lock historical parity only |
+| `crates/claudepot-core/data/cc-env-evidence.json` | `binary_crosscheck_version` | env pane hides `present_in_build` entirely |
+| same | `docs_fetched_at` / `docs_sha256` | docs rows drift from the live page |
+| same | `cc_source_read_at` | dated against the abandoned mirror |
+
+## What a green run looks like
+
+**Record the negative result.** "Checked, unchanged" is what makes a
+later red meaningful — a watchlist with no history of passing runs is
+indistinguishable from one nobody has run. The monthly report in
+`dev-docs/reports/` is where that goes.
+
+## Precedent
+
+`cleanupPeriodDays` is the worked example, found 2026-08-16 by running
+this list by hand for twenty minutes. CC had started rejecting `0`; the
+control Claudepot shipped for it kept writing `0` behind a
+type-to-confirm gate, which inverted its effect from "delete everything"
+to "never clean up, and keep writing". It had been wrong for some
+unknown part of 145 releases. See `dev-docs/cc-upstream-watch.md` §2.1.
