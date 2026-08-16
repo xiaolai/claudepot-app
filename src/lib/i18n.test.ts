@@ -94,10 +94,14 @@ describe("locale allowlist parity with Rust", () => {
 // hardcoded English literal inside an otherwise fully-translated dialog,
 // so a zh reader was asked to type a word the dialog never showed them.
 describe("type-to-confirm tokens are localized", () => {
-  const GATES = [
-    { ns: "settings", key: "retention.confirmDisable.phrase" },
-    { ns: "projects", key: "repair.abandonPhrase" },
-  ] as const;
+  // `settings:retention.confirmDisable.phrase` was the second entry here
+  // until CC 2.1.233 stopped accepting `cleanupPeriodDays: 0`. The
+  // dialog it gated wrote that value, so the dialog is gone and the
+  // phrase with it — see `claudepot_core::cc_retention`. Re-add an entry
+  // here the moment another type-to-confirm gate ships; the rule this
+  // suite encodes is about the pattern, not about the two call sites
+  // that happened to exist when it was written.
+  const GATES = [{ ns: "projects", key: "repair.abandonPhrase" }] as const;
 
   it("every gate token exists in both locales", () => {
     for (const { ns, key } of GATES) {
@@ -111,9 +115,9 @@ describe("type-to-confirm tokens are localized", () => {
 
   it("the zh token differs from the en token where the word is prose", () => {
     // Not a blanket rule: a token may legitimately be identical across
-    // locales. But the retention phrase is a sentence and the abandon
-    // token is a verb the dialog itself translates, so both must differ
-    // — if they match, the gate is showing English inside a zh dialog.
+    // locales. But the abandon token is a verb the dialog itself
+    // translates, so it must differ — if they match, the gate is showing
+    // English inside a zh dialog.
     for (const { ns, key } of GATES) {
       const en = i18n.getFixedT("en", ns)(key);
       const zh = i18n.getFixedT("zh-CN", ns)(key);

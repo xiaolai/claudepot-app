@@ -1242,7 +1242,6 @@ pub fn run() {
             commands::cc_retention::retention_report,
             commands::cc_retention::retention_set,
             commands::cc_retention::retention_clear,
-            commands::cc_retention::retention_disable_persistence,
             commands::attribution::attribution_state,
             commands::attribution::attribution_set,
             config_watch::config_watch_start,

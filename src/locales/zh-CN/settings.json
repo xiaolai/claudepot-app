@@ -383,19 +383,19 @@
     "loadErrorLead": "无法读取 Claude Code 的保留设置，因此本面板无法告诉你哪些内容已排定删除。",
     "tryAgain": "重试",
     "modeDefault": "{{days}} 天 — 这是 Claude Code 的默认值，不是你做的选择",
-    "modeDisabled": "对话记录完全没有在保存",
     "modeInvalid": "无效值（{{days}}）— Claude Code 的设置校验会拒绝它",
     "modeDays": "{{days}} 天",
     "sectionTitle": "对话记录保留",
     "risk": {
       "deletable_other": "{{num}} 条对话记录将在 Claude Code 下次启动时被删除。",
       "horizon_other": "另有 {{num}} 条将在 {{days}} 天内越过删除线。",
-      "nothing": "没有内容被排定删除。",
+      "nothing": "没有对话记录被安排删除。",
       "oldest": "现存最早的对话：{{date}}。",
       "scanIncomplete": "Claude Code 的对话记录文件夹有一部分无法读取，这些数字只是下限，不是总数。",
       "silent": "Claude Code 会静默执行 — 它从不报告删除了什么。",
-      "suppressed": "由于这个值使设置文件无效，Claude Code 目前完全跳过清理。这是在无意中保护了你的对话记录 — 请改正这个值，而不要恢复默认值：恢复默认会重新启用删除。",
-      "totalOnMachine_other": "这台机器上共有 {{num}} 条对话记录。"
+      "suppressed": "Claude Code 完全跳过了清理，因为它无法校验设置。可能是 cleanupPeriodDays 的值被 Claude Code 拒绝，也可能是设置文件无法读取——Claudepot 无法分辨是哪一种。这只是意外地保护了你的对话记录。请修正设置文件，而不要恢复默认值，否则会重新启用删除。",
+      "totalOnMachine_other": "这台机器上共有 {{num}} 条对话记录。",
+      "suppressedLegacyZero": "这个值是在 Claude Code 还将 cleanupPeriodDays: 0 视为“停止保存对话记录”时写入的。它现在拒绝该值，因此实际情况恰恰相反：对话记录仍在写入，而清理因设置无效而被完全跳过。在下方选一个保留时长即可修复——这也会同时开始删除更早的记录。"
     },
     "nestedNote": "清理只删除 {{total}} 个顶层会话对话记录。另有 {{nested}} 个嵌套文件（子代理运行、工具结果）永远不会被删除，所以对话在被删除的同时文件夹仍在增长 — 磁盘占用无法暴露这种丢失。",
     "keepFor": "对话记录保留时长",
@@ -408,8 +408,7 @@
     "bufferNote": "更长的窗口只是争取时间，不是备份。这些文件仍存放在 Claude Code 的缓存目录里、遵循 Claude Code 的规则，重度使用时每周大约增长 1 GB。",
     "dangerZone": "危险区",
     "restoreDefaultBtn": "恢复 Claude Code 的默认值",
-    "stopSavingBtn": "完全停止保存对话记录",
-    "dangerNote": "两者都会重新启用删除。对已被删除的对话记录，二者都无法撤销。",
+    "dangerNote": "会重新启用删除。已删除的对话记录无法恢复。",
     "confirmRestore": {
       "title": "恢复 Claude Code 的默认保留期？",
       "bodyCount": "保留期将恢复为 <strong>30 天</strong>。Claude Code 下次启动时会删除所有早于该期限的对话记录 — 目前保存着 {{num}} 条对话记录。此操作无法撤销。",
@@ -417,17 +416,15 @@
       "confirm": "恢复默认值"
     },
     "restoredToast": "保留期已恢复为 Claude Code 的 30 天默认值。",
-    "confirmDisable": {
-      "title": "完全停止保存对话记录？",
-      "intro": "这会写入 <code>cleanupPeriodDays: 0</code>，它做两件事：",
-      "li1": "Claude Code 停止为新会话写入对话记录。",
-      "li2": "所有现存对话记录将在 Claude Code 下次启动时被删除。",
-      "li2Count": "所有现存对话记录（这台机器上有 {{num}} 条）将在 Claude Code 下次启动时被删除。",
-      "outro": "会话恢复、搜索，以及 Claudepot 所有建立在对话记录之上的功能都将停止工作。此操作无法撤销。",
-      "confirm": "停止保存并删除",
-      "phrase": "删除我的对话记录"
+    "modeLegacyZero": "设为“停止保存”—— Claude Code 已不再接受该值",
+    "noDisableNote": "现在已无法通过设置停止保存对话记录。Claude Code 仅在 --print 模式下接受 --no-session-persistence，而 persistSession: false 仅限 SDK 使用，因此交互会话总会写入对话记录。",
+    "confirmRearm": {
+      "title": "将对话记录保留 {{label}}？",
+      "body": "Claude Code 目前正跳过清理，因此没有任何内容被删除。设置保留时长会<strong>重新启用删除</strong>：早于 {{label}} 的内容将在 Claude Code 下次启动时被清除。此操作无法撤销。",
+      "bodyCount": "Claude Code 目前正跳过清理，因此没有任何内容被删除——当前保留着 {{num}} 份对话记录。设置保留时长会<strong>重新启用删除</strong>：早于 {{label}} 的内容将在 Claude Code 下次启动时被清除。此操作无法撤销。",
+      "confirm": "设置并重新启用删除"
     },
-    "disabledToast": "对话记录持久化已停用。"
+    "scopeNote": "cleanupPeriodDays 并不只是对话记录的设置——Claude Code 会按同一时限清理 ~/.claude 下约二十个目录，包括 tasks、file-history、shell-snapshots 和 backups。Claudepot 统计的是无法再生的对话记录，其余目录不在此处显示。"
   },
   "health": {
     "refreshFailed": "健康检查刷新失败",

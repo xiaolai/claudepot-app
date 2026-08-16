@@ -269,7 +269,10 @@ left to memory.
   elevated by hand-editing settings shows as elevated but *not*
   Claudepot-managed — the UI won't revert someone's own choice.
 - CC schema (`permissions.defaultMode`) verified against
-  `~/github/claude_code_src/src`.
+  `~/github/claude_code_src/src` — i.e. against **2.1.88**, and not
+  re-checked since. See "Reference" for why that mirror is no longer
+  authoritative, and `crates/xtask/cc-upstream-watch.md` for the row
+  that re-verifies this key.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 
@@ -325,40 +328,89 @@ the pane:
 
 - **Sliding, not one-shot.** `getCutoffDate()` recomputes
   `now - cleanupPeriodDays` on *every* run, so loss is continuous.
-- **`0` is the most destructive value, not "off".** It means *write no
-  transcripts and delete the existing ones at startup*. It is therefore
-  **not on the duration scale** — `set_retention_days` rejects it and
-  `disable_persistence()` is a separately-named call behind a
-  type-to-confirm gate. Do not "simplify" these into one setter.
-- **Any value CC's schema rejects suppresses cleanup entirely.**
-  `cleanupOldMessageFilesInBackground` bails when settings fail
-  validation *and* the raw key is present, so an invalid value
-  accidentally **protects** transcripts (`RetentionMode::Invalid` /
-  `cleanup_suppressed`). The UI must say "fix the value", never
-  "restore the default" — restoring clears the error and re-arms
-  deletion.
+- **`0` is not on the duration scale — and CC now rejects it.** Through
+  CC 2.1.88 it meant *write no transcripts and delete the existing ones
+  at startup*. **CC 2.1.233 requires a minimum of 1** and refuses `0`
+  with its own message, pointing at `--no-session-persistence` or the
+  SDK's `persistSession: false` instead.
 
-  That is a negative number **and** anything that is not an integer:
-  `z.number().nonnegative().int()` rejects `"thirty"`, `30.5` and `true`
-  alike. This is why `settings_writer::read_i64_setting` returns a
-  three-state `SettingValue` rather than an `Option` — collapsing
-  "absent" and "present but wrong type" reported a 30-day timer on
-  history CC was in fact leaving alone, and pointed the user at the one
-  button that starts it. Known limit: CC suppresses cleanup on a
-  validation error **anywhere** in the file while this key is present;
-  Claudepot models only this key, so a file invalid elsewhere reads as
-  "cleanup armed". That errs toward warning about deletion that is not
-  happening, which is the safe direction, but it is not complete.
+  Both of those are out of reach: the flag is rejected outside
+  `--print` mode, and the option is SDK-only. **So there is no way to
+  disable transcript persistence for an interactive session, and
+  Claudepot no longer offers one** — `disable_persistence()` and
+  `retention_disable_persistence` were deleted rather than repointed,
+  because every implementation of that verb would write a value CC
+  rejects and report success. Do not re-add one without re-verifying
+  the schema; `cc_retention::MIN_CLEANUP_PERIOD_DAYS` is the pin.
+
+  A `0` written by an older Claudepot is still on disk for anyone who
+  used the old control, and it now does the **opposite** of what they
+  chose: transcripts are written, and cleanup is suppressed because the
+  key is present and invalid. That is `RetentionMode::LegacyZero`, kept
+  distinct from `Invalid` because the repair copy differs — a promise
+  withdrawn upstream, not a typo to correct.
+- **Any value CC's schema rejects suppresses cleanup entirely.** CC
+  bails when settings fail validation *and* the raw key is present, so
+  an invalid value accidentally **protects** transcripts
+  (`RetentionMode::Invalid` / `LegacyZero` / `cleanup_suppressed`). The
+  UI must say "fix the value", never "restore the default" — restoring
+  clears the error and re-arms deletion. It follows that **any control
+  that lifts suppression confirms first**: while suppressed, a preset
+  button is a one-tap destructive action on the whole backlog.
+
+  That is anything below `1` **and** anything that is not an integer —
+  the schema rejects `"thirty"`, `30.5` and `true` alike. This is why
+  `settings_writer::read_i64_setting` returns a three-state
+  `SettingValue` rather than an `Option` — collapsing "absent" and
+  "present but wrong type" reported a 30-day timer on history CC was in
+  fact leaving alone, and pointed the user at the one button that starts
+  it.
+
+  2.1.233 states the suppression out loud where 2.1.88 was silent
+  (*"Skipping cleanup: settings have validation errors but
+  cleanupPeriodDays was explicitly set"*, surfaced via `/doctor`), and
+  adds two causes Claudepot does not model: an unreadable/unparseable
+  settings file, and `--setting-sources` disabling the user-settings
+  source. Known limits, all in the same direction: CC suppresses on a
+  validation error **anywhere** in the file while this key is present,
+  and Claudepot models only this key, so a file invalid elsewhere — or
+  either new cause — reads as "cleanup armed". That errs toward warning
+  about deletion that is not happening, which is the safe direction, but
+  it is not complete.
 - **Invisible on disk.** Cleanup unlinks top-level session transcripts
   and never walks `subagents/`, so the folder grows while history is
   destroyed. `TranscriptRisk::nested_immortal` exists to say so.
 
 `TranscriptRisk::scan_incomplete` is load-bearing: a scan that failed
-must never render as "nothing is scheduled for deletion". Boot check at
-`src-tauri/src/retention_boot_check.rs` emits one bell entry via
-`Category::TranscriptsExpiring`; there is deliberately **no dismissal
-flag** — gating on the condition means raising retention silences it,
-while dismissing without fixing does not.
+must never render as "nothing is scheduled for deletion".
+
+Boot check at `src-tauri/src/retention_boot_check.rs` emits **at most one**
+bell entry, choosing between two mutually-exclusive conditions that core
+guarantees cannot both hold:
+
+| Condition | Core decision fn | Category |
+|---|---|---|
+| deletion is coming | `cc_retention::warning` | `TranscriptsExpiring` |
+| deletion is switched **off** and you were not told | `cc_retention::cleanup_suppressed_warning` | `TranscriptCleanupSuppressed` |
+
+The second exists because the first deliberately returns `None` for every
+suppressed state — announcing "conversations are expiring" where deletion
+is disabled alarms the user about the one thing that is *not* happening.
+That left the suppressed states discoverable only by opening the pane,
+and the user least likely to look is the one who set "stop saving" years
+ago and considers it settled. Two categories rather than one because the
+**mute decision differs**, which is `Category`'s standing test for a
+split.
+
+Neither has a dismissal flag — gating on the condition means fixing the
+setting silences it, while dismissing without fixing does not.
+
+Both bodies are composed in the Tauri crate from the catalog and locked
+byte-for-byte against core's `message()` under `en`, so the CLI's English
+and the GUI's cannot drift. The suppressed body additionally asserts it
+never contains "will be deleted" / "will delete": the two entries say
+opposite things, and a user who reads the wrong one takes the wrong
+action on the only CC setting that destroys data.
 
 ## CC env variables (Global → Config → Env Variables)
 
@@ -506,9 +558,13 @@ Full design in `dev-docs/i18n-plan.md`.
 logs and tracing, core error `Display` text, and technical identifiers
 (paths, model ids, CC setting keys like `cleanupPeriodDays`, env var
 names, commands the user copies). Localizing a value the user must
-type or paste is a bug, not a feature — the retention pane's
-type-to-confirm gate is the one deliberate exception, because a zh
-user must be able to type the phrase they are shown.
+type or paste is a bug, not a feature — **type-to-confirm gates are the
+one deliberate exception**, because a zh user must be able to type the
+phrase they are shown. The surviving gate is the repair pane's
+`projects:repair.abandonPhrase`; the retention pane's was removed with
+the control it guarded (see "Transcript retention"), so
+`src/lib/i18n.test.ts` now locks one entry rather than two. The rule is
+about the pattern — a new gate goes in that list.
 
 **Load-bearing rules, each learned the hard way:**
 
@@ -894,7 +950,32 @@ corrupted non-CSS files before).
 ## Reference
 
 `dev-docs/kannon/reference.md` — 3400-line verified reference for CC/Desktop internals.
-Always verify claims against CC source at `~/github/claude_code_src/src` before coding.
+
+**Verify against the installed binary, not the source mirror.**
+`~/github/claude_code_src` is a third-party mirror pinned at **2.1.88**
+and abandoned upstream on 2026-04-15 — 145+ versions stale, and it does
+not move again. Treat it as archaeology. Telling every agent to "verify
+against CC source" there made it a *drift generator*: each pass would
+confidently confirm April's behaviour and report success.
+
+Claude Code ships as a bun-compiled binary that retains readable JS and
+string literals, so it is the authority:
+
+```bash
+strings -n 60 ~/.local/share/claude/versions/<ver> | grep '<pattern>'
+claude --help | grep -- '--<flag>'
+```
+
+That is how the `cleanupPeriodDays` inversion surfaced — the complete
+validation message sits in the binary in plain text, and contradicted
+both this repo's docs and the mirror.
+
+CC ships **~27 releases a month**, so any CC claim more than a few weeks
+old is a hypothesis. `.claude/rules/cc-upstream-watch.md` carries the two
+standing rules; `crates/xtask/cc-upstream-watch.md` is the list of
+surfaces that drift and how to check each one (it sits by the tool that
+reads it, since `.claude/rules/` is loaded into every session);
+`dev-docs/cc-upstream-watch.md` is the routine's design.
 
 ## Icon assets
 

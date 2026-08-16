@@ -6,6 +6,53 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.4.16 — beta (unreleased)
+
+Claude Code changed `cleanupPeriodDays` out from under us in **2.1.89**
+— the release immediately after the source snapshot this repo verifies
+against — and nothing here noticed for about four and a half months.
+This release fixes the damage and adds the routine that should have
+caught it.
+
+Patch rather than minor, deliberately: the removed control is repair,
+not a feature deletion, because it did the opposite of its label. No
+schema migration, no settings-format change.
+
+### Fixed
+
+- **"Stop saving transcripts entirely" did the opposite of what it
+  said.** It wrote `cleanupPeriodDays: 0`, which Claude Code has
+  rejected since 2.1.89. A rejected value doesn't disable anything — it
+  invalidates the settings file, which makes Claude Code skip cleanup
+  altogether. So transcripts were being written *and* never cleaned,
+  for users who had explicitly asked for neither. The control is gone,
+  because current Claude Code offers no way to disable transcript
+  persistence for an interactive session at all
+  (`--no-session-persistence` is `--print`-only; `persistSession: false`
+  is SDK-only). Settings → Retention now says so instead of hiding the
+  absence.
+- **A `0` left on disk by an older Claudepot is now explained and
+  repairable.** It reads as its own state rather than as a typo, with
+  copy that describes the inversion — Claude Code is keeping every
+  conversation, not deleting them.
+- **The pane no longer claims "Nothing is scheduled for deletion."**
+  `cleanupPeriodDays` is a global TTL over roughly twenty directories
+  under `~/.claude`, not a transcript setting. Claudepot counts
+  conversations — the irreplaceable part — and now says so, and names
+  what it does not count.
+- Any action that lifts a suppressed cleanup asks first. While
+  suppressed, a retention preset re-arms deletion of the whole backlog
+  in one click.
+
+### Added
+
+- **A boot warning when Claude Code has stopped cleaning up.** Its
+  mirror already existed for "conversations are expiring"; the
+  suppressed case was reachable only by opening the pane, and the user
+  least likely to look is the one who set "stop saving" once and
+  considers it settled. New notification category, so muting one does
+  not mute the other.
+
 ## 0.4.15 — beta (released 2026-08-15)
 
 An external UX/UI audit, worked through in passes. Most of what follows

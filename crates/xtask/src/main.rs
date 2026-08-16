@@ -7,6 +7,7 @@
 //!
 //! See `parity-harness/README.md` for the full design.
 
+mod cc_drift;
 mod data_dir_scan;
 mod screenshot_fixture;
 mod verify_docs;
@@ -21,6 +22,7 @@ fn main() -> Result<()> {
 
     match cmd.as_str() {
         "verify-cc-parity" => verify_cc_parity(&rest),
+        "cc-drift" => cc_drift::run(&workspace_root()?, &rest),
         "verify-docs" => verify_docs::verify_docs(&workspace_root()?),
         "verify-screenshots" => verify_docs::verify_screenshots(&workspace_root()?),
         "screenshot-fixture" => {
@@ -68,6 +70,19 @@ subcommands:
   verify-cc-parity [--only <name>]    diff Rust merge output against
                                       parity-harness/fixtures/*/expected.json.
                                       Fails loudly on mismatch.
+
+  cc-drift [--since <ver>]            has Claude Code moved under us?
+           [--changelog <path>]       Reports version pins that have gone
+                                      stale (each disables a surface
+                                      silently) and every upstream
+                                      release note that mentions a token
+                                      from crates/xtask/cc-upstream-watch.md.
+                                      NOT a CI gate: needs CC installed,
+                                      and the version moves daily, so a
+                                      gate would be permanently red.
+                                      Defaults --since to the parity pin;
+                                      fetches the changelog with `gh`
+                                      unless --changelog is given.
 ";
 
 fn verify_cc_parity(args: &[String]) -> Result<()> {

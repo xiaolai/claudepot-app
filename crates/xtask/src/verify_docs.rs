@@ -127,11 +127,13 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_optional_shortcut_callbacks_are_wired(repo, &mut problems)?;
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
+    check_cc_watchlist(repo, &mut problems)?;
 
     if problems.is_empty() {
         println!(
             "verify-docs: ok — CLI verbs, Settings panes, databases, data-dir JSON state, the \
-             shortcut gate, web icon assets and the cc-env spec all in sync"
+             shortcut gate, web icon assets, the cc-env spec and the CC \
+             watchlist all in sync"
         );
         return Ok(());
     }
@@ -2515,6 +2517,79 @@ enum AccountAction {
 // one parsed 2 of 9 entries, one could never flag anything because it
 // counted braces from the wrong origin, and one compared only the
 // items that had not regressed. Each was found by hand-sabotaging the
+
+/// The CC upstream watchlist (`crates/xtask/cc-upstream-watch.md`) must
+/// stay machine-readable, and every module it names must exist.
+///
+/// This is the CI-safe half of `cargo xtask cc-drift`. The drift check
+/// itself cannot gate — it needs Claude Code installed and the version
+/// moves daily — but the artifact it reads is pure text, so the ways it
+/// rots are all catchable here:
+///
+/// - a table format change would make every future run silently report
+///   "green" over zero rows;
+/// - a renamed or deleted core module leaves a row pointing at nothing,
+///   which reads as coverage that does not exist.
+///
+/// **Scope of the owner check, stated because the earlier wording
+/// overclaimed it.** Only the FIRST `::` segment is resolved — the
+/// top-level module. `cc_retention::RetentionMode::Invalid` passes as
+/// long as `cc_retention` exists; a renamed *type* inside it is not
+/// caught here. Resolving deeper would mean parsing Rust paths into
+/// module/type/function forms against a moving codebase, and a guard
+/// that mis-resolves is worse than one with a stated limit, because it
+/// cries wolf and gets bypassed. The top segment is where the
+/// module-deleted-or-renamed failure actually lives.
+fn check_cc_watchlist(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
+    let path = repo.join(crate::cc_drift::WATCHLIST_REL);
+    let Ok(md) = std::fs::read_to_string(&path) else {
+        problems.push(format!(
+            "{} is missing — the CC upstream watchlist is the target list for \
+             `cargo xtask cc-drift`",
+            crate::cc_drift::WATCHLIST_REL
+        ));
+        return Ok(());
+    };
+    let rows = match crate::cc_drift::parse_watchlist(&md) {
+        Ok(r) => r,
+        Err(e) => {
+            problems.push(format!(
+                "{} no longer parses ({e}) — cc-drift would report green over zero rows",
+                crate::cc_drift::WATCHLIST_REL
+            ));
+            return Ok(());
+        }
+    };
+
+    let core = repo.join("crates/claudepot-core/src");
+    for row in &rows {
+        // The owner cell names modules in backticks. Only the ones that
+        // look like core module paths are resolvable here; entries like
+        // `src/costs.ts` or `parity-harness/` are checked by their own
+        // guards, and a bare prose owner is allowed.
+        for ident in row.owner.split('`').skip(1).step_by(2) {
+            let ident = ident.trim().trim_end_matches(',');
+            if ident.is_empty() || ident.contains('/') || ident.contains('.') {
+                continue;
+            }
+            let top = ident.split("::").next().unwrap_or(ident);
+            if top.is_empty() || !top.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                continue;
+            }
+            if !core.join(format!("{top}.rs")).exists() && !core.join(top).is_dir() {
+                problems.push(format!(
+                    "{}: row {:?} names owner `{top}`, which is not a module under \
+                     crates/claudepot-core/src — a watchlist row pointing at nothing \
+                     reads as coverage that does not exist",
+                    crate::cc_drift::WATCHLIST_REL,
+                    row.surface
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 // tree and watching for red.
 //
 // AGENTS.md already names this failure and prescribes the fix, for
@@ -2553,6 +2628,77 @@ mod guard_tests {
         let mut problems = Vec::new();
         f(d.path(), &mut problems).expect("check ran");
         problems
+    }
+
+    // ── CC upstream watchlist ────────────────────────────────────────
+
+    const GOOD_WATCHLIST: &str = "\
+## The watchlist
+
+| CC surface | Claudepot owner | Grep tokens | Check |
+|---|---|---|---|
+| retention | `cc_retention` | `cleanupPeriodDays` | binary strings |
+| env vars | `cc_env`, `data/cc-env-spec.json` | `CLAUDE_*` | rebuild evidence |
+| costs | `src/costs.ts` | `claude-opus` | changelog grep |
+";
+
+    fn watch_repo(md: &str, core_modules: &[&str]) -> tempfile::TempDir {
+        let d = repo();
+        write(&d, crate::cc_drift::WATCHLIST_REL, md);
+        for m in core_modules {
+            write(
+                &d,
+                &format!("crates/claudepot-core/src/{m}.rs"),
+                "// module",
+            );
+        }
+        d
+    }
+
+    #[test]
+    fn watchlist_accepts_a_well_formed_table_whose_owners_exist() {
+        let d = watch_repo(GOOD_WATCHLIST, &["cc_retention", "cc_env"]);
+        assert_eq!(run(check_cc_watchlist, &d), Vec::<String>::new());
+    }
+
+    /// The defect that matters most: a table cc-drift cannot read makes
+    /// every future run report green over zero rows.
+    #[test]
+    fn watchlist_format_drift_is_caught() {
+        let d = watch_repo("## The watchlist\n\nnow written as prose.\n", &[]);
+        let out = run(check_cc_watchlist, &d);
+        assert!(
+            out.iter().any(|p| p.contains("no longer parses")),
+            "{out:?}"
+        );
+    }
+
+    /// A row naming a module that no longer exists reads as coverage
+    /// that is not there.
+    #[test]
+    fn watchlist_owner_that_does_not_exist_is_caught() {
+        let d = watch_repo(GOOD_WATCHLIST, &["cc_retention"]); // cc_env missing
+        let out = run(check_cc_watchlist, &d);
+        assert!(out.iter().any(|p| p.contains("cc_env")), "{out:?}");
+    }
+
+    /// Owners that are paths rather than core modules (`src/costs.ts`,
+    /// `data/cc-env-spec.json`) must not be resolved as modules, or the
+    /// guard cries wolf and gets bypassed.
+    #[test]
+    fn watchlist_path_owners_are_not_treated_as_modules() {
+        let d = watch_repo(GOOD_WATCHLIST, &["cc_retention", "cc_env"]);
+        let out = run(check_cc_watchlist, &d);
+        assert!(!out.iter().any(|p| p.contains("costs")), "{out:?}");
+        assert!(!out.iter().any(|p| p.contains("cc-env-spec")), "{out:?}");
+    }
+
+    /// A deleted watchlist must fail loudly rather than pass by absence.
+    #[test]
+    fn a_missing_watchlist_is_reported() {
+        let d = repo();
+        let out = run(check_cc_watchlist, &d);
+        assert!(out.iter().any(|p| p.contains("missing")), "{out:?}");
     }
 
     // ── shortcut gate ────────────────────────────────────────────────
