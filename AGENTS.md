@@ -271,7 +271,7 @@ left to memory.
 - CC schema (`permissions.defaultMode`) verified against
   `~/github/claude_code_src/src` — i.e. against **2.1.88**, and not
   re-checked since. See "Reference" for why that mirror is no longer
-  authoritative, and `.claude/rules/cc-upstream-watch.md` for the row
+  authoritative, and `crates/xtask/cc-upstream-watch.md` for the row
   that re-verifies this key.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
@@ -971,8 +971,10 @@ validation message sits in the binary in plain text, and contradicted
 both this repo's docs and the mirror.
 
 CC ships **~27 releases a month**, so any CC claim more than a few weeks
-old is a hypothesis. `.claude/rules/cc-upstream-watch.md` is the list of
-surfaces that drift and how to check each one;
+old is a hypothesis. `.claude/rules/cc-upstream-watch.md` carries the two
+standing rules; `crates/xtask/cc-upstream-watch.md` is the list of
+surfaces that drift and how to check each one (it sits by the tool that
+reads it, since `.claude/rules/` is loaded into every session);
 `dev-docs/cc-upstream-watch.md` is the routine's design.
 
 ## Icon assets

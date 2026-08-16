@@ -2518,7 +2518,7 @@ enum AccountAction {
 // counted braces from the wrong origin, and one compared only the
 // items that had not regressed. Each was found by hand-sabotaging the
 
-/// The CC upstream watchlist (`.claude/rules/cc-upstream-watch.md`) must
+/// The CC upstream watchlist (`crates/xtask/cc-upstream-watch.md`) must
 /// stay machine-readable, and every module it names must exist.
 ///
 /// This is the CI-safe half of `cargo xtask cc-drift`. The drift check
@@ -2634,7 +2634,7 @@ mod guard_tests {
 
     fn watch_repo(md: &str, core_modules: &[&str]) -> tempfile::TempDir {
         let d = repo();
-        write(&d, ".claude/rules/cc-upstream-watch.md", md);
+        write(&d, crate::cc_drift::WATCHLIST_REL, md);
         for m in core_modules {
             write(
                 &d,

@@ -32,8 +32,15 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
-/// Path of the committed watchlist, relative to the workspace root.
-pub const WATCHLIST_REL: &str = ".claude/rules/cc-upstream-watch.md";
+/// Path of the watchlist this tool reads, relative to the workspace
+/// root.
+///
+/// It lives beside the tool rather than in `.claude/rules/` because
+/// everything in that directory is loaded into every Claude Code session
+/// in this repo. A monthly routine's 21-row target list does not earn
+/// always-on context; the short rule that points here does, and stays
+/// there.
+pub const WATCHLIST_REL: &str = "crates/xtask/cc-upstream-watch.md";
 
 /// One row of the watchlist table: a CC surface we depend on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +70,7 @@ pub struct Hit {
     pub excerpt: String,
 }
 
-/// Parse the watchlist table out of the committed rule file.
+/// Parse the watchlist table out of the committed input file.
 ///
 /// Deliberately strict: a table this file cannot read is a table the
 /// drift check silently skips, which is the failure mode the whole

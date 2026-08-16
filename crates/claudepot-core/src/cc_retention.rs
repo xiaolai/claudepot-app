@@ -46,7 +46,7 @@
 //! (`DEFAULT_CLEANUP_PERIOD_DAYS = 30`) and `:27` — still correct on the
 //! default, but that mirror is pinned at 2.1.88 and is exactly what
 //! missed the floor change. Check the binary, not the mirror; see
-//! `.claude/rules/cc-upstream-watch.md`.
+//! `crates/xtask/cc-upstream-watch.md`.
 //!
 //! ```text
 //! const days = settings.cleanupPeriodDays ?? 30
@@ -96,9 +96,10 @@ const MS_PER_DAY: i64 = 24 * 60 * 60 * 1_000;
 /// binary, which documents the key as "default: 30; minimum 1" and
 /// rejects `0` with its own message (see [`RetentionMode::LegacyZero`]).
 ///
-/// Re-verify when the upstream watch (`dev-docs/cc-upstream-watch.md`)
-/// reports movement on this key: it was `0` for the whole life of this
-/// module before 2.1.233, and the change inverted a control.
+/// Re-verify when `cargo xtask cc-drift` reports movement on this key
+/// (its row is in `crates/xtask/cc-upstream-watch.md`): the floor was
+/// `0` for the whole life of this module before 2.1.233, and the change
+/// inverted a control.
 pub const MIN_CLEANUP_PERIOD_DAYS: i64 = 1;
 
 /// File extensions CC's `cleanupOldSessionFiles` unlinks by mtime.

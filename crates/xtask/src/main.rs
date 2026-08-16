@@ -76,7 +76,7 @@ subcommands:
                                       stale (each disables a surface
                                       silently) and every upstream
                                       release note that mentions a token
-                                      from .claude/rules/cc-upstream-watch.md.
+                                      from crates/xtask/cc-upstream-watch.md.
                                       NOT a CI gate: needs CC installed,
                                       and the version moves daily, so a
                                       gate would be permanently red.
