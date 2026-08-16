@@ -50,6 +50,7 @@
     "usageThreshold": "Usage near limit",
     "updateInstallReady": "Update ready to install",
     "transcriptsExpiring": "Saved conversations expiring",
+    "transcriptCleanupSuppressed": "Transcript cleanup switched off",
     "accountVerified": "Account verified",
     "accountSwitched": "Account switched",
     "projectRenamed": "Project renamed",

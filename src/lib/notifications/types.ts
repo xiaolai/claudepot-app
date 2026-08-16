@@ -53,6 +53,7 @@ export type Category =
   | "usageThreshold"
   | "updateInstallReady"
   | "transcriptsExpiring"
+  | "transcriptCleanupSuppressed"
   // P2 — Acknowledge
   | "accountVerified"
   | "accountSwitched"
@@ -95,6 +96,7 @@ export const CATEGORY_NAMES: readonly Category[] = [
   "usageThreshold",
   "updateInstallReady",
   "transcriptsExpiring",
+  "transcriptCleanupSuppressed",
   "accountVerified",
   "accountSwitched",
   "projectRenamed",
@@ -282,6 +284,7 @@ export function priorityForCategory(category: Category): Priority {
     case "usageThreshold":
     case "updateInstallReady":
     case "transcriptsExpiring":
+    case "transcriptCleanupSuppressed":
       return "p1Stalled";
     case "accountVerified":
     case "accountSwitched":

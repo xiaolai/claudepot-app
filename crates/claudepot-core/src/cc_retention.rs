@@ -390,6 +390,92 @@ impl RetentionWarning {
     }
 }
 
+/// The mirror of [`RetentionWarning`]: cleanup is switched **off** and
+/// the user has not been told.
+///
+/// [`warning`] deliberately returns `None` for every suppressed state,
+/// because announcing "conversations are expiring" for a machine where
+/// deletion is disabled alarms the user about the one thing that is not
+/// happening. That leaves a real gap it was never meant to cover — a
+/// suppressed setting is only discoverable by opening the pane, and the
+/// user with the strongest reason to look is precisely the one who
+/// believes the matter is settled.
+///
+/// Two states reach here and they are not equally surprising:
+///
+/// - [`RetentionMode::LegacyZero`] — the user chose "stop saving" in an
+///   older Claudepot and got the opposite. Their belief about what is on
+///   disk is actively wrong, which is a privacy question, not just a
+///   settings one.
+/// - [`RetentionMode::Invalid`] — someone typed a value CC rejects. The
+///   transcripts are protected by accident, and the protection
+///   evaporates the moment anyone "tidies up" the settings file.
+///
+/// Both are worth one line at boot; the copy differs.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CleanupSuppressedWarning {
+    /// Which suppressed state. Always `LegacyZero` or `Invalid` —
+    /// [`cleanup_suppressed_warning`] returns `None` for anything else.
+    pub mode: RetentionMode,
+    /// The raw value on disk when it was an integer at all — `Some(0)`
+    /// for a legacy zero, `None` when the value was a string, float,
+    /// bool or null.
+    pub configured_days: Option<i64>,
+    /// How much history has accumulated while nothing was cleaning it.
+    /// The point of carrying it: for a legacy zero this is the number
+    /// the user believes is zero.
+    pub total_transcripts: u64,
+    /// The transcript tree could not be fully read, so
+    /// `total_transcripts` is a floor. Never render it as a total while
+    /// this is set.
+    pub scan_incomplete: bool,
+}
+
+impl CleanupSuppressedWarning {
+    /// One-line body for the bell entry, and the CLI's English surface.
+    /// The GUI mirrors this branch for branch through the catalog.
+    pub fn message(&self) -> String {
+        let count = if self.scan_incomplete {
+            format!("at least {}", self.total_transcripts)
+        } else {
+            self.total_transcripts.to_string()
+        };
+        match self.mode {
+            RetentionMode::LegacyZero => format!(
+                "Claude Code is keeping every saved conversation ({count} on this \
+                 machine). `cleanupPeriodDays: 0` once meant \"stop saving\"; Claude \
+                 Code now rejects it, so transcripts are being written and cleanup is \
+                 switched off. Settings → Retention."
+            ),
+            _ => format!(
+                "Claude Code has stopped deleting saved conversations ({count} on this \
+                 machine) because `cleanupPeriodDays` holds a value it rejects. Nothing \
+                 is being lost, but the protection is accidental. Settings → Retention."
+            ),
+        }
+    }
+}
+
+/// Decide whether the boot check should report a *suppressed* cleanup.
+/// Pure, and mutually exclusive with [`warning`] by construction: that
+/// one returns `None` whenever `cleanup_suppressed` is set, and this one
+/// returns `None` whenever it is not.
+///
+/// Gated on the condition, with no dismissal flag, for exactly the
+/// reason given on [`RetentionWarning`]: fixing the setting silences it,
+/// and dismissing without fixing should not.
+pub fn cleanup_suppressed_warning(report: &RetentionReport) -> Option<CleanupSuppressedWarning> {
+    if !report.state.cleanup_suppressed {
+        return None;
+    }
+    Some(CleanupSuppressedWarning {
+        mode: report.state.mode,
+        configured_days: report.state.configured_days,
+        total_transcripts: report.risk.total_transcripts,
+        scan_incomplete: report.risk.scan_incomplete,
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RetentionError {
     #[error("write CC settings")]
@@ -1054,7 +1140,91 @@ mod tests {
             is_durable_archive: false,
         };
         assert!(warning(&report).is_none());
+        // ...but the *suppressed* check must fire, or the state is
+        // invisible outside the pane.
+        assert!(cleanup_suppressed_warning(&report).is_some());
     }
+
+    fn report_with(
+        mode_source: SettingValue<i64>,
+        total: u64,
+        incomplete: bool,
+    ) -> RetentionReport {
+        RetentionReport {
+            state: state_from_configured(mode_source),
+            risk: TranscriptRisk {
+                total_transcripts: total,
+                scan_incomplete: incomplete,
+                ..Default::default()
+            },
+            is_durable_archive: false,
+        }
+    }
+
+    /// The two warnings partition the space: exactly one of them can
+    /// speak for any given state. If both could fire, the pane's user
+    /// would get "conversations are expiring" and "cleanup is switched
+    /// off" in the same bell, which is incoherent.
+    #[test]
+    fn the_two_boot_warnings_are_mutually_exclusive() {
+        for cfg in [
+            SettingValue::Absent,
+            SettingValue::Present(0),
+            SettingValue::Present(-1),
+            SettingValue::Present(30),
+            SettingValue::Invalid,
+        ] {
+            let rep = report_with(cfg, 12, false);
+            let expiring = warning(&rep).is_some();
+            let suppressed = cleanup_suppressed_warning(&rep).is_some();
+            assert!(
+                !(expiring && suppressed),
+                "cfg {cfg:?} produced both warnings"
+            );
+            assert_eq!(
+                suppressed, rep.state.cleanup_suppressed,
+                "cfg {cfg:?}: the suppressed warning must track the flag exactly"
+            );
+        }
+    }
+
+    #[test]
+    fn a_legacy_zero_says_transcripts_are_being_kept_not_deleted() {
+        let w = cleanup_suppressed_warning(&report_with(SettingValue::Present(0), 460, false))
+            .expect("legacy zero must warn");
+        assert_eq!(w.mode, RetentionMode::LegacyZero);
+        assert_eq!(w.configured_days, Some(0));
+        let m = w.message();
+        assert!(m.contains("460"), "{m}");
+        assert!(m.contains("keeping every saved conversation"), "{m}");
+        // The inversion is the whole point: never tell this user their
+        // transcripts are being deleted.
+        assert!(!m.contains("will delete"), "{m}");
+    }
+
+    #[test]
+    fn an_invalid_value_says_the_protection_is_accidental() {
+        let w = cleanup_suppressed_warning(&report_with(SettingValue::Invalid, 7, false))
+            .expect("invalid must warn");
+        assert_eq!(w.mode, RetentionMode::Invalid);
+        assert_eq!(w.configured_days, None);
+        let m = w.message();
+        assert!(m.contains("accidental"), "{m}");
+        // Must never suggest restoring the default — that re-arms
+        // deletion, which is the trap this whole module exists for.
+        assert!(!m.to_lowercase().contains("restore"), "{m}");
+    }
+
+    /// An unread tree makes the count a floor. Reporting it as a total
+    /// is the same class of error as reporting a failed scan as "nothing
+    /// scheduled for deletion".
+    #[test]
+    fn an_incomplete_scan_reports_the_count_as_a_floor() {
+        let w = cleanup_suppressed_warning(&report_with(SettingValue::Present(0), 3, true))
+            .expect("must warn");
+        assert!(w.message().contains("at least 3"), "{}", w.message());
+    }
+
     #[test]
     fn oldest_ms_reports_the_earliest_surviving_transcript() {
         let tmp = TempDir::new().unwrap();

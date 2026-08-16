@@ -23,7 +23,10 @@
 //! `cc_retention::RetentionWarning`'s docs for why gating on the
 //! condition is both simpler and safer than persisting a suppression.
 
-use claudepot_core::cc_retention::{report, warning, RetentionWarning, DEFAULT_RISK_HORIZON_DAYS};
+use claudepot_core::cc_retention::{
+    cleanup_suppressed_warning, report, warning, CleanupSuppressedWarning, RetentionMode,
+    RetentionWarning, DEFAULT_RISK_HORIZON_DAYS,
+};
 use claudepot_core::notification_log::NotificationKind;
 use claudepot_core::notifications::{Category, Priority, Surface};
 use tauri::{AppHandle, Manager};
@@ -46,9 +49,29 @@ fn run(app: &AppHandle) -> Result<(), String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let rep = report(now_ms, DEFAULT_RISK_HORIZON_DAYS);
 
-    let Some(w) = warning(&rep) else {
-        // Nothing scheduled for deletion. Staying silent is the whole
-        // point of gating on the condition rather than the setting.
+    // Two mutually-exclusive conditions, one entry at most. `warning`
+    // covers "deletion is coming"; `cleanup_suppressed_warning` covers
+    // its mirror, "deletion has been switched off and you were not
+    // told" — the state a legacy `cleanupPeriodDays: 0` now produces.
+    // Core guarantees they cannot both fire; the `else if` is belt and
+    // braces so a future core change degrades to one entry rather than
+    // two contradictory ones.
+    let (category, title, body) = if let Some(w) = warning(&rep) {
+        (
+            Category::TranscriptsExpiring,
+            tr("retention.title"),
+            warning_body(&w),
+        )
+    } else if let Some(s) = cleanup_suppressed_warning(&rep) {
+        (
+            Category::TranscriptCleanupSuppressed,
+            tr("retention.suppressedTitle"),
+            suppressed_body(&s),
+        )
+    } else {
+        // Nothing scheduled for deletion, and cleanup is running
+        // normally. Staying silent is the whole point of gating on the
+        // condition rather than the setting.
         return Ok(());
     };
 
@@ -76,14 +99,15 @@ fn run(app: &AppHandle) -> Result<(), String> {
                 poisoned.into_inner()
             }
         };
-        let enabled = guard.category_pref(Category::TranscriptsExpiring).enabled;
+        let enabled = guard.category_pref(category).enabled;
         // `wants_os: false` — the default surface is the bell, not an
         // OS banner: transcripts are days from deletion, not seconds,
         // so interrupting the desktop is unwarranted. A user who wants
         // the banner sets the category's os_override, which
-        // `effective_os_surface` honours over this default.
-        let os =
-            crate::preferences::effective_os_surface(&guard, Category::TranscriptsExpiring, false);
+        // `effective_os_surface` honours over this default. The
+        // suppressed case is even less urgent — nothing is being lost
+        // at all — so it takes the same default.
+        let os = crate::preferences::effective_os_surface(&guard, category, false);
         (enabled, os)
     };
     if !enabled {
@@ -95,8 +119,6 @@ fn run(app: &AppHandle) -> Result<(), String> {
     // `surfaces_requested` never records a request we knowingly
     // ignored.
     let mut delivered: Vec<Surface> = Vec::new();
-    let title = tr("retention.title");
-    let body = warning_body(&w);
     if os_surfaces.contains(&Surface::OsBanner) {
         use tauri_plugin_notification::NotificationExt;
         match app
@@ -113,7 +135,7 @@ fn run(app: &AppHandle) -> Result<(), String> {
 
     log.log
         .append_routed(
-            Category::TranscriptsExpiring,
+            category,
             Priority::P1Stalled,
             // `Notice`, not `Error`: nothing has failed. Something is
             // scheduled to happen that the user has not been told
@@ -135,12 +157,35 @@ fn run(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("notification_log append failed: {e}"))?;
 
     tracing::info!(
-        already_deletable = w.already_deletable,
-        at_risk = w.at_risk_within_horizon,
-        effective_days = w.effective_days,
-        "retention_boot_check: warned about pending transcript deletion"
+        category = ?category,
+        "retention_boot_check: warned about the machine's transcript retention state"
     );
     Ok(())
+}
+
+/// Localized body for the suppressed-cleanup entry. Mirrors
+/// [`CleanupSuppressedWarning::message`] — which stays the CLI's English
+/// surface — branch for branch; under `en` the two are byte-identical
+/// (locked by the tests below).
+fn suppressed_body(s: &CleanupSuppressedWarning) -> String {
+    // An unread tree makes the count a floor. Saying "460" when we mean
+    // "at least 460" is the same class of error as reporting a failed
+    // scan as "nothing scheduled for deletion".
+    let count = if s.scan_incomplete {
+        tr1(
+            "retention.countFloor",
+            "num",
+            &s.total_transcripts.to_string(),
+        )
+    } else {
+        s.total_transcripts.to_string()
+    };
+    let key = if s.mode == RetentionMode::LegacyZero {
+        "retention.suppressedLegacyZero"
+    } else {
+        "retention.suppressedInvalid"
+    };
+    tr1(key, "count", &count)
 }
 
 /// Localized banner body composed from [`RetentionWarning`]'s
@@ -209,6 +254,55 @@ mod tests {
         ];
         for w in &cases {
             assert_eq!(warning_body(w), w.message(), "fixture: {w:?}");
+        }
+    }
+
+    fn suppressed_fixture(
+        mode: RetentionMode,
+        total_transcripts: u64,
+        scan_incomplete: bool,
+    ) -> CleanupSuppressedWarning {
+        CleanupSuppressedWarning {
+            mode,
+            configured_days: if mode == RetentionMode::LegacyZero {
+                Some(0)
+            } else {
+                None
+            },
+            total_transcripts,
+            scan_incomplete,
+        }
+    }
+
+    /// Same contract as `warning_body_matches_core_message_in_en`: core's
+    /// `message()` is the canonical English (the CLI prints it), and the
+    /// catalog composition must not drift from it.
+    #[test]
+    fn suppressed_body_matches_core_message_in_en() {
+        let cases = [
+            suppressed_fixture(RetentionMode::LegacyZero, 460, false),
+            suppressed_fixture(RetentionMode::LegacyZero, 1, true),
+            suppressed_fixture(RetentionMode::Invalid, 7, false),
+            suppressed_fixture(RetentionMode::Invalid, 0, true),
+        ];
+        for s in &cases {
+            assert_eq!(suppressed_body(s), s.message(), "fixture: {s:?}");
+        }
+    }
+
+    /// The two bodies must never be confusable: one says deletion is
+    /// coming, the other says it has stopped. A user reading the wrong
+    /// one takes the wrong action on the only setting in Claude Code
+    /// that destroys data.
+    #[test]
+    fn the_suppressed_body_never_claims_deletion_is_coming() {
+        for s in [
+            suppressed_fixture(RetentionMode::LegacyZero, 460, false),
+            suppressed_fixture(RetentionMode::Invalid, 7, false),
+        ] {
+            let body = suppressed_body(&s);
+            assert!(!body.contains("will be deleted"), "{body}");
+            assert!(!body.contains("will delete"), "{body}");
         }
     }
 }

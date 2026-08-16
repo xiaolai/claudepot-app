@@ -6,13 +6,38 @@
 //! function with no I/O, no preferences lookup, and no Tauri
 //! dependency. Phase 1 builds the dispatcher facade on top.
 //!
-//! Adding a [`Category`] variant requires four lockstep changes:
+//! Adding a [`Category`] variant is an **eleven-site** lockstep change.
+//! This list said "four" until 2026-08-16, when adding
+//! `TranscriptCleanupSuppressed` walked the real set; an undercount here
+//! is worse than no list, because it reads as complete.
+//!
+//! Only the first two fail at *compile* time. The rest fail as test
+//! assertions, which is why they are enumerated rather than left to be
+//! rediscovered one red run at a time:
+//!
 //!   1. Add the variant here.
 //!   2. Bind its [`Priority`] in [`Category::priority`] (the exhaustive
 //!      `match` is a compile-time guard — adding a variant without
 //!      binding it fails to build).
-//!   3. Mirror the variant in `src/lib/notifications/types.ts`.
-//!   4. Add an entry to the metadata table in [`Category::display_meta`].
+//!   3. Add an entry to the metadata table in [`Category::display_meta`]
+//!      (also exhaustive, also a compile error).
+//!   4. Append it to [`Category::all`].
+//!   5. Bump `EXPECTED` in `test_all_returns_every_variant` below.
+//!   6. Regenerate the shared fixture:
+//!      `CLAUDEPOT_REGEN_FIXTURES=1 cargo test -p claudepot-core categories_fixture`.
+//!   7. Add it to the `NotificationCategory` union in
+//!      `src/lib/notifications/types.ts`.
+//!   8. Add it to `CATEGORY_NAMES` in the same file.
+//!   9. Add a `case` to that file's priority `switch`.
+//!  10. Bump the length assertion in
+//!      `src/lib/notifications/types.test.ts`.
+//!  11. Add the label to `src/locales/{en,zh-CN}/shell.json` under
+//!      `notificationCategories` — **both**, or `check:catalogs` fails.
+//!
+//! Whether a new state deserves its own category rather than reusing a
+//! neighbour is decided by one question: **does the mute decision
+//! differ?** See `RotationApplied` vs `RotationFailed`, and
+//! `TranscriptsExpiring` vs `TranscriptCleanupSuppressed`.
 
 use serde::{Deserialize, Serialize};
 
@@ -88,6 +113,20 @@ pub enum Category {
     /// attention before the next CC launch, but it does not block the
     /// work in front of the user. See `crate::cc_retention`.
     TranscriptsExpiring,
+    /// The mirror of [`Self::TranscriptsExpiring`]: Claude Code has
+    /// stopped deleting anything, because `cleanupPeriodDays` holds a
+    /// value its schema rejects.
+    ///
+    /// Separate from `TranscriptsExpiring` because the **mute decision
+    /// differs**, which is this enum's established test for a split (see
+    /// `RotationApplied` vs `RotationFailed`). A user who mutes
+    /// "conversations expiring" has accepted their retention window and
+    /// does not want a reminder every launch; that says nothing about
+    /// whether they want to hear that the setting is broken — and for a
+    /// `LegacyZero` it is the opposite of what they believe is
+    /// happening. Routing both through one category would let the first
+    /// mute silence the second.
+    TranscriptCleanupSuppressed,
 }
 
 /// Notification urgency. Drives the default surface set in [`route`];
@@ -215,10 +254,15 @@ impl Category {
             }
 
             // P1 — Stalled
-            SessionWaiting | SessionStuck | SessionErrorBurst | OpDoneUnfocused
-            | RotationSuggested | UsageThreshold | UpdateInstallReady | TranscriptsExpiring => {
-                P1Stalled
-            }
+            SessionWaiting
+            | SessionStuck
+            | SessionErrorBurst
+            | OpDoneUnfocused
+            | RotationSuggested
+            | UsageThreshold
+            | UpdateInstallReady
+            | TranscriptsExpiring
+            | TranscriptCleanupSuppressed => P1Stalled,
 
             // P2 — Acknowledge
             AccountVerified
@@ -263,6 +307,7 @@ impl Category {
             UsageThreshold => ("Usage near limit", "Live work", true),
             UpdateInstallReady => ("Update ready to install", "Live work", true),
             TranscriptsExpiring => ("Saved conversations expiring", "Live work", true),
+            TranscriptCleanupSuppressed => ("Transcript cleanup switched off", "Live work", true),
 
             AccountVerified => ("Account verified", "Actions", true),
             AccountSwitched => ("Account switched", "Actions", true),
@@ -332,6 +377,7 @@ impl Category {
             ServiceStatusChanged,
             UpdateAvailable,
             TranscriptsExpiring,
+            TranscriptCleanupSuppressed,
         ]
     }
 }
@@ -442,7 +488,7 @@ mod tests {
         // Synthetic exhaustive match: this fails to compile if a new
         // variant is added without updating `all()`. Update the
         // counter and the match arms in lockstep with the enum.
-        const EXPECTED: usize = 32;
+        const EXPECTED: usize = 33;
         let actual = Category::all().len();
         assert_eq!(
             actual, EXPECTED,

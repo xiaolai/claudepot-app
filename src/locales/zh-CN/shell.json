@@ -50,6 +50,7 @@
     "usageThreshold": "用量接近上限",
     "updateInstallReady": "更新已就绪",
     "transcriptsExpiring": "保存的对话即将过期",
+    "transcriptCleanupSuppressed": "对话记录清理已关闭",
     "accountVerified": "账户已验证",
     "accountSwitched": "账户已切换",
     "projectRenamed": "项目已重命名",

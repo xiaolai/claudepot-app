@@ -379,11 +379,35 @@ the pane:
   destroyed. `TranscriptRisk::nested_immortal` exists to say so.
 
 `TranscriptRisk::scan_incomplete` is load-bearing: a scan that failed
-must never render as "nothing is scheduled for deletion". Boot check at
-`src-tauri/src/retention_boot_check.rs` emits one bell entry via
-`Category::TranscriptsExpiring`; there is deliberately **no dismissal
-flag** — gating on the condition means raising retention silences it,
-while dismissing without fixing does not.
+must never render as "nothing is scheduled for deletion".
+
+Boot check at `src-tauri/src/retention_boot_check.rs` emits **at most one**
+bell entry, choosing between two mutually-exclusive conditions that core
+guarantees cannot both hold:
+
+| Condition | Core decision fn | Category |
+|---|---|---|
+| deletion is coming | `cc_retention::warning` | `TranscriptsExpiring` |
+| deletion is switched **off** and you were not told | `cc_retention::cleanup_suppressed_warning` | `TranscriptCleanupSuppressed` |
+
+The second exists because the first deliberately returns `None` for every
+suppressed state — announcing "conversations are expiring" where deletion
+is disabled alarms the user about the one thing that is *not* happening.
+That left the suppressed states discoverable only by opening the pane,
+and the user least likely to look is the one who set "stop saving" years
+ago and considers it settled. Two categories rather than one because the
+**mute decision differs**, which is `Category`'s standing test for a
+split.
+
+Neither has a dismissal flag — gating on the condition means fixing the
+setting silences it, while dismissing without fixing does not.
+
+Both bodies are composed in the Tauri crate from the catalog and locked
+byte-for-byte against core's `message()` under `en`, so the CLI's English
+and the GUI's cannot drift. The suppressed body additionally asserts it
+never contains "will be deleted" / "will delete": the two entries say
+opposite things, and a user who reads the wrong one takes the wrong
+action on the only CC setting that destroys data.
 
 ## CC env variables (Global → Config → Env Variables)
 
