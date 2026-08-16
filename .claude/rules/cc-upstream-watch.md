@@ -57,6 +57,16 @@ strings. `^(CLAUDE_|ANTHROPIC_)[A-Z0-9_]+$` reduces that to 17 real ones.
 There is no generic filter: a shape heuristic for settings keys returns
 dictionary words out of embedded data. Per-surface extractors, always.
 
+**Tokens must be distinctive, and the first draft of this table proved
+it.** `plan` and `policy` looked like reasonable tokens for the
+permission-mode and settings-precedence rows; over 115 releases they
+produced 51 hits, nearly all of them ordinary English in unrelated
+bullets. A token that matches prose trains the reader to skim the
+report, which is the same failure as a gate nobody watches. Prefer a
+camelCase key (`defaultMode`), a flag with its dashes (`--setting-sources`),
+or a screaming-snake family (`CLAUDE_*`) over any word that could appear
+in a sentence.
+
 Do not fetch `llms-full.txt` with a bare `curl` — it is 7.5 MB and
 truncates mid-transfer, which diffs as "hundreds of pages removed".
 
@@ -67,8 +77,8 @@ truncates mid-transfer, which diffs as "hundreds of pages removed".
 | `cleanupPeriodDays` semantics + floor | `cc_retention` | `cleanupPeriodDays`, `session-persistence`, `persistSession` | binary strings; `claude --help`; `MIN_CLEANUP_PERIOD_DAYS` is the pin |
 | settings-validation → cleanup suppression | `cc_retention::RetentionMode::Invalid` / `LegacyZero` | `Skipping cleanup`, `validation errors` | binary strings |
 | env var catalog + `SAFE_ENV_VARS` | `cc_env`, `data/cc-env-spec.json` | `CLAUDE_*`, `ANTHROPIC_*`, `SAFE_ENV_VARS`, `PROVIDER_MANAGED` | `scripts/build-cc-env-spec.py --rebuild-evidence` then `--check` |
-| settings merge precedence | `config_view::effective_settings`, `parity-harness/` | `settings.local.json`, `managed-settings`, `policy`, `--setting-sources` | `cargo xtask verify-cc-parity` + re-pin |
-| `permissions.defaultMode` | `permission::settings` | `defaultMode`, `bypassPermissions`, `acceptEdits`, `plan` | binary strings for the mode wire strings |
+| settings merge precedence | `config_view::effective_settings`, `parity-harness/` | `settings.local.json`, `managed-settings`, `--setting-sources`, `settingSources` | `cargo xtask verify-cc-parity` + re-pin |
+| `permissions.defaultMode` | `permission::settings` | `defaultMode`, `bypassPermissions`, `acceptEdits`, `permissionMode` | binary strings for the mode wire strings |
 | `availableModels` / `enforceAvailableModels` | `available_models` | `availableModels`, `enforceAvailableModels` | binary strings |
 | model ids and rates | `pricing`, `session_live::pricing`, `src/costs.ts` | `claude-opus`, `claude-sonnet`, `claude-fable`, `claude-haiku`, `mythos` | changelog grep; add a `RatePeriod` **and** a vector to `rate-resolution-vectors.json` |
 | fast-mode billing (known gap) | `fast_mode_toggle`, `pricing` | `fastMode` | changelog grep |
@@ -89,8 +99,15 @@ truncates mid-transfer, which diffs as "hundreds of pages removed".
 ## Version pins that go stale silently
 
 These artifacts **disable themselves** on a version mismatch and say
-nothing. That is correct behaviour and a reporting gap: check them by
-hand until `cargo xtask cc-drift` exists.
+nothing. That is correct behaviour and a reporting gap, so
+`cargo xtask cc-drift` reports every one of them against the installed
+CC — that command is how you run this whole file:
+
+```bash
+cargo xtask cc-drift                       # since the parity pin, via gh
+cargo xtask cc-drift --since 2.1.220       # since your last check
+cargo xtask cc-drift --changelog /tmp/CHANGELOG.md   # offline
+```
 
 | Artifact | Pin field | Failure mode when stale |
 |---|---|---|
