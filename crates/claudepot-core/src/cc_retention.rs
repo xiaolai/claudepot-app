@@ -303,6 +303,11 @@ pub struct RetentionReport {
     /// under CC's rules. The pane states this so a large number cannot
     /// read as "solved". See the plan's P0 archive contract.
     pub is_durable_archive: bool,
+    /// What else `cleanupPeriodDays` is aging out. `TranscriptRisk`
+    /// counts `projects/` alone; this is the rest of the same timer, so
+    /// the pane can stop implying that conversations are all it touches.
+    /// See [`crate::cc_sweep`].
+    pub swept_elsewhere: crate::cc_sweep::SweptElsewhere,
 }
 
 /// Resolve settings and scan the live transcript tree. `now_ms` is
@@ -310,9 +315,19 @@ pub struct RetentionReport {
 pub fn report(now_ms: i64, horizon_days: i64) -> RetentionReport {
     let state = resolve_retention();
     let risk = scan_transcript_risk(&state, now_ms, horizon_days);
+    // Same cutoff the transcript scan used, passed rather than
+    // recomputed so the two halves of the pane cannot disagree about
+    // when the guillotine falls. `None` when cleanup is suppressed.
+    let cutoff = if state.cleanup_suppressed {
+        None
+    } else {
+        Some(now_ms.saturating_sub(state.effective_days.saturating_mul(MS_PER_DAY)))
+    };
+    let swept_elsewhere = crate::cc_sweep::scan_swept_in(&claude_config_dir(), cutoff);
     RetentionReport {
         state,
         risk,
+        swept_elsewhere,
         // Always false today. Flipping this is P0's job, not a setting's.
         is_durable_archive: false,
     }
@@ -1186,11 +1201,7 @@ mod tests {
 
         // And the expiring boot check must stay silent: warning about
         // deletion that is not happening is the failure this guards.
-        let report = RetentionReport {
-            state,
-            risk: r,
-            is_durable_archive: false,
-        };
+        let report = rep(state, r);
         assert!(warning(&report).is_none());
         // ...but the *suppressed* check must fire, or the state is
         // invisible outside the pane.
@@ -1325,15 +1336,14 @@ mod tests {
     /// staying silent on zero counts.
     #[test]
     fn incomplete_scan_still_warns() {
-        let r = RetentionReport {
-            state: state_from_configured(SettingValue::Absent),
-            risk: TranscriptRisk {
+        let r = rep(
+            state_from_configured(SettingValue::Absent),
+            TranscriptRisk {
                 scan_incomplete: true,
                 horizon_days: 7,
                 ..Default::default()
             },
-            is_durable_archive: false,
-        };
+        );
         let w = warning(&r).expect("incomplete scan must warn");
         assert!(w.scan_incomplete);
         assert!(w.message().contains("could not read"));
@@ -1345,15 +1355,14 @@ mod tests {
     /// that cannot be happening.
     #[test]
     fn suppressed_cleanup_never_warns_even_on_an_incomplete_scan() {
-        let r = RetentionReport {
-            state: state_from_configured(SettingValue::Present(-1)),
-            risk: TranscriptRisk {
+        let r = rep(
+            state_from_configured(SettingValue::Present(-1)),
+            TranscriptRisk {
                 scan_incomplete: true,
                 horizon_days: 7,
                 ..Default::default()
             },
-            is_durable_archive: false,
-        };
+        );
         assert!(r.state.cleanup_suppressed);
         assert!(warning(&r).is_none());
     }
@@ -1421,6 +1430,7 @@ mod tests {
             state,
             risk,
             is_durable_archive: false,
+            swept_elsewhere: Default::default(),
         }
     }
 

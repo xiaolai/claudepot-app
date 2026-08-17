@@ -472,7 +472,96 @@ fn base64_decode(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Render the artifacts we could not read. Printed first and
+/// unconditionally: everything after it is only as trustworthy as the
+/// inputs, and a skipped input used to be invisible.
+fn render_problems(problems: &[String]) {
+    if problems.is_empty() {
+        return;
+    }
+    println!("PIN ARTIFACTS UNREADABLE — this report is incomplete:");
+    for p in problems {
+        println!("  ! {p}");
+    }
+    println!();
+}
+
+/// Render freshness evidence and version pins. Kept apart because a
+/// date is not comparable to a version; conflating them printed a
+/// permanent, meaningless "BEHIND" row.
+fn render_pins(installed: &str, pins: &[Pin]) {
+    let fresh: Vec<&Pin> = pins
+        .iter()
+        .filter(|p| p.kind == PinKind::Freshness)
+        .collect();
+    if !fresh.is_empty() {
+        println!("freshness evidence (not version-comparable):");
+        for p in &fresh {
+            println!("  {} · {} = {}", p.artifact, p.field, p.value);
+            println!("      → {}", p.when_stale);
+        }
+        println!();
+    }
+
+    let stale = compare_pins(installed, pins);
+    if stale.is_empty() {
+        println!("version pins: all current\n");
+    } else {
+        println!("version pins BEHIND {installed}:");
+        for f in &stale {
+            println!(
+                "  {} · {} = {}\n      → {}",
+                f.pin.artifact, f.pin.field, f.pin.value, f.pin.when_stale
+            );
+        }
+        println!();
+    }
+}
+
+/// Render the changelog scan, collapsed by surface.
+fn render_changelog(rows: &[WatchRow], text: &str, since: &str) {
+    let newer = parse_changelog(text)
+        .iter()
+        .filter(|r| is_newer(&r.version, since))
+        .count();
+    let hits = scan_changelog(rows, text, since);
+    let grouped = group_hits(&hits);
+    println!("changelog: {newer} releases newer than {since}");
+    if grouped.is_empty() {
+        println!("  no watchlist token mentioned — checked, green\n");
+        return;
+    }
+    println!(
+        "  {} surfaces mentioned across {} bullets:\n",
+        grouped.len(),
+        hits.len()
+    );
+    for r in &grouped {
+        println!(
+            "  {} — {} mention{}, newest {}",
+            r.surface,
+            r.mentions,
+            if r.mentions == 1 { "" } else { "s" },
+            r.newest
+        );
+        println!("      owner: {}", r.owner);
+        println!("      check: {}", r.check);
+        for (v, e) in &r.examples {
+            println!("      [{v}] {e}");
+        }
+        // Never let a cap read as completeness.
+        if r.mentions > r.examples.len() {
+            println!("      (+{} more)", r.mentions - r.examples.len());
+        }
+        println!();
+    }
+}
+
 /// Entry point for `cargo xtask cc-drift`.
+///
+/// Measurement and orchestration only — every judgement it prints comes
+/// from a pure function above, so the interesting logic is testable
+/// without a Claude Code install.
 pub fn run(root: &Path, args: &[String]) -> Result<()> {
     let arg = |name: &str| -> Option<&str> {
         args.iter()
@@ -503,52 +592,10 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
     println!("cc-drift: installed Claude Code {installed}");
     println!("          {} watchlist rows\n", rows.len());
 
-    // ── artifacts we could not read ──
-    // Printed first and unconditionally: everything below is only as
-    // trustworthy as the inputs, and a skipped input used to be
-    // invisible.
-    if !pin_problems.is_empty() {
-        println!("PIN ARTIFACTS UNREADABLE — this report is incomplete:");
-        for p in &pin_problems {
-            println!("  ! {p}");
-        }
-        println!();
-    }
+    render_problems(&pin_problems);
+    render_pins(&installed, &pins);
 
-    // ── freshness evidence (dates/hashes, never compared to a version) ──
-    let fresh: Vec<&Pin> = pins
-        .iter()
-        .filter(|p| p.kind == PinKind::Freshness)
-        .collect();
-    if !fresh.is_empty() {
-        println!("freshness evidence (not version-comparable):");
-        for p in &fresh {
-            println!("  {} · {} = {}", p.artifact, p.field, p.value);
-            println!("      → {}", p.when_stale);
-        }
-        println!();
-    }
-
-    // ── version pins ──
-    let stale = compare_pins(&installed, &pins);
-    if stale.is_empty() {
-        println!("version pins: all current\n");
-    } else {
-        println!("version pins BEHIND {installed}:");
-        for f in &stale {
-            println!(
-                "  {} · {} = {}\n      → {}",
-                f.pin.artifact, f.pin.field, f.pin.value, f.pin.when_stale
-            );
-        }
-        println!();
-    }
-
-    // ── changelog ──
     let Some(since) = since else {
-        // No baseline, so no range — and therefore no honest way to say
-        // "N releases newer" or "green". Stop here rather than print a
-        // number derived from a guess.
         println!(
             "changelog: NOT CHECKED — no baseline. Pass --since <version>, or restore \
              parity-harness/PINNED_CC_VERSION.\n"
@@ -559,45 +606,9 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
         );
         return Ok(());
     };
+
     match load_changelog(arg("--changelog")) {
-        Ok(text) => {
-            let releases = parse_changelog(&text);
-            let newer = releases
-                .iter()
-                .filter(|r| is_newer(&r.version, &since))
-                .count();
-            let hits = scan_changelog(&rows, &text, &since);
-            let grouped = group_hits(&hits);
-            println!("changelog: {newer} releases newer than {since}");
-            if grouped.is_empty() {
-                println!("  no watchlist token mentioned — checked, green\n");
-            } else {
-                println!(
-                    "  {} surfaces mentioned across {} bullets:\n",
-                    grouped.len(),
-                    hits.len()
-                );
-                for r in &grouped {
-                    println!(
-                        "  {} — {} mention{}, newest {}",
-                        r.surface,
-                        r.mentions,
-                        if r.mentions == 1 { "" } else { "s" },
-                        r.newest
-                    );
-                    println!("      owner: {}", r.owner);
-                    println!("      check: {}", r.check);
-                    for (v, e) in &r.examples {
-                        println!("      [{v}] {e}");
-                    }
-                    // Never let a cap read as completeness.
-                    if r.mentions > r.examples.len() {
-                        println!("      (+{} more)", r.mentions - r.examples.len());
-                    }
-                    println!();
-                }
-            }
-        }
+        Ok(text) => render_changelog(&rows, &text, &since),
         Err(e) => {
             // A failed fetch must not read as "nothing changed".
             println!("changelog: NOT CHECKED — {e}");

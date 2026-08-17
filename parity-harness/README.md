@@ -91,6 +91,60 @@ treat a CC minor-version jump or a quarter — whichever comes first —
 as the trigger to diff `utils/settings/settings.ts` between pinned and
 current and re-derive anything that moved.
 
+### 4.0 Decision (2026-08-18): the pin stays at 2.1.88 — deliberately
+
+Re-pin or freeze was an open question after CC reached 2.1.233. It is
+now answered **freeze**, with the evidence, so nobody re-opens it from
+scratch.
+
+**What was re-verified against the installed 2.1.233 binary.** The
+top-level source precedence array is byte-identical to what these
+fixtures model:
+
+```text
+["userSettings","projectSettings","localSettings","flagSettings","policySettings"]
+```
+
+So the merge ordering these goldens lock has *not* moved in 145
+releases. The fixtures still describe current CC on the axis they test.
+
+**What was NOT re-verified, and why the pin therefore does not move.**
+Null-clobber, array concat + dedupe, hooks concat order, and the policy
+sub-ordering (remote → mdm → managed-file → hkcu) were not re-derived
+against 2.1.233. Doing so needs CC's merge implementation, and §4's
+adapter gap is still shut — re-confirmed on 2.1.233:
+
+- no `--dump-settings` / `--dump-effective-settings` flag exists
+  (`claude --help`, checked 2026-08-18, same as the 2.1.88 finding);
+- CC now ships as a bun-compiled native binary, so there is no source
+  tree to install a shim into and no exported API to call;
+- the embedded bundle is minified, so reading the merge function is
+  archaeology, not verification.
+
+Bumping the pin would require rewriting twelve `notes.md` files to claim
+a re-derivation that did not happen. The harness deliberately fails a
+pin bump that skips that work — and satisfying it with an unearned claim
+is worse than an honest old pin, because CI would then enforce the lie.
+
+**So the pin is a statement of provenance, not of currency.** These
+goldens lock the merge semantics *as verified at 2.1.88*, and the one
+axis re-checked since is unchanged. Read `PINNED_CC_VERSION` as "derived
+from", never as "current as of".
+
+**Known uncovered surface**, tracked in
+`crates/xtask/cc-upstream-watch.md` under "settings merge precedence"
+rather than left implicit here:
+
+- `--setting-sources` can disable a whole source (added after 2.1.88).
+  Neither these fixtures nor `config_view::effective_settings` model it.
+- Managed settings now merge their `env` block per key rather than
+  wholesale.
+
+Both are *new surface*, not changed precedence — which is why they do
+not invalidate the existing twelve. Reopen this decision when the
+adapter gap opens (a `--dump-*` flag, or an exported API), not on a
+calendar.
+
 Plan §8.6 describes three candidate strategies for auto-regenerating
 `expected.json` from a real CC tree. Today none of them work
 out-of-the-box for the published CC source:

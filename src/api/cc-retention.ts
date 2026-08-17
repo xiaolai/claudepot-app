@@ -63,12 +63,37 @@ export interface TranscriptRisk {
   scan_incomplete: boolean;
 }
 
+/** One directory CC ages out on the same `cleanupPeriodDays` timer,
+ *  other than `projects/`. Counted in the unit CC deletes: files for
+ *  some directories, immediate subdirectories for others. */
+export interface SweptDir {
+  rel: string;
+  /** Prose for a reader — "file edit history", not "file-history". */
+  what: string;
+  kind: "content" | "cache";
+  entries: number;
+  already_deletable: number;
+}
+
+/** What `cleanupPeriodDays` is aging out beyond the transcript tree.
+ *  Only `content` directories are counted; `cache_dirs_skipped` records
+ *  how many were deliberately not, so the omission is stated rather
+ *  than implied. */
+export interface SweptElsewhere {
+  dirs: SweptDir[];
+  /** Counts are a floor. Never render them as a total while set. */
+  scan_incomplete: boolean;
+  cache_dirs_skipped: number;
+}
+
 export interface RetentionReport {
   state: RetentionState;
   risk: TranscriptRisk;
   /** Raising the window buys time; it does not make the corpus
    *  durable. Always false until the archive contract ships. */
   is_durable_archive: boolean;
+  /** The rest of the same timer — see `SweptElsewhere`. */
+  swept_elsewhere: SweptElsewhere;
 }
 
 export const ccRetentionApi = {

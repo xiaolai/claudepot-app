@@ -357,6 +357,14 @@ impl Category {
             RotationSuggested,
             UsageThreshold,
             UpdateInstallReady,
+            // Both retention categories are P1. `all()` drives the
+            // Settings pane's display order via the metadata IPC, so
+            // leaving them at the tail listed two P1 rows under the
+            // P3/Background group. The *enum body* is deliberately not
+            // reordered — the file's own rule — but nothing depends on
+            // `all()` matching it, and serde keys on variant names.
+            TranscriptsExpiring,
+            TranscriptCleanupSuppressed,
             AccountVerified,
             AccountSwitched,
             ProjectRenamed,
@@ -376,8 +384,6 @@ impl Category {
             ConfigTreePatched,
             ServiceStatusChanged,
             UpdateAvailable,
-            TranscriptsExpiring,
-            TranscriptCleanupSuppressed,
         ]
     }
 }

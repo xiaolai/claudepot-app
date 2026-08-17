@@ -324,6 +324,7 @@ mod tests {
                 ..Default::default()
             },
             is_durable_archive: false,
+            swept_elsewhere: Default::default(),
         }
     }
 

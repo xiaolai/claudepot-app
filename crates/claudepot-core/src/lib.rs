@@ -49,6 +49,7 @@ pub mod cc_daemon;
 pub mod cc_doctor;
 pub mod cc_env;
 pub mod cc_retention;
+pub mod cc_sweep;
 pub mod cc_tips;
 pub mod cli_backend;
 pub(crate) mod codex_session;
