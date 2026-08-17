@@ -380,6 +380,15 @@ the pane:
 - **Invisible on disk.** Cleanup unlinks top-level session transcripts
   and never walks `subagents/`, so the folder grows while history is
   destroyed. `TranscriptRisk::nested_immortal` exists to say so.
+- **It is not a transcript setting.** `cleanupPeriodDays` is a global
+  TTL over ~20 directories under `~/.claude`, verified against the
+  2.1.233 binary's cleanup module. `TranscriptRisk` counts `projects/`;
+  `claudepot-core::cc_sweep` counts the rest, in the unit CC actually
+  deletes — **files** for some directories, **immediate subdirectories**
+  for others. Counting the wrong unit reports zero and reads as "nothing
+  here", which is why `SweepUnit` is explicit per row. `SWEPT` also
+  classifies each directory `Content` or `Cache` so the exclusion of
+  telemetry and traces is a recorded decision, not an omission.
 
 `TranscriptRisk::scan_incomplete` is load-bearing: a scan that failed
 must never render as "nothing is scheduled for deletion".

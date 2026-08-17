@@ -75,6 +75,18 @@
     },
     {
       "defaultEnabled": true,
+      "group": "Live work",
+      "id": "transcriptsExpiring",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Live work",
+      "id": "transcriptCleanupSuppressed",
+      "priority": "p1Stalled"
+    },
+    {
+      "defaultEnabled": true,
       "group": "Actions",
       "id": "accountVerified",
       "priority": "p2Acknowledge"
@@ -186,18 +198,6 @@
       "group": "Background",
       "id": "updateAvailable",
       "priority": "p3Ambient"
-    },
-    {
-      "defaultEnabled": true,
-      "group": "Live work",
-      "id": "transcriptsExpiring",
-      "priority": "p1Stalled"
-    },
-    {
-      "defaultEnabled": true,
-      "group": "Live work",
-      "id": "transcriptCleanupSuppressed",
-      "priority": "p1Stalled"
     }
   ]
 }

@@ -69,6 +69,182 @@ function fmtDate(ms: number | null): string | null {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/** The consequence block: what is scheduled to go, and what the counts
+ *  do and do not cover. Extracted so the pane's own render function is
+ *  an outline rather than the whole surface. */
+function RiskSummary({ report }: { report: RetentionReport }) {
+  const { t } = useTranslation("settings");
+  const { state, risk } = report;
+  const atRiskTotal = risk.already_deletable + risk.at_risk_within_horizon;
+  const oldest = fmtDate(risk.oldest_ms);
+
+  // Headline severity: anything already past the cutoff is live loss.
+  // A legacy zero is NOT danger — nothing is being deleted in that
+  // state. It is a warning, because what the user believes is happening
+  // and what is happening have come apart.
+  const severity =
+    risk.already_deletable > 0
+      ? "var(--danger)"
+      : atRiskTotal > 0 || state.cleanup_suppressed
+        ? "var(--warn)"
+        : "var(--fg-muted)";
+
+  const modeLine =
+    state.mode === "cc_default"
+      ? t("retention.modeDefault", { days: state.effective_days })
+      : state.mode === "legacy_zero"
+        ? t("retention.modeLegacyZero")
+        : state.mode === "invalid"
+          ? t("retention.modeInvalid", { days: state.configured_days })
+          : t("retention.modeDays", { days: state.effective_days });
+
+  return (
+    <div>
+      <SectionLabel>{t("retention.sectionTitle")}</SectionLabel>
+      <div
+        style={{
+          fontSize: "var(--fs-md)",
+          color: severity,
+          marginTop: "var(--sp-6)",
+        }}
+      >
+        {modeLine}
+      </div>
+
+      {/* Consequence first. Render-if-nonzero: when nothing is at
+          risk this collapses to the single reassuring line below. */}
+      <div
+        style={{
+          marginTop: "var(--sp-8)",
+          fontSize: "var(--fs-sm)",
+          color: "var(--fg-muted)",
+          lineHeight: "var(--lh-body)",
+        }}
+      >
+        {risk.already_deletable > 0 && (
+          <div style={{ color: "var(--danger)" }}>
+            {t("retention.risk.deletable", {
+              // `count` drives i18next's plural selection and must be
+              // the raw number; `num` carries the grouped display form.
+              count: risk.already_deletable,
+              num: formatNumber(risk.already_deletable),
+            })}
+          </div>
+        )}
+        {risk.at_risk_within_horizon > 0 && (
+          <div style={{ color: "var(--warn)" }}>
+            {t("retention.risk.horizon", {
+              count: risk.at_risk_within_horizon,
+              num: formatNumber(risk.at_risk_within_horizon),
+              days: risk.horizon_days,
+            })}
+          </div>
+        )}
+        {/* Never reassure on an incomplete scan — a permissions
+            failure must not read as "all clear". */}
+        {risk.scan_incomplete && (
+          <div style={{ color: "var(--warn)" }}>
+            {t("retention.risk.scanIncomplete")}
+          </div>
+        )}
+        {atRiskTotal === 0 && !risk.scan_incomplete && (
+          <div>
+            {t("retention.risk.nothing")}
+            {/* render-if-nonzero: never ship "0 transcripts". */}
+            {risk.total_transcripts > 0 && (
+              <>
+                {" "}
+                {t("retention.risk.totalOnMachine", {
+                  count: risk.total_transcripts,
+                  num: formatNumber(risk.total_transcripts),
+                })}
+              </>
+            )}
+          </div>
+        )}
+        {/* Both suppressed states protect transcripts by accident, but
+            they need different sentences: `invalid` is a value to
+            correct, `legacy_zero` is a control that used to work and
+            was withdrawn upstream. */}
+        {state.cleanup_suppressed && (
+          <div style={{ color: "var(--warn)" }}>
+            {state.mode === "legacy_zero"
+              ? t("retention.risk.suppressedLegacyZero")
+              : t("retention.risk.suppressed")}
+          </div>
+        )}
+        {oldest && (
+          <div style={{ marginTop: "var(--sp-3)" }}>
+            {t("retention.risk.oldest", { date: oldest })}
+          </div>
+        )}
+        <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
+          {t("retention.risk.silent")}
+        </div>
+        <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
+          {t("retention.scopeNote")}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Everything else `cleanupPeriodDays` ages out. The counts above are
+ *  conversations only; without this the pane names the gap in prose but
+ *  never quantifies it, which is a smaller version of the same
+ *  over-claim. Entirely absent when nothing else is on the timer. */
+function SweptPanel({ swept }: { swept: RetentionReport["swept_elsewhere"] }) {
+  const { t } = useTranslation("settings");
+  if (swept.dirs.length === 0) return null;
+  return (
+    <div>
+      <SectionLabel>{t("retention.swept.title")}</SectionLabel>
+      <div
+        style={{
+          marginTop: "var(--sp-8)",
+          fontSize: "var(--fs-sm)",
+          color: "var(--fg-muted)",
+          lineHeight: "var(--lh-body)",
+        }}
+      >
+        <div>{t("retention.swept.lead")}</div>
+        {swept.dirs.map((d) => (
+          <div
+            key={d.rel}
+            style={{
+              marginTop: "var(--sp-3)",
+              color: d.already_deletable > 0 ? "var(--warn)" : undefined,
+            }}
+          >
+            {d.already_deletable > 0
+              ? t("retention.swept.rowAtRisk", {
+                  what: d.what,
+                  dir: d.rel,
+                  entries: formatNumber(d.entries),
+                  deletable: formatNumber(d.already_deletable),
+                })
+              : t("retention.swept.row", {
+                  what: d.what,
+                  dir: d.rel,
+                  entries: formatNumber(d.entries),
+                })}
+          </div>
+        ))}
+        {swept.scan_incomplete && (
+          <div style={{ marginTop: "var(--sp-3)", color: "var(--warn)" }}>
+            {t("retention.swept.incomplete")}
+          </div>
+        )}
+        {swept.cache_dirs_skipped > 0 && (
+          <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
+            {t("retention.swept.skipped", { count: swept.cache_dirs_skipped })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function RetentionPane({
   pushToast,
 }: {
@@ -143,29 +319,10 @@ export function RetentionPane({
     return <SkeletonList rows={3} label={t("shared.loading")} />;
   }
 
+  // Severity, the mode line and the risk copy all moved into
+  // <RiskSummary>; this function keeps only what the interactive
+  // controls need.
   const { state, risk, is_durable_archive } = report;
-  const atRiskTotal = risk.already_deletable + risk.at_risk_within_horizon;
-  const oldest = fmtDate(risk.oldest_ms);
-
-  // Headline severity: anything already past the cutoff is live loss.
-  // A legacy zero is NOT danger — nothing is being deleted in that
-  // state. It is a warning, because what the user believes is happening
-  // and what is happening have come apart.
-  const severity =
-    risk.already_deletable > 0
-      ? "var(--danger)"
-      : atRiskTotal > 0 || state.cleanup_suppressed
-        ? "var(--warn)"
-        : "var(--fg-muted)";
-
-  const modeLine =
-    state.mode === "cc_default"
-      ? t("retention.modeDefault", { days: state.effective_days })
-      : state.mode === "legacy_zero"
-        ? t("retention.modeLegacyZero")
-        : state.mode === "invalid"
-          ? t("retention.modeInvalid", { days: state.configured_days })
-          : t("retention.modeDays", { days: state.effective_days });
 
   return (
     <div
@@ -176,104 +333,8 @@ export function RetentionPane({
         maxWidth: "var(--content-cap-lg)",
       }}
     >
-      <div>
-        <SectionLabel>{t("retention.sectionTitle")}</SectionLabel>
-        <div
-          style={{
-            fontSize: "var(--fs-md)",
-            color: severity,
-            marginTop: "var(--sp-6)",
-          }}
-        >
-          {modeLine}
-        </div>
-
-        {/* Consequence first. Render-if-nonzero: when nothing is at
-            risk this collapses to the single reassuring line below. */}
-        <div
-          style={{
-            marginTop: "var(--sp-8)",
-            fontSize: "var(--fs-sm)",
-            color: "var(--fg-muted)",
-            lineHeight: "var(--lh-body)",
-          }}
-        >
-          {risk.already_deletable > 0 && (
-            <div style={{ color: "var(--danger)" }}>
-              {t("retention.risk.deletable", {
-                // `count` drives i18next's plural selection and must be
-                // the raw number; `num` carries the grouped display form
-                // (`1,234`). Both are required — this key was already
-                // correct; `horizon` and `totalOnMachine` below were not.
-                count: risk.already_deletable,
-                num: formatNumber(risk.already_deletable),
-              })}
-            </div>
-          )}
-          {risk.at_risk_within_horizon > 0 && (
-            <div style={{ color: "var(--warn)" }}>
-              {t("retention.risk.horizon", {
-                count: risk.at_risk_within_horizon,
-                num: formatNumber(risk.at_risk_within_horizon),
-                days: risk.horizon_days,
-              })}
-            </div>
-          )}
-          {/* Never reassure on an incomplete scan — a permissions
-              failure must not read as "all clear". */}
-          {risk.scan_incomplete && (
-            <div style={{ color: "var(--warn)" }}>
-              {t("retention.risk.scanIncomplete")}
-            </div>
-          )}
-          {atRiskTotal === 0 && !risk.scan_incomplete && (
-            <div>
-              {t("retention.risk.nothing")}
-              {/* render-if-nonzero: never ship "0 transcripts". */}
-              {risk.total_transcripts > 0 && (
-                <>
-                  {" "}
-                  {t("retention.risk.totalOnMachine", {
-                    count: risk.total_transcripts,
-                    num: formatNumber(risk.total_transcripts),
-                  })}
-                </>
-              )}
-            </div>
-          )}
-          {/* Both suppressed states protect transcripts by accident, but
-              they need different sentences: `invalid` is a value to
-              correct, `legacy_zero` is a control that used to work and
-              was withdrawn upstream. Telling a legacy-zero user to "fix
-              the value" would be advice they cannot act on — the value
-              was written by this app, on purpose, and the state they
-              chose no longer exists. */}
-          {state.cleanup_suppressed && (
-            <div style={{ color: "var(--warn)" }}>
-              {state.mode === "legacy_zero"
-                ? t("retention.risk.suppressedLegacyZero")
-                : t("retention.risk.suppressed")}
-            </div>
-          )}
-          {oldest && (
-            <div style={{ marginTop: "var(--sp-3)" }}>
-              {t("retention.risk.oldest", { date: oldest })}
-            </div>
-          )}
-          <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
-            {t("retention.risk.silent")}
-          </div>
-          {/* `cleanupPeriodDays` is a global TTL over ~20 directories
-              under ~/.claude, not a transcript setting — verified
-              against the 2.1.233 binary, see `TranscriptRisk`. The
-              counts above are conversations only, so without this the
-              pane's reassurance reads as "nothing anywhere is being
-              deleted", which is false. */}
-          <div style={{ marginTop: "var(--sp-3)", color: "var(--fg-faint)" }}>
-            {t("retention.scopeNote")}
-          </div>
-        </div>
-      </div>
+      <RiskSummary report={report} />
+      <SweptPanel swept={report.swept_elsewhere} />
 
       {/* Why the folder keeps growing while history shrinks. Only shown
           when there is actually a nested pile to explain. */}

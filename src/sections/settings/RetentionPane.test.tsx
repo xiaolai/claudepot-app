@@ -25,6 +25,7 @@ import { RetentionPane } from "./RetentionPane";
 function report(over: {
   state?: Partial<RetentionReport["state"]>;
   risk?: Partial<RetentionReport["risk"]>;
+  swept?: Partial<RetentionReport["swept_elsewhere"]>;
 } = {}): RetentionReport {
   return {
     state: {
@@ -46,6 +47,12 @@ function report(over: {
       ...over.risk,
     },
     is_durable_archive: false,
+    swept_elsewhere: {
+      dirs: [],
+      scan_incomplete: false,
+      cache_dirs_skipped: 7,
+      ...over.swept,
+    },
   };
 }
 
@@ -117,6 +124,37 @@ describe("RetentionPane", () => {
     ).toBeInTheDocument();
     // The unscoped claim must not survive anywhere on the surface.
     expect(screen.queryByText(/^Nothing is scheduled for deletion\.$/)).toBeNull();
+  });
+
+  // The gap the scope note names in prose, now quantified. Counting
+  // conversations alone and saying nothing about the rest was the
+  // smaller version of the same over-claim.
+  it("quantifies the other directories on the same timer", async () => {
+    retentionReportMock.mockResolvedValue(
+      report({
+        swept: {
+          dirs: [
+            { rel: "file-history", what: "file edit history", kind: "content", entries: 412, already_deletable: 91 },
+            { rel: "uploads", what: "files you uploaded", kind: "content", entries: 7, already_deletable: 0 },
+          ],
+          cache_dirs_skipped: 7,
+        },
+      }),
+    );
+    render(<RetentionPane pushToast={toast()} />);
+    expect(await screen.findByText(/file edit history/i)).toBeInTheDocument();
+    expect(screen.getByText(/91 past the cutoff/i)).toBeInTheDocument();
+    // The directories it chose NOT to count are stated, not implied.
+    expect(screen.getByText(/7 further directories/i)).toBeInTheDocument();
+  });
+
+  // design.md render-if-nonzero: a machine with nothing else on the
+  // timer must not grow an empty section.
+  it("omits the swept panel entirely when nothing else is on the timer", async () => {
+    retentionReportMock.mockResolvedValue(report());
+    render(<RetentionPane pushToast={toast()} />);
+    await screen.findByRole("button", { name: "30 days" });
+    expect(screen.queryByText(/Also on this timer/i)).toBeNull();
   });
 
   it("says a longer window is not a backup", async () => {
