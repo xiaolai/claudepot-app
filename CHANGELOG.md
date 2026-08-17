@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## Unreleased — beta
+## 0.4.17 — beta (unreleased)
 
 Follow-up to 0.4.16: the openings it shipped with, closed.
 
