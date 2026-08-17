@@ -6,7 +6,28 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.16 — beta (unreleased)
+## Unreleased — beta
+
+Follow-up to 0.4.16: the openings it shipped with, closed.
+
+### Added
+
+- **Settings → Retention now counts everything `cleanupPeriodDays`
+  deletes**, not only conversations. It is a global TTL over roughly
+  twenty directories under `~/.claude`; 0.4.16 stopped the pane
+  over-claiming but still counted one of them. `file-history`,
+  `uploads`, `tasks`, `shares`, `dump-prompts`, `shell-snapshots`,
+  `backups` and `plans` are now reported with what is past the cutoff,
+  and the number of cache directories deliberately not counted is stated
+  rather than implied.
+
+### Fixed
+
+- Notification categories are ordered by priority consistently between
+  the Rust source of truth and its TypeScript mirror; the two had
+  drifted, so two P1 rows listed under the Background group.
+
+## 0.4.16 — beta (released 2026-08-16)
 
 Claude Code changed `cleanupPeriodDays` out from under us in **2.1.89**
 — the release immediately after the source snapshot this repo verifies
