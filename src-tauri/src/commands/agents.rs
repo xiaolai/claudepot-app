@@ -817,15 +817,23 @@ pub async fn agents_run_now_start(
 
     // Refuse a second concurrent run of the SAME agent.
     //
-    // The renderer releases its optimistic lock as soon as this command
-    // returns and lets observed liveness take over — which leaves a
-    // window of up to one poll interval where the UI shows nothing
-    // running and Run Now is clickable. A UI-side lock cannot close that
-    // window on its own (a reload, a second window, or the CLI would all
-    // bypass it), so the guard belongs here, where the run is actually
-    // spawned.
+    // Liveness alone cannot be the guard: `run.pid` is written by the
+    // shim AFTER this command returns, so two rapid starts would both
+    // observe "nothing running" and both spawn. `RunningOps` is an
+    // in-process map, so a check against it closes the window this
+    // process can actually close.
     //
-    // Read-only and lock-free, matching `agents_running_list`.
+    // Honest about the remaining hole: a run started by launchd or the
+    // CLI is not in this map, so the liveness check below still matters
+    // as a second, weaker line. Closing the cross-process case needs a
+    // real per-agent lock file and is tracked separately.
+    if ops.any_agent_run(&aid.to_string()) {
+        return Err(ErrorDto::from(
+            claudepot_core::agent::AgentError::InvalidEnv(format!(
+                "agent {aid} is already running; wait for the current run to finish"
+            )),
+        ));
+    }
     {
         let check = claudepot_core::session_live::registry::SysinfoCheck::new();
         let already = claudepot_core::agent::liveness::scan_status_live(&check)

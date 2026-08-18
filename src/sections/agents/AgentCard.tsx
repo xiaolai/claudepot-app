@@ -71,7 +71,12 @@ export function AgentCard({
   // rendering as fact — but `controlsLocked` keyed off `isRunning`, so
   // the button became clickable exactly when we could not tell whether a
   // run was live. Not knowing is a reason to refuse, not to permit.
-  const controlsLocked = mutating || isRunning || runsUnknown;
+  // Two locks, not one. Conflating them made an agent with an
+  // unreadable runs directory impossible to EDIT or DELETE — the very
+  // actions a user needs to fix it. Unknown liveness is a reason to
+  // refuse a new run; it is not a reason to trap the agent.
+  const runLocked = mutating || isRunning || runsUnknown;
+  const mutationLocked = mutating;
 
   // Live elapsed. The 1s interval exists ONLY while a run is live —
   // render-if-nonzero applied to timers, not just to text. Without the
@@ -298,14 +303,14 @@ export function AgentCard({
             <Button
               variant="solid"
               onClick={() => onReview(agent)}
-              disabled={controlsLocked}
+              disabled={mutationLocked}
             >
               {t("card.actions.reviewInstall")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onRemove(agent)}
-              disabled={controlsLocked}
+              disabled={mutationLocked}
             >
               {t("card.actions.delete")}
             </Button>
@@ -315,21 +320,21 @@ export function AgentCard({
             <Button
               variant="solid"
               onClick={() => onRun(agent.id)}
-              disabled={controlsLocked}
+              disabled={runLocked}
             >
               {t("card.actions.runNow")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onEdit(agent)}
-              disabled={controlsLocked}
+              disabled={mutationLocked}
             >
               {t("card.actions.edit")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onToggle(agent.id, !agent.enabled)}
-              disabled={controlsLocked}
+              disabled={mutationLocked}
             >
               {agent.enabled
                 ? t("card.actions.disable")
@@ -338,7 +343,7 @@ export function AgentCard({
             <Button
               variant="ghost"
               onClick={() => onRemove(agent)}
-              disabled={controlsLocked}
+              disabled={mutationLocked}
             >
               {t("card.actions.delete")}
             </Button>

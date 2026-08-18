@@ -734,6 +734,11 @@ pub struct AgentRunStatusDto {
     /// This agent's run data could not be read. When true the two fields
     /// above are not trustworthy and the UI renders "can't determine".
     pub unreadable: bool,
+    /// Set only on the synthetic sentinel returned when the agents ROOT
+    /// is unreadable — that row has an empty `agent_id` and matches no
+    /// card, so without carrying this the sentinel could not cross IPC
+    /// and the fix that produced it was inert.
+    pub root_error: Option<String>,
 }
 
 impl From<claudepot_core::agent::liveness::AgentRunStatus> for AgentRunStatusDto {
@@ -757,6 +762,7 @@ impl From<claudepot_core::agent::liveness::AgentRunStatus> for AgentRunStatusDto
                 duration_ms: l.duration_ms,
             }),
             unreadable: s.unreadable,
+            root_error: s.root_error,
         }
     }
 }

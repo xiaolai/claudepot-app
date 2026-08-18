@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { AgentRunStatus } from "../types";
 
@@ -24,36 +24,49 @@ export function useAgentRuns(pollMs = 5000) {
   // running" — otherwise the pane briefly renders idle over a live run
   // on every mount.
   const [loaded, setLoaded] = useState(false);
-  const alive = useRef(true);
 
   useEffect(() => {
-    alive.current = true;
+    // Per-effect cancellation, NOT a shared ref. A ref survives effect
+    // re-runs, so a `pollMs` change would let the new effect set it back
+    // to true and revive an in-flight request from the old one — which
+    // would then write state and schedule its own next tick, running two
+    // poll chains at once.
+    let cancelled = false;
     let handle: number | undefined;
-    // Monotonic request id. `setInterval` could start a second poll
-    // while the first was still in flight, and a slow earlier response
-    // resolving last would overwrite fresher state — including a stale
-    // empty list rendering idle over a live run. Chained timeouts plus
-    // this guard make that unrepresentable.
+    // Monotonic id: a slow response resolving after a newer one must not
+    // overwrite fresher state.
     let seq = 0;
 
     const tick = async () => {
       const mine = ++seq;
       try {
-        const next = await api.agentsRunningList();
-        if (!alive.current || mine !== seq) return;
+        // Bounded. Without this an invoke that never settles means the
+        // `finally` never runs, no next poll is scheduled, `loaded`
+        // stays false forever — and since unknown now LOCKS Run Now,
+        // one hung IPC call would make every agent permanently
+        // unrunnable.
+        const next = await Promise.race([
+          api.agentsRunningList(),
+          new Promise<never>((_, reject) =>
+            window.setTimeout(
+              () => reject(new Error("agents_running_list timed out")),
+              Math.max(2000, pollMs * 2),
+            ),
+          ),
+        ]);
+        if (cancelled || mine !== seq) return;
         setRuns(next);
         setError(false);
       } catch {
-        if (!alive.current || mine !== seq) return;
+        if (cancelled || mine !== seq) return;
         // Keep the last known list rather than blanking it, but flag the
-        // failure: consumers render "can't determine", never idle, and
-        // must not present the stale list as current fact.
+        // failure: consumers render "can't determine", never idle.
         setError(true);
       } finally {
-        if (alive.current && mine === seq) {
+        if (!cancelled && mine === seq) {
           setLoaded(true);
-          // Schedule the NEXT poll only after this one settled, so two
-          // can never be in flight at once.
+          // Chain the NEXT poll only after this one settled, so two can
+          // never be in flight at once.
           handle = window.setTimeout(() => void tick(), pollMs);
         }
       }
@@ -61,7 +74,7 @@ export function useAgentRuns(pollMs = 5000) {
 
     void tick();
     return () => {
-      alive.current = false;
+      cancelled = true;
       if (handle !== undefined) window.clearTimeout(handle);
     };
   }, [pollMs]);

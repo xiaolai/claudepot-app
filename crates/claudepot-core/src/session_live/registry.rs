@@ -95,6 +95,19 @@ impl SysinfoCheck {
         }
     }
 
+    /// Unix-epoch SECONDS at which `pid` started, if the cached
+    /// `System` knows. Used by `agent::liveness` to tell our run's pid
+    /// from a recycled one: a process that began after the run
+    /// directory was created is not that run, however alive it is.
+    ///
+    /// `None` when the pid is unknown — callers must treat that as
+    /// "cannot tell", never as "recycled".
+    pub fn start_time_secs(&self, pid: u32) -> Option<u64> {
+        use sysinfo::Pid;
+        let sys = self.sys.lock().ok()?;
+        sys.process(Pid::from_u32(pid)).map(|p| p.start_time())
+    }
+
     /// Prime the cached `System` with the given PIDs. Callers should
     /// invoke this once per poll tick before running `poll_dir` so
     /// each `is_running` call is a cheap HashMap lookup.

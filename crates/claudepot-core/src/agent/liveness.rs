@@ -30,7 +30,49 @@
 
 use std::path::{Path, PathBuf};
 
-pub use crate::session_live::registry::ProcessCheck;
+/// Liveness for an agent run asks one question `session_live`'s trait
+/// does not: did this pid start AFTER the run directory was created? A
+/// pid that did is a recycled number, not our run — and without the
+/// check a stale `run.pid` wedges Run Now behind an unrelated process
+/// with no way to clear it from the UI.
+///
+/// Its own trait rather than a supertrait of `session_live`'s: a blanket
+/// impl over that one collides with the per-fake impls the tests need.
+pub trait ProcessCheck: Send + Sync {
+    fn is_running(&self, pid: u32) -> bool;
+
+    /// Prime with every pid about to be probed, so a scan costs one
+    /// refresh rather than one per run.
+    fn prime(&self, _pids: &[u32]) {}
+
+    /// True only when the process is KNOWN to have begun after
+    /// `since_ms`. "Cannot tell" must return `false` — the conservative
+    /// answer preserves the pid-exists verdict instead of inventing an
+    /// Interrupted.
+    fn started_after(&self, _pid: u32, _since_ms: i64) -> bool {
+        false
+    }
+}
+
+impl ProcessCheck for crate::session_live::registry::SysinfoCheck {
+    fn is_running(&self, pid: u32) -> bool {
+        crate::session_live::registry::ProcessCheck::is_running(self, pid)
+    }
+
+    fn prime(&self, pids: &[u32]) {
+        self.refresh_for(pids);
+    }
+
+    fn started_after(&self, pid: u32, since_ms: i64) -> bool {
+        // sysinfo reports whole seconds; the run dir gives ms. Compare
+        // in seconds and require a STRICT excess, so a process started
+        // in the same second as the directory is not called recycled.
+        match self.start_time_secs(pid) {
+            Some(secs) => i64::try_from(secs).is_ok_and(|s| s > since_ms / 1000),
+            None => false,
+        }
+    }
+}
 
 /// A scan that could not be completed. Deliberately distinct from an
 /// empty result: "no runs" and "could not look" are different answers,
@@ -110,7 +152,12 @@ pub fn scan_agent_dir(
     // Collect first so the process check can be primed with every pid in
     // one refresh rather than one system call per run.
     let mut candidates: Vec<(String, PathBuf, Option<u32>)> = Vec::new();
-    for ent in rd.flatten() {
+    for ent in rd {
+        // `flatten()` here would silently drop an entry we could not
+        // stat — in a scanner whose entire invariant is "a failed read
+        // is not a clean result", swallowing one is how a live run
+        // disappears and the card reads idle.
+        let ent = ent.map_err(|e| ScanError::Unreadable(e.to_string()))?;
         if !ent.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }
@@ -135,7 +182,16 @@ pub fn scan_agent_dir(
             run_id,
             started_ms: dir_started_ms(&dir),
             state: match pid {
-                Some(p) if check.is_running(p) => RunState::Running,
+                // Liveness is "this pid exists" AND "it did not start
+                // after our run did". Without the second clause a
+                // recycled pid reads as our run forever, wedging Run Now
+                // behind an unrelated process. `started_after` is a
+                // conservative check: when the process start time is
+                // unavailable we keep the pid-exists answer rather than
+                // inventing an Interrupted.
+                Some(p) if check.is_running(p) && !check.started_after(p, dir_started_ms(&dir)) => {
+                    RunState::Running
+                }
                 _ => RunState::Interrupted,
             },
         })
@@ -296,8 +352,16 @@ pub fn scan_status_live(check: &dyn ProcessCheck) -> Vec<AgentRunStatus> {
     out
 }
 
-/// Scan every agent under `agents_root` (`~/.claudepot/agents`).
-pub fn scan_all(agents_root: &Path, check: &dyn ProcessCheck) -> Vec<InFlightRun> {
+/// Scan every agent under `agents_root` for in-flight runs.
+///
+/// **Test-only.** Production reads run state through
+/// [`scan_status_live`], which carries the `unreadable` contract. This
+/// helper deliberately does not: it existed before that contract and
+/// `unwrap_or_default()`-ed unreadable agents into silence, which is the
+/// exact behaviour the module now forbids. Kept `pub(crate)` and
+/// cfg(test) so it cannot leak back into a production path.
+#[cfg(test)]
+pub(crate) fn scan_all(agents_root: &Path, check: &dyn ProcessCheck) -> Vec<InFlightRun> {
     let Ok(rd) = std::fs::read_dir(agents_root) else {
         return Vec::new();
     };
@@ -311,7 +375,6 @@ pub fn scan_all(agents_root: &Path, check: &dyn ProcessCheck) -> Vec<InFlightRun
         };
         out.extend(scan_agent_dir(&id, &ent.path(), check).unwrap_or_default());
     }
-    // Newest first, so a UI that shows only one shows the current run.
     out.sort_by(|a, b| b.started_ms.cmp(&a.started_ms));
     out
 }
@@ -507,6 +570,31 @@ mod tests {
             got.is_err(),
             "expected UNKNOWN, got {got:?} — an older run must never be \
              promoted to 'last' because the newest one would not parse"
+        );
+    }
+
+    /// R2-3. A pid that exists but STARTED AFTER the run directory did
+    /// is a recycled pid, not our run. Without this a stale run.pid
+    /// whose number got reused wedges Run Now behind an unrelated
+    /// process, with no way to clear it from the UI.
+    #[test]
+    fn a_recycled_pid_is_not_our_run() {
+        struct Recycled;
+        impl ProcessCheck for Recycled {
+            fn is_running(&self, _pid: u32) -> bool {
+                true // the number is live...
+            }
+            fn started_after(&self, _pid: u32, _since_ms: i64) -> bool {
+                true // ...but it began after our run dir was created
+            }
+        }
+        let t = TempDir::new().unwrap();
+        mk_run(t.path(), "r1", Some("4242"), false);
+        let got = scan_agent_dir("a", t.path(), &Recycled).unwrap();
+        assert_eq!(
+            got[0].state,
+            RunState::Interrupted,
+            "a pid that postdates the run is not the run"
         );
     }
 

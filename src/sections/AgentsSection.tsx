@@ -63,7 +63,12 @@ export function AgentsSection() {
     error: pollFailed,
     loaded: runsLoaded,
   } = useAgentRuns();
-  const runsUnknown = pollFailed || !runsLoaded;
+  // The agents ROOT being unreadable arrives as a synthetic row with an
+  // empty `agent_id`, which matches no card by construction. Detecting
+  // it here is what makes that signal reach the UI at all — without this
+  // the sentinel is produced, serialized, and silently dropped.
+  const rootUnreadable = runs.some((r) => r.root_error != null);
+  const runsUnknown = pollFailed || !runsLoaded || rootUnreadable;
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);

@@ -237,3 +237,23 @@ describe("AgentCard — unknown refuses rather than permits", () => {
     expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();
   });
 });
+
+// Round-2 regressions.
+describe("AgentCard — unknown must not trap the agent", () => {
+  // R2-4: the first fix locked EVERY control on unknown, so an agent
+  // with an unreadable runs directory could not be edited or deleted —
+  // the exact actions needed to fix it. Refusing a new run is right;
+  // trapping the agent is not.
+  it("leaves Edit and Delete available while liveness is unknown", () => {
+    render(<AgentCard agent={agent()} runsUnknown {...props} />);
+    expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /edit/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /delete/i })).toBeEnabled();
+  });
+
+  it("still locks everything during a real mutation", () => {
+    render(<AgentCard agent={agent()} {...props} mutating />);
+    expect(screen.getByRole("button", { name: /edit/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /delete/i })).toBeDisabled();
+  });
+});

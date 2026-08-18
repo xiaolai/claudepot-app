@@ -334,6 +334,23 @@ impl RunningOps {
         Self::default()
     }
 
+    /// Is a Run-Now already tracked for this agent?
+    ///
+    /// The agent id rides in `old_path` for `OpKind::AgentRun` (see
+    /// `agents_run_now_start`). Used as the concurrency guard there: a
+    /// liveness check cannot serve, because the shim writes `run.pid`
+    /// only after the command returns, so two rapid starts would both
+    /// see an idle agent.
+    ///
+    /// In-process only. A run started by launchd or the CLI is not in
+    /// this map — that case is covered, weakly, by the liveness check
+    /// alongside this one.
+    pub fn any_agent_run(&self, agent_id: &str) -> bool {
+        self.guard()
+            .values()
+            .any(|op| op.kind == OpKind::AgentRun && op.old_path == agent_id)
+    }
+
     /// Low-audit guard: recover from a poisoned Mutex rather than
     /// panicking. If an earlier panic poisoned the map, the ops
     /// pipeline would propagate the panic forever — this turns a
