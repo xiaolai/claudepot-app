@@ -63,7 +63,8 @@
       "runNowDisabled": "已在运行——开始于 {{started}}",
       "never": "从未运行",
       "lastOk": "上次运行于 {{ago}} 前 · 用时 {{took}}",
-      "lastFailed": "上次运行失败于 {{ago}} 前 —— 退出码 {{code}}"
+      "lastFailed": "上次运行失败于 {{ago}} 前 —— 退出码 {{code}}",
+      "runNowUnknown": "无法确定是否有运行正在进行——拒绝再启动一个"
     }
   },
   "form": {

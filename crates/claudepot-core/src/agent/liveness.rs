@@ -32,6 +32,15 @@ use std::path::{Path, PathBuf};
 
 pub use crate::session_live::registry::ProcessCheck;
 
+/// A scan that could not be completed. Deliberately distinct from an
+/// empty result: "no runs" and "could not look" are different answers,
+/// and only one of them is safe to render as idle.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ScanError {
+    #[error("agent run directory is unreadable: {0}")]
+    Unreadable(String),
+}
+
 /// What a run directory without a recorded result actually is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,11 +92,19 @@ pub fn scan_agent_dir(
     agent_id: &str,
     agent_dir: &Path,
     check: &dyn ProcessCheck,
-) -> Vec<InFlightRun> {
+) -> Result<Vec<InFlightRun>, ScanError> {
     let runs_dir: PathBuf = agent_dir.join("runs");
-    let Ok(rd) = std::fs::read_dir(&runs_dir) else {
-        // No runs directory is a real zero — the agent has never run.
-        return Vec::new();
+    let rd = match std::fs::read_dir(&runs_dir) {
+        Ok(rd) => rd,
+        // A MISSING runs directory is a real zero — the agent has never
+        // run, and CC creates it lazily. Anything else (permissions, a
+        // transient I/O error) is NOT a zero: rendering it as "never
+        // ran" is precisely the "failed read is not a clean result"
+        // failure this module exists to prevent.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(e) => return Err(ScanError::Unreadable(e.to_string())),
     };
 
     // Collect first so the process check can be primed with every pid in
@@ -111,7 +128,7 @@ pub fn scan_agent_dir(
     let pids: Vec<u32> = candidates.iter().filter_map(|(_, _, p)| *p).collect();
     check.prime(&pids);
 
-    candidates
+    let out = candidates
         .into_iter()
         .map(|(run_id, dir, pid)| InFlightRun {
             agent_id: agent_id.to_string(),
@@ -122,7 +139,8 @@ pub fn scan_agent_dir(
                 _ => RunState::Interrupted,
             },
         })
-        .collect()
+        .collect::<Vec<_>>();
+    Ok(out)
 }
 
 /// The most recent run that DID record a result.
@@ -150,6 +168,17 @@ pub struct AgentRunStatus {
     /// different statement from "the last run failed", and the card
     /// renders them differently.
     pub last: Option<LastRun>,
+    /// This agent's run data could not be read (permissions, transient
+    /// I/O, an unparseable newest result). Per-agent rather than global
+    /// so one bad directory does not blank every other card. When set,
+    /// `in_flight` and `last` are NOT trustworthy and the UI renders
+    /// "can't determine" rather than idle.
+    pub unreadable: bool,
+    /// Set only on the synthetic sentinel returned when the agents ROOT
+    /// itself is unreadable. Carries the reason so the UI can say what
+    /// went wrong instead of rendering every card as idle.
+    #[serde(default)]
+    pub root_error: Option<String>,
 }
 
 /// Newest `result.json` under an agent's `runs/`, if any.
@@ -158,48 +187,82 @@ pub struct AgentRunStatus {
 /// `result.json` yields `None` rather than a partial record, because a
 /// half-parsed outcome rendered as fact is the failure this whole area
 /// keeps producing.
-pub fn last_run(agent_dir: &Path) -> Option<LastRun> {
-    let rd = std::fs::read_dir(agent_dir.join("runs")).ok()?;
-    let mut best: Option<(i64, LastRun)> = None;
+pub fn last_run(agent_dir: &Path) -> Result<Option<LastRun>, ScanError> {
+    let rd = match std::fs::read_dir(agent_dir.join("runs")) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(ScanError::Unreadable(e.to_string())),
+    };
+
+    // Find the NEWEST recorded result first, then parse exactly that
+    // one. Parsing every candidate and keeping the newest that happened
+    // to parse would let a truncated newest result be silently replaced
+    // by an older run — the card would then state an old success or
+    // failure as the current fact. An unparseable newest result is an
+    // unknown, and unknowns are never rendered as confident answers.
+    let mut newest: Option<(i64, String, PathBuf)> = None;
     for ent in rd.flatten() {
         let dir = ent.path();
-        let Ok(text) = std::fs::read_to_string(dir.join("result.json")) else {
-            continue;
+        let result_path = dir.join("result.json");
+        let Ok(meta) = std::fs::metadata(&result_path) else {
+            continue; // no result.json — that run is in flight, not last
         };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
-        let (Some(exit_code), Some(duration_ms)) = (
-            v.get("exit_code").and_then(|x| x.as_i64()),
-            v.get("duration_ms").and_then(|x| x.as_i64()),
-        ) else {
-            continue;
-        };
-        let ended_ms = std::fs::metadata(dir.join("result.json"))
-            .and_then(|m| m.modified())
+        let ended_ms = meta
+            .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .and_then(|d| i64::try_from(d.as_millis()).ok())
             .unwrap_or(0);
         let run_id = ent.file_name().to_str().unwrap_or_default().to_string();
-        let cand = LastRun {
-            run_id,
-            ended_ms,
-            exit_code: i32::try_from(exit_code).unwrap_or(i32::MAX),
-            duration_ms,
-        };
-        if best.as_ref().is_none_or(|(t, _)| ended_ms > *t) {
-            best = Some((ended_ms, cand));
+        if newest.as_ref().is_none_or(|(t, _, _)| ended_ms > *t) {
+            newest = Some((ended_ms, run_id, result_path));
         }
     }
-    best.map(|(_, r)| r)
+
+    let Some((ended_ms, run_id, path)) = newest else {
+        return Ok(None); // never completed a run
+    };
+
+    let text = std::fs::read_to_string(&path).map_err(|e| ScanError::Unreadable(e.to_string()))?;
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| ScanError::Unreadable(format!("{}: {e}", path.display())))?;
+    let (Some(exit_code), Some(duration_ms)) = (
+        v.get("exit_code").and_then(|x| x.as_i64()),
+        v.get("duration_ms").and_then(|x| x.as_i64()),
+    ) else {
+        return Err(ScanError::Unreadable(format!(
+            "{}: missing exit_code or duration_ms",
+            path.display()
+        )));
+    };
+
+    Ok(Some(LastRun {
+        run_id,
+        ended_ms,
+        exit_code: i32::try_from(exit_code).unwrap_or(i32::MAX),
+        duration_ms,
+    }))
 }
 
 /// Per-agent run status for every agent in the live data directory.
 pub fn scan_status_live(check: &dyn ProcessCheck) -> Vec<AgentRunStatus> {
     let root = crate::paths::claudepot_data_dir().join("agents");
-    let Ok(rd) = std::fs::read_dir(&root) else {
-        return Vec::new();
+    let rd = match std::fs::read_dir(&root) {
+        Ok(rd) => rd,
+        // A missing agents root is a real zero: no agent has ever been
+        // installed. Anything else is unknown, and returning an empty
+        // vec would render every card idle — the same failure as the
+        // per-agent case below, one level up.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            return vec![AgentRunStatus {
+                agent_id: String::new(),
+                in_flight: None,
+                last: None,
+                unreadable: true,
+                root_error: Some(e.to_string()),
+            }]
+        }
     };
     let mut out = Vec::new();
     for ent in rd.flatten() {
@@ -210,27 +273,27 @@ pub fn scan_status_live(check: &dyn ProcessCheck) -> Vec<AgentRunStatus> {
             continue;
         };
         let dir = ent.path();
-        let mut in_flight = scan_agent_dir(&id, &dir, check);
-        // Newest first; the pane shows one.
-        in_flight.sort_by(|a, b| b.started_ms.cmp(&a.started_ms));
+        let (in_flight, scan_bad) = match scan_agent_dir(&id, &dir, check) {
+            Ok(mut v) => {
+                // Newest first; the pane shows one.
+                v.sort_by(|a, b| b.started_ms.cmp(&a.started_ms));
+                (v.into_iter().next(), false)
+            }
+            Err(_) => (None, true),
+        };
+        let (last, last_bad) = match last_run(&dir) {
+            Ok(l) => (l, false),
+            Err(_) => (None, true),
+        };
         out.push(AgentRunStatus {
             agent_id: id,
-            in_flight: in_flight.into_iter().next(),
-            last: last_run(&dir),
+            in_flight,
+            last,
+            unreadable: scan_bad || last_bad,
+            root_error: None,
         });
     }
     out
-}
-
-/// Scan every agent in the live data directory.
-///
-/// The one entry point production callers need — resolves the agents
-/// root through `paths::claudepot_data_dir()` so it honours
-/// `CLAUDEPOT_DATA_DIR` and the test-isolation guard, rather than
-/// rebuilding `$HOME/.claudepot` by hand (the mistake `cc_tips_catalog`
-/// made, which let a test write into the developer's live data root).
-pub fn scan_live(check: &dyn ProcessCheck) -> Vec<InFlightRun> {
-    scan_all(&crate::paths::claudepot_data_dir().join("agents"), check)
 }
 
 /// Scan every agent under `agents_root` (`~/.claudepot/agents`).
@@ -246,7 +309,7 @@ pub fn scan_all(agents_root: &Path, check: &dyn ProcessCheck) -> Vec<InFlightRun
         let Some(id) = ent.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        out.extend(scan_agent_dir(&id, &ent.path(), check));
+        out.extend(scan_agent_dir(&id, &ent.path(), check).unwrap_or_default());
     }
     // Newest first, so a UI that shows only one shows the current run.
     out.sort_by(|a, b| b.started_ms.cmp(&a.started_ms));
@@ -287,7 +350,7 @@ mod tests {
     fn a_live_pid_with_no_result_is_running() {
         let t = TempDir::new().unwrap();
         mk_run(t.path(), "r1", Some("4242"), false);
-        let got = scan_agent_dir("a", t.path(), &alive(&[4242]));
+        let got = scan_agent_dir("a", t.path(), &alive(&[4242])).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].state, RunState::Running);
         assert_eq!(got[0].run_id, "r1");
@@ -299,7 +362,7 @@ mod tests {
     fn a_dead_pid_with_no_result_is_interrupted_not_running() {
         let t = TempDir::new().unwrap();
         mk_run(t.path(), "r1", Some("4242"), false);
-        let got = scan_agent_dir("a", t.path(), &alive(&[])); // nothing alive
+        let got = scan_agent_dir("a", t.path(), &alive(&[])).unwrap(); // nothing alive
         assert_eq!(got[0].state, RunState::Interrupted);
     }
 
@@ -309,7 +372,7 @@ mod tests {
     fn a_run_predating_the_pid_file_is_interrupted() {
         let t = TempDir::new().unwrap();
         mk_run(t.path(), "old", None, false);
-        let got = scan_agent_dir("a", t.path(), &alive(&[4242]));
+        let got = scan_agent_dir("a", t.path(), &alive(&[4242])).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].state, RunState::Interrupted);
     }
@@ -318,7 +381,9 @@ mod tests {
     fn a_finished_run_is_not_in_flight_at_all() {
         let t = TempDir::new().unwrap();
         mk_run(t.path(), "done", Some("4242"), true);
-        assert!(scan_agent_dir("a", t.path(), &alive(&[4242])).is_empty());
+        assert!(scan_agent_dir("a", t.path(), &alive(&[4242]))
+            .unwrap()
+            .is_empty());
     }
 
     /// An unparseable or absurd pid is "cannot attribute a process",
@@ -328,7 +393,7 @@ mod tests {
         let t = TempDir::new().unwrap();
         mk_run(t.path(), "bad", Some("not-a-pid"), false);
         mk_run(t.path(), "zero", Some("0"), false);
-        let got = scan_agent_dir("a", t.path(), &alive(&[4242]));
+        let got = scan_agent_dir("a", t.path(), &alive(&[4242])).unwrap();
         assert_eq!(got.len(), 2);
         assert!(got.iter().all(|r| r.state == RunState::Interrupted));
     }
@@ -336,7 +401,9 @@ mod tests {
     #[test]
     fn an_agent_that_never_ran_reports_nothing() {
         let t = TempDir::new().unwrap();
-        assert!(scan_agent_dir("a", t.path(), &alive(&[])).is_empty());
+        assert!(scan_agent_dir("a", t.path(), &alive(&[]))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -356,7 +423,7 @@ mod tests {
         )
         .unwrap();
 
-        let got = last_run(t.path()).expect("a completed run exists");
+        let got = last_run(t.path()).unwrap().expect("a completed run exists");
         assert_eq!(got.run_id, "new");
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.duration_ms, 886422);
@@ -369,7 +436,7 @@ mod tests {
     fn an_agent_with_no_completed_run_has_no_last_run() {
         let t = TempDir::new().unwrap();
         mk_run(t.path(), "live", Some("1"), false); // in flight, no result
-        assert!(last_run(t.path()).is_none());
+        assert!(last_run(t.path()).unwrap().is_none());
     }
 
     /// A truncated or malformed result must yield nothing, not a
@@ -379,12 +446,68 @@ mod tests {
         let t = TempDir::new().unwrap();
         let d = mk_run(t.path(), "bad", Some("1"), true);
         fs::write(d.join("result.json"), "{\"exit_code\":").unwrap();
-        assert!(last_run(t.path()).is_none());
+        assert!(
+            last_run(t.path()).is_err(),
+            "a truncated newest result is UNKNOWN, not absent"
+        );
 
-        let d2 = mk_run(t.path(), "partial", Some("2"), true);
+        let t2 = TempDir::new().unwrap();
+        let d2 = mk_run(t2.path(), "partial", Some("2"), true);
         // Valid JSON, but missing duration_ms.
         fs::write(d2.join("result.json"), r#"{"exit_code":0}"#).unwrap();
-        assert!(last_run(t.path()).is_none());
+        assert!(last_run(t2.path()).is_err());
+    }
+
+    /// #2 from the round-1 audit. A directory that exists but cannot be
+    /// read is NOT "the agent never ran" — rendering it as idle is the
+    /// exact "failed read is a clean result" failure this module was
+    /// written to prevent. Only `NotFound` is a real zero.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_runs_directory_is_an_error_not_an_empty_list() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = TempDir::new().unwrap();
+        let runs = t.path().join("runs");
+        fs::create_dir_all(&runs).unwrap();
+        fs::set_permissions(&runs, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let got = scan_agent_dir("a", t.path(), &alive(&[]));
+        // Restore before asserting so a failure cannot leave a
+        // permission-denied directory behind in the temp tree.
+        fs::set_permissions(&runs, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(got.is_err(), "unreadable must not read as an empty scan");
+    }
+
+    #[test]
+    fn a_missing_runs_directory_is_a_real_zero_not_an_error() {
+        let t = TempDir::new().unwrap();
+        assert_eq!(scan_agent_dir("a", t.path(), &alive(&[])).unwrap(), vec![]);
+        assert_eq!(last_run(t.path()).unwrap(), None);
+    }
+
+    /// #3 from the round-1 audit, and the sharpest of them. Parsing every
+    /// candidate and keeping the newest that PARSED let a truncated
+    /// newest result be silently replaced by an older run — so the card
+    /// would state a stale success as the current fact.
+    #[test]
+    fn a_malformed_newest_result_never_falls_back_to_an_older_run() {
+        let t = TempDir::new().unwrap();
+        let older = mk_run(t.path(), "older", Some("1"), true);
+        fs::write(
+            older.join("result.json"),
+            r#"{"exit_code":0,"duration_ms":100}"#,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let newest = mk_run(t.path(), "newest", Some("2"), true);
+        fs::write(newest.join("result.json"), "{truncated").unwrap();
+
+        let got = last_run(t.path());
+        assert!(
+            got.is_err(),
+            "expected UNKNOWN, got {got:?} — an older run must never be \
+             promoted to 'last' because the newest one would not parse"
+        );
     }
 
     #[test]
@@ -419,7 +542,7 @@ mod tests {
         mk_run(t.path(), "r1", Some("11"), false);
         mk_run(t.path(), "r2", Some("22"), false);
         let rec = Recording(Mutex::new(Vec::new()));
-        scan_agent_dir("a", t.path(), &rec);
+        scan_agent_dir("a", t.path(), &rec).unwrap();
         let calls = rec.0.lock().unwrap();
         assert_eq!(calls.len(), 1, "one prime per scan");
         let mut got = calls[0].clone();

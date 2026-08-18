@@ -29,28 +29,40 @@ export function useAgentRuns(pollMs = 5000) {
   useEffect(() => {
     alive.current = true;
     let handle: number | undefined;
+    // Monotonic request id. `setInterval` could start a second poll
+    // while the first was still in flight, and a slow earlier response
+    // resolving last would overwrite fresher state — including a stale
+    // empty list rendering idle over a live run. Chained timeouts plus
+    // this guard make that unrepresentable.
+    let seq = 0;
 
     const tick = async () => {
+      const mine = ++seq;
       try {
         const next = await api.agentsRunningList();
-        if (!alive.current) return;
+        if (!alive.current || mine !== seq) return;
         setRuns(next);
         setError(false);
       } catch {
-        if (!alive.current) return;
-        // Keep the last known list rather than blanking it: a transient
-        // IPC failure should not make a live run vanish from the UI.
+        if (!alive.current || mine !== seq) return;
+        // Keep the last known list rather than blanking it, but flag the
+        // failure: consumers render "can't determine", never idle, and
+        // must not present the stale list as current fact.
         setError(true);
       } finally {
-        if (alive.current) setLoaded(true);
+        if (alive.current && mine === seq) {
+          setLoaded(true);
+          // Schedule the NEXT poll only after this one settled, so two
+          // can never be in flight at once.
+          handle = window.setTimeout(() => void tick(), pollMs);
+        }
       }
     };
 
     void tick();
-    handle = window.setInterval(() => void tick(), pollMs);
     return () => {
       alive.current = false;
-      if (handle !== undefined) window.clearInterval(handle);
+      if (handle !== undefined) window.clearTimeout(handle);
     };
   }, [pollMs]);
 

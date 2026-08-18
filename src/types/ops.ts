@@ -45,32 +45,15 @@ export interface JournalFlags {
 /** One of "running" | "pending" | "stale" | "abandoned". */
 export type JournalStatus = "running" | "pending" | "stale" | "abandoned";
 
-/** Kind of long-running op currently tracked by the backend. */
-export type OpKind =
-  | "repair_resume"
-  | "repair_rollback"
-  | "move_project"
-  | "clean_projects"
-  | "session_prune"
-  | "session_slim"
-  | "session_share"
-  | "session_move"
-  | "account_login"
-  | "account_register"
-  | "verify_all"
-  /** Manual "Run Now" of an agent. Absent from this union until
-   *  2026-08-18, which is why `RunningOpsChip`'s `verb()` switch had no
-   *  arm for it and TypeScript raised nothing: a switch is only
-   *  exhaustive over the union it is given. A live agent run was counted
-   *  by the chip and rendered with an undefined verb. */
-  | "agent_run";
-
-/** Every `OpKind`, as a runtime value. Exists so a test can assert that
- *  each one renders a label — a `switch` is exhaustive only over the
- *  union it is handed, so an `OpKind` missing from the union above
- *  produced no compile error and an undefined verb at runtime. Keep in
- *  lockstep with `OpKind`; the test below fails if this list and the
- *  union diverge. */
+/** Every `OpKind`, as a runtime value — and the single source of truth.
+ *
+ *  `OpKind` is DERIVED from this list rather than declared beside it. An
+ *  earlier revision declared both and reconciled them with
+ *  `satisfies readonly OpKind[]`, which proves every entry IS an
+ *  `OpKind` but says nothing about completeness — so a union member
+ *  missing from the array compiled cleanly and silently dropped out of
+ *  the label-coverage test. Deriving makes the two unrepresentable
+ *  apart. */
 export const OP_KINDS = [
   "repair_resume",
   "repair_rollback",
@@ -83,8 +66,14 @@ export const OP_KINDS = [
   "account_login",
   "account_register",
   "verify_all",
+  /** Manual "Run Now" of an agent. Absent from this list until
+   *  2026-08-18, which is why `RunningOpsChip`'s `verb()` switch had no
+   *  arm for it and TypeScript raised nothing. */
   "agent_run",
-] as const satisfies readonly OpKind[];
+] as const;
+
+/** Kind of long-running op currently tracked by the backend. */
+export type OpKind = (typeof OP_KINDS)[number];
 
 /** Phase ids emitted by `session_move_with_progress`. Stable contract
  *  with `crates/claudepot-core/src/session_move.rs`. */

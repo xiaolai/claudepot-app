@@ -39,7 +39,7 @@ function run(over: Partial<InFlightRun> = {}): InFlightRun {
 }
 
 function status(over: Partial<AgentRunStatus> = {}): AgentRunStatus {
-  return { agent_id: "a1", in_flight: null, last: null, ...over };
+  return { agent_id: "a1", in_flight: null, last: null, unreadable: false, ...over };
 }
 
 const noop = () => {};
@@ -180,5 +180,60 @@ describe("AgentCard — run visibility", () => {
     expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(/already running/i)).toBeNull();
+  });
+});
+
+// Round-1 audit regressions.
+describe("AgentCard — unknown never renders as fact", () => {
+  // #7: the hook keeps the last known list through a failed poll so a
+  // live run does not blink out — but presenting that stale row as a
+  // confident "Running", with a ticking clock, is the exact failure this
+  // feature exists to prevent.
+  it("a failed poll overrides a stale cached run", () => {
+    render(
+      <AgentCard
+        agent={agent()}
+        runStatus={status({ in_flight: run() })}
+        runsUnknown
+        {...props}
+      />,
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText(/can't determine/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Running/)).toBeNull();
+  });
+
+  // #5: before the first poll returns there is no status for any agent.
+  // Rendering that as "Never run" states an unverified claim as fact
+  // over a live cron run.
+  it("does not claim 'never run' before the first poll returns", () => {
+    render(<AgentCard agent={agent()} runsUnknown {...props} />);
+    expect(screen.queryByText(/never run/i)).toBeNull();
+    expect(screen.getByText(/can't determine/i)).toBeInTheDocument();
+  });
+});
+
+// Round-1 verify regressions: two fixes introduced new defects.
+describe("AgentCard — unknown refuses rather than permits", () => {
+  // The first fix for #7 made `isRunning` false while unknown so a stale
+  // row would stop rendering as fact — but `controlsLocked` keyed off
+  // `isRunning`, so Run Now became clickable exactly when we could not
+  // tell whether a run was live. Not knowing is a reason to refuse.
+  it("disables Run Now when the poll state is unknown", () => {
+    render(<AgentCard agent={agent()} runsUnknown {...props} />);
+    expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();
+    expect(screen.getByText(/refusing to start another/i)).toBeInTheDocument();
+  });
+
+  it("still disables Run Now when unknown overrides a stale run", () => {
+    render(
+      <AgentCard
+        agent={agent()}
+        runStatus={status({ in_flight: run() })}
+        runsUnknown
+        {...props}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();
   });
 });

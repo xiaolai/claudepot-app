@@ -698,3 +698,65 @@ mod tests {
         assert_eq!(AgentRunDto::from(r).trigger_kind, "scheduled");
     }
 }
+
+// ── Run liveness ───────────────────────────────────────────────────
+//
+// Outbound DTOs for `agents_running_list`. This file's boundary is that
+// core types do not cross IPC directly — returning
+// `claudepot_core::agent::liveness::AgentRunStatus` compiled and worked,
+// but it makes the renderer's wire shape hostage to a core refactor.
+
+/// Mirrors `claudepot_core::agent::liveness::InFlightRun`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InFlightRunDto {
+    pub agent_id: String,
+    pub run_id: String,
+    pub started_ms: i64,
+    /// `"running"` | `"interrupted"`.
+    pub state: String,
+}
+
+/// Mirrors `claudepot_core::agent::liveness::LastRun`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LastRunDto {
+    pub run_id: String,
+    pub ended_ms: i64,
+    pub exit_code: i32,
+    pub duration_ms: i64,
+}
+
+/// Mirrors `claudepot_core::agent::liveness::AgentRunStatus`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AgentRunStatusDto {
+    pub agent_id: String,
+    pub in_flight: Option<InFlightRunDto>,
+    pub last: Option<LastRunDto>,
+    /// This agent's run data could not be read. When true the two fields
+    /// above are not trustworthy and the UI renders "can't determine".
+    pub unreadable: bool,
+}
+
+impl From<claudepot_core::agent::liveness::AgentRunStatus> for AgentRunStatusDto {
+    fn from(s: claudepot_core::agent::liveness::AgentRunStatus) -> Self {
+        use claudepot_core::agent::liveness::RunState;
+        Self {
+            agent_id: s.agent_id,
+            in_flight: s.in_flight.map(|r| InFlightRunDto {
+                agent_id: r.agent_id,
+                run_id: r.run_id,
+                started_ms: r.started_ms,
+                state: match r.state {
+                    RunState::Running => "running".to_string(),
+                    RunState::Interrupted => "interrupted".to_string(),
+                },
+            }),
+            last: s.last.map(|l| LastRunDto {
+                run_id: l.run_id,
+                ended_ms: l.ended_ms,
+                exit_code: l.exit_code,
+                duration_ms: l.duration_ms,
+            }),
+            unreadable: s.unreadable,
+        }
+    }
+}

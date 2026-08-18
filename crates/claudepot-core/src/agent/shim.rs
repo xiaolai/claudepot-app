@@ -201,6 +201,16 @@ pub fn render_windows(agent: &Agent, inputs: &ShimInputs<'_>) -> String {
     s.push_str("if not exist \"%RUN_DIR%\" mkdir \"%RUN_DIR%\"\r\n");
     // Fail-fast if the runs dir couldn't be created.
     s.push_str("if not exist \"%RUN_DIR%\" (echo claudepot: failed to create %RUN_DIR%>&2 & exit /b 70)\r\n");
+    // Liveness marker, mirroring the Unix shim. Without it every Windows
+    // run reports `Interrupted` the moment it starts and the Agents
+    // pane's running indicator is silently Unix-only. cmd has no `$$`;
+    // the wrapper's own pid comes from the parent PowerShell probe, and
+    // a failure here must never abort the run — it only degrades the UI.
+    // Read by `claudepot_core::agent::liveness`.
+    s.push_str(
+        "for /f \"usebackq delims=\" %%p in (`powershell -NoProfile -Command \
+\"(Get-CimInstance Win32_Process -Filter \\\"ProcessId=$PID\\\").ParentProcessId\"`) do echo %%p> \"%RUN_DIR%\\run.pid\"\r\n",
+    );
 
     s.push_str(&format!(
         "set {}\r\n",

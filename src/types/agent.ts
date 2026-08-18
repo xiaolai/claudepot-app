@@ -294,4 +294,10 @@ export interface AgentRunStatus {
   agent_id: string;
   in_flight: InFlightRun | null;
   last: LastRun | null;
+  /** This agent's run data could not be read. When true the two fields
+   *  above are NOT trustworthy — render "can't determine", never idle. */
+  unreadable: boolean;
+  /** Set only on the synthetic sentinel returned when the agents root
+   *  itself is unreadable. */
+  root_error?: string | null;
 }

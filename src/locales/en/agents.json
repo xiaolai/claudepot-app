@@ -63,7 +63,8 @@
       "runNowDisabled": "Already running — started {{started}}",
       "never": "Never run",
       "lastOk": "Last run {{ago}} ago · took {{took}}",
-      "lastFailed": "Last run failed {{ago}} ago — exit {{code}}"
+      "lastFailed": "Last run failed {{ago}} ago — exit {{code}}",
+      "runNowUnknown": "Can't tell whether a run is in progress — refusing to start another"
     }
   },
   "form": {

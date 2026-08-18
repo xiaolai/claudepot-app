@@ -746,14 +746,16 @@ pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), ErrorDt
 /// reads would make every list call touch disk for data only this pane
 /// wants.
 #[tauri::command]
-pub async fn agents_running_list(
-) -> Result<Vec<claudepot_core::agent::liveness::AgentRunStatus>, ErrorDto> {
+pub async fn agents_running_list() -> Result<Vec<crate::dto_agents::AgentRunStatusDto>, ErrorDto> {
     // One `SysinfoCheck` per call. The pane polls on a slow timer, so
     // rebuilding the cache each tick is cheaper than holding a process
     // list warm between ticks — and `scan_all` primes it once with every
     // pid, so a call is one refresh regardless of how many runs exist.
     let check = claudepot_core::session_live::registry::SysinfoCheck::new();
-    Ok(claudepot_core::agent::liveness::scan_status_live(&check))
+    Ok(claudepot_core::agent::liveness::scan_status_live(&check)
+        .into_iter()
+        .map(Into::into)
+        .collect())
 }
 
 #[tauri::command]
@@ -811,6 +813,33 @@ pub async fn agents_run_now_start(
     // going through the X17 prelude).
     if matches!(agent.lifecycle, claudepot_core::agent::Lifecycle::Draft) {
         return Err(draft_not_runnable(&agent.name));
+    }
+
+    // Refuse a second concurrent run of the SAME agent.
+    //
+    // The renderer releases its optimistic lock as soon as this command
+    // returns and lets observed liveness take over — which leaves a
+    // window of up to one poll interval where the UI shows nothing
+    // running and Run Now is clickable. A UI-side lock cannot close that
+    // window on its own (a reload, a second window, or the CLI would all
+    // bypass it), so the guard belongs here, where the run is actually
+    // spawned.
+    //
+    // Read-only and lock-free, matching `agents_running_list`.
+    {
+        let check = claudepot_core::session_live::registry::SysinfoCheck::new();
+        let already = claudepot_core::agent::liveness::scan_status_live(&check)
+            .into_iter()
+            .find(|s| s.agent_id == aid.to_string())
+            .and_then(|s| s.in_flight)
+            .is_some_and(|r| r.state == claudepot_core::agent::liveness::RunState::Running);
+        if already {
+            return Err(ErrorDto::from(
+                claudepot_core::agent::AgentError::InvalidEnv(format!(
+                    "agent {aid} is already running; wait for the current run to finish"
+                )),
+            ));
+        }
     }
 
     let op_id = format!("agent-run-{}", Uuid::new_v4());

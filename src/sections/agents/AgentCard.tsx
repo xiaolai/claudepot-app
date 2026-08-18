@@ -61,20 +61,34 @@ export function AgentCard({
 
   const run = runStatus?.in_flight ?? undefined;
   const last = runStatus?.last ?? undefined;
-  const isRunning = run?.state === "running";
+  // Unknown poll ⇒ we cannot claim the run is live, so neither the
+  // elapsed timer nor the Run Now lock may key off stale data.
+  const isRunning = !runsUnknown && run?.state === "running";
   // Both reasons disable the controls, but they are different facts and
   // only one of them gets an inline explanation next to Run Now.
-  const controlsLocked = mutating || isRunning;
+  // `runsUnknown` LOCKS Run Now rather than freeing it. An earlier fix
+  // made `isRunning` false while unknown so a stale row would stop
+  // rendering as fact — but `controlsLocked` keyed off `isRunning`, so
+  // the button became clickable exactly when we could not tell whether a
+  // run was live. Not knowing is a reason to refuse, not to permit.
+  const controlsLocked = mutating || isRunning || runsUnknown;
 
   // Live elapsed. The 1s interval exists ONLY while a run is live —
   // render-if-nonzero applied to timers, not just to text. Without the
   // guard every card would hold a ticking interval forever.
   const [now, setNow] = useState(() => Date.now());
+  // 1s while a run is live (the elapsed row moves); 60s while an idle
+  // card shows a "last run N ago" line, which would otherwise freeze at
+  // whatever `now` happened to be when the card mounted. No timer at all
+  // when the card shows neither — render-if-nonzero, applied to timers.
+  const needsFastTick = isRunning;
+  const needsSlowTick = !isRunning && !!last;
   useEffect(() => {
-    if (!isRunning) return;
-    const h = window.setInterval(() => setNow(Date.now()), 1000);
+    if (!needsFastTick && !needsSlowTick) return;
+    const period = needsFastTick ? 1000 : 60_000;
+    const h = window.setInterval(() => setNow(Date.now()), period);
     return () => window.clearInterval(h);
-  }, [isRunning]);
+  }, [needsFastTick, needsSlowTick]);
 
   const startedLabel = run
     ? new Date(run.started_ms).toLocaleTimeString(undefined, {
@@ -217,7 +231,7 @@ export function AgentCard({
           design.md's signal budget. The status-bar chip carries the
           COUNT; identity and duration live here, on the thing you are
           looking at. Render-if-nonzero: absent entirely when idle. */}
-      {run && (
+      {run && !runsUnknown && (
         <div
           role="status"
           style={{
@@ -236,7 +250,12 @@ export function AgentCard({
               t("card.run.interrupted")}
         </div>
       )}
-      {runsUnknown && !run && (
+      {/* Unknown OUTRANKS a cached run. The hook deliberately keeps the
+          last known list through a failed poll so a live run does not
+          blink out — but presenting that stale row as a confident
+          "Running", with a ticking clock, is the failure this module
+          exists to prevent. */}
+      {runsUnknown && (
         <div style={{ fontSize: "var(--fs-xs)", color: "var(--warn)" }}>
           {t("card.run.unknown")}
         </div>
@@ -337,9 +356,11 @@ export function AgentCard({
           the button — never in a tooltip. Only the RUNNING lock is
           explained; `mutating` is a sub-second state nobody needs a
           sentence about. */}
-      {!isDraft && isRunning && (
+      {!isDraft && (isRunning || runsUnknown) && (
         <div style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
-          {t("card.run.runNowDisabled", { started: startedLabel })}
+          {isRunning
+            ? t("card.run.runNowDisabled", { started: startedLabel })
+            : t("card.run.runNowUnknown")}
         </div>
       )}
 
