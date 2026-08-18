@@ -6,7 +6,44 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.17 — beta (unreleased)
+## 0.4.18 — beta (unreleased)
+
+### Added
+
+- **The Agents pane shows what is running, and for how long.** Run state
+  is now observed from the filesystem and the process table rather than
+  remembered by the window, so it survives a reload and — for the first
+  time — covers **cron-fired runs**, which are the whole reason scheduled
+  agents exist and previously had no on-screen representation at any
+  point in their life.
+- A crashed run reads as **"Interrupted — no result recorded"** rather
+  than as either "running" or "fine". A run that left no outcome is an
+  unknown, and unknowns are not rendered as confident answers.
+- The status-bar chip can finally name an agent run. `OpKind::AgentRun`
+  was counted but had no label, because it was missing from the
+  TypeScript union entirely — so the `switch` was exhaustive over an
+  incomplete list and the compiler said nothing.
+
+### Fixed
+
+- **"Run Now" no longer re-enables itself mid-run.** It was cleared by a
+  five-minute safety timer against runs that take about fifteen, so the
+  card returned to idle two thirds of the way through and invited a
+  second concurrent run of the same agent. Starting a run while one is
+  live is now refused by the backend, not just greyed out in the UI.
+- Editing or deleting an agent is blocked while it is running —
+  removing an agent deletes the run directory its process is still
+  writing into.
+
+### Note for existing agents
+
+The generated shim now writes a liveness marker. Agents installed before
+this release have none, so their runs report "Interrupted" until the
+agent is reinstalled. That is the safe direction — a stale run reads as
+"no result recorded", never as live — but it means an armed agent should
+be re-armed to get the running indicator.
+
+## 0.4.17 — beta (released 2026-08-17)
 
 Follow-up to 0.4.16: the openings it shipped with, closed.
 
