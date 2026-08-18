@@ -1,13 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
-import type { AgentSummaryDto } from "../../types";
+import type { AgentRunStatus, AgentSummaryDto } from "../../types";
+import { formatElapsed } from "../../lib/elapsed";
 import { RunHistoryPanel } from "./RunHistoryPanel";
 
 interface Props {
   agent: AgentSummaryDto;
-  busy: boolean;
+  /** A *mutation* is in flight on this card (edit / delete / toggle).
+   *  Deliberately NOT "this agent is running" — the two were one boolean
+   *  until 2026-08-18 and could not be told apart, so a 15-minute run
+   *  and a 200ms toggle disabled the same controls for the same reason.
+   *  Liveness is `run`, below, and it comes from the backend. */
+  mutating: boolean;
+  /** This agent's run state from the liveness poll: the in-flight run if
+   *  any, plus the last completed one. `undefined` means the poll has
+   *  not reported this agent yet — distinct from a status whose
+   *  `in_flight` is null, which means "polled, nothing running". */
+  runStatus?: AgentRunStatus;
+  /** The liveness poll itself failed. Renders "can't determine" rather
+   *  than idle — a failed read is not a clean result. */
+  runsUnknown?: boolean;
   /** Increments when a run completes — RunHistoryPanel re-fetches. */
   runsRefreshKey: number;
   onRun: (id: string) => void;
@@ -18,9 +32,18 @@ interface Props {
   onReview: (a: AgentSummaryDto) => void;
 }
 
+/** Coarse "how long ago", reusing the elapsed formatter so a run that
+ *  finished 14 minutes ago and one that ran for 14 minutes read in the
+ *  same units. */
+function relativeAgo(endedMs: number, nowMs: number): string {
+  return formatElapsed(nowMs - endedMs);
+}
+
 export function AgentCard({
   agent,
-  busy,
+  mutating,
+  runStatus,
+  runsUnknown = false,
   runsRefreshKey,
   onRun,
   onEdit,
@@ -35,6 +58,57 @@ export function AgentCard({
   // install" because none of those actions are meaningful until a
   // human arms the agent.
   const isDraft = agent.lifecycle === "draft";
+
+  const run = runStatus?.in_flight ?? undefined;
+  const last = runStatus?.last ?? undefined;
+  // Unknown poll ⇒ we cannot claim the run is live, so neither the
+  // elapsed timer nor the Run Now lock may key off stale data.
+  const isRunning = !runsUnknown && run?.state === "running";
+  // Both reasons disable the controls, but they are different facts and
+  // only one of them gets an inline explanation next to Run Now.
+  // `runsUnknown` LOCKS Run Now rather than freeing it. An earlier fix
+  // made `isRunning` false while unknown so a stale row would stop
+  // rendering as fact — but `controlsLocked` keyed off `isRunning`, so
+  // the button became clickable exactly when we could not tell whether a
+  // run was live. Not knowing is a reason to refuse, not to permit.
+  // Two locks, not one. Conflating them made an agent with an
+  // unreadable runs directory impossible to EDIT or DELETE — the very
+  // actions a user needs to fix it. Unknown liveness is a reason to
+  // refuse a new run; it is not a reason to trap the agent.
+  // Two locks with different conditions, and both rounds of review are
+  // encoded here:
+  //   round 2 — unknown liveness must NOT trap the agent, or a bad runs
+  //             directory makes it impossible to edit or delete.
+  //   round 3 — a LIVE run must lock the destructive/definition-changing
+  //             actions: `agents_remove` deletes the run directory the
+  //             shim is still writing into.
+  // So unknown blocks only a new run; running blocks everything.
+  const runLocked = mutating || isRunning || runsUnknown;
+  const mutationLocked = mutating || isRunning;
+
+  // Live elapsed. The 1s interval exists ONLY while a run is live —
+  // render-if-nonzero applied to timers, not just to text. Without the
+  // guard every card would hold a ticking interval forever.
+  const [now, setNow] = useState(() => Date.now());
+  // 1s while a run is live (the elapsed row moves); 60s while an idle
+  // card shows a "last run N ago" line, which would otherwise freeze at
+  // whatever `now` happened to be when the card mounted. No timer at all
+  // when the card shows neither — render-if-nonzero, applied to timers.
+  const needsFastTick = isRunning;
+  const needsSlowTick = !isRunning && !!last;
+  useEffect(() => {
+    if (!needsFastTick && !needsSlowTick) return;
+    const period = needsFastTick ? 1000 : 60_000;
+    const h = window.setInterval(() => setNow(Date.now()), period);
+    return () => window.clearInterval(h);
+  }, [needsFastTick, needsSlowTick]);
+
+  const startedLabel = run
+    ? new Date(run.started_ms).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
 
   return (
     <article
@@ -166,6 +240,62 @@ export function AgentCard({
         )}
       </div>
 
+      {/* The ambient tier for this agent — exactly one row, per
+          design.md's signal budget. The status-bar chip carries the
+          COUNT; identity and duration live here, on the thing you are
+          looking at. Render-if-nonzero: absent entirely when idle. */}
+      {run && !runsUnknown && (
+        <div
+          role="status"
+          style={{
+            fontSize: "var(--fs-xs)",
+            color: isRunning ? "var(--fg-muted)" : "var(--warn)",
+          }}
+        >
+          {isRunning
+            ? t("card.run.running", {
+                elapsed: formatElapsed(now - run.started_ms),
+                started: startedLabel,
+              })
+            : /* Not "failed" and not "running" — the run left no result
+                 and nothing is working on it. Saying which of those it
+                 was would be a guess. */
+              t("card.run.interrupted")}
+        </div>
+      )}
+      {/* Unknown OUTRANKS a cached run. The hook deliberately keeps the
+          last known list through a failed poll so a live run does not
+          blink out — but presenting that stale row as a confident
+          "Running", with a ticking clock, is the failure this module
+          exists to prevent. */}
+      {runsUnknown && (
+        <div style={{ fontSize: "var(--fs-xs)", color: "var(--warn)" }}>
+          {t("card.run.unknown")}
+        </div>
+      )}
+      {/* The three idle states from the plan's §2.2 table. Only rendered
+          when nothing is in flight — a live run supersedes history, and
+          showing both would put two ambient rows on one card. */}
+      {!isDraft && !run && !runsUnknown && (
+        <div style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
+          {!last
+            ? t("card.run.never")
+            : last.exit_code === 0
+              ? t("card.run.lastOk", {
+                  ago: relativeAgo(last.ended_ms, now),
+                  took: formatElapsed(last.duration_ms),
+                })
+              : /* The exit code is the only honest thing we have here;
+                   naming a cause ("budget exhausted") would require
+                   parsing the run's stdout, and guessing one is how a
+                   status surface starts lying. */
+                t("card.run.lastFailed", {
+                  ago: relativeAgo(last.ended_ms, now),
+                  code: last.exit_code,
+                })}
+        </div>
+      )}
+
       <footer
         style={{
           display: "flex",
@@ -181,14 +311,14 @@ export function AgentCard({
             <Button
               variant="solid"
               onClick={() => onReview(agent)}
-              disabled={busy}
+              disabled={mutationLocked}
             >
               {t("card.actions.reviewInstall")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onRemove(agent)}
-              disabled={busy}
+              disabled={mutationLocked}
             >
               {t("card.actions.delete")}
             </Button>
@@ -198,21 +328,21 @@ export function AgentCard({
             <Button
               variant="solid"
               onClick={() => onRun(agent.id)}
-              disabled={busy}
+              disabled={runLocked}
             >
               {t("card.actions.runNow")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onEdit(agent)}
-              disabled={busy}
+              disabled={mutationLocked}
             >
               {t("card.actions.edit")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onToggle(agent.id, !agent.enabled)}
-              disabled={busy}
+              disabled={mutationLocked}
             >
               {agent.enabled
                 ? t("card.actions.disable")
@@ -221,7 +351,7 @@ export function AgentCard({
             <Button
               variant="ghost"
               onClick={() => onRemove(agent)}
-              disabled={busy}
+              disabled={mutationLocked}
             >
               {t("card.actions.delete")}
             </Button>
@@ -234,6 +364,18 @@ export function AgentCard({
           </>
         )}
       </footer>
+
+      {/* design.md: a disabled control states its reason inline, next to
+          the button — never in a tooltip. Only the RUNNING lock is
+          explained; `mutating` is a sub-second state nobody needs a
+          sentence about. */}
+      {!isDraft && (isRunning || runsUnknown) && (
+        <div style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
+          {isRunning
+            ? t("card.run.runNowDisabled", { started: startedLabel })
+            : t("card.run.runNowUnknown")}
+        </div>
+      )}
 
       {!isDraft && open && (
         <RunHistoryPanel

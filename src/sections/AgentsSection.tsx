@@ -8,6 +8,7 @@ import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
 import { renderError } from "../lib/i18n-error";
+import { useAgentRuns, statusFor } from "../hooks/useAgentRuns";
 import { useAppState } from "../providers/AppStateProvider";
 import type {
   AgentSummaryDto,
@@ -48,6 +49,26 @@ export function AgentsSection() {
   const [capabilities, setCapabilities] =
     useState<SchedulerCapabilitiesDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Liveness is OBSERVED, not remembered. `busyIds` below is now only
+  // "a mutation is in flight on this card" — the two were one boolean
+  // until 2026-08-18, which is why a 15-minute run and a 200ms toggle
+  // were indistinguishable. See dev-docs/agents-run-visibility-plan.md.
+  // `loaded` is load-bearing: before the first poll returns there is no
+  // status for any agent, and rendering that as "Never run" would state
+  // an unverified claim as fact over a live cron run. Not-yet-loaded and
+  // poll-failed are the same thing to the UI — both mean "we do not
+  // know" — so they collapse into one flag here.
+  const {
+    runs,
+    error: pollFailed,
+    loaded: runsLoaded,
+  } = useAgentRuns();
+  // The agents ROOT being unreadable arrives as a synthetic row with an
+  // empty `agent_id`, which matches no card by construction. Detecting
+  // it here is what makes that signal reach the UI at all — without this
+  // the sentinel is produced, serialized, and silently dropped.
+  const rootUnreadable = runs.some((r) => r.root_error != null);
+  const runsUnknown = pollFailed || !runsLoaded || rootUnreadable;
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
@@ -89,9 +110,9 @@ export function AgentsSection() {
     });
   }
 
-  // In-flight "Run now" cleanups (op-progress unlisten + safety
-  // timeout), keyed by identity. handleRun's listener/timeout used to
-  // be handler-scoped only — unmounting mid-run leaked them and let
+  // In-flight "Run now" cleanups (op-progress unlisten), keyed by
+  // identity. handleRun's listener used to be handler-scoped only —
+  // unmounting mid-run leaked it and let
   // late events setState on an unmounted component (audit 2026-07
   // F5). Every cleanup registers here and self-removes; the unmount
   // effect drains whatever is still pending.
@@ -113,7 +134,6 @@ export function AgentsSection() {
   async function handleRun(id: string) {
     setBusy(id, true);
     let unlisten: (() => void) | null = null;
-    let timeoutHandle: number | undefined;
     let cancelled = false;
     const cleanup = () => {
       cancelled = true;
@@ -126,15 +146,21 @@ export function AgentsSection() {
         }
         unlisten = null;
       }
-      if (timeoutHandle !== undefined) {
-        window.clearTimeout(timeoutHandle);
-        timeoutHandle = undefined;
-      }
     };
     runCleanupsRef.current.add(cleanup);
     try {
       const opId = await api.agentsRunNowStart(id);
       if (cancelled) return; // unmounted while starting
+      // The START has succeeded, so the mutation is over. Liveness now
+      // owns the long lock: `run.state === "running"` disables Run Now
+      // for as long as the run actually lasts, observed rather than
+      // remembered.
+      //
+      // Holding `mutating` until the op-progress terminal event would
+      // reintroduce the stuck button the deleted 5-minute timeout used
+      // to rescue — a dropped event would disable the card's controls
+      // permanently, with nothing left to clear them.
+      setBusy(id, false);
       // Listen for the terminal event on this op channel. The
       // backend (src-tauri/src/ops.rs::ProgressEvent) emits the
       // terminal event as `{phase: "op", status: "complete" | "error", ...}`.
@@ -152,7 +178,6 @@ export function AgentsSection() {
           } else {
             setRunsRefreshKey((k) => k + 1);
           }
-          setBusy(id, false);
           cleanup();
         }
       });
@@ -167,12 +192,12 @@ export function AgentsSection() {
         return;
       }
       unlisten = u;
-      // Safety timeout in case the event channel drops — clear busy
-      // after 5 minutes so the UI doesn't get stuck forever.
-      timeoutHandle = window.setTimeout(() => {
-        setBusy(id, false);
-        cleanup();
-      }, 5 * 60 * 1000);
+      // NO safety timeout. The old one cleared `busy` after 5 minutes
+      // "so the UI doesn't get stuck forever" — but a real run takes
+      // ~15, so it re-enabled Run Now two thirds of the way through a
+      // live run and invited a second concurrent one. Running state now
+      // comes from `useAgentRuns`, which is observed rather than
+      // remembered, so there is no stuck state left to rescue.
     } catch (e) {
       const wasCancelled = cancelled;
       cleanup();
@@ -316,7 +341,17 @@ export function AgentsSection() {
             <AgentCard
               key={a.id}
               agent={a}
-              busy={busyIds.has(a.id)}
+              mutating={busyIds.has(a.id)}
+              runStatus={statusFor(runs, a.id)}
+              runsUnknown={
+                runsUnknown ||
+                // A loaded poll now returns a row for every installed
+                // agent, so a MISSING row means "not reported", not
+                // "never ran" — render unknown rather than a confident
+                // "Never run".
+                statusFor(runs, a.id) === undefined ||
+                (statusFor(runs, a.id)?.unreadable ?? false)
+              }
               runsRefreshKey={runsRefreshKey}
               onRun={handleRun}
               onEdit={setEditTarget}

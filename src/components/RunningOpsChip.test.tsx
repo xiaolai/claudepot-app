@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RunningOpsChip, labelFor } from "./RunningOpsChip";
 import type { RunningOpInfo } from "../types";
+import { OP_KINDS } from "../types/ops";
 
 function op(partial: Partial<RunningOpInfo> = {}): RunningOpInfo {
   return {
@@ -164,5 +165,33 @@ describe("labelFor", () => {
         }),
       ),
     ).toBe("Renaming old-proj → new-proj");
+  });
+});
+
+// The enforcement half of the 2026-08-18 fix. `OpKind::AgentRun` existed
+// in Rust and was registered by `agents_run_now_start`, but the TS union
+// never listed it — so `verb()`'s switch was "exhaustive" over an
+// incomplete union, TypeScript raised nothing, and a live agent run
+// rendered with an undefined verb while still being counted.
+//
+// Adding the arm fixes today. This test is what stops the next OpKind
+// repeating it: it walks every kind as a runtime value, so a variant
+// added to Rust and the union but not to the switch fails here.
+describe("every OpKind renders a label", () => {
+  it("has a non-empty, non-key label for each kind", () => {
+    for (const kind of OP_KINDS) {
+      const label = labelFor(op({ kind }));
+      expect(label, `${kind} has no label`).toBeTruthy();
+      // design.md: no internal identifiers in primary UI. The backend
+      // passes the agent UUID in `old_path`, so a kind that falls
+      // through to the rename label would leak it here.
+      expect(label, `${kind} leaked a UUID`).not.toMatch(
+        /[0-9a-f]{8}-[0-9a-f]{4}-/i,
+      );
+      // A missing catalog entry renders the key itself; that is a
+      // failure, not a label.
+      expect(label, `${kind} rendered a raw i18n key`).not.toContain("ops.");
+      expect(label, `${kind} rendered undefined`).not.toContain("undefined");
+    }
   });
 });

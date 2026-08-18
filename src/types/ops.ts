@@ -45,19 +45,35 @@ export interface JournalFlags {
 /** One of "running" | "pending" | "stale" | "abandoned". */
 export type JournalStatus = "running" | "pending" | "stale" | "abandoned";
 
+/** Every `OpKind`, as a runtime value — and the single source of truth.
+ *
+ *  `OpKind` is DERIVED from this list rather than declared beside it. An
+ *  earlier revision declared both and reconciled them with
+ *  `satisfies readonly OpKind[]`, which proves every entry IS an
+ *  `OpKind` but says nothing about completeness — so a union member
+ *  missing from the array compiled cleanly and silently dropped out of
+ *  the label-coverage test. Deriving makes the two unrepresentable
+ *  apart. */
+export const OP_KINDS = [
+  "repair_resume",
+  "repair_rollback",
+  "move_project",
+  "clean_projects",
+  "session_prune",
+  "session_slim",
+  "session_share",
+  "session_move",
+  "account_login",
+  "account_register",
+  "verify_all",
+  /** Manual "Run Now" of an agent. Absent from this list until
+   *  2026-08-18, which is why `RunningOpsChip`'s `verb()` switch had no
+   *  arm for it and TypeScript raised nothing. */
+  "agent_run",
+] as const;
+
 /** Kind of long-running op currently tracked by the backend. */
-export type OpKind =
-  | "repair_resume"
-  | "repair_rollback"
-  | "move_project"
-  | "clean_projects"
-  | "session_prune"
-  | "session_slim"
-  | "session_share"
-  | "session_move"
-  | "account_login"
-  | "account_register"
-  | "verify_all";
+export type OpKind = (typeof OP_KINDS)[number];
 
 /** Phase ids emitted by `session_move_with_progress`. Stable contract
  *  with `crates/claudepot-core/src/session_move.rs`. */

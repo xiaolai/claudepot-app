@@ -138,7 +138,8 @@
     "sessionFallback": "session",
     "rename": "{{verb}} {{from}} → {{to}}",
     "renameFiles": "{{base}} ({{phase}}: {{done}}/{{total}} files)",
-    "renamePhase": "{{base}} ({{phase}})"
+    "renamePhase": "{{base}} ({{phase}})",
+    "runningAgent": "Running agent"
   },
   "notifLog": {
     "panel": "Notifications",

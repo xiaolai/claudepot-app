@@ -1276,6 +1276,7 @@ pub fn run() {
             commands::agents::agents_update,
             commands::agents::agents_remove,
             commands::agents::agents_set_enabled,
+            commands::agents::agents_running_list,
             commands::agents::agents_run_now_start,
             commands::agents::agents_runs_list,
             commands::agents::agents_run_get,

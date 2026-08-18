@@ -334,6 +334,41 @@ impl RunningOps {
         Self::default()
     }
 
+    /// Is a Run-Now already tracked for this agent?
+    ///
+    /// The agent id rides in `old_path` for `OpKind::AgentRun` (see
+    /// `agents_run_now_start`). Used as the concurrency guard there: a
+    /// liveness check cannot serve, because the shim writes `run.pid`
+    /// only after the command returns, so two rapid starts would both
+    /// see an idle agent.
+    ///
+    /// In-process only. A run started by launchd or the CLI is not in
+    /// this map — that case is covered, weakly, by the liveness check
+    /// alongside this one.
+    /// Atomically refuse-or-register a Run-Now for `agent_id`.
+    ///
+    /// Returns `false` when a run for that agent is already tracked, and
+    /// otherwise inserts `op` and returns `true` — **under one lock
+    /// acquisition**. A separate `any_agent_run()` check followed by
+    /// `insert()` was still check-then-insert: two rapid
+    /// `agents_run_now_start` calls could both pass the check before
+    /// either inserted, which is the race the guard exists to close.
+    ///
+    /// In-process only. A run started by launchd or the CLI is not in
+    /// this map; that case is covered, weakly, by the liveness check at
+    /// the call site.
+    pub fn insert_if_no_agent_run(&self, agent_id: &str, op: RunningOpInfo) -> bool {
+        let mut map = self.guard();
+        if map
+            .values()
+            .any(|o| o.kind == OpKind::AgentRun && o.old_path == agent_id)
+        {
+            return false;
+        }
+        map.insert(op.op_id.clone(), op);
+        true
+    }
+
     /// Low-audit guard: recover from a poisoned Mutex rather than
     /// panicking. If an earlier panic poisoned the map, the ops
     /// pipeline would propagate the panic forever — this turns a

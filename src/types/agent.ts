@@ -260,3 +260,44 @@ export interface NameValidationDto {
   error: string | null;
   already_taken: boolean;
 }
+
+/** A run directory that has recorded no result yet.
+ *
+ *  Mirrors `claudepot_core::agent::liveness::InFlightRun`. `interrupted`
+ *  is not a failure state to hide — it means the run died without
+ *  recording an outcome, and the pane must say that rather than pick
+ *  between "running" and "fine". */
+export type AgentRunState = "running" | "interrupted";
+
+export interface InFlightRun {
+  agent_id: string;
+  run_id: string;
+  /** Epoch ms. Elapsed is computed client-side from this, so a slow
+   *  poll never makes the displayed clock stutter. */
+  started_ms: number;
+  state: AgentRunState;
+}
+
+/** The most recent run that recorded a result. */
+export interface LastRun {
+  run_id: string;
+  ended_ms: number;
+  exit_code: number;
+  duration_ms: number;
+}
+
+/** One agent's full run state, from a single poll.
+ *
+ *  `last: null` means "never completed a run" — a different statement
+ *  from "the last run failed", and rendered differently. */
+export interface AgentRunStatus {
+  agent_id: string;
+  in_flight: InFlightRun | null;
+  last: LastRun | null;
+  /** This agent's run data could not be read. When true the two fields
+   *  above are NOT trustworthy — render "can't determine", never idle. */
+  unreadable: boolean;
+  /** Set only on the synthetic sentinel returned when the agents root
+   *  itself is unreadable. */
+  root_error?: string | null;
+}

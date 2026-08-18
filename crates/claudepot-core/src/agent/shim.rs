@@ -82,6 +82,15 @@ AUTO_DIR={auto_dir}
 RUN_ID="${{CLAUDEPOT_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$-$(awk 'BEGIN {{ srand(); print int(rand()*100000) }}')}}"
 RUN_DIR="$AUTO_DIR/runs/$RUN_ID"
 mkdir -p "$RUN_DIR" || exit 70
+# Liveness marker. A run directory without `result.json` means EITHER the
+# run is alive OR it died hard and never recorded anything; the two are
+# indistinguishable from the directory alone, and rendering the second as
+# "Running" would leave a card reading "Running 3 days" forever. The pid
+# is written before `claude -p` starts so the window where a run exists
+# but is unattributable is as small as the shell can make it.
+# Read by `claudepot_core::agent::liveness`. Best-effort: a failure here
+# must never abort the run, it only degrades the UI to "Interrupted".
+printf '%s' "$$" > "$RUN_DIR/run.pid" 2>/dev/null || true
 {home_export}
 export PATH={path_value}
 export LANG=en_US.UTF-8
@@ -192,6 +201,16 @@ pub fn render_windows(agent: &Agent, inputs: &ShimInputs<'_>) -> String {
     s.push_str("if not exist \"%RUN_DIR%\" mkdir \"%RUN_DIR%\"\r\n");
     // Fail-fast if the runs dir couldn't be created.
     s.push_str("if not exist \"%RUN_DIR%\" (echo claudepot: failed to create %RUN_DIR%>&2 & exit /b 70)\r\n");
+    // Liveness marker, mirroring the Unix shim. Without it every Windows
+    // run reports `Interrupted` the moment it starts and the Agents
+    // pane's running indicator is silently Unix-only. cmd has no `$$`;
+    // the wrapper's own pid comes from the parent PowerShell probe, and
+    // a failure here must never abort the run — it only degrades the UI.
+    // Read by `claudepot_core::agent::liveness`.
+    s.push_str(
+        "for /f \"usebackq delims=\" %%p in (`powershell -NoProfile -Command \
+\"(Get-CimInstance Win32_Process -Filter \\\"ProcessId=$PID\\\").ParentProcessId\"`) do echo %%p> \"%RUN_DIR%\\run.pid\"\r\n",
+    );
 
     s.push_str(&format!(
         "set {}\r\n",
