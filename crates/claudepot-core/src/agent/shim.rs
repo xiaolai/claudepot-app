@@ -110,6 +110,7 @@ printf '%s' '{prompt_b64}' | {decode_cmd} \
 EXIT=$?
 set -e
 END_TS=$(date -u +%s)
+RECORD_FAILED=""
 
 # `|| true` keeps a failed `_record-run` from aborting the shim
 # before it re-raises the real `claude -p` exit code below
@@ -124,7 +125,32 @@ END_TS=$(date -u +%s)
   --start "$START_TS" \
   --end "$END_TS" \
   --trigger scheduled \
-  --run-dir "$RUN_DIR" 2>"$RUN_DIR/record-run.log" || true
+  --run-dir "$RUN_DIR" 2>"$RUN_DIR/record-run.log" || RECORD_FAILED=$?
+
+# Leave evidence from the SHELL, not from the callee.
+#
+# The `||` above exists so a failed recorder cannot swallow the real
+# `claude -p` exit code. The comment further up claims `_record-run`
+# drops its own breadcrumb on failure — but that breadcrumb is written
+# BY the recorder, so it cannot exist for the cases where the recorder
+# never got far enough to write anything: the binary mid-replacement by
+# the updater, an OOM kill, a crash during start.
+#
+# Observed 2026-08-18: a run whose `claude -p` completed normally was
+# left with no result.json and no breadcrumb, because `_record-run` was
+# invoked at the moment the app bundle was being swapped. The run then
+# read as an orphan indefinitely, indistinguishable from one that never
+# finished.
+#
+# This branch runs in the shell that survived, so it lands whatever
+# happened to the callee.
+if [ -n "$RECORD_FAILED" ] && [ ! -f "$RUN_DIR/result.json" ]; then
+  echo "record-run failed with exit $RECORD_FAILED and wrote no result.json" > "$RUN_DIR/record-run-error.txt" 2>/dev/null || true
+  echo "run_id=$RUN_ID" >> "$RUN_DIR/record-run-error.txt" 2>/dev/null || true
+  echo "claude_exit=$EXIT" >> "$RUN_DIR/record-run-error.txt" 2>/dev/null || true
+  echo "started=$START_TS ended=$END_TS" >> "$RUN_DIR/record-run-error.txt" 2>/dev/null || true
+  echo "see record-run.log in this directory" >> "$RUN_DIR/record-run-error.txt" 2>/dev/null || true
+fi
 
 exit $EXIT
 "#,
@@ -844,5 +870,43 @@ mod tests {
                 .contains(r"\program files\claude\claude.exe"),
             "windows shim baked in an absolute Program Files path"
         );
+    }
+
+    /// A failed `_record-run` must leave evidence written by the SHELL.
+    /// The recorder's own breadcrumb cannot cover the cases that matter
+    /// — a binary replaced by the updater, an OOM kill, a crash before
+    /// it writes anything — because in those it never runs far enough to
+    /// write. Observed on a real machine 2026-08-18: a run whose
+    /// `claude -p` completed normally left no result.json and no
+    /// breadcrumb, and then read as an orphan indefinitely.
+    #[test]
+    fn a_failed_record_run_leaves_a_shell_written_breadcrumb() {
+        let a = auto();
+        let (segs, env) = inputs();
+        let s = render_unix(
+            &a,
+            &ShimInputs {
+                binary_abs_path: "/usr/local/bin/claude",
+                claudepot_cli_abs_path: "/Users/me/.claudepot/bin/claudepot",
+                agent_dir: "/tmp/agent",
+                path_segments: &segs,
+                extra_env: &env,
+            },
+        );
+        assert!(
+            s.contains("RECORD_FAILED"),
+            "the recorder's exit status must be captured, not discarded"
+        );
+        assert!(
+            s.contains("record-run-error.txt"),
+            "the shell must write the breadcrumb itself"
+        );
+        assert!(
+            s.contains("! -f \"$RUN_DIR/result.json\""),
+            "breadcrumb only when no result was actually produced"
+        );
+        // The real `claude -p` status must still be what the shim
+        // returns — a broken recorder may not mask it.
+        assert!(s.trim_end().ends_with("exit $EXIT"));
     }
 }

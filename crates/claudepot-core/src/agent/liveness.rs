@@ -310,7 +310,15 @@ pub fn last_run(agent_dir: &Path) -> Result<Option<LastRun>, ScanError> {
 
 /// Per-agent run status for every agent in the live data directory.
 pub fn scan_status_live(check: &dyn ProcessCheck) -> Vec<AgentRunStatus> {
-    let root = crate::paths::claudepot_data_dir().join("agents");
+    // Resolved through `paths` so it honours `CLAUDEPOT_DATA_DIR` and
+    // the test-isolation guard rather than rebuilding `$HOME/.claudepot`.
+    scan_status_in(&crate::paths::claudepot_data_dir().join("agents"), check)
+}
+
+/// [`scan_status_live`] against an explicit root, so the state machine
+/// can be tested against a fixture tree instead of the developer's live
+/// data directory.
+pub fn scan_status_in(root: &Path, check: &dyn ProcessCheck) -> Vec<AgentRunStatus> {
     let rd = match std::fs::read_dir(&root) {
         Ok(rd) => rd,
         // A missing agents root is a real zero: no agent has ever been
@@ -363,6 +371,24 @@ pub fn scan_status_live(check: &dyn ProcessCheck) -> Vec<AgentRunStatus> {
         let (last, last_bad) = match last_run(&dir) {
             Ok(l) => (l, false),
             Err(_) => (None, true),
+        };
+        // A candidate that predates the newest COMPLETED run is not in
+        // flight — it is an orphan, and the newer completed run is the
+        // current truth.
+        //
+        // Without this an interrupted directory shadows the agent
+        // forever: "no result.json" had no upper bound on age, so a run
+        // killed at 07:14 (an app update, a reboot, a kill -9) kept
+        // reporting `Interrupted` over a run that succeeded at 07:36,
+        // and the card could never show "Last run …" again until
+        // someone pruned the directory by hand.
+        //
+        // `Interrupted` remains correct — but only when nothing newer
+        // finished. That is the difference between "this agent is
+        // broken right now" and "this agent was interrupted once".
+        let in_flight = match (in_flight, &last) {
+            (Some(f), Some(l)) if f.started_ms < l.ended_ms => None,
+            (f, _) => f,
         };
         out.push(AgentRunStatus {
             agent_id: id,
@@ -618,6 +644,74 @@ mod tests {
             got[0].state,
             RunState::Interrupted,
             "a pid that postdates the run is not the run"
+        );
+    }
+
+    /// The defect this rule exists for, reproduced from a real machine:
+    /// a run orphaned at 07:14 (killed by an app update) kept reporting
+    /// `Interrupted` over a run that SUCCEEDED at 07:36, because "in
+    /// flight" was defined as "no result.json" with no bound on age. The
+    /// card could never show "Last run …" again.
+    #[test]
+    fn an_orphan_older_than_the_newest_completed_run_is_superseded() {
+        let t = TempDir::new().unwrap();
+        let agents = t.path();
+        let a = agents.join("agent-a");
+
+        // Orphan first: no result.json, no pid → Interrupted on its own.
+        mk_run(&a, "orphan", None, false);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        // Then a run that completed successfully, AFTER it.
+        let done = mk_run(&a, "done", Some("1"), true);
+        fs::write(
+            done.join("result.json"),
+            r#"{"exit_code":0,"duration_ms":1016600}"#,
+        )
+        .unwrap();
+
+        // On its own the orphan is still Interrupted — that classification
+        // is unchanged and correct.
+        let raw = scan_agent_dir("a", &a, &alive(&[])).unwrap();
+        assert_eq!(raw.len(), 1);
+        assert_eq!(raw[0].state, RunState::Interrupted);
+
+        // But the status the pane consumes must not report it, because a
+        // newer run finished.
+        let got = scan_status_in(agents, &alive(&[]));
+        let st = got.iter().find(|s| s.agent_id == "agent-a").unwrap();
+        assert!(
+            st.in_flight.is_none(),
+            "a superseded orphan must not shadow the completed run: {:?}",
+            st.in_flight
+        );
+        assert_eq!(st.last.as_ref().unwrap().exit_code, 0);
+        assert_eq!(st.last.as_ref().unwrap().duration_ms, 1016600);
+    }
+
+    /// The other half: an orphan with nothing newer IS the current state.
+    /// Suppressing it would hide a genuinely broken agent.
+    #[test]
+    fn an_orphan_with_no_newer_completed_run_is_still_reported() {
+        let t = TempDir::new().unwrap();
+        let agents = t.path();
+        let a = agents.join("agent-a");
+
+        let done = mk_run(&a, "done", Some("1"), true);
+        fs::write(
+            done.join("result.json"),
+            r#"{"exit_code":0,"duration_ms":10}"#,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        // Orphan is NEWER than the completed run.
+        mk_run(&a, "orphan", None, false);
+
+        let got = scan_status_in(agents, &alive(&[]));
+        let st = got.iter().find(|s| s.agent_id == "agent-a").unwrap();
+        assert_eq!(
+            st.in_flight.as_ref().map(|r| r.state),
+            Some(RunState::Interrupted),
+            "a newer orphan is the current state and must be reported"
         );
     }
 
