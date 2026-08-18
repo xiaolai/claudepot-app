@@ -257,11 +257,19 @@ pub fn last_run(agent_dir: &Path) -> Result<Option<LastRun>, ScanError> {
     // failure as the current fact. An unparseable newest result is an
     // unknown, and unknowns are never rendered as confident answers.
     let mut newest: Option<(i64, String, PathBuf)> = None;
-    for ent in rd.flatten() {
+    for ent in rd {
+        // Not `flatten()`. Dropping an entry we cannot stat would let an
+        // incomplete scan promote an older run to "last", or report
+        // "never run" — a confident answer built on a partial read.
+        let ent = ent.map_err(|e| ScanError::Unreadable(e.to_string()))?;
         let dir = ent.path();
         let result_path = dir.join("result.json");
-        let Ok(meta) = std::fs::metadata(&result_path) else {
-            continue; // no result.json — that run is in flight, not last
+        let meta = match std::fs::metadata(&result_path) {
+            Ok(m) => m,
+            // No result.json: that run is in flight, not the last one.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            // Anything else is a failed read, not an absent result.
+            Err(e) => return Err(ScanError::Unreadable(e.to_string())),
         };
         let ended_ms = meta
             .modified()
@@ -321,7 +329,22 @@ pub fn scan_status_live(check: &dyn ProcessCheck) -> Vec<AgentRunStatus> {
         }
     };
     let mut out = Vec::new();
-    for ent in rd.flatten() {
+    for ent in rd {
+        // An entry we cannot read is not an agent that is idle — omitting
+        // it silently is how a live run disappears from the pane.
+        let ent = match ent {
+            Ok(e) => e,
+            Err(e) => {
+                out.push(AgentRunStatus {
+                    agent_id: String::new(),
+                    in_flight: None,
+                    last: None,
+                    unreadable: true,
+                    root_error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
         if !ent.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }

@@ -343,7 +343,15 @@ export function AgentsSection() {
               agent={a}
               mutating={busyIds.has(a.id)}
               runStatus={statusFor(runs, a.id)}
-              runsUnknown={runsUnknown || (statusFor(runs, a.id)?.unreadable ?? false)}
+              runsUnknown={
+                runsUnknown ||
+                // A loaded poll now returns a row for every installed
+                // agent, so a MISSING row means "not reported", not
+                // "never ran" — render unknown rather than a confident
+                // "Never run".
+                statusFor(runs, a.id) === undefined ||
+                (statusFor(runs, a.id)?.unreadable ?? false)
+              }
               runsRefreshKey={runsRefreshKey}
               onRun={handleRun}
               onEdit={setEditTarget}

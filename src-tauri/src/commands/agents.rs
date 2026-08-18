@@ -752,10 +752,37 @@ pub async fn agents_running_list() -> Result<Vec<crate::dto_agents::AgentRunStat
     // list warm between ticks — and `scan_all` primes it once with every
     // pid, so a call is one refresh regardless of how many runs exist.
     let check = claudepot_core::session_live::registry::SysinfoCheck::new();
-    Ok(claudepot_core::agent::liveness::scan_status_live(&check)
-        .into_iter()
-        .map(Into::into)
-        .collect())
+    let mut rows: Vec<crate::dto_agents::AgentRunStatusDto> =
+        claudepot_core::agent::liveness::scan_status_live(&check)
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+    // Emit a row for EVERY installed agent, even one with no data
+    // directory yet. `scan_status_live` walks the filesystem, so an
+    // agent that has never run produces no row — and the renderer
+    // documents a missing row as "the poll has not reported this agent",
+    // i.e. unknown. Without this, "never ran" and "not reported" arrive
+    // identically and the card renders a confident "Never run" for both.
+    //
+    // Best-effort: a store that will not open leaves the filesystem rows
+    // alone rather than failing the whole poll, which would blank a pane
+    // that was otherwise fine.
+    if let Ok(store) = open_store() {
+        for a in store.list() {
+            let id = a.id.to_string();
+            if !rows.iter().any(|r| r.agent_id == id) {
+                rows.push(crate::dto_agents::AgentRunStatusDto {
+                    agent_id: id,
+                    in_flight: None,
+                    last: None,
+                    unreadable: false,
+                    root_error: None,
+                });
+            }
+        }
+    }
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -827,13 +854,10 @@ pub async fn agents_run_now_start(
     // CLI is not in this map, so the liveness check below still matters
     // as a second, weaker line. Closing the cross-process case needs a
     // real per-agent lock file and is tracked separately.
-    if ops.any_agent_run(&aid.to_string()) {
-        return Err(ErrorDto::from(
-            claudepot_core::agent::AgentError::InvalidEnv(format!(
-                "agent {aid} is already running; wait for the current run to finish"
-            )),
-        ));
-    }
+    // Liveness first: catches a run started by launchd or the CLI, which
+    // never appears in this process's `RunningOps`. Weaker than the
+    // atomic guard below (the shim writes `run.pid` only after this
+    // command returns), so it is the second line, not the only one.
     {
         let check = claudepot_core::session_live::registry::SysinfoCheck::new();
         let already = claudepot_core::agent::liveness::scan_status_live(&check)
@@ -851,12 +875,19 @@ pub async fn agents_run_now_start(
     }
 
     let op_id = format!("agent-run-{}", Uuid::new_v4());
-    ops.insert(new_running_op(
-        &op_id,
-        OpKind::AgentRun,
-        aid.to_string(),
-        String::new(),
-    ));
+    // Atomic check-and-insert. Refusing here is what actually closes the
+    // double-click race; the liveness probe above cannot, because
+    // `run.pid` does not exist yet at this point.
+    if !ops.insert_if_no_agent_run(
+        &aid.to_string(),
+        new_running_op(&op_id, OpKind::AgentRun, aid.to_string(), String::new()),
+    ) {
+        return Err(ErrorDto::from(
+            claudepot_core::agent::AgentError::InvalidEnv(format!(
+                "agent {aid} is already running; wait for the current run to finish"
+            )),
+        ));
+    }
 
     let ops_for_task = ops.inner().clone();
     let app_for_task = app.clone();

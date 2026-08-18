@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { invokeWithTimeout } from "../api/invokeWithTimeout";
 import type { AgentRunStatus } from "../types";
 
 /**
@@ -45,15 +45,20 @@ export function useAgentRuns(pollMs = 5000) {
         // stays false forever — and since unknown now LOCKS Run Now,
         // one hung IPC call would make every agent permanently
         // unrunnable.
-        const next = await Promise.race([
-          api.agentsRunningList(),
-          new Promise<never>((_, reject) =>
-            window.setTimeout(
-              () => reject(new Error("agents_running_list timed out")),
-              Math.max(2000, pollMs * 2),
-            ),
-          ),
-        ]);
+        // `invokeWithTimeout` rather than a local `Promise.race`: the
+        // hand-rolled version never cleared its losing timer, so every
+        // successful poll leaked a pending timeout — and that helper
+        // documents the cleanup as load-bearing.
+        //
+        // Bounded at all because an invoke that never settles means the
+        // `finally` never runs, no next poll is scheduled, `loaded`
+        // stays false forever, and unknown LOCKS Run Now — one hung IPC
+        // call would make every agent permanently unrunnable.
+        const next = await invokeWithTimeout<AgentRunStatus[]>(
+          "agents_running_list",
+          undefined,
+          Math.max(2000, pollMs * 2),
+        );
         if (cancelled || mine !== seq) return;
         setRuns(next);
         setError(false);

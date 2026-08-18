@@ -345,10 +345,28 @@ impl RunningOps {
     /// In-process only. A run started by launchd or the CLI is not in
     /// this map — that case is covered, weakly, by the liveness check
     /// alongside this one.
-    pub fn any_agent_run(&self, agent_id: &str) -> bool {
-        self.guard()
+    /// Atomically refuse-or-register a Run-Now for `agent_id`.
+    ///
+    /// Returns `false` when a run for that agent is already tracked, and
+    /// otherwise inserts `op` and returns `true` — **under one lock
+    /// acquisition**. A separate `any_agent_run()` check followed by
+    /// `insert()` was still check-then-insert: two rapid
+    /// `agents_run_now_start` calls could both pass the check before
+    /// either inserted, which is the race the guard exists to close.
+    ///
+    /// In-process only. A run started by launchd or the CLI is not in
+    /// this map; that case is covered, weakly, by the liveness check at
+    /// the call site.
+    pub fn insert_if_no_agent_run(&self, agent_id: &str, op: RunningOpInfo) -> bool {
+        let mut map = self.guard();
+        if map
             .values()
-            .any(|op| op.kind == OpKind::AgentRun && op.old_path == agent_id)
+            .any(|o| o.kind == OpKind::AgentRun && o.old_path == agent_id)
+        {
+            return false;
+        }
+        map.insert(op.op_id.clone(), op);
+        true
     }
 
     /// Low-audit guard: recover from a poisoned Mutex rather than

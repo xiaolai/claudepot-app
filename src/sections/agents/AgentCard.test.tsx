@@ -257,3 +257,29 @@ describe("AgentCard — unknown must not trap the agent", () => {
     expect(screen.getByRole("button", { name: /delete/i })).toBeDisabled();
   });
 });
+
+// Round-3 regressions.
+describe("AgentCard — a live run guards destructive actions", () => {
+  // R3-5. `agents_remove` deletes the run directory the shim is still
+  // writing into, so a live run must lock Edit/Delete/Toggle — while
+  // merely-unknown liveness must NOT (round 2). Different conditions,
+  // different locks.
+  it("locks Edit and Delete while a run is live", () => {
+    render(
+      <AgentCard
+        agent={agent()}
+        runStatus={status({ in_flight: run() })}
+        {...props}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /edit/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /delete/i })).toBeDisabled();
+  });
+
+  it("but leaves them available when liveness is merely unknown", () => {
+    render(<AgentCard agent={agent()} runsUnknown {...props} />);
+    expect(screen.getByRole("button", { name: /edit/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /delete/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();
+  });
+});

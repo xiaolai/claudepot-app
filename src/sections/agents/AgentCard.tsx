@@ -75,8 +75,16 @@ export function AgentCard({
   // unreadable runs directory impossible to EDIT or DELETE — the very
   // actions a user needs to fix it. Unknown liveness is a reason to
   // refuse a new run; it is not a reason to trap the agent.
+  // Two locks with different conditions, and both rounds of review are
+  // encoded here:
+  //   round 2 — unknown liveness must NOT trap the agent, or a bad runs
+  //             directory makes it impossible to edit or delete.
+  //   round 3 — a LIVE run must lock the destructive/definition-changing
+  //             actions: `agents_remove` deletes the run directory the
+  //             shim is still writing into.
+  // So unknown blocks only a new run; running blocks everything.
   const runLocked = mutating || isRunning || runsUnknown;
-  const mutationLocked = mutating;
+  const mutationLocked = mutating || isRunning;
 
   // Live elapsed. The 1s interval exists ONLY while a run is live —
   // render-if-nonzero applied to timers, not just to text. Without the
