@@ -8,6 +8,7 @@ import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
 import { renderError } from "../lib/i18n-error";
+import { useAgentRuns, statusFor } from "../hooks/useAgentRuns";
 import { useAppState } from "../providers/AppStateProvider";
 import type {
   AgentSummaryDto,
@@ -48,6 +49,11 @@ export function AgentsSection() {
   const [capabilities, setCapabilities] =
     useState<SchedulerCapabilitiesDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Liveness is OBSERVED, not remembered. `busyIds` below is now only
+  // "a mutation is in flight on this card" — the two were one boolean
+  // until 2026-08-18, which is why a 15-minute run and a 200ms toggle
+  // were indistinguishable. See dev-docs/agents-run-visibility-plan.md.
+  const { runs, error: runsUnknown } = useAgentRuns();
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
@@ -113,7 +119,6 @@ export function AgentsSection() {
   async function handleRun(id: string) {
     setBusy(id, true);
     let unlisten: (() => void) | null = null;
-    let timeoutHandle: number | undefined;
     let cancelled = false;
     const cleanup = () => {
       cancelled = true;
@@ -125,10 +130,6 @@ export function AgentsSection() {
           /* listener already torn down */
         }
         unlisten = null;
-      }
-      if (timeoutHandle !== undefined) {
-        window.clearTimeout(timeoutHandle);
-        timeoutHandle = undefined;
       }
     };
     runCleanupsRef.current.add(cleanup);
@@ -167,12 +168,12 @@ export function AgentsSection() {
         return;
       }
       unlisten = u;
-      // Safety timeout in case the event channel drops — clear busy
-      // after 5 minutes so the UI doesn't get stuck forever.
-      timeoutHandle = window.setTimeout(() => {
-        setBusy(id, false);
-        cleanup();
-      }, 5 * 60 * 1000);
+      // NO safety timeout. The old one cleared `busy` after 5 minutes
+      // "so the UI doesn't get stuck forever" — but a real run takes
+      // ~15, so it re-enabled Run Now two thirds of the way through a
+      // live run and invited a second concurrent one. Running state now
+      // comes from `useAgentRuns`, which is observed rather than
+      // remembered, so there is no stuck state left to rescue.
     } catch (e) {
       const wasCancelled = cancelled;
       cleanup();
@@ -316,7 +317,9 @@ export function AgentsSection() {
             <AgentCard
               key={a.id}
               agent={a}
-              busy={busyIds.has(a.id)}
+              mutating={busyIds.has(a.id)}
+              runStatus={statusFor(runs, a.id)}
+              runsUnknown={runsUnknown}
               runsRefreshKey={runsRefreshKey}
               onRun={handleRun}
               onEdit={setEditTarget}

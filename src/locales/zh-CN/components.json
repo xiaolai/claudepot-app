@@ -133,7 +133,8 @@
     "sessionFallback": "会话",
     "rename": "{{verb}} {{from}} → {{to}}",
     "renameFiles": "{{base}}（{{phase}}：{{done}}/{{total}} 个文件）",
-    "renamePhase": "{{base}}（{{phase}}）"
+    "renamePhase": "{{base}}（{{phase}}）",
+    "runningAgent": "正在运行代理"
   },
   "notifLog": {
     "panel": "通知",

@@ -726,6 +726,36 @@ pub async fn agents_set_enabled(id: String, enabled: bool) -> Result<(), ErrorDt
     Ok(())
 }
 
+/// `agents_running_list` — which agent runs are in flight right now.
+///
+/// Read-only and lock-free: it reads run directories and the process
+/// table, never `AgentStore`. That matters because this is polled every
+/// few seconds while the Agents pane is open, and taking the store lock
+/// on a timer would contend with the very Run-Now / install operations
+/// the pane exists to perform. Same reasoning as `lifecycle_of`'s
+/// non-blocking `try_open` in `agents_run_now_start` below.
+///
+/// Returns one entry per agent carrying BOTH the in-flight run (if any)
+/// and the last completed one. `Interrupted` is reported alongside
+/// `Running` — the caller must be able to tell "working" from "died
+/// without recording" — and `last: None` means "never completed a run",
+/// which the card renders differently from "the last run failed".
+///
+/// Last-run data rides this poll rather than `AgentSummaryDto` because
+/// that DTO is a pure `From<&Agent>` conversion; giving it filesystem
+/// reads would make every list call touch disk for data only this pane
+/// wants.
+#[tauri::command]
+pub async fn agents_running_list(
+) -> Result<Vec<claudepot_core::agent::liveness::AgentRunStatus>, ErrorDto> {
+    // One `SysinfoCheck` per call. The pane polls on a slow timer, so
+    // rebuilding the cache each tick is cheaper than holding a process
+    // list warm between ticks — and `scan_all` primes it once with every
+    // pid, so a call is one refresh regardless of how many runs exist.
+    let check = claudepot_core::session_live::registry::SysinfoCheck::new();
+    Ok(claudepot_core::agent::liveness::scan_status_live(&check))
+}
+
 #[tauri::command]
 pub async fn agents_run_now_start(
     id: String,

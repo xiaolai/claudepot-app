@@ -11,6 +11,7 @@ import type {
   AgentUpdateDto,
   CronValidationDto,
   NameValidationDto,
+  AgentRunStatus,
   SchedulerCapabilitiesDto,
 } from "../types";
 
@@ -54,6 +55,11 @@ export const agentApi = {
   /** Returns op_id; subscribe to `op-progress::<op_id>`. */
   agentsRunNowStart: (id: string) =>
     invoke<string>("agents_run_now_start", { id }),
+
+  /** Which agent runs are in flight, observed from run directories and
+   *  the process table. Read-only and lock-free — safe to poll. Covers
+   *  cron-fired runs, which no click ever told the renderer about. */
+  agentsRunningList: () => invoke<AgentRunStatus[]>("agents_running_list"),
 
   agentsRunsList: (id: string, limit?: number) =>
     invoke<AgentRunDto[]>("agents_runs_list", { id, limit }),

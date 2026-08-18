@@ -55,6 +55,15 @@
       "delete": "Delete",
       "showRuns": "Show runs",
       "hideRuns": "Hide runs"
+    },
+    "run": {
+      "running": "● Running · {{elapsed}} — started {{started}}",
+      "interrupted": "Interrupted — no result recorded",
+      "unknown": "Can't determine whether a run is in progress",
+      "runNowDisabled": "Already running — started {{started}}",
+      "never": "Never run",
+      "lastOk": "Last run {{ago}} ago · took {{took}}",
+      "lastFailed": "Last run failed {{ago}} ago — exit {{code}}"
     }
   },
   "form": {

@@ -57,7 +57,34 @@ export type OpKind =
   | "session_move"
   | "account_login"
   | "account_register"
-  | "verify_all";
+  | "verify_all"
+  /** Manual "Run Now" of an agent. Absent from this union until
+   *  2026-08-18, which is why `RunningOpsChip`'s `verb()` switch had no
+   *  arm for it and TypeScript raised nothing: a switch is only
+   *  exhaustive over the union it is given. A live agent run was counted
+   *  by the chip and rendered with an undefined verb. */
+  | "agent_run";
+
+/** Every `OpKind`, as a runtime value. Exists so a test can assert that
+ *  each one renders a label — a `switch` is exhaustive only over the
+ *  union it is handed, so an `OpKind` missing from the union above
+ *  produced no compile error and an undefined verb at runtime. Keep in
+ *  lockstep with `OpKind`; the test below fails if this list and the
+ *  union diverge. */
+export const OP_KINDS = [
+  "repair_resume",
+  "repair_rollback",
+  "move_project",
+  "clean_projects",
+  "session_prune",
+  "session_slim",
+  "session_share",
+  "session_move",
+  "account_login",
+  "account_register",
+  "verify_all",
+  "agent_run",
+] as const satisfies readonly OpKind[];
 
 /** Phase ids emitted by `session_move_with_progress`. Stable contract
  *  with `crates/claudepot-core/src/session_move.rs`. */

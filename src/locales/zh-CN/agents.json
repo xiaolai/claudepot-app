@@ -55,6 +55,15 @@
       "delete": "删除",
       "showRuns": "显示运行记录",
       "hideRuns": "隐藏运行记录"
+    },
+    "run": {
+      "running": "● 运行中 · {{elapsed}} —— 开始于 {{started}}",
+      "interrupted": "已中断——没有记录结果",
+      "unknown": "无法确定是否有运行正在进行",
+      "runNowDisabled": "已在运行——开始于 {{started}}",
+      "never": "从未运行",
+      "lastOk": "上次运行于 {{ago}} 前 · 用时 {{took}}",
+      "lastFailed": "上次运行失败于 {{ago}} 前 —— 退出码 {{code}}"
     }
   },
   "form": {

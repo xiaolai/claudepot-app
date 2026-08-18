@@ -66,6 +66,7 @@ pub mod error;
 pub mod events;
 pub mod install;
 pub mod install_gate;
+pub mod liveness;
 pub mod prerun;
 pub mod run;
 pub mod scheduler;

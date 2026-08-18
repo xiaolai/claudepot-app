@@ -134,6 +134,8 @@ function verb(kind: RunningOpInfo["kind"]): string {
       return i18n.t("ops.addingAccount", NS);
     case "verify_all":
       return i18n.t("ops.verifying", NS);
+    case "agent_run":
+      return i18n.t("ops.runningAgent", NS);
   }
 }
 
@@ -168,6 +170,18 @@ export function labelFor(op: RunningOpInfo): string {
     return op.current_phase
       ? i18n.t("ops.sharingPhase", { ...NS, phase: op.current_phase })
       : i18n.t("ops.sharingSession", NS);
+  }
+  if (op.kind === "agent_run") {
+    // Explicit branch, not the fallback. The fallback below formats
+    // every unhandled kind as a path rename, and the backend puts the
+    // agent's UUID in the `old_path` slot — so falling through would
+    // render "Running agent <uuid> → " in the status bar, breaking
+    // design.md's "no internal identifiers in primary UI".
+    //
+    // The verb alone is the right amount here: this chip's job is the
+    // COUNT (design.md's live-surface table), and identity belongs on
+    // the agent card. See dev-docs/agents-run-visibility-plan.md §2.3.
+    return verb(op.kind);
   }
   const base = i18n.t("ops.rename", {
     ...NS,
