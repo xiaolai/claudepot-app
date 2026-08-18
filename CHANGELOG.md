@@ -6,7 +6,28 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.18 — beta (unreleased)
+## 0.4.19 — beta (unreleased)
+
+### Fixed
+
+- **An agent that was interrupted once no longer reads "Interrupted"
+  forever.** A run directory left without a result outranked every
+  completed run after it, with no bound on age — so one crashed run in
+  the past could shadow a successful run finishing minutes later, and the
+  card could never return to "Last run" without someone deleting the
+  directory by hand. An unfinished run older than the newest completed
+  one is now recognised as the orphan it is. "Interrupted" still shows
+  when nothing newer has finished, which is the case where the agent
+  really is broken.
+- **A run callback that dies before it can report leaves evidence.** The
+  generated shim now records the recorder's exit status itself, from the
+  shell that survived, so a callback killed mid-flight — by an app
+  upgrade replacing the binary underneath it, an OOM kill, a crash on
+  start — is explained on disk instead of leaving a silently resultless
+  directory. The previous breadcrumb could not cover this: it was written
+  *by* the process that never got far enough to write it.
+
+## 0.4.18 — beta (released 2026-08-18)
 
 ### Added
 
