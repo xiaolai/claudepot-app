@@ -232,6 +232,22 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 # socket, so the whole HTTP surface is testable in CI. Already in the
 # tree via axum/hyper.
 tower = { version = "0.5", features = ["util"] }
+
+# TLS for the remote surface. All four are already compiled in the
+# workspace (Tauri, reqwest), so these are declarations rather than new
+# code.
+#
+# The `ring` provider is chosen explicitly, NOT rustls's aws-lc-rs
+# default: aws-lc-rs needs cmake and nasm to build on Windows, which
+# would break the Windows compile gate for a cryptographic difference
+# that does not matter here. `ring` is already in the tree via age and
+# minisign.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "logging"] }
+# PEM parsing comes from pki-types rather than the separate
+# rustls-pemfile crate, which would be genuinely new.
+rustls-pki-types = { version = "1", features = ["std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "http1"] }
 cbc = { version = "0.1", features = ["alloc"] }
 # Windows-only
 aes-gcm = "0.10"

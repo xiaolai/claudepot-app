@@ -235,14 +235,14 @@ fn bearer_from(headers: &HeaderMap) -> Option<String> {
 /// runs — in particular before login, so rebinding cannot spend the
 /// owner's throttle.
 pub async fn guard_origin(State(state): State<Shared>, req: Request, next: Next) -> Response {
-    let expected_port = { state.lock().await.config.server.port };
+    let allowed = { state.lock().await.config.server.allowed_hosts.clone() };
 
     if let Some(host) = req
         .headers()
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
     {
-        if !host_is_acceptable(host, expected_port) {
+        if !host_is_acceptable(host, &allowed) {
             return err(StatusCode::MISDIRECTED_REQUEST, "bad_host");
         }
     }
@@ -269,36 +269,69 @@ pub async fn guard_origin(State(state): State<Shared>, req: Request, next: Next)
 
 /// A `Host` we are willing to answer to.
 ///
-/// Deliberately permissive about the *name* and strict about the shape:
-/// this appliance is reached by IP, by mDNS name, and by whatever the
-/// user put in the certificate, so an allowlist of names would be wrong
-/// more often than right. What it refuses is a `Host` carrying a port
-/// that is not ours — the signature of a rebinding proxy — and anything
-/// unparseable.
-fn host_is_acceptable(host: &str, expected_port: u16) -> bool {
-    if host.is_empty() {
+/// The first version compared the **port** against the configured one.
+/// That was wrong twice over, and an end-to-end test caught it where
+/// the unit test could not:
+///
+/// - **Too strict.** Any port but the configured default was refused,
+///   so binding port 0 — or being reached through any port mapping —
+///   rejected every request.
+/// - **Useless.** A rebinding attacker chooses the whole Host, so
+///   `evil.example:8420` matched happily. The unit test passed only
+///   because it happened to use port 1234.
+///
+/// What separates a rebinding attempt from a real client is the
+/// **name**. An appliance is reached by IP literal, by a single label,
+/// or by an mDNS / MagicDNS suffix; a rebinding attack needs a public
+/// FQDN it controls, because it has to serve DNS for it. Hence a
+/// shape rule rather than a list of exact names, which would be wrong
+/// more often than right for something reached three different ways.
+///
+/// The port is ignored entirely.
+fn host_is_acceptable(host: &str, extra_allowed: &[String]) -> bool {
+    let Some(name) = host_name_of(host) else {
         return false;
-    }
-    // IPv6 literal: [::1]:8420
-    let port = if let Some(rest) = host.strip_prefix('[') {
-        match rest.split_once(']') {
-            Some((_, after)) => after.strip_prefix(':'),
-            None => return false,
-        }
-    } else {
-        match host.rsplit_once(':') {
-            Some((name, p)) if !name.is_empty() => Some(p),
-            Some(_) => return false,
-            None => None,
-        }
     };
-    match port {
-        None => true,
-        Some(p) => p
-            .parse::<u16>()
-            .map(|p| p == expected_port)
-            .unwrap_or(false),
+    let lower = name.to_ascii_lowercase();
+
+    if extra_allowed.iter().any(|a| a.eq_ignore_ascii_case(&lower)) {
+        return true;
     }
+    // An IP literal has no name to re-resolve, so it cannot be rebound.
+    // IPv6 arrives here already unbracketed.
+    if lower.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    // A single label has no public DNS to hijack.
+    if !lower.contains('.') {
+        return true;
+    }
+    lower.ends_with(".local") || lower.ends_with(".internal")
+}
+
+/// Strip the port and any IPv6 brackets. `None` for anything
+/// unparseable — a malformed Host is not something to guess at.
+fn host_name_of(host: &str) -> Option<&str> {
+    if host.is_empty() {
+        return None;
+    }
+    if let Some(rest) = host.strip_prefix('[') {
+        let (inner, after) = rest.split_once(']')?;
+        if !(after.is_empty() || after.starts_with(':')) {
+            return None;
+        }
+        return (!inner.is_empty()).then_some(inner);
+    }
+    let name = match host.rsplit_once(':') {
+        Some((n, port)) => {
+            if port.is_empty() || port.parse::<u16>().is_err() {
+                return None;
+            }
+            n
+        }
+        None => host,
+    };
+    (!name.is_empty()).then_some(name)
 }
 
 fn origin_matches_host(origin: &str, host: &str) -> bool {
@@ -563,18 +596,42 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
     }
 
+    /// Fixture hostnames must belong to nobody. A real machine name
+    /// or tailnet domain is internal topology, and the pre-push scan
+    /// blocks it — this is the second time one got in as "obviously
+    /// just test data", after the addresses in `bind.rs`.
     #[test]
     fn host_shapes() {
-        let p = super::super::config::DEFAULT_PORT;
-        assert!(host_is_acceptable("claudepot.local", p));
-        assert!(host_is_acceptable(&format!("192.168.1.5:{p}"), p));
-        assert!(host_is_acceptable(&format!("[::1]:{p}"), p));
-        assert!(host_is_acceptable("[::1]", p));
-        // A port that is not ours is the rebinding signature.
-        assert!(!host_is_acceptable("192.168.1.5:9999", p));
-        assert!(!host_is_acceptable("", p));
-        assert!(!host_is_acceptable(&format!(":{p}"), p));
-        assert!(!host_is_acceptable("host:notaport", p));
+        let none: Vec<String> = vec![];
+        // Reached-by-IP, on ANY port — the port is not a signal.
+        assert!(host_is_acceptable("192.168.1.5:8420", &none));
+        assert!(host_is_acceptable("192.168.1.5:54321", &none));
+        assert!(host_is_acceptable("127.0.0.1", &none));
+        assert!(host_is_acceptable("[::1]:8420", &none));
+        assert!(host_is_acceptable("[::1]", &none));
+        // Single label and local suffixes.
+        assert!(host_is_acceptable("localhost:9999", &none));
+        assert!(host_is_acceptable("claudepot.local", &none));
+        assert!(host_is_acceptable("appliance.example-net.internal:8420", &none));
+
+        // A public FQDN is the rebinding signature — and note it is
+        // refused even on our own port, which the old port check let
+        // straight through.
+        assert!(!host_is_acceptable("evil.example:8420", &none));
+        assert!(!host_is_acceptable("evil.example", &none));
+        assert!(!host_is_acceptable("rebind.attacker.com:8420", &none));
+
+        // Malformed.
+        assert!(!host_is_acceptable("", &none));
+        assert!(!host_is_acceptable(":8420", &none));
+        assert!(!host_is_acceptable("host:notaport", &none));
+        assert!(!host_is_acceptable("host:", &none));
+
+        // A user fronting the appliance with a real domain opts in.
+        let allowed = vec!["pot.example.com".to_string()];
+        assert!(host_is_acceptable("pot.example.com:443", &allowed));
+        assert!(host_is_acceptable("POT.EXAMPLE.COM", &allowed));
+        assert!(!host_is_acceptable("other.example.com", &allowed));
     }
 
     #[test]

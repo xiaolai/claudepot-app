@@ -49,6 +49,7 @@ pub mod bind;
 pub mod config;
 pub mod login;
 pub mod password;
+pub mod serve;
 pub mod server;
 pub mod store;
 pub mod tls;

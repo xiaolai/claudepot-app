@@ -48,6 +48,13 @@ pub struct ServerConfig {
     pub bind: IpAddr,
     #[serde(default = "default_port")]
     pub port: u16,
+    /// Extra `Host` names to answer to, beyond the shapes always
+    /// accepted (IP literals, single labels, `.local`, `.internal`).
+    /// For the one case the shape rule cannot cover: a user fronting
+    /// the appliance with a real public domain — which is exactly what
+    /// a DNS-rebinding attack needs, so it has to be opt-in.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -56,6 +63,7 @@ impl Default for ServerConfig {
             enabled: false,
             bind: default_bind(),
             port: DEFAULT_PORT,
+            allowed_hosts: Vec::new(),
         }
     }
 }
@@ -163,6 +171,7 @@ mod tests {
             enabled: true,
             bind: IpAddr::from_str("192.168.1.42").unwrap(),
             port: DEFAULT_PORT,
+            allowed_hosts: Vec::new(),
         };
         assert!(c.checked_bind().unwrap().requires_tls());
     }
@@ -173,6 +182,7 @@ mod tests {
             enabled: true,
             bind: IpAddr::from_str("8.8.8.8").unwrap(),
             port: DEFAULT_PORT,
+            allowed_hosts: Vec::new(),
         };
         assert!(c.checked_bind().is_err());
     }
@@ -356,6 +366,7 @@ mod persist_tests {
                 enabled: true,
                 bind: IpAddr::from_str("8.8.8.8").unwrap(),
                 port: DEFAULT_PORT,
+                allowed_hosts: Vec::new(),
             },
             ..Default::default()
         };
