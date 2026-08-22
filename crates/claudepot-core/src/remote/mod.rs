@@ -57,6 +57,7 @@ pub mod store;
 pub mod tls;
 pub mod token;
 pub mod totp;
+pub mod webauthn;
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};

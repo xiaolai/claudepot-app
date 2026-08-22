@@ -223,6 +223,21 @@ system-configuration = "0.6"
 hmac = "0.12"
 sha1 = "0.10"
 
+# Passkey (WebAuthn) verification, ES256 only.
+#
+# Pure Rust, chosen over `webauthn-rs` because that pulls native
+# `openssl-sys`, which on Windows needs a system OpenSSL or a vendored
+# build with perl and nasm — it would burden every contributor's build
+# and put the Windows compile gate at risk.
+#
+# The trade is that verification is implemented here rather than
+# imported. It is kept narrow to stay tractable: ES256 (the algorithm
+# Face ID, Touch ID and Android all use) and no attestation
+# verification, which is correct for a self-hosted relying party that
+# issues its own credentials to devices it already authenticated.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+ciborium = "0.2"
+
 # HTTP server for the remote surface. hyper 1, tower, http, rustls and
 # tokio-rustls are ALREADY in the tree (Tauri, reqwest), so axum is the
 # only genuinely new crate — and hand-rolling routing and extraction on
