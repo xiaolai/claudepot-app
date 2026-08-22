@@ -33,11 +33,27 @@ CA_DAYS=3650
 
 short="$(hostname -s)"
 
-# Tailscale PRETTY-PRINTS this JSON: `"MagicDNSSuffix": "example.internal"`,
-# with a space after the colon. The first version of this matched
-# `"MagicDNSSuffix":"` and silently derived nothing, so the script
-# aborted on a machine that had a perfectly good suffix. Tolerate any
-# whitespace.
+# The MagicDNS name is NOT `$(hostname -s).$suffix`.
+#
+# Tailscale assigns its own sanitised name, and it can differ
+# substantially from the local hostname — a machine called
+# `Someones-Laptop-Pro-7` locally may be plain `workstation` on the
+# tailnet. Deriving it from `hostname -s` mints a certificate for a name
+# that resolves nowhere, which fails as "cannot open the page" with
+# nothing pointing at the certificate.
+#
+# So take the name Tailscale itself reports for this node, and fall
+# back to composing one only if there is no Tailscale at all.
+ts_dnsname="$(tailscale status --json 2>/dev/null \
+  | python3 -c 'import json,sys
+try:
+    print((json.load(sys.stdin).get("Self") or {}).get("DNSName","").rstrip("."))
+except Exception:
+    pass' 2>/dev/null || true)"
+
+# Pretty-printed JSON: `"MagicDNSSuffix": "example.internal"`, with a
+# space after the colon. An earlier version matched `"MagicDNSSuffix":"`
+# and silently derived nothing.
 suffix="$(tailscale status --json 2>/dev/null \
   | grep -oE '"MagicDNSSuffix"[[:space:]]*:[[:space:]]*"[^"]*"' \
   | head -1 \
@@ -46,12 +62,15 @@ suffix="${suffix%.}"
 
 host="${1:-}"
 if [ -z "$host" ]; then
-  if [ -n "$suffix" ]; then
+  if [ -n "$ts_dnsname" ]; then
+    host="$ts_dnsname"
+  elif [ -n "$suffix" ]; then
     host="$short.$suffix"
   else
-    # mDNS: resolvable from any phone on the LAN with no DNS setup at
-    # all, and accepted by the server's Host guard. A better default
-    # than failing.
+    # mDNS: resolvable on a LAN with no DNS setup at all, and accepted
+    # by the server's Host guard. Note it does NOT traverse a tailnet —
+    # Tailscale carries no mDNS — so it is the last choice, not the
+    # first.
     host="$short.local"
   fi
 fi
@@ -66,11 +85,9 @@ ts_ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
 # connection rather than the certificate. Cheap to add, expensive to
 # diagnose when missing.
 alt_names="$host"
-case "$host" in
-  *.local) ;;
-  *) alt_names="$alt_names,DNS:$short.local" ;;
-esac
-[ -n "$suffix" ] && [ "$host" != "$short.$suffix" ] && alt_names="$alt_names,DNS:$short.$suffix"
+add_name() { case ",$alt_names," in *",DNS:$1,"*|"$1,"*|*",$1"*) ;; *) alt_names="$alt_names,DNS:$1" ;; esac; }
+[ -n "$ts_dnsname" ] && [ "$ts_dnsname" != "$host" ] && add_name "$ts_dnsname"
+add_name "$short.local"
 
 mkdir -p "$DATA_DIR"
 chmod 700 "$DATA_DIR"
