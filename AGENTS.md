@@ -474,6 +474,44 @@ adversarial review rather than by testing:
   character 7 and cut that position from 26 symbols to 16 — 36.9 bits
   rather than 37.6, and invisible because the code still looked random.
 
+**TOTP (`remote::totp`) is an optional SECOND factor and must never be
+the only one.** A TOTP secret cannot be hashed — the server needs it in
+recoverable form to compute the expected code — so replacing the
+password with it would make the stored credential strictly *more*
+valuable than a scrypt hash: reading the file would give working access
+instead of a cracking job. It also has no recovery story, and the usual
+remedy (printed backup codes) is a password again with worse
+ergonomics.
+
+Two details there are load-bearing:
+
+- **Codes are burned.** `TotpState::last_used_counter` is a high-water
+  mark, so a code cannot be replayed and an *earlier* still-in-window
+  code cannot be used after a later one. Without this a code is live for
+  up to `(2 x SKEW_STEPS + 1) x PERIOD_SECS` — 90 seconds — and anyone
+  who observes one can reuse it. RFC 6238 §5.2 requires it; most
+  implementations omit it.
+- **SHA-1 is correct**, not an oversight: it is RFC 6238's default and
+  the only algorithm Google Authenticator reads from a plain
+  `otpauth://` URI, and it is used inside HMAC where the collision
+  weakness does not apply. The implementation is checked against RFC
+  6238 Appendix B's published vectors, which is what makes interop with
+  real authenticator apps a fact rather than a hope.
+
+Be honest about what it buys: when the client is the phone and the
+authenticator app is on that same phone, the second factor is close to
+ceremonial — one device compromise defeats both. It defends a credential
+used from *elsewhere*. Offer it; do not force it.
+
+**Passkeys / WebAuthn are the better end state** and are not built. The
+server would store only a public key, so reading `remote-devices.json`
+would give an attacker nothing — strictly better than both a password
+hash and a TOTP secret. Unverified prerequisite: WebAuthn needs a valid
+certificate chain, and this deployment's comes from a private CA. From a
+device that trusts that CA it should qualify, but iOS has had extra
+restrictions here. Settle that with a real device before designing
+around it.
+
 Still open at the HTTP layer, recorded so they are not rediscovered:
 login needs the throttle wired with persistent state; mutations need an
 idempotency key (mobile retries re-execute); streams must close on

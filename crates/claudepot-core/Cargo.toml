@@ -18,6 +18,8 @@ chrono.workspace = true
 sha2.workspace = true
 hex.workspace = true
 scrypt.workspace = true
+hmac.workspace = true
+sha1.workspace = true
 tempfile.workspace = true
 filetime.workspace = true
 rusqlite.workspace = true
@@ -60,8 +62,9 @@ minisign-verify.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 pbkdf2.workspace = true
-hmac.workspace = true
-sha1.workspace = true
+# hmac + sha1 moved to the cross-platform [dependencies] above when
+# `remote::totp` started needing them everywhere; that entry subsumes a
+# macOS-only one, and listing both reads as two different requirements.
 cbc.workspace = true
 system-configuration.workspace = true
 

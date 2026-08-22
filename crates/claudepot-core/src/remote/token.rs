@@ -119,7 +119,7 @@ pub fn new_pairing_code() -> String {
 /// from 26 possible symbols to 16. Support fell from 26^8 to 26^7 x 16:
 /// 36.9 bits rather than the 37.6 the docs claimed. Small in absolute
 /// terms, and entirely invisible: the code still looked random.
-fn random_bytes(n: usize) -> Vec<u8> {
+pub(super) fn random_bytes(n: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(n);
     while out.len() < n {
         let uuid = Uuid::new_v4();

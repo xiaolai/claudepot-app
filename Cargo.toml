@@ -215,6 +215,11 @@ aes = "0.8"
 # macOS-only
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac", "sha1"] }
 system-configuration = "0.6"
+# hmac + sha1 are NOT macOS-only despite sitting in this block:
+# `remote::totp` uses them on every platform for RFC 6238. SHA-1 is not
+# a mistake there — it is RFC 6238's default and the only algorithm
+# Google Authenticator reads from a plain otpauth:// URI, and it is used
+# as an HMAC, where the collision weakness does not apply.
 hmac = "0.12"
 sha1 = "0.10"
 cbc = { version = "0.1", features = ["alloc"] }
