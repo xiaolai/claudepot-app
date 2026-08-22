@@ -88,6 +88,16 @@ pub struct PidRecord {
     /// like `"approve Bash"` or `"input needed"`.
     #[serde(rename = "waitingFor", default)]
     pub waiting_for: Option<String>,
+    /// Unix-domain socket CC bound for this session's cross-session
+    /// inbox, when the feature is on. Absent on older builds and on any
+    /// session whose bind failed. Consumed by `crate::peer` — this
+    /// module still never writes.
+    #[serde(rename = "messagingSocketPath", default)]
+    pub messaging_socket_path: Option<String>,
+    /// Version of the peer frame contract this session speaks. See
+    /// `crate::peer::PEER_PROTOCOL`.
+    #[serde(rename = "peerProtocol", default)]
+    pub peer_protocol: Option<u32>,
 }
 
 /// Aggregate row published to the `live-all` subscriber channel.

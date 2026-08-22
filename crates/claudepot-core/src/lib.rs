@@ -87,6 +87,7 @@ pub(crate) mod onboard;
 pub(crate) mod path_env;
 pub mod path_utils;
 pub mod paths;
+pub mod peer;
 pub mod permission;
 pub mod pricing;
 pub mod proc_utils;

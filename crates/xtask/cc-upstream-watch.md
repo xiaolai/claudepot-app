@@ -117,6 +117,7 @@ truncates mid-transfer, which diffs as "hundreds of pages removed".
 | credentials keychain item | `cli_backend/keychain` | `Claude Code-credentials` | binary strings |
 | MCP config scope resolution | `config_view::effective_mcp`, `mcp_snippet` | `mcpServers`, `getMcpConfigsByScope` | docs `mcp.md` diff |
 | global config file resolution | `paths::global_claude_json_target` | `getGlobalClaudeFile`, `.config.json` | binary strings |
+| peer messaging inbox (socket, key, frames) | `peer::wire`, `peer::key`, `peer::client` | `cc-socks`, `messagingSocketPath`, `peerToken`, `peerProtocol`, `uds-messaging`, `skipSlashCommands` | binary: grep `uds-messaging` log lines for the frame dispatch and the line limit; confirm `peerProtocol` is still `1` in a live `~/.claude/sessions/<pid>.json`; re-derive a key filename and check the file exists. Gated on the `agents_cross_session_inbox` flag, so absence is not removal |
 
 ## Version pins that go stale silently
 

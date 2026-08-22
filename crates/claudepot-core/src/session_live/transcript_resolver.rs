@@ -356,6 +356,8 @@ mod tests {
             name: None,
             status: None,
             waiting_for: None,
+            messaging_socket_path: None,
+            peer_protocol: None,
         }
     }
 
