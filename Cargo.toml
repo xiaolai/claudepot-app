@@ -82,6 +82,20 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 hex = "0.4"
 
+# Password hashing for the remote surface's admin password.
+#
+# scrypt rather than argon2 on dependency-hygiene grounds: it is ALREADY
+# compiled into this binary transitively (via `age`), so promoting it to
+# a direct dependency adds no new supply-chain surface, where argon2
+# would. It is memory-hard and OWASP-approved for this use. Both speak
+# PHC strings, so stored hashes carry their own algorithm and parameters
+# and swapping to argon2id later is a one-line change that does not
+# invalidate existing passwords.
+#
+# `simple` brings the password-hash / PHC integration; hand-rolling salt
+# and parameter encoding is exactly the part not to hand-roll.
+scrypt = { version = "0.11", default-features = false, features = ["simple", "std"] }
+
 # Keychain (Claudepot's own secrets — NOT for CC's Keychain item)
 keyring = "3"
 

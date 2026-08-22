@@ -46,6 +46,7 @@
 //! erase the audit trail of what had been let in.
 
 pub mod bind;
+pub mod password;
 pub mod store;
 pub mod tls;
 pub mod token;

@@ -383,138 +383,104 @@ to force it shut on the user's own choice. Every CLI entry point calls
 `ops::tick` first, so a window whose deadline passed while the GUI was
 closed still closes.
 
-## Remote control (loopback + Tailscale, no LAN listener)
+## Remote control (LAN appliance, admin password)
 
-Reaching Claudepot from a phone. Pure logic in
-`claudepot-core::remote` (`token` / `store` + the pairing state
-machine in `mod`).
+Reaching Claudepot from a phone or another machine. Pure logic in
+`claudepot-core::remote` (`bind` / `password` / `token` / `tls` /
+`store` + the pairing state machine in `mod`).
 
-**The transport decision, because it is easy to get wrong twice:**
-Claudepot binds **127.0.0.1 only** and is exposed to the user's other
-machines with `tailscale serve`. It never listens on a LAN interface.
+**The model is an appliance**, like Home Assistant or a NAS: reachable
+on the LAN — over Tailscale or not — behind one admin password, and
+whoever holds that password is admin and may do anything. There is no
+endpoint allowlist. That is coherent *only* because the password is
+treated as the entire security boundary, which is what the rest of this
+section is about: behind it sits the ability to drive Claude Code
+sessions, i.e. arbitrary code execution as this user.
 
-A LAN-bound port here would be remote code execution on the machine —
-the surface can inject prompts into sessions, some running
-`bypassPermissions` — gated only by hand-rolled auth, and reachable by
-every guest device and IoT bulb on the subnet. The failure mode also
-runs the wrong way: a LAN server that loses its auth is *still
-listening*, whereas a loopback server with Tailscale down is simply
-unreachable. Fails closed.
+**`bind` is an allowlist and the highest-consequence line in the
+feature.** Permitted: loopback, RFC1918, link-local, Tailscale's
+`100.64.0.0/10`, and `0.0.0.0` (what an appliance normally does;
+refusing it only pushes users to hardcode a DHCP address). Refused:
+anything **globally routable** — that is a password prompt on the
+public internet with code execution behind it, and no configuration
+meant that. `0.0.0.0` is accepted but returned as
+`Exposure::EveryInterface` so the caller must say so: on a host that
+later acquires a public address it becomes a public listener with no
+config change. Note `100.x` is not automatically Tailscale —
+`100.0.0.0/10` and `100.128.0.0/9` are ordinary public space, and
+matching the first octet would allow routable addresses.
 
-It is also the only option that *works*. `http://` on a private IP is
-not a secure context in any browser, so no service worker, no PWA
-install, no web push — a LAN server cannot deliver the client it exists
-for. Tailscale Serve terminates TLS on a real `*.ts.net` certificate,
-which makes the phone client an installable PWA. Use `serve`, never
-`funnel`: one word apart, and Funnel publishes to the open internet.
+**TLS is required iff the bind address is not loopback**
+(`BindAddr::requires_tls`). `http://127.0.0.1` is already a secure
+context in every browser, so loopback development needs no certificate
+and loses no browser capability. Everything else carries an admin
+password across a wire someone else can be on — and unlike the earlier
+tailnet-only design there is no WireGuard underneath a plain LAN, so
+here TLS is doing confidentiality work as well as unlocking service
+workers, PWA install, and web push. There is no downgrade switch:
+`remote::tls` stops the server rather than falling back, because a
+silent downgrade leaves the user believing traffic is protected.
 
-**Tailscale identity is not authentication here.** Binding loopback
-means any *local* process can reach the port and forge the
-`Tailscale-User-*` headers the proxy injects. Those headers say which
-tailnet user; only a paired device token says which device. Treating
-the headers as authn would make every local process a client.
+Certificates come from a private CA (`scripts/mint-remote-cert.sh`,
+idempotent so already-trusted devices keep working) because this
+tailnet's self-hosted control server cannot issue them — `tailscale
+cert` returns *"your Tailscale account does not support getting TLS
+certs"* — and `.internal` is not a real TLD. Two of that script's
+constraints are Apple policy and both fail with errors that blame
+something else: Safari refuses a leaf valid beyond **398 days**, and
+the leaf needs `extendedKeyUsage=serverAuth`. On iOS, installing the CA
+profile is half the job; full trust must also be enabled under Settings
+> General > About > Certificate Trust Settings.
 
-**Two secrets, opposite threat models** — getting these backwards is
-the failure the module is shaped to prevent:
+**Password hashing reverses `remote::token`'s reasoning, deliberately.**
+That module argues *against* a memory-hard KDF and is right to: a
+256-bit machine token has nothing to brute force. The argument depended
+on there being no low-entropy secret. A human-chosen password is
+exactly that secret, so `remote::password` uses scrypt. Both modules are
+correct for their own input; do not unify them onto one hash.
 
-| | Device token | Pairing code |
-|---|---|---|
-| Origin | machine, 256 bits | human retypes 8 chars |
-| Lifetime | until revoked | 3 minutes |
-| Defence | never stored recoverably (SHA-256 of it, and a test asserts the plaintext never reaches disk) | expiry + a 5-attempt cap + single use |
+scrypt rather than argon2 on dependency-hygiene grounds — it is already
+compiled in transitively via `age`, so promoting it adds no new
+supply-chain surface. Stored hashes are PHC strings carrying their own
+algorithm and parameters, so raising the cost or moving to argon2id
+later does not invalidate existing passwords.
 
-SHA-256 rather than Argon2 is deliberate, not lazy: Argon2 exists to
-make brute-forcing *low-entropy human passwords* expensive, and a
-256-bit machine token has nothing to brute force. The low-entropy
-secret here is the pairing code, and it is defended by the controls
-that actually apply to it. Randomness comes from `Uuid::new_v4`
-(`getrandom`-backed); pulling in `rand` for 32 bytes does not clear the
-dependency-hygiene bar, and `subtle` does not clear it for a five-line
-constant-time compare.
+**The throttle backs off; it never locks out.** A hard lockout on a
+LAN-reachable appliance is a denial-of-service handed to anyone on the
+wifi: they lock the owner out and risk nothing. Failures buy an
+exponentially growing delay capped at 30s — at which point an online
+search is dead while an owner who mistyped waits once. The pairing code
+in `token` *can* burn itself, because the user can always mint another
+at the machine; an admin locked out over the network cannot.
 
-`judge_pairing` returns the rejection **and the record as it should now
-be stored**, so the caller must write back the incremented attempt
-counter. A version returning only a verdict would leave `attempts`
-un-incremented on the losing path — which is exactly what turns an
-eight-character code into a password.
+**A bearer token defends against other devices, not against local
+code.** `remote-devices.json` is owner-writable and a same-UID process
+can write its own record — and can already drive CC's socket directly
+without Claudepot, since CC's own boundary there is the Unix user. The
+honest claim is narrow: this stops another *device* acting without
+credentials, and a *revoked* device acting at all. Do not write docs or
+UI copy implying more.
 
-**Revocation sets `revoked_at`; it never deletes the row.** A deleted
-device is merely unknown, and an unknown token could pair again as
-"new" if replayed; a revoked one is refused. That is also why
-`remote-devices.json` fails loud on corruption — see its entry in the
-data-dir list.
+Two failure modes are load-bearing and both were found by an
+adversarial review rather than by testing:
 
-**Bind address is the highest-consequence line in the feature**, so it
-is its own module with its own tests (`remote::bind`). The permitted
-set is an **allowlist**: loopback, or `100.64.0.0/10` (the CGNAT range
-Tailscale assigns). Everything else is refused *including the
-machine's own LAN address* — a denylist would have to enumerate every
-way to say "everyone" and would miss the case that matters, because
-`0.0.0.0` at least looks alarming while `192.168.1.42` looks like
-someone thought about it. `BindAddr`'s field is private, so the gate
-cannot be skipped by passing a bare `IpAddr` around. Note `100.x` is
-not automatically Tailscale: `100.0.0.0/10` and `100.128.0.0/9` are
-ordinary public space, and matching on the first octet would allow
-routable addresses.
-
-**TLS is terminated in-process, and four files in the data dir are not
-JSON** (so `verify-docs`'s data-dir check does not see them):
-`remote-cert.pem`, `remote-key.pem` (0600 — `remote::tls` refuses to
-start the server otherwise), plus `remote-ca.crt` and
-`remote-ca-key.pem` for the private CA. Minted by
-`scripts/mint-remote-cert.sh`, which is idempotent: it reuses an
-existing CA so already-trusted devices keep working.
-
-Two constraints in that script are Apple policy rather than taste, and
-both fail with errors that blame something else: a leaf valid for more
-than **398 days** is refused by Safari (hence 397), and the leaf needs
-`extendedKeyUsage=serverAuth` or it is structurally valid and still
-rejected. On iOS, installing the CA profile is only half the job — full
-trust must also be enabled under Settings > General > About >
-Certificate Trust Settings, and skipping it looks exactly like a bug in
-the app.
-
-Missing or unreadable TLS material **stops the server**; it never falls
-back to plain HTTP. A silent downgrade is worse than a refusal — the
-user believes traffic is protected and nothing ever surfaces that it
-is not.
-
-### The endpoint policy, after an adversarial review
-
-The remote surface is a hand-written allowlist. Four rules came out of
-a refute-mode review and each exists because the obvious design failed
-a specific check:
-
-- **Remote may revoke the `crossSessionInbound` grant. It may not open
-  one.** Otherwise the same bearer opens the gate *and* sends the
-  prompt, which collapses CC's held-for-local-approval step into one
-  action controlled by one stolen token — and the grant is machine-wide,
-  so it also unblocks every unrelated local peer, not just the calling
-  device. The 12-hour cap does not save this; it is renewable and was
-  never a safety property. Opening requires local presence. The general
-  rule: **remote may always make the machine safer, never less safe.**
-- **Sessions are addressed by `session_id`, never by pid.** The
-  `procStart` and `session_id` guards in `peer` already stop delivery to
-  the wrong *process*, but they cannot see the phone's stale *intent*: a
-  list fetched before a pid was recycled would resolve to whatever holds
-  that pid now. A stale handle must fail, not retarget.
-- **Transcript streaming is a secret-bearing endpoint** and the
-  allowlist must not be described as "nothing that touches a secret".
-  Transcripts carry prompts, tool output, and file contents, and
-  `session_live::redact` is explicitly incomplete — it knowingly passes
-  GitHub PATs and AWS keys. Treat it as full-secret access.
-- **A bearer token defends against other devices, not against local
-  code.** See `remote`'s module docs: a same-UID process can write its
-  own device record, and can already drive CC's socket without
-  Claudepot. Claiming otherwise in docs or UI copy is the finding.
+- `verify_password` must distinguish "wrong password" from "stored hash
+  unusable". A PHC string can parse and carry no hash output
+  (`$scrypt$garbage` does), and verifying it returns the same error as a
+  wrong password — so `.is_ok()` would tell the owner their correct
+  password is wrong, forever, with nothing pointing at the file.
+- The pairing code must not consume UUID bytes whose bits are fixed.
+  Taking the first eight bytes of a UUIDv4 put the version byte at
+  character 7 and cut that position from 26 symbols to 16 — 36.9 bits
+  rather than 37.6, and invisible because the code still looked random.
 
 Still open at the HTTP layer, recorded so they are not rediscovered:
-pairing needs a lock (the attempt cap is not transactional across
-concurrent requests, and an unauthenticated local caller can burn every
-pairing window); mutations need an idempotency key (mobile retries
-re-execute); streams must close on revocation, not merely refuse the
-next request; and `Host`/`Origin` must be checked before any state
-changes, or DNS rebinding burns pairing attempts.
+login needs the throttle wired with persistent state; mutations need an
+idempotency key (mobile retries re-execute); streams must close on
+credential revocation, not merely refuse the next request; `Host` and
+`Origin` must be checked before any state changes, or DNS rebinding
+burns attempts; and multiple appliances on one LAN need discovery
+(mDNS) with a user-set instance name.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 
