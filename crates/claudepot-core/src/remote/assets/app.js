@@ -54,6 +54,33 @@ async function probe() {
     }
   }
 
+  // The row above answers "does this DEVICE have an authenticator". It
+  // says nothing about whether THIS ORIGIN may use one, and the two come
+  // apart precisely here: WebAuthn's RP ID must be a valid domain, and
+  // an IP-address origin has none. Reporting only the capability would
+  // be a green light measuring the wrong thing.
+  //
+  // So: derive the RP ID the way a browser does, and say plainly when
+  // the origin disqualifies itself before any prompt appears.
+  const host = location.hostname;
+  const isIp =
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":") || host.startsWith("[");
+  env.append(
+    row(
+      "origin usable for passkeys",
+      !isIp,
+      isIp
+        ? `no — ${host} is an IP, and WebAuthn needs a domain`
+        : `yes — rp.id would be ${host}`,
+    ),
+  );
+  if (isIp) {
+    $("envnote2").textContent =
+      "Passkeys need a hostname, not an IP. This certificate already covers " +
+      "the .local and MagicDNS names, so reaching the same server by name " +
+      "is enough — no re-mint required.";
+  }
+
   // Registering is the real test — the API can exist and still refuse
   // outside a secure context.
   if ("serviceWorker" in navigator) {

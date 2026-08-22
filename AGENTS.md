@@ -538,11 +538,29 @@ is expected to go unused — the reasoning above about it being close to
 ceremonial when the client and the authenticator are the same phone
 applies with more force once that phone can do Face ID instead.
 
-One caveat kept separate from the measurement: iOS grants *standalone
-PWA install* and *web push* from Safari specifically. The capability
-probe above was not confirmed to be running in Safari, so install and
-push remain unverified even though the secure context they depend on is
-not.
+**The origin must be a hostname, not an IP.** WebAuthn's RP ID is
+required to be a valid domain, and an IP-address origin has none — so
+`https://100.64.x.x:8420` cannot register a passkey however capable the
+device is. This is a trap worth naming because
+`isUserVerifyingPlatformAuthenticatorAvailable()` answers "does this
+DEVICE have an authenticator" and reports `true` on exactly the origin
+that cannot use one. The first version of the probe reported only that
+flag, which is a green light measuring the wrong thing — the same shape
+of error as the port-based `Host` check. It now derives the RP ID the
+way a browser would and says so when the origin disqualifies itself.
+
+The minted certificate already covers the `.local` and MagicDNS names,
+so reaching the same server by name is enough; no re-mint is needed.
+
+Two further caveats kept separate from the measurement rather than
+folded into it:
+
+- iOS grants *standalone PWA install* and *web push* from Safari
+  specifically, and the probe was not confirmed to be running in Safari.
+  The secure context they depend on is proven; install and push are not.
+- Android reaches passkeys through the same standard, but a
+  user-installed CA sits in Android's *user* trust store, which Chrome
+  honours for browsing. That path is untested here.
 
 Still open at the HTTP layer, recorded so they are not rediscovered:
 login needs the throttle wired with persistent state; mutations need an
