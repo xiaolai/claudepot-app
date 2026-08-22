@@ -31,18 +31,46 @@ LEAF_CRT="$DATA_DIR/remote-cert.pem"
 LEAF_DAYS=397
 CA_DAYS=3650
 
+short="$(hostname -s)"
+
+# Tailscale PRETTY-PRINTS this JSON: `"MagicDNSSuffix": "example.internal"`,
+# with a space after the colon. The first version of this matched
+# `"MagicDNSSuffix":"` and silently derived nothing, so the script
+# aborted on a machine that had a perfectly good suffix. Tolerate any
+# whitespace.
+suffix="$(tailscale status --json 2>/dev/null \
+  | grep -oE '"MagicDNSSuffix"[[:space:]]*:[[:space:]]*"[^"]*"' \
+  | head -1 \
+  | sed -E 's/.*"([^"]*)"$/\1/')"
+suffix="${suffix%.}"
+
 host="${1:-}"
 if [ -z "$host" ]; then
-  host="$(hostname -s).$(tailscale status --json 2>/dev/null \
-    | sed -n 's/.*"MagicDNSSuffix":"\([^"]*\)".*/\1/p')"
-  host="${host%.}"
+  if [ -n "$suffix" ]; then
+    host="$short.$suffix"
+  else
+    # mDNS: resolvable from any phone on the LAN with no DNS setup at
+    # all, and accepted by the server's Host guard. A better default
+    # than failing.
+    host="$short.local"
+  fi
 fi
-[ -z "${host#*.}" ] && { echo "usage: $0 <hostname>  (could not derive one)" >&2; exit 1; }
 
 # Both a DNS name and the tailnet IP: a user may reach either, and a
 # certificate without a matching SAN fails with a message that blames
 # the connection rather than the certificate.
 ts_ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+
+# Every name the appliance may be reached by, because a certificate
+# without a matching SAN fails with a message that blames the
+# connection rather than the certificate. Cheap to add, expensive to
+# diagnose when missing.
+alt_names="$host"
+case "$host" in
+  *.local) ;;
+  *) alt_names="$alt_names,DNS:$short.local" ;;
+esac
+[ -n "$suffix" ] && [ "$host" != "$short.$suffix" ] && alt_names="$alt_names,DNS:$short.$suffix"
 
 mkdir -p "$DATA_DIR"
 chmod 700 "$DATA_DIR"
@@ -61,7 +89,11 @@ else
 fi
 
 san="DNS:$host"
+# `alt_names` is "$host[,DNS:extra...]"; append only the extras.
+case "$alt_names" in *,*) san="$san,${alt_names#*,}" ;; esac
 [ -n "$ts_ip" ] && san="$san,IP:$ts_ip"
+# Loopback too, so one certificate also covers local testing.
+san="$san,IP:127.0.0.1,DNS:localhost"
 echo "==> minting a leaf for $san (${LEAF_DAYS}d)"
 
 tmp="$(mktemp -d)"

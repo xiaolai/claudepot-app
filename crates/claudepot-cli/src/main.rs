@@ -104,12 +104,12 @@ enum Commands {
         #[command(subcommand)]
         action: MigrateAction,
     },
-    /// Manage CC session transcripts (move between projects, rescue orphans)
-    /// The LAN remote-control surface (server, password, sessions).
+    /// The LAN remote-control surface (server, password, sessions)
     Remote {
         #[command(subcommand)]
         action: RemoteAction,
     },
+    /// Manage CC session transcripts (move between projects, rescue orphans)
     Session {
         #[command(subcommand)]
         action: SessionAction,
