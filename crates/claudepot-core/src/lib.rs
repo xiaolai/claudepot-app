@@ -115,6 +115,7 @@ pub mod protected_paths;
 pub(crate) mod proxy;
 pub mod redaction;
 pub mod release_channel;
+pub mod remote;
 pub mod resolve;
 pub mod retention;
 pub mod rotation;

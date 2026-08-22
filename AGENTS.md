@@ -139,9 +139,9 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   `preferences.json`, `usage-snapshot.json`, `usage_alert_state.json`,
   `agent-events.json`, … — again, the data-dir joins in source are
   authoritative). Stores backed by `claudepot-core::json_store` (the
-  seven below plus `agent-events.json`) move a corrupt file aside to a
+  eight below plus `agent-events.json`) move a corrupt file aside to a
   timestamped `<name>.corrupt.<unix-ts>` and start empty — never
-  fatal at boot. Eight carry behavior worth documenting here:
+  fatal at boot. Nine carry behavior worth documenting here:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -184,6 +184,19 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     `permission-grants.json` this store **fails loud** on corruption —
     it is the only thing obliging anything to close the window. Empty
     file or no grant = feature off. See "## Peer messaging".
+  - `remote-devices.json` — paired devices for the remote-control
+    surface. `{schema_version, devices: [...], pending: {...}|null}`.
+    Owned by `claudepot-core::remote::store`. Holds a SHA-256 of each
+    device token and **never the token itself** — there is a test
+    asserting the plaintext never reaches disk. **This is the
+    revocation list**, which is why the store fails loud on corruption:
+    a silent reset would not just lose the device list (that fails
+    closed, safely — nothing authenticates until re-paired) but erase
+    `revoked_at` for every device that was turned off, and a revoked
+    token stays refused *only* because its record is still here. At
+    most one `pending` pairing window: two live codes double the
+    guessing surface for no benefit. Empty file = no paired devices.
+    See "## Remote control".
   - `pricing-history.json` — observed model-rate changes.
     `{schema_version, observations: [...]}`, appended (never
     overwritten) when a live pricing scrape reports a rate that
@@ -369,6 +382,67 @@ alone. The deadline obliges Claudepot to stop holding the door open, not
 to force it shut on the user's own choice. Every CLI entry point calls
 `ops::tick` first, so a window whose deadline passed while the GUI was
 closed still closes.
+
+## Remote control (loopback + Tailscale, no LAN listener)
+
+Reaching Claudepot from a phone. Pure logic in
+`claudepot-core::remote` (`token` / `store` + the pairing state
+machine in `mod`).
+
+**The transport decision, because it is easy to get wrong twice:**
+Claudepot binds **127.0.0.1 only** and is exposed to the user's other
+machines with `tailscale serve`. It never listens on a LAN interface.
+
+A LAN-bound port here would be remote code execution on the machine —
+the surface can inject prompts into sessions, some running
+`bypassPermissions` — gated only by hand-rolled auth, and reachable by
+every guest device and IoT bulb on the subnet. The failure mode also
+runs the wrong way: a LAN server that loses its auth is *still
+listening*, whereas a loopback server with Tailscale down is simply
+unreachable. Fails closed.
+
+It is also the only option that *works*. `http://` on a private IP is
+not a secure context in any browser, so no service worker, no PWA
+install, no web push — a LAN server cannot deliver the client it exists
+for. Tailscale Serve terminates TLS on a real `*.ts.net` certificate,
+which makes the phone client an installable PWA. Use `serve`, never
+`funnel`: one word apart, and Funnel publishes to the open internet.
+
+**Tailscale identity is not authentication here.** Binding loopback
+means any *local* process can reach the port and forge the
+`Tailscale-User-*` headers the proxy injects. Those headers say which
+tailnet user; only a paired device token says which device. Treating
+the headers as authn would make every local process a client.
+
+**Two secrets, opposite threat models** — getting these backwards is
+the failure the module is shaped to prevent:
+
+| | Device token | Pairing code |
+|---|---|---|
+| Origin | machine, 256 bits | human retypes 8 chars |
+| Lifetime | until revoked | 3 minutes |
+| Defence | never stored recoverably (SHA-256 of it, and a test asserts the plaintext never reaches disk) | expiry + a 5-attempt cap + single use |
+
+SHA-256 rather than Argon2 is deliberate, not lazy: Argon2 exists to
+make brute-forcing *low-entropy human passwords* expensive, and a
+256-bit machine token has nothing to brute force. The low-entropy
+secret here is the pairing code, and it is defended by the controls
+that actually apply to it. Randomness comes from `Uuid::new_v4`
+(`getrandom`-backed); pulling in `rand` for 32 bytes does not clear the
+dependency-hygiene bar, and `subtle` does not clear it for a five-line
+constant-time compare.
+
+`judge_pairing` returns the rejection **and the record as it should now
+be stored**, so the caller must write back the incremented attempt
+counter. A version returning only a verdict would leave `attempts`
+un-incremented on the losing path — which is exactly what turns an
+eight-character code into a password.
+
+**Revocation sets `revoked_at`; it never deletes the row.** A deleted
+device is merely unknown, and an unknown token could pair again as
+"new" if replayed; a revoked one is refused. That is also why
+`remote-devices.json` fails loud on corruption — see its entry in the
+data-dir list.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 
