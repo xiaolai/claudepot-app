@@ -107,9 +107,43 @@ pub fn tick(now: DateTime<Utc>) -> Result<Decision, GrantError> {
 
 /// Current state without changing anything. For read-only surfaces.
 pub fn status(now: DateTime<Utc>) -> Result<Decision, GrantError> {
+    Ok(state(now)?.decision)
+}
+
+/// Everything a surface needs to describe the gate honestly.
+///
+/// `decision` alone is not enough. When the setting says `accept` but no
+/// grant record exists, `decide` returns `Idle` — correct, because
+/// Claudepot must not revert a value the user set themselves — and a UI
+/// rendering only that would report "closed" while the door stands open.
+/// `observed` is what makes the unmanaged case visible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InboundState {
+    pub decision: Decision,
+    pub observed: ModeValue,
+}
+
+impl InboundState {
+    /// Peer messages are being delivered without asking, whoever
+    /// arranged it.
+    pub fn is_open(&self) -> bool {
+        self.observed.valid() == Some(InboundMode::Accept)
+    }
+
+    /// Open, but not by a grant Claudepot is holding a deadline on —
+    /// so nothing will close it. Worth saying out loud in any UI.
+    pub fn is_unmanaged_open(&self) -> bool {
+        self.is_open() && !matches!(self.decision, Decision::Active { .. })
+    }
+}
+
+pub fn state(now: DateTime<Utc>) -> Result<InboundState, GrantError> {
     let grant = load_grant()?;
     let observed = settings::read_mode()?;
-    Ok(decide(grant.as_ref(), &observed, now))
+    Ok(InboundState {
+        decision: decide(grant.as_ref(), &observed, now),
+        observed,
+    })
 }
 
 fn load_grant() -> Result<Option<InboundGrant>, GrantError> {
@@ -317,5 +351,61 @@ mod tests {
             ModeValue::Valid(InboundMode::Accept)
         );
         assert!(load_grant().unwrap().is_some());
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn isolated() -> (TempDir, std::sync::MutexGuard<'static, ()>) {
+        let lock = crate::testing::lock_data_dir();
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("config-dir");
+        let data = tmp.path().join("data-dir");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &config);
+        std::env::set_var("CLAUDEPOT_DATA_DIR", &data);
+        fs::write(config.join("settings.json"), r#"{"model":"opus"}"#).unwrap();
+        (tmp, lock)
+    }
+
+    fn now() -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(2026, 8, 22, 10, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn a_closed_gate_is_neither_open_nor_unmanaged() {
+        let (_t, _l) = isolated();
+        let st = state(now()).unwrap();
+        assert!(!st.is_open());
+        assert!(!st.is_unmanaged_open());
+    }
+
+    #[test]
+    fn a_granted_window_is_open_and_managed() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(1), None, now()).unwrap();
+        let st = state(now()).unwrap();
+        assert!(st.is_open());
+        assert!(!st.is_unmanaged_open(), "a live grant IS managed");
+    }
+
+    #[test]
+    fn accept_set_by_hand_reads_as_open_but_unmanaged() {
+        let (_t, _l) = isolated();
+        // No grant record — the user did this themselves.
+        settings::write_mode(InboundMode::Accept).unwrap();
+        let st = state(now()).unwrap();
+        assert_eq!(st.decision, Decision::Idle);
+        assert!(
+            st.is_open() && st.is_unmanaged_open(),
+            "the door is open and nothing will close it — a UI that renders \
+             only the decision would report this as closed"
+        );
     }
 }

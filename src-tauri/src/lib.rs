@@ -51,6 +51,7 @@ mod invalidation_orchestrator;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
+mod peer_inbound_orchestrator;
 mod permission_orchestrator;
 mod poller;
 mod pr_orchestrator;
@@ -1330,6 +1331,9 @@ pub fn run() {
             commands::rotation::rotation_pending_list,
             commands::rotation::rotation_apply_pending,
             commands::rotation::rotation_dismiss_pending,
+            commands::peer_inbound::peer_inbound_state,
+            commands::peer_inbound::peer_inbound_grant,
+            commands::peer_inbound::peer_inbound_revoke,
             commands::permission::permission_list,
             commands::permission::permission_get,
             commands::permission::permission_grant,

@@ -57,7 +57,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub use eval::{decide, Decision};
-pub use ops::{open, revoke, status, tick};
+pub use ops::{open, revoke, state, status, tick, InboundState};
 pub use settings::{clear_mode, read_mode, write_mode, InboundSettingsError};
 pub use store::{grant_path, load, save, GRANT_FILENAME};
 

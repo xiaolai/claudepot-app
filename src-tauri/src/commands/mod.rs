@@ -64,6 +64,7 @@ pub mod memory;
 pub mod memory_health;
 pub mod migrate;
 pub mod notification;
+pub mod peer_inbound;
 pub mod permission;
 pub mod preferences;
 pub mod pricing;

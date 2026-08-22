@@ -135,6 +135,14 @@ pub mod codes {
     pub const PERMISSION_DURATION_OUT_OF_RANGE: &str = "permission.duration_out_of_range";
     /// A permission mode string Claudepot will not grant.
     pub const PERMISSION_UNKNOWN_MODE: &str = "permission.unknown_mode";
+    /// A renderer-supplied remote-control window duration outside the
+    /// guard-rail range.
+    pub const PEER_INBOUND_DURATION_OUT_OF_RANGE: &str = "peer_inbound.duration_out_of_range";
+    /// Opening, closing, or reading the remote-control window failed.
+    /// Deliberately one code: every underlying `GrantError` already
+    /// carries a message written for the user, and splitting them here
+    /// would fork that wording.
+    pub const PEER_INBOUND_FAILED: &str = "peer_inbound.failed";
     /// Revert / extend targeted a project with no Claudepot grant. A
     /// project elevated by hand-editing settings lands here, and that
     /// is the point — Claudepot does not revert someone's own choice.

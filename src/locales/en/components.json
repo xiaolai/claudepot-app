@@ -266,5 +266,11 @@
     "copyValue": "Copy {{text}}",
     "contextMenu": "Context menu",
     "breadcrumb": "Breadcrumb"
+  },
+  "remoteWindow": {
+    "open": "remote {{minutes}}m",
+    "openHint": "Remote control is open for {{minutes}} more minutes. While open, any local process that can reach a session can send it prompts without asking you. Claudepot closes this automatically.",
+    "unmanaged": "remote open",
+    "unmanagedHint": "Cross-session messages are being accepted, and no Claudepot grant is minding it — nothing will close it automatically. Set it back to hold in Claude Code's settings, or open a time-boxed window instead."
   }
 }

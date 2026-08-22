@@ -3,6 +3,7 @@ import { i18n } from "../lib/i18n";
 import { useSessionLive } from "../hooks/useSessionLive";
 import { RunningOpsChip } from "../components/RunningOpsChip";
 import { PendingJournalsChip } from "../components/PendingJournalsChip";
+import { RemoteWindowChip } from "../components/RemoteWindowChip";
 import { ServiceStatusDot } from "./ServiceStatusDot";
 import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
@@ -207,6 +208,9 @@ export function AppStatusBar({
               onReopen={onReopenOp}
             />
           )}
+          {/* Self-decides visibility from its own state, so it is a
+              sibling rather than sharing another chip's condition. */}
+          <RemoteWindowChip />
           {hasPending && onOpenRepair && (
             <PendingJournalsChip
               summary={pendingSummary ?? null}
