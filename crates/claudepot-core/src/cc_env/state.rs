@@ -680,7 +680,8 @@ mod tests {
                 0 => json!(format!("sk-ant-{MARKER}")),
                 1 => json!([format!("bearer {MARKER}")]),
                 2 => json!({ "Authorization": format!("Bearer {MARKER}") }),
-                _ => json!(format!("{MARKER}")),
+                // The bare marker: no wrapper, same canary.
+                _ => json!(MARKER),
             };
             env.insert(v.name.clone(), value);
         }
