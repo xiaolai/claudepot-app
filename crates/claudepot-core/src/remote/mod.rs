@@ -48,6 +48,7 @@
 pub mod assets;
 pub mod bind;
 pub mod config;
+pub mod idempotency;
 pub mod login;
 pub mod password;
 pub mod serve;

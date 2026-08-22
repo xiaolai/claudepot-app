@@ -217,6 +217,7 @@ pub async fn serve_cmd(ctx: &AppContext) -> Result<()> {
         config: cfg,
         devices,
         persist: Box::new(FilePersist),
+        idempotency: claudepot_core::remote::idempotency::Idempotency::new(),
     }));
 
     let (_listener, info) = serve::listen(&server_cfg).await?;

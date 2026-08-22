@@ -32,7 +32,7 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{Path, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -44,6 +44,7 @@ use tokio::sync::Mutex;
 
 use super::assets;
 use super::config::RemoteConfigFile;
+use super::idempotency::{Idempotency, Lookup, Stored};
 use super::login::{self, LoginOutcome};
 use super::{authenticate, Device, DevicesFile};
 
@@ -56,6 +57,9 @@ pub struct AppState {
     pub devices: DevicesFile,
     /// Where to persist. Injected so tests never touch a real data dir.
     pub persist: Box<dyn Persist>,
+    /// Replay guard for mutations. In memory — see the module docs on
+    /// `idempotency` for why that is the right lifetime.
+    pub idempotency: Idempotency,
 }
 
 /// Persistence, injected. The HTTP layer must not know where the files
@@ -108,6 +112,21 @@ pub fn router(state: Shared) -> Router {
 
     let private = Router::new()
         .route("/api/me", get(me))
+        // Sessions are addressed by session_id, never by pid. A pid is
+        // recycled, and a list fetched by a phone before that happened
+        // would silently retarget — the existing procStart/session_id
+        // guards stop delivery to the wrong *process*, but cannot see a
+        // stale *intent*.
+        .route("/api/sessions", get(list_sessions))
+        .route("/api/sessions/{session_id}/prompt", post(send_prompt))
+        // Status and revoke only. Opening the gate remotely would let
+        // one bearer both open it and send through it, collapsing CC's
+        // held-for-approval step into a single action controlled by one
+        // stolen token — and the setting is machine-wide, so it would
+        // unblock every unrelated local peer too. Remote may always make
+        // the machine safer, never less safe.
+        .route("/api/inbound", get(inbound_status))
+        .route("/api/inbound/revoke", post(inbound_revoke))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     public
@@ -418,6 +437,7 @@ mod tests {
             },
             devices: DevicesFile::default(),
             persist,
+            idempotency: Idempotency::new(),
         }))
     }
 
@@ -687,6 +707,193 @@ mod tests {
         ] {
             h.insert(header::AUTHORIZATION, raw.parse().unwrap());
             assert_eq!(bearer_from(&h).as_deref(), want, "{raw:?}");
+        }
+    }
+}
+
+// ── The real endpoints ──────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct SessionDto {
+    session_id: String,
+    name: Option<String>,
+    cwd: String,
+    status: Option<String>,
+    /// Present for display only. **Never** an address: see the route
+    /// comment on why a pid cannot be a stable handle.
+    pid: u32,
+}
+
+async fn list_sessions() -> Response {
+    let dir = crate::session_live::registry::default_sessions_dir();
+    let sessions = match crate::peer::list_addressable(&dir) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "remote: cannot list sessions");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal");
+        }
+    };
+    let rows: Vec<SessionDto> = sessions
+        .into_iter()
+        .map(|a| SessionDto {
+            session_id: a.record.session_id.clone(),
+            name: a.record.name.clone(),
+            cwd: a.record.cwd.clone(),
+            status: a.record.status.clone(),
+            pid: a.record.pid,
+        })
+        .collect();
+    (StatusCode::OK, Json(rows)).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct PromptRequest {
+    text: String,
+    /// `now` | `next` | `later`. Unknown values fall back to CC's own
+    /// default rather than erroring — a client on an older build should
+    /// still be able to send.
+    #[serde(default)]
+    priority: Option<String>,
+}
+
+async fn send_prompt(
+    State(state): State<Shared>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<PromptRequest>,
+) -> Response {
+    let key = headers
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+
+    // A mutation without a key is refused rather than quietly executed:
+    // this is the endpoint where a retry does the work twice, and a
+    // client that has not thought about that should be told.
+    if key.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "idempotency_key_required");
+    }
+
+    let now = std::time::Instant::now();
+    {
+        let mut guard = state.lock().await;
+        match guard.idempotency.lookup(&key, now) {
+            Lookup::Replay(prev) => {
+                return (
+                    StatusCode::from_u16(prev.status).unwrap_or(StatusCode::OK),
+                    [(header::CONTENT_TYPE, "application/json")],
+                    prev.body,
+                )
+                    .into_response();
+            }
+            Lookup::Rejected(_) => {
+                return err(StatusCode::BAD_REQUEST, "bad_idempotency_key");
+            }
+            Lookup::Execute => {}
+        }
+    }
+
+    let dir = crate::session_live::registry::default_sessions_dir();
+    let (status, payload) = match do_send(&dir, &session_id, &body).await {
+        Ok(v) => (StatusCode::ACCEPTED, v),
+        Err((s, code)) => (s, serde_json::json!({ "error": code })),
+    };
+    let body_text = payload.to_string();
+
+    state.lock().await.idempotency.remember(
+        &key,
+        Stored {
+            status: status.as_u16(),
+            body: body_text.clone(),
+        },
+        now,
+    );
+
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json")],
+        body_text,
+    )
+        .into_response()
+}
+
+/// Resolve, address, send. Split out so the handler stays about HTTP.
+async fn do_send(
+    dir: &std::path::Path,
+    session_id: &str,
+    body: &PromptRequest,
+) -> Result<serde_json::Value, (StatusCode, &'static str)> {
+    if body.text.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "empty_prompt"));
+    }
+    let candidates = crate::peer::list_addressable(dir)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "internal"))?;
+
+    // Exact session id only. `peer::resolve` also accepts a pid and a
+    // name prefix, which is right for a human at a terminal and wrong
+    // here: a stale handle must fail, not retarget.
+    let chosen = candidates
+        .iter()
+        .find(|a| a.record.session_id == session_id)
+        .ok_or((StatusCode::GONE, "session_gone"))?;
+
+    let target = crate::peer::PeerTarget::from_record(&chosen.record)
+        .map_err(|_| (StatusCode::CONFLICT, "session_not_addressable"))?;
+
+    let priority = match body.priority.as_deref() {
+        Some("now") => crate::peer::Priority::Now,
+        Some("later") => crate::peer::Priority::Later,
+        _ => crate::peer::Priority::Next,
+    };
+
+    let handoff = crate::peer::send_prompt(&target, dir, &body.text, priority)
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "remote: send_prompt failed");
+            (StatusCode::BAD_GATEWAY, "send_failed")
+        })?;
+
+    // 202, and the wording is "handed off". Claude Code may still hold
+    // this for the local user's approval, and a surface that reported
+    // "sent" would be claiming something it cannot know.
+    Ok(serde_json::json!({
+        "outcome": "handed_off",
+        "uuid": handoff.uuid,
+        "session_id": handoff.session_id,
+        "note": "Claude Code may hold this for local approval; it is not necessarily delivered.",
+    }))
+}
+
+async fn inbound_status() -> Response {
+    match crate::peer::inbound::state(Utc::now()) {
+        Ok(st) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "open": st.is_open(),
+                "unmanaged_open": st.is_unmanaged_open(),
+                "record_recovered": st.record_recovered,
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "remote: inbound state failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal")
+        }
+    }
+}
+
+/// Closing the window is always allowed remotely; opening it is not.
+async fn inbound_revoke() -> Response {
+    match crate::peer::inbound::revoke(Utc::now()) {
+        Ok(revoked) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "revoked": revoked.is_some() })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "remote: inbound revoke failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal")
         }
     }
 }

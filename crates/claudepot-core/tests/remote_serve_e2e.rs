@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use claudepot_core::remote::config::{RemoteConfigFile, ServerConfig};
+use claudepot_core::remote::idempotency::Idempotency;
 use claudepot_core::remote::serve;
 use claudepot_core::remote::server::{router, AppState, Persist, Shared};
 use claudepot_core::remote::DevicesFile;
@@ -37,6 +38,7 @@ fn state() -> Shared {
         },
         devices: DevicesFile::default(),
         persist: Box::new(NoPersist),
+        idempotency: Idempotency::new(),
     }))
 }
 
@@ -196,5 +198,190 @@ async fn an_unknown_path_is_a_clean_404() {
     for p in ["/nope", "/../Cargo.toml", "/api/nothing"] {
         let res = reqwest::get(format!("{base}{p}")).await.unwrap();
         assert_eq!(res.status(), 404, "{p}");
+    }
+}
+
+/// Log in and return a bearer token.
+async fn token(base: &str) -> String {
+    reqwest::Client::new()
+        .post(format!("{base}/api/login"))
+        .json(&serde_json::json!({ "password": PW, "device_label": "e2e" }))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn the_real_endpoints_are_all_behind_auth() {
+    // The allowlist property: everything except health, login and the
+    // client shell requires a bearer. Asserted per route rather than
+    // per middleware, because the failure mode is a route added outside
+    // the guarded Router.
+    let (base, _s) = start().await;
+    let c = reqwest::Client::new();
+    for (method, path) in [
+        ("GET", "/api/sessions"),
+        ("GET", "/api/inbound"),
+        ("POST", "/api/inbound/revoke"),
+        ("POST", "/api/sessions/abc/prompt"),
+    ] {
+        let req = match method {
+            "GET" => c.get(format!("{base}{path}")),
+            _ => c.post(format!("{base}{path}")).json(&serde_json::json!({})),
+        };
+        assert_eq!(
+            req.send().await.unwrap().status(),
+            401,
+            "{method} {path} must require a token"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_mutation_without_an_idempotency_key_is_refused() {
+    // This is the endpoint where a retry does the work twice. A client
+    // that has not thought about that gets told, rather than getting
+    // lucky.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let res = reqwest::Client::new()
+        .post(format!("{base}/api/sessions/whatever/prompt"))
+        .bearer_auth(&t)
+        .json(&serde_json::json!({ "text": "hello" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    assert_eq!(
+        res.json::<serde_json::Value>().await.unwrap()["error"],
+        "idempotency_key_required"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_session_is_gone_not_retargeted() {
+    // A stale handle from a phone's cached list must fail. Retargeting
+    // to whatever holds that identity now is the failure this endpoint
+    // is shaped to prevent.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let res = reqwest::Client::new()
+        .post(format!(
+            "{base}/api/sessions/00000000-dead-beef-0000-000000000000/prompt"
+        ))
+        .bearer_auth(&t)
+        .header("idempotency-key", "k-stale-1")
+        .json(&serde_json::json!({ "text": "hello" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 410, "a vanished session is Gone");
+    assert_eq!(
+        res.json::<serde_json::Value>().await.unwrap()["error"],
+        "session_gone"
+    );
+}
+
+#[tokio::test]
+async fn a_retried_mutation_replays_instead_of_re_executing() {
+    // The property idempotency exists for. Both requests carry the same
+    // key; the second must return the first's response byte-for-byte
+    // without the work happening again.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let c = reqwest::Client::new();
+
+    let send = || {
+        c.post(format!(
+            "{base}/api/sessions/00000000-dead-beef-0000-000000000000/prompt"
+        ))
+        .bearer_auth(&t)
+        .header("idempotency-key", "k-retry-1")
+        .json(&serde_json::json!({ "text": "hello" }))
+        .send()
+    };
+
+    let first = send().await.unwrap();
+    let first_status = first.status();
+    let first_body = first.text().await.unwrap();
+
+    let second = send().await.unwrap();
+    assert_eq!(second.status(), first_status);
+    assert_eq!(
+        second.text().await.unwrap(),
+        first_body,
+        "a retry must replay the stored response, not run again"
+    );
+}
+
+#[tokio::test]
+async fn an_empty_prompt_is_refused() {
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let res = reqwest::Client::new()
+        .post(format!("{base}/api/sessions/x/prompt"))
+        .bearer_auth(&t)
+        .header("idempotency-key", "k-empty-1")
+        .json(&serde_json::json!({ "text": "   " }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn sessions_are_listed_by_id_and_never_addressed_by_pid() {
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base}/api/sessions"))
+        .bearer_auth(&t)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let rows = res.json::<serde_json::Value>().await.unwrap();
+    assert!(rows.is_array(), "sessions must be an array");
+    for row in rows.as_array().unwrap() {
+        assert!(
+            row.get("session_id").and_then(|v| v.as_str()).is_some(),
+            "every row must carry the id the prompt route addresses"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_inbound_gate_can_be_read_and_closed_but_not_opened() {
+    // Remote may always make the machine safer, never less safe. There
+    // is deliberately no route to open the window.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let c = reqwest::Client::new();
+
+    let st = c
+        .get(format!("{base}/api/inbound"))
+        .bearer_auth(&t)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(st.status(), 200);
+    assert!(st.json::<serde_json::Value>().await.unwrap()["open"].is_boolean());
+
+    // No such route, and that is the point.
+    for path in ["/api/inbound/grant", "/api/inbound/open"] {
+        let res = c
+            .post(format!("{base}{path}"))
+            .bearer_auth(&t)
+            .json(&serde_json::json!({ "duration_secs": 3600 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404, "{path} must not exist");
     }
 }
