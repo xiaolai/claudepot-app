@@ -7,12 +7,29 @@
 //! is down the surface is simply unreachable rather than quietly
 //! listening.
 //!
-//! It does not do *all* the work, which is why this module exists.
-//! Binding loopback means **any local process** can reach the port and
-//! forge the `Tailscale-User-*` headers the proxy injects. Those
-//! headers say which tailnet user; only a paired device token says
-//! which device. Treating the headers as authentication would make
-//! every local process an authenticated client.
+//! ## What a device token actually defends against — and what it does not
+//!
+//! It authenticates a **remote** device. It does not, and cannot,
+//! defend against arbitrary code running as the same Unix user.
+//!
+//! `remote-devices.json` is owner-writable JSON and `authenticate`
+//! trusts any active record in it, so a same-UID process can simply
+//! insert `SHA256(token_of_its_choosing)` and log in. That is not worth
+//! fixing, because the same process can already read
+//! `~/.claude/sessions/<pid>.<hash>.key` and drive CC's socket directly
+//! without involving Claudepot at all — CC's own boundary here is the
+//! Unix user, as `peer::key`'s docs say. Claudepot adds no exposure it
+//! could take away.
+//!
+//! The honest claim is therefore narrow: this stops *another device*
+//! from acting without pairing, and *a revoked device* from acting at
+//! all. Anything stronger needs a real OS isolation boundary — a
+//! separate UID or a sandbox — not a bearer token. Do not write
+//! documentation or UI copy implying otherwise.
+//!
+//! The `Tailscale-User-*` headers a proxy might inject are likewise not
+//! authentication: a local process can forge them. They say which
+//! tailnet user, never which device.
 //!
 //! ## Pairing
 //!
@@ -28,13 +45,16 @@
 //! pair again as a "new" device if it were ever replayed, and would
 //! erase the audit trail of what had been let in.
 
+pub mod bind;
 pub mod store;
+pub mod tls;
 pub mod token;
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use bind::{check as check_bind, BindAddr, BindRefusal};
 pub use store::{devices_path, load, save, DEVICES_FILENAME};
 pub use token::{new_device_token, new_pairing_code, NewToken};
 

@@ -48,6 +48,11 @@ typescript
 !/scripts/regen-icons.sh
 !/scripts/pre-push
 !/scripts/install-hooks.sh
+# Mints the TLS material for the remote surface. `remote::tls`'s
+# fail-closed errors name this path as the remedy, and AGENTS.md
+# documents it — an ignored script would point committed error messages
+# at a file a fresh clone does not have.
+!/scripts/mint-remote-cert.sh
 # Local CI gate + its shared invariant checks. repo-invariants.sh is
 # invoked by .github/workflows/ci.yml, so it MUST be committed.
 !/scripts/preflight.sh

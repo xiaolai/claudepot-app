@@ -43,9 +43,13 @@ use uuid::Uuid;
 /// around instead, which is a worse outcome than a shorter alphabet.
 const CODE_ALPHABET: &[u8] = b"ACDEFGHJKMNPQRTUVWXY346789";
 
-/// Characters in a pairing code. With a 26-letter alphabet this is
-/// ~37.6 bits — meaningless on its own, which is why `MAX_ATTEMPTS`
+/// Characters in a pairing code. With a 26-symbol alphabet this is
+/// ~37.6 bits — meaningless on its own, which is why `MAX_CODE_ATTEMPTS`
 /// and the expiry below are load-bearing rather than belt-and-braces.
+///
+/// That figure is only true because `random_bytes` discards the UUID
+/// bytes whose bits are fixed; consuming them cost 0.7 bits and a whole
+/// symbol position. See `random_bytes`.
 pub const CODE_LEN: usize = 8;
 
 /// Wrong guesses before a pairing code is destroyed.
@@ -54,10 +58,24 @@ pub const MAX_CODE_ATTEMPTS: u32 = 5;
 /// A freshly minted device token. The plaintext exists **only** in this
 /// value and is shown to the user exactly once; the store keeps the
 /// hash. Losing it means re-pairing, which is the correct trade.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NewToken {
     pub plaintext: String,
     pub hash: String,
+}
+
+/// Hand-written so the bearer token cannot reach a log through a
+/// `{:?}`. A derived `Debug` printed it in full, which is one
+/// `tracing::debug!` away from a credential in a log file — and the
+/// only reason it never happened is that nothing had logged this type
+/// yet.
+impl std::fmt::Debug for NewToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewToken")
+            .field("plaintext", &"<redacted>")
+            .field("hash", &self.hash)
+            .finish()
+    }
 }
 
 /// 256 bits of CSPRNG output, hex-encoded.
@@ -72,20 +90,48 @@ pub fn new_device_token() -> NewToken {
     NewToken { plaintext, hash }
 }
 
+/// Indices inside a UUIDv4 whose bits are **not** random: byte 6 has
+/// its high nibble pinned to the version (`0100`), byte 8 has its high
+/// bits pinned to the variant. Feeding those into the alphabet silently
+/// narrows the symbol set at a fixed position.
+const UUID_NON_RANDOM: [usize; 2] = [6, 8];
+
 /// A pairing code drawn from the unambiguous alphabet.
 pub fn new_pairing_code() -> String {
     let mut out = String::with_capacity(CODE_LEN);
-    // 16 bytes per UUID; two cover CODE_LEN comfortably.
-    let mut bytes = Vec::with_capacity(32);
-    bytes.extend_from_slice(Uuid::new_v4().as_bytes());
-    bytes.extend_from_slice(Uuid::new_v4().as_bytes());
-    for b in bytes.iter().take(CODE_LEN) {
-        // Modulo bias across 26 symbols in 256 values is ~1.6% on the
-        // first four symbols. Irrelevant here: the code's security does
-        // not come from its entropy, it comes from expiry plus the
-        // attempt cap. Documented so nobody "fixes" it into a rejection
-        // loop and assumes the code got stronger.
-        out.push(CODE_ALPHABET[*b as usize % CODE_ALPHABET.len()] as char);
+    for b in random_bytes(CODE_LEN) {
+        // Modulo bias: 256 values over 26 symbols gives 22 symbols ten
+        // preimages and four symbols nine — about a 10% relative edge on
+        // the common ones, worth ~0.02 bits overall. Left in
+        // deliberately, and documented so nobody "fixes" it into a
+        // rejection loop believing the code got stronger. The code's
+        // defence is expiry plus the attempt cap, not its entropy.
+        out.push(CODE_ALPHABET[b as usize % CODE_ALPHABET.len()] as char);
+    }
+    out
+}
+
+/// `n` bytes of CSPRNG output, with the structurally-fixed UUID bytes
+/// discarded rather than consumed.
+///
+/// The first version of this took the first `n` bytes of a UUID, which
+/// put byte 6 — the version byte — at character 7 and cut that position
+/// from 26 possible symbols to 16. Support fell from 26^8 to 26^7 x 16:
+/// 36.9 bits rather than the 37.6 the docs claimed. Small in absolute
+/// terms, and entirely invisible: the code still looked random.
+fn random_bytes(n: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(n);
+    while out.len() < n {
+        let uuid = Uuid::new_v4();
+        for (i, b) in uuid.as_bytes().iter().enumerate() {
+            if UUID_NON_RANDOM.contains(&i) {
+                continue;
+            }
+            out.push(*b);
+            if out.len() == n {
+                break;
+            }
+        }
     }
     out
 }
@@ -190,5 +236,64 @@ mod tests {
         assert_eq!(hash_secret("hello"), hash_secret("hello"));
         assert_ne!(hash_secret("hello"), hash_secret("hellp"));
         assert_eq!(hash_secret("hello").len(), 64);
+    }
+}
+
+#[cfg(test)]
+mod entropy_tests {
+    use super::*;
+    use std::collections::{HashMap, HashSet};
+
+    /// Regression for a real defect: taking the first `CODE_LEN` bytes
+    /// of a UUID put the version byte at character 7 and cut that
+    /// position from 26 symbols to 16. Every position must be able to
+    /// produce every symbol.
+    #[test]
+    fn every_character_position_can_produce_every_symbol() {
+        let mut seen: HashMap<usize, HashSet<char>> = HashMap::new();
+        for _ in 0..20_000 {
+            for (i, c) in new_pairing_code().chars().enumerate() {
+                seen.entry(i).or_default().insert(c);
+            }
+        }
+        for i in 0..CODE_LEN {
+            let n = seen[&i].len();
+            assert_eq!(
+                n,
+                CODE_ALPHABET.len(),
+                "position {} produced only {n} of {} symbols — a fixed-bit \
+                 byte is being consumed as randomness",
+                i + 1,
+                CODE_ALPHABET.len()
+            );
+        }
+    }
+
+    #[test]
+    fn random_bytes_never_returns_a_uuid_version_byte_pattern() {
+        // Byte 6 of a UUIDv4 is always 0x4_. If it were being consumed,
+        // one position in every 14 would land in 0x40..=0x4F far more
+        // often than chance.
+        let n = 14_000;
+        let bytes = random_bytes(n);
+        assert_eq!(bytes.len(), n);
+        let pinned = bytes.iter().filter(|b| (**b & 0xF0) == 0x40).count();
+        let expected = n / 16;
+        assert!(
+            pinned < expected * 2,
+            "{pinned} bytes in 0x40..0x4F out of {n} (chance ~{expected}) — \
+             version bytes are leaking into the stream"
+        );
+    }
+
+    #[test]
+    fn a_new_token_debug_does_not_print_the_bearer() {
+        let t = new_device_token();
+        let rendered = format!("{t:?}");
+        assert!(
+            !rendered.contains(&t.plaintext),
+            "NewToken's Debug leaked the bearer token: {rendered}"
+        );
+        assert!(rendered.contains("redacted"));
     }
 }

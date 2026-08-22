@@ -65,7 +65,25 @@ pub fn open(
         expires_at: now + duration,
         reason,
     };
-    persist(Some(grant.clone()))?;
+
+    // If the record cannot be written, put the setting back. The
+    // original comment here claimed the opposite ordering made the
+    // failure "loud" — it does not: `decide` returns `Idle` for an
+    // `accept` it has no grant for, deliberately, so nothing would ever
+    // close it. An unrecorded open window is the worst outcome this
+    // function can produce, and rolling back is the only thing that
+    // actually prevents it.
+    if let Err(e) = persist(Some(grant.clone())) {
+        if let Err(restore_err) = settings::restore(previous.valid()) {
+            tracing::error!(
+                error = %restore_err,
+                "could not roll back crossSessionInbound after failing to \
+                 record the grant — the window is OPEN with nothing minding \
+                 it; close it by hand"
+            );
+        }
+        return Err(e);
+    }
     Ok(grant)
 }
 
@@ -121,6 +139,10 @@ pub fn status(now: DateTime<Utc>) -> Result<Decision, GrantError> {
 pub struct InboundState {
     pub decision: Decision,
     pub observed: ModeValue,
+    /// The grant record was unreadable and has been reset. If the gate
+    /// is also open, nothing is minding it and the user has to close it
+    /// by hand — a surface that hides this is lying about the deadline.
+    pub record_recovered: bool,
 }
 
 impl InboundState {
@@ -132,23 +154,41 @@ impl InboundState {
 
     /// Open, but not by a grant Claudepot is holding a deadline on —
     /// so nothing will close it. Worth saying out loud in any UI.
+    ///
+    /// A recovered record counts even if a `decision` survived it: the
+    /// deadline that decision came from is exactly what was lost.
     pub fn is_unmanaged_open(&self) -> bool {
-        self.is_open() && !matches!(self.decision, Decision::Active { .. })
+        self.is_open()
+            && (self.record_recovered || !matches!(self.decision, Decision::Active { .. }))
     }
 }
 
 pub fn state(now: DateTime<Utc>) -> Result<InboundState, GrantError> {
-    let grant = load_grant()?;
+    let (grant, record_recovered) = load_grant_outcome()?;
     let observed = settings::read_mode()?;
     Ok(InboundState {
         decision: decide(grant.as_ref(), &observed, now),
         observed,
+        record_recovered,
     })
 }
 
 fn load_grant() -> Result<Option<InboundGrant>, GrantError> {
+    Ok(load_grant_outcome()?.0)
+}
+
+/// The grant plus whether the record had to be recovered from a corrupt
+/// file.
+///
+/// The recovery marker used to be discarded here. That is the one place
+/// it must not be: a recovered file means the deadline record is *gone*
+/// while `crossSessionInbound` may still say `accept`, and because
+/// nothing auto-reverts a value it has no grant for, the window would
+/// stay open with no trace of why. Losing it silently is how a
+/// three-minute grant becomes permanent.
+fn load_grant_outcome() -> Result<(Option<InboundGrant>, bool), GrantError> {
     let loaded = store::load().map_err(|e| GrantError::Store(e.to_string()))?;
-    Ok(loaded.value.grant)
+    Ok((loaded.value.grant, loaded.recovery.is_some()))
 }
 
 fn persist(grant: Option<InboundGrant>) -> Result<(), GrantError> {
@@ -407,5 +447,68 @@ mod state_tests {
             "the door is open and nothing will close it — a UI that renders \
              only the decision would report this as closed"
         );
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn isolated() -> (TempDir, std::sync::MutexGuard<'static, ()>) {
+        let lock = crate::testing::lock_data_dir();
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("config-dir");
+        let data = tmp.path().join("data-dir");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &config);
+        std::env::set_var("CLAUDEPOT_DATA_DIR", &data);
+        fs::write(config.join("settings.json"), r#"{"model":"opus"}"#).unwrap();
+        (tmp, lock)
+    }
+
+    fn now() -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(2026, 8, 22, 10, 0, 0).unwrap()
+    }
+
+    /// The window stays open, the deadline record is destroyed, and
+    /// nothing auto-reverts an `accept` it has no grant for. The only
+    /// defence left is saying so — a state that reported "closed" here
+    /// would leave the machine open indefinitely and silently.
+    #[test]
+    fn a_corrupt_record_over_an_open_gate_reads_as_unmanaged() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(2), None, now()).unwrap();
+        fs::write(store::grant_path(), "{ not json").unwrap();
+
+        let st = state(now()).unwrap();
+        assert!(st.record_recovered, "the corruption must be surfaced");
+        assert!(st.is_open(), "the setting is still accept");
+        assert!(
+            st.is_unmanaged_open(),
+            "the deadline is gone, so nothing will close this"
+        );
+    }
+
+    #[test]
+    fn a_healthy_open_window_is_not_flagged_as_recovered() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(2), None, now()).unwrap();
+        let st = state(now()).unwrap();
+        assert!(!st.record_recovered);
+        assert!(!st.is_unmanaged_open());
+    }
+
+    #[test]
+    fn a_closed_gate_with_a_corrupt_record_is_not_open() {
+        let (_t, _l) = isolated();
+        fs::write(store::grant_path(), "{ not json").unwrap();
+        let st = state(now()).unwrap();
+        assert!(st.record_recovered);
+        assert!(!st.is_open(), "no grant was ever applied to the setting");
+        assert!(!st.is_unmanaged_open());
     }
 }

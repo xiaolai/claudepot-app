@@ -444,6 +444,78 @@ device is merely unknown, and an unknown token could pair again as
 `remote-devices.json` fails loud on corruption — see its entry in the
 data-dir list.
 
+**Bind address is the highest-consequence line in the feature**, so it
+is its own module with its own tests (`remote::bind`). The permitted
+set is an **allowlist**: loopback, or `100.64.0.0/10` (the CGNAT range
+Tailscale assigns). Everything else is refused *including the
+machine's own LAN address* — a denylist would have to enumerate every
+way to say "everyone" and would miss the case that matters, because
+`0.0.0.0` at least looks alarming while `192.168.1.42` looks like
+someone thought about it. `BindAddr`'s field is private, so the gate
+cannot be skipped by passing a bare `IpAddr` around. Note `100.x` is
+not automatically Tailscale: `100.0.0.0/10` and `100.128.0.0/9` are
+ordinary public space, and matching on the first octet would allow
+routable addresses.
+
+**TLS is terminated in-process, and four files in the data dir are not
+JSON** (so `verify-docs`'s data-dir check does not see them):
+`remote-cert.pem`, `remote-key.pem` (0600 — `remote::tls` refuses to
+start the server otherwise), plus `remote-ca.crt` and
+`remote-ca-key.pem` for the private CA. Minted by
+`scripts/mint-remote-cert.sh`, which is idempotent: it reuses an
+existing CA so already-trusted devices keep working.
+
+Two constraints in that script are Apple policy rather than taste, and
+both fail with errors that blame something else: a leaf valid for more
+than **398 days** is refused by Safari (hence 397), and the leaf needs
+`extendedKeyUsage=serverAuth` or it is structurally valid and still
+rejected. On iOS, installing the CA profile is only half the job — full
+trust must also be enabled under Settings > General > About >
+Certificate Trust Settings, and skipping it looks exactly like a bug in
+the app.
+
+Missing or unreadable TLS material **stops the server**; it never falls
+back to plain HTTP. A silent downgrade is worse than a refusal — the
+user believes traffic is protected and nothing ever surfaces that it
+is not.
+
+### The endpoint policy, after an adversarial review
+
+The remote surface is a hand-written allowlist. Four rules came out of
+a refute-mode review and each exists because the obvious design failed
+a specific check:
+
+- **Remote may revoke the `crossSessionInbound` grant. It may not open
+  one.** Otherwise the same bearer opens the gate *and* sends the
+  prompt, which collapses CC's held-for-local-approval step into one
+  action controlled by one stolen token — and the grant is machine-wide,
+  so it also unblocks every unrelated local peer, not just the calling
+  device. The 12-hour cap does not save this; it is renewable and was
+  never a safety property. Opening requires local presence. The general
+  rule: **remote may always make the machine safer, never less safe.**
+- **Sessions are addressed by `session_id`, never by pid.** The
+  `procStart` and `session_id` guards in `peer` already stop delivery to
+  the wrong *process*, but they cannot see the phone's stale *intent*: a
+  list fetched before a pid was recycled would resolve to whatever holds
+  that pid now. A stale handle must fail, not retarget.
+- **Transcript streaming is a secret-bearing endpoint** and the
+  allowlist must not be described as "nothing that touches a secret".
+  Transcripts carry prompts, tool output, and file contents, and
+  `session_live::redact` is explicitly incomplete — it knowingly passes
+  GitHub PATs and AWS keys. Treat it as full-secret access.
+- **A bearer token defends against other devices, not against local
+  code.** See `remote`'s module docs: a same-UID process can write its
+  own device record, and can already drive CC's socket without
+  Claudepot. Claiming otherwise in docs or UI copy is the finding.
+
+Still open at the HTTP layer, recorded so they are not rediscovered:
+pairing needs a lock (the attempt cap is not transactional across
+concurrent requests, and an unauthenticated local caller can burn every
+pairing window); mutations need an idempotency key (mobile retries
+re-execute); streams must close on revocation, not merely refuse the
+next request; and `Host`/`Origin` must be checked before any state
+changes, or DNS rebinding burns pairing attempts.
+
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 
 Optional feature: a fully-local named-secret vault plus
