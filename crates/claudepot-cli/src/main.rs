@@ -1222,6 +1222,28 @@ async fn main() -> Result<()> {
             .with_writer(std::io::stderr)
             .with_ansi(false)
             .init();
+    } else if matches!(
+        cli.command,
+        Commands::Remote {
+            action: RemoteAction::Serve
+        }
+    ) {
+        // A long-running foreground server whose logs ARE the feedback
+        // channel. Without this it printed nothing at all — no accepted
+        // connection, no TLS handshake failure — so "I cannot connect"
+        // was indistinguishable from "nothing ever arrived", which is
+        // exactly the question the user needs answered.
+        //
+        // `claudepot_core` rather than `claudepot`: the server lives in
+        // core, and the CLI's usual `claudepot=debug` default does not
+        // name it.
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("claudepot_core::remote=info"));
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .init();
     } else if matches!(cli.command, Commands::Mcp { .. }) {
         // MCP subcommand always installs a stderr-pinned subscriber
         // (even without --verbose) so deep-stack `tracing::warn!` from

@@ -176,18 +176,30 @@ pub async fn serve(config: &ServerConfig, app: axum::Router) -> Result<(), Serve
         };
         let acceptor = acceptor.clone();
         let app = app.clone();
+        tracing::info!(%peer, "connection");
         tokio::spawn(async move {
             let tls_stream = match acceptor.accept(stream).await {
                 Ok(s) => s,
                 Err(e) => {
-                    // The common case is a plaintext request to a TLS
-                    // port — a browser typed `http://`. Logged at debug
-                    // because it is a user error, not a server fault,
-                    // and it must never be answered in plaintext.
-                    tracing::debug!(%peer, error = %e, "remote: TLS handshake failed");
+                    // Originally `debug!`, on the reasoning that a
+                    // plaintext request to a TLS port is user error
+                    // rather than a server fault. That was wrong for an
+                    // appliance: a failed handshake is precisely what
+                    // the person staring at "Safari cannot open the
+                    // page" needs to see, and the most likely causes —
+                    // `http://` instead of `https://`, or a CA the
+                    // device does not trust — are both fixable once
+                    // named. Never answered in plaintext either way.
+                    tracing::warn!(
+                        %peer,
+                        error = %e,
+                        "TLS handshake failed — the client may have used http:// \
+                         instead of https://, or may not trust this CA"
+                    );
                     return;
                 }
             };
+            tracing::info!(%peer, "TLS established");
             // The Router is a tower Service; hyper wants its own trait.
             let svc = TowerToHyperService::new(app);
             let _ = ConnBuilder::new(TokioExecutor::new())
