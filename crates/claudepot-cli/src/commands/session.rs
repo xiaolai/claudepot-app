@@ -97,6 +97,6 @@ pub use orphan::{
 pub use prune::{prune_cmd, PruneArgs};
 pub use redact::{redact_cmd, RedactArgs};
 pub use search::{search_cmd, worktrees_cmd};
-pub use send::{live_cmd, send_cmd};
+pub use send::{inbound_grant_cmd, inbound_revoke_cmd, inbound_status_cmd, live_cmd, send_cmd};
 pub use slim::{slim_cmd, SlimArgs};
 pub use trash::{trash_empty_cmd, trash_list_cmd, trash_restore_cmd};

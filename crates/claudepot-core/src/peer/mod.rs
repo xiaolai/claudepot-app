@@ -151,6 +151,7 @@
 
 pub mod client;
 pub mod discover;
+pub mod inbound;
 pub mod key;
 pub mod outcome;
 pub mod wire;

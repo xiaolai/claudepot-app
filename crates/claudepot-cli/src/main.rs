@@ -431,6 +431,27 @@ enum UpdateAction {
 }
 
 #[derive(Subcommand)]
+enum InboundAction {
+    /// Report whether the window is open, and for how much longer.
+    Status,
+    /// Open the window for a bounded time.
+    ///
+    /// While open, peer messages are delivered to your sessions
+    /// without asking. The setting is machine-wide — Claude Code only
+    /// honours `accept` from user scope — so the deadline is the only
+    /// thing containing it. Claudepot reverts automatically.
+    Grant {
+        /// How long to stay open, e.g. `30m`, `2h`. Capped at 12h.
+        duration: String,
+        /// Free-text note recorded with the grant.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Close the window now, restoring whatever the setting held before.
+    Revoke,
+}
+
+#[derive(Subcommand)]
 enum SessionAction {
     /// List projects whose cwd no longer exists on disk (adoption candidates).
     ListOrphans,
@@ -486,6 +507,12 @@ enum SessionAction {
         /// resolution Claude Code uses.
         #[arg(long)]
         claude_config: Option<std::path::PathBuf>,
+    },
+    /// Open, close, or inspect the time-boxed remote-control window
+    /// (Claude Code's `crossSessionInbound`).
+    Inbound {
+        #[command(subcommand)]
+        action: InboundAction,
     },
     /// List running Claude Code sessions that can be addressed over
     /// CC's cross-session inbox. Read-only.
@@ -1579,6 +1606,13 @@ async fn main() -> Result<()> {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
             SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
+            SessionAction::Inbound { action } => match action {
+                InboundAction::Status => commands::session::inbound_status_cmd(&ctx)?,
+                InboundAction::Grant { duration, reason } => {
+                    commands::session::inbound_grant_cmd(&ctx, &duration, reason.as_deref())?
+                }
+                InboundAction::Revoke => commands::session::inbound_revoke_cmd(&ctx)?,
+            },
             SessionAction::Live => commands::session::live_cmd(&ctx)?,
             SessionAction::Send {
                 target,

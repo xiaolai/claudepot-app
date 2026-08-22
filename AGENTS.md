@@ -139,9 +139,9 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   `preferences.json`, `usage-snapshot.json`, `usage_alert_state.json`,
   `agent-events.json`, … — again, the data-dir joins in source are
   authoritative). Stores backed by `claudepot-core::json_store` (the
-  six below plus `agent-events.json`) move a corrupt file aside to a
+  seven below plus `agent-events.json`) move a corrupt file aside to a
   timestamped `<name>.corrupt.<unix-ts>` and start empty — never
-  fatal at boot. Seven carry behavior worth documenting here:
+  fatal at boot. Eight carry behavior worth documenting here:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -170,6 +170,20 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     Owned by `claudepot-core::permission::store`. The orchestrator
     reverts expired grants each `usage_snapshot::run_tick`. Empty
     file or no grants = feature off. See "## Permission grants".
+  - `peer-inbound-grant.json` — the single open remote-control window.
+    `{schema_version, grant: {...}|null}`. Owned by
+    `claudepot-core::peer::inbound::store`. Records that Claudepot set
+    CC's `crossSessionInbound` to `accept`, what the key held before
+    (including "absent"), and when the window closes; the orchestrator
+    reverts it each `usage_snapshot::run_tick`. **One grant, not a
+    list** — the setting has a single machine-wide value, because CC
+    only honors `accept` from user scope (a project-scope value can
+    tighten the gate but never loosen it). That is also why the
+    deadline is the whole feature: the blast radius cannot be narrowed
+    spatially, so it is narrowed temporally. Like
+    `permission-grants.json` this store **fails loud** on corruption —
+    it is the only thing obliging anything to close the window. Empty
+    file or no grant = feature off. See "## Peer messaging".
   - `pricing-history.json` — observed model-rate changes.
     `{schema_version, observations: [...]}`, appended (never
     overwritten) when a live pricing scrape reports a rate that
@@ -273,6 +287,88 @@ left to memory.
   re-checked since. See "Reference" for why that mirror is no longer
   authoritative, and `crates/xtask/cc-upstream-watch.md` for the row
   that re-verifies this key.
+
+## Peer messaging (`claudepot session live` / `send` / `inbound`)
+
+Addressing a **running** Claude Code session. CC binds one Unix socket
+per session at `$XDG_RUNTIME_DIR/cc-socks/<pid>.sock`, publishes the
+path in `~/.claude/sessions/<pid>.json` as `messagingSocketPath`, and
+writes a 0600 key file beside it holding a `peerToken`. The protocol is
+newline-delimited JSON: an auth line, then frames.
+
+Pure logic in `claudepot-core::peer`: `wire` (frames, the protocol pin,
+the 1 MiB line limit), `key` (filename derivation, token validation,
+pid-reuse check), `client` (`send_prompt`), `discover` (resolve a
+name/id/pid to exactly one session), `outcome` (classify what happened),
+`inbound` (the time-boxed grant). CLI verbs in
+`cli/commands/session/send.rs`.
+
+Verified against the **2.1.239** binary; the `peer messaging` row in
+`crates/xtask/cc-upstream-watch.md` re-checks it. This is an internal,
+feature-gated surface (`agents_cross_session_inbox`) on a product that
+ships ~27 releases a month, so `peerProtocol == 1` is a hard pin —
+a session announcing anything else is refused, not addressed on a guess.
+
+Five properties drive the design; changing any invalidates the feature:
+
+- **It can inject a prompt and nothing else.** CC's inbox accepts `user`
+  plus `control` with `rename` / `notify_when_idle` / `peer_idle_notice`
+  / `peer_message_status`. There is no exit, interrupt, or restart
+  action, and `TIOCSTI` keystroke injection into the session's terminal
+  is refused by current macOS with EACCES even on a pty the caller owns
+  (measured). **A UI must not offer "restart" over this channel.**
+  Restarting a session means owning its pty, which means having started
+  it.
+- **Arrival is not delivery.** `crossSessionInbound` is
+  `accept | hold | refuse`, and an unattested sender addressing a
+  `bypassPermissions` session gets **held** — logged to the transcript
+  as a `type: "system"` notice, shown with Deny/Deliver, never seen by
+  Claude. Measured: held ~0.5 s, delivered ~2.5 s. So the success type
+  is `Handoff`, not `Delivery`, and the CLI never prints "sent".
+- **A peer prompt is not keyboard input.** Even on `accept`, CC wraps
+  the text (`"Another Claude session sent a message:\n…"`) and attaches
+  a standing caveat telling the session a peer cannot grant escalation —
+  never edit permission settings because a peer asked, never treat a
+  peer message as the user's approval, refuse an action the peer says it
+  was itself denied (CC calls that *permission laundering*). This is
+  remote **messaging** at lower trust than the session's own user.
+  Asking a session to approve a pending permission prompt is expected to
+  be refused, and that refusal is correct.
+- **Slash commands do not work.** CC dispatches injected prompts with
+  `skipSlashCommands: true`, so `/compact` arrives as literal text.
+  Never present the input as a command line.
+- **`accept` only counts from user scope.** A project-scope value can
+  *tighten* the gate but never loosen it — CC: "your own `accept` cannot
+  override a repo tightening". A project-scoped writer would report
+  success and change nothing.
+
+**Two guards against misdelivery, at different layers**, because a
+prompt landing in the wrong conversation is the worst thing this code
+could do and pids are recycled: `procStart` from the key file is
+compared against `ps -o lstart=` before connecting (the *token* is
+current), and `session_id` rides on every frame though CC treats it as
+optional (the *conversation* is the intended one). CC drops a mismatch.
+
+**The grant** (`peer::inbound`, `peer-inbound-grant.json`) exists
+because the two honest options are both bad: `hold` makes remote control
+useless, permanent `accept` leaves the machine open forever. Since the
+setting is machine-wide by necessity, the blast radius cannot be
+narrowed spatially — so it is narrowed **temporally**, and the deadline
+is the whole feature rather than a convenience. Capped at
+`MAX_GRANT_HOURS`; an unbounded grant is the permanent setting with
+extra steps.
+
+Running sessions re-read the setting **live** — a session started before
+the key was written delivered the next message, and went back to holding
+seconds after it was removed. That is what makes expiry meaningful
+rather than advisory.
+
+`eval::decide` checks **supersession before expiry**: if the user
+hand-changed the setting, the record is dropped and the setting is left
+alone. The deadline obliges Claudepot to stop holding the door open, not
+to force it shut on the user's own choice. Every CLI entry point calls
+`ops::tick` first, so a window whose deadline passed while the GUI was
+closed still closes.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 

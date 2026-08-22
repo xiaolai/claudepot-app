@@ -73,6 +73,16 @@ pub async fn send_cmd(
     let sessions_dir = claudepot_core::session_live::registry::default_sessions_dir();
     let config_dir = paths::claude_config_dir();
 
+    // Close an expired remote-control window before doing anything
+    // else. The GUI orchestrator is the primary reconciler, but it may
+    // not have run for days; every entry point into this feature owes
+    // the deadline the same respect.
+    if let Err(e) = claudepot_core::peer::inbound::tick(chrono::Utc::now()) {
+        ctx.info(&format!(
+            "warning: could not reconcile the inbound window: {e}"
+        ));
+    }
+
     let candidates = peer::list_addressable(&sessions_dir).context("list addressable sessions")?;
     let chosen = peer::resolve(&candidates, target)?;
     let peer_target = peer::PeerTarget::from_record(&chosen.record)?;
@@ -150,6 +160,95 @@ pub async fn send_cmd(
                  approval. Use --wait to find out."
             );
         }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------
+// `session inbound` — the time-boxed remote-control window.
+// ---------------------------------------------------------------
+
+use claudepot_core::peer::inbound::{self, Decision};
+
+fn describe(d: &Decision) -> String {
+    match d {
+        Decision::Idle => "closed — peer messages are held for your approval".into(),
+        Decision::Active { remaining_secs } => {
+            let m = remaining_secs / 60;
+            format!("OPEN — peer messages deliver without asking ({m}m left)")
+        }
+        Decision::Revert { .. } => "expired — closing now".into(),
+        Decision::Superseded { observed } => {
+            format!("changed by hand since the grant ({observed:?}) — record dropped")
+        }
+    }
+}
+
+pub fn inbound_status_cmd(ctx: &AppContext) -> Result<()> {
+    let now = chrono::Utc::now();
+    // Reconcile before reporting: a window whose deadline passed while
+    // Claudepot was closed must not be reported as open.
+    let decision = inbound::tick(now)?;
+    if ctx.json {
+        print_json(&serde_json::json!({
+            "state": match &decision {
+                Decision::Idle => "closed",
+                Decision::Active { .. } => "open",
+                Decision::Revert { .. } => "expired",
+                Decision::Superseded { .. } => "superseded",
+            },
+            "remaining_secs": match &decision {
+                Decision::Active { remaining_secs } => Some(*remaining_secs),
+                _ => None,
+            },
+        }))?;
+        return Ok(());
+    }
+    println!("Remote-control window: {}", describe(&decision));
+    Ok(())
+}
+
+pub fn inbound_grant_cmd(ctx: &AppContext, duration: &str, reason: Option<&str>) -> Result<()> {
+    let std_dur = parse_duration(duration)?;
+    let chrono_dur = chrono::Duration::from_std(std_dur)
+        .with_context(|| format!("duration out of range: {duration}"))?;
+
+    let grant = inbound::open(chrono_dur, reason.map(str::to_string), chrono::Utc::now())?;
+
+    if ctx.json {
+        print_json(&serde_json::json!({
+            "granted": grant.granted.as_wire(),
+            "previous": grant.previous.map(|p| p.as_wire()),
+            "granted_at": grant.granted_at.to_rfc3339(),
+            "expires_at": grant.expires_at.to_rfc3339(),
+        }))?;
+        return Ok(());
+    }
+
+    println!(
+        "Remote-control window OPEN until {}.",
+        grant.expires_at.to_rfc3339()
+    );
+    // Say the cost out loud every time. This is machine-wide by
+    // necessity — Claude Code only honours `accept` from user scope —
+    // so the deadline is the only thing containing it.
+    println!(
+        "  While open, ANY local process that can reach a session's socket \
+         can drive it without asking you."
+    );
+    println!("  Claudepot reverts this automatically. `session inbound revoke` closes it now.");
+    Ok(())
+}
+
+pub fn inbound_revoke_cmd(ctx: &AppContext) -> Result<()> {
+    let revoked = inbound::revoke(chrono::Utc::now())?;
+    if ctx.json {
+        print_json(&serde_json::json!({ "revoked": revoked.is_some() }))?;
+        return Ok(());
+    }
+    match revoked {
+        Some(_) => println!("Window closed. Peer messages are held for approval again."),
+        None => println!("No window was open."),
     }
     Ok(())
 }

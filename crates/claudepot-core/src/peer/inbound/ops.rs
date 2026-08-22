@@ -1,0 +1,321 @@
+//! Opening, closing, and reconciling the remote-control window.
+//!
+//! The impure layer: everything here touches CC's settings file and the
+//! grant record. The decisions it acts on are made by [`super::eval`],
+//! which is pure.
+//!
+//! [`tick`] is the reconciler and is safe to call from anywhere, as
+//! often as you like. That matters: the GUI orchestrator is the primary
+//! caller, but a window left open by a Claudepot that is no longer
+//! running must still close. Every CLI entry point that touches this
+//! feature calls `tick` first, so `claudepot session send` alone is
+//! enough to shut a window whose deadline passed while the app was
+//! closed.
+
+use chrono::{DateTime, Duration, Utc};
+
+use super::eval::{decide, Decision};
+use super::settings::{self, ModeValue};
+use super::store;
+use super::{GrantError, GrantFile, InboundGrant, InboundMode, MAX_GRANT_HOURS, SCHEMA_VERSION};
+
+/// Open a window, returning the grant that was recorded.
+///
+/// Order is deliberate: reconcile first, then validate, then write the
+/// setting, then persist the record. Writing the record *after* the
+/// setting means a crash in between leaves the setting open with no
+/// record — so the failure is loud (`tick` will report a value it has
+/// no grant for) rather than silent.
+pub fn open(
+    duration: Duration,
+    reason: Option<String>,
+    now: DateTime<Utc>,
+) -> Result<InboundGrant, GrantError> {
+    // A stale expired grant must not block a new one.
+    tick(now)?;
+
+    if duration <= Duration::zero() {
+        return Err(GrantError::ZeroDuration);
+    }
+    if duration > Duration::hours(MAX_GRANT_HOURS) {
+        return Err(GrantError::TooLong {
+            max_hours: MAX_GRANT_HOURS,
+        });
+    }
+
+    let existing = load_grant()?;
+    if let Some(g) = existing {
+        if !g.is_expired_at(now) {
+            return Err(GrantError::AlreadyOpen {
+                expires_at: g.expires_at,
+            });
+        }
+    }
+
+    // Refuse rather than clobber a value we could not put back.
+    if let ModeValue::Unrecognized(raw) = settings::read_mode()? {
+        return Err(GrantError::UnrecognizedExistingValue { raw });
+    }
+
+    let previous = settings::write_mode(InboundMode::Accept)?;
+    let grant = InboundGrant {
+        granted: InboundMode::Accept,
+        previous: previous.valid(),
+        granted_at: now,
+        expires_at: now + duration,
+        reason,
+    };
+    persist(Some(grant.clone()))?;
+    Ok(grant)
+}
+
+/// Close the window now, whatever its deadline said.
+pub fn revoke(now: DateTime<Utc>) -> Result<Option<InboundGrant>, GrantError> {
+    let Some(grant) = load_grant()? else {
+        return Ok(None);
+    };
+    // Respect a hand-change here too: revoking should never write a
+    // value the user did not ask for.
+    let observed = settings::read_mode()?;
+    if observed.valid() == Some(grant.granted) {
+        settings::restore(grant.previous)?;
+    }
+    persist(None)?;
+    let _ = now;
+    Ok(Some(grant))
+}
+
+/// Reconcile the record against CC's settings. Idempotent.
+pub fn tick(now: DateTime<Utc>) -> Result<Decision, GrantError> {
+    let grant = load_grant()?;
+    let observed = settings::read_mode()?;
+    let decision = decide(grant.as_ref(), &observed, now);
+
+    match &decision {
+        Decision::Revert { previous } => {
+            settings::restore(*previous)?;
+            persist(None)?;
+        }
+        Decision::Superseded { .. } => {
+            // Drop the record, touch nothing. The user's own edit stands.
+            persist(None)?;
+        }
+        Decision::Idle | Decision::Active { .. } => {}
+    }
+    Ok(decision)
+}
+
+/// Current state without changing anything. For read-only surfaces.
+pub fn status(now: DateTime<Utc>) -> Result<Decision, GrantError> {
+    let grant = load_grant()?;
+    let observed = settings::read_mode()?;
+    Ok(decide(grant.as_ref(), &observed, now))
+}
+
+fn load_grant() -> Result<Option<InboundGrant>, GrantError> {
+    let loaded = store::load().map_err(|e| GrantError::Store(e.to_string()))?;
+    Ok(loaded.value.grant)
+}
+
+fn persist(grant: Option<InboundGrant>) -> Result<(), GrantError> {
+    store::save(&GrantFile {
+        schema_version: SCHEMA_VERSION,
+        grant,
+    })
+    .map_err(|e| GrantError::Store(format!("{e:?}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Both the CC config dir and the Claudepot data dir have to be
+    /// redirected: this feature writes one file in each.
+    fn isolated() -> (TempDir, std::sync::MutexGuard<'static, ()>) {
+        let lock = crate::testing::lock_data_dir();
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("config-dir");
+        let data = tmp.path().join("data-dir");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &config);
+        std::env::set_var("CLAUDEPOT_DATA_DIR", &data);
+        fs::write(config.join("settings.json"), r#"{"model":"opus"}"#).unwrap();
+        (tmp, lock)
+    }
+
+    fn now() -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(2026, 8, 22, 10, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn open_sets_accept_and_records_the_window() {
+        let (_t, _l) = isolated();
+        let g = open(Duration::hours(2), Some("phone".into()), now()).unwrap();
+        assert_eq!(g.granted, InboundMode::Accept);
+        assert_eq!(g.previous, None);
+        assert_eq!(g.expires_at, now() + Duration::hours(2));
+        assert_eq!(
+            settings::read_mode().unwrap(),
+            ModeValue::Valid(InboundMode::Accept)
+        );
+    }
+
+    #[test]
+    fn a_second_open_while_one_is_live_is_refused() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(2), None, now()).unwrap();
+        assert!(matches!(
+            open(Duration::hours(1), None, now()).unwrap_err(),
+            GrantError::AlreadyOpen { .. }
+        ));
+    }
+
+    #[test]
+    fn zero_and_negative_durations_are_refused() {
+        let (_t, _l) = isolated();
+        assert!(matches!(
+            open(Duration::zero(), None, now()).unwrap_err(),
+            GrantError::ZeroDuration
+        ));
+        assert!(matches!(
+            open(Duration::hours(-1), None, now()).unwrap_err(),
+            GrantError::ZeroDuration
+        ));
+    }
+
+    #[test]
+    fn a_window_longer_than_the_cap_is_refused() {
+        let (_t, _l) = isolated();
+        assert!(matches!(
+            open(Duration::hours(MAX_GRANT_HOURS + 1), None, now()).unwrap_err(),
+            GrantError::TooLong { .. }
+        ));
+    }
+
+    #[test]
+    fn tick_before_expiry_leaves_the_window_open() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(2), None, now()).unwrap();
+        let d = tick(now() + Duration::hours(1)).unwrap();
+        assert!(matches!(d, Decision::Active { .. }));
+        assert_eq!(
+            settings::read_mode().unwrap(),
+            ModeValue::Valid(InboundMode::Accept)
+        );
+    }
+
+    #[test]
+    fn tick_after_expiry_closes_it_and_clears_the_record() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(2), None, now()).unwrap();
+        let d = tick(now() + Duration::hours(3)).unwrap();
+        assert_eq!(d, Decision::Revert { previous: None });
+        assert_eq!(settings::read_mode().unwrap(), ModeValue::Absent);
+        assert!(load_grant().unwrap().is_none());
+    }
+
+    #[test]
+    fn expiry_restores_a_prior_value_rather_than_deleting_the_key() {
+        let (_t, _l) = isolated();
+        fs::write(
+            settings::user_settings_path(),
+            r#"{"crossSessionInbound":"refuse"}"#,
+        )
+        .unwrap();
+        open(Duration::hours(1), None, now()).unwrap();
+        tick(now() + Duration::hours(2)).unwrap();
+        assert_eq!(
+            settings::read_mode().unwrap(),
+            ModeValue::Valid(InboundMode::Refuse),
+            "revert must restore what was there, not our idea of a default"
+        );
+    }
+
+    #[test]
+    fn tick_is_idempotent() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(1), None, now()).unwrap();
+        let later = now() + Duration::hours(2);
+        tick(later).unwrap();
+        assert_eq!(tick(later).unwrap(), Decision::Idle);
+        assert_eq!(settings::read_mode().unwrap(), ModeValue::Absent);
+    }
+
+    #[test]
+    fn a_hand_changed_setting_is_not_clobbered_by_expiry() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(1), None, now()).unwrap();
+        settings::write_mode(InboundMode::Refuse).unwrap();
+
+        let d = tick(now() + Duration::hours(5)).unwrap();
+        assert!(matches!(d, Decision::Superseded { .. }));
+        assert_eq!(
+            settings::read_mode().unwrap(),
+            ModeValue::Valid(InboundMode::Refuse),
+            "the user's own edit must survive our expiry"
+        );
+        assert!(
+            load_grant().unwrap().is_none(),
+            "the stale record is dropped"
+        );
+    }
+
+    #[test]
+    fn open_refuses_when_the_existing_value_is_unparseable() {
+        let (_t, _l) = isolated();
+        fs::write(
+            settings::user_settings_path(),
+            r#"{"crossSessionInbound":"yes"}"#,
+        )
+        .unwrap();
+        // Overwriting would strand a value we could never restore.
+        assert!(matches!(
+            open(Duration::hours(1), None, now()).unwrap_err(),
+            GrantError::UnrecognizedExistingValue { .. }
+        ));
+    }
+
+    #[test]
+    fn revoke_closes_early_and_reports_the_grant() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(6), None, now()).unwrap();
+        let g = revoke(now() + Duration::minutes(5)).unwrap();
+        assert!(g.is_some());
+        assert_eq!(settings::read_mode().unwrap(), ModeValue::Absent);
+        assert!(load_grant().unwrap().is_none());
+    }
+
+    #[test]
+    fn revoke_with_no_grant_is_a_no_op() {
+        let (_t, _l) = isolated();
+        assert!(revoke(now()).unwrap().is_none());
+    }
+
+    #[test]
+    fn an_expired_grant_does_not_block_a_new_one() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(1), None, now()).unwrap();
+        let later = now() + Duration::hours(4);
+        // No explicit tick: `open` reconciles first.
+        let g = open(Duration::hours(1), None, later).unwrap();
+        assert_eq!(g.granted_at, later);
+    }
+
+    #[test]
+    fn status_never_changes_anything() {
+        let (_t, _l) = isolated();
+        open(Duration::hours(1), None, now()).unwrap();
+        let after = now() + Duration::hours(5);
+        assert!(matches!(status(after).unwrap(), Decision::Revert { .. }));
+        // Still open, because status only reports.
+        assert_eq!(
+            settings::read_mode().unwrap(),
+            ModeValue::Valid(InboundMode::Accept)
+        );
+        assert!(load_grant().unwrap().is_some());
+    }
+}
