@@ -104,11 +104,16 @@ openssl req -newkey rsa:2048 -sha256 -nodes \
   -subj "/CN=$host" 2>/dev/null
 
 # extendedKeyUsage=serverAuth is required by Safari; without it the
-# certificate is structurally valid and still refused.
+# certificate is structurally valid and still refused. keyUsage is here
+# for the same class of reason: absent means "unrestricted" and most
+# validators accept that, but a strict one wants digitalSignature and
+# keyEncipherment named on an RSA server certificate — and the rejection
+# it produces (a bare `certificate_unknown` alert) says nothing about
+# which extension was missing.
 openssl x509 -req -in "$tmp/leaf.csr" -sha256 -days "$LEAF_DAYS" \
   -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \
   -out "$LEAF_CRT" \
-  -extfile <(printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\n' "$san") \
+  -extfile <(printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyEncipherment\nbasicConstraints=critical,CA:FALSE\n' "$san") \
   2>/dev/null
 
 # The private key authenticates this machine to every paired device.
@@ -123,5 +128,16 @@ echo
 echo "Install this on every device that will connect:"
 echo "  $CA_CRT"
 echo
-echo "iOS: install the profile, THEN enable full trust under"
-echo "     Settings > General > About > Certificate Trust Settings."
+# Printed so a device's trust can be CHECKED rather than assumed. When a
+# handshake fails with `certificate_unknown` the two candidate causes —
+# trust not enabled, or a different CA installed from an earlier run —
+# look identical from the server, and this is what tells them apart.
+echo "CA SHA-256 fingerprint (compare with the device):"
+openssl x509 -in "$CA_CRT" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=/  /'
+echo
+echo "iOS, and BOTH steps are required:"
+echo "  1. install the profile   Settings > General > VPN & Device Management"
+echo "  2. enable full trust     Settings > General > About >"
+echo "                           Certificate Trust Settings"
+echo "Step 2 is the one that gets skipped, and skipping it fails exactly"
+echo "like a broken certificate."
