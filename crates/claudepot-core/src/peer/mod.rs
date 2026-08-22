@@ -150,11 +150,15 @@
 //! `crates/xtask/cc-upstream-watch.md`.
 
 pub mod client;
+pub mod discover;
 pub mod key;
+pub mod outcome;
 pub mod wire;
 
 pub use client::{send_prompt, Handoff, PeerTarget};
+pub use discover::{list_addressable, resolve, Addressable};
 pub use key::KeyFile;
+pub use outcome::{await_outcome, begin_watch, Outcome, Watch};
 pub use wire::{Priority, MAX_LINE_BYTES, PEER_PROTOCOL};
 
 /// Every way addressing a running session can fail.
@@ -243,6 +247,35 @@ pub enum PeerError {
     )]
     UnsupportedPlatform { pid: u32 },
 
+    /// `candidates` is the full addressable list, not a guess at what
+    /// was meant. The error is the discovery path: a user who mistypes
+    /// a name should be able to read the right one straight out of it.
+    #[error(
+        "no live session matches {needle:?} (addressable: {})",
+        render(candidates)
+    )]
+    NoSuchSession {
+        needle: String,
+        candidates: Vec<String>,
+    },
+
+    #[error("{needle:?} matches more than one live session: {}", render(matches))]
+    AmbiguousSession {
+        needle: String,
+        matches: Vec<String>,
+    },
+
     #[error("cannot encode a peer frame: {0}")]
     Encode(#[from] serde_json::Error),
+}
+
+/// Render a candidate list for an error message. `none` rather than an
+/// empty pair of brackets, because "addressable: []" reads as a bug and
+/// "addressable: none" reads as the answer: nothing is running.
+fn render(items: &[String]) -> String {
+    if items.is_empty() {
+        "none".to_string()
+    } else {
+        items.join(", ")
+    }
 }

@@ -9,6 +9,8 @@
 //! - **prune** — wholesale-delete sessions matching a filter
 //! - **trash** — list / restore / empty the prune trash
 //! - **slim** — strip noisy events from a session in place
+//! - **send** — live, send (address a *running* session over CC's
+//!   cross-session inbox)
 //!
 //! Per the commands.md rule for nouns with ≥3 verbs, related verbs
 //! live in submodules under `commands/session/<group>.rs`. This entry
@@ -82,6 +84,7 @@ mod orphan;
 mod prune;
 mod redact;
 mod search;
+mod send;
 mod slim;
 mod trash;
 
@@ -94,5 +97,6 @@ pub use orphan::{
 pub use prune::{prune_cmd, PruneArgs};
 pub use redact::{redact_cmd, RedactArgs};
 pub use search::{search_cmd, worktrees_cmd};
+pub use send::{live_cmd, send_cmd};
 pub use slim::{slim_cmd, SlimArgs};
 pub use trash::{trash_empty_cmd, trash_list_cmd, trash_restore_cmd};

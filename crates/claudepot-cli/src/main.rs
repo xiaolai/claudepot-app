@@ -487,6 +487,31 @@ enum SessionAction {
         #[arg(long)]
         claude_config: Option<std::path::PathBuf>,
     },
+    /// List running Claude Code sessions that can be addressed over
+    /// CC's cross-session inbox. Read-only.
+    Live,
+    /// Send a prompt to a RUNNING session.
+    ///
+    /// This is not a keyboard: Claude Code frames the text as a peer
+    /// message at lower trust than the session's own user, and by
+    /// default holds it for that user's approval rather than
+    /// delivering it.
+    Send {
+        /// Session name, session-id prefix, or pid. Must match exactly
+        /// one — run `claudepot session live` to see the options.
+        target: String,
+        /// The prompt text. Slash commands are NOT interpreted; Claude
+        /// Code delivers peer messages with slash handling disabled.
+        prompt: String,
+        /// Where the prompt lands in the session's queue.
+        #[arg(long, default_value = "next", value_parser = ["now", "next", "later"])]
+        priority: String,
+        /// Watch the transcript for up to N seconds and report whether
+        /// the prompt was delivered or held. 0 reports only the
+        /// handoff, which is not the same as delivery.
+        #[arg(long, default_value_t = 0)]
+        wait: u64,
+    },
     /// Inspect one transcript: classification, chunks, linked tool
     /// calls, subagents, phases, context attribution. Read-only.
     View {
@@ -1554,6 +1579,13 @@ async fn main() -> Result<()> {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
             SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
+            SessionAction::Live => commands::session::live_cmd(&ctx)?,
+            SessionAction::Send {
+                target,
+                prompt,
+                priority,
+                wait,
+            } => commands::session::send_cmd(&ctx, &target, &prompt, &priority, wait).await?,
             SessionAction::Prune { args } => commands::session::prune_cmd(&ctx, args)?,
             SessionAction::Slim { args } => commands::session::slim_cmd(&ctx, args)?,
             SessionAction::Redact { args } => commands::session::redact_cmd(&ctx, args)?,
