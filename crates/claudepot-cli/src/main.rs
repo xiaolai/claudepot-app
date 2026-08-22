@@ -105,6 +105,11 @@ enum Commands {
         action: MigrateAction,
     },
     /// Manage CC session transcripts (move between projects, rescue orphans)
+    /// The LAN remote-control surface (server, password, sessions).
+    Remote {
+        #[command(subcommand)]
+        action: RemoteAction,
+    },
     Session {
         #[command(subcommand)]
         action: SessionAction,
@@ -428,6 +433,34 @@ enum UpdateAction {
         #[command(flatten)]
         args: commands::update::config::ConfigArgs,
     },
+}
+
+#[derive(Subcommand)]
+enum RemoteAction {
+    /// Show whether the surface is on, where it binds, and whether a
+    /// password is set. Read-only.
+    Status,
+    /// Set the admin password, read from stdin.
+    ///
+    /// Typing it interactively echoes it — this CLI deliberately does
+    /// not ship `rpassword`. Prefer:
+    ///   printf '%s' 'your password' | claudepot remote set-password
+    SetPassword,
+    /// Turn the surface on. Refuses a publicly-routable bind, and
+    /// refuses to enable before a password exists.
+    Enable {
+        /// IP to bind. Loopback, LAN, Tailscale, or 0.0.0.0.
+        #[arg(long)]
+        bind: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Turn it off.
+    Disable,
+    /// Revoke every session and paired device.
+    RevokeAll,
+    /// Run the server in the foreground.
+    Serve,
 }
 
 #[derive(Subcommand)]
@@ -1570,6 +1603,16 @@ async fn main() -> Result<()> {
                     .await?
                 }
             },
+        },
+        Commands::Remote { action } => match action {
+            RemoteAction::Status => commands::remote::status_cmd(&ctx)?,
+            RemoteAction::SetPassword => commands::remote::set_password_cmd(&ctx)?,
+            RemoteAction::Enable { bind, port } => {
+                commands::remote::enable_cmd(&ctx, bind.as_deref(), port)?
+            }
+            RemoteAction::Disable => commands::remote::disable_cmd(&ctx)?,
+            RemoteAction::RevokeAll => commands::remote::revoke_all_cmd(&ctx)?,
+            RemoteAction::Serve => commands::remote::serve_cmd(&ctx).await?,
         },
         Commands::Session { action } => match action {
             SessionAction::ListOrphans => commands::session::list_orphans(&ctx)?,

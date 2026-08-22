@@ -42,6 +42,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use super::assets;
 use super::config::RemoteConfigFile;
 use super::login::{self, LoginOutcome};
 use super::{authenticate, Device, DevicesFile};
@@ -111,8 +112,43 @@ pub fn router(state: Shared) -> Router {
 
     public
         .merge(private)
+        // The client, embedded. `fallback` rather than a route per file
+        // so adding an asset is one match arm in `assets::get`, not two
+        // edits that can disagree.
+        .fallback(static_asset)
         .layer(middleware::from_fn_with_state(state.clone(), guard_origin))
         .with_state(state)
+}
+
+/// Serve an embedded asset, or 404.
+///
+/// Unauthenticated, necessarily: this *is* the login page. It carries
+/// no data about the machine — the shell and a capability probe.
+async fn static_asset(req: Request) -> Response {
+    let Some(asset) = assets::get(req.uri().path()) else {
+        return err(StatusCode::NOT_FOUND, "not_found");
+    };
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, asset.content_type),
+            (header::CACHE_CONTROL, assets::CACHE_CONTROL),
+            // Self-only. The client loads nothing remote, so the policy
+            // that permits nothing remote costs nothing — and it is the
+            // difference between "we did not add a CDN" and "a CDN
+            // cannot be added by accident".
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+                 img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; \
+                 base-uri 'none'; form-action 'self'",
+            ),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::REFERRER_POLICY, "no-referrer"),
+        ],
+        asset.body,
+    )
+        .into_response()
 }
 
 /// Unauthenticated on purpose: a client needs to know the appliance is
@@ -612,7 +648,10 @@ mod tests {
         // Single label and local suffixes.
         assert!(host_is_acceptable("localhost:9999", &none));
         assert!(host_is_acceptable("claudepot.local", &none));
-        assert!(host_is_acceptable("appliance.example-net.internal:8420", &none));
+        assert!(host_is_acceptable(
+            "appliance.example-net.internal:8420",
+            &none
+        ));
 
         // A public FQDN is the rebinding signature — and note it is
         // refused even on our own port, which the old port check let

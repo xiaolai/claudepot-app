@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Claudepot">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>Claudepot</title>
+<style>
+  :root {
+    --bg: #faf8f5; --fg: #1c1a17; --dim: #6b6560; --line: #ddd6cc;
+    --ok: #2f6f4e; --bad: #9b3226; --accent: #b4542a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16150f; --fg:#e8e3da; --dim:#9a938a; --line:#332f28;
+            --ok:#6fb98f; --bad:#e08573; --accent:#d98a5b; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: max(1.5rem, env(safe-area-inset-top)) 1.25rem 2rem;
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 34rem; margin: 0 auto; }
+  h1 { font-size: 1.1rem; letter-spacing: .02em; margin: 0 0 .25rem; }
+  .sub { color: var(--dim); margin: 0 0 1.75rem; font-size: .85rem; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 1rem; margin: 0 0 1.25rem; }
+  legend { padding: 0 .4rem; color: var(--dim); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; }
+  label { display: block; font-size: .8rem; color: var(--dim); margin-bottom: .3rem; }
+  input {
+    width: 100%; padding: .6rem .7rem; margin-bottom: .8rem;
+    background: transparent; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    font: inherit; font-size: 16px; /* 16px stops iOS zooming on focus */
+  }
+  button {
+    width: 100%; padding: .65rem; border: 1px solid var(--accent);
+    background: var(--accent); color: #fff; border-radius: 6px;
+    font: inherit; font-weight: 600;
+  }
+  button[disabled] { opacity: .5; }
+  .row { display: flex; gap: .6rem; align-items: baseline; padding: .3rem 0; }
+  .row .k { flex: 1; color: var(--dim); font-size: .8rem; }
+  .row .v { font-weight: 600; font-size: .8rem; }
+  .yes { color: var(--ok); } .no { color: var(--bad); }
+  #msg { min-height: 1.4em; font-size: .82rem; margin-top: .5rem; }
+  .note { color: var(--dim); font-size: .75rem; margin-top: .6rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Claudepot</h1>
+  <p class="sub">Connectivity check — not the real client.</p>
+
+  <fieldset>
+    <legend>Environment</legend>
+    <div id="env"></div>
+    <p class="note" id="envnote"></p>
+  </fieldset>
+
+  <fieldset id="loginbox">
+    <legend>Sign in</legend>
+    <form id="f" autocomplete="on">
+      <label for="pw">Password</label>
+      <input id="pw" type="password" autocomplete="current-password" required>
+      <label for="totp">Code (only if you enabled one)</label>
+      <input id="totp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*">
+      <button id="go" type="submit">Sign in</button>
+    </form>
+    <div id="msg"></div>
+  </fieldset>
+
+  <fieldset id="session" hidden>
+    <legend>Session</legend>
+    <div id="who"></div>
+    <p class="note">Token is in localStorage. This page is a probe; it does nothing else.</p>
+  </fieldset>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

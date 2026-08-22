@@ -160,6 +160,11 @@ claudepot project   list | show | move | clean | remove | trash | repair
 claudepot session   list-orphans | move | adopt-orphan | rebuild-index
                     backfill-exchanges | view | export | search | worktrees
                     prune | slim | trash {list|restore|empty}
+                    live | send | inbound {status|grant|revoke}
+                                                    # address a RUNNING
+                                                    # Claude Code session
+claudepot remote    status | set-password | enable  # LAN appliance: reach
+                    disable | revoke-all | serve    # Claudepot from a phone
 claudepot agent     draft | list | show            (alias: automation)
 claudepot lesson    harvest | list | accept | reject | compile | status
                                                     # the knowledge compiler

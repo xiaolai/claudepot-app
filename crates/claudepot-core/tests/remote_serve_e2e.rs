@@ -137,3 +137,64 @@ async fn a_forged_host_header_is_refused_by_a_real_request() {
         "a rejected Host must never reach the login throttle"
     );
 }
+
+#[tokio::test]
+async fn the_client_is_served_from_the_binary() {
+    let (base, _s) = start().await;
+    let res = reqwest::get(&base).await.unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(
+        res.headers().get("content-type").unwrap(),
+        "text/html; charset=utf-8"
+    );
+    // The policy that keeps a CDN from creeping in later.
+    let csp = res
+        .headers()
+        .get("content-security-policy")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(csp.contains("default-src 'self'"));
+    assert!(csp.contains("frame-ancestors 'none'"));
+    assert!(res.text().await.unwrap().contains("Claudepot"));
+}
+
+#[tokio::test]
+async fn the_service_worker_is_served_at_the_root_scope() {
+    // A worker under /static would control only /static, so the scope
+    // is a property of the URL and worth asserting.
+    let (base, _s) = start().await;
+    let res = reqwest::get(format!("{base}/sw.js")).await.unwrap();
+    assert_eq!(res.status(), 200);
+    assert!(res
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("text/javascript"));
+}
+
+#[tokio::test]
+async fn the_manifest_has_the_type_browsers_require() {
+    let (base, _s) = start().await;
+    let res = reqwest::get(format!("{base}/manifest.webmanifest"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(
+        res.headers().get("content-type").unwrap(),
+        "application/manifest+json",
+        "some browsers ignore a manifest served as application/json"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_path_is_a_clean_404() {
+    let (base, _s) = start().await;
+    for p in ["/nope", "/../Cargo.toml", "/api/nothing"] {
+        let res = reqwest::get(format!("{base}{p}")).await.unwrap();
+        assert_eq!(res.status(), 404, "{p}");
+    }
+}

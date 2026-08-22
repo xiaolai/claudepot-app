@@ -45,6 +45,7 @@
 //! pair again as a "new" device if it were ever replayed, and would
 //! erase the audit trail of what had been let in.
 
+pub mod assets;
 pub mod bind;
 pub mod config;
 pub mod login;

@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod memory;
 pub mod project;
 pub mod project_migrate;
+pub mod remote;
 pub mod session;
 pub mod settings;
 pub mod status;
