@@ -222,6 +222,16 @@ system-configuration = "0.6"
 # as an HMAC, where the collision weakness does not apply.
 hmac = "0.12"
 sha1 = "0.10"
+
+# HTTP server for the remote surface. hyper 1, tower, http, rustls and
+# tokio-rustls are ALREADY in the tree (Tauri, reqwest), so axum is the
+# only genuinely new crate — and hand-rolling routing and extraction on
+# bare hyper is exactly where auth bypasses hide.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+# Test-only: `ServiceExt::oneshot` drives the router without binding a
+# socket, so the whole HTTP surface is testable in CI. Already in the
+# tree via axum/hyper.
+tower = { version = "0.5", features = ["util"] }
 cbc = { version = "0.1", features = ["alloc"] }
 # Windows-only
 aes-gcm = "0.10"

@@ -139,9 +139,9 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   `preferences.json`, `usage-snapshot.json`, `usage_alert_state.json`,
   `agent-events.json`, … — again, the data-dir joins in source are
   authoritative). Stores backed by `claudepot-core::json_store` (the
-  eight below plus `agent-events.json`) move a corrupt file aside to a
+  nine below plus `agent-events.json`) move a corrupt file aside to a
   timestamped `<name>.corrupt.<unix-ts>` and start empty — never
-  fatal at boot. Nine carry behavior worth documenting here:
+  fatal at boot. Ten carry behavior worth documenting here:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -197,6 +197,23 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     most one `pending` pairing window: two live codes double the
     guessing surface for no benefit. Empty file = no paired devices.
     See "## Remote control".
+  - `remote-config.json` — the remote surface's server settings and
+    persisted auth state. `{schema_version, server: {enabled, bind,
+    port}, password_hash, totp_secret_base32, totp_last_counter,
+    failed_attempts}`. Owned by `claudepot-core::remote::config`.
+    **`enabled` defaults to false** — a remote surface that switches
+    itself on because the app was installed is not a feature. Separate
+    from `remote-devices.json` because the write rates differ by orders
+    of magnitude: the throttle counter here moves on every failed
+    login, the revocation list there moves when someone pairs or
+    revokes, and sharing a file would rewrite the revocation list on
+    every wrong password. **Fails loud on corruption** for a sharper
+    reason than the other two: it holds the login throttle and the
+    spent-TOTP high-water mark, so a silent reset hands an attacker
+    unlimited guesses *and* reopens the replay window of every code
+    that was burned to close it. Validation refuses a publicly-routable
+    bind on the way to disk, not only at bind time. See
+    "## Remote control".
   - `pricing-history.json` — observed model-rate changes.
     `{schema_version, observations: [...]}`, appended (never
     overwritten) when a live pricing scrape reports a rate that
