@@ -523,11 +523,26 @@ used from *elsewhere*. Offer it; do not force it.
 **Passkeys / WebAuthn are the better end state** and are not built. The
 server would store only a public key, so reading `remote-devices.json`
 would give an attacker nothing — strictly better than both a password
-hash and a TOTP secret. Unverified prerequisite: WebAuthn needs a valid
-certificate chain, and this deployment's comes from a private CA. From a
-device that trusts that CA it should qualify, but iOS has had extra
-restrictions here. Settle that with a real device before designing
-around it.
+hash and a TOTP secret.
+
+The prerequisite is **settled, measured on a real iPhone** against this
+deployment's private CA (2026-08-23). A privately-trusted certificate on
+a tailnet IP gives a full secure context: `isSecureContext` true, a
+service worker registering at root scope, `crypto.subtle`, the WebAuthn
+API, and `isUserVerifyingPlatformAuthenticatorAvailable()` returning true
+for Face ID. Nothing about the private CA degrades the origin.
+
+So the intended auth story is: **password as the bootstrap and recovery
+credential, passkey as the day-to-day login.** TOTP stays available and
+is expected to go unused — the reasoning above about it being close to
+ceremonial when the client and the authenticator are the same phone
+applies with more force once that phone can do Face ID instead.
+
+One caveat kept separate from the measurement: iOS grants *standalone
+PWA install* and *web push* from Safari specifically. The capability
+probe above was not confirmed to be running in Safari, so install and
+push remain unverified even though the secure context they depend on is
+not.
 
 Still open at the HTTP layer, recorded so they are not rediscovered:
 login needs the throttle wired with persistent state; mutations need an
