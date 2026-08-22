@@ -106,6 +106,7 @@ mod tests {
             created_at: Utc.with_ymd_and_hms(2026, 8, 22, 10, 0, 0).unwrap(),
             last_seen: None,
             revoked_at: None,
+            expires_at: None,
         }
     }
 

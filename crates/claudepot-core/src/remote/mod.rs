@@ -46,6 +46,7 @@
 //! erase the audit trail of what had been let in.
 
 pub mod bind;
+pub mod login;
 pub mod password;
 pub mod store;
 pub mod tls;
@@ -85,11 +86,26 @@ pub struct Device {
     /// Set rather than removed — see the module docs.
     #[serde(default)]
     pub revoked_at: Option<DateTime<Utc>>,
+    /// `None` for a paired device (valid until revoked); `Some` for a
+    /// password-issued session. A session and a paired device are the
+    /// same thing — a token hash `authenticate` accepts — so they share
+    /// one representation rather than growing a parallel one with its
+    /// own revocation path to forget about.
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 impl Device {
     pub fn is_active(&self) -> bool {
         self.revoked_at.is_none()
+    }
+
+    pub fn is_expired_at(&self, now: DateTime<Utc>) -> bool {
+        self.expires_at.is_some_and(|e| now >= e)
+    }
+
+    pub fn is_usable_at(&self, now: DateTime<Utc>) -> bool {
+        self.is_active() && !self.is_expired_at(now)
     }
 }
 
@@ -197,10 +213,14 @@ pub fn judge_pairing(
 ///
 /// Revoked devices are skipped, not matched-then-rejected, so a revoked
 /// token is indistinguishable from an unknown one to the caller.
-pub fn authenticate<'a>(devices: &'a [Device], bearer: &str) -> Option<&'a Device> {
+pub fn authenticate<'a>(
+    devices: &'a [Device],
+    bearer: &str,
+    now: DateTime<Utc>,
+) -> Option<&'a Device> {
     devices
         .iter()
-        .filter(|d| d.is_active())
+        .filter(|d| d.is_usable_at(now))
         .find(|d| token::verify_secret(bearer, &d.token_hash))
 }
 
@@ -221,6 +241,7 @@ mod tests {
             created_at: at(0),
             last_seen: None,
             revoked_at: revoked.then(|| at(5)),
+            expires_at: None,
         }
     }
 
@@ -296,7 +317,7 @@ mod tests {
         let tok = new_device_token();
         let devices = vec![device("phone", &tok, false)];
         assert_eq!(
-            authenticate(&devices, &tok.plaintext).unwrap().name,
+            authenticate(&devices, &tok.plaintext, at(1)).unwrap().name,
             "phone"
         );
     }
@@ -306,7 +327,7 @@ mod tests {
         let tok = new_device_token();
         let devices = vec![device("old phone", &tok, true)];
         assert!(
-            authenticate(&devices, &tok.plaintext).is_none(),
+            authenticate(&devices, &tok.plaintext, at(1)).is_none(),
             "revocation must be immediate and total"
         );
     }
@@ -315,8 +336,8 @@ mod tests {
     fn an_unknown_token_authenticates_nothing() {
         let tok = new_device_token();
         let devices = vec![device("phone", &tok, false)];
-        assert!(authenticate(&devices, &new_device_token().plaintext).is_none());
-        assert!(authenticate(&devices, "").is_none());
+        assert!(authenticate(&devices, &new_device_token().plaintext, at(1)).is_none());
+        assert!(authenticate(&devices, "", at(1)).is_none());
     }
 
     #[test]
@@ -324,8 +345,42 @@ mod tests {
         let a = new_device_token();
         let b = new_device_token();
         let devices = vec![device("revoked", &a, true), device("live", &b, false)];
-        assert!(authenticate(&devices, &a.plaintext).is_none());
-        assert_eq!(authenticate(&devices, &b.plaintext).unwrap().name, "live");
+        assert!(authenticate(&devices, &a.plaintext, at(1)).is_none());
+        assert_eq!(
+            authenticate(&devices, &b.plaintext, at(1)).unwrap().name,
+            "live"
+        );
+    }
+
+    #[test]
+    fn an_expired_session_stops_authenticating() {
+        let tok = new_device_token();
+        let mut d = device("phone", &tok, false);
+        d.expires_at = Some(at(30));
+        let devices = vec![d];
+        assert!(authenticate(&devices, &tok.plaintext, at(29)).is_some());
+        assert!(
+            authenticate(&devices, &tok.plaintext, at(30)).is_none(),
+            "expiry is inclusive — a session that survives its own deadline \
+             can be extended by a slow clock"
+        );
+        assert!(authenticate(&devices, &tok.plaintext, at(31)).is_none());
+    }
+
+    #[test]
+    fn a_paired_device_without_an_expiry_never_times_out() {
+        let tok = new_device_token();
+        let d = device("phone", &tok, false);
+        assert_eq!(d.expires_at, None);
+        assert!(authenticate(&[d], &tok.plaintext, at(59)).is_some());
+    }
+
+    #[test]
+    fn revocation_beats_a_live_expiry() {
+        let tok = new_device_token();
+        let mut d = device("phone", &tok, true);
+        d.expires_at = Some(at(59));
+        assert!(authenticate(&[d], &tok.plaintext, at(1)).is_none());
     }
 
     #[test]
