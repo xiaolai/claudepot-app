@@ -110,7 +110,7 @@ export function Panel() {
     setView('sessions');
   }, [signOut]);
 
-  const { sessions, conn, refresh } = useSessions({
+  const { sessions, approvals, conn, refresh } = useSessions({
     enabled: Boolean(token) && checked,
     onUnauthorized: onSignOut,
   });
@@ -148,6 +148,7 @@ export function Panel() {
     ) : (
       <Sessions
         sessions={sessions}
+        approvals={approvals}
         conn={conn}
         host={host}
         onOpen={setOpenId}

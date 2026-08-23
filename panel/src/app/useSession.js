@@ -65,6 +65,7 @@ export function useAuth() {
  */
 export function useSessions({ enabled, onUnauthorized }) {
   const [sessions, setSessions] = useState(null);
+  const [approvals, setApprovals] = useState([]);
   const [conn, setConn] = useState('online');
   const inflight = useRef(null);
 
@@ -74,9 +75,17 @@ export function useSessions({ enabled, onUnauthorized }) {
     const ctrl = new AbortController();
     inflight.current = ctrl;
     try {
-      const data = await api.sessions(ctrl.signal);
+      // Both on one tick, and settled independently: a server too old
+      // to know about approvals, or one whose queue directory is
+      // unreadable, must not blank the session list beside it.
+      const [list, waiting] = await Promise.allSettled([
+        api.sessions(ctrl.signal),
+        api.approvals(ctrl.signal),
+      ]);
       if (inflight.current !== ctrl) return;
-      setSessions(data?.sessions ?? []);
+      if (list.status === 'rejected') throw list.reason;
+      setSessions(list.value?.sessions ?? []);
+      setApprovals(waiting.status === 'fulfilled' ? (waiting.value?.approvals ?? []) : []);
       setConn('online');
     } catch (e) {
       if (e?.name === 'AbortError' || inflight.current !== ctrl) return;
@@ -89,6 +98,7 @@ export function useSessions({ enabled, onUnauthorized }) {
   useEffect(() => {
     if (!enabled) {
       setSessions(null);
+      setApprovals([]);
       return undefined;
     }
     refresh();
@@ -111,7 +121,7 @@ export function useSessions({ enabled, onUnauthorized }) {
     };
   }, [enabled, refresh]);
 
-  return { sessions, conn, refresh };
+  return { sessions, approvals, conn, refresh };
 }
 
 /**

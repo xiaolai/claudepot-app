@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use claudepot_core::remote::config::{self, RemoteConfigFile};
 use claudepot_core::remote::server::{router, AppState, Persist};
-use claudepot_core::remote::{password, serve, store as device_store, DevicesFile};
+use claudepot_core::remote::{approval, password, serve, store as device_store, DevicesFile};
 use tokio::sync::Mutex;
 
 use crate::output::print_json;
@@ -231,6 +231,123 @@ pub async fn serve_cmd(ctx: &AppContext) -> Result<()> {
     if !info.tls {
         ctx.info("Loopback: no certificate needed (already a secure context).");
     }
-    serve::serve(&server_cfg, router(state)).await?;
+
+    // Remote approval is armed for exactly as long as the surface that
+    // reaches the phone is up — that coupling is what makes it
+    // acceptable to hand a network client the ability to grant a
+    // permission at all. Installed here, revoked on the way out, and
+    // heartbeated in between so a `kill -9` disarms it too.
+    let _approvals = ApprovalHook::arm();
+
+    tokio::select! {
+        result = serve::serve(&server_cfg, router(state)) => result?,
+        // Without this the process dies inside `serve` and the hook
+        // entry outlives it in the user's settings.json. The heartbeat
+        // makes a survivor harmless, but leaving litter we could have
+        // removed is not a plan — and this file is one people read.
+        signal = shutdown_signal() => ctx.info(&format!("{signal}. Stopping.")),
+    }
     Ok(())
+}
+
+/// Resolves when the process is asked to stop.
+///
+/// SIGTERM as well as Ctrl-C, and the difference is not academic:
+/// `kill`, launchd, systemd and every process supervisor send SIGTERM,
+/// so handling only SIGINT means the ordinary way to stop a server is
+/// the one way that leaves the hook installed. Measured — the first
+/// version of this handler did exactly that.
+async fn shutdown_signal() -> &'static str {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        // If the handler cannot be installed there is nothing useful to
+        // do but wait on the other one; `pending` never resolves.
+        let mut term = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+                return "Interrupted";
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => "Interrupted",
+            _ = term.recv() => "Terminated",
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows has no SIGTERM; `ctrl_c` also covers the console
+        // close and shutdown events that reach a foreground process.
+        let _ = tokio::signal::ctrl_c().await;
+        "Interrupted"
+    }
+}
+
+/// Installs CC's `PermissionRequest` hook for the life of the server,
+/// and takes it back out on the way down.
+struct ApprovalHook {
+    beat: tokio::task::JoinHandle<()>,
+    installed: bool,
+}
+
+impl ApprovalHook {
+    fn arm() -> Self {
+        let dir = approval::store::dir();
+        // Heartbeat first: it is what the hook actually believes, so a
+        // hook that starts before the first beat must read "not
+        // serving" rather than wait on a server that is not up yet.
+        let _ = approval::store::mark_serving(&dir, approval::now_ms());
+
+        // `current_exe` and not a looked-up path: this binary is the
+        // one carrying the verb, so the hook cannot point at a
+        // Claudepot that is not this one.
+        let installed = match std::env::current_exe() {
+            Ok(binary) => match approval::install::install(&binary) {
+                Ok(_) => true,
+                Err(e) => {
+                    // Not fatal — the rest of the panel works. But it
+                    // must be said: the alternative is a phone that
+                    // silently never shows an approval card.
+                    // Deliberately not `ctx.info`: `--quiet` must not
+                    // hide the fact that a feature is not working.
+                    eprintln!(
+                        "warning: remote approval is OFF — could not install Claude \
+                         Code's PermissionRequest hook: {e}"
+                    );
+                    false
+                }
+            },
+            Err(e) => {
+                eprintln!("warning: remote approval is OFF — cannot locate this binary: {e}");
+                false
+            }
+        };
+
+        let beat = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(approval::HEARTBEAT);
+            loop {
+                tick.tick().await;
+                let now = approval::now_ms();
+                let _ = approval::store::mark_serving(&dir, now);
+                // Cheap, and the only thing that clears up after a hook
+                // that was killed with its session.
+                approval::store::sweep(&dir, now);
+            }
+        });
+
+        Self { beat, installed }
+    }
+}
+
+impl Drop for ApprovalHook {
+    fn drop(&mut self) {
+        self.beat.abort();
+        approval::store::stop_serving(&approval::store::dir());
+        if self.installed {
+            // Best effort: the runtime gate is what makes a survivor
+            // harmless, so a failure here is untidy rather than unsafe.
+            let _ = approval::install::uninstall();
+        }
+    }
 }

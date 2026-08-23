@@ -21,6 +21,7 @@ use axum::Json;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use super::approval::{self, store as approval_store, ApprovalDecision, Decision};
 use super::panel::{self, transcript};
 use super::passkey::{self, Ceremony};
 use super::server::{err, idempotent, Shared};
@@ -218,6 +219,81 @@ pub(super) async fn mark_read(
             Some(settled) => (
                 StatusCode::OK,
                 serde_json::json!({ "through_count": settled }),
+            ),
+            None => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({ "error": "internal" }),
+            ),
+        }
+    })
+    .await
+}
+
+// ── Approvals ───────────────────────────────────────────────────────
+
+/// Permission prompts waiting for a tap.
+///
+/// **This is the one endpoint on the surface that leads to granting a
+/// capability rather than reading or messaging.** Everything else here
+/// is read-only or goes through `peer`, where Claude Code refuses to
+/// treat a message as its user's approval. This does not route around
+/// that refusal — the decision arrives through CC's own
+/// `PermissionRequest` hook, before the prompt is drawn. See
+/// `remote::approval`.
+///
+/// It exists only while `remote serve` does: the hook is installed on
+/// start, revoked on stop, and heartbeated in between, so a machine
+/// that never turns the remote surface on is never asked.
+pub(super) async fn list_approvals(_device: Device) -> Response {
+    let now = approval::now_ms();
+    match blocking("approvals", move || {
+        Ok::<_, std::convert::Infallible>(approval_store::pending(&approval_store::dir(), now))
+    })
+    .await
+    {
+        Some(pending) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "approvals": pending })),
+        )
+            .into_response(),
+        None => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct DecideRequest {
+    decision: Decision,
+}
+
+/// Answer one.
+///
+/// A 404 here means the prompt is no longer live — answered at the
+/// keyboard, or its hook gave up waiting. The phone must be told that
+/// plainly rather than shown a success for a decision that reached
+/// nobody.
+pub(super) async fn decide_approval(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    req_device: Device,
+    Json(body): Json<DecideRequest>,
+) -> Response {
+    idempotent(&state, &headers, || async move {
+        let now = approval::now_ms();
+        let decision = ApprovalDecision {
+            decision: body.decision,
+            device_id: req_device.id.to_string(),
+            at_ms: now,
+        };
+        match blocking("approval decision", move || {
+            approval_store::put_decision(&approval_store::dir(), &id, &decision, now)
+        })
+        .await
+        {
+            Some(true) => (StatusCode::OK, serde_json::json!({ "ok": true })),
+            Some(false) => (
+                StatusCode::NOT_FOUND,
+                serde_json::json!({ "error": "no longer waiting" }),
             ),
             None => (
                 StatusCode::INTERNAL_SERVER_ERROR,

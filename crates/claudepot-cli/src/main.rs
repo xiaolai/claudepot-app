@@ -109,6 +109,14 @@ enum Commands {
         #[command(subcommand)]
         action: RemoteAction,
     },
+    /// Verbs Claude Code invokes, not you. Hidden: these are wired
+    /// into CC's settings by the surface that owns them, and a user
+    /// running one by hand gets nothing useful.
+    #[command(hide = true)]
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
     /// Manage CC session transcripts (move between projects, rescue orphans)
     Session {
         #[command(subcommand)]
@@ -433,6 +441,14 @@ enum UpdateAction {
         #[command(flatten)]
         args: commands::update::config::ConfigArgs,
     },
+}
+
+#[derive(Subcommand)]
+enum HookAction {
+    /// Offer a pending permission prompt to paired devices and print
+    /// the decision Claude Code should honour.
+    #[command(name = "permission-request")]
+    PermissionRequest,
 }
 
 #[derive(Subcommand)]
@@ -1203,6 +1219,18 @@ impl AppContext {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Dispatched before logging, migrations and `AccountStore::open`,
+    // and deliberately so: this runs on EVERY permission prompt on the
+    // machine, must add no measurable latency to one, and must not
+    // contend on accounts.db's WAL writer lock the way the Mcp/Codex
+    // early return below exists to avoid. It also emits no logs — a
+    // hook whose contract is silence must not write to stderr.
+    if let Commands::Hook { action } = cli.command {
+        return match action {
+            HookAction::PermissionRequest => commands::hook::permission_request_cmd().await,
+        };
+    }
+
     // Pin all tracing output to stderr regardless of subcommand. The
     // MCP memory-server subcommand uses stdout for JSON-RPC frames;
     // a single `tracing::info!` / `warn!` landing on the default
@@ -1533,6 +1561,12 @@ async fn main() -> Result<()> {
         // one copy can't silently diverge.
         Commands::Mcp { .. } | Commands::Codex { .. } => {
             unreachable!("dispatched before AccountStore::open — see the early return above")
+        }
+        // Same arrangement, earlier still: `Hook` returns before even
+        // the logging setup, because it runs on every permission
+        // prompt and owes the session no latency.
+        Commands::Hook { .. } => {
+            unreachable!("dispatched at the top of main — see the early return above")
         }
         Commands::Activity { action } => match action {
             ActivityAction::Recent { args } => commands::activity::recent(&ctx, args)?,

@@ -674,6 +674,7 @@ The endpoints behind it, all in `remote::api` over `remote::panel`:
 | `POST /api/sessions/{id}/prompt` | the only write that reaches Claude Code, through `peer` |
 | `POST /api/sessions/{id}/read` | per-device read mark |
 | `GET /api/projects`, `GET /api/accounts` | **read-only** |
+| `GET /api/approvals`, `POST /api/approvals/{id}` | the only route that **grants a capability**; alive only while `remote serve` is |
 | `POST /api/passkey/{register,login}/{begin,finish}` | register is authenticated, login is not |
 
 Five decisions are worth not re-litigating:
@@ -768,6 +769,61 @@ pending prompt is expected to refuse. Tapping a chip sends the label as a
 session is blocked on has **not been measured**, so the UI says "handed
 off" and leaves the question on the card. See the
 `pending AskUserQuestion shape` row in `crates/xtask/cc-upstream-watch.md`.
+
+**Approving from the phone** (`remote::approval`) is the one thing on
+this surface that grants a capability rather than reading or messaging,
+and it does **not** contradict the paragraph above. It uses a different
+door: Claude Code's `PermissionRequest` hook, which CC fires *before*
+drawing a prompt, in a process CC started itself. No peer message, no
+keystroke injection, no laundering — the reasoning in `panel::ask`
+stays correct and stays enforced.
+
+Five properties hold it together:
+
+- **Silence is the fall-through.** CC's decision union is `allow` or
+  `deny` and has no "ask" arm, so a hook that prints nothing leaves the
+  normal prompt to be drawn at the machine. Every failure — surface off,
+  dead server, corrupt file, unparseable payload, nobody holding the
+  phone — degrades to *exactly today's behaviour*. That is what makes
+  the feature safe to add at all: the worst case is walking to the
+  machine.
+- **It is armed only while `remote serve` is up.** The hook is installed
+  on start and revoked on stop (SIGINT **and** SIGTERM — `kill` and
+  every process supervisor send the latter, so handling only Ctrl-C
+  leaves the entry behind, measured). An install that never turns the
+  remote surface on is never asked anything.
+- **The runtime gate is the half that holds.** `server.enabled` is a
+  stored preference, not liveness — it stays true after a `kill -9`. So
+  the server heartbeats every 5 s and the hook believes the heartbeat,
+  not the preference. Without it a killed server would leave every
+  permission prompt on the machine pausing for the full wait with
+  nothing able to answer.
+- **The wait ends before CC's does.** CC clamps a hook timeout to
+  `UQ_ = 300_000` ms and *kills* the process at it — and a killed hook
+  blocks the tool call, the one outcome that does not fall through. So
+  `WAIT` (110 s) sits under `HOOK_TIMEOUT_SECS` (120 s) sits under the
+  clamp, and there is a test asserting the ordering.
+- **One writer per file.** A request and its decision are two files, not
+  two fields of one: the hook writes only the request, the server only
+  the decision. Atomic rename is crash-safety, not concurrency-safety —
+  the same confusion that lost a write in `remote-read-state.json` — and
+  these writers are in different processes, where a process-local mutex
+  buys nothing. The split removes the race instead of trying to win it.
+
+Be exact about what this widens. Before it, a stolen bearer token could
+read transcripts and inject text that CC would refuse to treat as
+approval. With it, that token can approve a tool call — arbitrary code
+execution as this user, which is what the admin password was always
+guarding. It does not weaken the password boundary; it does mean the
+boundary now has less behind it in reserve. The `args` exec form is used
+so the binary path never reaches a shell parser, the decision is refused
+for any id with no live request, and the argument is redacted and capped
+on the way *in* so a secret in a command line never reaches the file.
+
+The hook is a **hidden** CLI verb (`claudepot hook permission-request`)
+because CC invokes it, not the user; `verify-docs` exempts
+`#[command(hide = true)]` verbs from the README on exactly that
+reasoning, and tests the exemption in both directions.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 

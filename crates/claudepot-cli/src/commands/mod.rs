@@ -8,6 +8,7 @@ pub mod corpus;
 pub mod corpus_detect;
 pub mod desktop_ops;
 pub mod doctor;
+pub mod hook;
 pub mod lesson;
 pub mod logs;
 pub mod mcp;

@@ -22,8 +22,11 @@ license = "ISC"
 # rt-multi-thread + macros (runtimes, #[tokio::main/test], select!),
 # sync/time/process/fs for the orchestrators and subprocess calls,
 # io-util for the Async{Read,Write,BufRead}Ext adapters, net for the
-# loopback TcpListener test fixtures. `full` would also compile
-# signal, io-std, and the UDP/UDS net surfaces nothing here uses.
+# loopback TcpListener test fixtures, signal for `remote serve`'s
+# Ctrl-C handler — it is a foreground server that says "Ctrl-C to
+# stop", and it must revoke the CC hook it installed on the way down
+# rather than leave an entry in the user's settings.json. `full` would
+# also compile io-std and the UDP/UDS net surfaces nothing here uses.
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "macros",
@@ -33,6 +36,7 @@ tokio = { version = "1", features = [
     "fs",
     "io-util",
     "net",
+    "signal",
 ] }
 # `FutureExt::catch_unwind` — used by `usage_snapshot::run_tick` to
 # isolate panics from each sub-orchestrator so one panicking tick can

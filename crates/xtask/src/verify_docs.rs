@@ -152,10 +152,20 @@ fn read(repo: &Path, rel: &str) -> Result<String> {
 
 // ─── 1. CLI verbs ────────────────────────────────────────────────────
 
-/// Top-level variants of `enum Commands` in the CLI's `main.rs`.
+/// Top-level variants of `enum Commands` in the CLI's `main.rs`, minus
+/// the ones hidden from `--help`.
 ///
 /// Parsed rather than hand-listed: a hand-listed set is one more place
 /// to forget, which is the bug being fixed.
+///
+/// `#[command(hide = true)]` verbs are skipped because this check asks
+/// "is the user-facing CLI documented", and a hidden verb is not part
+/// of it — `claudepot hook permission-request` is invoked by Claude
+/// Code, and putting it in the README's command block would invite
+/// someone to run it by hand and get nothing. Note the exemption is
+/// narrow on purpose: it keys off the attribute clap itself reads, so a
+/// verb cannot escape documentation without also disappearing from
+/// `--help`.
 fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let Some(start) = src.find("enum Commands {") else {
@@ -163,8 +173,12 @@ fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
     };
     let body = &src[start..];
     let mut depth = 0usize;
+    let mut hidden = false;
     for line in body.lines() {
         let trimmed = line.trim_start();
+        if depth == 1 && trimmed.starts_with("#[") && trimmed.contains("hide = true") {
+            hidden = true;
+        }
         // Variants sit at exactly one level of nesting inside the enum.
         if depth == 1 && !trimmed.starts_with("//") && !trimmed.starts_with("#[") {
             if let Some(name) = trimmed
@@ -174,7 +188,10 @@ fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
             {
                 // A variant line ends in `{`, `,` or `(`.
                 if trimmed.ends_with('{') || trimmed.ends_with(',') || trimmed.contains('(') {
-                    out.insert(name.to_lowercase());
+                    if !hidden {
+                        out.insert(name.to_lowercase());
+                    }
+                    hidden = false;
                 }
             }
         }
@@ -2455,6 +2472,35 @@ fn check_cc_env_spec(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn hidden_verbs_are_exempt_from_the_readme_and_visible_ones_are_not() {
+        // Both directions: an exemption nobody has watched narrow is
+        // indistinguishable from one that exempts everything.
+        let src = r#"
+enum Commands {
+    /// A normal one
+    Account {
+        #[command(subcommand)]
+        action: AccountAction,
+    },
+    #[command(hide = true)]
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
+    /// Another normal one, AFTER the hidden one
+    Status,
+}
+"#;
+        let verbs = super::shipped_cli_verbs(src);
+        assert!(verbs.contains("account"), "{verbs:?}");
+        assert!(!verbs.contains("hook"), "hidden verb leaked in: {verbs:?}");
+        assert!(
+            verbs.contains("status"),
+            "the hidden flag must not stick to the next variant: {verbs:?}"
+        );
+    }
     use super::*;
 
     #[test]

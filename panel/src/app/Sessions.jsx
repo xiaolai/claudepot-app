@@ -48,7 +48,7 @@ const TONE_COLOR = {
   done: 'var(--fg4)',
 };
 
-export function Sessions({ sessions, conn, host, onOpen, onRetry, onChanged }) {
+export function Sessions({ sessions, approvals = [], conn, host, onOpen, onRetry, onChanged }) {
   if (sessions === null) {
     return (
       <Scroll>
@@ -74,6 +74,16 @@ export function Sessions({ sessions, conn, host, onOpen, onRetry, onChanged }) {
             Start one at the machine and it will appear here.
           </p>
         </Surface>
+      )}
+
+      {approvals.length > 0 && (
+        <Group title={approvals.length === 1 ? 'Waiting on you' : `Waiting on you (${approvals.length})`}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+            {approvals.map((a) => (
+              <ApprovalCard key={a.id} a={a} conn={conn} onSettled={onChanged} />
+            ))}
+          </div>
+        </Group>
       )}
 
       {attention.length > 0 && (
@@ -385,6 +395,96 @@ function LiveCard({ s, onOpen, onChanged, conn }) {
  * for the local user's approval, so the wording after a tap is "handed
  * off", never "sent".
  */
+/**
+ * A permission prompt, answerable.
+ *
+ * This is the only control on the panel that grants a capability rather
+ * than reading or messaging, which is why it says what it is granting
+ * before it offers to grant it.
+ *
+ * Allow is deliberately NOT the success-green chip. Green reads as "the
+ * good outcome", and allowing is not the good outcome — it is the
+ * consequential one, and it is the one being asked about. It gets the
+ * plain accent; Deny gets no colour pull at all, because the safe
+ * answer should cost nothing to choose.
+ *
+ * It disappears when the request stops being live — answered here,
+ * answered at the machine, or its hook gave up waiting — because the
+ * server drops it from the list, not because this component decided.
+ */
+function ApprovalCard({ a, conn, onSettled }) {
+  const [busy, setBusy] = useState(null);
+  const [failed, setFailed] = useState(null);
+  const offline = conn === 'offline';
+
+  const decide = async (decision) => {
+    setBusy(decision);
+    setFailed(null);
+    try {
+      await api.decideApproval(a.id, decision, newIdempotencyKey());
+      onSettled?.();
+    } catch (e) {
+      // A 404 is not an error the user caused: the prompt was settled
+      // somewhere else while this card was on screen.
+      setFailed(e?.status === 404 ? 'Already answered at the machine.' : explainSend(e));
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Surface>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--s2)' }}>
+        <Ico n="alert" s="2xs" w="bold" c="var(--wn)" />
+        <span style={{ fontSize: 'var(--t-sub)', fontWeight: 'var(--w-semi)' }}>
+          {a.tool_name}
+        </span>
+        <span style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginLeft: 'auto' }}>
+          {basename(a.cwd)}
+        </span>
+      </div>
+
+      {a.argument && (
+        <div
+          className="mono selectable"
+          title={a.argument}
+          style={{
+            marginTop: 'var(--s2)',
+            padding: 'var(--s2) var(--s3)',
+            borderRadius: 'var(--r-md)',
+            background: 'var(--sf2)',
+            fontSize: 'var(--t-nano)',
+            color: 'var(--fg2)',
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {a.argument}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 'var(--s2)', marginTop: 'var(--s3)' }}>
+        <Chip tone="accent" size="md" onClick={busy || offline ? undefined : () => decide('allow')}>
+          {busy === 'allow' ? '…' : 'Allow'}
+        </Chip>
+        <Chip tone="quiet" size="md" onClick={busy || offline ? undefined : () => decide('deny')}>
+          {busy === 'deny' ? '…' : 'Deny'}
+        </Chip>
+      </div>
+
+      <p style={{ marginTop: 'var(--s2)', fontSize: 'var(--t-micro)', color: 'var(--fg4)' }}>
+        {offline
+          ? 'Cannot reach this Mac — answer at the machine.'
+          : 'Claude Code is waiting. If nobody answers, it asks at the machine as usual.'}
+      </p>
+
+      {failed && (
+        <p role="alert" style={{ marginTop: 'var(--s2)', fontSize: 'var(--t-micro)', color: 'var(--dg)' }}>
+          {failed}
+        </p>
+      )}
+    </Surface>
+  );
+}
+
 function Ask({ ask, sending, sent, failed, onReply, disabled }) {
   const caveats = [];
   if (ask.more_questions > 0) {

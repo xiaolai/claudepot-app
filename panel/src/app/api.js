@@ -154,6 +154,16 @@ export const api = {
       idempotencyKey: key,
     }),
 
+  // Permission prompts waiting for a tap. Polled alongside the session
+  // list rather than on its own timer: an approval only means anything
+  // while its hook is still waiting, so it shares the list's cadence.
+  approvals: (signal) => request('GET', '/api/approvals', { signal }),
+  decideApproval: (id, decision, key) =>
+    request('POST', `/api/approvals/${encodeURIComponent(id)}`, {
+      body: { decision },
+      idempotencyKey: key,
+    }),
+
   projects: (signal) => request('GET', '/api/projects', { signal }),
   accounts: (signal) => request('GET', '/api/accounts', { signal }),
 
