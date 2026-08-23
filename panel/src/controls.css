@@ -22,17 +22,35 @@
  * carries its own corner rounding and inner shadow, which show through
  * the same way once the border is gone.
  *
- * **Focus is deliberately untouched.** The design system already draws
- * `:focus-visible { outline: var(--bw-ring) solid var(--ac);
- * outline-offset: var(--bw-ring) }`, and an outline is painted OUTSIDE
- * the border box — so it is a ring around the field, never an inner
- * border. Removing it would take the visible focus indicator that
- * `.claude/rules/design.md` requires, to fix a problem it does not
- * cause.
+ * **The focus ring stays; only its offset goes.** The design system
+ * draws `:focus-visible { outline: var(--bw-ring) solid var(--ac);
+ * outline-offset: var(--bw-ring) }`. An outline is painted OUTSIDE the
+ * border box, so it is a ring around the field and never an inner
+ * border — that part is right and is kept, because
+ * `.claude/rules/design.md` requires a visible focus indicator.
+ *
+ * The 2px OFFSET is the part that reads as a defect on a filled field.
+ * It holds the ring away from the element, and since these fields draw
+ * their own surface and their parent is transparent, the gap shows the
+ * page through: a thin near-white band between the grey fill and the
+ * ring, which looks like the background failed to reach the edge.
+ * Measured — field `oklch(0.952 0.008 85)`, parent
+ * `rgba(0,0,0,0)`, offset `2px`.
+ *
+ * An offset earns its keep on a control whose own colour would muddle
+ * the ring. On a pale field under a terracotta ring there is contrast
+ * to spare, so the ring sits flush and the fill runs to meet it.
+ * Scoped to text fields: every other control keeps the system's ring
+ * exactly as delivered.
  */
 input,
 textarea {
   appearance: none;
   -webkit-appearance: none;
   border: none;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
 }
