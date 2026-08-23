@@ -32,6 +32,8 @@
 // `style-src 'unsafe-inline'`, which the design system requires anyway.
 import { useEffect, useId, useRef, useState } from 'react';
 
+import { toMermaidColor } from './color.js';
+
 /**
  * Paper-mono colours for mermaid, read from the live tokens.
  *
@@ -40,7 +42,10 @@ import { useEffect, useId, useRef, useState } from 'react';
  */
 function themeVariables() {
   const cs = getComputedStyle(document.documentElement);
-  const v = (name, fallback = '') => cs.getPropertyValue(name).trim() || fallback;
+  // Every token here is `oklch()`, and mermaid runs each one through
+  // khroma, which throws `Unsupported color format` on it — taking the
+  // whole diagram down before layout ever starts. See `color.js`.
+  const v = (name, fallback = '') => toMermaidColor(cs.getPropertyValue(name).trim() || fallback);
   const surface = v('--sf2');
   const line = v('--hair');
   const ink = v('--fg');

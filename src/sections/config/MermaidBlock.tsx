@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../../lib/i18n";
+import { toMermaidColor } from "./mermaidColor";
 
 /**
  * Lazy-rendered Mermaid diagram for markdown ` ```mermaid ` fences.
@@ -186,7 +187,14 @@ function scrubAttributes(el: Element): void {
  */
 function readThemeVariables(): Record<string, string> {
   const cs = getComputedStyle(document.documentElement);
-  const v = (name: string) => cs.getPropertyValue(name).trim();
+  // Every token in tokens.css is `oklch()`, and mermaid runs each theme
+  // colour through khroma — which predates CSS Color 4 and throws
+  // `Unsupported color format`, taking the whole diagram down before
+  // layout starts. Latent here since this file was written: the failure
+  // needs a diagram whose theme derives enough colours to reach a
+  // throwing path, which a flowchart does and a sequence diagram does
+  // not. See `mermaidColor.ts`.
+  const v = (name: string) => toMermaidColor(cs.getPropertyValue(name).trim());
   return {
     // Surfaces
     background: v("--bg") || "transparent",
