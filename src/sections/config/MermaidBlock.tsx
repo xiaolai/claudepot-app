@@ -58,6 +58,26 @@ export function MermaidBlock({ source }: { source: string }) {
           startOnLoad: false,
           securityLevel: "strict",
           theme: "base",
+          // Pure SVG labels, never HTML ones. Mermaid's default puts
+          // labels in a `<foreignObject>` of HTML containing unclosed
+          // `<br>`, which makes the returned SVG HTML-flavoured rather
+          // than well-formed XML — and `attachSvg` parses it as
+          // `image/svg+xml`, so a flowchart with `<br/>` labels failed
+          // with "Opening and ending tag mismatch: br line 1 and p".
+          //
+          // It bites twice here: `sanitizeSvg` also strips
+          // `foreignObject` outright, so even a diagram that parsed
+          // would have rendered with its labels missing. Turning HTML
+          // labels off removes both problems at the source and keeps
+          // the strict parse, which is a deliberate guard rather than
+          // an accident. `<br/>` still breaks a line — mermaid emits
+          // tspans for it.
+          //
+          // Found on the panel, fixed on both: same defect, two
+          // renderers.
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
+          class: { htmlLabels: false },
           themeVariables: readThemeVariables(),
           fontFamily:
             getComputedStyle(document.documentElement)

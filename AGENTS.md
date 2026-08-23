@@ -737,6 +737,33 @@ Five decisions are worth not re-litigating:
   inside a Tauri webview navigates **the application itself** away with
   no back button.
 
+  **Mermaid runs with `htmlLabels: false`, and that is load-bearing.**
+  By default mermaid puts labels in a `<foreignObject>` of HTML
+  containing **unclosed `<br>`**, so the SVG it returns is
+  HTML-flavoured rather than well-formed XML. Both renderers parse it
+  with `DOMParser` as `image/svg+xml` — a deliberate guard, not an
+  accident — and both therefore failed with *"Opening and ending tag
+  mismatch: br line 1 and p"* on any diagram whose labels used `<br/>`.
+  Measured on three real diagrams: the flowchart and the state diagram
+  failed, the sequence diagram drew, and the difference was only that
+  the first two had `<br/>` labels. On the desktop it bit twice —
+  `sanitizeSvg` strips `foreignObject` outright, so even a diagram that
+  parsed would have rendered with its labels missing. Loosening the
+  parse to `text/html` would also have worked and is the wrong trade;
+  turning HTML labels off fixes both surfaces at the source, and
+  `<br/>` still breaks a line because mermaid emits tspans for it.
+
+  **The failure says why.** `Mermaid.jsx` captured the reason and then
+  rendered a generic sentence, so every failure looked identical from
+  outside — which is how one cause (oklch, see below) was fixed while
+  this one went on producing the same message. The reason is now
+  appended to the notice.
+
+  **`clusterBkg` is the warm page colour, not `--sf`.** `--sf` is the
+  CARD colour and in light mode it is pure white, which painted every
+  subgraph a stark white box on the diagram's own `--sf2` container and
+  read as a rendering fault rather than as depth.
+
   **A ` ```mermaid ` fence is drawn, on both surfaces.** A diagram in an
   answer *is* the answer; showing its source is showing the wrong
   artifact. Both go through `securityLevel: "strict"` and both

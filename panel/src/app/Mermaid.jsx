@@ -47,6 +47,14 @@ function themeVariables() {
   // whole diagram down before layout ever starts. See `color.js`.
   const v = (name, fallback = '') => toMermaidColor(cs.getPropertyValue(name).trim() || fallback);
   const surface = v('--sf2');
+  // `--sf` is the CARD colour and in light mode it is pure white
+  // (`oklch(100% 0 0)`). That is right for a card floating on the warm
+  // page; inside a diagram it painted every subgraph a stark white box
+  // on the `--sf2` container, which read as a rendering fault rather
+  // than as depth. `--bg` is the warm paper the whole app sits on — a
+  // couple of percent off the container either way, so a cluster reads
+  // as a panel instead of a hole.
+  const panel = v('--bg');
   const line = v('--hair');
   const ink = v('--fg');
   const muted = v('--fg3');
@@ -54,7 +62,7 @@ function themeVariables() {
     background: 'transparent',
     mainBkg: surface,
     secondBkg: v('--sf3'),
-    tertiaryColor: v('--sf'),
+    tertiaryColor: panel,
     primaryColor: surface,
     primaryTextColor: ink,
     primaryBorderColor: v('--ac'),
@@ -62,7 +70,7 @@ function themeVariables() {
     textColor: ink,
     titleColor: ink,
     edgeLabelBackground: v('--bg'),
-    clusterBkg: v('--sf'),
+    clusterBkg: panel,
     clusterBorder: line,
     noteBkgColor: surface,
     noteTextColor: ink,
@@ -112,6 +120,26 @@ export function Mermaid({ source }) {
           startOnLoad: false,
           securityLevel: 'strict',
           theme: 'base',
+          // **Pure SVG labels, never HTML ones.** By default mermaid
+          // puts labels in a `<foreignObject>` containing HTML, and
+          // that HTML contains unclosed `<br>`. The SVG it returns is
+          // therefore HTML-flavoured, not well-formed XML — and the
+          // strict parse below rejected it with "Opening and ending tag
+          // mismatch: br line 1 and p". Measured: of three real
+          // diagrams, the flowchart and the state diagram failed and
+          // the sequence diagram drew, because only the first two
+          // carried `<br/>` labels.
+          //
+          // Loosening the parser to `text/html` would have worked too
+          // and is the wrong trade: the strict parse is a deliberate
+          // guard, and the desktop renderer additionally STRIPS
+          // `foreignObject` outright, so HTML labels would render there
+          // as missing text rather than as an error. Turning them off
+          // fixes both surfaces at the source, and `<br/>` still breaks
+          // a line — mermaid emits tspans for it.
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
+          class: { htmlLabels: false },
           themeVariables: themeVariables(),
         });
         const { svg } = await mermaid.render(id, source);
@@ -121,7 +149,9 @@ export function Mermaid({ source }) {
         // that would run a script if one were ever present.
         const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
         const el = doc.documentElement;
-        if (el.nodeName.toLowerCase() !== 'svg') throw new Error('not an svg');
+        if (el.nodeName.toLowerCase() !== 'svg') {
+          throw new Error(`not an svg: ${(el.textContent || '').trim().replace(/\s+/g," ").slice(0, 400)}`);
+        }
         ref.current.replaceChildren(document.importNode(el, true));
       } catch (e) {
         if (cancelled) return;
@@ -140,7 +170,15 @@ export function Mermaid({ source }) {
   if (error) {
     return (
       <div className="mmd-failed">
-        <p className="mmd-failed-note">Diagram could not be drawn — showing its source.</p>
+        {/* Say WHY. The reason was captured and then thrown away, so
+            every failure looked identical from the outside — which is
+            how one cause got fixed while a second went on producing the
+            same sentence. It is small and muted: a reader who does not
+            care skips it, and one who does has something to report. */}
+        <p className="mmd-failed-note">
+          Diagram could not be drawn — showing its source.
+          {error && typeof error === 'string' ? ` (${error})` : ''}
+        </p>
         <pre className="mono">{source}</pre>
       </div>
     );
