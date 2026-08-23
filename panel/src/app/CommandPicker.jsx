@@ -11,11 +11,12 @@
 // of them dispatch subprocesses, and the last thing between a mistyped
 // filter and a 14,000-word instruction arriving in a live session
 // should be a deliberate press of Send.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { api } from './api.js';
+import { PickerSheet, PICKER_ROW_STYLE } from './PickerSheet.jsx';
 
-const { Chip, Ico } = window;
+const { Chip } = window;
 
 /** `14208` → `14.2k`. A body length is a warning, not an accountancy. */
 function size(chars) {
@@ -31,11 +32,9 @@ function sourceLabel(source) {
 export function CommandPicker({ sessionId, onStage, onClose }) {
   const [all, setAll] = useState(null);
   const [failed, setFailed] = useState(null);
-  const [q, setQ] = useState('');
   const [chosen, setChosen] = useState(null);
   const [args, setArgs] = useState('');
   const [busy, setBusy] = useState(false);
-  const filterRef = useRef(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -43,27 +42,10 @@ export function CommandPicker({ sessionId, onStage, onClose }) {
       .commands(sessionId, ctrl.signal)
       .then((d) => setAll(d?.commands ?? []))
       .catch((e) => {
-        if (e?.name !== 'AbortError') setFailed('Could not read this project’s commands.');
+        if (e?.name !== 'AbortError') setFailed('Could not read this project\u2019s commands.');
       });
     return () => ctrl.abort();
   }, [sessionId]);
-
-  useEffect(() => {
-    // The list runs to 168 entries on a real machine, so the filter is
-    // the primary control, not an afterthought.
-    filterRef.current?.focus();
-  }, [all]);
-
-  const shown = useMemo(() => {
-    if (!all) return [];
-    const needle = q.trim().toLowerCase();
-    if (!needle) return all;
-    return all.filter(
-      (c) =>
-        c.name.toLowerCase().includes(needle) ||
-        (c.description || '').toLowerCase().includes(needle),
-    );
-  }, [all, q]);
 
   const stage = async (cmd, withArgs) => {
     setBusy(true);
@@ -88,80 +70,23 @@ export function CommandPicker({ sessionId, onStage, onClose }) {
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Insert a command"
-      style={{
-        // `fixed`, not `absolute`: this is a full-screen sheet, and
-        // `absolute` would silently become a 100px-tall box inside the
-        // composer the moment anything above it gains `position:
-        // relative`. Saying viewport is better than depending on no
-        // ancestor ever saying otherwise.
-        position: 'fixed',
-        inset: 0,
-        // `--z-sheet`, not a literal: `--z-bar` is also 20, and on a
-        // tie the tab bar wins on DOM order and paints over this.
-        zIndex: 'var(--z-sheet)',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg)',
-        paddingTop: 'var(--safe-t)',
-      }}
+    <PickerSheet
+      label="Insert a command"
+      placeholder="Filter commands\u2026"
+      items={all}
+      failed={failed}
+      match={(c, needle) =>
+        c.name.toLowerCase().includes(needle) ||
+        (c.description || '').toLowerCase().includes(needle)
+      }
+      empty="No commands in this project."
+      noMatch="Nothing matches that."
+      onClose={onClose}
     >
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--s2)',
-          alignItems: 'center',
-          padding: 'var(--s3) var(--gut)',
-          boxShadow: 'inset 0 calc(var(--bw-hair) * -1) 0 var(--hair)',
-        }}
-      >
-        <input
-          ref={filterRef}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Filter commands"
-          placeholder="Filter commands…"
-          style={{
-            flex: 1,
-            height: 'var(--ctl-lg)',
-            padding: '0 var(--s3)',
-            borderRadius: 'var(--r-md)',
-            background: 'var(--sf2)',
-            color: 'var(--fg)',
-            fontFamily: 'inherit',
-            fontSize: 'var(--t-body)',
-          }}
-        />
-        <button onClick={onClose} aria-label="Close" style={{ padding: 'var(--s2)' }}>
-          <Ico n="x" s="sm" c="var(--fg3)" />
-        </button>
-      </div>
-
-      <div className="sc" style={{ flex: 1, minHeight: 0, padding: '0 var(--gut)', paddingBottom: 'var(--safe-b)' }}>
-        {failed && (
-          <p role="alert" style={{ padding: 'var(--s4) 0', fontSize: 'var(--t-meta)', color: 'var(--dg)' }}>
-            {failed}
-          </p>
-        )}
-        {all === null && !failed && (
-          <p style={{ padding: 'var(--s4) 0', fontSize: 'var(--t-meta)', color: 'var(--fg4)' }}>Loading…</p>
-        )}
-        {all !== null && shown.length === 0 && (
-          <p style={{ padding: 'var(--s4) 0', fontSize: 'var(--t-meta)', color: 'var(--fg4)' }}>
-            {all.length === 0 ? 'No commands in this project.' : 'Nothing matches that.'}
-          </p>
-        )}
-
-        {shown.map((c) => {
+      {(c) => {
           const open = chosen?.name === c.name;
           return (
-            <div
-              key={c.name}
-              style={{ padding: 'var(--s3) 0', boxShadow: 'inset 0 calc(var(--bw-hair) * -1) 0 var(--hair)' }}
-            >
+            <div key={c.name} style={PICKER_ROW_STYLE}>
               <button
                 onClick={() => pick(c)}
                 disabled={busy}
@@ -223,8 +148,7 @@ export function CommandPicker({ sessionId, onStage, onClose }) {
               )}
             </div>
           );
-        })}
-      </div>
-    </div>
+        }}
+    </PickerSheet>
   );
 }

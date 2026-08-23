@@ -208,6 +208,7 @@ async function render(dir, scenario = {}) {
   const root = dom.window.document.getElementById('root');
   const out = {
     hasComposer: Boolean(dom.window.document.querySelector('textarea')),
+    hasSheet: Boolean(dom.window.document.querySelector('[role="dialog"]')),
     children: root?.children.length ?? 0,
     text: (root?.textContent || '').replace(/\s+/g, ' ').trim(),
     errors,
@@ -275,6 +276,39 @@ async function openAThread(window) {
   throw new Error('the session card never appeared');
 }
 
+/**
+ * Open a thread, then open the quick-prompt sheet from `…`.
+ *
+ * The two pickers share `PickerSheet`, so exercising one proves the
+ * sheet chrome mounts; this one is chosen because it is also the path
+ * that renders `QuickPicker`'s rows.
+ */
+async function openTheQuickSheet(window) {
+  await openAThread(window);
+  const doc = window.document;
+  for (let i = 0; i < 40; i += 1) {
+    const btn = doc.querySelector('button[aria-label="Send a quick prompt"]');
+    if (btn) {
+      btn.click();
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the quick-prompt button never appeared');
+}
+
+function evaluateSheet(result) {
+  const problems = [];
+  if (result.errors.length) problems.push(...result.errors.map((e) => e.slice(0, 400)));
+  if (!result.hasSheet) problems.push('the quick-prompt sheet did not open');
+  // The stub host serves one prompt named `Go`; if the sheet mounted
+  // but rendered no rows, the row renderer is what broke.
+  if (!/Go/.test(result.text)) {
+    problems.push(`the sheet rendered no rows (text was: ${result.text.slice(0, 160)})`);
+  }
+  return problems;
+}
+
 function evaluateThread(result) {
   const problems = [];
   if (result.children === 0) problems.push('#root has no children — React never mounted');
@@ -326,15 +360,19 @@ const problems = evaluate(await render(outDir));
 const threadProblems = evaluateThread(
   await render(outDir, { token: 'render-check-token', then: openAThread }),
 );
+const sheetProblems = evaluateSheet(
+  await render(outDir, { token: 'render-check-token', then: openTheQuickSheet }),
+);
 clearTimeout(deadline);
-if (problems.length || threadProblems.length) {
+if (problems.length || threadProblems.length || sheetProblems.length) {
   console.error('panel render check FAILED');
   for (const p of problems) console.error(`  - signed out: ${p}`);
   for (const p of threadProblems) console.error(`  - thread: ${p}`);
+  for (const p of sheetProblems) console.error(`  - sheet: ${p}`);
   restoreAll();
   process.exit(1);
 }
-console.log('panel render check ok — sign-in screen and a thread both render, no console errors');
+console.log('panel render check ok — sign-in, a thread and a picker sheet all render, no console errors');
 restoreAll();
 // Explicit, so a poll timer the panel scheduled cannot outlive the
 // verdict and turn a pass into a non-zero exit.

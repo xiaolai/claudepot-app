@@ -15,8 +15,45 @@ import react from '@vitejs/plugin-react';
 // level up); wiping it is a bigger hammer than this build needs.
 const OUT = '../crates/claudepot-core/src/remote/assets/panel';
 
+// Where `vite dev` forwards `/api` — a running `claudepot remote serve`.
+//
+// From the environment, never hardcoded: a real deployment binds a
+// tailnet or LAN address, and committing one would put somebody's
+// private topology in a public repo. Loopback is the default because it
+// is the only address that means the same thing on every machine.
+//
+//   CLAUDEPOT_API=https://<host>:8420 pnpm dev
+const API = process.env.CLAUDEPOT_API || 'http://127.0.0.1:8420';
+
 export default defineConfig({
   plugins: [react()],
+  // Dev only — `vite build` ignores this block, so nothing here reaches
+  // the shipped bundle.
+  server: {
+    proxy: {
+      '/api': {
+        target: API,
+        // Host becomes the target's, which `guard_origin` checks
+        // against `allowed_hosts`.
+        changeOrigin: true,
+        // The appliance's certificate comes from a private CA node has
+        // no reason to trust. This is the developer's machine talking
+        // to their own server.
+        secure: false,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            // `guard_origin` refuses a PRESENT Origin that does not
+            // match Host, and allows an absent one. The browser sends
+            // `http://localhost:5173`, which can never match — so drop
+            // it rather than forge it. Dropping is the honest form:
+            // this request genuinely did not come from a page on the
+            // appliance's own origin.
+            proxyReq.removeHeader('origin');
+          });
+        },
+      },
+    },
+  },
   // Assets are referenced as `/panel/…` because that is where the
   // server serves them from. A relative base would break the moment the
   // app is opened at a nested path.

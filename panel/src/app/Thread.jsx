@@ -18,6 +18,7 @@ import { ago, modelLabel, tightPath, groupTools } from './format.js';
 import { Markdown } from './Markdown.jsx';
 import { useTranscript } from './useTranscript.js';
 import { CommandPicker } from './CommandPicker.jsx';
+import { QuickPicker } from './QuickPicker.jsx';
 import { useFollowTail, useSendPrompt } from './useThreadState.js';
 import { CopyPath, Muted } from './views.jsx';
 
@@ -49,7 +50,7 @@ function useQuickPrompts() {
 }
 
 export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) {
-  const [picking, setPicking] = useState(false);
+  const [sheet, setSheet] = useState(null); // 'commands' | 'quick' | null
   const quickPrompts = useQuickPrompts();
   const id = session.session_id;
   const { events, total, loading, error, hasEarlier, loadEarlier } = useTranscript(id);
@@ -172,8 +173,9 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) 
         disabled={!canSend}
         reason={blocked}
         warning={warning}
-        onPick={() => setPicking(true)}
-        quickPrompts={quickPrompts}
+        onPickCommand={() => setSheet('commands')}
+        onPickQuick={() => setSheet('quick')}
+        hasQuick={quickPrompts.length > 0}
       />
 
       {/* Outside the composer, deliberately. The composer sets
@@ -186,12 +188,15 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) 
 
           `Thread` returns a fragment, so this lands directly under
           `Shell`, which sets no filter. */}
-      {picking && (
+      {sheet === 'commands' && (
         <CommandPicker
           sessionId={session.session_id}
           onStage={setStaged}
-          onClose={() => setPicking(false)}
+          onClose={() => setSheet(null)}
         />
+      )}
+      {sheet === 'quick' && (
+        <QuickPicker prompts={quickPrompts} onSend={send} onClose={() => setSheet(null)} />
       )}
     </>
   );
@@ -379,8 +384,9 @@ function Composer({
   staged,
   onStage,
   hasContent,
-  onPick,
-  quickPrompts,
+  onPickCommand,
+  onPickQuick,
+  hasQuick,
 }) {
 
   return (
@@ -412,20 +418,6 @@ function Composer({
         >
           <Ico n="alert" s="2xs" w="bold" /> {warning}
         </p>
-      )}
-      {!disabled && (
-        <div
-          style={{ display: 'flex', gap: 'var(--s2)', overflowX: 'auto', paddingBottom: 'var(--s2)' }}
-        >
-          {/* The NAME is the label, the TEXT is what gets sent. A
-              chip is a shortcut, so one tap sends — the picker is where
-              something long gets staged and reviewed first. */}
-          {quickPrompts.map((q) => (
-            <Chip key={q.id} tone="quiet" onClick={() => onSend(q.text)}>
-              {q.name}
-            </Chip>
-          ))}
-        </div>
       )}
       {/* The staged expansion. A chip rather than 14,000 characters in
           the textarea — same commitment, since nothing is sent until
@@ -466,9 +458,36 @@ function Composer({
         }}
         style={{ display: 'flex', gap: 'var(--s2)', alignItems: 'flex-end' }}
       >
+        {/* Before `/`, and only when there is something behind it.
+            These used to be a scrolling row of chips above the
+            composer, which cost a line on every thread and showed about
+            four before running off the edge. Behind a sheet the list is
+            as long as its owner wants and is searchable. */}
+        {hasQuick && (
+          <button
+            type="button"
+            onClick={onPickQuick}
+            disabled={disabled}
+            aria-label="Send a quick prompt"
+            title="Send a quick prompt"
+            style={{
+              display: 'grid',
+              placeItems: 'center',
+              height: 'var(--ctl-lg)',
+              width: 'var(--ctl-lg)',
+              flexShrink: 0,
+              borderRadius: 'var(--r-lg)',
+              background: 'var(--sf2)',
+              color: 'var(--fg3)',
+              fontSize: 'var(--t-body)',
+            }}
+          >
+            …
+          </button>
+        )}
         <button
           type="button"
-          onClick={onPick}
+          onClick={onPickCommand}
           disabled={disabled}
           aria-label="Insert a command"
           title="Insert a command"

@@ -938,6 +938,19 @@ Five decisions are worth not re-litigating:
   registers. Registering, removing and verifying accounts
   stay at the machine — they need credentials the panel never sees.
 
+**Two pickers, one sheet.** Slash commands sit behind `/` and quick
+prompts behind `…`, and they share `PickerSheet` — position, z-index,
+the filter field, the empty and failure states — because a second copy
+of that chrome is a second place for the fixed-position rule to drift.
+They differ in exactly one way, deliberately: `/` **stages** and `…`
+**sends**. A slash command expands to thousands of words and deserves a
+look before it goes; a quick prompt is a short phrase its owner wrote so
+it could be fired without ceremony.
+
+The quick prompts used to be a scrolling chip row above the composer,
+which cost a line on every thread and showed about four before running
+off the edge. `…` renders only when there is something behind it.
+
 **Answering without opening** (`remote::panel::ask`) reads exactly one
 shape: an unanswered `AskUserQuestion` tool call, whose input carries the
 question and its offered choices. Permission prompts are deliberately not
