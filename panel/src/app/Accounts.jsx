@@ -11,7 +11,24 @@ import { OfflineError, api, newIdempotencyKey } from './api.js';
 import { ago, verifyChip } from './format.js';
 import { Muted } from './views.jsx';
 
-const { Chip, Face, Group, Item, List, Meter } = window;
+const { Chip, Face, Group, Item, List, Meter, Tap } = window;
+
+/**
+ * The rate-limit windows, in the order the desktop's `UsageBlock` shows
+ * them so the two surfaces read the same way round.
+ *
+ * Rendered only where the server actually sent a figure. Anthropic
+ * returns `five_hour` and `seven_day` on these accounts today and omits
+ * the per-model pair; drawing a ring at 0% for a window nobody measured
+ * would be a number invented by the client, which is the thing the
+ * panel's rules refuse everywhere else.
+ */
+const WINDOWS = [
+  { key: 'five_hour', sub: '5h' },
+  { key: 'seven_day', sub: '7d' },
+  { key: 'seven_day_opus', sub: 'opus' },
+  { key: 'seven_day_sonnet', sub: 'sonnet' },
+];
 
 /** Stable hue per account so the tinted face is recognisable. */
 function hueOf(email) {
@@ -91,7 +108,9 @@ export function Accounts() {
           <List>
             {accounts.map((a, i) => {
               const v = verifyChip(a.verify_status);
-              const five = a.usage?.five_hour;
+              const meters = WINDOWS.map((win) => ({ ...win, w: a.usage?.[win.key] })).filter(
+                (m) => m.w && typeof m.w.utilization === 'number',
+              );
               return (
                 <Item key={a.email} first={i === 0} style={{ alignItems: 'flex-start' }}>
                   <Face name={a.email} hue={hueOf(a.email)} size="md" ring={a.is_cli_active} />
@@ -121,36 +140,54 @@ export function Accounts() {
                         </Chip>
                       )}
                     </div>
+                    {/* Under the identity rather than beside it: three
+                        72px rings do not fit in a row that also holds an
+                        avatar, an email and a control at 390px, and
+                        shrinking them re-creates the crowding that made
+                        `sm` wrong in the first place. Wrapping, so a
+                        fourth window appearing costs a line rather than
+                        the layout. */}
+                    {meters.length > 0 && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 'var(--s3)',
+                          flexWrap: 'wrap',
+                          marginTop: 'var(--s3)',
+                        }}
+                      >
+                        {meters.map((m) => (
+                          <Meter
+                            key={m.key}
+                            pct={Math.round(m.w.utilization)}
+                            size="md"
+                            sub={m.sub}
+                          />
+                        ))}
+                      </div>
+                    )}
                     {a.usage_as_of && (
                       <div className="mono" style={{ fontSize: 'var(--t-nano)', color: 'var(--fg4)', marginTop: 'var(--s2)' }}>
                         usage as of {ago(a.usage_as_of)} ago
                       </div>
                     )}
                   </div>
-                  {/* Ahead of the meter so the meters line up down the
-                      column. With the button last, the active row —
-                      which has no button — pushed its meter to the edge
-                      while every other row's sat short of it. */}
-                  {/* Names the slot, because the row beside it shows
-                      both. `cli` and `desktop` are independent nouns
-                      and this only moves the first — a bare "Use" next
-                      to a Desktop chip invites the reader to assume
-                      otherwise. */}
+                  {/* Icon-only, which the row earns: it repeats down a
+                      list, it is never the screen's primary action, and
+                      `check` reads as "make this the one" across the
+                      web. The label still names the SLOT — `cli` and
+                      `desktop` are independent nouns and this moves
+                      only the first — and it is not the sole disclosure:
+                      the note under the list says the same in prose,
+                      because a tooltip is not a place to hide something
+                      the reader needs. */}
                   {!a.is_cli_active && (
-                    <Chip
-                      tone="quiet"
-                      size="xs"
+                    <Tap
+                      n={busy === a.email ? 'clock' : 'check'}
                       onClick={busy ? undefined : () => activate(a.email, false)}
-                    >
-                      {busy === a.email ? '…' : 'Use for CLI'}
-                    </Chip>
+                      label={`Use ${a.email} for the CLI`}
+                    />
                   )}
-                  {/* `md`, not `sm`: both steps set the same font size,
-                      so `sm` packs it into a 56px ring instead of 72
-                      and a three-digit reading crowds the stroke. The
-                      design system is vendored byte-identical, so the
-                      room has to come from the size step. */}
-                  {five && <Meter pct={Math.round(five.utilization)} size="md" sub="5h" />}
                 </Item>
               );
             })}
