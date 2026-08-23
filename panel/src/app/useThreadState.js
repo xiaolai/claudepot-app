@@ -86,11 +86,31 @@ export function useFollowTail(sessionId, total, events) {
 }
 
 /**
+ * Text that Claude Code will treat as a slash command if typed at the
+ * terminal, and as literal prose if it arrives over the peer socket.
+ *
+ * A word, not a path. `/compact` matches; `/Users/joker/x` does not,
+ * because a second slash means the user is talking about a file.
+ */
+const LOOKS_LIKE_SLASH_COMMAND = /^\/[a-z][a-z0-9:_-]*(\s|$)/i;
+
+/**
  * Handing a prompt to a session.
  *
  * `canSend` and `blocked` travel together because a disabled control
  * that does not say why is the thing `rules/design.md` forbids: "disabled
  * buttons state a reason inline".
+ *
+ * `warning` is the softer case: the send will succeed and do something
+ * other than what the user meant. Claude Code dispatches an injected
+ * prompt with `skipSlashCommands: true` — its own predicate for "is this
+ * a command" is `startsWith("/") && !skipSlashCommands` — so `/compact`
+ * arrives as four-and-a-bit characters of text and Claude replies about
+ * it instead of running it. Verified against the 2.1.241 binary.
+ *
+ * A warning rather than a block: `/` also starts a path, and refusing to
+ * send text the user meant to send would be worse than telling them what
+ * will happen to it.
  */
 export function useSendPrompt(session, conn, onChanged) {
   const [text, setText] = useState('');
@@ -98,6 +118,9 @@ export function useSendPrompt(session, conn, onChanged) {
   const [notice, setNotice] = useState(null);
 
   const canSend = Boolean(session.live && session.addressable && conn !== 'offline');
+  const warning = LOOKS_LIKE_SLASH_COMMAND.test(text.trim())
+    ? 'Slash commands do not run over this channel — Claude Code will read this as plain text.'
+    : null;
   const blocked = !session.live
     ? 'This session is not running — nothing to send to.'
     : !session.addressable
@@ -126,5 +149,5 @@ export function useSendPrompt(session, conn, onChanged) {
     [text, sending, canSend, session.session_id, onChanged],
   );
 
-  return { text, setText, sending, notice, send, canSend, blocked };
+  return { text, setText, sending, notice, send, canSend, blocked, warning };
 }

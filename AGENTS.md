@@ -376,8 +376,20 @@ name/id/pid to exactly one session), `outcome` (classify what happened),
 `inbound` (the time-boxed grant). CLI verbs in
 `cli/commands/session/send.rs`.
 
-Verified against the **2.1.239** binary; the `peer messaging` row in
-`crates/xtask/cc-upstream-watch.md` re-checks it. This is an internal,
+Verified against the **2.1.241** binary (re-checked 2026-08-23); the
+`peer messaging` row in `crates/xtask/cc-upstream-watch.md` re-checks it.
+
+**There is no approval action on this channel, and `permission_response`
+in the binary is not a counter-example.** The control dispatch is an
+explicit if/else chain over `rename`, `peer_message_status`,
+`notify_when_idle` and `peer_idle_notice`; zero `uds-messaging` lines
+mention permission or approve. The `permission_response` frames that
+*do* exist belong to two other transports — CC's own remote-device
+WebSocket (`sendPermissionResponse`, keyed by `selectedDeviceId` /
+`target_device_id`) and the SDK's `canUseTool` control protocol. Both
+are reachable only by the process that owns the session, which for an
+interactive session is not Claudepot. Recorded here so the next reader
+who greps the binary does not mistake them for a way in. This is an internal,
 feature-gated surface (`agents_cross_session_inbox`) on a product that
 ships ~27 releases a month, so `peerProtocol == 1` is a hard pin —
 a session announcing anything else is refused, not addressed on a guess.
@@ -407,9 +419,13 @@ Five properties drive the design; changing any invalidates the feature:
   remote **messaging** at lower trust than the session's own user.
   Asking a session to approve a pending permission prompt is expected to
   be refused, and that refusal is correct.
-- **Slash commands do not work.** CC dispatches injected prompts with
-  `skipSlashCommands: true`, so `/compact` arrives as literal text.
-  Never present the input as a command line.
+- **Slash commands do not work.** CC's peer inbox builds its dispatch as
+  `{…, skipSlashCommands: true, isMeta: true}`, and CC's own predicate
+  for "is this a command" is `startsWith("/") && !skipSlashCommands`, so
+  `/compact` arrives as literal text. Never present the input as a
+  command line — and say so where someone would type one: the panel's
+  composer warns when the text looks like a command, because the send
+  otherwise *succeeds* and does something other than what was meant.
 - **`accept` only counts from user scope.** A project-scope value can
   *tighten* the gate but never loosen it — CC: "your own `accept` cannot
   override a repo tightening". A project-scoped writer would report

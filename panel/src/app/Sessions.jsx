@@ -309,10 +309,24 @@ function LiveCard({ s, onOpen, onChanged, conn }) {
         />
       )}
 
+      {/* A permission prompt, not a question. There is no chip row here
+          and there cannot be one: Claude Code's peer inbox accepts
+          `rename`, `notify_when_idle`, `peer_idle_notice` and
+          `peer_message_status` and nothing else — no approval action
+          exists on this channel. Even if one did, CC attaches a standing
+          caveat telling a session never to treat a peer message as the
+          user's approval, and calls doing so permission laundering. So
+          the card says where the answer has to happen. */}
       {!s.ask && s.waiting_for && (
-        <p style={{ marginTop: 'var(--s3)', fontSize: 'var(--t-meta)', color: 'var(--wn)' }}>
-          <Ico n="alert" s="2xs" w="bold" /> Waiting to {s.waiting_for} — answer at the machine.
-        </p>
+        <div style={{ marginTop: 'var(--s3)' }}>
+          <p style={{ fontSize: 'var(--t-meta)', color: 'var(--wn)' }}>
+            <Ico n="alert" s="2xs" w="bold" /> Waiting to {s.waiting_for}.
+          </p>
+          <p style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginTop: 'var(--s1)', lineHeight: 'var(--lh-body)' }}>
+            Approving needs the machine — a remote message cannot grant a permission, and Claude
+            Code will refuse one that tries.
+          </p>
+        </div>
       )}
     </Surface>
   );

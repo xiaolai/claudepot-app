@@ -27,7 +27,7 @@ export function Thread({ session, onBack, onChanged, conn }) {
   const id = session.session_id;
   const { events, total, loading, error, hasEarlier, loadEarlier } = useTranscript(id);
   const { scroller, onScroll } = useFollowTail(id, total, events);
-  const { text, setText, sending, notice, send, canSend, blocked } = useSendPrompt(
+  const { text, setText, sending, notice, send, canSend, blocked, warning } = useSendPrompt(
     session,
     conn,
     onChanged,
@@ -135,6 +135,7 @@ export function Thread({ session, onBack, onChanged, conn }) {
         notice={notice}
         disabled={!canSend}
         reason={blocked}
+        warning={warning}
       />
     </>
   );
@@ -256,7 +257,7 @@ function ToolTick({ e }) {
   );
 }
 
-function Composer({ text, onText, onSend, sending, notice, disabled, reason }) {
+function Composer({ text, onText, onSend, sending, notice, disabled, reason, warning }) {
   return (
     <div
       style={{
@@ -274,6 +275,14 @@ function Composer({ text, onText, onSend, sending, notice, disabled, reason }) {
           style={{ fontSize: 'var(--t-micro)', color: 'var(--fg3)', marginBottom: 'var(--s2)' }}
         >
           {notice}
+        </p>
+      )}
+      {warning && (
+        <p
+          role="status"
+          style={{ fontSize: 'var(--t-micro)', color: 'var(--wn)', marginBottom: 'var(--s2)' }}
+        >
+          <Ico n="alert" s="2xs" w="bold" /> {warning}
         </p>
       )}
       {!disabled && (
