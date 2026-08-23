@@ -11,7 +11,7 @@ import { OfflineError, api, newIdempotencyKey } from './api.js';
 import { ago, verifyChip } from './format.js';
 import { Muted } from './views.jsx';
 
-const { Chip, Face, Group, Item, List, Meter, Tap } = window;
+const { Chip, Face, Group, Item, List, Meter, Surface, Tap } = window;
 
 /**
  * The rate-limit windows, in the order the desktop's `UsageBlock` shows
@@ -35,6 +35,102 @@ function hueOf(email) {
   let h = 0;
   for (let i = 0; i < email.length; i += 1) h = (h * 31 + email.charCodeAt(i)) % 360;
   return h;
+}
+
+/** Windows the server actually reported a figure for, in `WINDOWS` order. */
+function metersOf(a) {
+  return WINDOWS.map((win) => ({ ...win, w: a.usage?.[win.key] })).filter(
+    (m) => m.w && typeof m.w.utilization === 'number',
+  );
+}
+
+/**
+ * One account, rendered identically in the active card and in the list.
+ *
+ * Shared rather than duplicated: the two differ only in their container,
+ * and a second copy of this markup is a second place for the meter row
+ * or the switch label to drift.
+ */
+function AccountRow({ a, v, meters, busy, onActivate }) {
+  return (
+    <>
+  <Face name={a.email} hue={hueOf(a.email)} size="md" ring={a.is_cli_active} />
+  <div style={{ flex: 1, minWidth: 0 }}>
+    <div
+      style={{
+        fontSize: 'var(--t-sub)',
+        fontWeight: 'var(--w-med)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {a.email}
+    </div>
+    <div style={{ display: 'flex', gap: 'var(--s2)', flexWrap: 'wrap', marginTop: 'var(--s2)' }}>
+      {/* No plan chip and no Desktop chip. The plan
+          is the same on every row here, so it separates
+          nothing; the Desktop slot is not something
+          this surface can move, and naming it invited
+          the reading that the control beside it might.
+          What is left is only what differs and matters:
+          a verification state, when there is one. */}
+      {v && (
+        <Chip tone={v.tone} size="xs">
+          {v.label}
+        </Chip>
+      )}
+    </div>
+    {/* Under the identity rather than beside it: three
+        72px rings do not fit in a row that also holds an
+        avatar, an email and a control at 390px, and
+        shrinking them re-creates the crowding that made
+        `sm` wrong in the first place. Wrapping, so a
+        fourth window appearing costs a line rather than
+        the layout. */}
+    {meters.length > 0 && (
+      <div
+        style={{
+          display: 'flex',
+          gap: 'var(--s3)',
+          flexWrap: 'wrap',
+          marginTop: 'var(--s3)',
+        }}
+      >
+        {meters.map((m) => (
+          <Meter
+            key={m.key}
+            pct={Math.round(m.w.utilization)}
+            size="md"
+            sub={m.sub}
+          />
+        ))}
+      </div>
+    )}
+    {a.usage_as_of && (
+      <div className="mono" style={{ fontSize: 'var(--t-nano)', color: 'var(--fg4)', marginTop: 'var(--s2)' }}>
+        usage as of {ago(a.usage_as_of)} ago
+      </div>
+    )}
+  </div>
+  {/* Icon-only, which the row earns: it repeats down a
+      list, it is never the screen's primary action, and
+      `check` reads as "make this the one" across the
+      web. The label still names the SLOT — `cli` and
+      `desktop` are independent nouns and this moves
+      only the first — and it is not the sole disclosure:
+      the note under the list says the same in prose,
+      because a tooltip is not a place to hide something
+      the reader needs. */}
+  {!a.is_cli_active && (
+    <Tap
+      n={busy === a.email ? 'clock' : 'check'}
+      onClick={busy ? undefined : () => onActivate(a.email, false)}
+      label={`Use ${a.email} for the CLI`}
+    />
+  )}
+    </>
+  );
 }
 
 export function Accounts() {
@@ -89,6 +185,11 @@ export function Accounts() {
   };
 
   const accounts = data?.accounts ?? null;
+  // The CLI account is lifted out of the list entirely — see the card
+  // below for why. `find` rather than a sort, because there is exactly
+  // one CLI slot and a second match would be a bug worth not hiding.
+  const active = accounts?.find((a) => a.is_cli_active) ?? null;
+  const others = accounts?.filter((a) => !a.is_cli_active) ?? [];
 
   return (
     <div className="sc" style={{ flex: 1, minHeight: 0, padding: '0 var(--gut) var(--s8)' }}>
@@ -103,94 +204,45 @@ export function Accounts() {
       {!error && accounts === null && <Muted>Loading…</Muted>}
       {accounts?.length === 0 && <Muted>No accounts registered with Claudepot.</Muted>}
 
-      {accounts?.length > 0 && (
+      {active && (
         <Group>
+          {/* A card, not a tinted row. "Which account is Claude Code
+              using" is the question this screen exists to answer, and a
+              row that differs only by a chip makes it something you
+              work out rather than something you see. Lifting it out of
+              the list also removes the need to mark it: nothing else is
+              up here. */}
+          <Surface>
+            {/* `Item` supplies the flex row in the list; a Surface does
+                not, so the card brings its own. Same gap and alignment,
+                so the two containers put the row on screen identically. */}
+            <div style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'flex-start' }}>
+            <AccountRow
+              a={active}
+              v={verifyChip(active.verify_status)}
+              meters={metersOf(active)}
+              busy={busy}
+              onActivate={activate}
+            />
+            </div>
+          </Surface>
+        </Group>
+      )}
+
+      {others.length > 0 && (
+        <Group title={active ? 'Other accounts' : undefined}>
           <List>
-            {accounts.map((a, i) => {
-              const v = verifyChip(a.verify_status);
-              const meters = WINDOWS.map((win) => ({ ...win, w: a.usage?.[win.key] })).filter(
-                (m) => m.w && typeof m.w.utilization === 'number',
-              );
-              return (
-                <Item key={a.email} first={i === 0} style={{ alignItems: 'flex-start' }}>
-                  <Face name={a.email} hue={hueOf(a.email)} size="md" ring={a.is_cli_active} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 'var(--t-sub)',
-                        fontWeight: 'var(--w-med)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {a.email}
-                    </div>
-                    <div style={{ display: 'flex', gap: 'var(--s2)', flexWrap: 'wrap', marginTop: 'var(--s2)' }}>
-                      {a.is_cli_active && <Chip tone="accent" size="xs">CLI</Chip>}
-                      {a.is_desktop_active && <Chip tone="accent" size="xs">Desktop</Chip>}
-                      {a.plan && (
-                        <Chip tone="quiet" size="xs">
-                          {a.plan}
-                        </Chip>
-                      )}
-                      {v && (
-                        <Chip tone={v.tone} size="xs">
-                          {v.label}
-                        </Chip>
-                      )}
-                    </div>
-                    {/* Under the identity rather than beside it: three
-                        72px rings do not fit in a row that also holds an
-                        avatar, an email and a control at 390px, and
-                        shrinking them re-creates the crowding that made
-                        `sm` wrong in the first place. Wrapping, so a
-                        fourth window appearing costs a line rather than
-                        the layout. */}
-                    {meters.length > 0 && (
-                      <div
-                        style={{
-                          display: 'flex',
-                          gap: 'var(--s3)',
-                          flexWrap: 'wrap',
-                          marginTop: 'var(--s3)',
-                        }}
-                      >
-                        {meters.map((m) => (
-                          <Meter
-                            key={m.key}
-                            pct={Math.round(m.w.utilization)}
-                            size="md"
-                            sub={m.sub}
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {a.usage_as_of && (
-                      <div className="mono" style={{ fontSize: 'var(--t-nano)', color: 'var(--fg4)', marginTop: 'var(--s2)' }}>
-                        usage as of {ago(a.usage_as_of)} ago
-                      </div>
-                    )}
-                  </div>
-                  {/* Icon-only, which the row earns: it repeats down a
-                      list, it is never the screen's primary action, and
-                      `check` reads as "make this the one" across the
-                      web. The label still names the SLOT — `cli` and
-                      `desktop` are independent nouns and this moves
-                      only the first — and it is not the sole disclosure:
-                      the note under the list says the same in prose,
-                      because a tooltip is not a place to hide something
-                      the reader needs. */}
-                  {!a.is_cli_active && (
-                    <Tap
-                      n={busy === a.email ? 'clock' : 'check'}
-                      onClick={busy ? undefined : () => activate(a.email, false)}
-                      label={`Use ${a.email} for the CLI`}
-                    />
-                  )}
-                </Item>
-              );
-            })}
+            {others.map((a, i) => (
+              <Item key={a.email} first={i === 0} style={{ alignItems: 'flex-start' }}>
+                <AccountRow
+                  a={a}
+                  v={verifyChip(a.verify_status)}
+                  meters={metersOf(a)}
+                  busy={busy}
+                  onActivate={activate}
+                />
+              </Item>
+            ))}
           </List>
         </Group>
       )}
