@@ -13,7 +13,9 @@ pub(super) fn chunk(name: &str) -> Option<&'static [u8]> {
     Some(match name {
         "abnfDiagram-VCTEODGH.js" => include_bytes!("panel/chunks/abnfDiagram-VCTEODGH.js"),
         "arc.js" => include_bytes!("panel/chunks/arc.js"),
-        "architectureDiagram-5GKGNRK7.js" => include_bytes!("panel/chunks/architectureDiagram-5GKGNRK7.js"),
+        "architectureDiagram-5GKGNRK7.js" => {
+            include_bytes!("panel/chunks/architectureDiagram-5GKGNRK7.js")
+        }
         "blockDiagram-NRAW4CY4.js" => include_bytes!("panel/chunks/blockDiagram-NRAW4CY4.js"),
         "c4Diagram-UCG6FXSJ.js" => include_bytes!("panel/chunks/c4Diagram-UCG6FXSJ.js"),
         "channel.js" => include_bytes!("panel/chunks/channel.js"),
@@ -48,27 +50,37 @@ pub(super) fn chunk(name: &str) -> Option<&'static [u8]> {
         "init.js" => include_bytes!("panel/chunks/init.js"),
         "ishikawaDiagram-5VMMS53U.js" => include_bytes!("panel/chunks/ishikawaDiagram-5VMMS53U.js"),
         "journeyDiagram-EYS64GPL.js" => include_bytes!("panel/chunks/journeyDiagram-EYS64GPL.js"),
-        "kanban-definition-3QL26DDD.js" => include_bytes!("panel/chunks/kanban-definition-3QL26DDD.js"),
+        "kanban-definition-3QL26DDD.js" => {
+            include_bytes!("panel/chunks/kanban-definition-3QL26DDD.js")
+        }
         "katex.js" => include_bytes!("panel/chunks/katex.js"),
         "layout.js" => include_bytes!("panel/chunks/layout.js"),
         "linear.js" => include_bytes!("panel/chunks/linear.js"),
         "mermaid.core.js" => include_bytes!("panel/chunks/mermaid.core.js"),
         "Mermaid.js" => include_bytes!("panel/chunks/Mermaid.js"),
-        "mindmap-definition-FBJOCRG2.js" => include_bytes!("panel/chunks/mindmap-definition-FBJOCRG2.js"),
+        "mindmap-definition-FBJOCRG2.js" => {
+            include_bytes!("panel/chunks/mindmap-definition-FBJOCRG2.js")
+        }
         "ordinal.js" => include_bytes!("panel/chunks/ordinal.js"),
         "pegDiagram-XKGWAZYB.js" => include_bytes!("panel/chunks/pegDiagram-XKGWAZYB.js"),
         "pieDiagram-E7YTZNPT.js" => include_bytes!("panel/chunks/pieDiagram-E7YTZNPT.js"),
         "quadrantDiagram-AXDQQJYC.js" => include_bytes!("panel/chunks/quadrantDiagram-AXDQQJYC.js"),
         "railroadDiagram-O6MQD6OU.js" => include_bytes!("panel/chunks/railroadDiagram-O6MQD6OU.js"),
-        "requirementDiagram-EFPCY7ZU.js" => include_bytes!("panel/chunks/requirementDiagram-EFPCY7ZU.js"),
+        "requirementDiagram-EFPCY7ZU.js" => {
+            include_bytes!("panel/chunks/requirementDiagram-EFPCY7ZU.js")
+        }
         "sankeyDiagram-P5KCCOFB.js" => include_bytes!("panel/chunks/sankeyDiagram-P5KCCOFB.js"),
         "sequenceDiagram-WJ2MYXX4.js" => include_bytes!("panel/chunks/sequenceDiagram-WJ2MYXX4.js"),
         "sizeCapture-X5ZJPWSS.js" => include_bytes!("panel/chunks/sizeCapture-X5ZJPWSS.js"),
         "stateDiagram-HBIQ2CUA.js" => include_bytes!("panel/chunks/stateDiagram-HBIQ2CUA.js"),
         "stateDiagram-v2-4QOOHH4V.js" => include_bytes!("panel/chunks/stateDiagram-v2-4QOOHH4V.js"),
         "swimlanes-XN3QIQJK.js" => include_bytes!("panel/chunks/swimlanes-XN3QIQJK.js"),
-        "swimlanesDiagram-VK2B7HYN.js" => include_bytes!("panel/chunks/swimlanesDiagram-VK2B7HYN.js"),
-        "timeline-definition-24CTP7MA.js" => include_bytes!("panel/chunks/timeline-definition-24CTP7MA.js"),
+        "swimlanesDiagram-VK2B7HYN.js" => {
+            include_bytes!("panel/chunks/swimlanesDiagram-VK2B7HYN.js")
+        }
+        "timeline-definition-24CTP7MA.js" => {
+            include_bytes!("panel/chunks/timeline-definition-24CTP7MA.js")
+        }
         "vennDiagram-4TSXK5OY.js" => include_bytes!("panel/chunks/vennDiagram-4TSXK5OY.js"),
         "wardleyDiagram-VM6X3IG4.js" => include_bytes!("panel/chunks/wardleyDiagram-VM6X3IG4.js"),
         "xychartDiagram-S5SC5T6Z.js" => include_bytes!("panel/chunks/xychartDiagram-S5SC5T6Z.js"),

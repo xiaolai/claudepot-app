@@ -13,13 +13,22 @@
 //! transcripts on this machine (CC 2.1.x, 2026-08). A tool call with no
 //! matching `tool_result` is one the session is still blocked on.
 //!
-//! **Permission prompts are not read**, and offering chips for one
-//! would be actively wrong. A peer message cannot grant an escalation:
-//! CC attaches a standing caveat telling the session never to treat a
-//! peer message as the user's approval, and calls doing so *permission
-//! laundering*. A session asked to approve its own pending prompt is
-//! expected to refuse, and that refusal is correct. The client shows the
-//! verb phrase and says to answer at the machine.
+//! **A permission prompt gets no chips**, and offering them would be
+//! actively wrong. A peer message cannot grant an escalation: CC
+//! attaches a standing caveat telling the session never to treat a peer
+//! message as the user's approval, and calls doing so *permission
+//! laundering*. Nor is it a transport problem that could be routed
+//! around — the prompt is an Ink component answered by the terminal's
+//! own keyboard handling, the peer socket has no interrupt or approval
+//! action, and `TIOCSTI` keystroke injection is refused by macOS even on
+//! a pty the caller owns.
+//!
+//! What it does get is [`pending_tool`]: **what is being asked**. There
+//! is a real difference between "approve Bash" and
+//! `Bash: rm -rf target/debug`, and it is the difference between having
+//! to walk to the machine to find out and deciding from where you are.
+//! Read-only, and no new capability — the same bytes are already in the
+//! transcript this surface serves.
 //!
 //! ## What a tap actually does
 //!
@@ -54,6 +63,10 @@ const QUESTION_CHARS: usize = 400;
 const LABEL_CHARS: usize = 60;
 const DESCRIPTION_CHARS: usize = 240;
 
+/// A pending call's subject line. Long enough for a real command,
+/// short enough that a card does not become the command.
+const ARGUMENT_CHARS: usize = 200;
+
 /// How many options a card will carry. More than this and the phone is
 /// the wrong place to answer.
 const MAX_OPTIONS: usize = 6;
@@ -86,6 +99,56 @@ pub struct PendingAsk {
 pub fn pending(file_path: &Path) -> Option<PendingAsk> {
     let events = super::transcript::tail_events(file_path, TAIL_BYTES)?;
     from_events(&events)
+}
+
+/// A tool call the session is blocked on that is **not** a question —
+/// which in practice means a permission prompt.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PendingTool {
+    /// Display only. The send path addresses a session, never a tool.
+    pub tool_use_id: String,
+    pub tool_name: String,
+    /// The call's subject: the command, the path, the pattern. `None`
+    /// when the input has no key this can recognise — better an absent
+    /// line than a JSON blob on a phone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub argument: Option<String>,
+}
+
+/// What the session is waiting on, when it is not waiting on a question.
+pub fn pending_tool(file_path: &Path) -> Option<PendingTool> {
+    let events = super::transcript::tail_events(file_path, TAIL_BYTES)?;
+    tool_from_events(&events)
+}
+
+/// Pure half, for the same reason [`from_events`] is split out.
+pub fn tool_from_events(events: &[SessionEvent]) -> Option<PendingTool> {
+    let answered: std::collections::HashSet<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::UserToolResult { tool_use_id, .. } => Some(tool_use_id.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    events.iter().rev().find_map(|e| match e {
+        SessionEvent::AssistantToolUse {
+            tool_name,
+            tool_use_id,
+            input_preview,
+            input_full,
+            ..
+        } if tool_name != ASK_TOOL && !answered.contains(tool_use_id.as_str()) => {
+            let arg = super::transcript::tool_argument(input_full, input_preview);
+            let arg = super::truncate(&redact_secrets(&arg), ARGUMENT_CHARS);
+            Some(PendingTool {
+                tool_use_id: tool_use_id.clone(),
+                tool_name: tool_name.clone(),
+                argument: (!arg.is_empty()).then_some(arg),
+            })
+        }
+        _ => None,
+    })
 }
 
 /// Pure half: the last unanswered `AskUserQuestion` in an event slice.
@@ -270,6 +333,60 @@ mod tests {
         // chip row would be a control that does nothing.
         let free = serde_json::json!({ "questions": [{ "question": "what next?" }] });
         assert!(from_events(&[ask_use("t1", free)]).is_none());
+    }
+
+    #[test]
+    fn a_pending_permission_reports_what_is_being_asked() {
+        // The difference between "approve Bash" and knowing whether it
+        // is `cargo test` or `rm -rf`.
+        let bash = SessionEvent::AssistantToolUse {
+            ts: None,
+            uuid: None,
+            model: None,
+            tool_name: "Bash".into(),
+            tool_use_id: "t1".into(),
+            input_preview: "{\"command\":\"rm -rf target/debug\"}".into(),
+            input_full: "{\"command\":\"rm -rf target/debug\"}".into(),
+        };
+        let got = tool_from_events(&[bash]).unwrap();
+        assert_eq!(got.tool_name, "Bash");
+        assert_eq!(got.argument.as_deref(), Some("rm -rf target/debug"));
+    }
+
+    #[test]
+    fn an_answered_tool_call_is_not_pending() {
+        let bash = SessionEvent::AssistantToolUse {
+            ts: None,
+            uuid: None,
+            model: None,
+            tool_name: "Bash".into(),
+            tool_use_id: "t1".into(),
+            input_preview: String::new(),
+            input_full: "{}".into(),
+        };
+        assert!(tool_from_events(&[bash, result("t1")]).is_none());
+    }
+
+    #[test]
+    fn a_question_is_not_reported_as_a_permission_prompt() {
+        // The two are mutually exclusive on a card: one gets chips, the
+        // other gets a "go to the machine" note.
+        assert!(tool_from_events(&[ask_use("t1", real_shape())]).is_none());
+    }
+
+    #[test]
+    fn a_pending_tool_argument_is_redacted() {
+        let leaky = SessionEvent::AssistantToolUse {
+            ts: None,
+            uuid: None,
+            model: None,
+            tool_name: "Bash".into(),
+            tool_use_id: "t1".into(),
+            input_preview: String::new(),
+            input_full: "{\"command\":\"deploy --key sk-ant-oat01-LEAKED\"}".into(),
+        };
+        let got = tool_from_events(&[leaky]).unwrap();
+        assert!(!got.argument.unwrap().contains("LEAKED"));
     }
 
     #[test]

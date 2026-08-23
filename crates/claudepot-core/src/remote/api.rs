@@ -657,19 +657,13 @@ mod tests {
             (header::ORIGIN, "https://laptop.local:8420"),
             (header::HOST, "laptop.local:8420"),
         ]);
-        assert_eq!(
-            origin_of(&h).as_deref(),
-            Some("https://laptop.local:8420")
-        );
+        assert_eq!(origin_of(&h).as_deref(), Some("https://laptop.local:8420"));
     }
 
     #[test]
     fn a_native_client_sending_no_origin_gets_one_derived() {
         let h = headers(&[(header::HOST, "laptop.local:8420")]);
-        assert_eq!(
-            origin_of(&h).as_deref(),
-            Some("https://laptop.local:8420")
-        );
+        assert_eq!(origin_of(&h).as_deref(), Some("https://laptop.local:8420"));
     }
 
     #[test]
@@ -691,10 +685,7 @@ mod tests {
             (header::ORIGIN, "null"),
             (header::HOST, "laptop.local:8420"),
         ]);
-        assert_eq!(
-            origin_of(&h).as_deref(),
-            Some("https://laptop.local:8420")
-        );
+        assert_eq!(origin_of(&h).as_deref(), Some("https://laptop.local:8420"));
     }
 
     #[test]

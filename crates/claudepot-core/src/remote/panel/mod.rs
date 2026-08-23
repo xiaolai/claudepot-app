@@ -171,6 +171,15 @@ pub struct PanelSession {
     /// The pending question and its offered choices, when one is open.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ask: Option<ask::PendingAsk>,
+    /// What the session is blocked on when it is **not** a question —
+    /// in practice a permission prompt.
+    ///
+    /// Carries what is being asked, not a way to answer it: there is a
+    /// real difference between "approve Bash" and
+    /// `Bash: rm -rf target/debug`, and it decides whether the walk to
+    /// the machine is worth making. Mutually exclusive with `ask`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_tool: Option<ask::PendingTool>,
     /// Events this device has not seen since it last looked.
     ///
     /// **Absent when this device has never opened the session**, which is
@@ -281,10 +290,16 @@ fn compose(
         .unwrap_or_default();
 
     let tail = row.and_then(|r| transcript::tail_summary(&r.file_path));
-    let ask = record
+    let waiting_row = record
         .filter(|r| matches!(PanelStatus::from_record(r), PanelStatus::Waiting))
-        .and(row)
-        .and_then(|r| ask::pending(&r.file_path));
+        .and(row);
+    let ask = waiting_row.and_then(|r| ask::pending(&r.file_path));
+    // Only when there is no question: a card shows one or the other, and
+    // a permission prompt is what "waiting" means the rest of the time.
+    let pending_tool = match ask {
+        Some(_) => None,
+        None => waiting_row.and_then(|r| ask::pending_tool(&r.file_path)),
+    };
 
     let events = row.map(|r| r.event_count).unwrap_or(0);
     // `event_count` only grows within one transcript, so the difference
@@ -336,6 +351,7 @@ fn compose(
         has_error: row.map(|r| r.has_error).unwrap_or(false),
         last_line: tail,
         ask,
+        pending_tool,
         unread,
     }
 }

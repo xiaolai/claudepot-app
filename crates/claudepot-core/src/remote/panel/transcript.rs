@@ -444,7 +444,7 @@ fn fold(raw: &[SessionEvent], emit_from: usize) -> Vec<PanelEvent> {
 /// the path is the subject. This is a **display** heuristic with a total
 /// fallback — it never decides anything, so a tool CC adds tomorrow
 /// degrades to the preview rather than breaking.
-fn tool_argument(input_full: &str, input_preview: &str) -> String {
+pub(super) fn tool_argument(input_full: &str, input_preview: &str) -> String {
     const SUBJECT_KEYS: &[&str] = &[
         "command",
         "file_path",

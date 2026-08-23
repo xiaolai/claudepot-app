@@ -310,24 +310,68 @@ function LiveCard({ s, onOpen, onChanged, conn }) {
       )}
 
       {/* A permission prompt, not a question. There is no chip row here
-          and there cannot be one: Claude Code's peer inbox accepts
-          `rename`, `notify_when_idle`, `peer_idle_notice` and
-          `peer_message_status` and nothing else — no approval action
-          exists on this channel. Even if one did, CC attaches a standing
-          caveat telling a session never to treat a peer message as the
-          user's approval, and calls doing so permission laundering. So
-          the card says where the answer has to happen. */}
+          and there cannot be one: the prompt is an Ink component the
+          terminal answers from its own keyboard handling, CC's peer
+          inbox has no approval or interrupt action, and TIOCSTI
+          keystroke injection is refused by macOS even on a pty we own.
+          What the card can do is say what is being asked, so the walk to
+          the machine is an informed one. */}
       {!s.ask && s.waiting_for && (
         <div style={{ marginTop: 'var(--s3)' }}>
           <p style={{ fontSize: 'var(--t-meta)', color: 'var(--wn)' }}>
             <Ico n="alert" s="2xs" w="bold" /> Waiting to {s.waiting_for}.
           </p>
-          <p style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginTop: 'var(--s1)', lineHeight: 'var(--lh-body)' }}>
+
+          {s.pending_tool && (
+            <div
+              style={{
+                marginTop: 'var(--s2)',
+                padding: 'var(--s2) var(--s3)',
+                borderRadius: 'var(--r-md)',
+                background: 'var(--sf2)',
+              }}
+            >
+              <div
+                className="mono"
+                style={{
+                  fontSize: 'var(--t-micro)',
+                  fontWeight: 'var(--w-semi)',
+                  color: 'var(--fg2)',
+                }}
+              >
+                {s.pending_tool.tool_name}
+              </div>
+              {s.pending_tool.argument && (
+                <div
+                  className="mono selectable"
+                  title={s.pending_tool.argument}
+                  style={{
+                    fontSize: 'var(--t-nano)',
+                    color: 'var(--fg3)',
+                    marginTop: 'var(--s1)',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {s.pending_tool.argument}
+                </div>
+              )}
+            </div>
+          )}
+
+          <p
+            style={{
+              fontSize: 'var(--t-micro)',
+              color: 'var(--fg4)',
+              marginTop: 'var(--s2)',
+              lineHeight: 'var(--lh-body)',
+            }}
+          >
             Approving needs the machine — a remote message cannot grant a permission, and Claude
             Code will refuse one that tries.
           </p>
         </div>
       )}
+
     </Surface>
   );
 }
