@@ -229,6 +229,131 @@ pub(super) async fn mark_read(
     .await
 }
 
+/// Make an account the one Claude Code uses.
+///
+/// **The one write on this surface that is not about a session**, and
+/// the reason the accounts pane stopped being read-only. The objection
+/// on record was that a swap "either fails while CC is running or
+/// bypasses the keychain-drift guard". Half of that is wrong: `force`
+/// is consulted in exactly two places in `swap::switch_inner`, both the
+/// live-session gate. The drift check runs unconditionally and is
+/// self-healing, so it is never what a remote caller skips.
+///
+/// What a remote caller *can* skip is the live-session gate, and that
+/// gate is about correctness rather than security: a running CC holds
+/// its refresh token in memory and overwrites the keychain on its next
+/// refresh, **silently reverting the swap**. A revert nobody is at the
+/// machine to notice is the worst outcome here, so the default refuses
+/// and says how many sessions are in the way. `force` stays available
+/// because auto-rotation already swaps unattended on a timer — the
+/// product long ago decided that trade is the user's to make — but the
+/// phone has to ask for it explicitly, with the consequence stated.
+///
+/// Addressed by **email**, not by uuid: email is this domain's identity
+/// for an account, and a uuid on the wire would be an internal
+/// identifier the panel then has to render or hide.
+#[derive(Debug, Deserialize)]
+pub(super) struct ActivateRequest {
+    #[serde(default)]
+    force: bool,
+}
+
+pub(super) async fn activate_account(
+    State(state): State<Shared>,
+    Path(email): Path<String>,
+    headers: HeaderMap,
+    _device: Device,
+    Json(body): Json<ActivateRequest>,
+) -> Response {
+    idempotent(&state, &headers, || async move {
+        use crate::cli_backend::{self, swap};
+
+        let data_dir = crate::paths::claudepot_data_dir();
+        let Ok(store) = crate::account::AccountStore::open(&data_dir.join("accounts.db")) else {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({ "error": "internal" }),
+            );
+        };
+        let Ok(Some(target)) = store.find_by_email(&email) else {
+            return (
+                StatusCode::NOT_FOUND,
+                serde_json::json!({ "error": "no such account" }),
+            );
+        };
+
+        // Reconcile first, exactly as the CLI does: without it a swap
+        // done at the machine leaves the DB believing the old target is
+        // active, and this reports "already active" while the keychain
+        // says otherwise. Best effort — a network failure falls through
+        // to the DB's view rather than blocking the swap.
+        let _ = crate::services::account_service::sync_from_current_cc(&store).await;
+
+        let current = store
+            .active_cli_uuid()
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<uuid::Uuid>().ok());
+        if current == Some(target.uuid) {
+            return (
+                StatusCode::OK,
+                serde_json::json!({ "already_active": true, "email": target.email }),
+            );
+        }
+
+        let platform = cli_backend::create_platform();
+        let refresher = swap::DefaultRefresher;
+        let fetcher = swap::DefaultProfileFetcher;
+        let result = if body.force {
+            swap::switch_force(
+                &store,
+                current,
+                target.uuid,
+                platform.as_ref(),
+                true,
+                &refresher,
+                &fetcher,
+            )
+            .await
+        } else {
+            swap::switch(
+                &store,
+                current,
+                target.uuid,
+                platform.as_ref(),
+                true,
+                &refresher,
+                &fetcher,
+            )
+            .await
+        };
+
+        match result {
+            Ok(()) => (
+                StatusCode::OK,
+                serde_json::json!({ "switched": true, "email": target.email }),
+            ),
+            // Its own status and its own code: this is the one failure
+            // the user can actually do something about, and the panel
+            // offers the override only for this.
+            Err(crate::error::SwapError::LiveSessionConflict) => (
+                StatusCode::CONFLICT,
+                serde_json::json!({ "error": "live_session", "email": target.email }),
+            ),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                // Core's error text is canonical English and says
+                // something useful — an identity mismatch names both
+                // emails. Passed through rather than flattened to
+                // "failed", which would send the user to the machine
+                // with nothing to go on.
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        }
+    })
+    .await
+}
+
 // ── Slash commands ──────────────────────────────────────────────────
 
 /// The commands a session could run, as text it can be sent.

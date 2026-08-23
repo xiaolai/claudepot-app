@@ -164,6 +164,10 @@ pub fn router(state: Shared) -> Router {
         // Read-only by design; each handler carries the reason.
         .route("/api/projects", get(super::api::list_projects))
         .route("/api/accounts", get(super::api::list_accounts))
+        .route(
+            "/api/accounts/{email}/activate",
+            post(super::api::activate_account),
+        )
         // Registering a passkey requires a session that is already
         // authenticated — otherwise anyone who can reach the page
         // enrols themselves.

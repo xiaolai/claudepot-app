@@ -178,6 +178,16 @@ export const api = {
 
   projects: (signal) => request('GET', '/api/projects', { signal }),
   accounts: (signal) => request('GET', '/api/accounts', { signal }),
+  // Addressed by email: that is this domain's identity for an account,
+  // and a uuid on the wire would be an internal id the panel then has
+  // to render or hide. `force` skips the live-session gate — see
+  // `remote::api::activate_account` for why that is the caller's
+  // decision and not a default.
+  activateAccount: (email, force, key) =>
+    request('POST', `/api/accounts/${encodeURIComponent(email)}/activate`, {
+      body: { force: Boolean(force) },
+      idempotencyKey: key,
+    }),
 
   inbound: () => request('GET', '/api/inbound'),
   inboundRevoke: (key) => request('POST', '/api/inbound/revoke', { idempotencyKey: key }),

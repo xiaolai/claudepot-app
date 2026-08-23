@@ -767,11 +767,32 @@ Five decisions are worth not re-litigating:
   `localStorage`, not server state: this is how one device likes to
   read, and a phone and a laptop pointed at the same Claudepot are
   allowed to disagree.
-- **Accounts and projects are read-only, and each for its own reason.**
-  A project move rewrites path-keyed CC state outside the project
-  directory behind a rollback journal; an account swap either fails
-  while CC is running or bypasses the keychain-drift guard. Neither
-  belongs one stolen bearer token away.
+- **Projects are read-only; accounts are not, and the earlier note here
+  was wrong about why.** A project move rewrites path-keyed CC state
+  outside the project directory behind a rollback journal — that half
+  stands, and `POST /api/projects/*` still does not exist.
+
+  The account half claimed a swap "either fails while CC is running or
+  bypasses the keychain-drift guard". `force` is consulted in exactly
+  two places in `swap::switch_inner`, **both the live-session gate**.
+  The drift check runs unconditionally and is self-healing, so it is
+  never what a remote caller skips.
+
+  What a remote caller can skip is the live-session gate, and that gate
+  is about **correctness, not security**: a running CC holds its refresh
+  token in memory and overwrites the keychain on its next refresh,
+  silently reverting the swap. A revert nobody is at the machine to see
+  is the worst outcome, so `POST /api/accounts/{email}/activate`
+  defaults to the gated `switch` and answers **409 `live_session`**;
+  `force` exists but the phone must ask for it and is told what it
+  costs. Auto-rotation has always called `switch_force` unattended on a
+  timer, so a human tapping a phone is strictly more supervised than
+  what already shipped.
+
+  Addressed by **email**: that is this domain's identity for an account,
+  and a uuid on the wire is an internal identifier the panel would then
+  have to render or hide. Registering, removing and verifying accounts
+  stay at the machine — they need credentials the panel never sees.
 
 **Answering without opening** (`remote::panel::ask`) reads exactly one
 shape: an unanswered `AskUserQuestion` tool call, whose input carries the

@@ -5,9 +5,9 @@
 // bypasses the keychain-drift guard that stops a rotated blob being
 // written under the wrong label; either needs its own check before it is
 // reachable from a phone.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { OfflineError, api } from './api.js';
+import { OfflineError, api, newIdempotencyKey } from './api.js';
 import { ago } from './format.js';
 import { Muted } from './views.jsx';
 
@@ -32,18 +32,49 @@ const VERIFY_TONE = {
 export function Accounts() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(null);
+  // Which account hit the live-session gate, so the override appears on
+  // that row and nowhere else.
+  const [conflict, setConflict] = useState(null);
+  const [note, setNote] = useState(null);
 
-  useEffect(() => {
-    const ctrl = new AbortController();
+  const load = useCallback((signal) => {
     api
-      .accounts(ctrl.signal)
+      .accounts(signal)
       .then(setData)
       .catch((e) => {
         if (e?.name === 'AbortError') return;
         setError(e instanceof OfflineError ? 'offline' : 'error');
       });
-    return () => ctrl.abort();
   }, []);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    load(ctrl.signal);
+    return () => ctrl.abort();
+  }, [load]);
+
+  const activate = async (email, force) => {
+    setBusy(email);
+    setNote(null);
+    if (!force) setConflict(null);
+    try {
+      const r = await api.activateAccount(email, force, newIdempotencyKey());
+      setNote(r.already_active ? `${email} was already active.` : `Claude Code now uses ${email}.`);
+      setConflict(null);
+      load();
+    } catch (e) {
+      if (e?.status === 409) {
+        // Not an error to apologise for — it is the gate doing its job,
+        // and the next move belongs to the user.
+        setConflict(email);
+      } else {
+        setNote(e instanceof OfflineError ? 'Cannot reach this Mac.' : e?.message || 'Switch failed.');
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const accounts = data?.accounts ?? null;
 
@@ -102,6 +133,15 @@ export function Accounts() {
                     )}
                   </div>
                   {five && <Meter pct={Math.round(five.utilization)} size="sm" sub="5h" />}
+                  {!a.is_cli_active && (
+                    <Chip
+                      tone="quiet"
+                      size="xs"
+                      onClick={busy ? undefined : () => activate(a.email, false)}
+                    >
+                      {busy === a.email ? '…' : 'Use'}
+                    </Chip>
+                  )}
                 </Item>
               );
             })}
@@ -109,8 +149,47 @@ export function Accounts() {
         </Group>
       )}
 
+      {/* The gate, explained where the decision is made. Inline rather
+          than a tooltip: per the design rules a blocked action states
+          its reason next to itself, and this one carries a consequence
+          the user needs before overriding it. */}
+      {conflict && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 'var(--s4)',
+            padding: 'var(--s3)',
+            borderRadius: 'var(--r-md)',
+            background: 'var(--wn-wash)',
+          }}
+        >
+          <p style={{ fontSize: 'var(--t-micro)', color: 'var(--fg2)', lineHeight: 'var(--lh-body)' }}>
+            Claude Code is running. Switching now works until a running session refreshes its token,
+            which puts the old account back — and you would not see it happen from here.
+          </p>
+          <div style={{ display: 'flex', gap: 'var(--s2)', marginTop: 'var(--s3)' }}>
+            <Chip tone="accent" size="md" onClick={busy ? undefined : () => activate(conflict, true)}>
+              {busy === conflict ? '…' : 'Switch anyway'}
+            </Chip>
+            <Chip tone="quiet" size="md" onClick={() => setConflict(null)}>
+              Leave it
+            </Chip>
+          </div>
+        </div>
+      )}
+
+      {note && (
+        <p
+          role="status"
+          style={{ marginTop: 'var(--s4)', fontSize: 'var(--t-micro)', color: 'var(--fg3)' }}
+        >
+          {note}
+        </p>
+      )}
+
       <p style={{ marginTop: 'var(--s6)', fontSize: 'var(--t-micro)', color: 'var(--fg4)', lineHeight: 'var(--lh-body)' }}>
-        Read-only. Switching the active account is done at the machine.
+        Switching sets which account Claude Code uses. Adding, removing and verifying accounts is
+        still done at the machine.
         {data?.usage_source === 'none' && ' Usage figures appear once the Claudepot app has run.'}
       </p>
     </div>
