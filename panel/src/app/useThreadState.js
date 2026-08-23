@@ -116,11 +116,24 @@ export function useSendPrompt(session, conn, onChanged) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState(null);
+  // An expanded slash command, staged but not sent.
+  //
+  // Staged rather than pasted into the textarea, though "insert into
+  // the composer" is what this is: `cc-suite:audit-fix` expands to
+  // 14,208 characters, and a phone textarea holding that is a textarea
+  // you cannot scroll past to reach the send button. The chip is the
+  // same commitment — nothing leaves until send — without making the
+  // composer unusable to get there.
+  const [staged, setStaged] = useState(null);
 
   const canSend = Boolean(session.live && session.addressable && conn !== 'offline');
-  const warning = LOOKS_LIKE_SLASH_COMMAND.test(text.trim())
-    ? 'Slash commands do not run over this channel — Claude Code will read this as plain text.'
-    : null;
+  // The warning is pointless once a command is staged — that is the
+  // supported way to send one, and repeating "slash commands do not
+  // run" over a staged expansion would contradict the chip above it.
+  const warning =
+    !staged && LOOKS_LIKE_SLASH_COMMAND.test(text.trim())
+      ? 'Slash commands do not run over this channel — pick one with / to send its text instead.'
+      : null;
   const blocked = !session.live
     ? 'This session is not running — nothing to send to.'
     : !session.addressable
@@ -131,23 +144,43 @@ export function useSendPrompt(session, conn, onChanged) {
 
   const send = useCallback(
     async (body) => {
-      const value = (body ?? text).trim();
+      // A staged command leads; anything typed follows it as a note.
+      // The other order buries the instruction under the aside.
+      const typed = (body ?? text).trim();
+      const value = staged ? [staged.text, typed].filter(Boolean).join('\n\n') : typed;
       if (!value || sending || !canSend) return;
       setSending(true);
       setNotice(null);
       try {
         await api.sendPrompt(session.session_id, value, newIdempotencyKey());
         setText('');
+        setStaged(null);
         setNotice('Handed off. Claude Code may hold it for approval at the machine.');
         onChanged?.();
       } catch (e) {
+        // Deliberately NOT cleared on failure: the expansion took a
+        // round trip to fetch, and dropping it would make a retry mean
+        // finding the command again.
         setNotice(explainSend(e));
       } finally {
         setSending(false);
       }
     },
-    [text, sending, canSend, session.session_id, onChanged],
+    [text, staged, sending, canSend, session.session_id, onChanged],
   );
 
-  return { text, setText, sending, notice, send, canSend, blocked, warning };
+  return {
+    text,
+    setText,
+    sending,
+    notice,
+    send,
+    canSend,
+    blocked,
+    warning,
+    staged,
+    setStaged,
+    // Something to send if either half is present.
+    hasContent: Boolean(staged || text.trim()),
+  };
 }

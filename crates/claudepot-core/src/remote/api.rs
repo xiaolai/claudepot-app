@@ -229,6 +229,98 @@ pub(super) async fn mark_read(
     .await
 }
 
+// ── Slash commands ──────────────────────────────────────────────────
+
+/// The commands a session could run, as text it can be sent.
+///
+/// A slash command does not survive the peer socket: CC's inbox
+/// dispatches with `skipSlashCommands: true`, so `/audit-fix` arrives
+/// as prose. `cc_commands` expands one the way CC expands it itself —
+/// see that module for why this is the same step rather than a way
+/// around it, and for what an expansion cannot carry.
+///
+/// The working directory is resolved **here, from the session id**,
+/// never taken from the client. A path parameter would let an
+/// authenticated device enumerate `.claude/commands` anywhere on the
+/// disk; a session id can only name a directory Claude Code is already
+/// working in.
+pub(super) async fn list_commands(Path(session_id): Path<String>, _device: Device) -> Response {
+    match blocking("commands", move || {
+        let ctx = panel::ListContext::live(None);
+        let cwd = panel::list(&ctx)?
+            .into_iter()
+            .find(|s| s.session_id == session_id)
+            .map(|s| s.project_path);
+        Ok::<_, panel::PanelError>(
+            cwd.map(|c| crate::cc_commands::discover(std::path::Path::new(&c))),
+        )
+    })
+    .await
+    {
+        Some(Some(commands)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "commands": commands })),
+        )
+            .into_response(),
+        Some(None) => err(StatusCode::NOT_FOUND, "no such session"),
+        None => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ExpandQuery {
+    #[serde(default)]
+    args: String,
+}
+
+/// The text of one command, with arguments substituted.
+///
+/// Resolved by **name against a fresh discovery**, never by a path the
+/// client supplies — `CommandSpec::path` is deliberately not
+/// serialized, so there is no path for a client to hand back and no
+/// traversal to defend against.
+pub(super) async fn expand_command(
+    Path((session_id, name)): Path<(String, String)>,
+    Query(q): Query<ExpandQuery>,
+    _device: Device,
+) -> Response {
+    match blocking("expand command", move || {
+        let ctx = panel::ListContext::live(None);
+        let Some(cwd) = panel::list(&ctx)?
+            .into_iter()
+            .find(|s| s.session_id == session_id)
+            .map(|s| s.project_path)
+        else {
+            return Ok::<_, panel::PanelError>(None);
+        };
+        let found = crate::cc_commands::discover(std::path::Path::new(&cwd))
+            .into_iter()
+            .find(|c| c.name == name);
+        Ok(found.and_then(|spec| {
+            crate::cc_commands::expand(&spec, &q.args)
+                .ok()
+                .map(|text| (spec, text))
+        }))
+    })
+    .await
+    {
+        Some(Some((spec, text))) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "name": spec.name,
+                "text": text,
+                // Repeated on the expansion so a client cannot render
+                // the body without the caveat that came with it.
+                "restricts_tools": spec.restricts_tools,
+                "pins_model": spec.pins_model,
+            })),
+        )
+            .into_response(),
+        Some(None) => err(StatusCode::NOT_FOUND, "no such command"),
+        None => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    }
+}
+
 // ── Approvals ───────────────────────────────────────────────────────
 
 /// Permission prompts waiting for a tap.

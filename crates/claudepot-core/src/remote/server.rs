@@ -151,6 +151,14 @@ pub fn router(state: Shared) -> Router {
             "/api/sessions/{session_id}/read",
             post(super::api::mark_read),
         )
+        .route(
+            "/api/sessions/{session_id}/commands",
+            get(super::api::list_commands),
+        )
+        .route(
+            "/api/sessions/{session_id}/commands/{name}",
+            get(super::api::expand_command),
+        )
         .route("/api/approvals", get(super::api::list_approvals))
         .route("/api/approvals/{id}", post(super::api::decide_approval))
         // Read-only by design; each handler carries the reason.

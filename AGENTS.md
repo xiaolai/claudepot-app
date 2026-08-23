@@ -674,6 +674,7 @@ The endpoints behind it, all in `remote::api` over `remote::panel`:
 | `POST /api/sessions/{id}/prompt` | the only write that reaches Claude Code, through `peer` |
 | `POST /api/sessions/{id}/read` | per-device read mark |
 | `GET /api/projects`, `GET /api/accounts` | **read-only** |
+| `GET /api/sessions/{id}/commands`, `…/commands/{name}` | slash commands as **text**; cwd resolved from the session, never from the client |
 | `GET /api/approvals`, `POST /api/approvals/{id}` | the only route that **grants a capability**; alive only while `remote serve` is |
 | `POST /api/passkey/{register,login}/{begin,finish}` | register is authenticated, login is not |
 
@@ -769,6 +770,46 @@ pending prompt is expected to refuse. Tapping a chip sends the label as a
 session is blocked on has **not been measured**, so the UI says "handed
 off" and leaves the question on the card. See the
 `pending AskUserQuestion shape` row in `crates/xtask/cc-upstream-watch.md`.
+
+**Sending a slash command** (`claudepot-core::cc_commands`) is possible
+only as text, and the panel does the expansion. CC's inbox dispatches
+with `skipSlashCommands: true` and its own predicate is
+`startsWith("/") && !skipSlashCommands`, so `/audit-fix` otherwise
+arrives as nine characters of prose. That flag is hardcoded at every
+injection site — it is not a setting, and no permission changes it.
+
+**Expanding here is what CC does there.** CC expands a command at the
+input layer and dispatches the *expansion* with `skipSlashCommands:
+true`, keeping the original only in `preExpansionValue` so the
+transcript can still show what was typed. This is the same step, one
+layer earlier — not a way around anything.
+
+Three things it deliberately is not:
+
+- **Not "running the command".** `allowed-tools` does not travel (272 of
+  732 command files on the reference machine declare one), nor does
+  `model` (40). Invoked properly the command runs under its own
+  restriction; sent as text it runs under the *session's*, which is
+  generally **wider**. `CommandSpec::restricts_tools` exists so every
+  surface says so, and the panel says it on the row and again on the
+  staged chip.
+- **Not a client-chosen directory.** The cwd is resolved server-side
+  from the session id. A path parameter would let one authenticated
+  device enumerate `.claude/commands` anywhere on the disk; a session id
+  can only name a directory CC is already working in. `CommandSpec.path`
+  is `#[serde(skip)]` for the same reason — there is no path for a
+  client to hand back, so there is no traversal to defend against.
+- **Not one tap.** The picker **stages**; only Send sends. These bodies
+  run to thousands of words and some dispatch subprocesses, so the last
+  thing between a mistyped filter and a 14,000-word instruction landing
+  in a live session is a deliberate press.
+
+Plugin resolution reads `installed_plugins.json`, which records one
+entry per *installation* — a plugin in eleven projects appears eleven
+times, at eleven paths, possibly at eleven versions. Entries are
+deduplicated by plugin name with a project-scoped install beating a
+user-scoped one, so the picker offers the same version the session would
+actually run, once.
 
 **Approving from the phone** (`remote::approval`) is the one thing on
 this surface that grants a capability rather than reading or messaging,

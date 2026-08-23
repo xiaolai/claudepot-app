@@ -154,6 +154,18 @@ export const api = {
       idempotencyKey: key,
     }),
 
+  // The slash commands this session could run, as text. A command
+  // does not survive the peer socket — see `cc_commands` — so the
+  // panel expands it the way Claude Code expands it itself.
+  commands: (id, signal) =>
+    request('GET', `/api/sessions/${encodeURIComponent(id)}/commands`, { signal }),
+  expandCommand: (id, name, args) =>
+    request(
+      'GET',
+      `/api/sessions/${encodeURIComponent(id)}/commands/${encodeURIComponent(name)}` +
+        `?args=${encodeURIComponent(args || '')}`,
+    ),
+
   // Permission prompts waiting for a tap. Polled alongside the session
   // list rather than on its own timer: an approval only means anything
   // while its hook is still waiting, so it shares the list's cadence.

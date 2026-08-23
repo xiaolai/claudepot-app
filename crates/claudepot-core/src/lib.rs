@@ -45,6 +45,7 @@ pub mod available_models;
 pub mod blob;
 pub mod board;
 pub mod breaker;
+pub mod cc_commands;
 pub mod cc_daemon;
 pub mod cc_doctor;
 pub mod cc_env;

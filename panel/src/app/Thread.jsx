@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { ago, modelLabel, tightPath } from './format.js';
 import { Markdown } from './Markdown.jsx';
 import { useTranscript } from './useTranscript.js';
+import { CommandPicker } from './CommandPicker.jsx';
 import { useFollowTail, useSendPrompt } from './useThreadState.js';
 import { CopyPath, Muted } from './views.jsx';
 
@@ -27,7 +28,8 @@ export function Thread({ session, onBack, onChanged, conn }) {
   const id = session.session_id;
   const { events, total, loading, error, hasEarlier, loadEarlier } = useTranscript(id);
   const { scroller, onScroll } = useFollowTail(id, total, events);
-  const { text, setText, sending, notice, send, canSend, blocked, warning } = useSendPrompt(
+  const { text, setText, sending, notice, send, canSend, blocked, warning, staged, setStaged, hasContent } =
+    useSendPrompt(
     session,
     conn,
     onChanged,
@@ -131,6 +133,10 @@ export function Thread({ session, onBack, onChanged, conn }) {
         text={text}
         onText={setText}
         onSend={send}
+        staged={staged}
+        onStage={setStaged}
+        hasContent={hasContent}
+        sessionId={session.session_id}
         sending={sending}
         notice={notice}
         disabled={!canSend}
@@ -257,7 +263,22 @@ function ToolTick({ e }) {
   );
 }
 
-function Composer({ text, onText, onSend, sending, notice, disabled, reason, warning }) {
+function Composer({
+  text,
+  onText,
+  onSend,
+  sending,
+  notice,
+  disabled,
+  reason,
+  warning,
+  staged,
+  onStage,
+  hasContent,
+  sessionId,
+}) {
+  const [picking, setPicking] = useState(false);
+
   return (
     <div
       style={{
@@ -296,6 +317,38 @@ function Composer({ text, onText, onSend, sending, notice, disabled, reason, war
           ))}
         </div>
       )}
+      {/* The staged expansion. A chip rather than 14,000 characters in
+          the textarea — same commitment, since nothing is sent until
+          Send, without making the composer impossible to scroll past. */}
+      {staged && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--s2)',
+            marginBottom: 'var(--s2)',
+            padding: 'var(--s2) var(--s3)',
+            borderRadius: 'var(--r-md)',
+            background: 'var(--ac-wash)',
+          }}
+        >
+          <Ico n="file" s="2xs" c="var(--ac-ink)" />
+          <span className="mono" style={{ fontSize: 'var(--t-micro)', color: 'var(--ac-ink)' }}>
+            /{staged.name}
+          </span>
+          <span style={{ fontSize: 'var(--t-nano)', color: 'var(--fg4)' }}>
+            {staged.chars < 1000 ? staged.chars : `${(staged.chars / 1000).toFixed(1)}k`} chars
+            {staged.restricts_tools ? ' · tool limits not carried' : ''}
+          </span>
+          <button
+            onClick={() => onStage(null)}
+            aria-label={`Remove ${staged.name}`}
+            style={{ marginLeft: 'auto', padding: 'var(--s1)' }}
+          >
+            <Ico n="x" s="2xs" c="var(--fg3)" />
+          </button>
+        </div>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -303,13 +356,34 @@ function Composer({ text, onText, onSend, sending, notice, disabled, reason, war
         }}
         style={{ display: 'flex', gap: 'var(--s2)', alignItems: 'flex-end' }}
       >
+        <button
+          type="button"
+          onClick={() => setPicking(true)}
+          disabled={disabled}
+          aria-label="Insert a command"
+          title="Insert a command"
+          style={{
+            height: 'var(--ctl-lg)',
+            width: 'var(--ctl-lg)',
+            flexShrink: 0,
+            borderRadius: 'var(--r-lg)',
+            background: 'var(--sf2)',
+            color: 'var(--fg3)',
+            fontFamily: 'var(--f-mono)',
+            fontSize: 'var(--t-body)',
+          }}
+        >
+          /
+        </button>
         <textarea
           value={text}
           onChange={(e) => onText(e.target.value)}
           rows={1}
           disabled={disabled}
           aria-label="Message this session"
-          placeholder={disabled ? reason || 'Unavailable' : 'Message this session…'}
+          placeholder={
+            disabled ? reason || 'Unavailable' : staged ? 'Add a note (optional)…' : 'Message this session…'
+          }
           style={{
             flex: 1,
             minHeight: 'var(--ctl-lg)',
@@ -325,10 +399,17 @@ function Composer({ text, onText, onSend, sending, notice, disabled, reason, war
             resize: 'none',
           }}
         />
-        <Btn kind="primary" disabled={disabled || sending || !text.trim()} ico="arrowR">
+        <Btn kind="primary" disabled={disabled || sending || !hasContent} ico="arrowR">
           {sending ? '…' : 'Send'}
         </Btn>
       </form>
+      {picking && (
+        <CommandPicker
+          sessionId={sessionId}
+          onStage={onStage}
+          onClose={() => setPicking(false)}
+        />
+      )}
       {disabled && reason && (
         <p style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginTop: 'var(--s2)' }}>
           {reason}
