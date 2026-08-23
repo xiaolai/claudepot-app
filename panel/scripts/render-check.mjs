@@ -118,7 +118,56 @@ function installGlobals(window) {
   return () => restore.forEach((f) => f());
 }
 
-async function render(dir) {
+/**
+ * A stub host for the authenticated pass.
+ *
+ * Only the routes a thread's first paint touches, answered with the
+ * smallest shape each consumer reads. Anything else 404s — a screen
+ * that needs a route not listed here is a screen this check does not
+ * cover, and it should say so by failing rather than by hanging.
+ */
+const SESSION_ID = 'render-check-session';
+function stubHost() {
+  const body = (o) => Promise.resolve({
+    ok: true, status: 200, json: () => Promise.resolve(o), text: () => Promise.resolve(JSON.stringify(o)),
+  });
+  return (input) => {
+    const url = String(typeof input === 'string' ? input : input?.url || '');
+    if (url.includes('/api/me')) return body({ device: 'render-check', passkeys: 0, server_version: '0.0.0' });
+    if (url.includes('/transcript')) {
+      return body({
+        total: 2,
+        next_cursor: 2,
+        events: [
+          { index: 0, kind: 'user', ts: '2026-08-24T00:00:00Z', text: 'hello' },
+          { index: 1, kind: 'assistant', ts: '2026-08-24T00:00:01Z', text: 'hi **there**' },
+        ],
+      });
+    }
+    if (url.includes('/api/sessions')) {
+      return body({
+        server_version: '0.0.0',
+        sessions: [{
+          session_id: SESSION_ID, live: true, addressable: true, status: 'working',
+          title: 'a session to open', project_path: '/tmp/p', branch: 'main',
+          messages: 2, models: ['claude-opus-5'], tokens: { input: 1, output: 1 },
+          last_ts: '2026-08-24T00:00:01Z', has_error: false, unread: 0,
+        }],
+      });
+    }
+    if (url.includes('/api/quick-prompts')) return body({ prompts: [{ id: 'q1', name: 'Go', text: 'go on' }] });
+    if (url.includes('/api/approvals')) return body({ approvals: [] });
+    return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
+  };
+}
+
+/** Global restores, run once on the way out — see the note in `render`. */
+const pendingRestores = [];
+function restoreAll() {
+  while (pendingRestores.length) pendingRestores.pop()();
+}
+
+async function render(dir, scenario = {}) {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', (e) => errors.push(`jsdomError: ${e.message}`));
@@ -132,6 +181,12 @@ async function render(dir) {
     virtualConsole: vc,
   });
   const restore = installGlobals(dom.window);
+  if (scenario.token) {
+    dom.window.localStorage.setItem('claudepot.token', scenario.token);
+    const f = stubHost();
+    dom.window.fetch = f;
+    globalThis.fetch = f;
+  }
 
   try {
     // A cache-busting query so repeated runs in one process re-evaluate.
@@ -142,14 +197,32 @@ async function render(dir) {
   }
 
   await new Promise((r) => setTimeout(r, 500));
+  if (scenario.then) {
+    try {
+      await scenario.then(dom.window);
+    } catch (e) {
+      errors.push(`scenario: ${e.message}`);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
   const root = dom.window.document.getElementById('root');
   const out = {
+    hasComposer: Boolean(dom.window.document.querySelector('textarea')),
     children: root?.children.length ?? 0,
     text: (root?.textContent || '').replace(/\s+/g, ' ').trim(),
     errors,
   };
-  restore();
+  // Teardown is DEFERRED to process exit, not done here.
+  //
+  // The panel polls on a `setInterval`, and jsdom's timers are Node
+  // timers that outlive `window.close()`. Restoring the globals between
+  // renders let one of those fire into a world with no `document`,
+  // which killed the process *after* the verdict had been printed — a
+  // gate that reports success and then exits non-zero is not a gate.
+  // Nothing here needs the globals put back mid-run: the next render
+  // installs its own over the top, and the process is short-lived.
   dom.window.close();
+  pendingRestores.push(restore);
   return out;
 }
 
@@ -161,6 +234,55 @@ function evaluate(result) {
   // mounted-but-empty tree would pass a children check and show nothing.
   if (!/Sign in/i.test(result.text)) {
     problems.push(`the sign-in screen did not render (text was: ${result.text.slice(0, 160)})`);
+  }
+  return problems;
+}
+
+/**
+ * The authenticated pass: sign in, open a thread.
+ *
+ * The sign-in assertion above proves the bundle mounts. It does not
+ * reach `Thread`, `Sessions` or `Markdown` — which is how two missing
+ * imports (`useEffect`, then `api`) shipped in one commit and turned
+ * every thread into a blank screen. Vite does not resolve free
+ * identifiers, so nothing before this caught them.
+ */
+async function openAThread(window) {
+  const doc = window.document;
+  for (let i = 0; i < 40; i += 1) {
+    // The DEEPEST element carrying the title, not the first: every
+    // ancestor up to <body> also "contains" the text, and clicking one
+    // of those misses the handler. `Item` renders a div rather than a
+    // button, so this cannot just query buttons.
+    const hits = [...doc.querySelectorAll('div,button')].filter((el) =>
+      el.textContent?.includes('a session to open'),
+    );
+    const card = hits[hits.length - 1];
+    if (card) {
+      card.click();
+      // A live card's own click target may be an ancestor of the text,
+      // so walk up a couple of levels too. Clicking a div with no
+      // handler is inert, which makes this cheap rather than risky.
+      let el = card;
+      for (let up = 0; up < 3 && el?.parentElement; up += 1) {
+        el = el.parentElement;
+        el.click();
+      }
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the session card never appeared');
+}
+
+function evaluateThread(result) {
+  const problems = [];
+  if (result.children === 0) problems.push('#root has no children — React never mounted');
+  if (result.errors.length) problems.push(...result.errors.map((e) => e.slice(0, 400)));
+  // The composer is the thread's own furniture: if it is there, the
+  // whole view rendered rather than throwing on the way.
+  if (!result.hasComposer) {
+    problems.push(`the thread did not render (text was: ${result.text.slice(0, 200)})`);
   }
   return problems;
 }
@@ -201,10 +323,19 @@ const deadline = setTimeout(() => {
 deadline.unref?.();
 
 const problems = evaluate(await render(outDir));
+const threadProblems = evaluateThread(
+  await render(outDir, { token: 'render-check-token', then: openAThread }),
+);
 clearTimeout(deadline);
-if (problems.length) {
+if (problems.length || threadProblems.length) {
   console.error('panel render check FAILED');
-  for (const p of problems) console.error(`  - ${p}`);
+  for (const p of problems) console.error(`  - signed out: ${p}`);
+  for (const p of threadProblems) console.error(`  - thread: ${p}`);
+  restoreAll();
   process.exit(1);
 }
-console.log('panel render check ok — mounted, sign-in screen present, no console errors');
+console.log('panel render check ok — sign-in screen and a thread both render, no console errors');
+restoreAll();
+// Explicit, so a poll timer the panel scheduled cannot outlive the
+// verdict and turn a pass into a non-zero exit.
+process.exit(0);

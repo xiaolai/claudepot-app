@@ -54,10 +54,27 @@ cd panel && pnpm check:render        # the built remote panel actually mounts
 ```
 
 `panel`'s render check answers a question `vite build` cannot: whether
-the bundle *mounts*. It runs the committed output in jsdom with no
-network — the offline path a phone hits first — and asserts the sign-in
-screen appears with zero console errors. `pnpm check:render:self-test`
-forces a failure so the assertions are known to fire.
+the bundle *mounts*. It runs the committed output in jsdom and asserts
+**two** passes, because for a while it only asserted the first:
+
+- **signed out**, with no network — the offline path a phone hits first
+  — reaching the sign-in screen with zero console errors;
+- **signed in**, against a stub host, opening a session and reaching the
+  thread's composer.
+
+The second exists because vite does not resolve free identifiers, so a
+missing import is a runtime `ReferenceError` in whatever code path
+touches it. Two of them shipped in one commit — `useEffect`, then `api`
+— and turned every thread into a blank screen while the signed-out
+assertion stayed green, since it never reaches `Thread`. Reverting
+either import now fails the check; verified in both directions.
+
+`pnpm check:render:self-test` forces a failure so the assertions are
+known to fire. Note the harness **defers restoring globals to process
+exit**: the panel polls on a `setInterval`, jsdom's timers are Node
+timers that outlive `window.close()`, and restoring between passes let
+one fire into a world with no `document` — killing the process *after*
+a passing verdict had been printed.
 
 CI runs the core + cli tests on a Linux/macOS/Windows matrix and the
 `claudepot-tauri` crate's tests on macOS + Windows (Linux needs

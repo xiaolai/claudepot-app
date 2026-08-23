@@ -11,8 +11,9 @@
 // read mark and sending live in `useThreadState`. What is left here is
 // rendering, which is the only thing a reviewer should have to read to
 // know what this screen looks like.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
+import { api } from './api.js';
 import { ago, modelLabel, tightPath, groupTools } from './format.js';
 import { Markdown } from './Markdown.jsx';
 import { useTranscript } from './useTranscript.js';
