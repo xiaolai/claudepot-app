@@ -37,11 +37,24 @@ function hueOf(email) {
   return h;
 }
 
-/** Windows the server actually reported a figure for, in `WINDOWS` order. */
+/**
+ * Every window the server reported a figure for: the fixed plan-level
+ * ones first, then whatever it scoped to a model.
+ *
+ * The scoped list is open-ended by design — it carries the weekly Fable
+ * limit today and will carry the next model without a code change,
+ * which is exactly why it cannot be a fixed key list like `WINDOWS`.
+ * Labels are server-supplied and already human-readable, so they are
+ * rendered verbatim rather than mapped.
+ */
 function metersOf(a) {
-  return WINDOWS.map((win) => ({ ...win, w: a.usage?.[win.key] })).filter(
+  const named = WINDOWS.map((win) => ({ ...win, w: a.usage?.[win.key] })).filter(
     (m) => m.w && typeof m.w.utilization === 'number',
   );
+  const scoped = (a.usage?.scoped ?? [])
+    .filter((sc) => sc && typeof sc.utilization === 'number')
+    .map((sc) => ({ key: `scoped:${sc.label}`, sub: sc.label, w: sc }));
+  return [...named, ...scoped];
 }
 
 /**
