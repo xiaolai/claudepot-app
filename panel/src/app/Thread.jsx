@@ -22,10 +22,34 @@ import { CopyPath, Muted } from './views.jsx';
 
 const { Btn, Chip, Dot, Ico, Tap } = window;
 
-const INTENTS = ['Continue', 'Explain that', 'Run the tests', 'Show me the diff'];
+/**
+ * The quick-prompt chips, fetched once per thread.
+ *
+ * They used to be four hardcoded strings, which is the right list for
+ * nobody in particular — the useful ones are the phrases a given person
+ * types twenty times a week. They are authored in the desktop app now
+ * and read here; see `claudepot-core::quick_prompt`.
+ *
+ * Failure is silence: a server too old to know the route, or a
+ * read that fails, leaves the row empty rather than blocking the
+ * composer behind an error nobody can act on from a phone.
+ */
+function useQuickPrompts() {
+  const [prompts, setPrompts] = useState([]);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .quickPrompts(ctrl.signal)
+      .then((d) => setPrompts(d?.prompts ?? []))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, []);
+  return prompts;
+}
 
 export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) {
   const [picking, setPicking] = useState(false);
+  const quickPrompts = useQuickPrompts();
   const id = session.session_id;
   const { events, total, loading, error, hasEarlier, loadEarlier } = useTranscript(id);
   const { scroller, onScroll } = useFollowTail(id, total, events);
@@ -148,6 +172,7 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) 
         reason={blocked}
         warning={warning}
         onPick={() => setPicking(true)}
+        quickPrompts={quickPrompts}
       />
 
       {/* Outside the composer, deliberately. The composer sets
@@ -354,6 +379,7 @@ function Composer({
   onStage,
   hasContent,
   onPick,
+  quickPrompts,
 }) {
 
   return (
@@ -390,9 +416,12 @@ function Composer({
         <div
           style={{ display: 'flex', gap: 'var(--s2)', overflowX: 'auto', paddingBottom: 'var(--s2)' }}
         >
-          {INTENTS.map((i) => (
-            <Chip key={i} tone="quiet" onClick={() => onSend(i)}>
-              {i}
+          {/* The NAME is the label, the TEXT is what gets sent. A
+              chip is a shortcut, so one tap sends — the picker is where
+              something long gets staged and reviewed first. */}
+          {quickPrompts.map((q) => (
+            <Chip key={q.id} tone="quiet" onClick={() => onSend(q.text)}>
+              {q.name}
             </Chip>
           ))}
         </div>
@@ -471,7 +500,9 @@ function Composer({
           // Short enough not to wrap. The `/` button costs 54px, which
           // left the field 184px at 390 — and "Message this session…"
           // wrapped to a second line the one-row height then clipped.
-          placeholder={disabled ? reason || 'Unavailable' : staged ? 'Add a note…' : 'Message…'}
+          placeholder={
+            disabled ? reason || 'Unavailable' : staged ? 'Add a note…' : 'Message this session…'
+          }
           style={{
             flex: 1,
             minHeight: 'var(--ctl-lg)',
@@ -487,8 +518,22 @@ function Composer({
             resize: 'none',
           }}
         />
-        <Btn kind="primary" disabled={disabled || sending || !hasContent} ico="arrowR">
-          {sending ? '…' : 'Send'}
+        {/* Icon-only, and the one place in this app that overrides
+            `rules/icon-buttons.md`'s "never the primary action". An
+            upward arrow in a message composer is as close to a
+            universal verb as this interface has — iMessage, WhatsApp,
+            Telegram and ChatGPT all ship it unlabelled — so the rule's
+            actual test, "can the user scan the surface and know what it
+            does without reading", is met. It also gives ~55px back to a
+            390px row that the `/` button had taken. */}
+        <Btn
+          kind="primary"
+          disabled={disabled || sending || !hasContent}
+          ico={sending ? undefined : 'up'}
+          aria-label="Send"
+          style={{ width: 'var(--ctl-lg)', padding: 0, flexShrink: 0 }}
+        >
+          {sending ? '…' : ''}
         </Btn>
       </form>
 

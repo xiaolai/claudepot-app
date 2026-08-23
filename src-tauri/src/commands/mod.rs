@@ -70,6 +70,7 @@ pub mod preferences;
 pub mod pricing;
 pub mod project;
 pub mod protected;
+pub mod quick_prompt;
 pub mod release_update;
 pub mod repair;
 pub mod rotation;

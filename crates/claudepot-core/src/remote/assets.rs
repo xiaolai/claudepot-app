@@ -142,6 +142,19 @@ const WOFF2: &str = "font/woff2";
 /// Exhaustive match, no fallthrough to a filesystem lookup. An unknown
 /// path is `None` and the caller 404s.
 pub fn get(path: &str) -> Option<Asset> {
+    get_from(path, dev_panel_dir().as_deref())
+}
+
+/// The body of [`get`], with the dev directory passed in.
+///
+/// Split out so the tests never touch `CLAUDEPOT_PANEL_DIR`. A test
+/// that mutates a process global is a test that fails when the suite
+/// runs in parallel — and this one took the service-worker assertion
+/// down with it, because that test read `panel.js` while another had
+/// the override pointed at a temp directory. Second time this session;
+/// the fix is not a lock, it is not reading a global from code under
+/// test.
+fn get_from(path: &str, dev: Option<&std::path::Path>) -> Option<Asset> {
     // Chunks first: there are sixty of them and they are generated, so
     // they cannot live in the match below without that file becoming
     // unreadable.
@@ -156,6 +169,7 @@ pub fn get(path: &str) -> Option<Asset> {
         return panel_chunks::chunk(name).map(|body| {
             with_dev_override(
                 path,
+                dev,
                 Asset {
                     body: std::borrow::Cow::Borrowed(body),
                     content_type: JS,
@@ -230,6 +244,7 @@ pub fn get(path: &str) -> Option<Asset> {
     };
     Some(with_dev_override(
         path,
+        dev,
         Asset {
             body: std::borrow::Cow::Borrowed(body),
             content_type,
@@ -244,8 +259,8 @@ pub fn get(path: &str) -> Option<Asset> {
 /// file mid-build, a directory that does not exist, a typo in the
 /// variable. A dev convenience that could 500 the app is worse than one
 /// that occasionally serves a stale byte.
-fn with_dev_override(path: &str, embedded: Asset) -> Asset {
-    let Some(dir) = dev_panel_dir() else {
+fn with_dev_override(path: &str, dev: Option<&std::path::Path>, embedded: Asset) -> Asset {
+    let Some(dir) = dev else {
         return embedded;
     };
     let Some(rel) = dev_relative_path(path) else {
@@ -294,12 +309,10 @@ mod tests {
     /// pointed at a directory that really does contain the file.
     #[test]
     fn a_path_the_match_refuses_stays_refused_under_the_override() {
-        let _lock = crate::testing::lock_data_dir();
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("secret.txt"), b"should never be served").unwrap();
         std::fs::create_dir_all(dir.path().join("chunks")).unwrap();
         std::fs::write(dir.path().join("chunks/evil.js"), b"nope").unwrap();
-        std::env::set_var("CLAUDEPOT_PANEL_DIR", dir.path());
 
         for path in [
             "/panel/secret.txt",
@@ -309,49 +322,42 @@ mod tests {
             "/../../etc/passwd",
             "/panel/",
         ] {
-            assert!(get(path).is_none(), "{path} must stay unservable");
+            assert!(
+                get_from(path, Some(dir.path())).is_none(),
+                "{path} must stay unservable"
+            );
         }
-        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
     }
 
     #[test]
     fn the_override_serves_disk_bytes_for_an_approved_path() {
-        let _lock = crate::testing::lock_data_dir();
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("panel.js"), b"// from disk").unwrap();
-        std::env::set_var("CLAUDEPOT_PANEL_DIR", dir.path());
 
-        let got = get("/panel/panel.js").expect("still an approved path");
+        let got = get_from("/panel/panel.js", Some(dir.path())).expect("still an approved path");
         assert_eq!(got.text(), "// from disk");
         // And the headers are the embedded asset's — only the bytes move.
         assert_eq!(got.content_type, JS);
         assert_eq!(got.cache_control, CACHE_CONTROL);
-        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
     }
 
     #[test]
     fn a_missing_file_falls_back_to_the_embedded_bytes() {
         // A half-written file mid-build must not 500 the app.
-        let _lock = crate::testing::lock_data_dir();
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("CLAUDEPOT_PANEL_DIR", dir.path());
 
-        let got = get("/panel/panel.js").expect("embedded fallback");
+        let got = get_from("/panel/panel.js", Some(dir.path())).expect("embedded fallback");
         assert!(!got.body.is_empty());
         assert!(
             got.text().len() > 1000,
             "that is the real bundle, not an empty read"
         );
-        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
     }
 
     #[test]
     fn without_the_variable_nothing_changes() {
-        let _lock = crate::testing::lock_data_dir();
-        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
-        assert!(dev_panel_dir().is_none());
         assert!(matches!(
-            get("/panel/panel.js").unwrap().body,
+            get_from("/panel/panel.js", None).unwrap().body,
             std::borrow::Cow::Borrowed(_)
         ));
     }

@@ -57,6 +57,10 @@ export const SETTINGS_PANES = [
   // destroys user data. "core", not "advanced": a control that exists
   // to prevent silent data loss is worthless if the user has to go
   // looking for it, and CC's own UI never mentions the setting at all.
+  { id: "prompts",
+    get label() { return i18n.t("panes.quickPrompts", { ns: "settings" }); },
+    glyph: NF.bolt, group: "core",
+    keywords: ["chips", "shortcuts", "phrases", "remote", "panel", "composer"] },
   { id: "retention",
     get label() { return i18n.t("panes.retention", { ns: "settings" }); },
     glyph: NF.archive, group: "core",

@@ -176,6 +176,10 @@ export const api = {
       idempotencyKey: key,
     }),
 
+  // The chips above the composer. Authored in the desktop app; the
+  // panel only reads them.
+  quickPrompts: (signal) => request('GET', '/api/quick-prompts', { signal }),
+
   accounts: (signal) => request('GET', '/api/accounts', { signal }),
   // Addressed by email: that is this domain's identity for an account,
   // and a uuid on the wire would be an internal id the panel then has

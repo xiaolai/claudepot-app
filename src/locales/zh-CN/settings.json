@@ -18,7 +18,8 @@
     "github": "GitHub",
     "locks": "锁文件",
     "diagnostics": "诊断",
-    "about": "关于"
+    "about": "关于",
+    "quickPrompts": "快捷提示"
   },
   "shared": {
     "loading": "加载中…",
@@ -662,5 +663,24 @@
     "perSessionLabel": "要求按会话启用",
     "perSessionOnHint": "每个新会话都以快速模式关闭开始；用 /fast 重新开启。已保存的偏好会保留。",
     "perSessionOffHint": "快速模式一经开启便跨会话保持。启用此项可让每个会话都以关闭状态开始。"
+  },
+  "quickPrompts": {
+    "intro": "远程面板输入框上方的快捷按钮。点击即发送其提示词——名称只是标签。",
+    "empty": "没有快捷提示，面板不会显示任何按钮。",
+    "name": "名称",
+    "text": "提示词",
+    "namePlaceholder": "简短标签，例如：跑测试",
+    "textPlaceholder": "点击后发送的内容",
+    "add": "添加",
+    "remove": "删除",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "save": "保存",
+    "saved": "已保存。",
+    "restore": "恢复内置的四项",
+    "unsaved": "有未保存的更改",
+    "saveFailed": "保存失败",
+    "loadFailed": "无法读取快捷提示。",
+    "count": "{{count}} / {{max}}"
   }
 }

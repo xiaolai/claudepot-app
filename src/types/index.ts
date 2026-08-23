@@ -22,3 +22,4 @@ export * from "./usage";
 export * from "./updates";
 export * from "./memory-health";
 export * from "./ccEnv";
+export * from "./quick-prompt";

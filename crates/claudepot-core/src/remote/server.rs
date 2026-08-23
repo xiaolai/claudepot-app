@@ -162,6 +162,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/approvals", get(super::api::list_approvals))
         .route("/api/approvals/{id}", post(super::api::decide_approval))
         // Read-only by design; each handler carries the reason.
+        .route("/api/quick-prompts", get(super::api::list_quick_prompts))
         .route("/api/accounts", get(super::api::list_accounts))
         .route(
             "/api/accounts/{email}/activate",

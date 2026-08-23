@@ -114,6 +114,7 @@ pub use project::trash as project_trash;
 pub use project::types as project_types;
 pub mod protected_paths;
 pub(crate) mod proxy;
+pub mod quick_prompt;
 pub mod redaction;
 pub mod release_channel;
 pub mod remote;

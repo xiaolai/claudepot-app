@@ -92,3 +92,4 @@ export const api = {
 export { migrateApi, sharedMemoryApi };
 export type * from "./migrate";
 export type * from "./sharedMemory";
+export * from "./quick-prompt";

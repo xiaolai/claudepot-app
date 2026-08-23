@@ -230,6 +230,7 @@ async fn the_real_endpoints_are_all_behind_auth() {
         ("GET", "/api/sessions"),
         ("GET", "/api/sessions/abc/transcript"),
         ("GET", "/api/accounts"),
+        ("GET", "/api/quick-prompts"),
         ("GET", "/api/inbound"),
         ("POST", "/api/inbound/revoke"),
         ("POST", "/api/sessions/abc/prompt"),

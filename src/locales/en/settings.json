@@ -18,7 +18,8 @@
     "github": "GitHub",
     "locks": "Locks",
     "diagnostics": "Diagnostics",
-    "about": "About"
+    "about": "About",
+    "quickPrompts": "Quick prompts"
   },
   "shared": {
     "loading": "Loading…",
@@ -669,5 +670,24 @@
     "perSessionLabel": "Require per-session opt-in",
     "perSessionOnHint": "Every new session starts with fast mode off; re-enable it with /fast. Your saved preference is kept.",
     "perSessionOffHint": "Fast mode persists across sessions once turned on. Enable this to make each session start with it off instead."
+  },
+  "quickPrompts": {
+    "intro": "Chips above the composer on the remote panel. Tap one and its text is sent — the name is only the label.",
+    "empty": "No quick prompts. The panel shows no chips.",
+    "name": "Name",
+    "text": "Prompt",
+    "namePlaceholder": "Short label, e.g. Run the tests",
+    "textPlaceholder": "What gets sent when it is tapped",
+    "add": "Add",
+    "remove": "Remove",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "save": "Save",
+    "saved": "Saved.",
+    "restore": "Restore the built-in four",
+    "unsaved": "Unsaved changes",
+    "saveFailed": "Could not save",
+    "loadFailed": "Could not read the quick prompts.",
+    "count": "{{count}} of {{max}}"
   }
 }

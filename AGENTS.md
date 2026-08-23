@@ -257,6 +257,17 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     fails without the lock). Capped at 200 sessions per device and 32
     devices, oldest first. Empty file = no badges.
     See "## Remote control".
+  - `quick-prompts.json` — the chips above the remote panel's
+    composer, edited in Settings → Quick prompts. `{schema_version,
+    prompts: [{id, name, text}]}`, owned by
+    `claudepot-core::quick_prompt`. A short name you tap and the longer
+    text it sends. **Absent and empty are different states**: no file
+    means "never configured" and yields the built-in four, while a file
+    that exists and is empty means "I deleted them all" and yields
+    nothing — collapsing the two would make the last delete undo itself.
+    Saved as a whole list because order is data; there is no add/remove
+    verb. Recovers silently on corruption, unlike the two remote stores
+    above: this is a list of phrases, and losing it costs retyping.
   - `pricing-history.json` — observed model-rate changes.
     `{schema_version, observations: [...]}`, appended (never
     overwritten) when a live pricing scrape reports a rate that

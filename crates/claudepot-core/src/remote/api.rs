@@ -333,6 +333,27 @@ pub(super) async fn activate_account(
     .await
 }
 
+/// The user's quick prompts, for the chips above the composer.
+///
+/// **Read-only here.** They are edited in the desktop app, where there
+/// is room for a name, a body and a reorder — and where a mistake is in
+/// front of the person who made it. The panel taps them; it does not
+/// author them.
+pub(super) async fn list_quick_prompts(_device: Device) -> Response {
+    match blocking("quick prompts", || {
+        Ok::<_, std::convert::Infallible>(crate::quick_prompt::load().prompts)
+    })
+    .await
+    {
+        Some(prompts) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "prompts": prompts })),
+        )
+            .into_response(),
+        None => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    }
+}
+
 // ── Slash commands ──────────────────────────────────────────────────
 
 /// The commands a session could run, as text it can be sent.
