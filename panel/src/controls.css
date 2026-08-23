@@ -1,0 +1,38 @@
+/* controls.css — the half of the reset the design system does not ship.
+ *
+ * `ds-tokens.css` resets `button` fully (`border:none`, background,
+ * cursor, alignment) but gives `input, textarea` only `font` and
+ * `color`. So every text control in this app kept the user-agent
+ * control border. Measured in WebKit at 390px:
+ *
+ *   textarea  1px solid  rgb(118,118,118)
+ *   input     2px INSET  rgb(118,118,118)
+ *
+ * `inset` is the one that looks broken rather than merely wrong: it
+ * renders as a bevel, dark along the top and left and light along the
+ * bottom and right, so a field reads as having half a border. Ours draw
+ * their own surface with `background` + `border-radius`, so the UA
+ * border is never wanted — it just sat inside the shape at a different
+ * radius.
+ *
+ * This lives here and not in `src/vendor/`, which panel/README.md
+ * requires be byte-identical to the delivered design system.
+ *
+ * `appearance: none` goes with it: on iOS the UA control appearance
+ * carries its own corner rounding and inner shadow, which show through
+ * the same way once the border is gone.
+ *
+ * **Focus is deliberately untouched.** The design system already draws
+ * `:focus-visible { outline: var(--bw-ring) solid var(--ac);
+ * outline-offset: var(--bw-ring) }`, and an outline is painted OUTSIDE
+ * the border box — so it is a ring around the field, never an inner
+ * border. Removing it would take the visible focus indicator that
+ * `.claude/rules/design.md` requires, to fix a problem it does not
+ * cause.
+ */
+input,
+textarea {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+}

@@ -53,6 +53,12 @@ typescript
 # documents it — an ignored script would point committed error messages
 # at a file a fresh clone does not have.
 !/scripts/mint-remote-cert.sh
+# Builds the remote panel. It writes TWO committed artifacts — the
+# bundle under crates/claudepot-core/src/remote/assets/panel/ and the
+# generated panel_chunks.rs beside it — and AGENTS.md lists it under
+# "## Build". Ignored, a fresh clone had the artifacts and no way to
+# regenerate them, and the docs pointed at a file that was not there.
+!/scripts/build-panel.sh
 # Local CI gate + its shared invariant checks. repo-invariants.sh is
 # invoked by .github/workflows/ci.yml, so it MUST be committed.
 !/scripts/preflight.sh

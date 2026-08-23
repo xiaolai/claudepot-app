@@ -5,6 +5,7 @@ import './fonts.css';
 import './vendor/ds-tokens.css';
 import './vendor/ds-icons.jsx';
 import './vendor/ds-kit.jsx';
+import './controls.css';
 import './markdown.css';
 
 import React from 'react';
