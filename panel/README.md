@@ -44,6 +44,44 @@ system and is written against the real endpoints.
   error-doc pointer.
 - **Rebuild after touching anything here.** The committed output is the
   artifact; a source change that is not rebuilt ships the old bundle.
+## Seeing a change without rebuilding the binary
+
+The panel is embedded with `include_bytes!`, so the honest loop is
+`pnpm build` → `scripts/build-panel.sh` → `cargo build` → restart the
+server. Measured on this repo: 3.1s + 3.2s + 7.2s, plus the restart —
+and most of that is overhead for a CSS tweak.
+
+**In a debug build**, point the server at the built directory instead:
+
+```bash
+export CLAUDEPOT_PANEL_DIR="$PWD/crates/claudepot-core/src/remote/assets/panel"
+cargo run -p claudepot-cli -- remote serve      # leave it running
+cd panel && pnpm build --watch                  # in another shell
+```
+
+Now a save rebuilds in ~3s and a browser refresh shows it. No `cargo
+build`, no restart — which also means the `PermissionRequest` hook stays
+installed rather than being revoked and re-installed each time. Vite
+already writes straight into the embedded directory, so those bytes are
+on disk the moment the build finishes; the server just reads them.
+
+Two things about it are deliberate:
+
+- **Debug builds only.** `dev_panel_dir()` returns `None` when
+  `debug_assertions` is off, so a shipped appliance cannot be pointed at
+  a directory by anyone who can set a variable on it.
+- **It cannot widen what is servable.** The exhaustive match still runs
+  first and decides whether a path exists; the override only changes
+  where an approved path's bytes come from. `remote::assets` is a match
+  precisely so there is no runtime directory walk and no traversal
+  surface, and a dev convenience that reintroduced one would be a bad
+  trade at any speed. `a_path_the_match_refuses_stays_refused_under_the_override`
+  asserts it with the override pointed at a directory that really does
+  contain the file.
+
+Still rebuild and commit before pushing — the committed bundle is the
+artifact, and this only changes what *you* see.
+
 - **A rebuild also regenerates Rust.** `scripts/build-panel.sh` writes
   `crates/claudepot-core/src/remote/assets/panel_chunks.rs` — one
   `include_bytes!` arm per emitted chunk. Mermaid splits into ~60 of

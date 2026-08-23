@@ -54,10 +54,14 @@ mod panel_chunks;
 /// Prefix for the lazily-loaded panel chunks. See `panel_chunks`.
 const CHUNK_PREFIX: &str = "/panel/chunks/";
 
-/// One embedded file: its bytes, the Content-Type it must be served
-/// with, and how long a client may keep it.
+/// One file: its bytes, the Content-Type it must be served with, and
+/// how long a client may keep it.
+///
+/// `Cow` rather than `&'static [u8]` because a **debug** build can be
+/// told to serve the panel from disk instead of from the binary — see
+/// [`dev_panel_dir`]. A release build only ever produces `Borrowed`.
 pub struct Asset {
-    pub body: &'static [u8],
+    pub body: std::borrow::Cow<'static, [u8]>,
     pub content_type: &'static str,
     pub cache_control: &'static str,
 }
@@ -66,8 +70,46 @@ impl Asset {
     /// The body as text. Panics on a non-UTF-8 asset, which is what the
     /// tests want — every text asset here is authored, not user data.
     #[cfg(test)]
-    fn text(&self) -> &'static str {
-        std::str::from_utf8(self.body).expect("text asset is not UTF-8")
+    fn text(&self) -> String {
+        String::from_utf8(self.body.to_vec()).expect("text asset is not UTF-8")
+    }
+}
+
+/// Where to read the panel from instead of the binary, if anywhere.
+///
+/// **Debug builds only.** A release binary returns `None` whatever the
+/// environment says, so a shipped appliance cannot be pointed at a
+/// directory by anyone who can set a variable on it.
+///
+/// This exists because the edit-to-see loop was `pnpm build` →
+/// `build-panel.sh` → `cargo build` → restart the server, and the
+/// `cargo build` and the restart are pure overhead for a CSS tweak.
+/// Vite already writes straight into the embedded directory, so those
+/// bytes are on disk the moment the build finishes; this just reads
+/// them.
+///
+/// **It does not widen what can be served.** The exhaustive match still
+/// runs first and decides whether a path exists at all — this only
+/// changes where an already-approved path's bytes come from. That is
+/// the whole point: `remote::assets` exists so there is no runtime
+/// directory walk and therefore no traversal surface, and a dev
+/// convenience that reintroduced one would be a bad trade at any speed.
+fn dev_panel_dir() -> Option<std::path::PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var_os("CLAUDEPOT_PANEL_DIR").map(std::path::PathBuf::from)
+}
+
+/// The on-disk name for a request path the match already approved.
+///
+/// Only the panel's own files: fonts and the probe do not change while
+/// someone is iterating on a screen, and every path not named here
+/// falls back to the embedded bytes.
+fn dev_relative_path(path: &str) -> Option<&str> {
+    match path {
+        "/" | "/index.html" => Some("index.html"),
+        _ => path.strip_prefix("/panel/"),
     }
 }
 
@@ -111,10 +153,15 @@ pub fn get(path: &str) -> Option<Asset> {
         if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
             return None;
         }
-        return panel_chunks::chunk(name).map(|body| Asset {
-            body,
-            content_type: JS,
-            cache_control: CACHE_CONTROL,
+        return panel_chunks::chunk(name).map(|body| {
+            with_dev_override(
+                path,
+                Asset {
+                    body: std::borrow::Cow::Borrowed(body),
+                    content_type: JS,
+                    cache_control: CACHE_CONTROL,
+                },
+            )
         });
     }
 
@@ -181,15 +228,133 @@ pub fn get(path: &str) -> Option<Asset> {
         ),
         _ => return None,
     };
-    Some(Asset {
-        body,
-        content_type,
-        cache_control,
-    })
+    Some(with_dev_override(
+        path,
+        Asset {
+            body: std::borrow::Cow::Borrowed(body),
+            content_type,
+            cache_control,
+        },
+    ))
+}
+
+/// Swap in the bytes on disk for a path the match already approved.
+///
+/// Falls back to the embedded asset on any failure — a half-written
+/// file mid-build, a directory that does not exist, a typo in the
+/// variable. A dev convenience that could 500 the app is worse than one
+/// that occasionally serves a stale byte.
+fn with_dev_override(path: &str, embedded: Asset) -> Asset {
+    let Some(dir) = dev_panel_dir() else {
+        return embedded;
+    };
+    let Some(rel) = dev_relative_path(path) else {
+        return embedded;
+    };
+    match std::fs::read(dir.join(rel)) {
+        Ok(bytes) => Asset {
+            body: std::borrow::Cow::Owned(bytes),
+            ..embedded
+        },
+        Err(_) => embedded,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// The mapping, without touching the environment.
+    ///
+    /// The security property is that this is only ever consulted for a
+    /// path the exhaustive match has ALREADY approved — so what matters
+    /// here is that it never invents a name outside the panel.
+    #[test]
+    fn the_dev_mapping_covers_the_panel_and_nothing_else() {
+        assert_eq!(dev_relative_path("/"), Some("index.html"));
+        assert_eq!(dev_relative_path("/index.html"), Some("index.html"));
+        assert_eq!(dev_relative_path("/panel/panel.js"), Some("panel.js"));
+        assert_eq!(
+            dev_relative_path("/panel/chunks/Mermaid.js"),
+            Some("chunks/Mermaid.js")
+        );
+        // Not the panel: fonts and the probe do not change while
+        // someone is iterating on a screen.
+        assert_eq!(dev_relative_path("/sw.js"), None);
+        assert_eq!(dev_relative_path("/probe"), None);
+        assert_eq!(dev_relative_path("/api/health"), None);
+    }
+
+    /// **The override cannot widen what is servable.**
+    ///
+    /// The whole reason `remote::assets` is an exhaustive match is to
+    /// have no runtime directory walk and therefore no traversal
+    /// surface. A dev convenience that reintroduced one would be a bad
+    /// trade at any speed, so the match runs first and this asserts it
+    /// still refuses everything it refused before — with the override
+    /// pointed at a directory that really does contain the file.
+    #[test]
+    fn a_path_the_match_refuses_stays_refused_under_the_override() {
+        let _lock = crate::testing::lock_data_dir();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("secret.txt"), b"should never be served").unwrap();
+        std::fs::create_dir_all(dir.path().join("chunks")).unwrap();
+        std::fs::write(dir.path().join("chunks/evil.js"), b"nope").unwrap();
+        std::env::set_var("CLAUDEPOT_PANEL_DIR", dir.path());
+
+        for path in [
+            "/panel/secret.txt",
+            "/panel/chunks/evil.js",
+            "/panel/../secret.txt",
+            "/panel/chunks/../secret.txt",
+            "/../../etc/passwd",
+            "/panel/",
+        ] {
+            assert!(get(path).is_none(), "{path} must stay unservable");
+        }
+        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
+    }
+
+    #[test]
+    fn the_override_serves_disk_bytes_for_an_approved_path() {
+        let _lock = crate::testing::lock_data_dir();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("panel.js"), b"// from disk").unwrap();
+        std::env::set_var("CLAUDEPOT_PANEL_DIR", dir.path());
+
+        let got = get("/panel/panel.js").expect("still an approved path");
+        assert_eq!(got.text(), "// from disk");
+        // And the headers are the embedded asset's — only the bytes move.
+        assert_eq!(got.content_type, JS);
+        assert_eq!(got.cache_control, CACHE_CONTROL);
+        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
+    }
+
+    #[test]
+    fn a_missing_file_falls_back_to_the_embedded_bytes() {
+        // A half-written file mid-build must not 500 the app.
+        let _lock = crate::testing::lock_data_dir();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_PANEL_DIR", dir.path());
+
+        let got = get("/panel/panel.js").expect("embedded fallback");
+        assert!(!got.body.is_empty());
+        assert!(
+            got.text().len() > 1000,
+            "that is the real bundle, not an empty read"
+        );
+        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
+    }
+
+    #[test]
+    fn without_the_variable_nothing_changes() {
+        let _lock = crate::testing::lock_data_dir();
+        std::env::remove_var("CLAUDEPOT_PANEL_DIR");
+        assert!(dev_panel_dir().is_none());
+        assert!(matches!(
+            get("/panel/panel.js").unwrap().body,
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
     use super::*;
 
     /// Every path `get` answers. The tests iterate this rather than
