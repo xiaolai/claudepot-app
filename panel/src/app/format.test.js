@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ago, basename, bytes, compact, long, modelLabel, short, span, tightPath, until } from './format.js';
+import { ago, basename, bytes, compact, long, modelLabel, short, span, tightPath, until, groupTools } from './format.js';
 
 test('basename handles all four path shapes', () => {
   assert.equal(basename('/Users/joker/code/claudepot'), 'claudepot');
@@ -116,4 +116,60 @@ test('modelLabel drops the prefix and the date stamp', () => {
   assert.equal(modelLabel('claude-opus-5'), 'opus-5');
   assert.equal(modelLabel('claude-haiku-4-5-20251001'), 'haiku-4-5');
   assert.equal(modelLabel(null), null);
+});
+
+test('groupTools folds a run of tool ticks into one row', () => {
+  const ev = [
+    { index: 0, kind: 'user' },
+    { index: 1, kind: 'tool' },
+    { index: 2, kind: 'tool' },
+    { index: 3, kind: 'tool' },
+    { index: 4, kind: 'assistant' },
+  ];
+  const out = groupTools(ev);
+  assert.deepEqual(
+    out.map((r) => r.kind),
+    ['one', 'group', 'one'],
+  );
+  assert.equal(out[1].events.length, 3);
+});
+
+test('groupTools leaves a lone tick alone', () => {
+  // "1 tool call" is worse than the tick, which at least names the tool.
+  const ev = [{ index: 0, kind: 'assistant' }, { index: 1, kind: 'tool' }, { index: 2, kind: 'user' }];
+  assert.deepEqual(
+    groupTools(ev).map((r) => r.kind),
+    ['one', 'one', 'one'],
+  );
+});
+
+test('groupTools never drops or reorders an event', () => {
+  // A group must expand back into exactly what it replaced.
+  const ev = Array.from({ length: 40 }, (_, i) => ({
+    index: i,
+    kind: i % 7 === 0 ? 'assistant' : 'tool',
+  }));
+  const flat = groupTools(ev).flatMap((r) => (r.kind === 'group' ? r.events : [r.e]));
+  assert.deepEqual(
+    flat.map((e) => e.index),
+    ev.map((e) => e.index),
+  );
+});
+
+test('groupTools in shown mode changes nothing', () => {
+  const ev = [{ index: 0, kind: 'tool' }, { index: 1, kind: 'tool' }];
+  const out = groupTools(ev, 'shown');
+  assert.deepEqual(out.map((r) => r.kind), ['one', 'one']);
+});
+
+test('groupTools handles a transcript that is nothing but tools', () => {
+  // Measured: one real session was 91% tool ticks.
+  const ev = [{ index: 0, kind: 'tool' }, { index: 1, kind: 'tool' }];
+  const out = groupTools(ev);
+  assert.deepEqual(out.map((r) => r.kind), ['group']);
+  assert.equal(out[0].events.length, 2);
+});
+
+test('groupTools on an empty transcript is empty', () => {
+  assert.deepEqual(groupTools([]), []);
 });

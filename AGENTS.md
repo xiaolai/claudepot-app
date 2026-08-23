@@ -754,6 +754,19 @@ Five decisions are worth not re-litigating:
   caught `__init__ never runs` becoming `init never runs` — the exact
   corruption the module claims to prevent, in the module that claims it.
   Single `*` is left alone for the same reason (`*.log`, `2 * 3`).
+- **Tool calls fold by default, and folding is not hiding.** Measured
+  across five real sessions on this machine, **59–91% of transcript
+  rows were tool ticks** — so listing each one turns a 390px column
+  into a wall of ticks with the conversation scattered through it. A
+  run of two or more collapses to one `N tool calls` row that expands
+  into exactly what it replaced; a run of *one* is left alone, because
+  a row reading "1 tool call" is strictly worse than the tick, which at
+  least names the tool. An errored call is counted on the folded row —
+  grouping must not hide the one thing in a run worth looking at.
+  Settings → Appearance → Tool calls switches it off. The preference is
+  `localStorage`, not server state: this is how one device likes to
+  read, and a phone and a laptop pointed at the same Claudepot are
+  allowed to disagree.
 - **Accounts and projects are read-only, and each for its own reason.**
   A project move rewrites path-keyed CC state outside the project
   directory behind a rollback journal; an account swap either fails

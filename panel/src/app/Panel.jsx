@@ -15,7 +15,7 @@ import { Thread } from './Thread.jsx';
 import { Projects } from './Projects.jsx';
 import { Accounts } from './Accounts.jsx';
 import { Settings } from './Settings.jsx';
-import { useAuth, useSessions, useTheme } from './useSession.js';
+import { useAuth, useSessions, useTheme, useToolDisplay } from './useSession.js';
 
 const { Badge, Ico, IcoFill, Wire } = window;
 
@@ -97,6 +97,7 @@ export function Panel() {
   const [view, setView] = useState('sessions');
   const [openId, setOpenId] = useState(null);
   const [theme, setTheme] = useTheme();
+  const [tools, setTools] = useToolDisplay();
   const [host, setHost] = useState('');
 
   const { token, checked, signIn, signOut } = useAuth();
@@ -141,6 +142,8 @@ export function Panel() {
       <Settings
         theme={theme}
         onTheme={setTheme}
+        tools={tools}
+        onTools={setTools}
         host={host}
         onSignOut={onSignOut}
         onRefresh={refresh}
@@ -161,7 +164,13 @@ export function Panel() {
     <Shell theme={theme}>
       {conn !== 'online' && !open && <Wire state={conn} onRetry={refresh} host={host || 'this Mac'} />}
       {open ? (
-        <Thread session={open} onBack={() => setOpenId(null)} onChanged={refresh} conn={conn} />
+        <Thread
+          session={open}
+          onBack={() => setOpenId(null)}
+          onChanged={refresh}
+          conn={conn}
+          tools={tools}
+        />
       ) : (
         screen
       )}

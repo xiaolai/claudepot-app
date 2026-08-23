@@ -25,7 +25,12 @@ const THEMES = [
   { v: 'dark', n: 'Dark' },
 ];
 
-export function Settings({ theme, onTheme, host, onSignOut, onRefresh }) {
+const TOOLS = [
+  { v: 'grouped', n: 'Grouped' },
+  { v: 'shown', n: 'Every one' },
+];
+
+export function Settings({ theme, onTheme, tools, onTools, host, onSignOut, onRefresh }) {
   const [me, setMe] = useState(null);
   const [inbound, setInbound] = useState(null);
   const [support, setSupport] = useState(null);
@@ -123,6 +128,26 @@ export function Settings({ theme, onTheme, host, onSignOut, onRefresh }) {
           <Item first>
             <span style={{ flex: 1, fontSize: 'var(--t-sub)' }}>Theme</span>
             <Seg opts={THEMES} v={theme} onChange={onTheme} />
+          </Item>
+          <Item>
+            <span style={{ flex: 1, fontSize: 'var(--t-sub)' }}>
+              Tool calls
+              {/* The reason for the default, where the person changing
+                  it can read it: measured across five real sessions on
+                  this machine, 59–91% of transcript rows were tool
+                  ticks. */}
+              <span
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--t-nano)',
+                  color: 'var(--fg4)',
+                  marginTop: 'var(--s1)',
+                }}
+              >
+                Grouped folds a run into one row you can open.
+              </span>
+            </span>
+            <Seg opts={TOOLS} v={tools} onChange={onTools} />
           </Item>
         </List>
       </Group>

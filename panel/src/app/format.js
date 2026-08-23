@@ -105,3 +105,37 @@ export function bytes(n) {
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(0)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
+
+/**
+ * Fold consecutive tool ticks into one row.
+ *
+ * Returns a list of `{kind: 'one', e}` and `{kind: 'group', events}`.
+ *
+ * A run of **one** is left alone deliberately: collapsing a single tick
+ * into a row reading "1 tool call" is strictly worse than the tick,
+ * which at least names the tool. The saving starts at two.
+ *
+ * Order is never changed and nothing is dropped — every input event
+ * appears exactly once in the output, so a group can always be expanded
+ * back into precisely what it replaced.
+ */
+export function groupTools(events, mode = 'grouped') {
+  if (mode === 'shown') return events.map((e) => ({ kind: 'one', e }));
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    if (run.length === 1) out.push({ kind: 'one', e: run[0] });
+    else out.push({ kind: 'group', events: run });
+    run = [];
+  };
+  for (const e of events) {
+    if (e.kind === 'tool') run.push(e);
+    else {
+      flush();
+      out.push({ kind: 'one', e });
+    }
+  }
+  flush();
+  return out;
+}

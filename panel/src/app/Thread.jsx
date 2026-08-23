@@ -13,7 +13,7 @@
 // know what this screen looks like.
 import { useState } from 'react';
 
-import { ago, modelLabel, tightPath } from './format.js';
+import { ago, modelLabel, tightPath, groupTools } from './format.js';
 import { Markdown } from './Markdown.jsx';
 import { useTranscript } from './useTranscript.js';
 import { CommandPicker } from './CommandPicker.jsx';
@@ -24,7 +24,7 @@ const { Btn, Chip, Dot, Ico, Tap } = window;
 
 const INTENTS = ['Continue', 'Explain that', 'Run the tests', 'Show me the diff'];
 
-export function Thread({ session, onBack, onChanged, conn }) {
+export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) {
   const id = session.session_id;
   const { events, total, loading, error, hasEarlier, loadEarlier } = useTranscript(id);
   const { scroller, onScroll } = useFollowTail(id, total, events);
@@ -122,9 +122,13 @@ export function Thread({ session, onBack, onChanged, conn }) {
               background: 'var(--hair)',
             }}
           />
-          {events.map((e) => (
-            <Row key={e.index} e={e} />
-          ))}
+          {groupTools(events, tools).map((r) =>
+            r.kind === 'group' ? (
+              <ToolGroup key={`g${r.events[0].index}`} events={r.events} />
+            ) : (
+              <Row key={r.e.index} e={r.e} />
+            ),
+          )}
         </div>
         <div style={{ height: 'var(--s6)' }} />
       </div>
@@ -208,6 +212,60 @@ function Row({ e }) {
       >
         <Markdown text={e.text} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * A run of consecutive tool calls, as one row.
+ *
+ * Not a hide: the count stays and the row opens into exactly the ticks
+ * it replaced, so a working session still looks different from a
+ * stalled one. Measured, 59–91% of a real transcript is these — which
+ * is why the default folds them and why the row has to stay honest
+ * about how many it swallowed.
+ */
+function ToolGroup({ events }) {
+  const [open, setOpen] = useState(false);
+  const failed = events.filter((e) => e.is_error).length;
+  if (open) {
+    return (
+      <div>
+        <button
+          onClick={() => setOpen(false)}
+          aria-expanded="true"
+          style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', width: '100%', padding: 'var(--s1) 0' }}
+        >
+          <Ico n="chevD" s="2xs" w="thin" c="var(--fg4)" />
+          <span style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)' }}>
+            {events.length} tool calls
+          </span>
+        </button>
+        {events.map((e) => (
+          <ToolTick key={e.index} e={e} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: 'var(--s1) 0' }}>
+      <button
+        onClick={() => setOpen(true)}
+        aria-expanded="false"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', width: '100%', textAlign: 'left' }}
+      >
+        <Ico n="chevR" s="2xs" w="thin" c="var(--fg4)" />
+        <span style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)' }}>
+          {events.length} tool calls
+        </span>
+        {/* An errored call must survive the fold, or grouping hides the
+            one thing in a run worth looking at. */}
+        {failed > 0 && (
+          <span style={{ fontSize: 'var(--t-nano)', color: 'var(--dg)' }}>
+            {failed} errored
+          </span>
+        )}
+      </button>
     </div>
   );
 }

@@ -146,3 +146,43 @@ export function useTheme() {
   }, [pref]);
   return [pref, setPref];
 }
+
+/**
+ * How a transcript renders tool calls.
+ *
+ * `grouped` (the default) folds each consecutive run of tool ticks into
+ * one row; `shown` lists them the way the desktop does.
+ *
+ * Grouped is the default because of what a transcript is actually made
+ * of. Measured across five real sessions on this machine, tool ticks
+ * were **59–91%** of all rows — so listing them individually means a
+ * phone screen of one-line ticks with the conversation scattered
+ * through it. The desktop can afford that; a 390px column cannot.
+ *
+ * Not a *hide*: the group row keeps the count and expands, so "Claude
+ * is doing something and here is roughly what" survives. Removing tool
+ * calls from the transcript entirely would make a working session and a
+ * stalled one look identical.
+ *
+ * localStorage rather than the server: this is how one device likes to
+ * read, not a property of the machine. A phone and a laptop looking at
+ * the same Claudepot should be allowed to disagree.
+ */
+export function useToolDisplay() {
+  const [pref, setPref] = useState(() => {
+    try {
+      return window.localStorage.getItem('claudepot.tools') === 'shown' ? 'shown' : 'grouped';
+    } catch {
+      return 'grouped';
+    }
+  });
+  useEffect(() => {
+    try {
+      if (pref === 'grouped') window.localStorage.removeItem('claudepot.tools');
+      else window.localStorage.setItem('claudepot.tools', pref);
+    } catch {
+      /* Non-fatal: the preference lives for this page load only. */
+    }
+  }, [pref]);
+  return [pref, setPref];
+}
