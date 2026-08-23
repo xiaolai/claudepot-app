@@ -754,6 +754,29 @@ Five decisions are worth not re-litigating:
   caught `__init__ never runs` becoming `init never runs` — the exact
   corruption the module claims to prevent, in the module that claims it.
   Single `*` is left alone for the same reason (`*.log`, `2 * 3`).
+- **A home-screen app has no way to reload itself, so the panel ships
+  one.** Installed to the iOS home screen there is no address bar and no
+  reload button, and the system pull-to-refresh **cannot fire**: the
+  shell is `position: fixed; inset: 0; overflow: hidden` and scrolling
+  happens inside `.sc` containers, so the document never scrolls. Left
+  alone, a standalone panel runs last week's bundle indefinitely with
+  nothing on screen saying so — which is how a shipped mermaid fix read
+  as unfixed for an afternoon.
+
+  Two halves. `GET /api/sessions` carries `server_version`, and since
+  the bundle is embedded in that binary with `include_bytes!` the
+  server's version **is** the bundle's — they cannot disagree. The
+  client records the version it booted with and shows a one-line
+  tap-to-reload bar when a later poll reports a different one. A server
+  too old to send the field leaves it null and nothing ever goes stale,
+  so the check fails off. Settings → This device → Reload is the manual
+  half, for the case you would not notice.
+
+  It is a **tap, never an automatic reload**: reloading mid-sentence
+  loses the composer, and "the app updated itself while I was typing" is
+  a worse surprise than a bar. `location.reload()` is enough — the panel
+  is `no-store`, so a load always fetches current bytes and there is no
+  cache to bust.
 - **Tool calls fold by default, and folding is not hiding.** Measured
   across five real sessions on this machine, **59–91% of transcript
   rows were tool ticks** — so listing each one turns a 390px column

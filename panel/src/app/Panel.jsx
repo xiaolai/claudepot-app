@@ -72,6 +72,37 @@ function TabBtn({ t, on, badge, onGo }) {
   );
 }
 
+/**
+ * Claudepot restarted with a different version than this bundle came
+ * from — so this bundle is old.
+ *
+ * A tap, not an automatic reload: a reload mid-sentence would lose
+ * whatever is in the composer, and "the app updated itself while I was
+ * typing" is a worse surprise than a one-line bar.
+ *
+ * `location.reload()` is enough — the panel is served `no-store`, so a
+ * load always fetches the current bytes and there is no cache to bust.
+ */
+function Updated() {
+  return (
+    <button
+      onClick={() => window.location.reload()}
+      style={{
+        flexShrink: 0,
+        width: '100%',
+        padding: 'var(--s2) var(--gut)',
+        background: 'var(--ac-wash)',
+        color: 'var(--ac-ink)',
+        fontSize: 'var(--t-micro)',
+        fontWeight: 'var(--w-semi)',
+        textAlign: 'center',
+      }}
+    >
+      Claudepot was updated — tap to reload
+    </button>
+  );
+}
+
 function TabBar({ view, onGo, badge }) {
   return (
     <nav
@@ -111,7 +142,7 @@ export function Panel() {
     setView('sessions');
   }, [signOut]);
 
-  const { sessions, approvals, conn, refresh } = useSessions({
+  const { sessions, approvals, conn, refresh, stale } = useSessions({
     enabled: Boolean(token) && checked,
     onUnauthorized: onSignOut,
   });
@@ -162,6 +193,16 @@ export function Panel() {
 
   return (
     <Shell theme={theme}>
+      {/* The only way out of a stale bundle on a home-screen app.
+          Installed to the iOS home screen there is no address bar, no
+          reload button, and the system pull-to-refresh cannot fire
+          because the shell is `position: fixed` and the document never
+          scrolls — so without this the app runs last week's build
+          indefinitely with nothing saying so.
+
+          Above the thread as well as the list: a stale bundle is stale
+          wherever you happen to be standing. */}
+      {stale && <Updated />}
       {conn !== 'online' && !open && <Wire state={conn} onRetry={refresh} host={host || 'this Mac'} />}
       {open ? (
         <Thread

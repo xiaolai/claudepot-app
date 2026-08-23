@@ -242,6 +242,33 @@ export function Settings({ theme, onTheme, tools, onTools, host, onSignOut, onRe
               {me?.server_version ? `v${me.server_version}` : '—'}
             </span>
           </Item>
+          {/* The manual half of reloading. Installed to the iOS home
+              screen this app has no address bar, no reload button, and
+              cannot use the system pull-to-refresh — the shell is
+              `position: fixed` so the document never scrolls. Without a
+              control here there is no way to reload at all short of
+              deleting the icon and re-adding it.
+
+              The bar that appears when the server version changes
+              handles the case you would notice; this handles the rest. */}
+          <Item>
+            <span style={{ flex: 1, fontSize: 'var(--t-sub)' }}>
+              Reload
+              <span
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--t-nano)',
+                  color: 'var(--fg4)',
+                  marginTop: 'var(--s1)',
+                }}
+              >
+                Fetches the current app. Nothing is signed out.
+              </span>
+            </span>
+            <Chip tone="quiet" size="xs" onClick={() => window.location.reload()}>
+              Reload
+            </Chip>
+          </Item>
         </List>
       </Group>
 

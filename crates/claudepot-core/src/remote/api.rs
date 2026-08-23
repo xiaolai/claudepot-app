@@ -73,6 +73,18 @@ pub(super) async fn list_sessions(device: Device) -> Response {
             Json(serde_json::json!({
                 "sessions": sessions,
                 "generated_at": Utc::now().to_rfc3339(),
+                // Rides on the polled endpoint so the client can notice
+                // it changed. The panel bundle is embedded in this
+                // binary with `include_bytes!`, so the server's version
+                // IS the bundle's version — they cannot disagree.
+                //
+                // A standalone iOS home-screen app has no address bar,
+                // no reload button, and cannot use the system
+                // pull-to-refresh because the shell is `position:
+                // fixed` and the document never scrolls. Without this it
+                // can run someone's build from last week indefinitely
+                // with nothing on screen saying so.
+                "server_version": env!("CARGO_PKG_VERSION"),
             })),
         )
             .into_response(),

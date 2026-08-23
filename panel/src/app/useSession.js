@@ -68,6 +68,15 @@ export function useSessions({ enabled, onUnauthorized }) {
   const [approvals, setApprovals] = useState([]);
   const [conn, setConn] = useState('online');
   const inflight = useRef(null);
+  // The version this bundle was served by, captured once. If the
+  // server later reports a different one it has been upgraded under
+  // us, and — since the bundle is embedded in that binary — the code
+  // running here is stale.
+  //
+  // A ref, not state: it must survive every re-render and never itself
+  // cause one.
+  const bootVersion = useRef(null);
+  const [stale, setStale] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!readToken()) return;
@@ -87,6 +96,15 @@ export function useSessions({ enabled, onUnauthorized }) {
       setSessions(list.value?.sessions ?? []);
       setApprovals(waiting.status === 'fulfilled' ? (waiting.value?.approvals ?? []) : []);
       setConn('online');
+
+      const seen = list.value?.server_version;
+      if (seen) {
+        // An older server that does not report one leaves this null and
+        // nothing ever goes stale — the check fails off, which is right
+        // for a nag.
+        if (bootVersion.current === null) bootVersion.current = seen;
+        else if (seen !== bootVersion.current) setStale(true);
+      }
     } catch (e) {
       if (e?.name === 'AbortError' || inflight.current !== ctrl) return;
       if (e instanceof OfflineError) setConn('offline');
@@ -121,7 +139,7 @@ export function useSessions({ enabled, onUnauthorized }) {
     };
   }, [enabled, refresh]);
 
-  return { sessions, approvals, conn, refresh };
+  return { sessions, approvals, conn, refresh, stale };
 }
 
 /**
