@@ -789,6 +789,20 @@ Five decisions are worth not re-litigating:
   timer, so a human tapping a phone is strictly more supervised than
   what already shipped.
 
+  **The CLI slot only.** `cli` and `desktop` are independent nouns and
+  `.claude/rules/architecture.md` says never to couple them, so the
+  panel moves the first and never the second — Claude Desktop's slot is
+  switched at the machine. `swap::switch` touches CC's keychain item and
+  nothing of Desktop's (every `Desktop` mention in that module is
+  Windows process *detection*, so a running Desktop is not mistaken for
+  CC). Reading the swap code proves today's behaviour; the lock that
+  matters is `no_route_can_switch_the_desktop_slot`, which fails the day
+  a desktop route appears — and has been watched failing against a
+  planted one. `ActivateRequest` carries no `desktop` field either, so
+  the body is not a way in. The UI names the slot for the same reason:
+  a bare "Use" next to a Desktop chip invites the reader to assume it
+  moves both.
+
   Addressed by **email**: that is this domain's identity for an account,
   and a uuid on the wire is an internal identifier the panel would then
   have to render or hide. Resolution is **prefix matching**, the same as

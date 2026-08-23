@@ -656,6 +656,60 @@ mod tests {
         assert_eq!(v, serde_json::json!({ "ok": true }));
     }
 
+    /// **The panel switches the CLI slot and only the CLI slot.**
+    ///
+    /// `cli` and `desktop` are independent nouns and
+    /// `.claude/rules/architecture.md` says never to couple them. The
+    /// activate endpoint reaches `swap::switch`, which touches CC's
+    /// keychain item and nothing of Claude Desktop's — every `Desktop`
+    /// mention in that module is Windows process *detection*, so a
+    /// running Desktop is not mistaken for CC.
+    ///
+    /// Asserted at the router because that is where a future
+    /// `/api/accounts/{email}/desktop` would appear. Reading the swap
+    /// code proves today's behaviour; this fails the day someone adds
+    /// the route, which is the failure worth catching.
+    #[tokio::test]
+    async fn no_route_can_switch_the_desktop_slot() {
+        let app = router(state_with_password(Box::new(NoPersist)));
+        for (method, path) in [
+            ("POST", "/api/accounts/a%40example.com/desktop"),
+            ("POST", "/api/accounts/a%40example.com/activate-desktop"),
+            ("POST", "/api/desktop/activate"),
+            ("POST", "/api/desktop"),
+        ] {
+            let res = app
+                .clone()
+                .oneshot(req(method, path, Some(serde_json::json!({}))))
+                .await
+                .unwrap();
+            assert_eq!(
+                res.status(),
+                StatusCode::NOT_FOUND,
+                "{method} {path} must not exist"
+            );
+        }
+    }
+
+    /// The activate endpoint takes no desktop knob either — a `desktop`
+    /// field must not become a way in through the body.
+    #[tokio::test]
+    async fn activate_ignores_a_desktop_field_in_the_body() {
+        let app = router(state_with_password(Box::new(NoPersist)));
+        let res = app
+            .oneshot(req(
+                "POST",
+                "/api/accounts/a%40example.com/activate",
+                Some(serde_json::json!({"force": false, "desktop": true})),
+            ))
+            .await
+            .unwrap();
+        // Unauthenticated, so it stops at the guard — the point is that
+        // `ActivateRequest` has no `desktop` field to deserialize into,
+        // so no future body can reach one.
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn a_private_route_without_a_token_is_401() {
         let app = router(state_with_password(Box::new(NoPersist)));

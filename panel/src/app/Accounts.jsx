@@ -60,7 +60,11 @@ export function Accounts() {
     if (!force) setConflict(null);
     try {
       const r = await api.activateAccount(email, force, newIdempotencyKey());
-      setNote(r.already_active ? `${email} was already active.` : `Claude Code now uses ${email}.`);
+      setNote(
+        r.already_active
+          ? `${email} was already the CLI account.`
+          : `Claude Code now uses ${email}. Claude Desktop is unchanged.`,
+      );
       setConflict(null);
       load();
     } catch (e) {
@@ -133,13 +137,18 @@ export function Accounts() {
                     )}
                   </div>
                   {five && <Meter pct={Math.round(five.utilization)} size="sm" sub="5h" />}
+                  {/* Names the slot, because the row beside it shows
+                      both. `cli` and `desktop` are independent nouns
+                      and this only moves the first — a bare "Use" next
+                      to a Desktop chip invites the reader to assume
+                      otherwise. */}
                   {!a.is_cli_active && (
                     <Chip
                       tone="quiet"
                       size="xs"
                       onClick={busy ? undefined : () => activate(a.email, false)}
                     >
-                      {busy === a.email ? '…' : 'Use'}
+                      {busy === a.email ? '…' : 'Use for CLI'}
                     </Chip>
                   )}
                 </Item>
@@ -188,8 +197,8 @@ export function Accounts() {
       )}
 
       <p style={{ marginTop: 'var(--s6)', fontSize: 'var(--t-micro)', color: 'var(--fg4)', lineHeight: 'var(--lh-body)' }}>
-        Switching sets which account Claude Code uses. Adding, removing and verifying accounts is
-        still done at the machine.
+        Switching sets which account Claude Code uses. Claude Desktop is a separate slot and is
+        not touched from here. Adding, removing and verifying accounts stay at the machine.
         {data?.usage_source === 'none' && ' Usage figures appear once the Claudepot app has run.'}
       </p>
     </div>
