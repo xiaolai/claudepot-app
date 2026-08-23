@@ -139,3 +139,35 @@ export function groupTools(events, mode = 'grouped') {
   flush();
   return out;
 }
+
+// A chip per row only where something HAPPENED. `null` means "say
+// nothing", and both silent entries are deliberate: `ok` is the
+// expected state, and `never` is an absence of information rather than
+// a finding — badging every row with "we haven't looked" is the same
+// noise as rendering `0 sessions`.
+export const VERIFY_TONE = {
+  ok: null,
+  never: null,
+  drift: { tone: 'warn', label: 'Drift' },
+  rejected: { tone: 'danger', label: 'Rejected' },
+  signed_out: { tone: 'danger', label: 'Signed out' },
+  network_error: { tone: 'quiet', label: 'Unverified' },
+};
+
+/**
+ * The verify chip for a status, or nothing.
+ *
+ * Not `VERIFY_TONE[status] ?? VERIFY_TONE.never`: `??` cannot tell a
+ * deliberate `null` from a missing key, so it substituted the fallback
+ * for every entry meaning "say nothing" — and every *verified* account
+ * was labelled "Never verified", the opposite of the truth, on every
+ * row.
+ *
+ * With `never` also silent the two forms happen to agree today, which
+ * is exactly why this is written the honest way: the next label added
+ * to `never` would silently resurrect the bug, and the tests below fail
+ * on that combination rather than on this line alone.
+ */
+export function verifyChip(status) {
+  return status in VERIFY_TONE ? VERIFY_TONE[status] : VERIFY_TONE.never;
+}

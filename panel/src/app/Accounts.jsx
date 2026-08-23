@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { OfflineError, api, newIdempotencyKey } from './api.js';
-import { ago } from './format.js';
+import { ago, verifyChip } from './format.js';
 import { Muted } from './views.jsx';
 
 const { Chip, Face, Group, Item, List, Meter } = window;
@@ -19,15 +19,6 @@ function hueOf(email) {
   for (let i = 0; i < email.length; i += 1) h = (h * 31 + email.charCodeAt(i)) % 360;
   return h;
 }
-
-const VERIFY_TONE = {
-  ok: null,
-  drift: { tone: 'warn', label: 'Drift' },
-  rejected: { tone: 'danger', label: 'Rejected' },
-  signed_out: { tone: 'danger', label: 'Signed out' },
-  network_error: { tone: 'quiet', label: 'Unverified' },
-  never: { tone: 'quiet', label: 'Never verified' },
-};
 
 export function Accounts() {
   const [data, setData] = useState(null);
@@ -99,7 +90,7 @@ export function Accounts() {
         <Group>
           <List>
             {accounts.map((a, i) => {
-              const v = VERIFY_TONE[a.verify_status] ?? VERIFY_TONE.never;
+              const v = verifyChip(a.verify_status);
               const five = a.usage?.five_hour;
               return (
                 <Item key={a.email} first={i === 0} style={{ alignItems: 'flex-start' }}>
@@ -136,7 +127,10 @@ export function Accounts() {
                       </div>
                     )}
                   </div>
-                  {five && <Meter pct={Math.round(five.utilization)} size="sm" sub="5h" />}
+                  {/* Ahead of the meter so the meters line up down the
+                      column. With the button last, the active row —
+                      which has no button — pushed its meter to the edge
+                      while every other row's sat short of it. */}
                   {/* Names the slot, because the row beside it shows
                       both. `cli` and `desktop` are independent nouns
                       and this only moves the first — a bare "Use" next
@@ -151,6 +145,12 @@ export function Accounts() {
                       {busy === a.email ? '…' : 'Use for CLI'}
                     </Chip>
                   )}
+                  {/* `md`, not `sm`: both steps set the same font size,
+                      so `sm` packs it into a 56px ring instead of 72
+                      and a three-digit reading crowds the stroke. The
+                      design system is vendored byte-identical, so the
+                      room has to come from the size step. */}
+                  {five && <Meter pct={Math.round(five.utilization)} size="md" sub="5h" />}
                 </Item>
               );
             })}

@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ago, basename, bytes, compact, long, modelLabel, short, span, tightPath, until, groupTools } from './format.js';
+import { ago, basename, bytes, compact, long, modelLabel, short, span, tightPath, until, groupTools, verifyChip } from './format.js';
 
 test('basename handles all four path shapes', () => {
   assert.equal(basename('/Users/joker/code/claudepot'), 'claudepot');
@@ -172,4 +172,30 @@ test('groupTools handles a transcript that is nothing but tools', () => {
 
 test('groupTools on an empty transcript is empty', () => {
   assert.deepEqual(groupTools([]), []);
+});
+
+test('verifyChip says nothing for a verified account', () => {
+  // The bug this replaced: `VERIFY_TONE[status] ?? VERIFY_TONE.never`
+  // cannot tell a deliberate null from a missing key, so every VERIFIED
+  // account was chipped "Never verified" — the opposite of the truth,
+  // on every row.
+  assert.equal(verifyChip('ok'), null);
+});
+
+test('verifyChip says nothing for never-verified either', () => {
+  // An absence of information is not a finding worth a badge.
+  assert.equal(verifyChip('never'), null);
+});
+
+test('verifyChip still reports the states that are findings', () => {
+  assert.equal(verifyChip('drift').label, 'Drift');
+  assert.equal(verifyChip('rejected').label, 'Rejected');
+  assert.equal(verifyChip('signed_out').label, 'Signed out');
+  assert.equal(verifyChip('network_error').label, 'Unverified');
+});
+
+test('verifyChip treats an unknown status as never, not as a crash', () => {
+  // A status CC or core adds tomorrow must degrade to silence.
+  assert.equal(verifyChip('some_new_state_2027'), null);
+  assert.equal(verifyChip(undefined), null);
 });
