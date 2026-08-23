@@ -39,6 +39,7 @@ fn state() -> Shared {
         devices: DevicesFile::default(),
         persist: Box::new(NoPersist),
         idempotency: Idempotency::new(),
+        challenges: claudepot_core::remote::passkey::Challenges::new(),
     }))
 }
 
@@ -227,9 +228,17 @@ async fn the_real_endpoints_are_all_behind_auth() {
     let c = reqwest::Client::new();
     for (method, path) in [
         ("GET", "/api/sessions"),
+        ("GET", "/api/sessions/abc/transcript"),
+        ("GET", "/api/projects"),
+        ("GET", "/api/accounts"),
         ("GET", "/api/inbound"),
         ("POST", "/api/inbound/revoke"),
         ("POST", "/api/sessions/abc/prompt"),
+        ("POST", "/api/sessions/abc/read"),
+        // Registering a passkey must require a session that already
+        // exists, or anyone who can reach the page enrols themselves.
+        ("POST", "/api/passkey/register/begin"),
+        ("POST", "/api/passkey/register/finish"),
     ] {
         let req = match method {
             "GET" => c.get(format!("{base}{path}")),
@@ -290,6 +299,15 @@ async fn an_unknown_session_is_gone_not_retargeted() {
 
 #[tokio::test]
 async fn a_retried_mutation_replays_instead_of_re_executing() {
+    // Sequential retry only. The *concurrent* case — two requests with
+    // one key arriving inside the window the mutation takes — is covered
+    // in `remote::idempotency`'s unit tests, and deliberately not here:
+    // every handler on this surface resolves fast enough that the first
+    // request finishes before the second is dispatched, so an end-to-end
+    // test would report success without ever entering the window. The
+    // only way to widen it is a sleep that exists for the test, and a
+    // test that needs production code to be slower is measuring the
+    // sleep.
     // The property idempotency exists for. Both requests carry the same
     // key; the second must return the first's response byte-for-byte
     // without the work happening again.
@@ -346,9 +364,19 @@ async fn sessions_are_listed_by_id_and_never_addressed_by_pid() {
         .await
         .unwrap();
     assert_eq!(res.status(), 200);
-    let rows = res.json::<serde_json::Value>().await.unwrap();
-    assert!(rows.is_array(), "sessions must be an array");
-    for row in rows.as_array().unwrap() {
+    let body = res.json::<serde_json::Value>().await.unwrap();
+    let rows = body
+        .get("sessions")
+        .and_then(|v| v.as_array())
+        .expect("sessions must be an array under `sessions`");
+    // An envelope rather than a bare array: the list carries a
+    // `generated_at` the client renders as "as of", and a bare array has
+    // nowhere to put it.
+    assert!(
+        body.get("generated_at").and_then(|v| v.as_str()).is_some(),
+        "the list must say when it was taken"
+    );
+    for row in rows {
         assert!(
             row.get("session_id").and_then(|v| v.as_str()).is_some(),
             "every row must carry the id the prompt route addresses"
@@ -384,4 +412,106 @@ async fn the_inbound_gate_can_be_read_and_closed_but_not_opened() {
             .unwrap();
         assert_eq!(res.status(), 404, "{path} must not exist");
     }
+}
+
+#[tokio::test]
+async fn the_public_routes_are_exactly_these_four() {
+    // The allowlist, asserted from the other side. `the_real_endpoints_
+    // are_all_behind_auth` catches a route that should be guarded and is
+    // not; this catches the opposite mistake — a route quietly joining
+    // the public set — by naming the whole set.
+    let (base, _s) = start().await;
+    let c = reqwest::Client::new();
+
+    // Reachable without a bearer.
+    for (method, path) in [
+        ("GET", "/api/health"),
+        ("POST", "/api/login"),
+        ("POST", "/api/passkey/login/begin"),
+        ("POST", "/api/passkey/login/finish"),
+    ] {
+        let req = match method {
+            "GET" => c.get(format!("{base}{path}")),
+            _ => c.post(format!("{base}{path}")).json(&serde_json::json!({})),
+        };
+        let status = req.send().await.unwrap().status();
+        assert_ne!(status, 401, "{method} {path} is meant to be public");
+    }
+}
+
+#[tokio::test]
+async fn passkey_login_says_nothing_when_none_is_registered() {
+    // And in particular does not enumerate credential ids: `begin`
+    // refuses outright rather than returning an empty allowlist a caller
+    // could distinguish from a populated one.
+    let (base, _s) = start().await;
+    let res = reqwest::Client::new()
+        .post(format!("{base}/api/passkey/login/begin"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+    assert_eq!(
+        res.json::<serde_json::Value>().await.unwrap()["error"],
+        "no_passkey"
+    );
+}
+
+#[tokio::test]
+async fn registering_a_passkey_over_an_ip_origin_is_refused_with_a_reason() {
+    // The trap: the phone reports a platform authenticator is available
+    // on exactly the origin that cannot use one. The server must say
+    // which of the two is wrong.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let res = reqwest::Client::new()
+        .post(format!("{base}/api/passkey/register/begin"))
+        .bearer_auth(&t)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    // `start()` binds loopback, so the Host is an IP literal.
+    assert_eq!(res.status(), 409);
+    assert_eq!(
+        res.json::<serde_json::Value>().await.unwrap()["error"],
+        "rp_id_unavailable"
+    );
+}
+
+#[tokio::test]
+async fn a_transcript_for_an_unknown_session_is_not_found() {
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base}/api/sessions/no-such-session/transcript?tail=1"
+        ))
+        .bearer_auth(&t)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn recording_read_state_needs_an_idempotency_key_like_every_mutation() {
+    // Not because a repeat is dangerous here — the mark only moves
+    // forward — but so a client does not have to learn which mutations
+    // are special.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let res = reqwest::Client::new()
+        .post(format!("{base}/api/sessions/abc/read"))
+        .bearer_auth(&t)
+        .json(&serde_json::json!({ "through_count": 4 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    assert_eq!(
+        res.json::<serde_json::Value>().await.unwrap()["error"],
+        "idempotency_key_required"
+    );
 }

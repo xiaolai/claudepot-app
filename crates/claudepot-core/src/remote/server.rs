@@ -6,11 +6,19 @@
 //!
 //! ## What is unauthenticated, and nothing else
 //!
-//! `GET /api/health` and `POST /api/login`. Everything else goes through
+//! `GET /api/health`, `POST /api/login`, and the two `POST
+//! /api/passkey/login/*` steps. Everything else goes through
 //! [`require_auth`]. The list is short enough to hold in your head on
 //! purpose — an allowlist of public routes is auditable, whereas
 //! "authenticated unless marked otherwise" fails open the moment someone
 //! adds a route and forgets the attribute.
+//!
+//! Two tests assert it, from both sides, and they live in
+//! `tests/remote_serve_e2e.rs` rather than here because they drive a
+//! real socket: `the_real_endpoints_are_all_behind_auth` names every
+//! private route and requires a 401 without a bearer, and
+//! `the_public_routes_are_exactly_these_four` names the public set. A
+//! route added to the wrong `Router` fails one of them.
 //!
 //! ## Guards that run before anything reads state
 //!
@@ -60,6 +68,9 @@ pub struct AppState {
     /// Replay guard for mutations. In memory — see the module docs on
     /// `idempotency` for why that is the right lifetime.
     pub idempotency: Idempotency,
+    /// Open WebAuthn ceremonies. In memory for the same reason, and
+    /// single-use for a sharper one — see `passkey`.
+    pub challenges: super::passkey::Challenges,
 }
 
 /// Persistence, injected. The HTTP layer must not know where the files
@@ -79,7 +90,7 @@ struct ApiError {
     retry_after_secs: Option<u64>,
 }
 
-fn err(status: StatusCode, error: &'static str) -> Response {
+pub(super) fn err(status: StatusCode, error: &'static str) -> Response {
     (
         status,
         Json(ApiError {
@@ -108,7 +119,20 @@ pub struct LoginResponse {
 pub fn router(state: Shared) -> Router {
     let public = Router::new()
         .route("/api/health", get(health))
-        .route("/api/login", post(handle_login));
+        .route("/api/login", post(handle_login))
+        // Unauthenticated of necessity — this *is* a way to sign in.
+        // Safe to expose: `login/begin` sends an empty
+        // `allowCredentials`, so it reveals nothing about what is
+        // registered, and `finish` is a signature over a single-use
+        // challenge, which nothing can brute force.
+        .route(
+            "/api/passkey/login/begin",
+            post(super::api::passkey_login_begin),
+        )
+        .route(
+            "/api/passkey/login/finish",
+            post(super::api::passkey_login_finish),
+        );
 
     let private = Router::new()
         .route("/api/me", get(me))
@@ -117,8 +141,30 @@ pub fn router(state: Shared) -> Router {
         // would silently retarget — the existing procStart/session_id
         // guards stop delivery to the wrong *process*, but cannot see a
         // stale *intent*.
-        .route("/api/sessions", get(list_sessions))
+        .route("/api/sessions", get(super::api::list_sessions))
+        .route(
+            "/api/sessions/{session_id}/transcript",
+            get(super::api::get_transcript),
+        )
         .route("/api/sessions/{session_id}/prompt", post(send_prompt))
+        .route(
+            "/api/sessions/{session_id}/read",
+            post(super::api::mark_read),
+        )
+        // Read-only by design; each handler carries the reason.
+        .route("/api/projects", get(super::api::list_projects))
+        .route("/api/accounts", get(super::api::list_accounts))
+        // Registering a passkey requires a session that is already
+        // authenticated — otherwise anyone who can reach the page
+        // enrols themselves.
+        .route(
+            "/api/passkey/register/begin",
+            post(super::api::passkey_register_begin),
+        )
+        .route(
+            "/api/passkey/register/finish",
+            post(super::api::passkey_register_finish),
+        )
         // Status and revoke only. Opening the gate remotely would let
         // one bearer both open it and send through it, collapsing CC's
         // held-for-approval step into a single action controlled by one
@@ -151,16 +197,25 @@ async fn static_asset(req: Request) -> Response {
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, asset.content_type),
-            (header::CACHE_CONTROL, assets::CACHE_CONTROL),
+            // Per asset, not one constant: the fonts are the only bytes
+            // here whose name changes when their contents do, so they
+            // are the only ones a client may keep. See `assets`.
+            (header::CACHE_CONTROL, asset.cache_control),
             // Self-only. The client loads nothing remote, so the policy
             // that permits nothing remote costs nothing — and it is the
             // difference between "we did not add a CDN" and "a CDN
             // cannot be added by accident".
+            //
+            // `style-src 'unsafe-inline'` is required and not a
+            // loosening worth arguing about: the design system styles
+            // every component through React's `style` prop, and CSP2's
+            // `style-src` covers attributes as well as `<style>`. Script
+            // stays strict, which is where injection lives.
             (
                 header::CONTENT_SECURITY_POLICY,
                 "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-                 img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; \
-                 base-uri 'none'; form-action 'self'",
+                 img-src 'self' data:; font-src 'self'; connect-src 'self'; \
+                 frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
             ),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::REFERRER_POLICY, "no-referrer"),
@@ -185,12 +240,15 @@ async fn me(State(state): State<Shared>, req: Request) -> Response {
         // extension into a panic that answers 500 to an attacker.
         return err(StatusCode::UNAUTHORIZED, "unauthorized");
     };
-    let _ = state;
+    let passkeys = state.lock().await.config.passkeys.len();
     (
         StatusCode::OK,
         Json(serde_json::json!({
             "device": device.name,
             "expires_at": device.expires_at.map(|t| t.to_rfc3339()),
+            // A count, never the records. They are public keys, but a
+            // list of credential ids is still a list of what to phish.
+            "passkeys": passkeys,
         })),
     )
         .into_response()
@@ -255,6 +313,103 @@ async fn handle_login(State(state): State<Shared>, Json(body): Json<LoginRequest
             }),
         )
             .into_response(),
+    }
+}
+
+/// Run a mutation exactly once per `Idempotency-Key`.
+///
+/// Factored out of the first handler that needed it. Every mutation on
+/// this surface goes through it, and the key is **required**: this is a
+/// phone client, a retry is normal, and "send a prompt" running twice
+/// means the work happens twice rather than a counter being wrong. A
+/// client that has not thought about that is told so rather than being
+/// quietly obeyed.
+///
+/// `lookup` **reserves** the key under the lock and this function drops
+/// the lock before running the mutation. Both halves matter: reserving
+/// is what stops two concurrent duplicates from both executing, and
+/// releasing is what stops one slow prompt from blocking every other
+/// request on the appliance.
+pub(super) async fn idempotent<F, Fut>(state: &Shared, headers: &HeaderMap, run: F) -> Response
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = (StatusCode, serde_json::Value)>,
+{
+    let key = headers
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+
+    if key.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "idempotency_key_required");
+    }
+
+    let now = std::time::Instant::now();
+    {
+        let mut guard = state.lock().await;
+        match guard.idempotency.lookup(&key, now) {
+            Lookup::Replay(prev) => {
+                return (
+                    StatusCode::from_u16(prev.status).unwrap_or(StatusCode::OK),
+                    [(header::CONTENT_TYPE, "application/json")],
+                    prev.body,
+                )
+                    .into_response();
+            }
+            Lookup::Rejected(_) => return err(StatusCode::BAD_REQUEST, "bad_idempotency_key"),
+            // A duplicate that arrived while the first one is still
+            // running. Neither answer is available yet, so say so and
+            // let the client retry — running the mutation again is the
+            // exact outcome the key exists to prevent.
+            Lookup::InFlight => return err(StatusCode::CONFLICT, "idempotency_key_in_flight"),
+            Lookup::Execute => {}
+        }
+    }
+
+    let (status, payload) = run().await;
+    let body_text = payload.to_string();
+
+    // Stamped at completion, not at lookup. Using the lookup instant
+    // would age a stored response by however long the mutation took —
+    // so a slow prompt could store a response that was already expired,
+    // and the retry it exists to serve would re-execute.
+    state.lock().await.idempotency.remember(
+        &key,
+        Stored {
+            status: status.as_u16(),
+            body: body_text.clone(),
+        },
+        std::time::Instant::now(),
+    );
+
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json")],
+        body_text,
+    )
+        .into_response()
+}
+
+/// `Device` as an extractor.
+///
+/// [`require_auth`] has already put it in the request extensions, so a
+/// handler that names it in its signature cannot be reached
+/// unauthenticated. Failing closed rather than unwrapping keeps a future
+/// refactor from turning a missing extension into a 500 an attacker can
+/// provoke.
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for Device {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<Device>()
+            .cloned()
+            .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "unauthorized"))
     }
 }
 
@@ -438,6 +593,7 @@ mod tests {
             devices: DevicesFile::default(),
             persist,
             idempotency: Idempotency::new(),
+            challenges: super::super::passkey::Challenges::new(),
         }))
     }
 
@@ -713,39 +869,6 @@ mod tests {
 
 // ── The real endpoints ──────────────────────────────────────────────
 
-#[derive(Debug, Serialize)]
-struct SessionDto {
-    session_id: String,
-    name: Option<String>,
-    cwd: String,
-    status: Option<String>,
-    /// Present for display only. **Never** an address: see the route
-    /// comment on why a pid cannot be a stable handle.
-    pid: u32,
-}
-
-async fn list_sessions() -> Response {
-    let dir = crate::session_live::registry::default_sessions_dir();
-    let sessions = match crate::peer::list_addressable(&dir) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(error = %e, "remote: cannot list sessions");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal");
-        }
-    };
-    let rows: Vec<SessionDto> = sessions
-        .into_iter()
-        .map(|a| SessionDto {
-            session_id: a.record.session_id.clone(),
-            name: a.record.name.clone(),
-            cwd: a.record.cwd.clone(),
-            status: a.record.status.clone(),
-            pid: a.record.pid,
-        })
-        .collect();
-    (StatusCode::OK, Json(rows)).into_response()
-}
-
 #[derive(Debug, Deserialize)]
 struct PromptRequest {
     text: String,
@@ -762,60 +885,15 @@ async fn send_prompt(
     headers: HeaderMap,
     Json(body): Json<PromptRequest>,
 ) -> Response {
-    let key = headers
-        .get("idempotency-key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-
-    // A mutation without a key is refused rather than quietly executed:
-    // this is the endpoint where a retry does the work twice, and a
-    // client that has not thought about that should be told.
-    if key.is_empty() {
-        return err(StatusCode::BAD_REQUEST, "idempotency_key_required");
-    }
-
-    let now = std::time::Instant::now();
-    {
-        let mut guard = state.lock().await;
-        match guard.idempotency.lookup(&key, now) {
-            Lookup::Replay(prev) => {
-                return (
-                    StatusCode::from_u16(prev.status).unwrap_or(StatusCode::OK),
-                    [(header::CONTENT_TYPE, "application/json")],
-                    prev.body,
-                )
-                    .into_response();
-            }
-            Lookup::Rejected(_) => {
-                return err(StatusCode::BAD_REQUEST, "bad_idempotency_key");
-            }
-            Lookup::Execute => {}
+    let headers2 = headers.clone();
+    idempotent(&state, &headers2, || async move {
+        let dir = crate::session_live::registry::default_sessions_dir();
+        match do_send(&dir, &session_id, &body).await {
+            Ok(v) => (StatusCode::ACCEPTED, v),
+            Err((s, code)) => (s, serde_json::json!({ "error": code })),
         }
-    }
-
-    let dir = crate::session_live::registry::default_sessions_dir();
-    let (status, payload) = match do_send(&dir, &session_id, &body).await {
-        Ok(v) => (StatusCode::ACCEPTED, v),
-        Err((s, code)) => (s, serde_json::json!({ "error": code })),
-    };
-    let body_text = payload.to_string();
-
-    state.lock().await.idempotency.remember(
-        &key,
-        Stored {
-            status: status.as_u16(),
-            body: body_text.clone(),
-        },
-        now,
-    );
-
-    (
-        status,
-        [(header::CONTENT_TYPE, "application/json")],
-        body_text,
-    )
-        .into_response()
+    })
+    .await
 }
 
 /// Resolve, address, send. Split out so the handler stays about HTTP.

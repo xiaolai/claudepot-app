@@ -35,7 +35,13 @@ cargo build -p claudepot-cli         # CLI binary
 pnpm build                           # Frontend bundle
 pnpm tauri dev                       # GUI in dev mode (hot reload)
 pnpm tauri build --no-bundle         # GUI release binary (no .dmg)
+scripts/build-panel.sh               # Remote panel → committed embed dir
 ```
+
+`scripts/build-panel.sh` is separate because `panel/` has its own
+install and its output is **committed** — see "## Remote control". A
+source change under `panel/` that nobody rebuilt ships the previous
+bundle with no error anywhere.
 
 ## Test
 
@@ -44,7 +50,14 @@ cargo test --workspace               # Rust
 cargo xtask verify-cc-parity         # CC settings-merge parity goldens (see parity-harness/README.md)
 pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
+cd panel && pnpm check:render        # the built remote panel actually mounts
 ```
+
+`panel`'s render check answers a question `vite build` cannot: whether
+the bundle *mounts*. It runs the committed output in jsdom with no
+network — the offline path a phone hits first — and asserts the sign-in
+screen appears with zero console errors. `pnpm check:render:self-test`
+forces a failure so the assertions are known to fire.
 
 CI runs the core + cli tests on a Linux/macOS/Windows matrix and the
 `claudepot-tauri` crate's tests on macOS + Windows (Linux needs
@@ -200,7 +213,15 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   - `remote-config.json` — the remote surface's server settings and
     persisted auth state. `{schema_version, server: {enabled, bind,
     port}, password_hash, totp_secret_base32, totp_last_counter,
-    failed_attempts}`. Owned by `claudepot-core::remote::config`.
+    failed_attempts, passkeys, passkey_user_handle}`. Owned by
+    `claudepot-core::remote::config`. The passkeys are **public keys
+    only** — the reason a passkey beats both of its neighbours here is
+    that reading this file gives an attacker a cracking job for the
+    password hash, working access for the TOTP secret, and nothing at
+    all for these. They are account credentials, not device records, so
+    they live here rather than on a `Device`: attaching one to a session
+    would delete it when that session expired, and revoking a lost phone
+    would destroy the way back in from every other one.
     **`enabled` defaults to false** — a remote surface that switches
     itself on because the app was installed is not a feature. Separate
     from `remote-devices.json` because the write rates differ by orders
@@ -214,6 +235,28 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     that was burned to close it. Validation refuses a publicly-routable
     bind on the way to disk, not only at bind time. See
     "## Remote control".
+  - `remote-read-state.json` — per-device read marks behind the panel's
+    unread badges. `{schema_version, devices: {device_id: {sessions:
+    {session_id: {through_count, at}}}}}`. Owned by
+    `claudepot-core::remote::panel::read_state`. **Recovers silently on
+    corruption**, unlike the two files above, and the asymmetry is the
+    point: those hold a revocation list and a login throttle, where a
+    silent reset hands something back to an attacker; this is a badge
+    cache, and losing it clears every badge — exactly what tapping
+    through the list would have done. The value is a **count of events
+    consumed** — not a timestamp, because a phone's clock is not the
+    machine's and comparing them would make a badge depend on clock
+    skew; and not the *index* of the last event, because the two differ
+    by one and the field was originally named for the index while every
+    caller stored the count. Absent mark ≠ zero — a session this device
+    never opened carries no badge at all, because a count against no
+    baseline is just the event total and would put a four-digit number
+    on every row of a new phone. Writes go through a process-local mutex:
+    atomic rename is crash-safety, not concurrency-safety, and two marks
+    landing together dropped each other (measured — there is a test that
+    fails without the lock). Capped at 200 sessions per device and 32
+    devices, oldest first. Empty file = no badges.
+    See "## Remote control".
   - `pricing-history.json` — observed model-rate changes.
     `{schema_version, observations: [...]}`, appended (never
     overwritten) when a live pricing scrape reports a rate that
@@ -520,10 +563,29 @@ authenticator app is on that same phone, the second factor is close to
 ceremonial — one device compromise defeats both. It defends a credential
 used from *elsewhere*. Offer it; do not force it.
 
-**Passkeys / WebAuthn are the better end state** and are not built. The
-server would store only a public key, so reading `remote-devices.json`
-would give an attacker nothing — strictly better than both a password
-hash and a TOTP secret.
+**Passkeys / WebAuthn are the better end state**, and they are built:
+verification in `remote::webauthn` (ES256, hand-rolled, no attestation),
+the ceremony state and origin rules in `remote::passkey`, the four HTTP
+steps in `remote::api`. The server stores only a public key, so reading
+`remote-config.json` gives an attacker nothing — strictly better than
+both a password hash and a TOTP secret.
+
+Four properties there are load-bearing:
+
+- **Registration requires an authenticated session.** Otherwise anyone
+  who can reach the page enrols themselves. The password stays the
+  bootstrap and recovery credential.
+- **The RP ID is derived from the request, never configured.** The same
+  appliance reached by `.local` and by MagicDNS gets two credentials
+  rather than one broken one — which is correct, since a passkey is
+  scoped to an origin by design and the minted certificate covers both.
+- **`login/begin` sends an empty `allowCredentials`.** It is
+  unauthenticated of necessity, so it must reveal nothing about what is
+  registered; `residentKey: "required"` makes the platform resolve the
+  credential itself, which costs nothing on the device this is for.
+- **A passkey login mints exactly what a password login mints** — the
+  same `Device` row, expiry and revocation path. Two kinds of session
+  would be two things to remember to revoke.
 
 The prerequisite is **settled, measured on a real iPhone** against this
 deployment's private CA (2026-08-23). A privately-trusted certificate on
@@ -563,12 +625,133 @@ folded into it:
   honours for browsing. That path is untested here.
 
 Still open at the HTTP layer, recorded so they are not rediscovered:
-login needs the throttle wired with persistent state; mutations need an
-idempotency key (mobile retries re-execute); streams must close on
-credential revocation, not merely refuse the next request; `Host` and
-`Origin` must be checked before any state changes, or DNS rebinding
-burns attempts; and multiple appliances on one LAN need discovery
-(mDNS) with a user-set instance name.
+multiple appliances on one LAN need discovery (mDNS) with a user-set
+instance name, and there is no streaming surface yet — when one is
+added it must **close** on credential revocation rather than merely
+refusing the next request. The rest of that list is done: the throttle
+is persisted, every mutation requires an `Idempotency-Key`, and `Host` /
+`Origin` are checked in `guard_origin` before any handler runs.
+
+### The panel — the client that ships at `/`
+
+`panel/` is a self-contained Vite app (its own install; **not** a
+workspace member of the Tauri renderer, which carries 328 `invoke` calls
+that mean nothing over HTTP). It builds into
+`crates/claudepot-core/src/remote/assets/panel/`, which is **committed**,
+so `cargo build` needs no Node. Rebuild with `scripts/build-panel.sh`
+after touching anything under `panel/` — nothing else notices, and the
+previous bundle ships silently.
+
+The probe moved to `/probe` rather than being deleted. It is not the
+product and never was, but it has twice been the only thing able to
+answer a question a development machine cannot — it established that a
+privately-trusted certificate on a tailnet name yields a full secure
+context, and it caught the passkey check measuring the device rather
+than the origin.
+
+The endpoints behind it, all in `remote::api` over `remote::panel`:
+
+| Route | Notes |
+|---|---|
+| `GET /api/sessions` | live PID registry joined to `session_index` on session id; live always, plus the 20 most recently touched |
+| `GET /api/sessions/{id}/transcript` | `tail` / `after` / `before` windows, `no-store`. **The secret-bearing endpoint** |
+| `POST /api/sessions/{id}/prompt` | the only write that reaches Claude Code, through `peer` |
+| `POST /api/sessions/{id}/read` | per-device read mark |
+| `GET /api/projects`, `GET /api/accounts` | **read-only** |
+| `POST /api/passkey/{register,login}/{begin,finish}` | register is authenticated, login is not |
+
+Five decisions are worth not re-litigating:
+
+- **No `failed` status is synthesised.** The only available signal is
+  `SessionRow::has_error`, true of any transcript with one errored tool
+  call — routine in a long session. Painting those red would make the
+  one colour that should mean "look at this" mean "a command exited
+  non-zero". It ships as its own boolean instead.
+- **No `stuck`, no `idle_ms`, no tool-call count.** The first two are
+  `session_live::LiveRuntime` overlays and `remote serve` has no
+  runtime; the third needs a schema migration. All three are absent
+  rather than estimated — a card showing a number nobody computed is
+  worse than a card without one.
+- **Token components travel, not one sum.** `TokenUsage::total()`
+  includes cache reads, which dominate by two orders of magnitude: a
+  real session here reported 1.8 *billion*. The client renders
+  input + output.
+- **The transcript endpoint says the text is masked, never scrubbed.**
+  `session_live::redact` is explicitly incomplete and knowingly passes
+  GitHub PATs and AWS keys. A user who believes a screen is scrubbed
+  will screenshot it.
+- **Prose renders as markdown; tool output never does.** Claude writes
+  markdown, and both transcript viewers used to show it verbatim — a GFM
+  table arrived as one run-on line of pipes. Two exclusions are
+  deliberate and hold on **both** surfaces (`panel/src/app/Markdown.jsx`
+  and `sections/sessions/components/TranscriptMarkdown.tsx`):
+
+  | Case | Renders as | Why |
+  |---|---|---|
+  | a prose turn | markdown | it is markdown |
+  | a tool call or its output | verbatim, mono | a shell comment is not a heading and a glob is not emphasis; the one thing output must be is what the command printed |
+  | any turn while a **search** is running (desktop only) | highlighted plain text | `highlight` marks matches by splitting the raw string; a match you can find beats a bold you can read |
+
+  Neither renderer enables `rehype-raw`, so embedded HTML is escaped
+  text — the input is model output quoting arbitrary files. Images
+  render as their alt text rather than being fetched. Links differ by
+  surface on purpose: the panel opens a new tab, the desktop goes
+  through `ExternalLink` and the OS opener, because a bare `<a href>`
+  inside a Tauri webview navigates **the application itself** away with
+  no back button.
+
+  **A ` ```mermaid ` fence is drawn, on both surfaces.** A diagram in an
+  answer *is* the answer; showing its source is showing the wrong
+  artifact. Both go through `securityLevel: "strict"` and both
+  lazy-import mermaid, which matters far more on the panel: mermaid and
+  its diagram packs are larger than the rest of that bundle put
+  together, so they are **60 separate chunks** served from
+  `/panel/chunks/` and the base bundle stays ~413 KB. A thread with no
+  diagram pays nothing; a flowchart pulls its own pack, not cytoscape
+  and katex.
+
+  The route table for those chunks is **generated** into
+  `assets/panel_chunks.rs` by `scripts/build-panel.sh`, because sixty
+  hand-written match arms would be wrong within one mermaid upgrade —
+  and because a runtime directory walk would hand `remote::assets` the
+  traversal surface it exists not to have. Two tests walk the directory
+  and fail in **both** directions. The cost, stated rather than buried:
+  ~3.4 MB of committed bytes embedded in every binary whether or not the
+  remote surface is ever switched on.
+
+- **A card title is markdown-stripped, not markdown-rendered.** The
+  opposite of the body, and for the obvious reason: one line has no room
+  for a heading, a fence or a list. Every `/execute-plan` session on this
+  machine was titled `## User Input ```text …`.
+
+  The rule is `claudepot-core::session::title::derive` (which the panel
+  DTO uses) and `deriveSessionTitle` in
+  `src/sections/sessions/format.ts` (which the desktop uses, because it
+  renders `SessionRow` straight over IPC). Two implementations, pinned by
+  `crates/claudepot-core/testdata/session-title-vectors.json` — **both
+  run those vectors**, the same arrangement `PriceBook::resolve` and
+  `src/costs.ts` have. Change one, change the other, add a vector.
+
+  **Underscores are never touched**, including `__bold__`. The vectors
+  caught `__init__ never runs` becoming `init never runs` — the exact
+  corruption the module claims to prevent, in the module that claims it.
+  Single `*` is left alone for the same reason (`*.log`, `2 * 3`).
+- **Accounts and projects are read-only, and each for its own reason.**
+  A project move rewrites path-keyed CC state outside the project
+  directory behind a rollback journal; an account swap either fails
+  while CC is running or bypasses the keychain-drift guard. Neither
+  belongs one stolen bearer token away.
+
+**Answering without opening** (`remote::panel::ask`) reads exactly one
+shape: an unanswered `AskUserQuestion` tool call, whose input carries the
+question and its offered choices. Permission prompts are deliberately not
+read — a peer message cannot grant an escalation, CC calls trying to do
+so *permission laundering*, and a session asked to approve its own
+pending prompt is expected to refuse. Tapping a chip sends the label as a
+**prompt**; whether an arriving message can resolve a tool call the
+session is blocked on has **not been measured**, so the UI says "handed
+off" and leaves the question on the card. See the
+`pending AskUserQuestion shape` row in `crates/xtask/cc-upstream-watch.md`.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 

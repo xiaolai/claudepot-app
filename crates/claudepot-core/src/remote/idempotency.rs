@@ -10,6 +10,33 @@
 //! within the window returns that stored response without re-running
 //! anything.
 //!
+//! ## Reserving, not just remembering
+//!
+//! Remembering the *response* is not enough on its own. The window
+//! between "this key has not been seen" and "here is what it produced"
+//! is exactly as long as the mutation takes — a socket round trip to
+//! Claude Code — and two requests carrying the same key can both land
+//! inside it. Both would see `Execute` and both would send the prompt,
+//! which is the one outcome this module exists to prevent.
+//!
+//! So [`Lookup::Execute`] **reserves** the key. A concurrent duplicate
+//! gets [`Lookup::InFlight`] and is told to retry rather than being
+//! silently executed or silently dropped; a caller that finishes calls
+//! [`Idempotency::remember`], which turns the reservation into a stored
+//! response.
+//!
+//! A reservation whose caller never finishes — the client disconnected
+//! and axum dropped the future — is reclaimed by [`RESERVATION_TTL`],
+//! which is deliberately **shorter** than the response TTL and not the
+//! same number. A stuck key nobody can retry is a worse failure than the
+//! double-send, so the reservation has to expire; but expiring it while
+//! the first caller is still working would reopen the race. The window
+//! is therefore sized to exceed any handler on this surface, and the
+//! trade is stated rather than hidden: a mutation that somehow ran
+//! longer than [`RESERVATION_TTL`] could be executed twice by a
+//! determined retry. Nothing here can — a peer send is bounded by its
+//! socket timeout and a read mark is one file write.
+//!
 //! ## In memory, and that is not a shortcut
 //!
 //! A retry happens within seconds of the original. Persisting these
@@ -43,6 +70,17 @@ pub const MAX_ENTRIES: usize = 512;
 /// out of the map.
 pub const MAX_KEY_LEN: usize = 200;
 
+/// How long an unfinished reservation is believed.
+///
+/// Its own constant, not [`TTL`]. They answer different questions: `TTL`
+/// is "how long may a client retry and get the same answer", which wants
+/// to be generous; this is "how long do we assume the first caller is
+/// still working", which wants to be just longer than the slowest
+/// handler. Reusing one number for both would make an abandoned key
+/// unusable for five minutes *and* would tie the race window to a value
+/// chosen for a different reason.
+pub const RESERVATION_TTL: Duration = Duration::from_secs(60);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stored {
     pub status: u16,
@@ -50,7 +88,8 @@ pub struct Stored {
 }
 
 struct Entry {
-    stored: Stored,
+    /// `None` while the first caller is still running.
+    stored: Option<Stored>,
     at: Instant,
 }
 
@@ -62,10 +101,16 @@ pub struct Idempotency {
 /// What the caller should do with a request carrying a key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Lookup {
-    /// No prior response. Execute, then call [`Idempotency::remember`].
+    /// No prior request. The key is now **reserved** — execute, then
+    /// call [`Idempotency::remember`].
     Execute,
     /// A prior response exists. Return it and execute nothing.
     Replay(Stored),
+    /// A request with this key is running right now. Execute nothing and
+    /// tell the client to retry: the first one may still succeed, so
+    /// neither replaying an answer we do not have nor running the
+    /// mutation a second time is correct.
+    InFlight,
     /// The key itself is unusable.
     Rejected(&'static str),
 }
@@ -84,8 +129,27 @@ impl Idempotency {
         }
         self.expire(now);
         match self.entries.get(key) {
-            Some(e) => Lookup::Replay(e.stored.clone()),
-            None => Lookup::Execute,
+            Some(e) => match &e.stored {
+                Some(stored) => Lookup::Replay(stored.clone()),
+                None => Lookup::InFlight,
+            },
+            None => {
+                // Reserve before returning, while the caller still holds
+                // whatever lock brought it here. Returning `Execute`
+                // without reserving is the race this module exists to
+                // close.
+                if self.entries.len() >= MAX_ENTRIES {
+                    self.evict_oldest();
+                }
+                self.entries.insert(
+                    key.to_string(),
+                    Entry {
+                        stored: None,
+                        at: now,
+                    },
+                );
+                Lookup::Execute
+            }
         }
     }
 
@@ -97,8 +161,13 @@ impl Idempotency {
         if self.entries.len() >= MAX_ENTRIES && !self.entries.contains_key(key) {
             self.evict_oldest();
         }
-        self.entries
-            .insert(key.to_string(), Entry { stored, at: now });
+        self.entries.insert(
+            key.to_string(),
+            Entry {
+                stored: Some(stored),
+                at: now,
+            },
+        );
     }
 
     pub fn len(&self) -> usize {
@@ -110,7 +179,14 @@ impl Idempotency {
     }
 
     fn expire(&mut self, now: Instant) {
-        self.entries.retain(|_, e| now.duration_since(e.at) < TTL);
+        self.entries.retain(|_, e| {
+            let limit = if e.stored.is_some() {
+                TTL
+            } else {
+                RESERVATION_TTL
+            };
+            now.duration_since(e.at) < limit
+        });
     }
 
     fn evict_oldest(&mut self) {
@@ -128,6 +204,84 @@ impl Idempotency {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_concurrent_duplicate_is_told_to_wait_not_run_again() {
+        // The race this closes: `lookup` used to return `Execute`
+        // without recording anything, so two requests carrying one key
+        // could both be told to execute during the seconds a prompt
+        // takes to reach Claude Code — and the session got it twice.
+        let mut i = Idempotency::new();
+        let now = Instant::now();
+        assert_eq!(i.lookup("k", now), Lookup::Execute);
+        assert_eq!(
+            i.lookup("k", now),
+            Lookup::InFlight,
+            "the second caller must not be told to execute"
+        );
+    }
+
+    #[test]
+    fn a_reservation_becomes_a_replay_once_the_response_lands() {
+        let mut i = Idempotency::new();
+        let now = Instant::now();
+        assert_eq!(i.lookup("k", now), Lookup::Execute);
+        let stored = Stored {
+            status: 202,
+            body: "{}".into(),
+        };
+        i.remember("k", stored.clone(), now);
+        assert_eq!(i.lookup("k", now), Lookup::Replay(stored));
+    }
+
+    #[test]
+    fn a_reservation_whose_caller_died_is_reclaimed_on_its_own_clock() {
+        // A key stuck reserved forever is a worse failure than the
+        // double-send: the client can never retry and never find out
+        // why. It is reclaimed on RESERVATION_TTL, which is shorter than
+        // the response TTL — an abandoned key must not sit unusable for
+        // as long as a *successful* one stays replayable.
+        let mut i = Idempotency::new();
+        let now = Instant::now();
+        assert_eq!(i.lookup("k", now), Lookup::Execute);
+        assert_eq!(
+            i.lookup("k", now + RESERVATION_TTL - Duration::from_secs(1)),
+            Lookup::InFlight,
+            "the first caller is still believed to be working"
+        );
+        assert_eq!(
+            i.lookup("k", now + RESERVATION_TTL + Duration::from_secs(1)),
+            Lookup::Execute
+        );
+    }
+
+    #[test]
+    fn a_stored_response_outlives_a_reservation() {
+        // The two clocks are separate on purpose; this is the assertion
+        // that says so.
+        assert!(RESERVATION_TTL < TTL);
+        let mut i = Idempotency::new();
+        let now = Instant::now();
+        i.lookup("k", now);
+        i.remember("k", stored(202), now);
+        let later = now + RESERVATION_TTL + Duration::from_secs(1);
+        assert!(
+            matches!(i.lookup("k", later), Lookup::Replay(_)),
+            "a finished response must not expire on the reservation clock"
+        );
+    }
+
+    #[test]
+    fn an_unusable_key_reserves_nothing() {
+        let mut i = Idempotency::new();
+        let now = Instant::now();
+        assert!(matches!(i.lookup("", now), Lookup::Rejected(_)));
+        assert!(matches!(
+            i.lookup(&"x".repeat(MAX_KEY_LEN + 1), now),
+            Lookup::Rejected(_)
+        ));
+        assert!(i.is_empty(), "a refused key must not occupy an entry");
+    }
 
     fn stored(n: u16) -> Stored {
         Stored {
@@ -165,12 +319,14 @@ mod tests {
         let mut i = Idempotency::new();
         let now = Instant::now();
         i.remember("k1", stored(200), now);
+        i.remember("k2", stored(200), now);
         let later = now + TTL + Duration::from_secs(1);
         assert_eq!(i.lookup("k1", later), Lookup::Execute);
-        assert!(
-            i.is_empty(),
-            "expired entries are dropped, not just ignored"
-        );
+        // One entry, not three: the expired responses were dropped
+        // rather than merely ignored, and what remains is the fresh
+        // reservation `lookup` just took. Asserting `is_empty` here
+        // would now be asserting that `lookup` does not reserve.
+        assert_eq!(i.len(), 1, "expired entries are dropped, not just ignored");
     }
 
     #[test]

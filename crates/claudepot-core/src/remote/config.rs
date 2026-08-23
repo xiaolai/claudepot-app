@@ -97,6 +97,28 @@ pub struct RemoteConfigFile {
     /// has to make the process crash to get unlimited guesses.
     #[serde(default)]
     pub failed_attempts: u32,
+    /// Registered passkeys. **Public keys only** — that is the whole
+    /// reason a passkey beats both of the credentials above: reading
+    /// this file gives an attacker a cracking job for the password hash,
+    /// working access for a TOTP secret, and nothing at all for these.
+    ///
+    /// They live here rather than on a `Device` in `remote-devices.json`
+    /// because a passkey is an *account* credential, like the password.
+    /// Attaching one to a session record would delete it when that
+    /// session expired, and revoking a lost phone would silently destroy
+    /// the way back in from every other one.
+    #[serde(default)]
+    pub passkeys: Vec<super::passkey::PasskeyRecord>,
+    /// Stable WebAuthn user handle for this appliance.
+    ///
+    /// WebAuthn requires a user id, and this appliance has exactly one
+    /// user — so the value carries no information beyond "this machine".
+    /// It has to be *stable*, though: a fresh handle per registration
+    /// makes the platform file each passkey under a separate account, so
+    /// a phone that re-registers ends up showing two Claudepot entries
+    /// rather than replacing the first. Minted on first use.
+    #[serde(default)]
+    pub passkey_user_handle: Option<uuid::Uuid>,
 }
 
 /// Hand-written because `#[derive(Default)]` would produce
@@ -113,11 +135,29 @@ impl Default for RemoteConfigFile {
             totp_secret_base32: None,
             totp_last_counter: None,
             failed_attempts: 0,
+            passkeys: Vec::new(),
+            passkey_user_handle: None,
         }
     }
 }
 
 impl RemoteConfigFile {
+    /// The WebAuthn user handle, minting one the first time it is asked
+    /// for. Returns whether it had to mint, so the caller knows a save
+    /// is required — a handle that lives only in memory would be a new
+    /// handle after every restart, which is the failure this field
+    /// exists to prevent.
+    pub fn passkey_user_handle_or_mint(&mut self) -> (uuid::Uuid, bool) {
+        match self.passkey_user_handle {
+            Some(id) => (id, false),
+            None => {
+                let id = uuid::Uuid::new_v4();
+                self.passkey_user_handle = Some(id);
+                (id, true)
+            }
+        }
+    }
+
     pub fn auth(&self) -> AuthConfig {
         AuthConfig {
             password_hash: self.password_hash.clone(),

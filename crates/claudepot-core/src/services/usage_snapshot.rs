@@ -218,6 +218,26 @@ pub fn write(path: &Path, snapshot: &UsageSnapshot) -> std::io::Result<()> {
     atomic_write(path, &json)
 }
 
+/// Read the snapshot, if there is a usable one.
+///
+/// `None` covers all three of "the GUI has never run", "the file was
+/// removed", and "the file no longer parses" — a consumer of this
+/// schema cannot act differently on any of them, and the alternative is
+/// every caller writing its own `read_to_string` + `from_str` and
+/// arriving at three different opinions about a missing file. Absence is
+/// the answer, never a synthesized zero: a figure nobody fetched must
+/// not render as "0% used".
+pub fn read(path: &Path) -> Option<UsageSnapshot> {
+    let bytes = std::fs::read(path).ok()?;
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::warn!(error = %e, "usage snapshot did not parse; treating as absent");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

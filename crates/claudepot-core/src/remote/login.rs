@@ -151,7 +151,7 @@ pub fn attempt(
 /// hash that `authenticate` will accept — so they share one
 /// representation rather than growing a parallel one that would need
 /// its own revocation path.
-fn issue_session(label: &str, now: DateTime<Utc>) -> (String, Device) {
+pub(super) fn issue_session(label: &str, now: DateTime<Utc>) -> (String, Device) {
     let NewToken { plaintext, hash } = token::new_device_token();
     let device = Device {
         id: uuid::Uuid::new_v4(),

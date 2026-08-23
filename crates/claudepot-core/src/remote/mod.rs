@@ -45,11 +45,14 @@
 //! pair again as a "new" device if it were ever replayed, and would
 //! erase the audit trail of what had been let in.
 
+pub mod api;
 pub mod assets;
 pub mod bind;
 pub mod config;
 pub mod idempotency;
 pub mod login;
+pub mod panel;
+pub mod passkey;
 pub mod password;
 pub mod serve;
 pub mod server;
