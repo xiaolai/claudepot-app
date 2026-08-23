@@ -251,6 +251,22 @@ async fn me(State(state): State<Shared>, req: Request) -> Response {
             // A count, never the records. They are public keys, but a
             // list of credential ids is still a list of what to phish.
             "passkeys": passkeys,
+            // Which Claudepot is actually serving this panel.
+            //
+            // The panel is `no-store`, so the bytes a phone holds are
+            // always the ones the server sent — but the server embeds
+            // the bundle with `include_bytes!`, so a `remote serve`
+            // that outlives a rebuild serves the OLD panel forever and
+            // nothing on the phone can tell. That cost an afternoon
+            // once: a mermaid fix was committed, rebuilt and shipped,
+            // and the running server predated the binary, so the bug
+            // read as unfixed. This is the field that answers it.
+            //
+            // On `me` rather than `health`: `health` is
+            // unauthenticated and deliberately says nothing about the
+            // machine — a version there is a fingerprint for anyone
+            // who can reach the port.
+            "server_version": env!("CARGO_PKG_VERSION"),
         })),
     )
         .into_response()

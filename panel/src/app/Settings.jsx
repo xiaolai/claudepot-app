@@ -206,6 +206,17 @@ export function Settings({ theme, onTheme, host, onSignOut, onRefresh }) {
               {host || '—'}
             </span>
           </Item>
+          {/* Which Claudepot is serving this panel. The bundle is
+              embedded in the server binary, so a `remote serve` that
+              outlives a rebuild serves the old panel indefinitely and
+              nothing else on this screen would say so — a fixed bug
+              reads as unfixed, from the phone, with no way to tell. */}
+          <Item>
+            <span style={{ flex: 1, fontSize: 'var(--t-sub)' }}>Server</span>
+            <span className="mono" style={{ fontSize: 'var(--t-meta)', color: 'var(--fg3)' }}>
+              {me?.server_version ? `v${me.server_version}` : '—'}
+            </span>
+          </Item>
         </List>
       </Group>
 
