@@ -1,0 +1,162 @@
+[
+  {
+    "name": "plain prose is untouched",
+    "raw": "Rework the mobile panel for phone-native feel",
+    "want": "Rework the mobile panel for phone-native feel"
+  },
+  {
+    "name": "a paragraph collapses to one line",
+    "raw": "First line.\n\nSecond line.\n   Third.",
+    "want": "First line. Second line. Third."
+  },
+  {
+    "name": "leading heading",
+    "raw": "## User Input\n\nthe rest",
+    "want": "User Input the rest"
+  },
+  {
+    "name": "stacked leading scaffolding unwinds",
+    "raw": "> ## quoted heading\nbody",
+    "want": "quoted heading body"
+  },
+  {
+    "name": "leading fence with a language",
+    "raw": "```ts\nconst x = 1;\n```",
+    "want": "const x = 1;"
+  },
+  {
+    "name": "leading bullet",
+    "raw": "- do the thing",
+    "want": "do the thing"
+  },
+  {
+    "name": "leading ordered item",
+    "raw": "1. do the thing",
+    "want": "do the thing"
+  },
+  {
+    "name": "an inner fence loses its delimiters but keeps its content",
+    "raw": "run this:\n\n```bash\ncargo test\n```\n\nthen report",
+    "want": "run this: cargo test then report"
+  },
+  {
+    "name": "inline code keeps the content",
+    "raw": "why does `cargo xtask verify-docs` fail",
+    "want": "why does cargo xtask verify-docs fail"
+  },
+  {
+    "name": "bold with asterisks",
+    "raw": "the **Plan files** argument",
+    "want": "the Plan files argument"
+  },
+  {
+    "name": "underscore bold is NOT stripped, because __init__ is not emphasis",
+    "raw": "the __Plan files__ argument",
+    "want": "the __Plan files__ argument"
+  },
+  {
+    "name": "strikethrough",
+    "raw": "~~old plan~~ new plan",
+    "want": "old plan new plan"
+  },
+  {
+    "name": "a link keeps its text",
+    "raw": "see [the docs](https://example.com/x) for more",
+    "want": "see the docs for more"
+  },
+  {
+    "name": "an image keeps its alt text and drops the bang",
+    "raw": "look at ![a diagram](https://example.com/d.png)",
+    "want": "look at a diagram"
+  },
+  {
+    "name": "an autolink keeps the url",
+    "raw": "fetch <https://example.com/x> please",
+    "want": "fetch https://example.com/x please"
+  },
+  {
+    "name": "cc image placeholder is removed",
+    "raw": "[Image #3] what is wrong here",
+    "want": "what is wrong here"
+  },
+  {
+    "name": "cc pasted-text placeholder with a line count is removed",
+    "raw": "[Pasted text #1 +42 lines] review this",
+    "want": "review this"
+  },
+  {
+    "name": "cc truncated-text placeholder is removed",
+    "raw": "[...Truncated text #2] and the rest",
+    "want": "and the rest"
+  },
+  {
+    "name": "the real prompt this session started from",
+    "raw": "## User Input\n\n```text\ndev-docs/remote-panel-plan.md 3\n```\n\nArguments are space-separated:\n\n- **Plan files** — one or more paths.",
+    "want": "User Input dev-docs/remote-panel-plan.md 3 Arguments are space-separated: Plan files — one or more paths."
+  },
+  {
+    "name": "a snake_case identifier is not emphasis",
+    "raw": "some_var_name is wrong",
+    "want": "some_var_name is wrong"
+  },
+  {
+    "name": "a dunder is not emphasis",
+    "raw": "__init__ never runs",
+    "want": "__init__ never runs"
+  },
+  {
+    "name": "a glob is not emphasis",
+    "raw": "delete *.log files",
+    "want": "delete *.log files"
+  },
+  {
+    "name": "multiplication is not emphasis",
+    "raw": "why is 2 * 3 * 4 slow",
+    "want": "why is 2 * 3 * 4 slow"
+  },
+  {
+    "name": "a windows path with underscores survives",
+    "raw": "check C:\\Users\\a_b\\c",
+    "want": "check C:\\Users\\a_b\\c"
+  },
+  {
+    "name": "empty input has no title",
+    "raw": "",
+    "want": null
+  },
+  {
+    "name": "whitespace only has no title",
+    "raw": "   \n\n  ",
+    "want": null
+  },
+  {
+    "name": "a bare fence has no title",
+    "raw": "```",
+    "want": null
+  },
+  {
+    "name": "a placeholder alone has no title",
+    "raw": "[Image #1]",
+    "want": null
+  },
+  {
+    "name": "CJK prose is untouched",
+    "raw": "把这段代码改好，**重点**是可读性",
+    "want": "把这段代码改好，重点是可读性"
+  },
+  {
+    "name": "a nested list under a heading flattens",
+    "raw": "# Title\n\n- one\n- two",
+    "want": "Title one two"
+  },
+  {
+    "name": "a hyphen mid-sentence is not a bullet",
+    "raw": "well - it depends on the a-b split",
+    "want": "well - it depends on the a-b split"
+  },
+  {
+    "name": "a bullet on a later line is still a bullet",
+    "raw": "Arguments:\n\n- Plan files\n- Rounds",
+    "want": "Arguments: Plan files Rounds"
+  }
+]

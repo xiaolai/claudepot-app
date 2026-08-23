@@ -65,37 +65,74 @@ const CC_REF_PLACEHOLDER_RE =
 /**
  * Turn a raw `first_user_prompt` into a clean single-line title.
  *
- * CC embeds placeholders like `[Image #3]` and `[Pasted text #1 +42 lines]`
- * directly into the prompt text — they are stripped here because they
- * leak internal encoding into the UI (design.md: "No internal
- * identifiers in primary UI"). Leading Markdown scaffolding (headers,
- * opening code fences, blockquote markers) is also stripped so a prompt
- * that started with ` ```ts ` or `## spec` renders as the readable text
- * that followed it rather than raw markup.
+ * What people type into Claude Code is markdown, and a title has no room
+ * for it: a real session here opens with `## User Input`, a fenced path,
+ * and a `- **Plan files**` bullet, all of which were on screen.
  *
- * Returns `null` if the cleaned string is empty — callers fall back to
- * a session-id or subsession hint.
+ * The marks come **out** rather than being rendered — the opposite of
+ * what the transcript body does, and deliberately so.
+ *
+ * ## Two implementations, locked together
+ *
+ * The same rule lives in `claudepot-core::session::title::derive`, which
+ * is what the remote panel's DTO uses. This copy exists because the
+ * desktop renders `SessionRow` straight over IPC, and adding a derived
+ * column to the cache would be a schema change for a presentation
+ * concern.
+ *
+ * Both run `crates/claudepot-core/testdata/session-title-vectors.json`.
+ * **Change one, change the other, add a vector** — the same arrangement
+ * `PriceBook::resolve` and `src/costs.ts` have.
+ *
+ * ## What is deliberately left alone
+ *
+ * Every underscore, including `__bold__`, and single `*`. A stripper
+ * that treats them as emphasis destroys `__init__`, `some_var_name`,
+ * `*.log` and `2 * 3` — all plausible openings for a prompt. The
+ * vectors caught exactly that. One stray asterisk reads far better than
+ * a mangled path.
+ *
+ * Returns `null` if nothing readable is left — callers fall back to a
+ * session-id or subsession hint, and a blank row is worse than either.
  */
 export function deriveSessionTitle(raw: string | null): string | null {
   if (raw == null) return null;
-  let s = raw.replace(CC_REF_PLACEHOLDER_RE, "");
-  // Strip leading Markdown scaffolding, one layer at a time, tolerating
-  // stacks (e.g. "> ## heading"). Each branch peels one marker plus its
-  // trailing whitespace and loops until nothing matches.
-  //
-  // Order matters: the opening code fence must be removed before the
-  // header-hash pass, so a line like "```md\n# Title" becomes "# Title"
-  // first and then "Title".
-  let prev = "";
-  while (prev !== s) {
-    prev = s;
-    s = s.replace(/^\s+/, "");
-    s = s.replace(/^```[a-zA-Z0-9_+-]*\s*\n?/, "");
-    s = s.replace(/^#{1,6}\s+/, "");
-    s = s.replace(/^>\s*/, "");
-  }
-  // Collapse internal runs of whitespace so a multi-line prompt
-  // renders as one clean line in the row's truncated headline.
+  const cleaned = raw.replace(CC_REF_PLACEHOLDER_RE, "");
+
+  // Scaffolding is peeled per line, before the lines are joined. Doing
+  // it only at the head leaves a list that starts on line five with its
+  // markers; doing it after the join cannot tell a bullet from a hyphen
+  // in "well - it depends", because only position at the start of a line
+  // distinguishes them.
+  const lines = cleaned.split("\n").map((line) => {
+    let l = line;
+    let prev = "";
+    while (prev !== l) {
+      prev = l;
+      l = l.replace(/^\s+/, "");
+      // A fence before a heading, so "```md" then "# Title" unwinds in
+      // that order.
+      l = l.replace(/^```[A-Za-z0-9_+-]*[ \t]*$/, "");
+      l = l.replace(/^```[A-Za-z0-9_+-]*[ \t]*/, "");
+      l = l.replace(/^#{1,6}\s+/, "");
+      l = l.replace(/^>\s*/, "");
+      l = l.replace(/^(?:[-*+]|\d+\.)[ \t]+/, "");
+    }
+    return l;
+  });
+  let s = lines.join("\n");
+
+  // Inline marks. Images before links, or `![alt](url)` reads as a link
+  // behind a stray `!`.
+  s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+  s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  s = s.replace(/<((?:https?|mailto):[^>\s]+)>/g, "$1");
+  s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
+  s = s.replace(/~~([^~]+)~~/g, "$1");
+  s = s.replace(/```[A-Za-z0-9_+-]*/g, " ");
+  s = s.replace(/`([^`]*)`/g, "$1");
+
+  // One line. A prompt is often a paragraph; a row is not.
   s = s.replace(/\s+/g, " ").trim();
   return s.length > 0 ? s : null;
 }

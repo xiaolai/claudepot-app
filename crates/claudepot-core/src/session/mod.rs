@@ -48,6 +48,7 @@ pub mod search;
 pub mod share;
 pub mod slim;
 pub mod subagents;
+pub mod title;
 pub mod tool_link;
 pub mod worktree;
 
