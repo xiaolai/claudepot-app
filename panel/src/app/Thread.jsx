@@ -25,6 +25,7 @@ const { Btn, Chip, Dot, Ico, Tap } = window;
 const INTENTS = ['Continue', 'Explain that', 'Run the tests', 'Show me the diff'];
 
 export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) {
+  const [picking, setPicking] = useState(false);
   const id = session.session_id;
   const { events, total, loading, error, hasEarlier, loadEarlier } = useTranscript(id);
   const { scroller, onScroll } = useFollowTail(id, total, events);
@@ -146,7 +147,26 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) 
         disabled={!canSend}
         reason={blocked}
         warning={warning}
+        onPick={() => setPicking(true)}
       />
+
+      {/* Outside the composer, deliberately. The composer sets
+          `backdrop-filter`, and a filter — backdrop or otherwise —
+          makes its element the containing block for `position: fixed`
+          descendants. So a sheet rendered in there resolved `inset: 0`
+          against a 109px-tall bar instead of the viewport and appeared
+          as a strip above the tab bar. Measured, not reasoned: top 526,
+          height 109, viewport 701.
+
+          `Thread` returns a fragment, so this lands directly under
+          `Shell`, which sets no filter. */}
+      {picking && (
+        <CommandPicker
+          sessionId={session.session_id}
+          onStage={setStaged}
+          onClose={() => setPicking(false)}
+        />
+      )}
     </>
   );
 }
@@ -333,9 +353,8 @@ function Composer({
   staged,
   onStage,
   hasContent,
-  sessionId,
+  onPick,
 }) {
-  const [picking, setPicking] = useState(false);
 
   return (
     <div
@@ -419,11 +438,18 @@ function Composer({
       >
         <button
           type="button"
-          onClick={() => setPicking(true)}
+          onClick={onPick}
           disabled={disabled}
           aria-label="Insert a command"
           title="Insert a command"
           style={{
+            // `grid`/`place-items`, not the button default: the design
+            // system's reset makes every button `display: block` with
+            // `text-align: left`, so the glyph sat flush against the
+            // left edge of its own circle. Measured — box left 22,
+            // glyph left 22.
+            display: 'grid',
+            placeItems: 'center',
             height: 'var(--ctl-lg)',
             width: 'var(--ctl-lg)',
             flexShrink: 0,
@@ -442,9 +468,10 @@ function Composer({
           rows={1}
           disabled={disabled}
           aria-label="Message this session"
-          placeholder={
-            disabled ? reason || 'Unavailable' : staged ? 'Add a note (optional)…' : 'Message this session…'
-          }
+          // Short enough not to wrap. The `/` button costs 54px, which
+          // left the field 184px at 390 — and "Message this session…"
+          // wrapped to a second line the one-row height then clipped.
+          placeholder={disabled ? reason || 'Unavailable' : staged ? 'Add a note…' : 'Message…'}
           style={{
             flex: 1,
             minHeight: 'var(--ctl-lg)',
@@ -464,13 +491,7 @@ function Composer({
           {sending ? '…' : 'Send'}
         </Btn>
       </form>
-      {picking && (
-        <CommandPicker
-          sessionId={sessionId}
-          onStage={onStage}
-          onClose={() => setPicking(false)}
-        />
-      )}
+
       {disabled && reason && (
         <p style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginTop: 'var(--s2)' }}>
           {reason}
