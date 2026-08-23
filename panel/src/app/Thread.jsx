@@ -283,7 +283,10 @@ function Composer({
     <div
       style={{
         flexShrink: 0,
-        padding: 'var(--s3) var(--gut) var(--safe-b)',
+        // No `--safe-b` here: the tab bar sits below the composer and
+        // owns the home-indicator inset. Both claiming it left a strip
+        // of dead space above the bar.
+        padding: 'var(--s3) var(--gut)',
         background: 'var(--glass)',
         backdropFilter: 'blur(var(--blur-bar))',
         WebkitBackdropFilter: 'blur(var(--blur-bar))',

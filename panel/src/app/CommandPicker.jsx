@@ -100,7 +100,9 @@ export function CommandPicker({ sessionId, onStage, onClose }) {
         // ancestor ever saying otherwise.
         position: 'fixed',
         inset: 0,
-        zIndex: 20,
+        // `--z-sheet`, not a literal: `--z-bar` is also 20, and on a
+        // tie the tab bar wins on DOM order and paints over this.
+        zIndex: 'var(--z-sheet)',
         display: 'flex',
         flexDirection: 'column',
         background: 'var(--bg)',

@@ -165,7 +165,20 @@ export function Panel() {
       ) : (
         screen
       )}
-      {!open && <TabBar view={view} onGo={setView} badge={attention} />}
+      {/* The tab bar persists into a thread. A conversation is a place
+          in the app, not a mode you have to back out of: losing the
+          bar meant the only way to reach Projects from a transcript
+          was Back first, and nothing on screen said so. Tapping a tab
+          therefore also leaves the thread — otherwise the tab would
+          light up under a transcript that is still covering it. */}
+      <TabBar
+        view={view}
+        onGo={(v) => {
+          setOpenId(null);
+          setView(v);
+        }}
+        badge={attention}
+      />
     </Shell>
   );
 }
