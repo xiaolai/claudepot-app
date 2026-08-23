@@ -266,7 +266,7 @@ pub(super) async fn activate_account(
     Json(body): Json<ActivateRequest>,
 ) -> Response {
     idempotent(&state, &headers, || async move {
-        use crate::cli_backend::{self, swap};
+        use crate::services::account_service::{self, ActivateError, Activation};
 
         let data_dir = crate::paths::claudepot_data_dir();
         let Ok(store) = crate::account::AccountStore::open(&data_dir.join("accounts.db")) else {
@@ -275,78 +275,45 @@ pub(super) async fn activate_account(
                 serde_json::json!({ "error": "internal" }),
             );
         };
-        let Ok(Some(target)) = store.find_by_email(&email) else {
-            return (
-                StatusCode::NOT_FOUND,
-                serde_json::json!({ "error": "no such account" }),
-            );
-        };
 
-        // Reconcile first, exactly as the CLI does: without it a swap
-        // done at the machine leaves the DB believing the old target is
-        // active, and this reports "already active" while the keychain
-        // says otherwise. Best effort — a network failure falls through
-        // to the DB's view rather than blocking the swap.
-        let _ = crate::services::account_service::sync_from_current_cc(&store).await;
-
-        let current = store
-            .active_cli_uuid()
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<uuid::Uuid>().ok());
-        if current == Some(target.uuid) {
-            return (
+        // One sequence, shared with `claudepot cli use`. This handler
+        // owns the HTTP mapping and nothing else — an earlier version
+        // walked the steps itself and had already lost `resolve_email`,
+        // so a prefix that worked at the keyboard was "not found" here.
+        match account_service::activate_cli(&store, &email, body.force, true).await {
+            Ok(Activation::AlreadyActive { email }) => (
                 StatusCode::OK,
-                serde_json::json!({ "already_active": true, "email": target.email }),
-            );
-        }
-
-        let platform = cli_backend::create_platform();
-        let refresher = swap::DefaultRefresher;
-        let fetcher = swap::DefaultProfileFetcher;
-        let result = if body.force {
-            swap::switch_force(
-                &store,
-                current,
-                target.uuid,
-                platform.as_ref(),
-                true,
-                &refresher,
-                &fetcher,
-            )
-            .await
-        } else {
-            swap::switch(
-                &store,
-                current,
-                target.uuid,
-                platform.as_ref(),
-                true,
-                &refresher,
-                &fetcher,
-            )
-            .await
-        };
-
-        match result {
-            Ok(()) => (
-                StatusCode::OK,
-                serde_json::json!({ "switched": true, "email": target.email }),
+                serde_json::json!({ "already_active": true, "email": email }),
             ),
-            // Its own status and its own code: this is the one failure
-            // the user can actually do something about, and the panel
-            // offers the override only for this.
-            Err(crate::error::SwapError::LiveSessionConflict) => (
+            Ok(Activation::Switched { from, to }) => (
+                StatusCode::OK,
+                serde_json::json!({ "switched": true, "from": from, "email": to }),
+            ),
+            Err(ActivateError::Resolve(e)) => (
+                StatusCode::NOT_FOUND,
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+            Err(ActivateError::NotFound(e)) => (
+                StatusCode::NOT_FOUND,
+                serde_json::json!({ "error": format!("account not found: {e}") }),
+            ),
+            // Its own status and code: the one failure the user can act
+            // on, and the only one the panel offers an override for.
+            Err(ActivateError::Swap(crate::error::SwapError::LiveSessionConflict)) => (
                 StatusCode::CONFLICT,
-                serde_json::json!({ "error": "live_session", "email": target.email }),
+                // `requested`, not `email`: this is what the caller
+                // asked for, which may be a prefix. The resolved
+                // address is not in hand on this arm, and labelling an
+                // input as an email would be a small lie in the one
+                // response the user acts on.
+                serde_json::json!({ "error": "live_session", "requested": email }),
             ),
             Err(e) => (
                 StatusCode::BAD_GATEWAY,
-                // Core's error text is canonical English and says
-                // something useful — an identity mismatch names both
-                // emails. Passed through rather than flattened to
-                // "failed", which would send the user to the machine
-                // with nothing to go on.
+                // Core's text is canonical English and says something
+                // useful — an identity mismatch names both emails.
+                // Flattening it to "failed" would send the user to the
+                // machine with nothing to go on.
                 serde_json::json!({ "error": e.to_string() }),
             ),
         }

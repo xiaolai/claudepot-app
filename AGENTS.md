@@ -791,7 +791,16 @@ Five decisions are worth not re-litigating:
 
   Addressed by **email**: that is this domain's identity for an account,
   and a uuid on the wire is an internal identifier the panel would then
-  have to render or hide. Registering, removing and verifying accounts
+  have to render or hide. Resolution is **prefix matching**, the same as
+  everywhere else, because the sequence is shared —
+  `account_service::activate_cli` is the one implementation of
+  resolve → reconcile → compare → swap, and both `claudepot cli use` and
+  the endpoint call it. It exists because there were briefly two, and
+  the second had already dropped `resolve_email`: a prefix that worked
+  at the keyboard answered "account not found" from the phone. What
+  stays with each caller is presentation — the CLI's split-brain warning
+  and the panel's inline conflict copy say the same thing in different
+  registers. Registering, removing and verifying accounts
   stay at the machine — they need credentials the panel never sees.
 
 **Answering without opening** (`remote::panel::ask`) reads exactly one
