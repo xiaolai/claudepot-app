@@ -174,6 +174,7 @@ claudepot corpus    index | status | detect         # cross-machine transcript
 claudepot memory    list | view | log               # CLAUDE.md + memory files
 claudepot activity  recent | reindex                # anomaly + milestone cards
 claudepot usage     report                          # local token/cost rollup
+claudepot usage     refresh                         # refetch each account's usage snapshot
 claudepot update    check | cli | desktop | config  # CC + Desktop updates
 claudepot settings  auto-memory {status|enable|disable|clear}
 claudepot mcp       memory-server | print-snippet | install-snippet

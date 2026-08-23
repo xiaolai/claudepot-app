@@ -124,6 +124,12 @@ pub struct UsageWindows {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScopedSnapshot {
     pub label: String,
+    /// The server's own `kind` — `weekly_scoped` today. Carried so a
+    /// consumer can say "7d Fable" without hardcoding the period: the
+    /// day Anthropic scopes something daily, a label that assumed a
+    /// week would be wrong rather than merely terse.
+    #[serde(default)]
+    pub kind: String,
     pub utilization: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<DateTime<FixedOffset>>,
@@ -158,6 +164,7 @@ impl UsageWindows {
                 .scoped_limits()
                 .map(|(label, l)| ScopedSnapshot {
                     label: label.to_string(),
+                    kind: l.kind.clone(),
                     utilization: l.percent,
                     resets_at: l.resets_at,
                 })
@@ -296,6 +303,7 @@ mod tests {
 
         assert_eq!(w.scoped.len(), 1, "plan-level limits must not be copied in");
         assert_eq!(w.scoped[0].label, "Fable");
+        assert_eq!(w.scoped[0].kind, "weekly_scoped");
         assert_eq!(w.scoped[0].utilization, 41.5);
         // And it survives the round trip the panel actually reads.
         let back: UsageWindows = serde_json::from_str(&serde_json::to_string(&w).unwrap()).unwrap();

@@ -777,6 +777,18 @@ Five decisions are worth not re-litigating:
   a worse surprise than a bar. `location.reload()` is enough — the panel
   is `no-store`, so a load always fetches current bytes and there is no
   cache to bust.
+- **Usage figures come from `usage-snapshot.json`, and something has to
+  write it.** The panel renders that file, never a live `/usage` call —
+  so on a machine reached only through `remote serve` there were no
+  usage figures at all until the desktop app had run, and a window
+  added to the schema stayed invisible until someone opened the GUI.
+  `claudepot usage refresh` writes it from the CLI. Two consequences
+  worth knowing: an **older** desktop build rewrites the file on its
+  five-minute tick and silently drops fields it was compiled without —
+  which is exactly how a shipped `scoped` window read as "Anthropic
+  doesn't send it" — and the snapshot is the reason a figure can be
+  stale without anything on screen saying so, hence the `usage as of`
+  line on every row.
 - **Tool calls fold by default, and folding is not hiding.** Measured
   across five real sessions on this machine, **59–91% of transcript
   rows were tool ticks** — so listing each one turns a 390px column

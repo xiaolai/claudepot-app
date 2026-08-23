@@ -25,10 +25,24 @@ const { Chip, Face, Group, Item, List, Meter, Surface, Tap } = window;
  */
 const WINDOWS = [
   { key: 'five_hour', sub: '5h' },
-  { key: 'seven_day', sub: '7d' },
-  { key: 'seven_day_opus', sub: 'opus' },
-  { key: 'seven_day_sonnet', sub: 'sonnet' },
+  { key: 'seven_day', sub: '7d all' },
+  { key: 'seven_day_opus', sub: '7d Opus' },
+  { key: 'seven_day_sonnet', sub: '7d Sonnet' },
 ];
+
+/**
+ * A scoped window's label, matching the desktop catalog's
+ * `usage.rows.scopedWeekly` — "7d Fable" rather than a bare "Fable".
+ *
+ * The period comes from the server's own `kind`, not from an
+ * assumption: every scoped limit is weekly today, and a label that
+ * hardcoded "7d" would be wrong rather than terse the day one is not.
+ * An unfamiliar kind falls back to the model name alone, which is
+ * incomplete but never false.
+ */
+function scopedLabel(sc) {
+  return sc.kind === 'weekly_scoped' ? `7d ${sc.label}` : sc.label;
+}
 
 /** Stable hue per account so the tinted face is recognisable. */
 function hueOf(email) {
@@ -53,7 +67,7 @@ function metersOf(a) {
   );
   const scoped = (a.usage?.scoped ?? [])
     .filter((sc) => sc && typeof sc.utilization === 'number')
-    .map((sc) => ({ key: `scoped:${sc.label}`, sub: sc.label, w: sc }));
+    .map((sc) => ({ key: `scoped:${sc.label}`, sub: scopedLabel(sc), w: sc }));
   return [...named, ...scoped];
 }
 
@@ -110,13 +124,36 @@ function AccountRow({ a, v, meters, busy, onActivate }) {
           marginTop: 'var(--s3)',
         }}
       >
+        {/* The caption sits UNDER the ring, not inside it. `Meter`
+            stacks its value and its `sub` as two grid children and
+            centres the PAIR, which leaves the percentage above the
+            middle of the circle — measured at 72px, the value centred
+            on y=19 in a box whose centre is 36. Passing no `sub` leaves
+            the value alone in that grid, so it centres on the ring, and
+            the caption lives out here where this file can place it. The
+            design system is vendored byte-identical, so the fix has to
+            be in what we hand it rather than in the primitive. */}
         {meters.map((m) => (
-          <Meter
+          <div
             key={m.key}
-            pct={Math.round(m.w.utilization)}
-            size="md"
-            sub={m.sub}
-          />
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 'var(--s1)',
+            }}
+          >
+            <Meter pct={Math.round(m.w.utilization)} size="md" />
+            <span
+              style={{
+                fontSize: 'var(--t-micro)',
+                color: 'var(--fg3)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {m.sub}
+            </span>
+          </div>
         ))}
       </div>
     )}
@@ -225,7 +262,11 @@ export function Accounts() {
               work out rather than something you see. Lifting it out of
               the list also removes the need to mark it: nothing else is
               up here. */}
-          <Surface>
+          {/* Tinted, not just lifted. Position alone said "first",
+              which is only "current" if you already knew the list was
+              ordered — the accent wash is the same one the CLI chip
+              used to carry, doing the same job with less furniture. */}
+          <Surface style={{ background: 'var(--ac-wash)' }}>
             {/* `Item` supplies the flex row in the list; a Surface does
                 not, so the card brings its own. Same gap and alignment,
                 so the two containers put the row on screen identically. */}

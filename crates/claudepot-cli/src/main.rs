@@ -418,6 +418,13 @@ enum UsageAction {
         #[arg(long, default_value = "all")]
         window: String,
     },
+    /// Fetch each account's usage and rewrite `usage-snapshot.json`.
+    ///
+    /// Until now only the desktop app wrote that file, so a headless
+    /// install — a Mac reached solely through `remote serve` — showed
+    /// no usage at all, and a newly added window (the model-scoped
+    /// ones) never appeared until someone opened the GUI.
+    Refresh,
 }
 
 #[derive(Subcommand)]
@@ -1547,6 +1554,7 @@ async fn main() -> Result<()> {
         Commands::Status => commands::status::run(&ctx).await?,
         Commands::Usage { action } => match action {
             UsageAction::Report { window } => commands::usage::report(&ctx, &window).await?,
+            UsageAction::Refresh => commands::usage::refresh(&ctx).await?,
         },
         Commands::Update { action } => match action {
             UpdateAction::Check => commands::update::check::run(&ctx).await?,
