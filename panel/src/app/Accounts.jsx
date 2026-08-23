@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { OfflineError, api, newIdempotencyKey } from './api.js';
-import { ago, verifyChip } from './format.js';
+import { ago, resetAt, verifyChip } from './format.js';
 import { Muted } from './views.jsx';
 
 const { Chip, Face, Group, Item, List, Meter, Surface, Tap } = window;
@@ -80,106 +80,128 @@ function metersOf(a) {
  */
 function AccountRow({ a, v, meters, busy, onActivate }) {
   return (
-    <>
-  <Face name={a.email} hue={hueOf(a.email)} size="md" ring={a.is_cli_active} />
-  <div style={{ flex: 1, minWidth: 0 }}>
-    <div
-      style={{
-        fontSize: 'var(--t-sub)',
-        fontWeight: 'var(--w-med)',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {a.email}
-    </div>
-    <div style={{ display: 'flex', gap: 'var(--s2)', flexWrap: 'wrap', marginTop: 'var(--s2)' }}>
-      {/* No plan chip and no Desktop chip. The plan
-          is the same on every row here, so it separates
-          nothing; the Desktop slot is not something
-          this surface can move, and naming it invited
-          the reading that the control beside it might.
-          What is left is only what differs and matters:
-          a verification state, when there is one. */}
+    // One full-width COLUMN, not a three-across row. With the avatar and
+    // the switch control flanking them the meters had ~204px, and three
+    // 72px rings need 240 — so the third wrapped onto its own line in
+    // the list while the active card, which has no control, fit all
+    // three. Same data, two shapes. Giving the meters the row's whole
+    // width makes both containers agree.
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s4)' }}>
+        <Face name={a.email} hue={hueOf(a.email)} size="md" ring={a.is_cli_active} />
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 'var(--t-sub)',
+            fontWeight: 'var(--w-med)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {a.email}
+        </div>
+        {/* Icon-only, which the row earns: it repeats down a list, it is
+            never the screen's primary action, and `check` reads as "make
+            this the one" across the web. The label names the SLOT —
+            `cli` and `desktop` are independent nouns and this moves only
+            the first — and it is not the sole disclosure, since the note
+            under the list says the same in prose. */}
+        {!a.is_cli_active && (
+          <Tap
+            n={busy === a.email ? 'clock' : 'check'}
+            onClick={busy ? undefined : () => onActivate(a.email, false)}
+            label={`Use ${a.email} for the CLI`}
+          />
+        )}
+      </div>
+
+      {/* Only what differs and matters: a verification state, when there
+          is one. No plan chip — it reads the same on every row here — and
+          no Desktop chip, because that slot is not something this surface
+          can move and naming it invited the reading that the control
+          above might. */}
       {v && (
-        <Chip tone={v.tone} size="xs">
-          {v.label}
-        </Chip>
+        <div style={{ display: 'flex', gap: 'var(--s2)', flexWrap: 'wrap', marginTop: 'var(--s3)' }}>
+          <Chip tone={v.tone} size="xs">
+            {v.label}
+          </Chip>
+        </div>
       )}
-    </div>
-    {/* Under the identity rather than beside it: three
-        72px rings do not fit in a row that also holds an
-        avatar, an email and a control at 390px, and
-        shrinking them re-creates the crowding that made
-        `sm` wrong in the first place. Wrapping, so a
-        fourth window appearing costs a line rather than
-        the layout. */}
-    {meters.length > 0 && (
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--s3)',
-          flexWrap: 'wrap',
-          marginTop: 'var(--s3)',
-        }}
-      >
-        {/* The caption sits UNDER the ring, not inside it. `Meter`
-            stacks its value and its `sub` as two grid children and
-            centres the PAIR, which leaves the percentage above the
-            middle of the circle — measured at 72px, the value centred
-            on y=19 in a box whose centre is 36. Passing no `sub` leaves
-            the value alone in that grid, so it centres on the ring, and
-            the caption lives out here where this file can place it. The
-            design system is vendored byte-identical, so the fix has to
-            be in what we hand it rather than in the primitive. */}
-        {meters.map((m) => (
-          <div
-            key={m.key}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 'var(--s1)',
-            }}
-          >
-            <Meter pct={Math.round(m.w.utilization)} size="md" />
-            <span
+
+      {meters.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--s3)',
+            flexWrap: 'wrap',
+            marginTop: 'var(--s3)',
+          }}
+        >
+          {/* The caption sits UNDER the ring. `Meter` stacks its value
+              and its `sub` as two grid children and centres the PAIR,
+              leaving the percentage above the middle of the circle —
+              measured at 72px, the value centred on y=19 in a box whose
+              centre is 36. Passing no `sub` leaves the value alone in
+              that grid, so it centres. */}
+          {meters.map((m) => (
+            <div
+              key={m.key}
               style={{
-                fontSize: 'var(--t-micro)',
-                color: 'var(--fg3)',
-                whiteSpace: 'nowrap',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 'var(--s1)',
               }}
             >
-              {m.sub}
-            </span>
-          </div>
-        ))}
-      </div>
-    )}
-    {a.usage_as_of && (
-      <div className="mono" style={{ fontSize: 'var(--t-nano)', color: 'var(--fg4)', marginTop: 'var(--s2)' }}>
-        usage as of {ago(a.usage_as_of)} ago
-      </div>
-    )}
-  </div>
-  {/* Icon-only, which the row earns: it repeats down a
-      list, it is never the screen's primary action, and
-      `check` reads as "make this the one" across the
-      web. The label still names the SLOT — `cli` and
-      `desktop` are independent nouns and this moves
-      only the first — and it is not the sole disclosure:
-      the note under the list says the same in prose,
-      because a tooltip is not a place to hide something
-      the reader needs. */}
-  {!a.is_cli_active && (
-    <Tap
-      n={busy === a.email ? 'clock' : 'check'}
-      onClick={busy ? undefined : () => onActivate(a.email, false)}
-      label={`Use ${a.email} for the CLI`}
-    />
-  )}
-    </>
+              <Meter pct={Math.round(m.w.utilization)} size="md" />
+              <span
+                style={{
+                  fontSize: 'var(--t-micro)',
+                  color: 'var(--fg3)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {m.sub}
+              </span>
+              {/* When it rolls over. The meter answers "how much is
+                  left"; this answers "until when", which is the half you
+                  can act on — 96% of a week reads very differently if it
+                  clears tonight than if it clears on Friday. Absent for
+                  a window the server gave no timestamp, which is every
+                  window at 0%: nothing used, nothing waiting to reset.
+
+                  `block`, because `max-width` does not apply to a
+                  non-replaced inline element. */}
+              {resetAt(m.w.resets_at) && (
+                <span
+                  style={{
+                    display: 'block',
+                    maxWidth: 'var(--meter-md)',
+                    fontSize: 'var(--t-nano)',
+                    color: 'var(--fg4)',
+                    textAlign: 'center',
+                    lineHeight: 'var(--lh-flat)',
+                  }}
+                >
+                  {resetAt(m.w.resets_at)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {a.usage_as_of && (
+        <div
+          className="mono"
+          style={{ fontSize: 'var(--t-nano)', color: 'var(--fg4)', marginTop: 'var(--s3)' }}
+        >
+          usage as of {ago(a.usage_as_of)} ago
+        </div>
+      )}
+    </div>
   );
 }
 

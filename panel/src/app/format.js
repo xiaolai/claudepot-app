@@ -171,3 +171,25 @@ export const VERIFY_TONE = {
 export function verifyChip(status) {
   return status in VERIFY_TONE ? VERIFY_TONE[status] : VERIFY_TONE.never;
 }
+
+/**
+ * When a usage window rolls over, in the reader's own timezone.
+ *
+ * Absolute rather than relative ("28 Aug 09:00", not "in 4d"): a
+ * relative figure answers how long you must wait, and the question in
+ * front of an exhausted week is *when can I start again* — which is a
+ * time you can plan around. Same-day resets drop the date, because on
+ * a 5-hour window the date is noise and only the clock matters.
+ *
+ * `null` for a window the server gave no timestamp: it returns one only
+ * once a window has activity, so a meter at 0% has nothing to reset and
+ * says nothing rather than inventing a date.
+ */
+export function resetAt(iso, now = new Date()) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (d.toDateString() === now.toDateString()) return hm;
+  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${hm}`;
+}

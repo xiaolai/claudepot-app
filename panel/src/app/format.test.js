@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ago, basename, bytes, compact, long, modelLabel, short, span, tightPath, until, groupTools, verifyChip } from './format.js';
+import { ago, basename, bytes, compact, long, modelLabel, short, span, tightPath, until, groupTools, verifyChip, resetAt } from './format.js';
 
 test('basename handles all four path shapes', () => {
   assert.equal(basename('/Users/joker/code/claudepot'), 'claudepot');
@@ -198,4 +198,38 @@ test('verifyChip treats an unknown status as never, not as a crash', () => {
   // A status CC or core adds tomorrow must degrade to silence.
   assert.equal(verifyChip('some_new_state_2027'), null);
   assert.equal(verifyChip(undefined), null);
+});
+
+test('resetAt drops the date when the window rolls over today', () => {
+  // Built in LOCAL time on purpose. A first version used fixed UTC
+  // instants and failed on a UTC+8 machine, where 16:19Z is already
+  // the next local day — the test was timezone-naive, not the code.
+  const now = new Date();
+  now.setHours(9, 0, 0, 0);
+  const later = new Date(now);
+  later.setHours(16, 19, 0, 0);
+  assert.equal(resetAt(later.toISOString(), now), '16:19');
+});
+
+test('resetAt keeps the date when it is another day', () => {
+  const now = new Date();
+  now.setHours(9, 0, 0, 0);
+  const later = new Date(now);
+  later.setDate(later.getDate() + 5);
+  later.setHours(9, 0, 0, 0);
+  const out = resetAt(later.toISOString(), now);
+  assert.match(out, /\d{2}:\d{2}$/, out);
+  assert.ok(out.length > 5, `expected a date as well as a time, got ${out}`);
+});
+
+test('resetAt says nothing when the server gave no timestamp', () => {
+  // A window at 0% has had no activity, so there is nothing to reset —
+  // inventing a date would be worse than an absent line.
+  assert.equal(resetAt(null), null);
+  assert.equal(resetAt(undefined), null);
+  assert.equal(resetAt(''), null);
+});
+
+test('resetAt says nothing for a timestamp it cannot read', () => {
+  assert.equal(resetAt('not a date'), null);
 });
