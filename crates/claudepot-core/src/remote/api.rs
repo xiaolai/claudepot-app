@@ -502,65 +502,6 @@ pub(super) async fn decide_approval(
 
 // ── Projects (read-only) ────────────────────────────────────────────
 
-#[derive(Debug, Serialize)]
-struct ProjectDto {
-    path: String,
-    name: String,
-    sessions: usize,
-    size_bytes: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_modified: Option<String>,
-    is_orphan: bool,
-    is_reachable: bool,
-}
-
-/// Read-only, and the omission is the design.
-///
-/// Move, rename, clean and repair each rewrite path-keyed Claude Code
-/// state that lives *outside* the project directory — `history.jsonl`,
-/// the `~/.claude.json` projects map, plugin bindings — behind a
-/// rollback journal. A half-applied one leaves Claude Code pointing at
-/// paths that do not exist. None of that belongs one stolen bearer token
-/// away.
-pub(super) async fn list_projects() -> Response {
-    let config_dir = crate::paths::claude_config_dir();
-    match blocking("project list", move || {
-        crate::project::list_projects(&config_dir)
-    })
-    .await
-    {
-        Some(projects) => {
-            let rows: Vec<ProjectDto> = projects
-                .into_iter()
-                .map(|p| ProjectDto {
-                    name: basename(&p.original_path),
-                    path: p.original_path,
-                    sessions: p.session_count,
-                    size_bytes: p.total_size_bytes,
-                    last_modified: p
-                        .last_modified
-                        .map(|t| chrono::DateTime::<Utc>::from(t).to_rfc3339()),
-                    is_orphan: p.is_orphan,
-                    is_reachable: p.is_reachable,
-                })
-                .collect();
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({ "projects": rows })),
-            )
-                .into_response()
-        }
-        None => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-    }
-}
-
-fn basename(path: &str) -> String {
-    path.rsplit(['/', '\\'])
-        .find(|s| !s.is_empty())
-        .unwrap_or(path)
-        .to_string()
-}
-
 // ── Accounts (read-only) ────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -995,12 +936,5 @@ mod tests {
                 limit: 60
             }
         ));
-    }
-
-    #[test]
-    fn basename_handles_both_separators() {
-        assert_eq!(basename("/Users/x/code/claudepot"), "claudepot");
-        assert_eq!(basename(r"C:\Users\x\code\claudepot"), "claudepot");
-        assert_eq!(basename("/Users/x/code/claudepot/"), "claudepot");
     }
 }

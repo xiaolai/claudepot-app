@@ -229,7 +229,6 @@ async fn the_real_endpoints_are_all_behind_auth() {
     for (method, path) in [
         ("GET", "/api/sessions"),
         ("GET", "/api/sessions/abc/transcript"),
-        ("GET", "/api/projects"),
         ("GET", "/api/accounts"),
         ("GET", "/api/inbound"),
         ("POST", "/api/inbound/revoke"),

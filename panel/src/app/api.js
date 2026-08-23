@@ -176,7 +176,6 @@ export const api = {
       idempotencyKey: key,
     }),
 
-  projects: (signal) => request('GET', '/api/projects', { signal }),
   accounts: (signal) => request('GET', '/api/accounts', { signal }),
   // Addressed by email: that is this domain's identity for an account,
   // and a uuid on the wire would be an internal id the panel then has

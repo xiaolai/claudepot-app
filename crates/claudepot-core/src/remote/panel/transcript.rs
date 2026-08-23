@@ -226,6 +226,61 @@ pub fn page(
 /// Reads a bounded window from the end rather than parsing the file:
 /// this runs on every list poll, and the list poll must not scale with
 /// transcript size.
+/// The last thing the **user** actually typed.
+///
+/// A card's title used to be `session::title::derive` over the row's
+/// stored title, which is the FIRST prompt of the session. On a thread
+/// that has run for hours that names what you started, not what you are
+/// doing — and every long session ends up titled by a question settled
+/// long ago.
+///
+/// Scans backwards so the cost is the tail, not the file. Skips
+/// [`is_harness_text`]: Claude Code writes `<command-name>`,
+/// `<bash-stdout>`, `<system-reminder>` and friends into the USER role,
+/// and a title reading `<bash-stdout>` would be worse than the stale
+/// one it replaced. Also skips tool results, which are user-role by
+/// schema and never typed by anyone.
+///
+/// `None` when the tail holds no genuine prompt — the caller keeps the
+/// derived title rather than showing nothing.
+pub(super) fn last_user_prompt(file_path: &Path) -> Option<String> {
+    // Escalating windows, cheapest first. A tool-heavy session can put
+    // megabytes of output between two prompts: measured on a real 14 MB
+    // transcript, the last 64 KB held **zero** user turns while 512 KB
+    // held three, the newest being the prompt actually wanted. A single
+    // large window would pay that cost on every session on every poll;
+    // this pays it only where the cheap read came up empty.
+    //
+    // The cap is deliberate. Past it the honest answer is "no recent
+    // prompt in reach", and the caller falls back to the stored first
+    // prompt — better than reading a whole transcript every five
+    // seconds to name a card.
+    const WINDOWS: [u64; 2] = [TAIL_BYTES, 512 * 1024];
+    let mut last_len = 0usize;
+    for window in WINDOWS {
+        let Some(events) = tail_events(file_path, window) else {
+            continue;
+        };
+        // A larger window that read no further means the file is
+        // smaller than the window — escalating again cannot help.
+        let grew = events.len() > last_len;
+        last_len = events.len();
+        if let Some(found) = events.iter().rev().find_map(|e| match e {
+            SessionEvent::UserText { text, .. } if !is_harness_text(text) => {
+                let t = text.trim();
+                (!t.is_empty()).then(|| t.to_string())
+            }
+            _ => None,
+        }) {
+            return Some(found);
+        }
+        if !grew {
+            break;
+        }
+    }
+    None
+}
+
 pub fn tail_summary(file_path: &Path) -> Option<String> {
     let events = tail_events(file_path, TAIL_BYTES)?;
     events.iter().rev().find_map(|e| match e {

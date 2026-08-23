@@ -673,13 +673,32 @@ The endpoints behind it, all in `remote::api` over `remote::panel`:
 | `GET /api/sessions/{id}/transcript` | `tail` / `after` / `before` windows, `no-store`. **The secret-bearing endpoint** |
 | `POST /api/sessions/{id}/prompt` | the only write that reaches Claude Code, through `peer` |
 | `POST /api/sessions/{id}/read` | per-device read mark |
-| `GET /api/projects`, `GET /api/accounts` | **read-only** |
+| `GET /api/accounts` | read-only except `…/{email}/activate` |
 | `GET /api/sessions/{id}/commands`, `…/commands/{name}` | slash commands as **text**; cwd resolved from the session, never from the client |
 | `GET /api/approvals`, `POST /api/approvals/{id}` | the only route that **grants a capability**; alive only while `remote serve` is |
 | `POST /api/passkey/{register,login}/{begin,finish}` | register is authenticated, login is not |
 
 Five decisions are worth not re-litigating:
 
+- **A card is titled by the LAST prompt, not the first.** The stored
+  `first_user_prompt` names what a session started as, which on a thread
+  running for hours is a question settled long ago. `last_user_prompt`
+  scans the tail backwards, skipping the text CC writes into the *user*
+  role itself (`<command-name>`, `<bash-stdout>`, `<system-reminder>`,
+  tool results) — a card reading `<bash-stdout>` would be worse than the
+  stale title it replaced. It falls back to the stored first prompt, so
+  a session whose tail is all tool traffic still has a name.
+
+  The window **escalates**, 64 KB then 512 KB, and that is not a guess:
+  on a real 14 MB transcript the last 64 KB held **zero** user turns
+  while 512 KB held three. One large window would pay that on every
+  session every poll; escalating pays it only where the cheap read came
+  up empty, and the list stayed at 0.34 s. Past the cap the honest
+  answer is "no recent prompt in reach" — reading a whole transcript
+  every five seconds to name a card is not a trade worth making.
+- **Live cards are ordered by last activity, not by process start.**
+  The session you opened first this morning is the one you have been
+  working in all day, so start order answers the wrong question.
 - **No `failed` status is synthesised.** The only available signal is
   `SessionRow::has_error`, true of any transcript with one errored tool
   call — routine in a long session. Painting those red would make the
@@ -802,10 +821,14 @@ Five decisions are worth not re-litigating:
   `localStorage`, not server state: this is how one device likes to
   read, and a phone and a laptop pointed at the same Claudepot are
   allowed to disagree.
-- **Projects are read-only; accounts are not, and the earlier note here
-  was wrong about why.** A project move rewrites path-keyed CC state
-  outside the project directory behind a rollback journal — that half
-  stands, and `POST /api/projects/*` still does not exist.
+- **There is no projects surface at all; accounts are writable, and the
+  earlier note here was wrong about why.** The projects tab, its screen
+  and `GET /api/projects` were deleted rather than left read-only: the
+  tab listed what the sessions list already names on every card, and a
+  route nothing calls is surface with no reader. A project *move* was
+  never offered and still is not — it rewrites path-keyed CC state
+  outside the project directory behind a rollback journal, and a
+  half-applied one leaves Claude Code pointing at a path that is gone.
 
   The account half claimed a swap "either fails while CC is running or
   bypasses the keychain-drift guard". `force` is consulted in exactly

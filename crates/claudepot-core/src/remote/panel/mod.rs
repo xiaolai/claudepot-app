@@ -244,6 +244,15 @@ pub fn list(ctx: &ListContext) -> Result<Vec<PanelSession>, PanelError> {
         out.push(compose(Some(record), row, &read));
     }
 
+    // Most recently ACTIVE first, which is not the order they started
+    // in. `live_records` sorts by process start — fine as a tiebreak,
+    // useless as the answer to "what was I just doing", since the
+    // session you opened first this morning is the one you have been
+    // working in all day. Sorting the composed rows rather than the pid
+    // records because `last_ts` comes from the transcript, which only
+    // exists after `compose`.
+    out.sort_by(|a, b| b.last_ts.cmp(&a.last_ts));
+
     let live_ids: std::collections::HashSet<&str> =
         live.iter().map(|r| r.session_id.as_str()).collect();
     // `list_all_sessions` returns newest-first, so `take` is the "most
@@ -329,9 +338,17 @@ fn compose(
         // marks rather than rendering them, because a card title has no
         // room for a heading or a fence and every prompt that starts
         // with `## User Input` was showing them.
+        // The LAST prompt, falling back to the first. A card names
+        // what the session is doing now; the stored
+        // `first_user_prompt` names what it was doing hours ago, which
+        // on a long thread is a question already settled. The fallback
+        // matters — a session whose tail holds only tool traffic still
+        // needs a name.
         title: row
-            .and_then(|r| r.first_user_prompt.as_deref())
-            .and_then(|t| crate::session::title::derive(&redact_secrets(t)))
+            .and_then(|r| {
+                transcript::last_user_prompt(&r.file_path).or_else(|| r.first_user_prompt.clone())
+            })
+            .and_then(|t| crate::session::title::derive(&redact_secrets(&t)))
             .map(|t| truncate(&t, TITLE_CHARS)),
         project_path,
         branch: row.and_then(|r| r.git_branch.clone()),

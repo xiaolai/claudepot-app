@@ -12,7 +12,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Login } from './Login.jsx';
 import { Sessions } from './Sessions.jsx';
 import { Thread } from './Thread.jsx';
-import { Projects } from './Projects.jsx';
 import { Accounts } from './Accounts.jsx';
 import { Settings } from './Settings.jsx';
 import { useAuth, useSessions, useTheme, useToolDisplay } from './useSession.js';
@@ -21,7 +20,6 @@ const { Badge, Ico, IcoFill, Wire } = window;
 
 const TABS = [
   { v: 'sessions', ico: 'layers', n: 'Sessions' },
-  { v: 'projects', ico: 'folder', n: 'Projects' },
   { v: 'accounts', ico: 'user', n: 'Accounts' },
   { v: 'settings', ico: 'sliders', n: 'Settings' },
 ];
@@ -164,10 +162,7 @@ export function Panel() {
   const open = openId && sessions ? sessions.find((s) => s.session_id === openId) : null;
   const attention = (sessions || []).filter((s) => s.live).length;
 
-  const screen =
-    view === 'projects' ? (
-      <Projects />
-    ) : view === 'accounts' ? (
+  const screen = view === 'accounts' ? (
       <Accounts />
     ) : view === 'settings' ? (
       <Settings
