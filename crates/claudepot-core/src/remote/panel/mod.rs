@@ -161,6 +161,15 @@ pub struct PanelSession {
     pub first_ts: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_ts: Option<DateTime<Utc>>,
+    /// When Claude last replied **in prose** — the closest thing a
+    /// transcript has to "a job finished", and what the live list is
+    /// ordered by.
+    ///
+    /// Carried rather than kept server-side so the ordering is
+    /// inspectable from outside: a list sorted by a number the client
+    /// cannot see is a list nobody can check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_reply_ts: Option<DateTime<Utc>>,
     /// The transcript contains at least one failed tool call. A marker,
     /// not a status — see the module docs.
     pub has_error: bool,
@@ -244,14 +253,24 @@ pub fn list(ctx: &ListContext) -> Result<Vec<PanelSession>, PanelError> {
         out.push(compose(Some(record), row, &read));
     }
 
-    // Most recently ACTIVE first, which is not the order they started
-    // in. `live_records` sorts by process start — fine as a tiebreak,
-    // useless as the answer to "what was I just doing", since the
-    // session you opened first this morning is the one you have been
-    // working in all day. Sorting the composed rows rather than the pid
-    // records because `last_ts` comes from the transcript, which only
-    // exists after `compose`.
-    out.sort_by(|a, b| b.last_ts.cmp(&a.last_ts));
+    // Ordered by when each session last REPLIED, not by its last event.
+    //
+    // `live_records` sorts by process start, which answers the wrong
+    // question — the session you opened first this morning is the one
+    // you have been working in all day. But `last_ts` is the wrong
+    // answer too: it moves on every tool call, so a session grinding
+    // through a hundred of them sits permanently at the top while
+    // having told you nothing since breakfast. `last_reply_ts` is the
+    // moment something actually came back.
+    //
+    // `last_ts` remains the tiebreak, so a session that has never
+    // replied still sorts sensibly against its neighbours rather than
+    // falling to the bottom in arbitrary order.
+    out.sort_by(|a, b| {
+        b.last_reply_ts
+            .cmp(&a.last_reply_ts)
+            .then_with(|| b.last_ts.cmp(&a.last_ts))
+    });
 
     let live_ids: std::collections::HashSet<&str> =
         live.iter().map(|r| r.session_id.as_str()).collect();
@@ -299,6 +318,11 @@ fn compose(
         .unwrap_or_default();
 
     let tail = row.and_then(|r| transcript::tail_summary(&r.file_path));
+    // One pass for both: the list re-reads every live transcript on
+    // every poll, so the title and the "last replied" mark share a scan.
+    let marks = row
+        .map(|r| transcript::tail_marks(&r.file_path))
+        .unwrap_or_default();
     let waiting_row = record
         .filter(|r| matches!(PanelStatus::from_record(r), PanelStatus::Waiting))
         .and(row);
@@ -344,10 +368,10 @@ fn compose(
         // on a long thread is a question already settled. The fallback
         // matters — a session whose tail holds only tool traffic still
         // needs a name.
-        title: row
-            .and_then(|r| {
-                transcript::last_user_prompt(&r.file_path).or_else(|| r.first_user_prompt.clone())
-            })
+        title: marks
+            .prompt
+            .clone()
+            .or_else(|| row.and_then(|r| r.first_user_prompt.clone()))
             .and_then(|t| crate::session::title::derive(&redact_secrets(&t)))
             .map(|t| truncate(&t, TITLE_CHARS)),
         project_path,
@@ -366,6 +390,7 @@ fn compose(
         first_ts: row.and_then(|r| r.first_ts),
         last_ts: row.and_then(|r| r.last_ts),
         has_error: row.map(|r| r.has_error).unwrap_or(false),
+        last_reply_ts: marks.replied_at,
         last_line: tail,
         ask,
         pending_tool,

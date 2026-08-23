@@ -707,9 +707,17 @@ Five decisions are worth not re-litigating:
   up empty, and the list stayed at 0.34 s. Past the cap the honest
   answer is "no recent prompt in reach" — reading a whole transcript
   every five seconds to name a card is not a trade worth making.
-- **Live cards are ordered by last activity, not by process start.**
-  The session you opened first this morning is the one you have been
-  working in all day, so start order answers the wrong question.
+- **Live cards are ordered by when each session last REPLIED.** Not by
+  process start — the session you opened first this morning is the one
+  you have been working in all day — and not by `last_ts` either, which
+  moves on every tool call, so a session grinding through a hundred of
+  them sat permanently at the top while having said nothing for
+  minutes. `last_reply_ts` is the timestamp of the last assistant turn
+  that was *prose*, which is the closest thing a transcript has to "a
+  job finished". `last_ts` stays as the tiebreak, so a session that has
+  never replied still sorts sensibly. It crosses to the client rather
+  than staying server-side: a list ordered by a number the client cannot
+  see is a list nobody can check.
 - **No `failed` status is synthesised.** The only available signal is
   `SessionRow::has_error`, true of any transcript with one errored tool
   call — routine in a long session. Painting those red would make the
