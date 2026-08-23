@@ -278,3 +278,38 @@
 }
 
 .mermaid-error-msg { color: var(--danger); }
+
+/* ── Transcript variant ────────────────────────────────────────
+   `.md-body` above is sized for a document pane. A transcript turn is
+   already inside a bubble that owns its padding, so this variant drops
+   the pane chrome and nothing else — every element rule above still
+   applies, which is the point of reusing the class rather than writing
+   a second stylesheet that would drift from it. */
+.md-transcript {
+  padding: 0;
+  gap: var(--sp-6);
+  font-size: var(--fs-sm);
+}
+
+/* A wide GFM table scrolls inside its own wrapper instead of widening
+   the bubble. `.md-body table` sets width:100%, which is right in a
+   document pane and wrong here, so the wrapper carries the overflow. */
+.md-transcript .md-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.md-transcript .md-table-scroll table {
+  width: auto;
+  min-width: 100%;
+}
+
+/* An image's alt text, standing in for the image. See
+   TranscriptMarkdown.tsx on why a transcript's images are not fetched. */
+.md-transcript .md-img-alt {
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-2);
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}

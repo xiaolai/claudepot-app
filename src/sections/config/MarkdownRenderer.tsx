@@ -11,6 +11,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { i18n } from "../../lib/i18n";
 import { MermaidBlock } from "./MermaidBlock";
+import { extractCodeText } from "./extractCodeText";
 
 /**
  * Markdown renderer for Config previews.
@@ -158,17 +159,6 @@ const components: Components = {
  * languages with `ignoreMissing: true`, mermaid lands in the first
  * shape, but we handle both for resilience.
  */
-function extractCodeText(node: ReactNode): string {
-  if (typeof node === "string") return node;
-  if (typeof node === "number") return String(node);
-  if (node === null || node === undefined || typeof node === "boolean") return "";
-  if (Array.isArray(node)) return node.map(extractCodeText).join("");
-  if (isValidElement(node)) {
-    const props = node.props as { children?: ReactNode };
-    return extractCodeText(props.children);
-  }
-  return "";
-}
 
 // ---------- Frontmatter ----------------------------------------------
 

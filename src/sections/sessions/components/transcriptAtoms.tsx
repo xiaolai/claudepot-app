@@ -4,6 +4,21 @@ import { IconButton } from "../../../components/primitives/IconButton";
 import { NF } from "../../../icons";
 import { formatNumber } from "../../../lib/intl";
 import { DETAIL_QUERY_MIN_LEN } from "../sessionDetail.search";
+import { TranscriptMarkdown } from "./TranscriptMarkdown";
+
+/**
+ * Is a search running?
+ *
+ * The one predicate for it in this layer. Three places used to answer it
+ * independently — `normalizeDetailQuery`, the fold's `searchActive`, and
+ * `highlight`'s own hardcoded `2` — and the third disagreed with the
+ * other two about whitespace. `Body` now asks the same question to
+ * decide whether to render markdown, which makes a fourth answer worse
+ * than a stylistic problem.
+ */
+export function isSearching(term: string): boolean {
+  return term.trim().length >= DETAIL_QUERY_MIN_LEN;
+}
 
 /**
  * Visual primitives shared by the two transcript renderers
@@ -102,8 +117,32 @@ export function Divider({ children }: { children: React.ReactNode }) {
 
 /**
  * Truncating body cell with a "Show N more chars / Collapse" toggle.
- * `clamp` is the visible-character cap; rendered on top of `highlight`
- * so the active search term is marked even inside the trimmed slice.
+ * `clamp` is the visible-character cap.
+ *
+ * ## Markdown, and what it gives way to
+ *
+ * Prose turns render as markdown; Claude writes markdown, and showing it
+ * raw meant `**bold**` kept its asterisks and a GFM table arrived as one
+ * run-on line of pipes.
+ *
+ * Two things take precedence over rendering it, and both are deliberate:
+ *
+ * - **`mono` wins.** It marks a tool payload — a command's arguments or
+ *   its stdout — and markdown would corrupt that: a shell comment
+ *   becomes a heading, a glob becomes emphasis, an ASCII table loses its
+ *   alignment. The one thing a reader needs from a command's output is
+ *   that it is what the command printed.
+ * - **An active search wins.** `highlight` marks matches by splitting
+ *   the raw string, which cannot be done through a rendered element tree
+ *   without walking it. A match you can *find* beats a bold you can
+ *   read, so while a search is running the body falls back to
+ *   highlighted plain text. `highlight` no-ops below two characters, so
+ *   the ordinary case — no search — renders markdown.
+ *
+ * The clamp still slices the raw string, so a trimmed body can cut a
+ * fence open and render its tail as code. Expanding restores it, and the
+ * alternative — parsing to find a safe cut point — would make the cap
+ * depend on the content it exists to bound.
  */
 export function Body({
   text,
@@ -127,6 +166,8 @@ export function Body({
   const overflow = trimmed.length > clamp;
   const visible = expanded || !overflow ? trimmed : trimmed.slice(0, clamp);
 
+  const asMarkdown = !mono && !isSearching(searchTerm);
+
   const baseStyle: CSSProperties = {
     fontFamily: mono ? "var(--font)" : undefined,
     fontSize: mono ? "var(--fs-xs)" : "var(--fs-sm)",
@@ -136,13 +177,21 @@ export function Body({
         : tone === "ghost"
           ? "var(--fg-muted)"
           : "var(--fg)",
-    whiteSpace: "pre-wrap",
+    // Markdown owns its own whitespace; forcing pre-wrap around it would
+    // double every blank line the parser already consumed.
+    whiteSpace: asMarkdown ? undefined : "pre-wrap",
     wordBreak: "break-word",
   };
 
   return (
     <>
-      <div style={baseStyle}>{highlight(visible, searchTerm)}</div>
+      <div style={baseStyle}>
+        {asMarkdown ? (
+          <TranscriptMarkdown body={visible} />
+        ) : (
+          highlight(visible, searchTerm)
+        )}
+      </div>
       {overflow && (
         <button
           type="button"
@@ -302,7 +351,7 @@ export function FoldableBubble({
   // Same floor `normalizeDetailQuery` applies, imported rather than
   // re-typed: if the two drift, the fold and the chunk filter disagree
   // about whether a search is running.
-  const searchActive = searchTerm.trim().length >= DETAIL_QUERY_MIN_LEN;
+  const searchActive = isSearching(searchTerm);
 
   const folded = foldable && !searchActive && (userFolded ?? true);
 
@@ -350,7 +399,13 @@ export function FoldableBubble({
  * pay the regex cost per event on every keystroke of the filter box.
  */
 export function highlight(text: string, term: string): React.ReactNode {
-  if (!term || term.length < 2) return text;
+  // `DETAIL_QUERY_MIN_LEN`, not a literal `2`. This was the third copy
+  // of that threshold in the transcript layer — `normalizeDetailQuery`
+  // owns it, `searchActive` below already used it, and this one had its
+  // own hardcoded number that also skipped the `.trim()` the other two
+  // apply. A query of `" a "` was therefore "not searching" to one and
+  // "searching" to another.
+  if (!isSearching(term)) return text;
   try {
     const pattern = new RegExp(escapeRegex(term), "gi");
     const parts: React.ReactNode[] = [];
