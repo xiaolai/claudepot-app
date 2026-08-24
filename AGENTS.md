@@ -151,6 +151,30 @@ After all three, the repo has zero of either. Verified by reverting the
 fields. `pnpm check:classes:self-test` forces both halves to fail so the
 guard is known to be able to.
 
+**`Input` and `Textarea` draw a focus outline, never the button
+ring.** `tokens.css` documents two treatments and says which is for
+which: a box-shadow `--focus-ring` (3px) for "filled chrome controls",
+an outline (`--bw-focus`, 2px) for "input/list/row controls" —
+`.settings-input:focus-visible` and its siblings in `envvars.css` /
+`projects.css` / `banners.css` already use the second. `Input` used the
+first: its inner element carried `pm-focus`, which pulls in the button
+ring, stacked on the wrapper's own border turning accent-coloured on
+focus. Two indicators, and the box-shadow one had nowhere to go — the
+wrapper sets no vertical padding, so the ring bled 2px past the pill's
+top and bottom edge instead of being contained by it. It read as one
+heavy, doubled box rather than a single crisp ring.
+
+`primitives/fieldChrome.ts` is the shared fix, read by both `Input` and
+the newer `Textarea`: the wrapper's border stops changing colour on
+focus, and an outline appears instead, flush with no offset — exactly
+`.settings-input`'s pattern, so a field styled through the primitive and
+one styled directly in a shard now agree. `focus.test.tsx` locks both
+halves of the split: button-shaped primitives still carry `pm-focus`,
+`Input`/`Textarea` never do, and the wrapper's `outline` (not
+`boxShadow`) is what changes when the inner element gains focus. Watched
+firing against the reverted state — `pm-focus` back on `Input`'s inner
+element failed the "neither carries pm-focus" assertion immediately.
+
 **The wide pass declares a width, and that is the whole trick.** jsdom
 has no layout, so a real `ResizeObserver` measurement is always zero and
 the stub used to be a no-op — which pinned every pass to the phone step

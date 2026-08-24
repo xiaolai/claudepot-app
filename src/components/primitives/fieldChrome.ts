@@ -19,6 +19,29 @@ import type { CSSProperties } from "react";
  * Two functions rather than one object because the chrome depends on
  * focus and disabled state, and the shell and the control want opposite
  * things — the shell paints, the control gets out of the way.
+ *
+ * ## The focus indicator is an outline, not the button ring
+ *
+ * `tokens.css` documents two DIFFERENT focus treatments and says which
+ * is for which: *"Focus-ring offsets — outline pattern (input/list/row
+ * controls). The box-shadow ring (filled chrome controls) keeps using
+ * `--focus-ring` above."* `Input` used to ignore that split — its inner
+ * element carried `pm-focus`, which pulls in the 3px `--focus-ring`
+ * box-shadow meant for buttons — stacked on top of the wrapper's OWN
+ * border turning accent-coloured. Two indicators at once, and the
+ * box-shadow one had nowhere to go: the wrapper sets no vertical
+ * padding, so the ring bled 2px past the pill's top and bottom edges
+ * instead of being contained by it. It read as one heavy, doubled box
+ * rather than a single crisp ring.
+ *
+ * The fix matches the pattern already established elsewhere in this
+ * shard — `.settings-input:focus-visible` in `settings.css`, and the
+ * same pair in `envvars.css` / `projects.css` / `banners.css`: an
+ * `outline` at `--bw-focus` (2px, half the box-shadow ring's weight),
+ * flush against the border with no offset. The border itself stops
+ * changing colour on focus, so exactly one thing happens when a field
+ * gains focus, matching every sibling control in the app rather than
+ * inventing a second local treatment.
  */
 
 /** The wrapper: what the user sees as "the field". */
@@ -36,9 +59,10 @@ export function fieldShell(opts: {
     ...(fixedHeight ? { height: "var(--input-height)" } : {}),
     padding: fixedHeight ? "0 var(--sp-10)" : "var(--sp-6) var(--sp-10)",
     background: "var(--bg-raised)",
-    border: `var(--bw-hair) solid ${focused ? "var(--accent-border)" : "var(--line)"}`,
+    border: "var(--bw-hair) solid var(--line)",
     borderRadius: "var(--r-2)",
-    transition: "border-color var(--dur-fast) var(--ease-linear)",
+    outline: focused ? "var(--bw-focus) solid var(--accent)" : "none",
+    outlineOffset: "var(--focus-outline-offset-flat)",
     opacity: disabled ? "var(--opacity-dimmed)" : 1,
   };
 }
@@ -48,6 +72,8 @@ export function fieldShell(opts: {
  *
  * `border`/`outline`/`background` are cleared here rather than relied on
  * from a reset, because there is no reset — see the module note.
+ * `outline: none` is what suppresses the browser's OWN default focus
+ * ring on the native element — the wrapper draws the one the user sees.
  */
 export function fieldControl(): CSSProperties {
   return {

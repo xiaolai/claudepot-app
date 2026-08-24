@@ -51,11 +51,6 @@ export function Textarea({ style, inputRef, rows = 2, onFocus, onBlur, id, ...re
         id={id ?? generatedId}
         ref={inputRef}
         rows={rows}
-        // `pm-focus` for the same reason `Input` carries it: the inline
-        // style cannot express `:focus-visible`, and the accent border
-        // alone fires on mouse focus too, so it is chrome rather than a
-        // keyboard-focus indicator.
-        className="pm-focus"
         onFocus={(e) => {
           setFocused(true);
           onFocus?.(e);

@@ -60,10 +60,13 @@ interface InputProps extends NativeInputProps {
  * ambiguous click and focus behaviour. A `<div>` with `:focus-within`
  * chrome has neither problem.
  *
- * The input carries `pm-focus` so the design system's keyboard-focus ring
- * applies: the inline-style approach these primitives use cannot express
- * `:focus-visible` itself, and the accent border alone fires on mouse focus
- * too, so it is chrome rather than a focus indicator.
+ * Focus is tracked in React state (`onFocus`/`onBlur`) rather than CSS
+ * `:focus-visible` on the wrapper, because the wrapper never receives
+ * focus itself — only the inner `<input>` does — and `:focus-within`
+ * would fire for the `suffix` slot's own controls too, which must not
+ * paint this field as focused. `fieldChrome.ts` is what the state then
+ * draws: an outline on the wrapper, matching every other input-like
+ * control in the app rather than the button-weight ring.
  */
 export function Input({
   glyph,
@@ -103,7 +106,6 @@ export function Input({
         id={inputId}
         ref={inputRef}
         type={type}
-        className="pm-focus"
         onFocus={(e) => {
           setFocused(true);
           onFocus?.(e);
