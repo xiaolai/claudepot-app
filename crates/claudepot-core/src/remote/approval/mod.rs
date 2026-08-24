@@ -296,11 +296,38 @@ pub mod store {
     /// false "no" is the prompt waiting at the keyboard exactly as it
     /// does today; the cost of a false "yes" is a two-minute pause on
     /// work nobody is watching.
+    ///
+    /// Three conditions, and `approvals_enabled` is checked **here**
+    /// rather than only at install time for the reason the whole module
+    /// is built this way: a hook entry outlives the process that wrote
+    /// it. Someone who turns the toggle off must not still be answering
+    /// prompts from a phone because `settings.json` kept an entry a
+    /// crash left behind — or because a second Claudepot, or a
+    /// hand-edit, put one there. Uninstalling is tidiness; this is the
+    /// line that holds.
     pub fn gate() -> bool {
-        let enabled = crate::remote::config::load()
-            .map(|loaded| loaded.value.server.enabled)
-            .unwrap_or(false);
-        enabled && is_serving(&dir(), crate::remote::approval::now_ms())
+        let cfg = crate::remote::config::load();
+        // An unreadable config answers "no" to both, which is the safe
+        // direction — see the doc above.
+        let (enabled, approvals) = cfg
+            .map(|loaded| (loaded.value.server.enabled, loaded.value.approvals_enabled))
+            .unwrap_or((false, false));
+        gate_from(
+            enabled,
+            approvals,
+            is_serving(&dir(), crate::remote::approval::now_ms()),
+        )
+    }
+
+    /// The judgement, split from the measurement.
+    ///
+    /// `gate` reads the real config and the real heartbeat, so testing
+    /// the rule through it would mean mutating `CLAUDEPOT_DATA_DIR` —
+    /// process-global state, raced by every other test in the binary.
+    /// The three inputs are cheap to enumerate; the reading of them is
+    /// not the part that can be wrong.
+    pub fn gate_from(enabled: bool, approvals: bool, serving: bool) -> bool {
+        enabled && approvals && serving
     }
 
     /// Hook side: publish a request for the phone to see.
@@ -631,6 +658,42 @@ mod tests {
     fn a_missing_directory_is_an_empty_list_not_an_error() {
         // The ordinary state on a machine that has never used this.
         assert!(store::pending(Path::new("/nonexistent/claudepot-approvals"), 0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::store::gate_from;
+
+    /// Only one combination may hold a permission prompt.
+    #[test]
+    fn every_input_must_be_true() {
+        assert!(gate_from(true, true, true));
+        for (enabled, approvals, serving) in [
+            (false, true, true),
+            (true, false, true),
+            (true, true, false),
+            (false, false, false),
+        ] {
+            assert!(
+                !gate_from(enabled, approvals, serving),
+                "enabled={enabled} approvals={approvals} serving={serving}"
+            );
+        }
+    }
+
+    /// The case the toggle exists for, named on its own so a regression
+    /// says which rule broke.
+    ///
+    /// A user who turns approvals off keeps the remote surface — the
+    /// panel still lists sessions, reads transcripts and sends prompts —
+    /// and a permission prompt goes back to being drawn at the machine.
+    /// Checked at RUNTIME rather than only at install: a hook entry
+    /// outlives the process that wrote it, so a crash, a hand-edit or a
+    /// second Claudepot must not leave the capability switched on.
+    #[test]
+    fn approvals_off_refuses_even_while_serving() {
+        assert!(!gate_from(true, false, true));
     }
 }
 

@@ -56,6 +56,7 @@ pub fn status_cmd(ctx: &AppContext) -> Result<()> {
             "password_set": st.password_set,
             "totp_enabled": st.totp_enabled,
             "passkeys": st.passkeys,
+            "approvals_enabled": st.approvals_enabled,
             "requires_tls": st.requires_tls,
             "bind_error": st.bind_error,
             "devices_active": st.active_device_count(chrono::Utc::now()),
@@ -103,6 +104,16 @@ pub fn status_cmd(ctx: &AppContext) -> Result<()> {
     );
     println!("  2FA       {}", if st.totp_enabled { "on" } else { "off" });
     println!("  passkeys  {}", st.passkeys);
+    // Named as a capability rather than a setting, because that is what
+    // it grants — see `RemoteAction::Approvals`.
+    println!(
+        "  approvals {}",
+        if st.approvals_enabled {
+            "ON — a paired device can approve a tool call"
+        } else {
+            "off — permission prompts are answered at the machine"
+        }
+    );
     println!(
         "  devices   {} active",
         st.active_device_count(chrono::Utc::now())
@@ -183,6 +194,29 @@ pub fn disable_cmd(ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
+pub fn approvals_cmd(ctx: &AppContext, enabled: bool) -> Result<()> {
+    service::set_approvals(enabled)?;
+
+    // A running server picks this up on its next hook invocation —
+    // `approval::store::gate` reads the preference every time — so
+    // there is nothing to restart. What this process cannot do is
+    // uninstall the hook entry from a server it does not own; the gate
+    // makes that entry inert, and `ApprovalHook::arm` clears it on the
+    // next start.
+    if ctx.json {
+        print_json(&serde_json::json!({ "approvals_enabled": enabled }))?;
+        return Ok(());
+    }
+    if enabled {
+        println!("Approvals ON. A paired device can now approve a tool call —");
+        println!("which is arbitrary code execution as you, behind the admin password.");
+    } else {
+        println!("Approvals off. Permission prompts are drawn at the machine as usual.");
+        println!("The panel still lists sessions, reads transcripts and sends prompts.");
+    }
+    Ok(())
+}
+
 pub fn revoke_all_cmd(ctx: &AppContext) -> Result<()> {
     let n = service::revoke_all()?;
     if ctx.json {
@@ -212,6 +246,7 @@ pub async fn serve_cmd(ctx: &AppContext) -> Result<()> {
 
     let devices = device_store::load().context("load devices")?.value;
     let server_cfg = cfg.server.clone();
+    let approvals_enabled = cfg.approvals_enabled;
     let state = Arc::new(Mutex::new(AppState {
         config: cfg,
         devices,
@@ -236,7 +271,7 @@ pub async fn serve_cmd(ctx: &AppContext) -> Result<()> {
     // acceptable to hand a network client the ability to grant a
     // permission at all. Installed here, revoked on the way out, and
     // heartbeated in between so a `kill -9` disarms it too.
-    let approvals = ApprovalHook::arm();
+    let approvals = ApprovalHook::arm(approvals_enabled);
     // Deliberately not `ctx.info`: `--quiet` must not hide the fact
     // that a feature is not working.
     for w in &approvals.warnings {

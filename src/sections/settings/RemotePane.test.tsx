@@ -11,6 +11,7 @@ const remoteStopMock = vi.fn();
 const remoteEnableMock = vi.fn();
 const remoteDisableMock = vi.fn();
 const remoteSetPasswordMock = vi.fn();
+const remoteSetApprovalsMock = vi.fn();
 const remoteRevokeAllMock = vi.fn();
 const remoteRevokeDeviceMock = vi.fn();
 
@@ -32,6 +33,7 @@ vi.mock("../../api", () => ({
     remoteEnable: (...a: unknown[]) => remoteEnableMock(...a),
     remoteDisable: (...a: unknown[]) => remoteDisableMock(...a),
     remoteSetPassword: (...a: unknown[]) => remoteSetPasswordMock(...a),
+    remoteSetApprovals: (...a: unknown[]) => remoteSetApprovalsMock(...a),
     remoteRevokeAll: (...a: unknown[]) => remoteRevokeAllMock(...a),
     remoteRevokeDevice: (...a: unknown[]) => remoteRevokeDeviceMock(...a),
   },
@@ -53,6 +55,7 @@ function status(over: Partial<RemoteStatus> = {}): RemoteStatus {
     passwordSet: true,
     totpEnabled: false,
     passkeys: 0,
+    approvalsEnabled: true,
     configRecovered: false,
     devicesRecovered: false,
     lastError: null,
@@ -123,7 +126,13 @@ describe("RemotePane — the design system is actually wired", () => {
     expect(SOURCE).toContain("SectionLabel");
     expect(SOURCE).toContain("<Input");
     expect(SOURCE).not.toContain("<h2>");
-    expect(SOURCE).not.toMatch(/<input\s/);
+    // No bare TEXT input. A checkbox is exempt and always was — its
+    // chrome is the platform's, which `check-classes.mjs` encodes for
+    // the whole repo. The first version of this assertion said
+    // `/<input\s/` and would have failed the moment a checkbox landed,
+    // which is a lock on the wrong thing.
+    expect(SOURCE).not.toMatch(/<input\s[^>]*type="(text|password)"/);
+    expect(SOURCE.match(/<input\s/g) ?? []).toHaveLength(1);
   });
 });
 
@@ -297,6 +306,53 @@ describe("RemotePane — the password", () => {
     expect(
       await screen.findByRole("button", { name: t("remote.setPassword") }),
     ).toBeDisabled();
+  });
+});
+
+describe("RemotePane — the approvals toggle", () => {
+  /**
+   * The one capability on this surface that grants rather than reads.
+   * It was hard-wired to the server's lifetime before this — starting
+   * the server installed Claude Code's `PermissionRequest` hook, so
+   * wanting the panel meant taking phone-approval with it.
+   */
+  it("reflects the stored preference", async () => {
+    remoteStatusMock.mockResolvedValue(status({ approvalsEnabled: true }));
+    const { unmount } = render(<RemotePane />);
+    const on = await screen.findByLabelText(t("remote.approvalsLabel"));
+    expect(on).toBeChecked();
+    unmount();
+
+    remoteStatusMock.mockResolvedValue(status({ approvalsEnabled: false }));
+    render(<RemotePane />);
+    expect(await screen.findByLabelText(t("remote.approvalsLabel"))).not.toBeChecked();
+  });
+
+  it("turning it off calls through with false", async () => {
+    const user = userEvent.setup();
+    remoteStatusMock.mockResolvedValue(status({ approvalsEnabled: true }));
+    remoteSetApprovalsMock.mockResolvedValue(undefined);
+    render(<RemotePane />);
+
+    await user.click(await screen.findByLabelText(t("remote.approvalsLabel")));
+    await waitFor(() => expect(remoteSetApprovalsMock).toHaveBeenCalledWith(false));
+  });
+
+  /**
+   * Approving a tool call is arbitrary code execution as this user. The
+   * consequence is stated at the control while it is on, and there is
+   * nothing to warn about once it is off.
+   */
+  it("warns only while it is on", async () => {
+    remoteStatusMock.mockResolvedValue(status({ approvalsEnabled: true }));
+    const { unmount } = render(<RemotePane />);
+    expect(await screen.findByText(t("remote.approvalsWarning"))).toBeInTheDocument();
+    unmount();
+
+    remoteStatusMock.mockResolvedValue(status({ approvalsEnabled: false }));
+    render(<RemotePane />);
+    await screen.findByLabelText(t("remote.approvalsLabel"));
+    expect(screen.queryByText(t("remote.approvalsWarning"))).not.toBeInTheDocument();
   });
 });
 

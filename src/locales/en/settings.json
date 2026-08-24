@@ -745,6 +745,12 @@
     "cannotRevokeRecovered": "Revoking is refused while the device records are lost — saving over them now would make that loss permanent while reporting success.",
     "promptsHeading": "Quick prompts",
     "activeCount_one": "{{count}} active",
-    "activeCount_other": "{{count}} active"
+    "activeCount_other": "{{count}} active",
+    "approvalsHeading": "Approving from a phone",
+    "approvalsLabel": "Let a paired device answer permission prompts",
+    "approvalsDetail": "Claude Code asks before running a tool it needs permission for. With this on, the question reaches your phone first and your answer is honoured. With it off, the prompt is drawn at the machine as usual — everything else on the panel still works.",
+    "approvalsWarning": "This is the one thing here that grants rather than reads. Approving a tool call is arbitrary code execution as you, so the admin password is the only thing standing in front of it.",
+    "approvalsOn": "Approvals on.",
+    "approvalsOff": "Approvals off — prompts are answered at the machine."
   }
 }

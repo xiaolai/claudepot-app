@@ -480,6 +480,21 @@ enum RemoteAction {
     },
     /// Turn it off.
     Disable,
+    /// Allow or refuse answering permission prompts from a phone.
+    ///
+    /// This is the one capability on the remote surface that GRANTS
+    /// something rather than reading or messaging: with it on, whoever
+    /// holds the admin password can approve a tool call, which is
+    /// arbitrary code execution as you. Off, the panel still lists
+    /// sessions, reads transcripts and sends prompts, and a permission
+    /// prompt is drawn at the machine as it always was.
+    ///
+    /// Takes effect immediately, including on a server already running.
+    Approvals {
+        /// `on` or `off`.
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
     /// Revoke every session and paired device.
     RevokeAll,
     /// Run the server in the foreground.
@@ -1675,6 +1690,9 @@ async fn main() -> Result<()> {
                 commands::remote::enable_cmd(&ctx, bind.as_deref(), port)?
             }
             RemoteAction::Disable => commands::remote::disable_cmd(&ctx)?,
+            RemoteAction::Approvals { state } => {
+                commands::remote::approvals_cmd(&ctx, state == "on")?
+            }
             RemoteAction::RevokeAll => commands::remote::revoke_all_cmd(&ctx)?,
             RemoteAction::Serve => commands::remote::serve_cmd(&ctx).await?,
         },

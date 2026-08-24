@@ -132,6 +132,12 @@ pub struct Status {
     pub password_set: bool,
     pub totp_enabled: bool,
     pub passkeys: usize,
+    /// May a phone answer a permission prompt? See
+    /// `config::RemoteConfigFile::approvals_enabled` — this is the one
+    /// capability here that grants rather than reads, so a surface that
+    /// reports the rest and not this would be describing the smaller
+    /// half.
+    pub approvals_enabled: bool,
     /// The config file was unreadable and was reset. The login throttle
     /// and the spent-TOTP high-water mark were in it.
     pub config_recovered: bool,
@@ -187,6 +193,7 @@ pub fn status(now_ms: u64) -> Result<Status, ServiceError> {
         password_set: cfg.password_hash.is_some(),
         totp_enabled: cfg.totp_secret_base32.is_some(),
         passkeys: cfg.passkeys.len(),
+        approvals_enabled: cfg.approvals_enabled,
         config_recovered,
         devices_recovered: devices_recovery.is_some(),
         devices: devices.devices.iter().map(DeviceSummary::from).collect(),
@@ -265,6 +272,23 @@ pub fn set_password(plain: &mut String) -> Result<(), ServiceError> {
     save_config(&cfg)
 }
 
+/// Turn phone-approval of permission prompts on or off.
+///
+/// Writing the preference is the whole of the *safety* change:
+/// `approval::store::gate` reads it on every hook invocation, so a
+/// running server stops honouring approvals the moment this returns,
+/// with no restart and no uninstall needed.
+///
+/// Reconciling `settings.json` is a separate, best-effort tidy-up the
+/// caller does when it owns a running server — see `ApprovalHook::arm`.
+/// A caller that does not (the CLI toggling while the GUI serves, say)
+/// leaves an inert entry behind, which the gate already refuses.
+pub fn set_approvals(enabled: bool) -> Result<(), ServiceError> {
+    let (mut cfg, _) = load_config()?;
+    cfg.approvals_enabled = enabled;
+    save_config(&cfg)
+}
+
 /// Revoke every session and paired device. Returns how many changed.
 pub fn revoke_all() -> Result<usize, ServiceError> {
     let (mut devices, recovery) = load_devices()?;
@@ -337,39 +361,70 @@ pub struct ApprovalHook {
     pub warnings: Vec<String>,
 }
 
+/// Make `settings.json` agree with the approvals preference.
+///
+/// Returns whether our hook entry is now installed, plus anything worth
+/// telling the user. Never fails: an install we could not write means
+/// permission prompts are drawn at the machine as they always were,
+/// which is the fall-through the whole design rests on.
+///
+/// **This is tidiness, not the safety line.** `approval::store::gate`
+/// reads the preference on every hook invocation, so an entry left
+/// behind by a crash, a hand-edit, or a second Claudepot is already
+/// inert. What this buys is that a file people read does not claim a
+/// capability that is switched off.
+pub fn reconcile_approval_hook(enabled: bool) -> (bool, Vec<String>) {
+    let mut warnings = Vec::new();
+    if !enabled {
+        let _ = approval::install::uninstall();
+        return (false, warnings);
+    }
+    // `current_exe` and not a looked-up path: this binary is the one
+    // carrying the verb, so the hook cannot point at a Claudepot that is
+    // not this one.
+    let installed = match std::env::current_exe() {
+        Ok(binary) => match approval::install::install(&binary) {
+            Ok(_) => true,
+            Err(e) => {
+                warnings.push(format!(
+                    "remote approval is OFF — could not install Claude Code's \
+                     PermissionRequest hook: {e}"
+                ));
+                false
+            }
+        },
+        Err(e) => {
+            warnings.push(format!(
+                "remote approval is OFF — cannot locate this binary: {e}"
+            ));
+            false
+        }
+    };
+    (installed, warnings)
+}
+
 impl ApprovalHook {
     /// Arm it. Never fails: a hook that could not be installed means
     /// permission prompts are drawn at the machine as they always were,
     /// which is the fall-through the whole design rests on.
-    pub fn arm() -> Self {
+    ///
+    /// `approvals` is the user's toggle
+    /// ([`config::RemoteConfigFile::approvals_enabled`]). When it is
+    /// off the hook is not installed, and any entry a previous run left
+    /// behind is actively removed — the server still runs, the panel
+    /// still reads transcripts and sends prompts, and a permission
+    /// prompt is drawn at the machine as it was before this feature
+    /// existed.
+    pub fn arm(approvals: bool) -> Self {
         let dir = approval::store::dir();
         // Heartbeat first: it is what the hook actually believes, so a
         // hook that starts before the first beat must read "not
         // serving" rather than wait on a server that is not up yet.
         let _ = approval::store::mark_serving(&dir, approval::now_ms());
 
-        let mut warnings = Vec::new();
-        // `current_exe` and not a looked-up path: this binary is the one
-        // carrying the verb, so the hook cannot point at a Claudepot
-        // that is not this one.
-        let installed = match std::env::current_exe() {
-            Ok(binary) => match approval::install::install(&binary) {
-                Ok(_) => true,
-                Err(e) => {
-                    warnings.push(format!(
-                        "remote approval is OFF — could not install Claude Code's \
-                         PermissionRequest hook: {e}"
-                    ));
-                    false
-                }
-            },
-            Err(e) => {
-                warnings.push(format!(
-                    "remote approval is OFF — cannot locate this binary: {e}"
-                ));
-                false
-            }
-        };
+        // Off means clearing an entry an earlier run left behind, not
+        // merely skipping the install — see `reconcile_approval_hook`.
+        let (installed, warnings) = reconcile_approval_hook(approvals);
 
         let beat = tokio::spawn(async move {
             let mut tick = tokio::time::interval(approval::HEARTBEAT);
@@ -440,6 +495,7 @@ mod tests {
             password_set: false,
             totp_enabled: false,
             passkeys: 0,
+            approvals_enabled: true,
             config_recovered: false,
             devices_recovered: false,
             devices,

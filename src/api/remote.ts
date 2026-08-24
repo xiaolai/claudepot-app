@@ -42,6 +42,14 @@ export type RemoteStatus = {
   passwordSet: boolean;
   totpEnabled: boolean;
   passkeys: number;
+  /**
+   * May a paired device answer a permission prompt?
+   *
+   * The one capability on this surface that GRANTS rather than reads.
+   * With it off the panel still lists sessions, reads transcripts and
+   * sends prompts; a permission prompt is drawn at the machine.
+   */
+  approvalsEnabled: boolean;
   /** The config file was unreadable and was reset — the login throttle
    *  and the spent-TOTP high-water mark were in it. */
   configRecovered: boolean;
@@ -72,6 +80,15 @@ export const remoteApi = {
    *  returns it — see `rules/architecture.md` on secret direction. */
   remoteSetPassword: (password: string): Promise<void> =>
     invoke("remote_set_password", { password }),
+
+  /**
+   * Allow or refuse answering permission prompts from a paired device.
+   *
+   * Takes effect immediately, including on a server already running —
+   * the hook reads the preference on every invocation.
+   */
+  remoteSetApprovals: (enabled: boolean): Promise<void> =>
+    invoke("remote_set_approvals", { enabled }),
 
   /** Resolves with the URL. Starting while already running returns the
    *  running server's URL rather than failing on a busy port. */

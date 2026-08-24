@@ -737,6 +737,12 @@
     "revokeAllBody": "所有已配对设备和已登录会话都会立即失效。它们可以用管理员密码重新配对。",
     "cannotRevokeRecovered": "设备记录已丢失，因此拒绝吊销——此时写回会让这一丢失变成永久，同时还报告成功。",
     "promptsHeading": "快捷提示",
-    "activeCount_other": "{{count}} 个有效"
+    "activeCount_other": "{{count}} 个有效",
+    "approvalsHeading": "用手机批准",
+    "approvalsLabel": "允许已配对设备回答权限询问",
+    "approvalsDetail": "Claude Code 在运行需要权限的工具前会询问。开启后，这个问题会先送到你的手机，你的回答会被采纳。关闭后，询问照常显示在本机——面板上的其他功能不受影响。",
+    "approvalsWarning": "这是此处唯一「授予」而非「读取」的能力。批准一次工具调用等于以你的身份执行任意代码，而管理员密码是它前面唯一的屏障。",
+    "approvalsOn": "已开启批准。",
+    "approvalsOff": "已关闭批准——权限询问在本机回答。"
   }
 }

@@ -307,6 +307,50 @@ export function RemotePane({ pushToast }: Props) {
         )}
       </div>
 
+      {/* The one capability here that GRANTS rather than reads, and
+          therefore the one that gets its own section rather than a line
+          in the status block. Placed above the password because the
+          password is what guards it. */}
+      <SectionLabel>{t("remote.approvalsHeading")}</SectionLabel>
+      {/* `htmlFor` + `aria-describedby` rather than wrapping the input
+          in the label. A wrapping label takes its accessible name from
+          ALL its text, so the control announced as "Let a paired device
+          answer permission prompts Claude Code asks before running a
+          tool…" — the whole explanatory paragraph read out as the
+          control's name. The description is a separate relationship;
+          assistive tech reads it after the name, or on request. */}
+      <div className="remote-toggle">
+        <input
+          id="remote-approvals"
+          type="checkbox"
+          checked={status.approvalsEnabled}
+          disabled={busy !== null}
+          aria-describedby="remote-approvals-detail"
+          onChange={(e) =>
+            run(
+              "approvals",
+              () => remoteApi.remoteSetApprovals(e.target.checked),
+              e.target.checked ? t("remote.approvalsOn") : t("remote.approvalsOff"),
+            )
+          }
+          style={{ marginTop: "var(--sp-3)", flexShrink: 0, accentColor: "var(--accent)" }}
+        />
+        <span>
+          <label htmlFor="remote-approvals" style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+            {t("remote.approvalsLabel")}
+          </label>
+          <span
+            id="remote-approvals-detail"
+            style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}
+          >
+            {t("remote.approvalsDetail")}
+          </span>
+        </span>
+      </div>
+      {/* Stated at the control, not in a doc: this is arbitrary code
+          execution as this user, behind the admin password. */}
+      {status.approvalsEnabled && <div style={WARN}>{t("remote.approvalsWarning")}</div>}
+
       <SectionLabel>{t("remote.passwordHeading")}</SectionLabel>
       <div style={NOTE}>
         {status.passwordSet ? t("remote.passwordSet") : t("remote.passwordUnset")}

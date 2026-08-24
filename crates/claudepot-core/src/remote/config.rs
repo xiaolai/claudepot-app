@@ -21,6 +21,12 @@ use super::totp::{TotpSecret, TotpState};
 pub const SCHEMA_VERSION: u32 = 1;
 pub const CONFIG_FILENAME: &str = "remote-config.json";
 
+/// Serde needs a fn for a non-`false` bool default. See
+/// `RemoteConfigFile::approvals_enabled` for why this one is `true`.
+fn default_true() -> bool {
+    true
+}
+
 fn default_schema_version() -> u32 {
     SCHEMA_VERSION
 }
@@ -128,6 +134,31 @@ pub struct RemoteConfigFile {
     /// rather than replacing the first. Minted on first use.
     #[serde(default)]
     pub passkey_user_handle: Option<uuid::Uuid>,
+    /// May a phone answer a permission prompt?
+    ///
+    /// The one capability on this surface that *grants* something rather
+    /// than reading or messaging — see `remote::approval`. Everything
+    /// else a stolen bearer token can reach is a transcript to read or
+    /// text Claude Code will refuse to treat as approval; with this on,
+    /// that token can approve a tool call, which is arbitrary code
+    /// execution as this user.
+    ///
+    /// Separable from `server.enabled` because the two are different
+    /// questions and were previously one: the hook was installed by the
+    /// mere act of starting the server, so wanting the panel — read a
+    /// transcript, send a prompt from the sofa — meant taking the
+    /// approval capability with it whether or not it was wanted.
+    ///
+    /// **Defaults to `true`**, unlike `server.enabled`. That asymmetry
+    /// is deliberate: `enabled` defaults off because a surface that
+    /// switches itself on at install is not a feature, whereas this
+    /// field is only ever consulted on a machine whose owner has already
+    /// turned the surface on and set a password. Defaulting it off would
+    /// silently remove a working capability from every existing install
+    /// on upgrade, which is a worse surprise than the status quo it
+    /// preserves. Turn it off to narrow what a stolen token can do.
+    #[serde(default = "default_true")]
+    pub approvals_enabled: bool,
 }
 
 /// Hand-written because `#[derive(Default)]` would produce
@@ -147,6 +178,7 @@ impl Default for RemoteConfigFile {
             last_failed_at: None,
             passkeys: Vec::new(),
             passkey_user_handle: None,
+            approvals_enabled: true,
         }
     }
 }
@@ -544,6 +576,37 @@ mod persist_tests {
         };
         save_at(&path, &f).unwrap();
         assert_eq!(load_at(&path).unwrap().value.failed_attempts, 2);
+    }
+
+    /// A file written before this field existed keeps the capability it
+    /// already had.
+    ///
+    /// `approvals_enabled` is the one field here that defaults to
+    /// `true`, and the reason is upgrades: it is only ever read on a
+    /// machine whose owner has already turned the surface on and set a
+    /// password, so defaulting it off would silently withdraw a working
+    /// feature from every existing install. `#[serde(default)]` on a
+    /// bool gives `false`, which is why this needs its own helper — and
+    /// its own test, because losing the helper is a silent change of
+    /// behaviour rather than a compile error.
+    #[test]
+    fn an_older_config_still_allows_approvals() {
+        let older = r#"{"schema_version":1,"server":{"enabled":true}}"#;
+        let cfg: RemoteConfigFile = serde_json::from_str(older).unwrap();
+        assert!(cfg.approvals_enabled, "a missing field must not disable it");
+    }
+
+    /// …and an explicit `false` survives a round trip, which is the
+    /// whole point of the toggle.
+    #[test]
+    fn approvals_off_round_trips() {
+        let raw = r#"{"schema_version":1,"server":{"enabled":true},"approvals_enabled":false}"#;
+        let cfg: RemoteConfigFile = serde_json::from_str(raw).unwrap();
+        assert!(!cfg.approvals_enabled);
+
+        let again: RemoteConfigFile =
+            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!again.approvals_enabled, "a save must not re-enable it");
     }
 
     #[test]

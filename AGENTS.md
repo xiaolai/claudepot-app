@@ -1338,6 +1338,36 @@ because CC invokes it, not the user; `verify-docs` exempts
 `#[command(hide = true)]` verbs from the README on exactly that
 reasoning, and tests the exemption in both directions.
 
+**It has its own switch: `approvals_enabled`.** It was hard-wired to
+the server's lifetime — starting the server installed the hook, so
+wanting the panel at all meant taking the one capability that grants
+rather than reads. Those are different questions and are now two:
+Settings → Remote has the toggle, `claudepot remote approvals on|off`
+is the CLI, and `remote status` reports it. Off, the panel still lists
+sessions, reads transcripts and sends prompts; a permission prompt is
+drawn at the machine exactly as it was before this feature existed.
+
+Two things about it are load-bearing:
+
+- **The check is in `store::gate`, at runtime, not only at install.** A
+  hook entry outlives the process that wrote it — that is the premise
+  the whole module is built on and why the runtime gate exists at all —
+  so a crash, a hand-edit, or a second Claudepot must not leave the
+  capability on after the toggle went off. Uninstalling from
+  `settings.json` is tidiness (`reconcile_approval_hook`, shared by
+  `ApprovalHook::arm` and the GUI's live toggle); the gate is the line
+  that holds. `gate_from` splits that judgement from the reading of the
+  config so all eight input combinations are testable without mutating
+  `CLAUDEPOT_DATA_DIR`, which every other test in the binary races.
+- **It defaults to `true`, unlike `server.enabled`.** The asymmetry is
+  deliberate: `enabled` defaults off because a surface that switches
+  itself on at install is not a feature, whereas this field is only ever
+  read on a machine whose owner has already turned the surface on and
+  set a password. Defaulting it off would silently withdraw a working
+  capability on upgrade. `#[serde(default)]` on a bool gives `false`, so
+  this needs its own helper — and its own test, since losing the helper
+  is a silent behaviour change rather than a compile error.
+
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 
 Optional feature: a fully-local named-secret vault plus

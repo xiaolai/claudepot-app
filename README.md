@@ -164,7 +164,10 @@ claudepot session   list-orphans | move | adopt-orphan | rebuild-index
                                                     # address a RUNNING
                                                     # Claude Code session
 claudepot remote    status | set-password | enable  # LAN appliance: reach
-                    disable | revoke-all | serve    # Claudepot from a phone
+                    disable | approvals | revoke-all  # Claudepot from a phone
+                    serve                           # `approvals off` keeps the
+                                                    # panel, drops the one
+                                                    # capability that GRANTS
 claudepot agent     draft | list | show            (alias: automation)
 claudepot lesson    harvest | list | accept | reject | compile | status
                                                     # the knowledge compiler

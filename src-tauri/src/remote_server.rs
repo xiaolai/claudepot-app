@@ -175,6 +175,8 @@ impl RemoteServerState {
             .value;
 
         let server_cfg = cfg.server.clone();
+        // Read before `cfg` moves into the shared state below.
+        let approvals = cfg.approvals_enabled;
         let state = Arc::new(AsyncMutex::new(AppState {
             config: cfg,
             devices,
@@ -203,7 +205,7 @@ impl RemoteServerState {
             // task ends however it ends. The alternative — holding it
             // beside the handle — leaves CC's hook installed for any
             // exit path that forgets to take it out.
-            let hook = ApprovalHook::arm();
+            let hook = ApprovalHook::arm(approvals);
             if !hook.warnings.is_empty() {
                 let mut inner = shared.lock().await;
                 inner.warnings = hook.warnings.clone();

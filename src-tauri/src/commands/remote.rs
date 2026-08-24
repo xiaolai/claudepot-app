@@ -57,6 +57,9 @@ pub struct RemoteStatusDto {
     pub password_set: bool,
     pub totp_enabled: bool,
     pub passkeys: usize,
+    /// May a paired device answer a permission prompt? The one
+    /// capability here that grants rather than reads.
+    pub approvals_enabled: bool,
     pub config_recovered: bool,
     pub devices_recovered: bool,
     /// Why the last start failed, or why a running server died.
@@ -116,6 +119,7 @@ pub async fn remote_status(
         password_set: st.password_set,
         totp_enabled: st.totp_enabled,
         passkeys: st.passkeys,
+        approvals_enabled: st.approvals_enabled,
         config_recovered: st.config_recovered,
         devices_recovered: st.devices_recovered,
         last_error: local.last_error,
@@ -168,6 +172,33 @@ pub async fn remote_set_password(password: String) -> Result<(), ErrorDto> {
     .await
     .map_err(ErrorDto::task_join)?
     .map_err(map_err)
+}
+
+/// Allow or refuse answering permission prompts from a paired device.
+///
+/// Two effects, and only the first is load-bearing. Writing the
+/// preference is immediate and total: `approval::store::gate` reads it
+/// on every hook invocation, so a running server stops honouring
+/// approvals before this returns. Reconciling `settings.json` is
+/// tidiness — done only when THIS process owns the server, because a
+/// hook entry we did not write is not ours to remove out from under
+/// whoever did.
+#[tauri::command]
+pub async fn remote_set_approvals(
+    enabled: bool,
+    server: State<'_, RemoteServerState>,
+) -> Result<(), ErrorDto> {
+    tokio::task::spawn_blocking(move || service::set_approvals(enabled))
+        .await
+        .map_err(ErrorDto::task_join)?
+        .map_err(map_err)?;
+
+    if server.describe().await.running_here {
+        tokio::task::spawn_blocking(move || service::reconcile_approval_hook(enabled))
+            .await
+            .map_err(ErrorDto::task_join)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

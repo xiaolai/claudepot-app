@@ -1343,6 +1343,7 @@ pub fn run() {
             commands::remote::remote_enable,
             commands::remote::remote_disable,
             commands::remote::remote_set_password,
+            commands::remote::remote_set_approvals,
             commands::remote::remote_start,
             commands::remote::remote_stop,
             commands::remote::remote_revoke_all,
