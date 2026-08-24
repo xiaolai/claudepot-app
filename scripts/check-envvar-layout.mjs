@@ -115,13 +115,31 @@ async function main() {
   // exactly the kind of transcription this script exists to avoid, and the
   // app restores whatever section was last open, so a click path would also
   // depend on where it happened to start.
+  // Navigate to the env-vars pane.
+  //
+  // **The section id is `config`, not `global`.** The registry entry is
+  // labelled "Global" and its component is `GlobalSection`, but its id
+  // is `config` — deliberately, so a saved position from before the
+  // rename still resolves. This script asked for `global`, and
+  // `useNavigationBridges` gates the event on
+  // `enabledSectionIds().includes(id)`, so the dispatch was silently
+  // dropped and the pane never appeared. It surfaced as "timed out
+  // waiting for env-vars pane", which reads like the pane is broken
+  // rather than like the navigation never happened.
+  //
+  // The sub-route key is per-section (`claudepot.subRoute.<id>`), so it
+  // carried the same error. `claudepot.global.tab` is correct as-is —
+  // that one really is named for the tab strip, not the section.
+  //
+  // Nobody caught it because CI cannot run this check, which is the
+  // decay AGENTS.md names it as the standing example of.
   await js(
     ws,
     `(() => {
       localStorage.setItem('claudepot.global.tab', 'config');
-      localStorage.setItem('claudepot.subRoute.global', 'node:virtual:env-vars');
+      localStorage.setItem('claudepot.subRoute.config', 'node:virtual:env-vars');
       window.dispatchEvent(new CustomEvent('claudepot:navigate-section', {
-        detail: { id: 'global' },
+        detail: { id: 'config' },
       }));
       return true;
     })()`,
