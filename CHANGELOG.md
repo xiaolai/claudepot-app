@@ -6,7 +6,95 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.4.19 — beta (unreleased)
+## 0.5.0 — beta (unreleased)
+
+### Added
+
+- **Reach Claude Code from your phone.** `claudepot remote serve` — or
+  Settings → Remote in the app — puts a small web panel on your LAN or
+  tailnet: the sessions running on your Mac, their transcripts, and a
+  composer that hands a prompt to any of them. Behind one admin
+  password, over TLS on anything but loopback, with paired devices you
+  can revoke individually.
+
+  Be clear about what it is. The panel can inject a **prompt** and
+  nothing else — Claude Code's inbox has no interrupt, exit or restart
+  action, so nothing here offers one. A message it accepts may still be
+  *held* for your approval at the machine, which is why the panel says
+  "handed off" and never "sent".
+
+- **Answer a permission prompt from the phone**, through Claude Code's
+  own `PermissionRequest` hook rather than the message channel. The
+  question reaches you before the prompt is drawn, and if nobody
+  answers, it is drawn at the machine exactly as it always was — every
+  failure degrades to today's behaviour.
+
+  It has its own switch, because it is the one capability here that
+  *grants* rather than reads: approving a tool call is code execution as
+  you. Off, the panel still lists sessions, reads transcripts and sends
+  prompts.
+
+- **A message typed offline is held, not refused.** The composer keeps
+  working when the Mac is unreachable and sends when it comes back —
+  gated on the session still being live, cancellable from the row it
+  sits on, and carrying its own idempotency key so a retry is the same
+  message rather than a second one.
+
+- **Address a running session from the terminal**: `claudepot session
+  live`, `send`, and a time-boxed `inbound` window that Claudepot closes
+  for you. The deadline is the feature — Claude Code's setting is
+  machine-wide, so the only way to contain it is in time.
+
+- **Quick prompts** — the chips above the panel's composer, authored in
+  Settings → Remote. A short name you tap and the longer text it sends.
+
+- **Transcripts render their markdown**, including Mermaid diagrams, on
+  both the desktop and the panel. Tool output stays verbatim: a shell
+  comment is not a heading, and the one thing output must be is what the
+  command printed.
+
+### Changed
+
+- **The panel adapts to the screen it is on.** Below 480px it is a
+  phone; above 900px the tabs become a rail and a thread opens beside
+  the list instead of covering it.
+
+- Settings gains a **Remote** pane and loses the standalone Quick
+  prompts one — those chips belong to the panel's composer and now live
+  with it.
+
+### Fixed
+
+- **`0.0.0.0`'s IPv6 twin was accepted as a bind address.** `::` slipped
+  past the allowlist while every specific IPv6 address was refused, so
+  the one bind with nothing vetting it was the one that got through.
+
+- **The login throttle was a lockout, not a delay.** It counted failures
+  and never recorded when they happened, so the wait could never be
+  served — anyone on the same wifi could lock the owner out permanently.
+  It backs off and expires now, which is what it always claimed to do.
+
+- **A damaged two-factor secret authenticated instead of failing.**
+  HMAC accepts a key of any length, so a truncated or blanked secret
+  produced a working second factor built on a guessable key. Its length
+  is checked now.
+
+- **"Unlock with Face ID" could quietly become "touch the key."** The
+  bit the authenticator signs to say it verified you was never checked,
+  only requested — and a request is not a guarantee.
+
+- **A link in a transcript could choose which app opened it.** Only
+  `http`, `https` and `mailto` reach the system opener now; the input is
+  model output quoting arbitrary files, which is exactly the input that
+  must not pick a protocol handler.
+
+- **Adding the panel to an iPhone home screen produced a plain "C".**
+  iOS accepts only PNG for a home-screen icon and silently generates a
+  letter tile from anything else. It ships a real icon now, and the
+  website's favicon lost the grey plate it carried into every browser
+  tab.
+
+## 0.4.19 — beta (released 2026-08-18)
 
 ### Fixed
 
