@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.5.0 — beta (unreleased)
+## 0.5.0 — beta (released 2026-08-25)
 
 ### Added
 
@@ -53,6 +53,14 @@ Versioning scheme:
   comment is not a heading, and the one thing output must be is what the
   command printed.
 
+- **The two environment variables Claude Code added in 2.1.234** are in
+  Global → Config → Env Variables: `CLAUDE_CODE_GOAL_CHECKIN_MINUTES`,
+  and `CLAUDE_CODE_PROJECT_DIR_NAME` as a read-only row. The second one
+  is deliberate — Claude Code reads it only from the environment you
+  start `claude` from and never from a settings file, so a value set
+  here would be saved and then ignored. The row says so, and says where
+  to set it instead.
+
 ### Changed
 
 - **The panel adapts to the screen it is on.** Below 480px it is a
@@ -93,6 +101,45 @@ Versioning scheme:
   letter tile from anything else. It ships a real icon now, and the
   website's favicon lost the grey plate it carried into every browser
   tab.
+
+- **A single API error removed a whole session from the cost report.**
+  Claude Code writes `<synthetic>` in the model field of turns it
+  generates itself — "API Error: 403", "No response requested." — and
+  that placeholder sorts ahead of every real model name. Both cost
+  paths read the first name, so any session that had ever hit one
+  transient error priced as nothing at all. Its tokens still counted;
+  its dollars silently did not. On the machine this was found on the
+  report was understating by a factor of five, and the sessions it
+  dropped were the long ones, which are exactly the expensive ones.
+
+- **A broken `.mcp.json` read as "no MCP servers".** A file that failed
+  to parse and a project with nothing configured gave the same answer,
+  so the one case you need to act on looked like the one you don't.
+  Config → Effective MCP now names the file and what is wrong with it.
+
+  A file using VS Code's `servers` key instead of `mcpServers` was
+  worse than silent: it invented a server called `servers` while the
+  real one stayed invisible. Claude Code has never accepted that shape,
+  so neither does this — and since Claude Code reads such a file as
+  simply having no servers, it is reported as a hint about the key
+  rather than as a failure.
+
+- **Being on Claude Code's third update channel showed as being on
+  `latest`.** Its settings accept `rc` — the channel its own screens
+  call "slow" — and anything unrecognized was quietly rounded down to
+  `latest`, so the panel lit the wrong button and compared your install
+  against a baseline from a channel you were not on. There is no
+  published version feed for that channel, so Claudepot now names it
+  and says plainly that it cannot tell you whether a newer Claude Code
+  exists on it, rather than guessing. Which channel is selected is also
+  now readable by a screen reader, not carried by colour alone.
+
+- **Three lines of `claude daemon status` changed from a path to a
+  sentence**, and the parser kept reading them as paths — so the
+  daemon's recorded roster, log and socket locations could be text like
+  `updated 765423s ago`. Nothing displays those fields yet, which is
+  the only reason this was invisible; every one of them is now either a
+  real path or nothing.
 
 ## 0.4.19 — beta (released 2026-08-18)
 
