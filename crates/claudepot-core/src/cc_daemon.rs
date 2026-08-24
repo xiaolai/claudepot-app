@@ -44,7 +44,9 @@ pub struct DaemonStatus {
     /// Daemon PID when running. `None` in the idle case.
     pub pid: Option<u32>,
     /// Uptime in seconds when running. `None` when idle or when the
-    /// uptime field couldn't be parsed.
+    /// uptime field couldn't be parsed. Read from the `uptime:  <N>s`
+    /// line of the running-daemon header — it is not on the first
+    /// line, which is why this was always `None` before.
     pub uptime_secs: Option<u64>,
     /// Active background workers in roster.json. `0` when the daemon
     /// is idle or the roster is absent — distinguished from `None`
@@ -52,14 +54,19 @@ pub struct DaemonStatus {
     pub bg_workers: Option<u32>,
     /// `/tmp/cc-daemon-<uid>/<hash>` when present.
     pub sock_dir: Option<PathBuf>,
-    /// `/tmp/cc-daemon-<uid>/<hash>/control.sock`. Whether it's
-    /// reachable is encoded in `running`; this is the raw path the
-    /// daemon advertises.
+    /// `/tmp/cc-daemon-<uid>/<hash>/control.sock` when CC names it.
+    /// `None` when the socket answered — CC prints the word
+    /// `reachable` in place of the path in that case, so a healthy
+    /// daemon yields `None` here and `running: true`. When the socket
+    /// is *un*reachable the path is recovered from the error hint,
+    /// which is the case a UI would want to show.
     pub control_sock: Option<PathBuf>,
-    /// Path to roster.json. `None` when the status line said `absent`.
+    /// Path to roster.json, when CC advertises one. **Always `None` on
+    /// CC 2.1.241** — that line now reports the roster's age rather
+    /// than its location. Retained for older CC, which printed a path.
     pub roster_path: Option<PathBuf>,
     /// Path to `~/.claude/daemon.log`. `None` when the status line
-    /// said `absent`.
+    /// said `absent`, i.e. the log file does not exist yet.
     pub log_path: Option<PathBuf>,
     /// How confident we are in the parse. UI uses this to decide
     /// between "show this" and "show last-known-good" (parallel to
@@ -183,6 +190,51 @@ fn capture_status() -> Result<String, String> {
 
 /// Pure parser. Takes the full captured text and returns the parsed
 /// status. Tested directly with fixture strings — no process spawn.
+///
+/// # The format
+///
+/// Read out of CC 2.1.241's `formatBgDaemonStatus` and the `status`
+/// arm of the `daemon` command, not sampled from one run — a sample
+/// only shows the branches that machine happened to be in, which is
+/// how three of these lines were modelled wrongly. Optional lines are
+/// bracketed; `|` separates alternatives of one line.
+///
+/// ```text
+/// not running                                        # idle: first line
+/// pid:     <N>                                       # running: first line
+/// version: <ver>
+/// uptime:  <N>s
+/// origin:  <origin>
+/// config:  <path>
+/// log:     <path>
+/// [launcher: <cmd> | (none)]
+/// [warning: <...>]
+///
+/// bg sessions:
+///   sock dir:     <path>
+///   control.sock: reachable | unreachable (<err>)
+///   [bg sessions:  disabled (start failure — ...)]
+///   bg workers:   <live> running (control.sock), <roster> in roster.json
+///               | <roster> in roster.json (live count unavailable | control unreachable)
+///   [              <N> from a different CLI version (...)]
+///   roster.json:  absent | updated <N>s ago
+///   daemon.log:   absent | <size> at <path>
+///   [warning:      supervisor not running but <N> workers in roster — ...]
+/// ```
+///
+/// Three of those lines print a **sentence where an older CC printed a
+/// path**, and the parser used to store the sentence as a `PathBuf`:
+/// `control.sock: reachable`, `roster.json: updated <N>s ago`, and
+/// `daemon.log: <size> at <path>` became `control_sock = "reachable"`,
+/// `roster_path = "updated 765423s ago"` and
+/// `log_path = "18.3KB at /Users/…/daemon.log"`. Every path arm now
+/// goes through [`parse_absolute_path_or_none`], so an unrecognized
+/// shape yields `None` — the honest answer — instead of a fabricated
+/// path that `.claude/rules/path-display.md` would then render.
+///
+/// Note there is **no `running` line**: a running daemon announces
+/// itself by leading with `pid:`, so that is what the first-line
+/// branch has to recognize.
 pub fn parse_status_output(text: &str) -> DaemonStatus {
     let mut out = DaemonStatus {
         running: false,
@@ -197,10 +249,9 @@ pub fn parse_status_output(text: &str) -> DaemonStatus {
     };
 
     // First non-empty line carries the running/not-running verdict.
-    // Observed idle form is the literal string "not running"; the
-    // running form is undocumented but the help text says it shows
-    // "pid, version, uptime" — match any line that has a digit run
-    // after "pid" as a defensive heuristic.
+    // Idle is the literal "not running"; running leads with
+    // `pid:     <N>`. `parse_running_line`'s digit-after-"pid" search
+    // covers both that shape and any future one-line variant.
     let mut saw_status_line = false;
     let mut saw_workers_line = false;
 
@@ -229,22 +280,23 @@ pub fn parse_status_output(text: &str) -> DaemonStatus {
             continue;
         }
 
-        // Key-value lines under "bg sessions:". Format observed:
-        //   sock dir:     /tmp/cc-daemon-501/<hash>
-        //   control.sock: unreachable (...)  | <path>
-        //   bg workers:   0 in roster.json (control unreachable)
-        //   roster.json:  absent | <path>
-        //   daemon.log:   absent | <path>
+        // Key-value lines. See the format block in `parse_status_output`'s
+        // doc comment for the authoritative shapes; every arm below
+        // refuses to invent a path out of prose.
         if let Some((key, value)) = split_kv(line) {
             match key {
                 "sock dir" => out.sock_dir = parse_path_value(value),
-                "control.sock" => out.control_sock = parse_path_or_unreachable(value),
+                "control.sock" => out.control_sock = parse_control_sock(value),
                 "bg workers" => {
                     saw_workers_line = true;
                     out.bg_workers = parse_worker_count(value);
                 }
-                "roster.json" => out.roster_path = parse_path_or_absent(value),
-                "daemon.log" => out.log_path = parse_path_or_absent(value),
+                "roster.json" => out.roster_path = parse_roster_value(value),
+                "daemon.log" => out.log_path = parse_log_value(value),
+                // Running-daemon header block: `uptime:  <N>s`. The
+                // first-line branch above never sees it, because when
+                // the daemon runs the first line is `pid:     <N>`.
+                "uptime" => out.uptime_secs = out.uptime_secs.or_else(|| parse_uptime(value)),
                 _ => {}
             }
         }
@@ -334,15 +386,68 @@ fn parse_path_value(value: &str) -> Option<PathBuf> {
     Some(PathBuf::from(v))
 }
 
-fn parse_path_or_absent(value: &str) -> Option<PathBuf> {
-    if value.trim().eq_ignore_ascii_case("absent") {
-        return None;
-    }
-    parse_path_value(value)
+/// `roster.json:  absent | updated <N>s ago | <path>`.
+///
+/// Current CC never prints a path here — the line reports *freshness*,
+/// not location. The old shape is still accepted so an older CC keeps
+/// working, but anything that is not an absolute path yields `None`
+/// rather than a `PathBuf` built out of the sentence "updated 765423s
+/// ago". The age itself is deliberately dropped: no surface renders
+/// it, and a field with no reader is worse than no field.
+fn parse_roster_value(value: &str) -> Option<PathBuf> {
+    parse_absolute_path_or_none(value)
 }
 
-fn parse_path_or_unreachable(value: &str) -> Option<PathBuf> {
+/// `daemon.log:   absent | <size> at <path> | <path>`.
+///
+/// The size prefix is a formatted string (`18.3KB`), so it is read for
+/// its `" at "` separator only and then discarded — parsing it back to
+/// a byte count would be lossy. Split on the FIRST `" at "`: the size
+/// never contains one, and a path legitimately can.
+fn parse_log_value(value: &str) -> Option<PathBuf> {
     let v = value.trim();
+    if let Some((_size, rest)) = v.split_once(" at ") {
+        return parse_absolute_path_or_none(rest);
+    }
+    parse_absolute_path_or_none(v)
+}
+
+/// The one gate that stops prose becoming a path. `absent`,
+/// `reachable`, `updated 765423s ago` and any future sentence all fall
+/// through to `None`; only something path-shaped survives.
+///
+/// `is_absolute_path_str` (not `starts_with('/')`, not
+/// `Path::is_absolute` — .claude/rules/paths.md) so Unix, drive-letter,
+/// UNC and named-pipe shapes are all recognized on every host.
+fn parse_absolute_path_or_none(value: &str) -> Option<PathBuf> {
+    let v = value.trim();
+    if v.is_empty() || !crate::path_utils::is_absolute_path_str(v) {
+        return None;
+    }
+    Some(PathBuf::from(v))
+}
+
+/// `uptime:  <N>s` from the running-daemon header block.
+fn parse_uptime(value: &str) -> Option<u64> {
+    let digits: String = value
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
+/// `control.sock: reachable | unreachable (<err>) | <path>`.
+///
+/// The `reachable` arm is why this cannot reuse the generic path
+/// parser: CC prints the word instead of the path when the socket
+/// answers, and treating it as a path produced a `control_sock` of
+/// literally `reachable` on every healthy daemon.
+fn parse_control_sock(value: &str) -> Option<PathBuf> {
+    let v = value.trim();
+    if v.eq_ignore_ascii_case("reachable") {
+        return None;
+    }
     if v.to_ascii_lowercase().starts_with("unreachable") {
         // Try to recover the sock path from the parenthesized hint:
         //   "unreachable (connect ENOENT /tmp/.../control.sock)"
@@ -365,12 +470,24 @@ fn parse_path_or_unreachable(value: &str) -> Option<PathBuf> {
         }
         return None;
     }
-    parse_path_value(value)
+    parse_absolute_path_or_none(v)
 }
 
+/// `bg workers:` has two shapes, and which number comes first differs
+/// between them:
+///
+/// ```text
+/// bg workers:   2 running (control.sock), 3 in roster.json   # control reachable
+/// bg workers:   3 in roster.json (control unreachable)       # control down
+/// ```
+///
+/// Taking the first digit run is correct for both, and deliberately so:
+/// it yields the live count when the control socket can supply one, and
+/// falls back to the roster count when it cannot. `bg_workers` is the
+/// load-bearing field (it drives the sidebar badge and the rotation
+/// audit's "N bg workers active" suffix), so both shapes are pinned by
+/// fixtures rather than left to luck.
 fn parse_worker_count(value: &str) -> Option<u32> {
-    // Format: "N in roster.json (...)" or just "N". Pull the first
-    // digit run.
     let mut digits = String::new();
     for c in value.chars() {
         if c.is_ascii_digit() {
@@ -395,7 +512,7 @@ mod tests {
     fn test_daemon_sock_recovery_handles_unix_hint() {
         let v = "unreachable (connect ENOENT /tmp/cc-daemon-501/abc/control.sock)";
         assert_eq!(
-            parse_path_or_unreachable(v),
+            parse_control_sock(v),
             Some(PathBuf::from("/tmp/cc-daemon-501/abc/control.sock"))
         );
     }
@@ -405,7 +522,7 @@ mod tests {
         let v =
             r"unreachable (connect ENOENT C:\Users\j\AppData\Local\Temp\cc-daemon\control.sock)";
         assert_eq!(
-            parse_path_or_unreachable(v),
+            parse_control_sock(v),
             Some(PathBuf::from(
                 r"C:\Users\j\AppData\Local\Temp\cc-daemon\control.sock"
             ))
@@ -416,21 +533,40 @@ mod tests {
     fn test_daemon_sock_recovery_handles_named_pipe_hint() {
         let v = r"unreachable (connect ENOENT \\.\pipe\cc-daemon-control)";
         assert_eq!(
-            parse_path_or_unreachable(v),
+            parse_control_sock(v),
             Some(PathBuf::from(r"\\.\pipe\cc-daemon-control"))
         );
     }
 
     #[test]
     fn test_daemon_sock_recovery_returns_none_without_path_token() {
-        assert_eq!(
-            parse_path_or_unreachable("unreachable (connect refused)"),
-            None
-        );
-        assert_eq!(parse_path_or_unreachable("unreachable"), None);
+        assert_eq!(parse_control_sock("unreachable (connect refused)"), None);
+        assert_eq!(parse_control_sock("unreachable"), None);
     }
 
+    // ── fixtures ────────────────────────────────────────────────
+    // Transcribed from CC 2.1.241's `formatBgDaemonStatus`, not
+    // invented. The pair below is the reason: `IDLE_FIXTURE` is the
+    // shape that shipped, `IDLE_FIXTURE_LEGACY` the shape this parser
+    // was written against, and only the second one has paths on the
+    // roster/log lines.
+
+    /// Live output, copied verbatim from `claude daemon status` on
+    /// CC 2.1.241 (2026-08-24) with the daemon idle.
     const IDLE_FIXTURE: &str = "\
+not running
+
+bg sessions:
+  sock dir:     /tmp/cc-daemon-501/5efc884f
+  control.sock: unreachable (connect ENOENT /tmp/cc-daemon-501/5efc884f/control.sock)
+  bg workers:   0 in roster.json (control unreachable)
+  roster.json:  updated 765423s ago
+  daemon.log:   18.3KB at /Users/joker/.claude/daemon.log
+";
+
+    /// The older shape, where both lines carried a bare path. Kept so
+    /// the compatibility arm is exercised rather than assumed.
+    const IDLE_FIXTURE_LEGACY: &str = "\
 not running
 
 bg sessions:
@@ -440,6 +576,172 @@ bg sessions:
   roster.json:  absent
   daemon.log:   absent
 ";
+
+    /// Running daemon: header block first (leading with `pid:`, NOT a
+    /// "running" line), then the bg-sessions block with the control
+    /// socket up — which is the shape that prints `reachable` instead
+    /// of a path and two worker numbers instead of one.
+    const RUNNING_FIXTURE: &str = "\
+pid:     12345
+version: 2.1.241
+uptime:  3600s
+origin:  transient
+config:  /Users/me/.claude/daemon/daemon.json
+log:     /Users/me/.claude/daemon.log
+
+bg sessions:
+  sock dir:     /tmp/cc-daemon-501/abc
+  control.sock: reachable
+  bg workers:   2 running (control.sock), 3 in roster.json
+  roster.json:  updated 12s ago
+  daemon.log:   1.2MB at /Users/me/.claude/daemon.log
+";
+
+    // ── the reported defect: prose must never become a path ──────
+
+    #[test]
+    fn roster_age_line_does_not_become_a_path() {
+        // Regression for #84. `updated 765423s ago` is a sentence, and
+        // the parser used to hand it to `PathBuf::from` verbatim.
+        let s = parse_status_output(IDLE_FIXTURE);
+        assert_eq!(s.roster_path, None);
+    }
+
+    #[test]
+    fn log_line_yields_the_path_not_the_size_prefix() {
+        let s = parse_status_output(IDLE_FIXTURE);
+        assert_eq!(
+            s.log_path.as_deref(),
+            Some(std::path::Path::new("/Users/joker/.claude/daemon.log")),
+            "the size prefix must be stripped, not carried into the path"
+        );
+    }
+
+    #[test]
+    fn reachable_control_sock_does_not_become_a_path() {
+        // The second instance of the same defect, in the same
+        // function: CC prints the word `reachable` where it used to
+        // print the socket path, so every healthy daemon reported a
+        // `control_sock` of literally "reachable".
+        let s = parse_status_output(RUNNING_FIXTURE);
+        assert_eq!(s.control_sock, None);
+    }
+
+    #[test]
+    fn running_daemon_leads_with_pid_and_reports_uptime() {
+        let s = parse_status_output(RUNNING_FIXTURE);
+        assert!(s.running, "a `pid:` first line means the daemon is up");
+        assert_eq!(s.pid, Some(12345));
+        assert_eq!(
+            s.uptime_secs,
+            Some(3600),
+            "uptime is its own line, not part of the first one"
+        );
+    }
+
+    #[test]
+    fn reachable_control_reports_the_live_worker_count() {
+        // Two numbers on the line; the live one comes first and is the
+        // one that answers "how many workers are active".
+        let s = parse_status_output(RUNNING_FIXTURE);
+        assert_eq!(s.bg_workers, Some(2));
+        assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
+    }
+
+    #[test]
+    fn legacy_path_shapes_still_parse() {
+        let fixture = IDLE_FIXTURE_LEGACY
+            .replace(
+                "roster.json:  absent",
+                "roster.json:  /Users/me/.claude/roster.json",
+            )
+            .replace(
+                "daemon.log:   absent",
+                "daemon.log:   /Users/me/.claude/daemon.log",
+            );
+        let s = parse_status_output(&fixture);
+        assert_eq!(
+            s.roster_path.as_deref(),
+            Some(std::path::Path::new("/Users/me/.claude/roster.json"))
+        );
+        assert_eq!(
+            s.log_path.as_deref(),
+            Some(std::path::Path::new("/Users/me/.claude/daemon.log"))
+        );
+    }
+
+    #[test]
+    fn absent_stays_none_on_both_lines() {
+        let s = parse_status_output(IDLE_FIXTURE_LEGACY);
+        assert_eq!(s.roster_path, None);
+        assert_eq!(s.log_path, None);
+    }
+
+    #[test]
+    fn optional_lines_do_not_derail_the_parse() {
+        // `bg sessions:  disabled`, the version-skew continuation (no
+        // colon at all) and the trailing `warning:` line are all
+        // things CC emits that this parser must step over without
+        // corrupting a field.
+        let fixture = "\
+not running
+
+bg sessions:
+  sock dir:     /tmp/cc-daemon-501/abc
+  control.sock: unreachable (connect ENOENT /tmp/cc-daemon-501/abc/control.sock)
+  bg sessions:  disabled (start failure — see daemon.log; restart the service after fixing)
+  bg workers:   1 running (control.sock), 4 in roster.json
+                2 from a different CLI version (most stay attachable)
+  roster.json:  updated 3s ago
+  daemon.log:   18.3KB at /Users/me/.claude/daemon.log
+  warning:      supervisor not running but 4 workers in roster
+";
+        let s = parse_status_output(fixture);
+        assert!(!s.running);
+        assert_eq!(s.bg_workers, Some(1));
+        assert_eq!(s.roster_path, None);
+        assert_eq!(
+            s.log_path.as_deref(),
+            Some(std::path::Path::new("/Users/me/.claude/daemon.log"))
+        );
+        assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
+    }
+
+    #[test]
+    fn windows_shapes_survive_both_lines() {
+        // .claude/rules/paths.md — the classifier is string-shape
+        // based, so drive-letter and UNC forms are recognized on every
+        // host, not just Windows.
+        assert_eq!(
+            parse_log_value(r"18.3KB at C:\Users\j\.claude\daemon.log"),
+            Some(PathBuf::from(r"C:\Users\j\.claude\daemon.log"))
+        );
+        assert_eq!(
+            parse_log_value(r"18.3KB at \\server\share\daemon.log"),
+            Some(PathBuf::from(r"\\server\share\daemon.log"))
+        );
+        assert_eq!(
+            parse_roster_value(r"C:\Users\j\.claude\roster.json"),
+            Some(PathBuf::from(r"C:\Users\j\.claude\roster.json"))
+        );
+    }
+
+    #[test]
+    fn unrecognized_prose_never_yields_a_path() {
+        // The general guard, so a future CC sentence fails to None
+        // rather than fabricating a path nobody can open.
+        for prose in [
+            "absent",
+            "reachable",
+            "updated 42s ago",
+            "unknown",
+            "",
+            "some future phrasing",
+        ] {
+            assert_eq!(parse_roster_value(prose), None, "roster: {prose:?}");
+            assert_eq!(parse_absolute_path_or_none(prose), None, "guard: {prose:?}");
+        }
+    }
 
     #[test]
     fn idle_fixture_parses_to_zero_workers() {
@@ -456,14 +758,21 @@ bg sessions:
                 "/tmp/cc-daemon-501/5efc884f/control.sock"
             ))
         );
-        assert_eq!(s.roster_path, None);
-        assert_eq!(s.log_path, None);
+        assert_eq!(s.roster_path, None, "the age line advertises no path");
+        assert_eq!(
+            s.log_path.as_deref(),
+            Some(std::path::Path::new("/Users/joker/.claude/daemon.log"))
+        );
         assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
     }
 
     #[test]
     fn running_with_workers_parses_count() {
-        // Hypothetical running form. Test the parser, not the live CLI.
+        // NOT CC's format — see RUNNING_FIXTURE for that. This pins the
+        // defensive one-line fallback in `parse_running_line`, which is
+        // what would catch a future CC that announces itself on a
+        // single line again. Believing this fixture WAS the format is
+        // how the real running shape went unmodelled.
         let fixture = "\
 running pid 12345 uptime 3600
 
@@ -540,11 +849,11 @@ bg sessions:
     }
 
     #[test]
-    fn path_or_absent_returns_none_for_absent() {
-        assert_eq!(parse_path_or_absent("absent"), None);
-        assert_eq!(parse_path_or_absent("Absent"), None);
+    fn log_value_returns_none_for_absent() {
+        assert_eq!(parse_log_value("absent"), None);
+        assert_eq!(parse_log_value("Absent"), None);
         assert_eq!(
-            parse_path_or_absent("/Users/me/.claude/daemon.log"),
+            parse_log_value("/Users/me/.claude/daemon.log"),
             Some(PathBuf::from("/Users/me/.claude/daemon.log"))
         );
     }
@@ -557,6 +866,26 @@ bg sessions:
             "live: running={} pid={:?} workers={:?} parse_status={:?}",
             s.running, s.pid, s.bg_workers, s.parse_status
         );
+        // Print the path fields too: #84 was a *garbage value*, not a
+        // crash, so a live run that only prints the load-bearing pair
+        // shows green over exactly the defect being checked.
+        eprintln!(
+            "live: sock_dir={:?} control_sock={:?} roster_path={:?} log_path={:?}",
+            s.sock_dir, s.control_sock, s.roster_path, s.log_path
+        );
+        for (name, p) in [
+            ("sock_dir", &s.sock_dir),
+            ("control_sock", &s.control_sock),
+            ("roster_path", &s.roster_path),
+            ("log_path", &s.log_path),
+        ] {
+            if let Some(p) = p {
+                assert!(
+                    crate::path_utils::is_absolute_path_str(&p.to_string_lossy()),
+                    "{name} is not path-shaped: {p:?}"
+                );
+            }
+        }
         // No hard assert on `running` — we don't know whether the
         // user has a daemon up. Assert only that the parser didn't
         // outright fail.
