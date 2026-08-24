@@ -164,11 +164,40 @@ async fn read_proc_start(pid: u32) -> Result<Option<String>, PeerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::path::PathBuf;
+
+    // ## Why most of this module is `#[cfg(unix)]`
+    //
+    // `key_file_name` refuses a socket path that is not absolute, and
+    // "absolute" is a platform question: `/tmp/cc-socks/11137.sock` has
+    // no drive letter, so `Path::is_absolute` is **false** for it on
+    // Windows and every test feeding one in failed there with
+    // `RelativeSocketPath`. Nine of them, in CI, on the one platform a
+    // macOS preflight cannot cover.
+    //
+    // Rewriting the fixtures to `C:\tmp\…` would be the wrong repair.
+    // `key_file_name_matches_cc_derivation` is a **parity lock against
+    // Claude Code's own Unix derivation** — it asserts
+    // `sha256("/tmp/cc-socks/11137.sock")` because that is the string CC
+    // hashes. On Windows CC binds a named pipe and derives the key from
+    // a lowercased pipe name instead: a different scheme, which
+    // `client.rs` refuses explicitly rather than approximating. A
+    // Windows variant of that golden would assert a derivation nothing
+    // produces.
+    //
+    // So this is OS-specific behaviour, and `.claude/rules/paths.md`
+    // puts OS-specific behaviour behind `#[cfg]` — the same treatment
+    // the `proc_start` tests below already had. What stays cross-
+    // platform is the guard itself (`relative_socket_path_is_refused`),
+    // the redaction check, and the Windows counterpart that makes
+    // gating these honest rather than convenient: proof the whole send
+    // path refuses there.
 
     /// Golden: locks our derivation against CC's. Computed as
     /// `sha256("/tmp/cc-socks/11137.sock")`.
     #[test]
+    #[cfg(unix)]
     fn key_file_name_matches_cc_derivation() {
         let name = key_file_name(11137, Path::new("/tmp/cc-socks/11137.sock")).unwrap();
         let (pid, rest) = name.split_once('.').unwrap();
@@ -185,6 +214,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn key_file_name_matches_cc_filename_regex() {
         let re = Regex::new(r"^(\d+)\.[0-9a-f]{64}\.key$").unwrap();
         let name = key_file_name(42, Path::new("/tmp/cc-socks/42.sock")).unwrap();
@@ -192,12 +222,43 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn different_sockets_derive_different_names() {
         let a = key_file_name(7, Path::new("/tmp/cc-socks/7.sock")).unwrap();
         let b = key_file_name(7, Path::new("/run/user/501/cc-socks/7.sock")).unwrap();
         assert_ne!(
             a, b,
             "the digest must cover the socket path, not just the pid"
+        );
+    }
+
+    /// The Windows half of the split above.
+    ///
+    /// The Unix tests are gated on the claim that this feature does not
+    /// run here at all — so that claim needs a test of its own, or
+    /// gating them is just muting a failure. `client.rs` refuses
+    /// non-unix **before** reading a key, so the surface a Windows
+    /// caller meets is `UnsupportedPlatform`, not a missing file.
+    ///
+    /// A real socket path is not needed: the refusal comes first, which
+    /// is the property being asserted.
+    #[cfg(not(unix))]
+    #[tokio::test]
+    async fn the_whole_send_path_is_refused_off_unix() {
+        use crate::peer::wire::Priority;
+        use crate::peer::{send_prompt, PeerTarget};
+
+        let target = PeerTarget {
+            pid: 4321,
+            session_id: "s".into(),
+            socket_path: std::path::PathBuf::from(r"\\.\pipe\cc-4321"),
+        };
+        let err = send_prompt(&target, std::path::Path::new("."), "hello", Priority::Next)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, PeerError::UnsupportedPlatform { pid: 4321 }),
+            "expected UnsupportedPlatform, got {err:?}"
         );
     }
 
@@ -210,6 +271,7 @@ mod tests {
     /// Fixture tokens must be obviously synthetic. A real `peerToken`
     /// read off this machine is a live credential for another process's
     /// input queue, and pasting one in here publishes it.
+    #[cfg(unix)]
     fn write_key(dir: &Path, pid: u32, socket: &Path, body: &str) -> PathBuf {
         let path = dir.join(key_file_name(pid, socket).unwrap());
         std::fs::write(&path, body).unwrap();
@@ -217,6 +279,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn reads_a_well_formed_key() {
         let dir = tempfile::tempdir().unwrap();
         let socket = Path::new("/tmp/cc-socks/9.sock");
@@ -232,6 +295,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn key_without_proc_start_is_accepted() {
         let dir = tempfile::tempdir().unwrap();
         let socket = Path::new("/tmp/cc-socks/9.sock");
@@ -248,6 +312,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn rejects_a_token_that_is_not_32_hex() {
         let dir = tempfile::tempdir().unwrap();
         let socket = Path::new("/tmp/cc-socks/9.sock");
@@ -267,6 +332,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn malformed_key_error_never_echoes_the_token() {
         let dir = tempfile::tempdir().unwrap();
         let socket = Path::new("/tmp/cc-socks/9.sock");
@@ -287,6 +353,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn missing_key_file_is_unreadable_not_malformed() {
         let dir = tempfile::tempdir().unwrap();
         let err = read_key(dir.path(), 9, Path::new("/tmp/cc-socks/9.sock")).unwrap_err();
@@ -294,6 +361,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn oversized_key_file_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let socket = Path::new("/tmp/cc-socks/9.sock");
