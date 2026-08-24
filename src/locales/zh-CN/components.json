@@ -270,6 +270,8 @@
   },
   "remoteServing": {
     "serving": "远程已开启",
-    "everyInterface": "远程已开启 · 所有接口"
+    "servingHint": "这台 Mac 上有服务正在提供远程面板。控制项在「设置 → 远程」。",
+    "everyInterface": "远程已开启 · 所有接口",
+    "everyInterfaceHint": "远程面板正在所有网络接口上提供服务。如果这台主机获得公网地址，管理员密码就是互联网与「以你的身份执行代码」之间唯一的屏障。"
   }
 }

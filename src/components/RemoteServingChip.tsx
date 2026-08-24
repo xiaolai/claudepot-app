@@ -88,12 +88,20 @@ export function RemoteServingChip() {
 
   return (
     <span
-      className={`status-chip${everyInterface ? " status-chip-warn" : ""}`}
-      title={label}
+      // `statusbar-chip` + `warn`, the shard's own vocabulary — see
+      // `styles/components/statusbar-chips.css`. `RemoteWindowChip`
+      // beside it uses the same pair.
+      className={`statusbar-chip${everyInterface ? " warn" : ""}`}
+      title={
+        everyInterface
+          ? t("remoteServing.everyInterfaceHint")
+          : t("remoteServing.servingHint")
+      }
       aria-label={label}
+      role="status"
     >
       <Glyph g={NF.globe} />
-      <span>{label}</span>
+      {label}
     </span>
   );
 }

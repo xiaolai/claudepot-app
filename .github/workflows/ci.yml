@@ -231,6 +231,14 @@ jobs:
       - name: Check locale catalogs
         run: pnpm check:catalogs
 
+      # A `className` with no CSS rule behind it renders as unstyled
+      # markup. It is valid HTML, invisible to tsc, and invisible to a
+      # render test that asserts on text — so an entire pane shipped
+      # unstyled with every other gate green. Cheap (string scan, no
+      # jsdom); the self-test proves the guard can fail.
+      - name: Check CSS class coverage
+        run: pnpm check:classes:self-test && pnpm check:classes
+
       # The production vite build catches failure classes tsc and
       # vitest don't (asset resolution, CSS shard syntax errors,
       # rollup-only module issues). Without this step the first

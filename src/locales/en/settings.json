@@ -19,7 +19,6 @@
     "locks": "Locks",
     "diagnostics": "Diagnostics",
     "about": "About",
-    "quickPrompts": "Quick prompts",
     "remote": "Remote"
   },
   "shared": {
@@ -743,6 +742,9 @@
     "revokedAll": "Every device and session revoked.",
     "revokeAllTitle": "Revoke every device?",
     "revokeAllBody": "Every paired device and signed-in session stops working immediately. They can pair again with the admin password.",
-    "cannotRevokeRecovered": "Revoking is refused while the device records are lost — saving over them now would make that loss permanent while reporting success."
+    "cannotRevokeRecovered": "Revoking is refused while the device records are lost — saving over them now would make that loss permanent while reporting success.",
+    "promptsHeading": "Quick prompts",
+    "activeCount_one": "{{count}} active",
+    "activeCount_other": "{{count}} active"
   }
 }

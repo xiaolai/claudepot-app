@@ -278,6 +278,8 @@
   },
   "remoteServing": {
     "serving": "remote on",
-    "everyInterface": "remote on · all interfaces"
+    "servingHint": "Something on this Mac is serving the remote panel. Settings → Remote has the controls.",
+    "everyInterface": "remote on · all interfaces",
+    "everyInterfaceHint": "The remote panel is being served on every network interface. If this host gets a public address, the admin password is the only thing between the internet and code execution as you."
   }
 }

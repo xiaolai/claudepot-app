@@ -296,3 +296,51 @@
   flex-wrap: wrap;
   margin-top: var(--sp-8);
 }
+
+/* Settings → Remote. Structural only; the pane's prose registers are
+   inline token styles, the way RetentionPane's are. Named `remote-*`
+   and sitting beside `qp-*` because the quick-prompt editor is now a
+   section inside this same pane. */
+.remote-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  margin-top: var(--sp-8);
+}
+.remote-fields {
+  display: flex;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+  margin-top: var(--sp-8);
+}
+.remote-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.remote-devices {
+  list-style: none;
+  margin: var(--sp-8) 0 0;
+  padding: 0;
+}
+.remote-devices li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-height: var(--sp-32);
+  padding: var(--sp-4) 0;
+  border-bottom: var(--bw-hair) solid var(--line);
+}
+/* The last row's rule would double with whatever follows the list. */
+.remote-devices li:last-child {
+  border-bottom: none;
+}
+/* The name takes the slack so the state word and Revoke stay right-aligned. */
+.remote-devices li > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -133,10 +133,9 @@ export function ContextMenu({
               title={item.disabled ? item.disabledReason : undefined}
               onClick={() => handleItemClick(item)}
             >
-              <span className="context-menu-label">{item.label}</span>
+              <span>{item.label}</span>
               {item.disabled && item.disabledReason && (
                 <span
-                  className="context-menu-reason"
                   style={{
                     marginLeft: "var(--sp-8)",
                     color: "var(--fg-faint)",

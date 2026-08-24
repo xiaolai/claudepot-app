@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { RemoteStatus } from "../../api/remote";
 import { i18n } from "../../lib/i18n";
+import SOURCE from "./RemotePane.tsx?raw";
 
 const remoteStatusMock = vi.fn();
 const remoteStartMock = vi.fn();
@@ -13,7 +14,17 @@ const remoteSetPasswordMock = vi.fn();
 const remoteRevokeAllMock = vi.fn();
 const remoteRevokeDeviceMock = vi.fn();
 
+// `quickPromptApi` is mocked because the pane now renders the
+// quick-prompt editor as a section — see `RemotePane`'s module docs on
+// why those chips belong here rather than in a pane of their own. Its
+// own behaviour is covered by its own component; here it just has to
+// mount without reaching for an IPC bridge that is not there.
 vi.mock("../../api", () => ({
+  quickPromptApi: {
+    list: () => Promise.resolve([]),
+    save: (p: unknown) => Promise.resolve(p),
+    defaults: () => Promise.resolve([]),
+  },
   remoteApi: {
     remoteStatus: (...a: unknown[]) => remoteStatusMock(...a),
     remoteStart: (...a: unknown[]) => remoteStartMock(...a),
@@ -71,6 +82,49 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+/**
+ * The eight class names this pane once invented.
+ *
+ * It shipped rendering `pane`, `pane-block`, `pane-intro`,
+ * `pane-warning`, `pane-error`, `pane-actions`, `remote-devices` and
+ * `status-chip` — and only `remote-devices` was ever given a rule. A
+ * className with no rule is valid HTML, invisible to `tsc`, and
+ * invisible to every test in this file, all of which assert on text. So
+ * the pane rendered as unstyled markup with a full green suite.
+ *
+ * The general check is `scripts/check-classes.mjs`, which scans every
+ * `className` in `src/` against every stylesheet and runs in CI — it
+ * cannot live here, because this file is typechecked by the browser
+ * tsconfig (no node types) and Vite stubs `?raw` on CSS under Vitest.
+ * What stays is the file-local lock: these particular names, by name,
+ * so the specific mistake cannot come back quietly.
+ */
+describe("RemotePane — the design system is actually wired", () => {
+  it("uses none of the class names the first version invented", () => {
+    for (const dead of [
+      "pane-block",
+      "pane-intro",
+      "pane-warning",
+      "pane-error",
+      "pane-actions",
+      "status-chip",
+    ]) {
+      expect(SOURCE).not.toContain(dead);
+    }
+  });
+
+  it("renders through the primitives rather than hand-rolled markup", () => {
+    // `SectionLabel` for headings, `Input` for fields, `Button` for
+    // actions. The first version used bare `<h2>`, `<input>` and its own
+    // classes — and the `<h2>` duplicated the title `SettingsSection`
+    // already renders from the pane registry.
+    expect(SOURCE).toContain("SectionLabel");
+    expect(SOURCE).toContain("<Input");
+    expect(SOURCE).not.toContain("<h2>");
+    expect(SOURCE).not.toMatch(/<input\s/);
+  });
 });
 
 describe("RemotePane — the three states", () => {

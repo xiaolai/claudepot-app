@@ -115,7 +115,7 @@ export function QuickPromptsPane({
   if (!draft) return <p className="muted">…</p>;
 
   return (
-    <div className="pane">
+    <div>
       <p className="muted">{t("quickPrompts.intro")}</p>
 
       {draft.length === 0 && <p className="muted">{t("quickPrompts.empty")}</p>}

@@ -117,7 +117,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
         );
       }
       return (
-        <main className="app loading">
+        <main className="loading">
           <div className="empty">
             <h2>{i18n.t("errorBoundary.title", { ns: "components" })}</h2>
             <p className="muted mono">{this.state.error}</p>

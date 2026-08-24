@@ -102,7 +102,11 @@ const components: Components = {
     const { children, href } = props;
     return (
       <span
-        className="md-link"
+        // A test hook, not a style hook: this span draws itself from the
+        // inline tokens below, and the `md-link` class it used to carry
+        // had no rule in any stylesheet. `data-testid` says which of the
+        // two it is — see `scripts/check-classes.mjs`.
+        data-testid="md-link"
         title={href ?? undefined}
         style={{
           color: "var(--accent-ink)",

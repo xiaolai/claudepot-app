@@ -19,7 +19,6 @@
     "locks": "锁文件",
     "diagnostics": "诊断",
     "about": "关于",
-    "quickPrompts": "快捷提示",
     "remote": "远程"
   },
   "shared": {
@@ -736,6 +735,8 @@
     "revokedAll": "已吊销全部设备与会话。",
     "revokeAllTitle": "吊销所有设备？",
     "revokeAllBody": "所有已配对设备和已登录会话都会立即失效。它们可以用管理员密码重新配对。",
-    "cannotRevokeRecovered": "设备记录已丢失，因此拒绝吊销——此时写回会让这一丢失变成永久，同时还报告成功。"
+    "cannotRevokeRecovered": "设备记录已丢失，因此拒绝吊销——此时写回会让这一丢失变成永久，同时还报告成功。",
+    "promptsHeading": "快捷提示",
+    "activeCount_other": "{{count}} 个有效"
   }
 }

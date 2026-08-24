@@ -58,7 +58,6 @@ import { McpInstallerPane } from "./settings/McpInstallerPane";
 import { NetworkPane } from "./settings/NetworkPane";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { RotationPane } from "./settings/RotationPane";
-import { QuickPromptsPane } from "./settings/QuickPromptsPane";
 import { RemotePane } from "./settings/RemotePane";
 import { RetentionPane } from "./settings/RetentionPane";
 import { CleanupPane } from "./sessions/CleanupPane";
@@ -168,7 +167,6 @@ export function SettingsSection() {
           {tab === "notifications" && <NotificationsPane pushToast={pushToast} />}
           {tab === "network" && <NetworkPane pushToast={pushToast} />}
           {tab === "rotation" && <RotationPane pushToast={pushToast} />}
-          {tab === "prompts" && <QuickPromptsPane pushToast={pushToast} />}
           {tab === "remote" && <RemotePane pushToast={pushToast} />}
           {tab === "retention" && <RetentionPane pushToast={pushToast} />}
           {tab === "health" && <HealthPane pushToast={pushToast} />}

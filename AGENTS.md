@@ -51,6 +51,7 @@ cargo xtask verify-cc-parity         # CC settings-merge parity goldens (see par
 pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
 cd panel && pnpm check:render        # the built remote panel actually mounts
+pnpm check:classes                   # every className has a CSS rule behind it
 ```
 
 `panel`'s render check answers a question `vite build` cannot: whether
@@ -85,6 +86,37 @@ store has unit tests, the loop that reads it had none — and it is the
 one path in the panel that sends a message the user is not present for.
 Watched failing against a drain that minted a fresh key instead of
 replaying the entry's.
+
+**A `className` with no rule renders as unstyled markup, and
+`pnpm check:classes` is the only thing that says so.** It is valid HTML,
+invisible to `tsc`, and invisible to a render test that asserts on text
+— so `RemotePane` shipped against eight invented class names (`pane`,
+`pane-block`, `pane-intro`, `pane-warning`, `pane-error`,
+`pane-actions`, `remote-devices`, `status-chip`) with every other gate
+green.
+
+It was the *second* instance, which is why the answer is a gate rather
+than a third careful reading: `QuickPromptsPane` had been rendering a
+dead `pane` since it was written, and `ProtectedPathsPane` carries a
+comment from an earlier pass that found `className="btn outline"` doing
+nothing. The scan found eight more across the renderer, all now removed.
+
+Three details it needs to be honest:
+
+- **Comments are stripped first.** `ProtectedPathsPane` quotes the dead
+  `className="btn outline"` inside the comment explaining its removal,
+  and the first version reported that as a live finding.
+- **It refuses a vacuous pass.** An empty corpus on either side reports
+  zero orphans, so it fails when it finds fewer than 100 of either.
+- **`lucide*` is exempt** — `lucide-react` stamps
+  `class="lucide lucide-<name>"` onto every icon SVG, and those belong to
+  the library. Scoped to that prefix so it cannot become a general
+  escape hatch.
+
+A class that exists only to be queried by a test is a `data-testid`, not
+a class — `MarkdownRenderer`'s `md-link` was the one such case and now
+says so. `pnpm check:classes:self-test` forces a failure so the guard is
+known to fire.
 
 **The wide pass declares a width, and that is the whole trick.** jsdom
 has no layout, so a real `ResizeObserver` measurement is always zero and
@@ -754,6 +786,14 @@ against a pane that collapsed them.
 The pane is **`group: "core"`**, for the reason Retention is: it is
 where you revoke a lost phone, and an emergency control you have to go
 hunting for is a broken one.
+
+**Quick prompts live inside it**, not in a pane of their own. They are
+the chips above the *remote panel's* composer and mean nothing anywhere
+else, so a top-level entry put one surface's detail beside Retention and
+Health. `QuickPromptsPane` stays its own component — its editor, its CSS
+and its behaviour were fine; only its position in the nav was wrong —
+and its search terms folded into the Remote pane's `keywords` so ⌘K
+still finds it.
 
 **Two chips, not one.** `RemoteServingChip` is the ambient tier for
 this surface; `RemoteWindowChip` is Claude Code's `crossSessionInbound`.
