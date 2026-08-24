@@ -270,6 +270,32 @@ describe("sessionCostEstimate", () => {
     expect(sessionCostEstimate(TABLE, [], { input: 1, output: 1 })).toBeNull();
   });
 
+  // #91's real cause, mirrored on this side. The list arrives sorted
+  // from a Rust BTreeSet and `<` (0x3C) sorts before every lowercase
+  // letter, so `<synthetic>` — Claude Code's placeholder for a turn it
+  // generated locally, never a model — led the array and `models[0]`
+  // priced the whole session as null.
+  it("ignores the <synthetic> placeholder when picking the model", () => {
+    const usage = { input: 1_000_000, output: 0 };
+    const withPlaceholder = sessionCostEstimate(
+      TABLE,
+      ["<synthetic>", "claude-opus-5"],
+      usage,
+      null,
+    );
+    const without = sessionCostEstimate(TABLE, ["claude-opus-5"], usage, null);
+    expect(withPlaceholder).not.toBeNull();
+    expect(withPlaceholder!.usd).toBeCloseTo(without!.usd, 9);
+  });
+
+  it("returns null when the placeholder is the only entry", () => {
+    // Nothing was billed — those turns carry zero tokens — so null is
+    // the honest answer rather than a number invented from a fallback.
+    expect(
+      sessionCostEstimate(TABLE, ["<synthetic>"], { input: 1, output: 1 }),
+    ).toBeNull();
+  });
+
   it("marks a family-estimated session", () => {
     const c = sessionCostEstimate(TABLE, ["claude-opus-9"], {
       input: 1_000_000,

@@ -312,6 +312,41 @@ const FAMILY_CURRENT: &[(&str, &str)] = &[
     ("claude-mythos-", "claude-fable-5"),
 ];
 
+/// Claude Code's placeholder in a transcript's `model` field for an
+/// assistant turn **it generated locally**, not one the API produced:
+/// `API Error: 403 Request not allowed`, `No response requested.`,
+/// interruption notices. Verified against real transcripts — every
+/// such turn carries `usage` with all four token counts at zero,
+/// because nothing was ever sent.
+///
+/// It is not a model, and treating it as one is expensive rather than
+/// merely untidy. `SessionRow::models` is a `BTreeSet`, so it
+/// serializes sorted, and `<` (0x3C) sorts before every lowercase
+/// letter — so `["<synthetic>", "claude-opus-5"]` puts the
+/// placeholder FIRST. Both cost estimators pick the leading element
+/// (Rust takes the minimum, `src/costs.ts` takes `models[0]`), so
+/// every session that ever hit one API error resolved to an unpriced
+/// "model" and dropped out of the cost total entirely — tokens still
+/// counted, dollars silently missing.
+///
+/// Measured on this repo's reference machine: 186 of 1,817 sessions,
+/// carrying 130 billion cache-read and 444 million output tokens —
+/// the majority of the machine's spend. It reads as "the price table
+/// is missing my newest models" (issue #91), which is why the
+/// distinction is written down here rather than fixed silently.
+///
+/// Filtered where the value is READ rather than where the index is
+/// written, so existing `sessions.db` files report correct costs with
+/// no rebuild.
+pub fn is_synthetic_model(id: &str) -> bool {
+    id == SYNTHETIC_MODEL
+}
+
+/// CC's literal placeholder. Exact match only — a real model id will
+/// never contain angle brackets, and a substring test would be a
+/// silent over-filter.
+pub const SYNTHETIC_MODEL: &str = "<synthetic>";
+
 /// Every canonical model id the bundled table prices, in tier order.
 /// [`crate::pricing::bundled`] iterates this to build the dashboard's
 /// price table, so the two can't disagree about which models exist.

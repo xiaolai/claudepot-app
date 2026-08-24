@@ -39,7 +39,7 @@ use crate::pricing::{PriceBook, PricedCost};
 use crate::session::SessionRow;
 use crate::session_index::error::SessionIndexError;
 use crate::session_index::{SessionIndex, TurnCandidate};
-use crate::session_live::pricing::RateConfidence;
+use crate::session_live::pricing::{self, RateConfidence};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -247,8 +247,13 @@ pub fn aggregate_from_rows(
         // so a single session that emitted three Opus turns and one
         // Sonnet turn adds 1 to each bucket, not 4. Sessions with no
         // recorded models simply don't contribute.
+        //
+        // `<synthetic>` is excluded for the same reason it is excluded
+        // from pricing: it is CC's placeholder for a locally-generated
+        // turn, and listing it in a "models used" breakdown invents a
+        // model the user never chose.
         let mut seen = std::collections::HashSet::new();
-        for m in &s.models {
+        for m in s.models.iter().filter(|m| !pricing::is_synthetic_model(m)) {
             if seen.insert(m.as_str()) {
                 *acc.models_by_session.entry(m.clone()).or_insert(0) += 1;
                 *totals.models_by_session.entry(m.clone()).or_insert(0) += 1;
@@ -470,8 +475,19 @@ fn compute_session_cost(
 /// for determinism — there's no per-message token attribution at the
 /// session-row level to pick a "majority" by, so any deterministic
 /// tiebreak is as good as another. Empty list → None.
+///
+/// `<synthetic>` is dropped first, and the ordering above is exactly
+/// why that matters: it is not a model (see
+/// [`pricing::is_synthetic_model`]), and `<` sorts before every
+/// lowercase letter, so it won the alphabetical tiebreak in every
+/// session that contained one and took the whole session's cost out
+/// of the report with it.
 fn dominant_model(models: &[String]) -> Option<&str> {
-    models.iter().min().map(|s| s.as_str())
+    models
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|m| !pricing::is_synthetic_model(m))
+        .min()
 }
 
 fn merge_min(slot: &mut Option<i64>, candidate: Option<i64>) {
@@ -633,6 +649,68 @@ mod tests {
             (foo_cost - 12.585).abs() < 0.01,
             "expected ~12.585 USD, got {foo_cost}"
         );
+    }
+
+    /// #91's real cause. `<synthetic>` is not a model, and because
+    /// `SessionRow::models` arrives sorted it led the list on every
+    /// session that ever hit an API error — winning the alphabetical
+    /// tiebreak and taking that session's whole cost out of the report.
+    /// On the reference machine that was 186 of 1,817 sessions and the
+    /// majority of the spend, which reads from outside as "the bundled
+    /// price table doesn't know my models".
+    #[test]
+    fn a_synthetic_turn_does_not_make_a_whole_session_unpriced() {
+        let prices = rates_for_test();
+        // Sorted exactly the way a BTreeSet serializes it: `<` (0x3C)
+        // before `c` (0x63).
+        let row = row(
+            "/p",
+            1_800_000_000_000,
+            vec!["<synthetic>", "claude-opus-5"],
+            TokenUsage {
+                input: 1_000_000,
+                output: 1_000_000,
+                cache_creation: 0,
+                cache_read: 0,
+            },
+        );
+        assert!(
+            row.models[0] < row.models[1],
+            "the fixture must reproduce the ordering that causes the bug"
+        );
+
+        let out = aggregate_from_rows(vec![row], &prices, TimeWindow::default());
+        assert_eq!(
+            out.totals.unpriced_sessions, 0,
+            "the session has a real model and must be priced"
+        );
+        let usd = out.totals.cost_usd.expect("priced");
+        assert!(usd > 0.0, "cost must be non-zero, got {usd}");
+
+        // And the placeholder must not appear as a model the user used.
+        assert!(
+            !out.totals.models_by_session.contains_key("<synthetic>"),
+            "models breakdown: {:?}",
+            out.totals.models_by_session
+        );
+        assert_eq!(out.totals.models_by_session.get("claude-opus-5"), Some(&1));
+    }
+
+    #[test]
+    fn a_session_of_only_synthetic_turns_stays_unpriced() {
+        // Nothing was billed — CC generated those turns locally and
+        // every one carries zero tokens — so "unpriced" is the honest
+        // answer here, not a bug to paper over.
+        let prices = rates_for_test();
+        let row = row(
+            "/p",
+            1_800_000_000_000,
+            vec!["<synthetic>"],
+            TokenUsage::default(),
+        );
+        let out = aggregate_from_rows(vec![row], &prices, TimeWindow::default());
+        assert_eq!(out.totals.unpriced_sessions, 1);
+        assert!(out.totals.models_by_session.is_empty());
     }
 
     #[test]

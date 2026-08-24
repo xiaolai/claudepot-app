@@ -189,15 +189,30 @@ export function sessionCostEstimate(
   usage: TokenUsage,
   atMs?: number | null,
 ): PricedCost | null {
-  if (models.length === 0) return null;
+  // `<synthetic>` is Claude Code's placeholder for a turn it generated
+  // locally (an API error, "No response requested."), not a model. It
+  // has to go before `models[0]` is read: the list arrives sorted from
+  // a Rust `BTreeSet`, and `<` sorts ahead of every lowercase letter,
+  // so any session that ever hit one API error led with the
+  // placeholder and priced as null. Mirrors
+  // `session_live::pricing::is_synthetic_model` — see its docs for
+  // the measurement.
+  const real = models.filter((m) => m !== SYNTHETIC_MODEL);
+  if (real.length === 0) return null;
   // Prefer the first model as the basis. Over-estimates slightly
   // when a session starts on Opus and switches to Haiku mid-way
   // (Haiku is 15× cheaper input); under-estimates in the reverse.
   // Acceptable for a dashboard figure — anyone who cares about a
   // precise bill goes to Anthropic's dashboard, not ours.
   const on = (atMs != null ? ymdFromMs(atMs) : null) ?? todayUtc();
-  return costFromUsage(table, models[0], usage, on);
+  return costFromUsage(table, real[0], usage, on);
 }
+
+/**
+ * Claude Code's literal placeholder in a transcript's `model` field.
+ * Kept in lock-step with `session_live::pricing::SYNTHETIC_MODEL`.
+ */
+export const SYNTHETIC_MODEL = "<synthetic>";
 
 /**
  * Format a dollar number with adaptive precision — small values
