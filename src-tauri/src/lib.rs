@@ -51,10 +51,12 @@ mod invalidation_orchestrator;
 mod live_activity_bridge;
 mod memory_watch;
 mod ops;
+mod peer_inbound_orchestrator;
 mod permission_orchestrator;
 mod poller;
 mod pr_orchestrator;
 mod preferences;
+mod remote_server;
 mod retention_boot_check;
 mod rotation_orchestrator;
 mod service_status_watcher;
@@ -944,6 +946,7 @@ pub fn run() {
             }
             state::LiveSessionState::new(svc)
         })
+        .manage(remote_server::RemoteServerState::new())
         .manage(ops::RunningOps::new())
         .manage(commands::cc_doctor::CcDoctorState::new())
         .manage(state::TrayHealthState::default())
@@ -1045,6 +1048,9 @@ pub fn run() {
             commands::tray_set_alert_count,
             traffic_light::traffic_light_metrics,
             commands::cli::sync_from_current_cc,
+            commands::quick_prompt::quick_prompt_list,
+            commands::quick_prompt::quick_prompt_save,
+            commands::quick_prompt::quick_prompt_defaults,
             commands::unlock_keychain,
             commands::reveal_in_finder,
             commands::logs_dir_reveal,
@@ -1330,6 +1336,18 @@ pub fn run() {
             commands::rotation::rotation_pending_list,
             commands::rotation::rotation_apply_pending,
             commands::rotation::rotation_dismiss_pending,
+            commands::peer_inbound::peer_inbound_state,
+            commands::peer_inbound::peer_inbound_grant,
+            commands::peer_inbound::peer_inbound_revoke,
+            commands::remote::remote_status,
+            commands::remote::remote_enable,
+            commands::remote::remote_disable,
+            commands::remote::remote_set_password,
+            commands::remote::remote_set_approvals,
+            commands::remote::remote_start,
+            commands::remote::remote_stop,
+            commands::remote::remote_revoke_all,
+            commands::remote::remote_revoke_device,
             commands::permission::permission_list,
             commands::permission::permission_get,
             commands::permission::permission_grant,
@@ -1379,6 +1397,22 @@ pub fn run() {
             std::process::exit(1);
         })
         .run(|app, event| {
+            // Quitting Claudepot takes the remote surface down with it.
+            //
+            // That is the trade in-process hosting makes — see
+            // `remote_server`'s module docs — and it is enforced here
+            // rather than left to the OS reaping the process, because
+            // CC's `PermissionRequest` hook is an entry in the user's
+            // `settings.json` that outlives us if nobody removes it.
+            // `Exit` rather than `ExitRequested`: the latter can be
+            // prevented, and stopping the server for a quit that then
+            // does not happen would leave the pane reporting a state
+            // nobody asked for.
+            if matches!(event, tauri::RunEvent::Exit) {
+                use tauri::Manager;
+                remote_server::stop_on_exit(&app.state::<remote_server::RemoteServerState>());
+            }
+
             // Re-apply the Dock icon once the app is actually up.
             //
             // `setup()` also calls this, and that call alone is not

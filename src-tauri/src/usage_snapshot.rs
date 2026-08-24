@@ -80,6 +80,17 @@ async fn run_tick(app: &AppHandle) {
     )
     .await;
 
+    // Close an expired remote-control window. Same placement rationale
+    // as the permission grants above: independent of account state, so
+    // it must run before the no-accounts / no-credentials early
+    // returns. This one matters more if it is skipped — the setting it
+    // manages is machine-wide.
+    guarded(
+        "peer_inbound_orchestrator",
+        crate::peer_inbound_orchestrator::tick(app),
+    )
+    .await;
+
     // Refresh per-project PR detection. Independent of accounts (a
     // user can have projects without an Anthropic account); runs
     // before the account-state early returns. The orchestrator

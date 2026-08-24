@@ -55,6 +55,24 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
                 if let Some(ref w) = u.seven_day_sonnet {
                     j["seven_day_sonnet"] = win_json(w);
                 }
+                // Model-scoped windows (the weekly Fable limit, and
+                // whatever the server scopes next). Emitted because
+                // this verb fetched them and dropping them made
+                // `--json` a worse witness than the GUI: absence here
+                // was read as absence upstream, which was wrong.
+                let scoped: Vec<serde_json::Value> = u
+                    .scoped_limits()
+                    .map(|(label, l)| {
+                        serde_json::json!({
+                            "label": label,
+                            "kind": l.kind, "utilization": l.percent, "is_active": l.is_active,
+                            "resets_at": l.resets_at.map(|t| t.to_rfc3339()),
+                        })
+                    })
+                    .collect();
+                if !scoped.is_empty() {
+                    j["scoped_limits"] = serde_json::json!(scoped);
+                }
                 if let Some(ref extra) = u.extra_usage {
                     // monthly_limit / used_credits are passed through
                     // in MINOR units (pence/cents) to match the raw

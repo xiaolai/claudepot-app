@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Mint the TLS material for Claudepot's remote surface.
+#
+# Claudepot terminates TLS itself. A self-hosted tailnet control server
+# cannot issue certificates, so `tailscale serve` is not available and
+# there is no public CA that will sign a `.internal` name. This script
+# creates a small private CA and a leaf certificate for this machine.
+#
+# Install the CA (printed at the end) on each phone or laptop that will
+# reach Claudepot. On iOS that is TWO steps and the second is the one
+# everybody forgets:
+#   1. AirDrop / open the .crt  ->  Settings > Profile Downloaded > Install
+#   2. Settings > General > About > Certificate Trust Settings
+#      -> enable full trust for the root
+# Without step 2 Safari rejects it and the failure looks like a bug.
+#
+# Idempotent: an existing CA is reused so previously-trusted devices
+# keep working. Delete the CA files to start over — every device then
+# has to install the new one.
+set -euo pipefail
+
+DATA_DIR="${CLAUDEPOT_DATA_DIR:-$HOME/.claudepot}"
+CA_KEY="$DATA_DIR/remote-ca-key.pem"
+CA_CRT="$DATA_DIR/remote-ca.crt"
+LEAF_KEY="$DATA_DIR/remote-key.pem"
+LEAF_CRT="$DATA_DIR/remote-cert.pem"
+
+# Safari refuses a leaf valid for more than 398 days (Apple's policy
+# since Sep 2020), and the resulting error says nothing about duration.
+# 397 keeps a day of headroom. The CA itself is exempt from that rule.
+LEAF_DAYS=397
+CA_DAYS=3650
+
+short="$(hostname -s)"
+
+# The MagicDNS name is NOT `$(hostname -s).$suffix`.
+#
+# Tailscale assigns its own sanitised name, and it can differ
+# substantially from the local hostname — a machine called
+# `Someones-Laptop-Pro-7` locally may be plain `workstation` on the
+# tailnet. Deriving it from `hostname -s` mints a certificate for a name
+# that resolves nowhere, which fails as "cannot open the page" with
+# nothing pointing at the certificate.
+#
+# So take the name Tailscale itself reports for this node, and fall
+# back to composing one only if there is no Tailscale at all.
+ts_dnsname="$(tailscale status --json 2>/dev/null \
+  | python3 -c 'import json,sys
+try:
+    print((json.load(sys.stdin).get("Self") or {}).get("DNSName","").rstrip("."))
+except Exception:
+    pass' 2>/dev/null || true)"
+
+# Pretty-printed JSON: `"MagicDNSSuffix": "example.internal"`, with a
+# space after the colon. An earlier version matched `"MagicDNSSuffix":"`
+# and silently derived nothing.
+suffix="$(tailscale status --json 2>/dev/null \
+  | grep -oE '"MagicDNSSuffix"[[:space:]]*:[[:space:]]*"[^"]*"' \
+  | head -1 \
+  | sed -E 's/.*"([^"]*)"$/\1/')"
+suffix="${suffix%.}"
+
+host="${1:-}"
+if [ -z "$host" ]; then
+  if [ -n "$ts_dnsname" ]; then
+    host="$ts_dnsname"
+  elif [ -n "$suffix" ]; then
+    host="$short.$suffix"
+  else
+    # mDNS: resolvable on a LAN with no DNS setup at all, and accepted
+    # by the server's Host guard. Note it does NOT traverse a tailnet —
+    # Tailscale carries no mDNS — so it is the last choice, not the
+    # first.
+    host="$short.local"
+  fi
+fi
+
+# Both a DNS name and the tailnet IP: a user may reach either, and a
+# certificate without a matching SAN fails with a message that blames
+# the connection rather than the certificate.
+ts_ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+
+# Every name the appliance may be reached by, because a certificate
+# without a matching SAN fails with a message that blames the
+# connection rather than the certificate. Cheap to add, expensive to
+# diagnose when missing.
+alt_names="$host"
+add_name() { case ",$alt_names," in *",DNS:$1,"*|"$1,"*|*",$1"*) ;; *) alt_names="$alt_names,DNS:$1" ;; esac; }
+[ -n "$ts_dnsname" ] && [ "$ts_dnsname" != "$host" ] && add_name "$ts_dnsname"
+add_name "$short.local"
+
+mkdir -p "$DATA_DIR"
+chmod 700 "$DATA_DIR"
+
+if [ ! -f "$CA_KEY" ] || [ ! -f "$CA_CRT" ]; then
+  echo "==> creating a new CA (devices will need to trust this)"
+  openssl req -x509 -newkey rsa:4096 -sha256 -days "$CA_DAYS" -nodes \
+    -keyout "$CA_KEY" -out "$CA_CRT" \
+    -subj "/CN=Claudepot Remote CA/O=Claudepot" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+  chmod 600 "$CA_KEY"
+  chmod 644 "$CA_CRT"
+else
+  echo "==> reusing the existing CA (already-trusted devices keep working)"
+fi
+
+san="DNS:$host"
+# `alt_names` is "$host[,DNS:extra...]"; append only the extras.
+case "$alt_names" in *,*) san="$san,${alt_names#*,}" ;; esac
+[ -n "$ts_ip" ] && san="$san,IP:$ts_ip"
+# Loopback too, so one certificate also covers local testing.
+san="$san,IP:127.0.0.1,DNS:localhost"
+echo "==> minting a leaf for $san (${LEAF_DAYS}d)"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+openssl req -newkey rsa:2048 -sha256 -nodes \
+  -keyout "$LEAF_KEY" -out "$tmp/leaf.csr" \
+  -subj "/CN=$host" 2>/dev/null
+
+# extendedKeyUsage=serverAuth is required by Safari; without it the
+# certificate is structurally valid and still refused. keyUsage is here
+# for the same class of reason: absent means "unrestricted" and most
+# validators accept that, but a strict one wants digitalSignature and
+# keyEncipherment named on an RSA server certificate — and the rejection
+# it produces (a bare `certificate_unknown` alert) says nothing about
+# which extension was missing.
+openssl x509 -req -in "$tmp/leaf.csr" -sha256 -days "$LEAF_DAYS" \
+  -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \
+  -out "$LEAF_CRT" \
+  -extfile <(printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyEncipherment\nbasicConstraints=critical,CA:FALSE\n' "$san") \
+  2>/dev/null
+
+# The private key authenticates this machine to every paired device.
+# `remote::tls` refuses to start the server if this is not owner-only.
+chmod 600 "$LEAF_KEY"
+chmod 644 "$LEAF_CRT"
+
+echo
+echo "cert : $LEAF_CRT"
+echo "key  : $LEAF_KEY  (0600)"
+echo
+echo "Install this on every device that will connect:"
+echo "  $CA_CRT"
+echo
+# Printed so a device's trust can be CHECKED rather than assumed. When a
+# handshake fails with `certificate_unknown` the two candidate causes —
+# trust not enabled, or a different CA installed from an earlier run —
+# look identical from the server, and this is what tells them apart.
+echo "CA SHA-256 fingerprint (compare with the device):"
+openssl x509 -in "$CA_CRT" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=/  /'
+echo
+echo "iOS, and BOTH steps are required:"
+echo "  1. install the profile   Settings > General > VPN & Device Management"
+echo "  2. enable full trust     Settings > General > About >"
+echo "                           Certificate Trust Settings"
+echo "Step 2 is the one that gets skipped, and skipping it fails exactly"
+echo "like a broken certificate."

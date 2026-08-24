@@ -13,81 +13,34 @@ pub async fn use_account(
     no_refresh: bool,
     force: bool,
 ) -> Result<()> {
-    use claudepot_core::cli_backend;
-    use claudepot_core::resolve::resolve_email;
     use claudepot_core::services::account_service;
 
-    let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let target = ctx
-        .store
-        .find_by_email(&email)?
-        .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
-
-    // Reconcile DB's active_cli pointer with CC's actual keychain state
-    // BEFORE checking "already active". Otherwise, if a running CC
-    // process refreshed its token and reverted a prior swap, our DB
-    // still thinks the old target is active — and this command would
-    // falsely report "Already active" without actually fixing the
-    // keychain. Best-effort; network/profile failures fall through.
-    if let Err(e) = account_service::sync_from_current_cc(&ctx.store).await {
-        if !ctx.quiet {
-            eprintln!("\u{26a0}  Couldn't verify CC state ({e}); proceeding with DB view.");
-        }
-    }
-
-    let current_uuid = ctx
-        .store
-        .active_cli_uuid()?
-        .and_then(|s| s.parse::<uuid::Uuid>().ok());
-
-    if current_uuid == Some(target.uuid) {
-        if ctx.json {
-            println!(
-                "{}",
-                serde_json::json!({"already_active": true, "email": email})
-            );
-        } else {
-            ctx.info(&format!("Already active: {email}"));
-        }
-        return Ok(());
-    }
-
-    let platform = cli_backend::create_platform();
-
-    ctx.info(&format!("Switching CLI to {email}..."));
-    let refresher = cli_backend::swap::DefaultRefresher;
-    let fetcher = cli_backend::swap::DefaultProfileFetcher;
-    if force {
-        cli_backend::swap::switch_force(
-            &ctx.store,
-            current_uuid,
-            target.uuid,
-            platform.as_ref(),
-            !no_refresh,
-            &refresher,
-            &fetcher,
-        )
+    // One sequence, shared with the remote surface's activate
+    // endpoint. Everything below this call is presentation — the
+    // split-brain warning is CLI register and stays here.
+    let outcome = account_service::activate_cli(&ctx.store, email_input, force, !no_refresh)
         .await
-        .map_err(annotate_swap_err)?;
-    } else {
-        cli_backend::swap::switch(
-            &ctx.store,
-            current_uuid,
-            target.uuid,
-            platform.as_ref(),
-            !no_refresh,
-            &refresher,
-            &fetcher,
-        )
-        .await
-        .map_err(annotate_swap_err)?;
-    }
+        .map_err(|e| match e {
+            account_service::ActivateError::Swap(swap_err) => annotate_swap_err(swap_err),
+            other => anyhow::anyhow!("{other}"),
+        })?;
 
-    let from = current_uuid
-        .and_then(|u| ctx.store.find_by_uuid(u).ok().flatten())
-        .map(|a| a.email)
-        .unwrap_or_else(|| "(none)".to_string());
+    let (from, email) = match outcome {
+        account_service::Activation::AlreadyActive { email } => {
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::json!({"already_active": true, "email": email})
+                );
+            } else {
+                ctx.info(&format!("Already active: {email}"));
+            }
+            return Ok(());
+        }
+        account_service::Activation::Switched { from, to } => {
+            (from.unwrap_or_else(|| "(none)".to_string()), to)
+        }
+    };
 
     if ctx.json {
         println!(

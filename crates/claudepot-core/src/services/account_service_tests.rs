@@ -1778,3 +1778,69 @@ async fn test_verify_all_with_progress_uses_200ms_stagger_only_between_calls() {
         let _ = swap::delete_private(a.uuid).await;
     }
 }
+
+// -- activate_cli tests --
+//
+// These cover the resolution half, which is the half that had two
+// implementations and lost one. The swap half is covered by
+// `cli_backend::swap`'s own suite; reaching it here would need a
+// keychain.
+
+#[tokio::test]
+async fn activate_resolves_a_prefix_the_way_the_domain_says() {
+    // The regression that prompted the extraction: the remote surface
+    // used an exact `find_by_email`, so a prefix that worked at the
+    // keyboard was "account not found" from the phone.
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+    let acct = make_account("alice@example.com");
+    store.insert(&acct).unwrap();
+    store.set_active_cli(acct.uuid).unwrap();
+
+    let got = activate_cli(&store, "alice", false, false).await.unwrap();
+    assert_eq!(
+        got,
+        Activation::AlreadyActive {
+            email: "alice@example.com".into()
+        }
+    );
+}
+
+#[tokio::test]
+async fn activate_says_ambiguous_rather_than_not_found() {
+    // "not found" would send the user looking for a typo that isn't
+    // there; the candidates are the actual next step.
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+    store.insert(&make_account("alice@example.com")).unwrap();
+    store.insert(&make_account("alicia@example.com")).unwrap();
+
+    let err = activate_cli(&store, "ali", false, false).await.unwrap_err();
+    match err {
+        ActivateError::Resolve(crate::resolve::ResolveError::Ambiguous { candidates, .. }) => {
+            assert_eq!(candidates.len(), 2);
+        }
+        other => panic!("expected Ambiguous, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn activate_reports_no_match_for_a_name_nobody_has() {
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+    store.insert(&make_account("alice@example.com")).unwrap();
+
+    let err = activate_cli(&store, "zebra", false, false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ActivateError::Resolve(crate::resolve::ResolveError::NoMatch(_))
+        ),
+        "{err:?}"
+    );
+}

@@ -133,7 +133,7 @@ localStorage compatibility.
 
 ![Global tab](assets/screenshots/global.png)
 
-**Settings** — Fourteen sub-panes: General, Appearance (light / dark / system, paper-mono density), Notifications, Network (status-bar dot + status-page polling), **Rotation** (rule-driven auto-swap of the active CLI account when a usage window crosses a threshold — confirm or auto, with a 500-entry audit log), **Retention** (Claude Code deletes saved conversations older than 30 days on every launch and reports nothing — this pane is the only place that says so, and shows how many of *yours* are scheduled to go), Health (Claude Code's own self-diagnostic, scraped from `claude doctor`), MCP (memory-server health + agent-instruction snippet installer), Cleanup (**Prune** orphaned sessions · **Slim** strips bulky tool-output payloads · **Trash** 7-day undo), Protected paths, GitHub PAT, Locks (SQLite-lock recovery), Diagnostics (Claudepot's own self-check), and About.
+**Settings** — Fifteen sub-panes: General, Appearance (light / dark / system, paper-mono density), Notifications, Network (status-bar dot + status-page polling), **Remote** (the LAN appliance — start and stop the server the phone talks to, set the admin password, revoke a lost device, and edit the quick-prompt chips above the panel's composer), **Rotation** (rule-driven auto-swap of the active CLI account when a usage window crosses a threshold — confirm or auto, with a 500-entry audit log), **Retention** (Claude Code deletes saved conversations older than 30 days on every launch and reports nothing — this pane is the only place that says so, and shows how many of *yours* are scheduled to go), Health (Claude Code's own self-diagnostic, scraped from `claude doctor`), MCP (memory-server health + agent-instruction snippet installer), Cleanup (**Prune** orphaned sessions · **Slim** strips bulky tool-output payloads · **Trash** 7-day undo), Protected paths, GitHub PAT, Locks (SQLite-lock recovery), Diagnostics (Claudepot's own self-check), and About.
 
 ![Settings tab](assets/screenshots/settings.png)
 
@@ -160,6 +160,14 @@ claudepot project   list | show | move | clean | remove | trash | repair
 claudepot session   list-orphans | move | adopt-orphan | rebuild-index
                     backfill-exchanges | view | export | search | worktrees
                     prune | slim | trash {list|restore|empty}
+                    live | send | inbound {status|grant|revoke}
+                                                    # address a RUNNING
+                                                    # Claude Code session
+claudepot remote    status | set-password | enable  # LAN appliance: reach
+                    disable | approvals | revoke-all  # Claudepot from a phone
+                    serve                           # `approvals off` keeps the
+                                                    # panel, drops the one
+                                                    # capability that GRANTS
 claudepot agent     draft | list | show            (alias: automation)
 claudepot lesson    harvest | list | accept | reject | compile | status
                                                     # the knowledge compiler
@@ -169,6 +177,7 @@ claudepot corpus    index | status | detect         # cross-machine transcript
 claudepot memory    list | view | log               # CLAUDE.md + memory files
 claudepot activity  recent | reindex                # anomaly + milestone cards
 claudepot usage     report                          # local token/cost rollup
+claudepot usage     refresh                         # refetch each account's usage snapshot
 claudepot update    check | cli | desktop | config  # CC + Desktop updates
 claudepot settings  auto-memory {status|enable|disable|clear}
 claudepot mcp       memory-server | print-snippet | install-snippet

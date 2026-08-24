@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../../lib/i18n";
+import { toMermaidColor } from "./mermaidColor";
 
 /**
  * Lazy-rendered Mermaid diagram for markdown ` ```mermaid ` fences.
@@ -57,6 +58,26 @@ export function MermaidBlock({ source }: { source: string }) {
           startOnLoad: false,
           securityLevel: "strict",
           theme: "base",
+          // Pure SVG labels, never HTML ones. Mermaid's default puts
+          // labels in a `<foreignObject>` of HTML containing unclosed
+          // `<br>`, which makes the returned SVG HTML-flavoured rather
+          // than well-formed XML — and `attachSvg` parses it as
+          // `image/svg+xml`, so a flowchart with `<br/>` labels failed
+          // with "Opening and ending tag mismatch: br line 1 and p".
+          //
+          // It bites twice here: `sanitizeSvg` also strips
+          // `foreignObject` outright, so even a diagram that parsed
+          // would have rendered with its labels missing. Turning HTML
+          // labels off removes both problems at the source and keeps
+          // the strict parse, which is a deliberate guard rather than
+          // an accident. `<br/>` still breaks a line — mermaid emits
+          // tspans for it.
+          //
+          // Found on the panel, fixed on both: same defect, two
+          // renderers.
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
+          class: { htmlLabels: false },
           themeVariables: readThemeVariables(),
           fontFamily:
             getComputedStyle(document.documentElement)
@@ -186,7 +207,19 @@ function scrubAttributes(el: Element): void {
  */
 function readThemeVariables(): Record<string, string> {
   const cs = getComputedStyle(document.documentElement);
-  const v = (name: string) => cs.getPropertyValue(name).trim();
+  // Every token in tokens.css is `oklch()`, and mermaid runs each theme
+  // colour through khroma — which predates CSS Color 4 and throws
+  // `Unsupported color format`, taking the whole diagram down before
+  // layout starts. Latent here since this file was written: the failure
+  // needs a diagram whose theme derives enough colours to reach a
+  // throwing path, which a flowchart does and a sequence diagram does
+  // not. See `mermaidColor.ts`.
+  const v = (name: string) => toMermaidColor(cs.getPropertyValue(name).trim());
+  // Sizes and families are NOT colours: `v` runs values through
+  // `toMermaidColor`, which is right for a paint and meaningless for
+  // `13px`.
+  const raw = (name: string, fallback: string) =>
+    cs.getPropertyValue(name).trim() || fallback;
   return {
     // Surfaces
     background: v("--bg") || "transparent",
@@ -231,7 +264,10 @@ function readThemeVariables(): Record<string, string> {
     taskBkgColor: v("--accent-soft"),
     taskBorderColor: v("--accent-border"),
     taskTextColor: v("--fg"),
-    // Misc
-    fontSize: "13px",
+    // Misc. From the token, not a literal — `.claude/rules/design.md`
+    // makes `tokens.css` the only place a size is declared, and mermaid
+    // MEASURES text to size its nodes, so a hardcoded value here also
+    // mis-sizes every box the moment the token moves.
+    fontSize: raw("--fs-base", "13px"),
   };
 }

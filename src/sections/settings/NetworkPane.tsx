@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { tierColor, tierLabel } from "../../api/service-status";
@@ -375,6 +375,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/**
+ * A checkbox with a label and an explanatory line under it.
+ *
+ * **`htmlFor` + `aria-describedby`, not a wrapping `<label>`.** A label
+ * that wraps both the control and the explanation takes its accessible
+ * name from ALL of its text, so this announced as "Probe latency on
+ * open Runs a HEAD request against each endpoint…" — the whole
+ * paragraph read out as the control's name. Name and description are
+ * different relationships and assistive tech treats them differently:
+ * the name identifies, the description elaborates on request.
+ *
+ * `SettingToggleRow` is the canonical version of this row and had it
+ * right; this is the same contract on a checkbox.
+ */
 function ToggleRow({
   checked,
   onChange,
@@ -386,8 +400,10 @@ function ToggleRow({
   label: string;
   detail?: string;
 }) {
+  const id = useId();
+  const detailId = `${id}-detail`;
   return (
-    <label
+    <div
       style={{
         display: "flex",
         alignItems: "flex-start",
@@ -395,8 +411,10 @@ function ToggleRow({
       }}
     >
       <input
+        id={id}
         type="checkbox"
         checked={checked}
+        aria-describedby={detail ? detailId : undefined}
         onChange={(e) => onChange(e.target.checked)}
         style={{
           marginTop: "var(--sp-3)",
@@ -405,13 +423,15 @@ function ToggleRow({
         }}
       />
       <span style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
-        <span style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>{label}</span>
+        <label htmlFor={id} style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+          {label}
+        </label>
         {detail && (
-          <span style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
+          <span id={detailId} style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}>
             {detail}
           </span>
         )}
       </span>
-    </label>
+    </div>
   );
 }

@@ -152,10 +152,20 @@ fn read(repo: &Path, rel: &str) -> Result<String> {
 
 // ─── 1. CLI verbs ────────────────────────────────────────────────────
 
-/// Top-level variants of `enum Commands` in the CLI's `main.rs`.
+/// Top-level variants of `enum Commands` in the CLI's `main.rs`, minus
+/// the ones hidden from `--help`.
 ///
 /// Parsed rather than hand-listed: a hand-listed set is one more place
 /// to forget, which is the bug being fixed.
+///
+/// `#[command(hide = true)]` verbs are skipped because this check asks
+/// "is the user-facing CLI documented", and a hidden verb is not part
+/// of it — `claudepot hook permission-request` is invoked by Claude
+/// Code, and putting it in the README's command block would invite
+/// someone to run it by hand and get nothing. Note the exemption is
+/// narrow on purpose: it keys off the attribute clap itself reads, so a
+/// verb cannot escape documentation without also disappearing from
+/// `--help`.
 fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let Some(start) = src.find("enum Commands {") else {
@@ -163,8 +173,12 @@ fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
     };
     let body = &src[start..];
     let mut depth = 0usize;
+    let mut hidden = false;
     for line in body.lines() {
         let trimmed = line.trim_start();
+        if depth == 1 && trimmed.starts_with("#[") && trimmed.contains("hide = true") {
+            hidden = true;
+        }
         // Variants sit at exactly one level of nesting inside the enum.
         if depth == 1 && !trimmed.starts_with("//") && !trimmed.starts_with("#[") {
             if let Some(name) = trimmed
@@ -174,7 +188,10 @@ fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
             {
                 // A variant line ends in `{`, `,` or `(`.
                 if trimmed.ends_with('{') || trimmed.ends_with(',') || trimmed.contains('(') {
-                    out.insert(name.to_lowercase());
+                    if !hidden {
+                        out.insert(name.to_lowercase());
+                    }
+                    hidden = false;
                 }
             }
         }
@@ -2259,32 +2276,24 @@ fn keyboard_closures(src: &str) -> Vec<(String, String)> {
 /// derived from had been deleted from the repo. Nothing failed,
 /// because nothing was looking.
 ///
-/// # The two checks are deliberately different shapes
+/// # Both checks compare GEOMETRY, and the favicon used not to
 ///
-/// The favicon is a **byte copy** of the flat master, so byte equality
-/// is the honest assertion. The nav logo is not and cannot be: it
-/// carries a provenance comment and a squared viewBox, because it is
-/// composited onto a themed page rather than into a tab strip. Byte
-/// equality there would force one of the two to be wrong. What must
-/// hold is that the *artwork* matches — so this compares the block's
-/// path geometry, which is what changes when the mark is redrawn.
+/// The favicon was a **byte copy** of `app-icon-flat.svg`, the plated
+/// master — which meant it carried an opaque `#D9D5CF` plate into a
+/// browser tab whose colour the site does not control, so the mark sat
+/// on a grey card against every theme that was not that grey. It tracks
+/// the **plateless** glyph now, the same master the nav logo does, and
+/// the check is the same shape for the same reason: a derived file
+/// carries a provenance comment and its own framing, so byte equality
+/// would force one of the two to be wrong. What must hold is that the
+/// artwork matches.
+///
+/// The favicon additionally must have **no background rect** — that is
+/// the property the plate removal bought, and geometry equality alone
+/// would not notice one being pasted back on top.
 fn check_web_icon_provenance(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
-    // Favicon: a straight copy of the plated flat master.
-    let master = repo.join("assets/icon-set/app-icon-flat.svg");
-    let favicon = repo.join("web/src/app/icon.svg");
-    match (std::fs::read(&master), std::fs::read(&favicon)) {
-        (Ok(a), Ok(b)) if a != b => problems.push(
-            "web/src/app/icon.svg has drifted from assets/icon-set/app-icon-flat.svg \
-             (the favicon is a byte copy of that master — re-copy it)"
-                .to_string(),
-        ),
-        (Err(_), _) => problems.push("assets/icon-set/app-icon-flat.svg is missing".to_string()),
-        (_, Err(_)) => problems.push("web/src/app/icon.svg is missing".to_string()),
-        _ => {}
-    }
-
-    // Nav logo: same artwork, different framing — compare geometry.
     let glyph = repo.join("assets/icon-set/windows/icon-glyph.svg");
+    let favicon = repo.join("web/src/app/icon.svg");
     let logo = repo.join("web/public/claudepot-logo.svg");
     let (Ok(glyph_src), Ok(logo_src)) = (
         std::fs::read_to_string(&glyph),
@@ -2296,6 +2305,21 @@ fn check_web_icon_provenance(repo: &Path, problems: &mut Vec<String>) -> Result<
         );
         return Ok(());
     };
+    let Ok(favicon_src) = std::fs::read_to_string(&favicon) else {
+        problems.push("web/src/app/icon.svg is missing".to_string());
+        return Ok(());
+    };
+
+    // A favicon sits on a tab strip whose colour the site does not
+    // control. An opaque plate there is a card floating on every theme
+    // that is not exactly that colour, which is what shipped.
+    if favicon_src.contains("<rect") {
+        problems.push(
+            "web/src/app/icon.svg contains a <rect> — the favicon is the PLATELESS glyph, \
+             transparent behind, so it works on a light or dark tab strip alike"
+                .to_string(),
+        );
+    }
 
     let paths = |s: &str| -> Vec<String> {
         s.match_indices(" d=\"")
@@ -2308,20 +2332,26 @@ fn check_web_icon_provenance(repo: &Path, problems: &mut Vec<String>) -> Result<
     let want = paths(&glyph_src);
     if want.is_empty() {
         problems.push(
-            "assets/icon-set/windows/icon-glyph.svg has no <path d=…> — the logo check \
-             cannot run, so it must not silently pass"
+            "assets/icon-set/windows/icon-glyph.svg has no <path d=…> — the logo and \
+             favicon checks cannot run, so they must not silently pass"
                 .to_string(),
         );
         return Ok(());
     }
-    let have = paths(&logo_src);
-    for d in &want {
-        if !have.contains(d) {
-            problems.push(format!(
-                "web/public/claudepot-logo.svg is missing a block face from \
-                 assets/icon-set/windows/icon-glyph.svg (path starting `{}`) — re-derive it",
-                d.chars().take(28).collect::<String>()
-            ));
+    // Both derived files carry the same four block faces.
+    for (label, src) in [
+        ("web/public/claudepot-logo.svg", &logo_src),
+        ("web/src/app/icon.svg", &favicon_src),
+    ] {
+        let have = paths(src);
+        for d in &want {
+            if !have.contains(d) {
+                problems.push(format!(
+                    "{label} is missing a block face from \
+                     assets/icon-set/windows/icon-glyph.svg (path starting `{}`) — re-derive it",
+                    d.chars().take(28).collect::<String>()
+                ));
+            }
         }
     }
     Ok(())
@@ -2455,6 +2485,35 @@ fn check_cc_env_spec(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn hidden_verbs_are_exempt_from_the_readme_and_visible_ones_are_not() {
+        // Both directions: an exemption nobody has watched narrow is
+        // indistinguishable from one that exempts everything.
+        let src = r#"
+enum Commands {
+    /// A normal one
+    Account {
+        #[command(subcommand)]
+        action: AccountAction,
+    },
+    #[command(hide = true)]
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
+    /// Another normal one, AFTER the hidden one
+    Status,
+}
+"#;
+        let verbs = super::shipped_cli_verbs(src);
+        assert!(verbs.contains("account"), "{verbs:?}");
+        assert!(!verbs.contains("hook"), "hidden verb leaked in: {verbs:?}");
+        assert!(
+            verbs.contains("status"),
+            "the hidden flag must not stick to the next variant: {verbs:?}"
+        );
+    }
     use super::*;
 
     #[test]

@@ -57,6 +57,17 @@ export const SETTINGS_PANES = [
   // destroys user data. "core", not "advanced": a control that exists
   // to prevent silent data loss is worthless if the user has to go
   // looking for it, and CC's own UI never mentions the setting at all.
+  // "core", not "advanced", and for the same reason Retention is: this
+  // pane is where you revoke a lost phone, and an emergency control you
+  // have to go hunting for is a broken emergency control.
+  { id: "remote",
+    get label() { return i18n.t("panes.remote", { ns: "settings" }); },
+    glyph: NF.globe, group: "core",
+    keywords: ["panel", "phone", "lan", "appliance", "server", "pair", "device", "revoke",
+               "password",
+               // Folded in when Quick prompts stopped being its own pane:
+               // the editor moved into this one, and ⌘K still has to find it.
+               "quick prompts", "chips", "shortcuts", "phrases", "composer"] },
   { id: "retention",
     get label() { return i18n.t("panes.retention", { ns: "settings" }); },
     glyph: NF.archive, group: "core",

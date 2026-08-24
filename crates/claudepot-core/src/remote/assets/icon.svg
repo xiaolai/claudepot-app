@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="112 128 800 768" role="img" aria-label="Claudepot">
+  <!-- The product's own mark, plateless and transparent — the same
+       artwork and viewBox as `assets/icon-set/windows/icon-glyph.svg`
+       and `web/src/app/icon.svg`.
+
+       It used to be a generic `</>` chevron-and-slash on a terracotta
+       rounded rect: not the Claudepot icon at all, so a phone that
+       reached this panel showed a mark nothing else in the product
+       uses. Regenerate from the authored glyph.
+
+       Transparent because this is the browser-tab favicon and a
+       manifest icon. The HOME-SCREEN tile is a PNG — see
+       `apple-touch-icon.png`, and index.html on why an SVG cannot be
+       one. -->
+  <path fill="#F7B47C" d="M512 208 L192 384 L512 560 Z"></path>
+  <path fill="#E8833A" d="M512 208 L832 384 L512 560 Z"></path>
+  <path fill="#C0642A" d="M192 384 L512 560 L512 816 L192 640 Z"></path>
+  <path fill="#9A4F1B" d="M832 384 L512 560 L512 816 L832 640 Z"></path>
+</svg>

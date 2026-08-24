@@ -22,8 +22,11 @@ license = "ISC"
 # rt-multi-thread + macros (runtimes, #[tokio::main/test], select!),
 # sync/time/process/fs for the orchestrators and subprocess calls,
 # io-util for the Async{Read,Write,BufRead}Ext adapters, net for the
-# loopback TcpListener test fixtures. `full` would also compile
-# signal, io-std, and the UDP/UDS net surfaces nothing here uses.
+# loopback TcpListener test fixtures, signal for `remote serve`'s
+# Ctrl-C handler — it is a foreground server that says "Ctrl-C to
+# stop", and it must revoke the CC hook it installed on the way down
+# rather than leave an entry in the user's settings.json. `full` would
+# also compile io-std and the UDP/UDS net surfaces nothing here uses.
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "macros",
@@ -33,6 +36,7 @@ tokio = { version = "1", features = [
     "fs",
     "io-util",
     "net",
+    "signal",
 ] }
 # `FutureExt::catch_unwind` — used by `usage_snapshot::run_tick` to
 # isolate panics from each sub-orchestrator so one panicking tick can
@@ -81,6 +85,20 @@ chrono = { version = "0.4", features = ["serde"] }
 # Crypto (service-name hashing only)
 sha2 = "0.10"
 hex = "0.4"
+
+# Password hashing for the remote surface's admin password.
+#
+# scrypt rather than argon2 on dependency-hygiene grounds: it is ALREADY
+# compiled into this binary transitively (via `age`), so promoting it to
+# a direct dependency adds no new supply-chain surface, where argon2
+# would. It is memory-hard and OWASP-approved for this use. Both speak
+# PHC strings, so stored hashes carry their own algorithm and parameters
+# and swapping to argon2id later is a one-line change that does not
+# invalidate existing passwords.
+#
+# `simple` brings the password-hash / PHC integration; hand-rolling salt
+# and parameter encoding is exactly the part not to hand-roll.
+scrypt = { version = "0.11", default-features = false, features = ["simple", "std"] }
 
 # Keychain (Claudepot's own secrets — NOT for CC's Keychain item)
 keyring = "3"
@@ -201,8 +219,54 @@ aes = "0.8"
 # macOS-only
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac", "sha1"] }
 system-configuration = "0.6"
+# hmac + sha1 are NOT macOS-only despite sitting in this block:
+# `remote::totp` uses them on every platform for RFC 6238. SHA-1 is not
+# a mistake there — it is RFC 6238's default and the only algorithm
+# Google Authenticator reads from a plain otpauth:// URI, and it is used
+# as an HMAC, where the collision weakness does not apply.
 hmac = "0.12"
 sha1 = "0.10"
+
+# Passkey (WebAuthn) verification, ES256 only.
+#
+# Pure Rust, chosen over `webauthn-rs` because that pulls native
+# `openssl-sys`, which on Windows needs a system OpenSSL or a vendored
+# build with perl and nasm — it would burden every contributor's build
+# and put the Windows compile gate at risk.
+#
+# The trade is that verification is implemented here rather than
+# imported. It is kept narrow to stay tractable: ES256 (the algorithm
+# Face ID, Touch ID and Android all use) and no attestation
+# verification, which is correct for a self-hosted relying party that
+# issues its own credentials to devices it already authenticated.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+ciborium = "0.2"
+
+# HTTP server for the remote surface. hyper 1, tower, http, rustls and
+# tokio-rustls are ALREADY in the tree (Tauri, reqwest), so axum is the
+# only genuinely new crate — and hand-rolling routing and extraction on
+# bare hyper is exactly where auth bypasses hide.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+# Test-only: `ServiceExt::oneshot` drives the router without binding a
+# socket, so the whole HTTP surface is testable in CI. Already in the
+# tree via axum/hyper.
+tower = { version = "0.5", features = ["util"] }
+
+# TLS for the remote surface. All four are already compiled in the
+# workspace (Tauri, reqwest), so these are declarations rather than new
+# code.
+#
+# The `ring` provider is chosen explicitly, NOT rustls's aws-lc-rs
+# default: aws-lc-rs needs cmake and nasm to build on Windows, which
+# would break the Windows compile gate for a cryptographic difference
+# that does not matter here. `ring` is already in the tree via age and
+# minisign.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "logging"] }
+# PEM parsing comes from pki-types rather than the separate
+# rustls-pemfile crate, which would be genuinely new.
+rustls-pki-types = { version = "1", features = ["std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "http1"] }
 cbc = { version = "0.1", features = ["alloc"] }
 # Windows-only
 aes-gcm = "0.10"

@@ -198,6 +198,73 @@ fn thousands(n: u64) -> String {
     out
 }
 
+/// Fetch usage for every account and rewrite the snapshot the panel
+/// reads.
+///
+/// The remote panel renders `usage-snapshot.json`, not a live response —
+/// so on a machine where the desktop app has never run, or has not run
+/// since a new window appeared in the schema, the panel shows nothing
+/// or shows yesterday's shape. That was invisible in exactly the way
+/// that matters: an absent meter looks like an account with no usage
+/// rather than a file nobody rewrote.
+pub async fn refresh(ctx: &AppContext) -> Result<()> {
+    use claudepot_core::services::usage_snapshot;
+
+    let accounts = ctx.store.list()?;
+    if accounts.is_empty() {
+        ctx.info("No accounts registered — nothing to refresh.");
+        return Ok(());
+    }
+    let uuids: Vec<uuid::Uuid> = accounts.iter().map(|a| a.uuid).collect();
+
+    ctx.info(&format!("Fetching usage for {} account(s)...", uuids.len()));
+    let outcomes = ctx
+        .usage_cache
+        .fetch_batch_detailed_verified(&ctx.store, &uuids)
+        .await;
+
+    // Scrape the daemon like the GUI's tick does. `build` hardcodes
+    // `bg_workers: None`, so a CLI refresh used to blank whatever the
+    // desktop app had recorded — and the remote panel renders this file
+    // rather than calling anything live, so the worker count simply
+    // vanished from the phone until the GUI next ran. The same shape of
+    // bug as an older desktop build dropping a field it was compiled
+    // without.
+    let bg_workers = tokio::task::spawn_blocking(|| {
+        claudepot_core::cc_daemon::scrape_daemon_status().bg_workers
+    })
+    .await
+    .unwrap_or(None);
+
+    let snapshot = usage_snapshot::build_with_bg_workers(&accounts, &outcomes, bg_workers);
+    let path = usage_snapshot::snapshot_path();
+    usage_snapshot::write(&path, &snapshot)?;
+
+    // Report what landed, not just that something did: a snapshot
+    // written from failed fetches is a file with no numbers in it, and
+    // "wrote the snapshot" would be true and useless.
+    let with_usage = snapshot
+        .accounts
+        .values()
+        .filter(|a| a.usage.is_some())
+        .count();
+    if ctx.json {
+        print_json(&serde_json::json!({
+            "path": path.display().to_string(),
+            "accounts": snapshot.accounts.len(),
+            "with_usage": with_usage,
+        }))?;
+    } else {
+        ctx.info(&format!(
+            "Wrote {} — {} of {} account(s) reported usage.",
+            path.display(),
+            with_usage,
+            snapshot.accounts.len()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

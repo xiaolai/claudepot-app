@@ -73,3 +73,44 @@ globalThis.confirm = () => true;
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
+
+// Tauri's event bus, mocked once for every test file.
+//
+// `listen()` reaches `window.__TAURI_INTERNALS__`, which does not exist
+// outside the webview, so a component that subscribes on mount throws
+// inside a passive effect. React swallows that into an unhandled
+// rejection — which vitest reports at the END of the run, attributed to
+// whichever file happened to be running, while every test in it still
+// reports green. That is the worst possible shape for a failure: a red
+// exit code with 1347 passes above it and a stack pointing at a file
+// that did nothing wrong.
+//
+// Five test files had each hand-rolled this mock; the sixth component to
+// call `listen` (`RemoteWindowChip`, reached through `AppStatusBar`)
+// found the one test file that had not. A mock every renderer needs
+// belongs here, not copied into each caller. Files that need to assert
+// on their own `listen` still declare a local `vi.mock`, which wins.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+  emit: vi.fn().mockResolvedValue(undefined),
+  once: vi.fn().mockResolvedValue(() => {}),
+}));
+
+// The OS opener, for the same reason and with the same shape.
+//
+// This is the second Tauri API a component called that no test file had
+// mocked, so it is a class rather than an incident: anything reached
+// through `@tauri-apps/*` throws outside the webview, and a component
+// that calls one in an effect or a handler turns that into an unhandled
+// rejection — reported at the END of the run, attributed to whichever
+// file was executing, with every test above still green.
+//
+// The resolved promise is load-bearing: `ExternalLink` does
+// `openUrl(href).catch(…)`, so a bare `vi.fn()` returning `undefined`
+// throws on `.catch` at click time. A mock has to keep the contract the
+// caller relies on, not merely exist.
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn().mockResolvedValue(undefined),
+  openPath: vi.fn().mockResolvedValue(undefined),
+  revealItemInDir: vi.fn().mockResolvedValue(undefined),
+}));

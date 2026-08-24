@@ -112,7 +112,14 @@ impl TranscriptResolver {
     /// `<projects_dir>/<slug(cwd)>/<session_id>.jsonl` without a
     /// separate lookup.
     pub fn resolve(&mut self, rec: &PidRecord, projects_dir: &Path) -> Option<String> {
-        let slug = sanitize_path(&rec.cwd);
+        // `.claude/rules/paths.md`: every input to `sanitize_path` goes
+        // through `simplify_windows_path` first. `rec.cwd` is whatever
+        // CC wrote into the session registry, and a verbatim
+        // `\\?\C:\…` prefix sanitizes to a slug that does not match the
+        // directory CC actually created — so the lookup silently finds
+        // nothing and the session reads as having no transcript. No-op
+        // off Windows.
+        let slug = sanitize_path(&crate::path_utils::simplify_windows_path(&rec.cwd));
         let slug_dir = projects_dir.join(&slug);
 
         let candidates = self.scan_slug_dir(&slug_dir, rec);
@@ -356,6 +363,8 @@ mod tests {
             name: None,
             status: None,
             waiting_for: None,
+            messaging_socket_path: None,
+            peer_protocol: None,
         }
     }
 

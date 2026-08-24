@@ -1,0 +1,82 @@
+{
+  "comment": [
+    "Shared vectors for the oklch -> sRGB conversion mermaid needs.",
+    "",
+    "TWO implementations run these: panel/src/app/color.js (the remote",
+    "panel, a separate Vite app) and src/sections/config/mermaidColor.ts",
+    "(the Tauri renderer). They cannot import each other, so this file is",
+    "the pin — the same arrangement PriceBook/costs.ts and session::title",
+    "already use. Change one implementation, change the other, add a vector.",
+    "",
+    "Expectations are CSS Color 4 oklch -> sRGB, gamma-encoded and",
+    "quantised to 8 bits. Alpha below 1 renders as rgba(); anything that is",
+    "not an oklch() string passes through untouched, because khroma already",
+    "reads those."
+  ],
+  "cases": [
+    {
+      "input": "oklch(0.62 0.19 29.2)",
+      "expected": "#e24a3c"
+    },
+    {
+      "input": "oklch(0.87 0.29 142)",
+      "expected": "#29ff0e"
+    },
+    {
+      "input": "oklch(0.45 0.31 264)",
+      "expected": "#0005fd"
+    },
+    {
+      "input": "oklch(1 0 0)",
+      "expected": "#ffffff"
+    },
+    {
+      "input": "oklch(0 0 0)",
+      "expected": "#000000"
+    },
+    {
+      "input": "oklch(0.5 0 0)",
+      "expected": "#636363"
+    },
+    {
+      "input": "oklch(0.62 0.19 29.2 / 0.5)",
+      "expected": "rgba(226, 74, 60, 0.5)"
+    },
+    {
+      "input": "oklch(62% 0.19 29.2)",
+      "expected": "#e24a3c"
+    },
+    {
+      "input": "oklch(0.7 0.1 200 / 50%)",
+      "expected": "rgba(64, 177, 183, 0.5)"
+    },
+    {
+      "input": "oklch(none none none)",
+      "expected": "#000000"
+    },
+    {
+      "input": "oklch(0.952 0.008 85)",
+      "expected": "#f2efe9"
+    },
+    {
+      "input": "oklch(0.28 0.02 265)",
+      "expected": "#242933"
+    },
+    {
+      "input": "#abcdef",
+      "expected": "#abcdef"
+    },
+    {
+      "input": "rgb(1, 2, 3)",
+      "expected": "rgb(1, 2, 3)"
+    },
+    {
+      "input": "transparent",
+      "expected": "transparent"
+    },
+    {
+      "input": "",
+      "expected": ""
+    }
+  ]
+}

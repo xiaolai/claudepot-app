@@ -94,6 +94,14 @@ pub mod codes {
     /// Save submitted with an empty (or whitespace-only) GitHub token.
     pub const SESSION_SHARE_TOKEN_EMPTY: &str = "session_share.token_empty";
 
+    // --- remote appliance (commands/remote.rs)
+    /// Any `remote::service` verb failed. One code because the service
+    /// error's own `Display` already says which — splitting it would
+    /// mean a catalog entry per variant that all read the same.
+    pub const REMOTE_FAILED: &str = "remote.failed";
+    /// A renderer-supplied device id did not parse as a uuid.
+    pub const REMOTE_BAD_DEVICE_ID: &str = "remote.bad_device_id";
+
     // --- accounts / auth / desktop (commands/{account,desktop,preferences}.rs)
     /// `LoginState`'s mutex was poisoned — a previous holder panicked.
     pub const ACCOUNTS_LOGIN_STATE_LOCK_POISONED: &str = "accounts.login_state_lock_poisoned";
@@ -135,6 +143,14 @@ pub mod codes {
     pub const PERMISSION_DURATION_OUT_OF_RANGE: &str = "permission.duration_out_of_range";
     /// A permission mode string Claudepot will not grant.
     pub const PERMISSION_UNKNOWN_MODE: &str = "permission.unknown_mode";
+    /// A renderer-supplied remote-control window duration outside the
+    /// guard-rail range.
+    pub const PEER_INBOUND_DURATION_OUT_OF_RANGE: &str = "peer_inbound.duration_out_of_range";
+    /// Opening, closing, or reading the remote-control window failed.
+    /// Deliberately one code: every underlying `GrantError` already
+    /// carries a message written for the user, and splitting them here
+    /// would fork that wording.
+    pub const PEER_INBOUND_FAILED: &str = "peer_inbound.failed";
     /// Revert / extend targeted a project with no Claudepot grant. A
     /// project elevated by hand-editing settings lands here, and that
     /// is the point — Claudepot does not revert someone's own choice.
@@ -844,6 +860,8 @@ pub mod codes {
         ACCOUNTS_INVALID_UUID,
         ACCOUNTS_UNKNOWN_UUID,
         APP_TASK_JOIN_FAILED,
+        PEER_INBOUND_DURATION_OUT_OF_RANGE,
+        PEER_INBOUND_FAILED,
         KEYS_BAD_UUID,
         KEYS_LABEL_REQUIRED,
         KEYS_API_KEY_NOT_FOUND,
@@ -853,6 +871,8 @@ pub mod codes {
         KEYS_PROBE_RATE_LIMITED,
         ACTIVITY_PREFS_LOCK_POISONED,
         SESSION_SHARE_TOKEN_EMPTY,
+        REMOTE_FAILED,
+        REMOTE_BAD_DEVICE_ID,
         ACCOUNTS_LOGIN_STATE_LOCK_POISONED,
         ACCOUNTS_LOGIN_IN_PROGRESS,
         ACCOUNTS_VERIFY_ALL_IN_PROGRESS,

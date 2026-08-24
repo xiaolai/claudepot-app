@@ -1,5 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" fill="#DCD8D2"></rect>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="112 128 800 768">
+  <!-- The plateless glyph, transparent behind. A favicon sits on a
+       browser tab whose colour the site does not control — light, dark,
+       or whatever the user's theme is — so a baked plate is a grey card
+       floating on every one of them. This is the same reasoning
+       `assets/icon-set/windows/icon-glyph.svg` records for Windows,
+       which draws no enclosure either; the two are the same artwork and
+       the same viewBox, cropped to the block so it fills a 16px tile
+       instead of sitting inset with dead margin around it.
+       Regenerate from `assets/icon-set/windows/icon-glyph.svg`. -->
   <path fill="#F7B47C" d="M512 208 L192 384 L512 560 Z"></path>
   <path fill="#E8833A" d="M512 208 L832 384 L512 560 Z"></path>
   <path fill="#C0642A" d="M192 384 L512 560 L512 816 L192 640 Z"></path>

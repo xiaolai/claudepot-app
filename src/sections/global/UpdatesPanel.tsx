@@ -567,24 +567,34 @@ function Warning({ children }: { children: React.ReactNode }) {
  * Native `<input type="checkbox">` rendering inside the Tauri webview
  * looks out of place against paper-mono and proved unreliable to
  * click in some themes. The button + role="switch" pattern is the
- * project's canonical toggle. The description text is rendered as a
- * sibling by the caller (kept out of the toggle's API to match the
- * existing Toggle exactly — same shape, same a11y semantics).
+ * project's canonical toggle.
+ *
+ * **`label` is required and reaches `aria-label`.** It used to say the
+ * description was "rendered as a sibling by the caller … same a11y
+ * semantics" — which was the bug, not the design: a `<button>` with no
+ * text content and no `aria-label` has no accessible name at all, so
+ * every switch in this panel announced as "switch, not checked" with
+ * nothing saying what it switched. A sibling `<span>` is not a label;
+ * only `aria-label`, `aria-labelledby` or the button's own content is.
+ * `SettingToggleRow` is the canonical version of this and had it right.
  */
 function Toggle({
   on,
   onChange,
   disabled,
+  label,
 }: {
   on: boolean;
   onChange: (next: boolean) => void;
   disabled?: boolean;
+  label: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
+      aria-label={label}
       disabled={disabled}
       onClick={() => !disabled && onChange(!on)}
       className="pm-focus"
@@ -639,7 +649,12 @@ function ToggleWithLabel({
         gap: "var(--sp-10)",
       }}
     >
-      <Toggle on={on} onChange={onChange} disabled={disabled} />
+      {/* The label is both the switch's accessible name and the visible
+          text beside it — exactly `SettingToggleRow`'s contract, which
+          is the canonical version of this row. One mechanism across the
+          app beats shaving the duplicate announcement here and nowhere
+          else. */}
+      <Toggle on={on} onChange={onChange} disabled={disabled} label={label} />
       <span
         style={{
           fontSize: "var(--fs-sm)",

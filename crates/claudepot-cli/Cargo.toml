@@ -15,6 +15,7 @@ tempfile.workspace = true
 
 [dependencies]
 claudepot-core = { path = "../claudepot-core" }
+zeroize.workspace = true
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true

@@ -1690,3 +1690,130 @@ pub async fn reconcile_all(store: &AccountStore) -> Result<ReconcileReport, Reco
 #[cfg(test)]
 #[path = "account_service_tests.rs"]
 mod tests;
+
+/// What activating an account did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Activation {
+    /// The requested account was already the one Claude Code uses.
+    AlreadyActive { email: String },
+    /// The keychain now holds `to`.
+    Switched { from: Option<String>, to: String },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ActivateError {
+    #[error("{0}")]
+    Resolve(#[from] crate::resolve::ResolveError),
+    #[error("account not found: {0}")]
+    NotFound(String),
+    /// The account store itself failed. Distinct from `NotFound`
+    /// because "we looked and it is not there" and "we could not look"
+    /// call for different answers — the first is the user's typo, the
+    /// second is a broken `accounts.db`, and collapsing them told the
+    /// user to check their spelling.
+    #[error("account store unavailable: {0}")]
+    Store(String),
+    /// The swap itself. Kept as the typed variant rather than a string
+    /// so each surface can react to `LiveSessionConflict` in its own
+    /// idiom — the CLI prints its split-brain warning, the remote API
+    /// answers 409 — without either one parsing English.
+    #[error(transparent)]
+    Swap(#[from] crate::error::SwapError),
+}
+
+/// Make an account the one Claude Code's CLI uses.
+///
+/// **The one sequence.** It exists because there were briefly two: the
+/// CLI's `cli use` and the remote surface's activate endpoint each
+/// walked resolve → reconcile → compare → swap, and the second copy had
+/// already lost `resolve_email`, so a prefix that worked at the keyboard
+/// was "account not found" from the phone. A sequence with two
+/// implementations is one defect, not two.
+///
+/// What stays with the caller is *presentation*: the CLI's split-brain
+/// warning and the panel's inline conflict copy say the same thing in
+/// different registers, and neither belongs here.
+///
+/// `force` skips the live-session gate. It is not a security control —
+/// see `swap::switch_inner`, where `force` is consulted only there and
+/// the keychain-drift check runs unconditionally — but it is a
+/// correctness one: a running Claude Code overwrites the keychain on its
+/// next token refresh, silently reverting the swap. Callers that offer
+/// it owe the user that sentence.
+pub async fn activate_cli(
+    store: &AccountStore,
+    email_input: &str,
+    force: bool,
+    auto_refresh: bool,
+) -> Result<Activation, ActivateError> {
+    use crate::cli_backend::{self, swap};
+
+    // Prefix matching is this domain's account resolution, so it
+    // belongs on every path that names an account — not just the one
+    // where someone remembered it.
+    let email = crate::resolve::resolve_email(store, email_input)?;
+    let target = store
+        .find_by_email(&email)
+        .map_err(|e| ActivateError::Store(e.to_string()))?
+        .ok_or_else(|| ActivateError::NotFound(email.clone()))?;
+
+    // Reconcile before comparing. Without this, a swap done outside
+    // Claudepot leaves the DB believing the old target is active and
+    // this reports "already active" while the keychain disagrees.
+    // Best effort: a network failure falls through to the DB's view
+    // rather than blocking the swap.
+    //
+    // **But it must not fall through to `AlreadyActive`.** That answer
+    // is a claim that the keychain already holds this account, and it
+    // does no work to earn it — so returning it from an unreconciled DB
+    // pointer reports a swap that never happened, on the one path where
+    // nothing downstream will notice. The swap path is safe to take
+    // redundantly; a false "already active" is not.
+    let reconciled = sync_from_current_cc(store).await.is_ok();
+
+    let current = store
+        .active_cli_uuid()
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<Uuid>().ok());
+    if reconciled && current == Some(target.uuid) {
+        return Ok(Activation::AlreadyActive {
+            email: target.email,
+        });
+    }
+    let from = current
+        .and_then(|u| store.find_by_uuid(u).ok().flatten())
+        .map(|a| a.email);
+
+    let platform = cli_backend::create_platform();
+    let refresher = swap::DefaultRefresher;
+    let fetcher = swap::DefaultProfileFetcher;
+    if force {
+        swap::switch_force(
+            store,
+            current,
+            target.uuid,
+            platform.as_ref(),
+            auto_refresh,
+            &refresher,
+            &fetcher,
+        )
+        .await?;
+    } else {
+        swap::switch(
+            store,
+            current,
+            target.uuid,
+            platform.as_ref(),
+            auto_refresh,
+            &refresher,
+            &fetcher,
+        )
+        .await?;
+    }
+
+    Ok(Activation::Switched {
+        from,
+        to: target.email,
+    })
+}

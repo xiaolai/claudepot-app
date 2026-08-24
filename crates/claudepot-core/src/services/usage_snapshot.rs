@@ -105,6 +105,34 @@ pub struct UsageWindows {
     pub seven_day_opus: Option<WindowSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seven_day_sonnet: Option<WindowSnapshot>,
+    /// Model-scoped windows from the server's `limits[]` — the weekly
+    /// Fable limit today, whatever it scopes next tomorrow.
+    ///
+    /// Carried because the four fields above are a fixed list and the
+    /// server's is not. Dropping `limits[]` here meant the desktop
+    /// showed a Fable meter (via `UsageDto::from_response`) and the
+    /// remote panel could not, since the panel reads this snapshot
+    /// rather than the live response — a difference with no reason
+    /// behind it, and one that read as "Anthropic doesn't send it".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scoped: Vec<ScopedSnapshot>,
+}
+
+/// One model-scoped window. `label` is server-supplied and already
+/// human-readable ("Fable"); it is a proper noun in every locale, so it
+/// is stored and rendered verbatim.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ScopedSnapshot {
+    pub label: String,
+    /// The server's own `kind` — `weekly_scoped` today. Carried so a
+    /// consumer can say "7d Fable" without hardcoding the period: the
+    /// day Anthropic scopes something daily, a label that assumed a
+    /// week would be wrong rather than merely terse.
+    #[serde(default)]
+    pub kind: String,
+    pub utilization: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -132,6 +160,15 @@ impl UsageWindows {
             seven_day: r.seven_day.as_ref().map(WindowSnapshot::from_window),
             seven_day_opus: r.seven_day_opus.as_ref().map(WindowSnapshot::from_window),
             seven_day_sonnet: r.seven_day_sonnet.as_ref().map(WindowSnapshot::from_window),
+            scoped: r
+                .scoped_limits()
+                .map(|(label, l)| ScopedSnapshot {
+                    label: label.to_string(),
+                    kind: l.kind.clone(),
+                    utilization: l.percent,
+                    resets_at: l.resets_at,
+                })
+                .collect(),
         }
     }
 }
@@ -218,8 +255,71 @@ pub fn write(path: &Path, snapshot: &UsageSnapshot) -> std::io::Result<()> {
     atomic_write(path, &json)
 }
 
+/// Read the snapshot, if there is a usable one.
+///
+/// `None` covers all three of "the GUI has never run", "the file was
+/// removed", and "the file no longer parses" — a consumer of this
+/// schema cannot act differently on any of them, and the alternative is
+/// every caller writing its own `read_to_string` + `from_str` and
+/// arriving at three different opinions about a missing file. Absence is
+/// the answer, never a synthesized zero: a figure nobody fetched must
+/// not render as "0% used".
+pub fn read(path: &Path) -> Option<UsageSnapshot> {
+    let bytes = std::fs::read(path).ok()?;
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::warn!(error = %e, "usage snapshot did not parse; treating as absent");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// The snapshot must carry model-scoped windows, not just the four
+    /// named ones.
+    ///
+    /// This was a real divergence: the desktop read the live response
+    /// and drew a Fable meter, the remote panel read this snapshot and
+    /// could not — and the absence was easy to misread as "Anthropic
+    /// does not send it". It does; a live response for a Max account
+    /// carries `{"kind":"weekly_scoped","scope":{"model":
+    /// {"display_name":"Fable"}}}`.
+    #[test]
+    fn a_model_scoped_window_survives_into_the_snapshot() {
+        let json = r#"{
+            "five_hour": {"utilization": 23.0, "resets_at": null},
+            "limits": [
+                {"kind": "session", "percent": 23.0},
+                {"kind": "weekly_scoped", "percent": 41.5,
+                 "resets_at": null,
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}}
+            ]
+        }"#;
+        let resp: UsageResponse = serde_json::from_str(json).unwrap();
+        let w = UsageWindows::from_response(&resp);
+
+        assert_eq!(w.scoped.len(), 1, "plan-level limits must not be copied in");
+        assert_eq!(w.scoped[0].label, "Fable");
+        assert_eq!(w.scoped[0].kind, "weekly_scoped");
+        assert_eq!(w.scoped[0].utilization, 41.5);
+        // And it survives the round trip the panel actually reads.
+        let back: UsageWindows = serde_json::from_str(&serde_json::to_string(&w).unwrap()).unwrap();
+        assert_eq!(back.scoped[0].label, "Fable");
+    }
+
+    #[test]
+    fn no_scoped_windows_serializes_to_nothing_at_all() {
+        // `skip_serializing_if` keeps an empty list out of the file, so
+        // an account with none looks exactly as it did before.
+        let resp: UsageResponse =
+            serde_json::from_str(r#"{"five_hour":{"utilization":1.0}}"#).unwrap();
+        let w = UsageWindows::from_response(&resp);
+        assert!(w.scoped.is_empty());
+        assert!(!serde_json::to_string(&w).unwrap().contains("scoped"));
+    }
     use super::*;
     use crate::oauth::usage::UsageWindow;
 

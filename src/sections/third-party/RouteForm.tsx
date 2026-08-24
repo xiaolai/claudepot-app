@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Button } from "../../components/primitives/Button";
 import { Input } from "../../components/primitives/Input";
@@ -542,8 +542,14 @@ function KeychainOption(props: {
   field: string;
 }) {
   const { t } = useTranslation("providers");
+  const id = useId();
+  const noteId = `${id}-note`;
   return (
-    <label
+    // `htmlFor` + `aria-describedby` rather than a wrapping `<label>`.
+    // A wrapping label takes its accessible name from all of its text,
+    // so this control announced as its label PLUS the whole `code`-laden
+    // note after it. Name and description are different relationships.
+    <div
       style={{
         display: "flex",
         alignItems: "center",
@@ -555,20 +561,22 @@ function KeychainOption(props: {
       title={t("form.keychainTitle")}
     >
       <input
+        id={id}
         type="checkbox"
         checked={props.checked}
         disabled={props.disabled}
+        aria-describedby={noteId}
         onChange={(e) => props.onChange(e.target.checked)}
       />
-      {t("form.keychainLabel", { field: props.field })}
-      <span style={{ color: "var(--fg-faint)" }}>
+      <label htmlFor={id}>{t("form.keychainLabel", { field: props.field })}</label>
+      <span id={noteId} style={{ color: "var(--fg-faint)" }}>
         <Trans
           ns="providers"
           i18nKey="form.keychainNote"
           components={{ code: <code /> }}
         />
       </span>
-    </label>
+    </div>
   );
 }
 

@@ -34,28 +34,82 @@
   ],
   "codes": [
     {
+      "code": "activity_cards.body_read_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "No such file or directory (os error 2)"
+    },
+    {
+      "code": "activity_cards.invalid_query",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "unknown severity \"loud\"; valid: info, notice, warn, error"
+    },
+    {
+      "code": "artifact_usage.unknown_kind",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "unknown artifact kind: skil"
+    },
+    {
       "code": "attribution.unknown_mode",
       "owner": "command",
-      "params": ["mode"],
+      "params": [
+        "mode"
+      ],
       "message": "unknown mode yolo; want default|off|custom"
     },
     {
       "code": "auto_dream.unknown_mode",
       "owner": "command",
-      "params": ["mode"],
+      "params": [
+        "mode"
+      ],
       "message": "unknown mode yolo; want default|on|off"
     },
     {
-      "code": "memory_health.audit_failed",
+      "code": "cc_doctor.cache_lock_poisoned",
       "owner": "command",
-      "params": ["detail"],
-      "message": "permission denied"
+      "params": [],
+      "message": "cc_doctor cache mutex poisoned"
     },
     {
       "code": "cli.resolve_target_failed",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "account not found: nobody@example.com"
+    },
+    {
+      "code": "config.watch_start_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "spawn config-watch: Too many open files (os error 24)"
+    },
+    {
+      "code": "config.watch_state_lock_poisoned",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "watch state lock: poisoned lock: another task failed inside"
+    },
+    {
+      "code": "memory_health.audit_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "permission denied"
     },
     {
       "code": "migrate.passphrase_required",
@@ -66,49 +120,83 @@
     {
       "code": "migrate.unknown_conflict_mode",
       "owner": "command",
-      "params": ["mode"],
+      "params": [
+        "mode"
+      ],
       "message": "unknown mode: clobber"
     },
     {
       "code": "migrate.unknown_merge_preference",
       "owner": "command",
-      "params": ["prefer"],
+      "params": [
+        "prefer"
+      ],
       "message": "unknown prefer: newest"
+    },
+    {
+      "code": "peer_inbound.duration_out_of_range",
+      "owner": "command",
+      "params": [
+        "min_secs",
+        "max_secs",
+        "got_secs"
+      ],
+      "message": "a remote-control window must be between 60s and 43200s"
+    },
+    {
+      "code": "peer_inbound.failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "remote-control grant store is unreadable"
+    },
+    {
+      "code": "remote.bad_device_id",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "not a device id: not-a-uuid"
+    },
+    {
+      "code": "remote.failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "set a password first — enabling without one would open a surface nobody can log into, and that is not a useful state to persist"
     },
     {
       "code": "session_move.invalid_session_id",
       "owner": "command",
-      "params": ["detail"],
+      "params": [
+        "detail"
+      ],
       "message": "invalid session id: invalid length: expected length 32 for simple format, found 3"
     },
     {
       "code": "session_move.target_cwd_missing",
       "owner": "command",
-      "params": ["path"],
+      "params": [
+        "path"
+      ],
       "message": "target cwd does not exist: /Users/me/gone"
     },
     {
-      "code": "activity_cards.invalid_query",
+      "code": "usage_local.unknown_pricing_tier",
       "owner": "command",
-      "params": ["detail"],
-      "message": "unknown severity \"loud\"; valid: info, notice, warn, error"
-    },
-    {
-      "code": "activity_cards.body_read_failed",
-      "owner": "command",
-      "params": ["detail"],
-      "message": "No such file or directory (os error 2)"
-    },
-    {
-      "code": "artifact_usage.unknown_kind",
-      "owner": "command",
-      "params": ["detail"],
-      "message": "unknown artifact kind: skil"
+      "params": [
+        "tier"
+      ],
+      "message": "unknown pricing tier: azure"
     },
     {
       "code": "usage_local.unknown_window_kind",
       "owner": "command",
-      "params": ["kind"],
+      "params": [
+        "kind"
+      ],
       "message": "unknown window kind: last_hours"
     },
     {
@@ -116,30 +204,6 @@
       "owner": "command",
       "params": [],
       "message": "last_days requires `days`"
-    },
-    {
-      "code": "usage_local.unknown_pricing_tier",
-      "owner": "command",
-      "params": ["tier"],
-      "message": "unknown pricing tier: azure"
-    },
-    {
-      "code": "cc_doctor.cache_lock_poisoned",
-      "owner": "command",
-      "params": [],
-      "message": "cc_doctor cache mutex poisoned"
-    },
-    {
-      "code": "config.watch_state_lock_poisoned",
-      "owner": "command",
-      "params": ["detail"],
-      "message": "watch state lock: poisoned lock: another task failed inside"
-    },
-    {
-      "code": "config.watch_start_failed",
-      "owner": "command",
-      "params": ["detail"],
-      "message": "spawn config-watch: Too many open files (os error 24)"
     }
   ]
 }

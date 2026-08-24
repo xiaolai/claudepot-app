@@ -67,7 +67,7 @@ describe("MarkdownRenderer", () => {
     // No anchor — Tauri webview would otherwise navigate away.
     expect(container.querySelector("a")).toBeNull();
     // The destination is preserved in a tooltip for copy-paste.
-    const link = container.querySelector('span.md-link');
+    const link = container.querySelector('span[data-testid="md-link"]');
     expect(link).toBeTruthy();
     expect(link?.getAttribute("title")).toBe("https://example.com/docs");
     expect(link?.textContent).toBe("the docs");

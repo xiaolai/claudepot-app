@@ -18,6 +18,10 @@
     "test:coverage": "vitest run --coverage",
     "check:envvar-layout": "node scripts/check-envvar-layout.mjs",
     "check:catalogs": "node scripts/check-catalogs.mjs",
+    "check:classes": "node scripts/check-classes.mjs",
+    "check:classes:self-test": "node scripts/check-classes.mjs --self-test",
+    "check:a11y": "node scripts/check-a11y-names.mjs",
+    "check:a11y:self-test": "node scripts/check-a11y-names.mjs --self-test",
     "scan:untranslated": "node scripts/scan-untranslated.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs"
   },

@@ -3,6 +3,8 @@ import { i18n } from "../lib/i18n";
 import { useSessionLive } from "../hooks/useSessionLive";
 import { RunningOpsChip } from "../components/RunningOpsChip";
 import { PendingJournalsChip } from "../components/PendingJournalsChip";
+import { RemoteWindowChip } from "../components/RemoteWindowChip";
+import { RemoteServingChip } from "../components/RemoteServingChip";
 import { ServiceStatusDot } from "./ServiceStatusDot";
 import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
@@ -207,6 +209,13 @@ export function AppStatusBar({
               onReopen={onReopenOp}
             />
           )}
+          {/* Self-decides visibility from its own state, so it is a
+              sibling rather than sharing another chip's condition. */}
+          <RemoteWindowChip />
+          {/* A different door from the chip above: that one is Claude
+              Code's local peer gate, this one is an HTTP server on the
+              network. Two capabilities, two indicators. */}
+          <RemoteServingChip />
           {hasPending && onOpenRepair && (
             <PendingJournalsChip
               summary={pendingSummary ?? null}

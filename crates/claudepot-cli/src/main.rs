@@ -104,6 +104,19 @@ enum Commands {
         #[command(subcommand)]
         action: MigrateAction,
     },
+    /// The LAN remote-control surface (server, password, sessions)
+    Remote {
+        #[command(subcommand)]
+        action: RemoteAction,
+    },
+    /// Verbs Claude Code invokes, not you. Hidden: these are wired
+    /// into CC's settings by the surface that owns them, and a user
+    /// running one by hand gets nothing useful.
+    #[command(hide = true)]
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
     /// Manage CC session transcripts (move between projects, rescue orphans)
     Session {
         #[command(subcommand)]
@@ -405,6 +418,13 @@ enum UsageAction {
         #[arg(long, default_value = "all")]
         window: String,
     },
+    /// Fetch each account's usage and rewrite `usage-snapshot.json`.
+    ///
+    /// Until now only the desktop app wrote that file, so a headless
+    /// install — a Mac reached solely through `remote serve` — showed
+    /// no usage at all, and a newly added window (the model-scoped
+    /// ones) never appeared until someone opened the GUI.
+    Refresh,
 }
 
 #[derive(Subcommand)]
@@ -428,6 +448,78 @@ enum UpdateAction {
         #[command(flatten)]
         args: commands::update::config::ConfigArgs,
     },
+}
+
+#[derive(Subcommand)]
+enum HookAction {
+    /// Offer a pending permission prompt to paired devices and print
+    /// the decision Claude Code should honour.
+    #[command(name = "permission-request")]
+    PermissionRequest,
+}
+
+#[derive(Subcommand)]
+enum RemoteAction {
+    /// Show whether the surface is on, where it binds, and whether a
+    /// password is set. Read-only.
+    Status,
+    /// Set the admin password, read from stdin.
+    ///
+    /// Typing it interactively echoes it — this CLI deliberately does
+    /// not ship `rpassword`. Prefer:
+    ///   printf '%s' 'your password' | claudepot remote set-password
+    SetPassword,
+    /// Turn the surface on. Refuses a publicly-routable bind, and
+    /// refuses to enable before a password exists.
+    Enable {
+        /// IP to bind. Loopback, LAN, Tailscale, or 0.0.0.0.
+        #[arg(long)]
+        bind: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Turn it off.
+    Disable,
+    /// Allow or refuse answering permission prompts from a phone.
+    ///
+    /// This is the one capability on the remote surface that GRANTS
+    /// something rather than reading or messaging: with it on, whoever
+    /// holds the admin password can approve a tool call, which is
+    /// arbitrary code execution as you. Off, the panel still lists
+    /// sessions, reads transcripts and sends prompts, and a permission
+    /// prompt is drawn at the machine as it always was.
+    ///
+    /// Takes effect immediately, including on a server already running.
+    Approvals {
+        /// `on` or `off`.
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Revoke every session and paired device.
+    RevokeAll,
+    /// Run the server in the foreground.
+    Serve,
+}
+
+#[derive(Subcommand)]
+enum InboundAction {
+    /// Report whether the window is open, and for how much longer.
+    Status,
+    /// Open the window for a bounded time.
+    ///
+    /// While open, peer messages are delivered to your sessions
+    /// without asking. The setting is machine-wide — Claude Code only
+    /// honours `accept` from user scope — so the deadline is the only
+    /// thing containing it. Claudepot reverts automatically.
+    Grant {
+        /// How long to stay open, e.g. `30m`, `2h`. Capped at 12h.
+        duration: String,
+        /// Free-text note recorded with the grant.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Close the window now, restoring whatever the setting held before.
+    Revoke,
 }
 
 #[derive(Subcommand)]
@@ -486,6 +578,37 @@ enum SessionAction {
         /// resolution Claude Code uses.
         #[arg(long)]
         claude_config: Option<std::path::PathBuf>,
+    },
+    /// Open, close, or inspect the time-boxed remote-control window
+    /// (Claude Code's `crossSessionInbound`).
+    Inbound {
+        #[command(subcommand)]
+        action: InboundAction,
+    },
+    /// List running Claude Code sessions that can be addressed over
+    /// CC's cross-session inbox. Read-only.
+    Live,
+    /// Send a prompt to a RUNNING session.
+    ///
+    /// This is not a keyboard: Claude Code frames the text as a peer
+    /// message at lower trust than the session's own user, and by
+    /// default holds it for that user's approval rather than
+    /// delivering it.
+    Send {
+        /// Session name, session-id prefix, or pid. Must match exactly
+        /// one — run `claudepot session live` to see the options.
+        target: String,
+        /// The prompt text. Slash commands are NOT interpreted; Claude
+        /// Code delivers peer messages with slash handling disabled.
+        prompt: String,
+        /// Where the prompt lands in the session's queue.
+        #[arg(long, default_value = "next", value_parser = ["now", "next", "later"])]
+        priority: String,
+        /// Watch the transcript for up to N seconds and report whether
+        /// the prompt was delivered or held. 0 reports only the
+        /// handoff, which is not the same as delivery.
+        #[arg(long, default_value_t = 0)]
+        wait: u64,
     },
     /// Inspect one transcript: classification, chunks, linked tool
     /// calls, subagents, phases, context attribution. Read-only.
@@ -1118,6 +1241,18 @@ impl AppContext {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Dispatched before logging, migrations and `AccountStore::open`,
+    // and deliberately so: this runs on EVERY permission prompt on the
+    // machine, must add no measurable latency to one, and must not
+    // contend on accounts.db's WAL writer lock the way the Mcp/Codex
+    // early return below exists to avoid. It also emits no logs — a
+    // hook whose contract is silence must not write to stderr.
+    if let Commands::Hook { action } = cli.command {
+        return match action {
+            HookAction::PermissionRequest => commands::hook::permission_request_cmd().await,
+        };
+    }
+
     // Pin all tracing output to stderr regardless of subcommand. The
     // MCP memory-server subcommand uses stdout for JSON-RPC frames;
     // a single `tracing::info!` / `warn!` landing on the default
@@ -1132,6 +1267,28 @@ async fn main() -> Result<()> {
         // unparseable, preserving the prior default.
         let filter = tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("claudepot=debug"));
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .init();
+    } else if matches!(
+        cli.command,
+        Commands::Remote {
+            action: RemoteAction::Serve
+        }
+    ) {
+        // A long-running foreground server whose logs ARE the feedback
+        // channel. Without this it printed nothing at all — no accepted
+        // connection, no TLS handshake failure — so "I cannot connect"
+        // was indistinguishable from "nothing ever arrived", which is
+        // exactly the question the user needs answered.
+        //
+        // `claudepot_core` rather than `claudepot`: the server lives in
+        // core, and the CLI's usual `claudepot=debug` default does not
+        // name it.
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("claudepot_core::remote=info"));
         tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_writer(std::io::stderr)
@@ -1412,6 +1569,7 @@ async fn main() -> Result<()> {
         Commands::Status => commands::status::run(&ctx).await?,
         Commands::Usage { action } => match action {
             UsageAction::Report { window } => commands::usage::report(&ctx, &window).await?,
+            UsageAction::Refresh => commands::usage::refresh(&ctx).await?,
         },
         Commands::Update { action } => match action {
             UpdateAction::Check => commands::update::check::run(&ctx).await?,
@@ -1426,6 +1584,12 @@ async fn main() -> Result<()> {
         // one copy can't silently diverge.
         Commands::Mcp { .. } | Commands::Codex { .. } => {
             unreachable!("dispatched before AccountStore::open — see the early return above")
+        }
+        // Same arrangement, earlier still: `Hook` returns before even
+        // the logging setup, because it runs on every permission
+        // prompt and owes the session no latency.
+        Commands::Hook { .. } => {
+            unreachable!("dispatched at the top of main — see the early return above")
         }
         Commands::Activity { action } => match action {
             ActivityAction::Recent { args } => commands::activity::recent(&ctx, args)?,
@@ -1519,6 +1683,19 @@ async fn main() -> Result<()> {
                 }
             },
         },
+        Commands::Remote { action } => match action {
+            RemoteAction::Status => commands::remote::status_cmd(&ctx)?,
+            RemoteAction::SetPassword => commands::remote::set_password_cmd(&ctx)?,
+            RemoteAction::Enable { bind, port } => {
+                commands::remote::enable_cmd(&ctx, bind.as_deref(), port)?
+            }
+            RemoteAction::Disable => commands::remote::disable_cmd(&ctx)?,
+            RemoteAction::Approvals { state } => {
+                commands::remote::approvals_cmd(&ctx, state == "on")?
+            }
+            RemoteAction::RevokeAll => commands::remote::revoke_all_cmd(&ctx)?,
+            RemoteAction::Serve => commands::remote::serve_cmd(&ctx).await?,
+        },
         Commands::Session { action } => match action {
             SessionAction::ListOrphans => commands::session::list_orphans(&ctx)?,
             SessionAction::Move {
@@ -1554,6 +1731,20 @@ async fn main() -> Result<()> {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
             SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
+            SessionAction::Inbound { action } => match action {
+                InboundAction::Status => commands::session::inbound_status_cmd(&ctx)?,
+                InboundAction::Grant { duration, reason } => {
+                    commands::session::inbound_grant_cmd(&ctx, &duration, reason.as_deref())?
+                }
+                InboundAction::Revoke => commands::session::inbound_revoke_cmd(&ctx)?,
+            },
+            SessionAction::Live => commands::session::live_cmd(&ctx)?,
+            SessionAction::Send {
+                target,
+                prompt,
+                priority,
+                wait,
+            } => commands::session::send_cmd(&ctx, &target, &prompt, &priority, wait).await?,
             SessionAction::Prune { args } => commands::session::prune_cmd(&ctx, args)?,
             SessionAction::Slim { args } => commands::session::slim_cmd(&ctx, args)?,
             SessionAction::Redact { args } => commands::session::redact_cmd(&ctx, args)?,

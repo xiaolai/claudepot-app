@@ -36,6 +36,7 @@ focus-ring|shadow|font|dur-|ease-)[A-Za-z0-9_-]*\s*:" src/styles/components/  # 
 @import "./styles/components/palette.css";
 @import "./styles/components/modals.css";
 @import "./styles/components/settings.css";
+@import "./styles/components/remote.css";
 @import "./styles/components/maintenance.css";
 @import "./styles/components/projects.css";
 @import "./styles/components/projects-orphans.css";

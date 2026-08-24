@@ -226,7 +226,7 @@ export function MemoryPane({ projectRoot }: MemoryPaneProps) {
                   the file list rows defer here per
                   .claude/rules/path-display.md state B. */}
               <span
-                className="mono small memory-pane__viewer-path"
+                className="mono small"
                 title={selectedPath ?? undefined}
               >
                 {selectedPath ? basename(selectedPath) : "—"}
@@ -499,7 +499,7 @@ function PerProjectAutoMemoryToggle({
 
   if (overridden) {
     return (
-      <span className="memory-pane__toggle memory-pane__toggle--locked">
+      <span className="memory-pane__toggle">
         <Tag tone={state.effective ? "neutral" : "warn"}>
           {state.effective ? t("memory.autoOn") : t("memory.autoOff")}
         </Tag>

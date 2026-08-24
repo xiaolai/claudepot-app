@@ -231,6 +231,22 @@ jobs:
       - name: Check locale catalogs
         run: pnpm check:catalogs
 
+      # A `className` with no CSS rule behind it renders as unstyled
+      # markup. It is valid HTML, invisible to tsc, and invisible to a
+      # render test that asserts on text — so an entire pane shipped
+      # unstyled with every other gate green. Cheap (string scan, no
+      # jsdom); the self-test proves the guard can fail.
+      - name: Check CSS class coverage
+        run: pnpm check:classes:self-test && pnpm check:classes
+
+      # A `<button role="switch">` with no text content and no
+      # `aria-label` has no accessible name — it announces as "switch,
+      # not checked" with nothing saying what it switches. Two shipped
+      # that way, one behind fourteen call sites. The visible text
+      # beside a switch is not a label, however obvious it looks.
+      - name: Check switch accessible names
+        run: pnpm check:a11y:self-test && pnpm check:a11y
+
       # The production vite build catches failure classes tsc and
       # vitest don't (asset resolution, CSS shard syntax errors,
       # rollup-only module issues). Without this step the first
@@ -243,3 +259,40 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+      # The remote panel. Its own install (see panel/README.md), so its
+      # own steps rather than a workspace script.
+      #
+      # The rebuild is the load-bearing one: the built bundle is
+      # COMMITTED and embedded by `remote::assets`, so a source change
+      # nobody rebuilt ships the previous bundle with nothing red
+      # anywhere. `git diff --exit-code` turns that into a failure with
+      # a one-command remedy.
+      - name: Install panel deps
+        run: pnpm install --frozen-lockfile
+        working-directory: panel
+
+      - name: Panel bundle is up to date
+        working-directory: panel
+        run: |
+          pnpm build
+          cd ..
+          if ! git diff --quiet -- crates/claudepot-core/src/remote/assets/panel; then
+            echo "::error::The committed panel bundle does not match panel/. Run scripts/build-panel.sh and commit the result."
+            git --no-pager diff --stat -- crates/claudepot-core/src/remote/assets/panel
+            exit 1
+          fi
+
+      # Does it MOUNT? `vite build` cannot say. Runs the committed
+      # output in jsdom with no network — the offline path a phone hits
+      # first. The self-test runs too, because a guard nobody has
+      # watched go red is indistinguishable from one that cannot.
+      - name: Panel unit tests
+        working-directory: panel
+        run: pnpm test
+
+      - name: Panel renders
+        working-directory: panel
+        run: |
+          pnpm check:render:self-test
+          pnpm check:render

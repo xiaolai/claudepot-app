@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
+import { fieldControl, fieldShell } from "./fieldChrome";
 
 /**
  * Everything a native `<input>` takes, minus the two the wrapper owns.
@@ -59,10 +60,13 @@ interface InputProps extends NativeInputProps {
  * ambiguous click and focus behaviour. A `<div>` with `:focus-within`
  * chrome has neither problem.
  *
- * The input carries `pm-focus` so the design system's keyboard-focus ring
- * applies: the inline-style approach these primitives use cannot express
- * `:focus-visible` itself, and the accent border alone fires on mouse focus
- * too, so it is chrome rather than a focus indicator.
+ * Focus is tracked in React state (`onFocus`/`onBlur`) rather than CSS
+ * `:focus-visible` on the wrapper, because the wrapper never receives
+ * focus itself — only the inner `<input>` does — and `:focus-within`
+ * would fire for the `suffix` slot's own controls too, which must not
+ * paint this field as focused. `fieldChrome.ts` is what the state then
+ * draws: an outline on the wrapper, matching every other input-like
+ * control in the app rather than the button-weight ring.
  */
 export function Input({
   glyph,
@@ -79,21 +83,7 @@ export function Input({
   const generatedId = useId();
   const inputId = id ?? generatedId;
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--sp-8)",
-        height: "var(--input-height)",
-        padding: "0 var(--sp-10)",
-        background: "var(--bg-raised)",
-        border: `var(--bw-hair) solid ${focused ? "var(--accent-border)" : "var(--line)"}`,
-        borderRadius: "var(--r-2)",
-        transition: "border-color var(--dur-fast) var(--ease-linear)",
-        opacity: rest.disabled ? "var(--opacity-dimmed)" : 1,
-        ...style,
-      }}
-    >
+    <div style={{ ...fieldShell({ focused, disabled: rest.disabled }), ...style }}>
       {glyph && (
         // Clicking the icon focuses the field, which is what the old
         // `<label>` wrapper gave for free. `onMouseDown` rather than
@@ -116,7 +106,6 @@ export function Input({
         id={inputId}
         ref={inputRef}
         type={type}
-        className="pm-focus"
         onFocus={(e) => {
           setFocused(true);
           onFocus?.(e);
@@ -125,15 +114,7 @@ export function Input({
           setFocused(false);
           onBlur?.(e);
         }}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          border: "none",
-          outline: "none",
-          background: "transparent",
-          fontSize: "var(--fs-sm)",
-          color: "var(--fg)",
-        }}
+        style={fieldControl()}
       />
       {suffix}
     </div>

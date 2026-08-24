@@ -48,6 +48,17 @@ typescript
 !/scripts/regen-icons.sh
 !/scripts/pre-push
 !/scripts/install-hooks.sh
+# Mints the TLS material for the remote surface. `remote::tls`'s
+# fail-closed errors name this path as the remedy, and AGENTS.md
+# documents it — an ignored script would point committed error messages
+# at a file a fresh clone does not have.
+!/scripts/mint-remote-cert.sh
+# Builds the remote panel. It writes TWO committed artifacts — the
+# bundle under crates/claudepot-core/src/remote/assets/panel/ and the
+# generated panel_chunks.rs beside it — and AGENTS.md lists it under
+# "## Build". Ignored, a fresh clone had the artifacts and no way to
+# regenerate them, and the docs pointed at a file that was not there.
+!/scripts/build-panel.sh
 # Local CI gate + its shared invariant checks. repo-invariants.sh is
 # invoked by .github/workflows/ci.yml, so it MUST be committed.
 !/scripts/preflight.sh
@@ -56,6 +67,12 @@ typescript
 # preflight.sh and by the `check:envvar-layout` package script, so leaving it
 # out would point a committed gate at a file a fresh clone does not have.
 !/scripts/check-envvar-layout.mjs
+# Two CI gates over the renderer. Both are invoked by ci.yml through
+# `check:classes` / `check:a11y`, so an ignored copy is a workflow
+# pointing at a file a fresh clone does not have — which is exactly what
+# shipped in 37217727 and what `repo-invariants.sh` now checks for.
+!/scripts/check-classes.mjs
+!/scripts/check-a11y-names.mjs
 # Its unit tests, which vitest DOES run in CI (`scripts/**/*.test.mjs` is in
 # vitest.config.ts's include). Leaving this ignored would put a test file in
 # the working tree that no other clone has and CI never sees — the same

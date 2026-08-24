@@ -1,0 +1,117 @@
+/* controls.css — the half of the reset the design system does not ship.
+ *
+ * `ds-tokens.css` resets `button` fully (`border:none`, background,
+ * cursor, alignment) but gives `input, textarea` only `font` and
+ * `color`. So every text control in this app kept the user-agent
+ * control border. Measured in WebKit at 390px:
+ *
+ *   textarea  1px solid  rgb(118,118,118)
+ *   input     2px INSET  rgb(118,118,118)
+ *
+ * `inset` is the one that looks broken rather than merely wrong: it
+ * renders as a bevel, dark along the top and left and light along the
+ * bottom and right, so a field reads as having half a border. Ours draw
+ * their own surface with `background` + `border-radius`, so the UA
+ * border is never wanted — it just sat inside the shape at a different
+ * radius.
+ *
+ * This lives here and not in `src/vendor/`, which panel/README.md
+ * requires be byte-identical to the delivered design system.
+ *
+ * `appearance: none` goes with it: on iOS the UA control appearance
+ * carries its own corner rounding and inner shadow, which show through
+ * the same way once the border is gone.
+ *
+ * **The focus ring stays; only its offset goes.** The design system
+ * draws `:focus-visible { outline: var(--bw-ring) solid var(--ac);
+ * outline-offset: var(--bw-ring) }`. An outline is painted OUTSIDE the
+ * border box, so it is a ring around the field and never an inner
+ * border — that part is right and is kept, because
+ * `.claude/rules/design.md` requires a visible focus indicator.
+ *
+ * The 2px OFFSET is the part that reads as a defect on a filled field.
+ * It holds the ring away from the element, and since these fields draw
+ * their own surface and their parent is transparent, the gap shows the
+ * page through: a thin near-white band between the grey fill and the
+ * ring, which looks like the background failed to reach the edge.
+ * Measured — field `oklch(0.952 0.008 85)`, parent
+ * `rgba(0,0,0,0)`, offset `2px`.
+ *
+ * An offset earns its keep on a control whose own colour would muddle
+ * the ring. On a pale field under a terracotta ring there is contrast
+ * to spare, so the ring sits flush and the fill runs to meet it.
+ * Scoped to text fields: every other control keeps the system's ring
+ * exactly as delivered.
+ */
+input,
+textarea {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
+}
+
+/**
+ * Text the user is meant to be able to grab.
+ *
+ * The class was already applied in two places on the strength of the
+ * desktop's `.mono.selectable`, and no stylesheet here ever defined it
+ * — so it asserted nothing. Selection happens to work anyway because
+ * the panel never disables it globally, which is exactly what makes a
+ * dead class like this survive: it is indistinguishable from a working
+ * one until someone adds a `user-select: none` and quietly breaks the
+ * one affordance a truncated path had.
+ *
+ * `-webkit-touch-callout` is the iOS half: without it, long-press on a
+ * span inside a tappable card can raise the link/image sheet instead of
+ * the selection handles, and long-press IS the copy gesture on the
+ * device this client is for (`.claude/rules/path-display.md`).
+ */
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/**
+ * Reading measure at the wide step.
+ *
+ * `data-bp="lg"` was dead CSS until the shell started measuring itself,
+ * so nothing had ever been seen above 899px. Two of the three tab roots
+ * take the full width there — Accounts and Settings have no detail pane
+ * to sit beside — and the sign-in screen has no rail either, so in a
+ * 1600px browser window a list row and a password field both stretched
+ * to 1600px. That is not a layout the design specifies; it is what
+ * `flex: 1` does when nobody has said otherwise, and the delivered
+ * prototype never saw it because it ran inside a 390px device frame.
+ *
+ * Declared here rather than in `src/vendor/ds-tokens.css`, which
+ * `panel/README.md` requires stay as delivered — and scoped to `.panel`
+ * rather than `:root` for the same reason.
+ *
+ * Two measures because they are two different things: a column of prose
+ * and rows, and a form of four fields. One value for both makes the
+ * form look abandoned in the middle of the window.
+ */
+.panel[data-bp='lg'] {
+  --read-max: 720px;
+  --form-max: 380px;
+}
+
+.panel[data-bp='lg'] .measure,
+.panel[data-bp='lg'] .measure-form {
+  width: 100%;
+  margin-inline: auto;
+}
+
+.panel[data-bp='lg'] .measure {
+  max-width: var(--read-max);
+}
+
+.panel[data-bp='lg'] .measure-form {
+  max-width: var(--form-max);
+}

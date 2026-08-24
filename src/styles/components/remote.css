@@ -1,0 +1,70 @@
+/* Settings → Remote — the LAN appliance pane.
+ *
+ * Its own shard rather than more of `settings.css`, which was at 357
+ * lines and over the 350 the loc-guardian limit in
+ * `.claude/rules/design.md` names. Splitting by surface is what that
+ * limit is for: this is one pane's structure, and it reads better
+ * beside itself than appended to fourteen other panes'.
+ *
+ * Structural only. The pane's prose registers are inline token styles,
+ * the way `RetentionPane`'s are.
+ */
+
+.remote-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  margin-top: var(--sp-8);
+}
+.remote-fields {
+  display: flex;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+  margin-top: var(--sp-8);
+}
+.remote-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.remote-devices {
+  list-style: none;
+  margin: var(--sp-8) 0 0;
+  padding: 0;
+}
+.remote-devices li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-height: var(--sp-32);
+  padding: var(--sp-4) 0;
+  border-bottom: var(--bw-hair) solid var(--line);
+}
+/* The last row's rule would double with whatever follows the list. */
+.remote-devices li:last-child {
+  border-bottom: none;
+}
+/* The name takes the slack so the state word and Revoke stay right-aligned. */
+.remote-devices li > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings → Remote, the approvals toggle. Matches NetworkPane's
+   checkbox row shape; the stack is a column so the detail line sits
+   under the label rather than beside it. */
+.remote-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-10);
+  margin-top: var(--sp-8);
+}
+.remote-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}

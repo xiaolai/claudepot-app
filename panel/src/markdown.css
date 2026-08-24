@@ -1,0 +1,208 @@
+/* Rendered transcript prose.
+ *
+ * Every value is a token from ds-tokens.css. A raw number here would be
+ * the same defect the design system exists to prevent — see the panel's
+ * README and `.claude/rules/design.md`.
+ *
+ * Scoped under `.md` so it cannot reach the shell. The thread is the
+ * only surface that renders markdown; the tool ticks beside it stay in
+ * their own `<pre>` and must not inherit any of this.
+ */
+
+.md {
+  font-size: var(--t-sub);
+  line-height: var(--lh-body);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* First and last child margins would otherwise fight the row padding
+ * that already spaces one turn from the next. */
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: var(--s2) 0;
+}
+
+/* Headings step down but stay close to body size. A phone column is
+ * ~40 characters wide; a 2em heading in it is a banner, not a heading. */
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: var(--s4) 0 var(--s2);
+  font-weight: var(--w-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-snug);
+}
+.md h1 {
+  font-size: var(--t-head);
+}
+.md h2 {
+  font-size: var(--t-sub);
+}
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  font-size: var(--t-sub);
+  color: var(--fg2);
+}
+
+.md strong {
+  font-weight: var(--w-semi);
+}
+.md em {
+  font-style: italic;
+}
+.md del {
+  text-decoration: line-through;
+  color: var(--fg4);
+}
+
+.md a {
+  color: var(--ac-ink);
+  text-decoration: underline;
+  text-underline-offset: var(--s1);
+  /* The one sanctioned pointer: a real hyperlink that opens the
+   * browser. See `.claude/rules/design.md` on cursor policy. */
+  cursor: pointer;
+}
+
+.md ul,
+.md ol {
+  margin: var(--s2) 0;
+  padding-left: var(--s6);
+}
+.md li {
+  margin: var(--s1) 0;
+}
+.md li::marker {
+  color: var(--fg4);
+}
+
+/* GFM task lists. The checkbox is inert — a transcript is a record, not
+ * a form, and a tappable box that changes nothing is a lie. */
+.md input[type='checkbox'] {
+  margin-right: var(--s2);
+  pointer-events: none;
+}
+
+.md blockquote {
+  margin: var(--s3) 0;
+  padding-left: var(--s4);
+  border-left: var(--bw-hair) solid var(--hair);
+  color: var(--fg3);
+}
+
+.md code {
+  font-family: var(--f-mono);
+  font-size: var(--t-meta);
+  background: var(--sf2);
+  border-radius: var(--r-xs);
+  padding: 0 var(--s1);
+}
+
+/* A fenced block scrolls sideways rather than wrapping: wrapped code is
+ * harder to read than code you have to swipe, and indentation is
+ * information. */
+.md pre {
+  margin: var(--s3) 0;
+  padding: var(--s3);
+  border-radius: var(--r-md);
+  background: var(--sf2);
+  overflow-x: auto;
+}
+.md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: var(--t-nano);
+  color: var(--fg2);
+  white-space: pre;
+}
+
+/* The one construct that reliably exceeds a phone's width. It scrolls
+ * inside its own wrapper so it cannot widen the column. */
+.md-table-scroll {
+  margin: var(--s3) 0;
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  background: var(--sf2);
+}
+.md-table-scroll table {
+  border-collapse: collapse;
+  font-size: var(--t-meta);
+  white-space: nowrap;
+}
+.md-table-scroll th,
+.md-table-scroll td {
+  padding: var(--s2) var(--s3);
+  text-align: left;
+  box-shadow: inset 0 calc(var(--bw-hair) * -1) 0 var(--hair);
+}
+.md-table-scroll th {
+  font-weight: var(--w-semi);
+  color: var(--fg2);
+}
+
+.md hr {
+  margin: var(--s4) 0;
+  border: none;
+  height: var(--bw-hair);
+  background: var(--hair);
+}
+
+/* An image's alt text, standing in for the image. See Markdown.jsx. */
+.md-img {
+  display: inline-block;
+  padding: 0 var(--s2);
+  border-radius: var(--r-xs);
+  background: var(--sf2);
+  color: var(--fg4);
+  font-size: var(--t-micro);
+  font-style: italic;
+}
+
+/* ── Mermaid ───────────────────────────────────────────────────
+   A diagram is wider than a phone more often than not, so the
+   container scrolls rather than shrinking the SVG to unreadable. */
+.mmd {
+  margin: var(--s3) 0;
+  padding: var(--s3);
+  border-radius: var(--r-md);
+  background: var(--sf2);
+  overflow-x: auto;
+}
+.mmd svg {
+  max-width: none;
+  height: auto;
+}
+
+/* A diagram the model got slightly wrong is common, and it must not
+   take the thread down with it — the source is shown instead, which
+   is what the reader had before diagrams were rendered at all. */
+.mmd-failed {
+  margin: var(--s3) 0;
+}
+.mmd-failed-note {
+  font-size: var(--t-micro);
+  color: var(--wn);
+  margin-bottom: var(--s1);
+}
+.mmd-failed pre {
+  margin: 0;
+  padding: var(--s3);
+  border-radius: var(--r-md);
+  background: var(--sf2);
+  font-size: var(--t-nano);
+  color: var(--fg2);
+  overflow-x: auto;
+  white-space: pre;
+}

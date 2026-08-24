@@ -62,7 +62,7 @@ export function RepairEntry({
         <span className="muted"> → </span>
         <span className="mono small selectable">{e.new_path}</span>
       </div>
-      <div className="repair-entry-meta muted small">
+      <div className="muted small">
         {t("repair.startedMeta", {
           date: e.started_at,
           phases: e.phases_completed.join(", ") || t("repair.phasesNone"),

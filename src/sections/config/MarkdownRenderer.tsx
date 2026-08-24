@@ -11,6 +11,8 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { i18n } from "../../lib/i18n";
 import { MermaidBlock } from "./MermaidBlock";
+import { extractCodeText } from "./extractCodeText";
+import { hasLanguage } from "../../lib/codeFence";
 
 /**
  * Markdown renderer for Config previews.
@@ -89,7 +91,7 @@ const components: Components = {
       | undefined;
 
     const className = codeChild?.props?.className ?? "";
-    if (className.includes("language-mermaid")) {
+    if (hasLanguage(className, "mermaid")) {
       return <MermaidBlock source={extractCodeText(codeChild?.props?.children)} />;
     }
 
@@ -100,7 +102,11 @@ const components: Components = {
     const { children, href } = props;
     return (
       <span
-        className="md-link"
+        // A test hook, not a style hook: this span draws itself from the
+        // inline tokens below, and the `md-link` class it used to carry
+        // had no rule in any stylesheet. `data-testid` says which of the
+        // two it is — see `scripts/check-classes.mjs`.
+        data-testid="md-link"
         title={href ?? undefined}
         style={{
           color: "var(--accent-ink)",
@@ -149,26 +155,6 @@ const components: Components = {
     );
   },
 };
-
-/**
- * Pull a flat string out of a `<code>` element's children. With
- * `rehype-highlight` enabled the children are typically a single text
- * node (when the language is unknown — mermaid is) or an array of
- * `<span class="hljs-…">` elements (when it's known). For unknown
- * languages with `ignoreMissing: true`, mermaid lands in the first
- * shape, but we handle both for resilience.
- */
-function extractCodeText(node: ReactNode): string {
-  if (typeof node === "string") return node;
-  if (typeof node === "number") return String(node);
-  if (node === null || node === undefined || typeof node === "boolean") return "";
-  if (Array.isArray(node)) return node.map(extractCodeText).join("");
-  if (isValidElement(node)) {
-    const props = node.props as { children?: ReactNode };
-    return extractCodeText(props.children);
-  }
-  return "";
-}
 
 // ---------- Frontmatter ----------------------------------------------
 

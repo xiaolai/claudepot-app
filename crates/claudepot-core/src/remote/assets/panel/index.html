@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Claudepot" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<!-- iOS reads `apple-touch-icon` and accepts PNG ONLY. Pointed at an
+     SVG it ignores the tag entirely and generates a tile from the first
+     letter of the title instead — which is why adding this panel to an
+     iPhone home screen produced a plain "C" on a white square. The SVG
+     stays as the favicon below, where it is the better format. -->
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<title>Claudepot</title>
+  <script type="module" crossorigin src="/panel/panel.js"></script>
+  <link rel="stylesheet" crossorigin href="/panel/panel.css">
+</head>
+<body>
+<div id="root"></div>
+</body>
+</html>

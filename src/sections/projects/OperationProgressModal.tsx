@@ -317,7 +317,7 @@ export function OperationProgressModal({
                 </span>
                 <span className="phase-label">{stateLabel}</span>
                 {sub && sub.phase === p.id && (
-                  <span className="phase-progress mono small muted">
+                  <span className="mono small muted">
                     {" "}({sub.done}/{sub.total})
                   </span>
                 )}

@@ -458,6 +458,10 @@
     "import_failed": "The sign-in finished but left no credentials to import.",
     "io": "Filesystem error: {{detail}}"
   },
+  "peer_inbound": {
+    "duration_out_of_range": "A remote-control window has to be between {{min_secs}} and {{max_secs}} seconds. You asked for {{got_secs}}.",
+    "failed": "Couldn't read or change the remote-control window. {{detail}}"
+  },
   "permission": {
     "duration_out_of_range": "Pick a duration between {{min}} and {{max}} seconds.",
     "grants_load_failed": "Couldn't load the permission grants: {{detail}}",
@@ -784,5 +788,9 @@
     "empty": "A command name is required.",
     "invalid_chars": "\"{{name}}\" isn't shell-safe — use letters, digits, `-`, `_`.",
     "reserved": "\"{{name}}\" is reserved."
+  },
+  "remote": {
+    "failed": "The remote surface could not be changed. {{detail}}",
+    "bad_device_id": "That is not a device id. {{detail}}"
   }
 }

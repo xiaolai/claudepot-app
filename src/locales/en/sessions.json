@@ -219,5 +219,8 @@
     "filterJson": "JSON",
     "saveDialogFailed": "Couldn't open the save dialog. Please retry.",
     "failedScope": "Export failed"
+  },
+  "transcript": {
+    "imageAlt": "image"
   }
 }
