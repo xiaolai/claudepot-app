@@ -702,6 +702,79 @@ refusing the next request. The rest of that list is done: the throttle
 is persisted, every mutation requires an `Idempotency-Key`, and `Host` /
 `Origin` are checked in `guard_origin` before any handler runs.
 
+### Wiring it into the desktop app — Settings → Remote
+
+The surface was CLI-only for its whole life: `claudepot remote
+{status,set-password,enable,disable,revoke-all,serve}`, with `serve` a
+foreground process somebody kept a terminal open for. The GUI now hosts
+it, and three decisions hold that together.
+
+**Every verb is `remote::service`, and there is exactly one of it.**
+The CLI's command file used to carry real logic — `FilePersist`, the
+recovery warning, `enable`'s preflight ordering, `revoke_all`'s refusal
+— so a Tauri command written against `claudepot_core::remote` directly
+would have reimplemented all of it. That is the `account_service` story
+again, and the `revoke_all` refusal is the one that would have hurt:
+drop it in a second implementation and the GUI's "Revoke all" reports
+`Revoked 0` over a device file whose `revoked_at` marks were already
+lost, which reads as "there was nothing to revoke" rather than "every
+stolen token is live". `ApprovalHook` and `FilePersist` moved to core
+with it. What stays per-caller is presentation.
+
+**The server runs in-process, on a tokio task
+(`src-tauri/src/remote_server.rs`).** Not a launchd/systemd daemon, and
+the reason is the approval hook rather than convenience: it is armed for
+exactly as long as a server is up, and that coupling is what makes it
+acceptable to hand a network client the ability to grant a permission at
+all. A daemon makes "as long as the surface is up" mean *always*, which
+turns a session-scoped capability — code execution as this user — into a
+permanent one. That is the trade the peer-inbound grant already refuses
+by narrowing temporally.
+
+The cost is real and is **disclosed, not discovered**: quitting
+Claudepot stops the remote surface. `RunEvent::Exit` enforces it (not
+`ExitRequested`, which can be prevented — stopping the server for a quit
+that then does not happen would leave the pane reporting a state nobody
+asked for), and the pane says so in as many words.
+
+**Three states, not two, and two liveness fields.** `server.enabled` is
+a stored preference that survives a `kill -9`; `approval::store::is_serving`
+is the heartbeat. So the pane renders *off* / *enabled, not serving* /
+*serving*, and collapsing the middle one is a review finding — a phone
+cannot reach a Mac whose preference merely says yes.
+
+`serving` and `running_here` are separate for a second reason: a
+`claudepot remote serve` in a terminal sets the heartbeat and is not
+ours. A pane with only the first would offer Stop for a process it
+cannot stop; one with only the second would report "off" while a
+terminal was serving the panel to a phone. Both are asserted in
+`RemotePane.test.tsx`, and the three-state test has been watched failing
+against a pane that collapsed them.
+
+The pane is **`group: "core"`**, for the reason Retention is: it is
+where you revoke a lost phone, and an emergency control you have to go
+hunting for is a broken one.
+
+**Two chips, not one.** `RemoteServingChip` is the ambient tier for
+this surface; `RemoteWindowChip` is Claude Code's `crossSessionInbound`.
+Different capabilities with different blast radii — folding them into
+one indicator would leave a user who saw it lit unable to tell which
+door was open. The new chip reads liveness rather than the preference,
+so a CLI-started server lights it too, and renders nothing when nothing
+is serving.
+
+**Secret direction is unchanged and worth restating**, because this is
+the first surface that takes a password over IPC. It crosses *in* and is
+zeroized by `service::set_password` on every path; nothing returns it,
+and the device store holds a SHA-256 that `DeviceSummary` does not carry
+either. If TOTP enrolment is added later it needs the `key_*_copy`
+treatment — the `otpauth://` URI is a secret coming *back*, which
+`rules/architecture.md` forbids in the plain shape.
+
+Still absent by design: pairing-code display and QR, and TOTP/passkey
+enrolment from the GUI. The endpoints exist; the pane does not drive
+them yet.
+
 ### The panel — the client that ships at `/`
 
 `panel/` is a self-contained Vite app (its own install; **not** a

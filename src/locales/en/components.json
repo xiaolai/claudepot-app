@@ -275,5 +275,9 @@
     "unknownHint": "Claudepot could not read whether the remote-control window is open. It may be open. Check Settings, or run `claudepot session inbound status` at the machine.",
     "unmanaged": "remote open",
     "unmanagedHint": "Cross-session messages are being accepted, and no Claudepot grant is minding it — nothing will close it automatically. Set it back to hold in Claude Code's settings, or open a time-boxed window instead."
+  },
+  "remoteServing": {
+    "serving": "remote on",
+    "everyInterface": "remote on · all interfaces"
   }
 }

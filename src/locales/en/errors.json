@@ -788,5 +788,9 @@
     "empty": "A command name is required.",
     "invalid_chars": "\"{{name}}\" isn't shell-safe — use letters, digits, `-`, `_`.",
     "reserved": "\"{{name}}\" is reserved."
+  },
+  "remote": {
+    "failed": "The remote surface could not be changed. {{detail}}",
+    "bad_device_id": "That is not a device id. {{detail}}"
   }
 }

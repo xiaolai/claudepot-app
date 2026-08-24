@@ -5,7 +5,7 @@
     "cards stream, artifact-usage telemetry, the local cost report, and",
     "the cc_doctor snapshot cache.",
     "",
-    "Every entry here is owner=\"command\" \u2014 an ad-hoc failure raised at a",
+    "Every entry here is owner=\"command\" — an ad-hoc failure raised at a",
     "Tauri command site with no core enum behind it. Where a core enum",
     "did exist, the conversion lifted it (`ErrorDto::from`) instead of",
     "minting a code, which is why files that read like they should be",
@@ -19,14 +19,14 @@
     "  - A wire discriminant the renderer sent that we do not know",
     "    (a mode, a window kind, an artifact kind, a pricing tier). The",
     "    offending value rides in params under its own name so a",
-    "    localized sentence can quote it, and it is never translated \u2014",
+    "    localized sentence can quote it, and it is never translated —",
     "    it is a protocol token, not prose.",
     "  - A bare `std::io` / mutex failure with no enum to lift. Those",
     "    carry `detail` only, and `detail` is core's English.",
     "",
     "Nothing here can carry a credential. The values are enum spellings,",
     "filesystem paths, and `Display` text from a settings-file parser, a",
-    "uuid parser, or sqlite \u2014 none of the commands in this file reads a",
+    "uuid parser, or sqlite — none of the commands in this file reads a",
     "transcript body or a keychain item.",
     "",
     "See src-tauri/src/dto_error.rs for the consts these lock against,",
@@ -150,6 +150,22 @@
         "detail"
       ],
       "message": "remote-control grant store is unreadable"
+    },
+    {
+      "code": "remote.bad_device_id",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "not a device id: not-a-uuid"
+    },
+    {
+      "code": "remote.failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "set a password first — enabling without one would open a surface nobody can log into, and that is not a useful state to persist"
     },
     {
       "code": "session_move.invalid_session_id",

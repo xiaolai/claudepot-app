@@ -267,5 +267,9 @@
     "unknownHint": "Claudepot 无法读取远程控制窗口是否处于打开状态。它可能是打开的。请检查设置，或在本机运行 `claudepot session inbound status`。",
     "unmanaged": "远程已开启",
     "unmanagedHint": "跨会话消息正在被接受，但没有任何 Claudepot 授权在管它——不会自动关闭。请在 Claude Code 设置中改回 hold，或改用限时授权。"
+  },
+  "remoteServing": {
+    "serving": "远程已开启",
+    "everyInterface": "远程已开启 · 所有接口"
   }
 }

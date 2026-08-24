@@ -14,6 +14,7 @@ import { boardApi } from "./board";
 import { configApi } from "./config";
 import { pricingApi } from "./pricing";
 import { peerInboundApi } from "./peerInbound";
+import { remoteApi } from "./remote";
 import { artifactUsageApi } from "./artifact-usage";
 import { artifactLifecycleApi } from "./artifact-lifecycle";
 import { artifactToolApi } from "./artifact-tool";
@@ -56,6 +57,7 @@ export const api = {
   ...configApi,
   ...pricingApi,
   ...peerInboundApi,
+  ...remoteApi,
   ...artifactUsageApi,
   ...artifactLifecycleApi,
   ...artifactToolApi,
@@ -91,5 +93,6 @@ export const api = {
 
 export { migrateApi, sharedMemoryApi };
 export type * from "./migrate";
+export * from "./remote";
 export type * from "./sharedMemory";
 export * from "./quick-prompt";

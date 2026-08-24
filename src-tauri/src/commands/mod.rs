@@ -72,6 +72,7 @@ pub mod project;
 pub mod protected;
 pub mod quick_prompt;
 pub mod release_update;
+pub mod remote;
 pub mod repair;
 pub mod rotation;
 pub mod routes;

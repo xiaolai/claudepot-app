@@ -788,5 +788,9 @@
     "empty": "必须填写命令名。",
     "invalid_chars": "“{{name}}”在 shell 中不安全——请使用字母、数字、`-`、`_`。",
     "reserved": "“{{name}}”为保留名称。"
+  },
+  "remote": {
+    "failed": "无法更改远程服务。{{detail}}",
+    "bad_device_id": "这不是有效的设备 ID。{{detail}}"
   }
 }

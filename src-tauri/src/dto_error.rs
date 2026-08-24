@@ -94,6 +94,14 @@ pub mod codes {
     /// Save submitted with an empty (or whitespace-only) GitHub token.
     pub const SESSION_SHARE_TOKEN_EMPTY: &str = "session_share.token_empty";
 
+    // --- remote appliance (commands/remote.rs)
+    /// Any `remote::service` verb failed. One code because the service
+    /// error's own `Display` already says which — splitting it would
+    /// mean a catalog entry per variant that all read the same.
+    pub const REMOTE_FAILED: &str = "remote.failed";
+    /// A renderer-supplied device id did not parse as a uuid.
+    pub const REMOTE_BAD_DEVICE_ID: &str = "remote.bad_device_id";
+
     // --- accounts / auth / desktop (commands/{account,desktop,preferences}.rs)
     /// `LoginState`'s mutex was poisoned — a previous holder panicked.
     pub const ACCOUNTS_LOGIN_STATE_LOCK_POISONED: &str = "accounts.login_state_lock_poisoned";

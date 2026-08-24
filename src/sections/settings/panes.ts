@@ -61,6 +61,13 @@ export const SETTINGS_PANES = [
     get label() { return i18n.t("panes.quickPrompts", { ns: "settings" }); },
     glyph: NF.bolt, group: "core",
     keywords: ["chips", "shortcuts", "phrases", "remote", "panel", "composer"] },
+  // "core", not "advanced", and for the same reason Retention is: this
+  // pane is where you revoke a lost phone, and an emergency control you
+  // have to go hunting for is a broken emergency control.
+  { id: "remote",
+    get label() { return i18n.t("panes.remote", { ns: "settings" }); },
+    glyph: NF.globe, group: "core",
+    keywords: ["panel", "phone", "lan", "appliance", "server", "pair", "device", "revoke", "password"] },
   { id: "retention",
     get label() { return i18n.t("panes.retention", { ns: "settings" }); },
     glyph: NF.archive, group: "core",

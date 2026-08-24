@@ -58,6 +58,7 @@ pub mod passkey;
 pub mod password;
 pub mod serve;
 pub mod server;
+pub mod service;
 pub mod store;
 pub mod tls;
 pub mod token;
