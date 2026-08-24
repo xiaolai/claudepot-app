@@ -276,9 +276,13 @@ fn drain_to_newline_unit_test_with_giant_stream() {
     data.extend_from_slice(b"after-drain\n");
 
     let mut reader = BufReader::new(Cursor::new(data));
-    let started = std::time::Instant::now();
+
+    // Everything above has allocated: the 100 MiB source and the
+    // reader's own buffer. Count from here, so the reading is what the
+    // drain itself asked for.
+    crate::alloc_probe::reset();
     let ok = super::parser::drain_to_newline(&mut reader).expect("drain ok");
-    let elapsed = started.elapsed();
+    let allocated = crate::alloc_probe::bytes();
     assert!(ok, "drain should find the newline");
 
     // The next read MUST start at "after-drain\n" — proving the
@@ -290,13 +294,26 @@ fn drain_to_newline_unit_test_with_giant_stream() {
         "drain stopped past the newline; next line should be after-drain"
     );
 
-    // 100 MiB through BufReader::fill_buf+consume is sub-second
-    // on any reasonable machine. A regression that re-allocates
-    // proportional to stream size would either OOM or slow down
-    // by orders of magnitude on small-RAM CI.
+    // The property, measured rather than inferred: the drain allocates
+    // nothing proportional to the stream.
+    //
+    // This was a wall-clock assertion — "100 MiB in under 5 seconds" —
+    // and the proxy was wrong in both directions. It failed at load
+    // average 81 on a machine running the suite in parallel, reporting
+    // an allocation regression where there was none; and it could not
+    // have caught the regression it names, because allocating and
+    // copying 100 MiB costs tens of milliseconds, not seconds. See
+    // `crate::alloc_probe`.
+    //
+    // The bound is generous by design. `BufReader`'s buffer is 8 KiB
+    // and the drain adds nothing to it, so the real figure is ~0; a
+    // `read_until(&mut Vec)` rewrite would report ~100 MiB. Anything in
+    // between is a change worth looking at rather than a threshold to
+    // retune.
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "drain_to_newline took {elapsed:?} on 100 MiB — possible allocation regression"
+        allocated < 1024 * 1024,
+        "drain_to_newline allocated {allocated} bytes draining 100 MiB — it must \
+         stream through the reader's buffer, not accumulate the line"
     );
 }
 

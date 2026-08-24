@@ -164,3 +164,81 @@ pub mod token_refresh;
 pub mod trash;
 pub mod updates;
 pub mod usage_local;
+
+/// Counting allocator, installed only in the test binary.
+///
+/// # Why a global allocator exists for one assertion
+///
+/// `codex_session::parser::drain_to_newline` promises **bounded**
+/// memory: it walks a `BufRead` with `fill_buf`/`consume` and never
+/// accumulates, so a 100 MiB line costs one 8 KiB buffer. The
+/// regression it guards against is someone rewriting it as
+/// `read_until(&mut Vec)`, which would hold the whole line.
+///
+/// That property was asserted through **wall-clock time** — "100 MiB in
+/// under 5 seconds" — and the proxy was wrong twice over. It is
+/// load-sensitive, and it failed at load average 81 on a developer
+/// machine running the suite in parallel, reporting a possible
+/// allocation regression where there was none. It is also *too weak to
+/// see the regression it names*: allocating and copying 100 MiB costs
+/// tens of milliseconds, nowhere near a 5-second bound, so a real
+/// `read_until` rewrite would have sailed past it. A flaky test that
+/// cannot detect its own subject is worth replacing rather than
+/// retuning.
+///
+/// # Per-thread, and a running total rather than a peak
+///
+/// `cargo test` runs tests in parallel, so a process-global counter
+/// would measure every other test at the same time. A thread-local
+/// makes the reading belong to the test that took it.
+///
+/// A monotonic total, not a peak, so no `dealloc` bookkeeping is
+/// needed — and therefore no correctness question about memory freed on
+/// a different thread from the one that allocated it. The separation
+/// this needs is enormous (about zero versus about 100 MiB), so the
+/// cruder measure is ample.
+///
+/// The counter is a `Cell` behind a const-initialised `thread_local!`,
+/// which allocates nothing itself — an allocator that allocates on its
+/// own accounting path recurses forever.
+#[cfg(test)]
+pub(crate) mod alloc_probe {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static BYTES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Start counting from zero on this thread.
+    pub(crate) fn reset() {
+        let _ = BYTES.try_with(|b| b.set(0));
+    }
+
+    /// Bytes this thread has allocated since [`reset`].
+    pub(crate) fn bytes() -> usize {
+        BYTES.try_with(|b| b.get()).unwrap_or(0)
+    }
+
+    pub(crate) struct Counting;
+
+    // SAFETY: every method forwards to `System`, which is a valid
+    // allocator, and the accounting touches only a `Cell<usize>` behind
+    // a const-initialised TLS — no allocation, so no reentrancy.
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            // `try_with`: during thread teardown the TLS is already
+            // gone, and a panic on that path would abort the process.
+            let _ = BYTES.try_with(|b| b.set(b.get().saturating_add(layout.size())));
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static COUNTING_ALLOCATOR: alloc_probe::Counting = alloc_probe::Counting;
