@@ -60,6 +60,26 @@ exceptions.
   `#[cfg(target_os = "windows")]` or `#[cfg(unix)]`. CI must run on
   `windows-latest` so these gates actually fire. See
   `.github/workflows/ci.yml` — Windows is in the matrix; keep it there.
+- **A test FIXTURE is path-processing code too.** `peer::key`'s guard
+  correctly used `Path::is_absolute`, and nine of its tests still failed
+  on `windows-latest` — they fed it `/tmp/cc-socks/11137.sock`, which is
+  not absolute there. The rule above was followed in the function and
+  ignored in the tests around it. When a literal path is the *input* to
+  something that validates paths, the literal needs the same `#[cfg]`
+  the behaviour does.
+- **Typecheck `#[cfg]`-gated code you cannot run.** Writing a
+  Windows-only arm from macOS is writing code no local command compiles:
+  `cargo check --target x86_64-pc-windows-msvc` does not get there
+  (`ring`'s build script needs a Windows C toolchain), and the validator
+  hosts in AGENTS.md check *pushed commits*, not a working tree. So a
+  typo reaches CI and costs a full matrix run — a first draft of that
+  Windows test used `Priority::Normal`, a variant that does not exist.
+
+  Temporarily delete the `#[cfg]`, run `cargo check --tests`, then put it
+  back. The body is compiled against the real types, which catches every
+  wrong name, path and arity. It does not prove the *platform* behaviour
+  — only CI does that — but it removes the class of failure that is pure
+  spelling.
 - **Red → green, never green first.** Before changing path-processing
   behavior:
   1. Write the failing test with the expected Windows form.
