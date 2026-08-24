@@ -79,7 +79,8 @@
       "sourceNote": "通道与 DISABLE_* 键位于 <code>~/.claude/settings.json</code>（CC 自己的文件）。通知开关与检查频率位于 <code>~/.claudepot/updates.json</code>。"
     },
     "channel": {
-      "pinHonored": "将遵循 minimumVersion={{version}} 的锁定"
+      "pinHonored": "将遵循 minimumVersion={{version}} 的锁定",
+      "untrackedHint": "Claude Code 当前使用 “{{channel}}” 更新通道。Anthropic 没有为该通道发布版本源，因此 Claudepot 无法判断该通道上是否有更新版本。切换到 latest 或 stable 可恢复更新检查。"
     },
     "source": {
       "homebrew": "Homebrew Cask",

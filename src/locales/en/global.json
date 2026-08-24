@@ -80,7 +80,8 @@
       "sourceNote": "Channel + DISABLE_* keys live in <code>~/.claude/settings.json</code> (CC's own file). Notification toggles + cadence live in <code>~/.claudepot/updates.json</code>."
     },
     "channel": {
-      "pinHonored": "minimumVersion={{version}} pin will be honored"
+      "pinHonored": "minimumVersion={{version}} pin will be honored",
+      "untrackedHint": "Claude Code is set to the \"{{channel}}\" update channel. Anthropic publishes no version feed for it, so Claudepot cannot say whether a newer Claude Code exists on it. Choose latest or stable to resume update checks."
     },
     "source": {
       "homebrew": "Homebrew Cask",

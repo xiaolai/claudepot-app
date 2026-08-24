@@ -16,8 +16,17 @@ const CC_RELEASES_BASE: &str = "https://downloads.claude.ai/claude-code-releases
 const DESKTOP_FORMULAE_API: &str = "https://formulae.brew.sh/api/cask/claude.json";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// CC release channel. Mirrors the values CC's own
-/// `autoUpdatesChannel` setting accepts.
+/// A CC release channel Claudepot **has a published version feed for**
+/// — i.e. one where `{CC_RELEASES_BASE}/{channel}` answers. That is the
+/// whole meaning of this type: `as_str` builds a URL.
+///
+/// It is deliberately *narrower* than the set of values CC accepts. CC
+/// 2.1.241's schema is `["latest","stable","rc"]`, but there is no
+/// `rc` feed — `GET /claude-code-releases/rc` returns 404 NoSuchKey
+/// (measured 2026-08-24, alongside 200s for `latest` and `stable`).
+/// Adding an `Rc` variant here would create a channel whose only
+/// possible fetch is a 404, so the third value is modelled by
+/// [`CcChannel::Untracked`] instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Channel {
@@ -43,6 +52,73 @@ impl std::str::FromStr for Channel {
             other => Err(UpdateError::Parse(format!(
                 "unknown channel: {other:?} (expected 'latest' or 'stable')"
             ))),
+        }
+    }
+}
+
+/// What CC's `autoUpdatesChannel` key actually says, read as three
+/// states rather than coerced to two.
+///
+/// Every reader used to be `raw.parse::<Channel>().ok().unwrap_or(
+/// Channel::Latest)`, which silently answers "latest" for a user who
+/// is genuinely on `rc`: the panel lit the `latest` button and the
+/// version comparison ran against the `latest` baseline. A misreport,
+/// not a crash — so nothing exercising only `latest`/`stable` could
+/// catch it.
+///
+/// The distinction that matters is *not* valid-vs-invalid. `rc` is a
+/// perfectly valid setting; Claudepot simply has no feed for it. So
+/// `Untracked` carries the raw string and is reported, never repaired
+/// — same reasoning as the retention pane's three-state
+/// `SettingValue`, where collapsing "absent" into "present but
+/// unusable" pointed the user at the wrong remedy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CcChannel {
+    /// Key absent. CC's own default is `latest`, so that is what the
+    /// probe uses — but "unset" is kept distinct from an explicit
+    /// `"latest"` because only one of the two is the user's choice.
+    Unset,
+    /// A channel with a feed. Probe it, cache it, compare against it.
+    Tracked(Channel),
+    /// A value CC accepts and Claudepot cannot track — `rc` on
+    /// 2.1.241, which CC's own `/status` and `/config` display as
+    /// **"slow"**. Also covers any future value, so the next channel
+    /// CC adds degrades to "we can't tell you" rather than to a
+    /// confident wrong answer.
+    Untracked(String),
+}
+
+impl CcChannel {
+    /// Read the raw `autoUpdatesChannel` value.
+    pub fn read(raw: Option<&str>) -> Self {
+        match raw.map(str::trim) {
+            None | Some("") => CcChannel::Unset,
+            Some(v) => match v.parse::<Channel>() {
+                Ok(c) => CcChannel::Tracked(c),
+                Err(_) => CcChannel::Untracked(v.to_string()),
+            },
+        }
+    }
+
+    /// The channel to probe and cache under, or `None` when there is
+    /// no feed. `Unset` probes `latest` because that is CC's default.
+    pub fn tracked(&self) -> Option<Channel> {
+        match self {
+            CcChannel::Unset => Some(Channel::Latest),
+            CcChannel::Tracked(c) => Some(*c),
+            CcChannel::Untracked(_) => None,
+        }
+    }
+
+    /// The wire value to show the user — CC's own string, never a
+    /// translated or normalized one. `.claude/rules/design.md` keeps
+    /// CC setting values in English precisely because the user may
+    /// have to type them.
+    pub fn label(&self) -> &str {
+        match self {
+            CcChannel::Unset => Channel::Latest.as_str(),
+            CcChannel::Tracked(c) => c.as_str(),
+            CcChannel::Untracked(raw) => raw,
         }
     }
 }
@@ -221,5 +297,74 @@ mod tests {
             Channel::Stable.as_str().parse::<Channel>().unwrap(),
             Channel::Stable
         );
+    }
+
+    // ── CcChannel: the three-state read of `autoUpdatesChannel` ──
+
+    #[test]
+    fn rc_is_untracked_not_latest() {
+        // The reported defect. CC 2.1.241 accepts `rc` (its own UI
+        // calls it "slow"); the old read coerced it to Latest and the
+        // panel then claimed the user was on latest.
+        let c = CcChannel::read(Some("rc"));
+        assert_eq!(c, CcChannel::Untracked("rc".into()));
+        assert_eq!(c.tracked(), None, "no feed, so nothing to compare against");
+        assert_eq!(c.label(), "rc", "the user sees CC's own value");
+    }
+
+    #[test]
+    fn a_future_channel_value_also_degrades_honestly() {
+        // The point of `Untracked` carrying the raw string: the next
+        // value CC adds must not silently become Latest either.
+        let c = CcChannel::read(Some("nightly"));
+        assert_eq!(c, CcChannel::Untracked("nightly".into()));
+        assert_eq!(c.tracked(), None);
+        assert_eq!(c.label(), "nightly");
+    }
+
+    #[test]
+    fn tracked_channels_still_resolve() {
+        assert_eq!(
+            CcChannel::read(Some("stable")),
+            CcChannel::Tracked(Channel::Stable)
+        );
+        assert_eq!(
+            CcChannel::read(Some("stable")).tracked(),
+            Some(Channel::Stable)
+        );
+        assert_eq!(CcChannel::read(Some("stable")).label(), "stable");
+        assert_eq!(
+            CcChannel::read(Some("  LATEST  ")),
+            CcChannel::Tracked(Channel::Latest),
+            "CC's parser is case- and whitespace-tolerant; so is ours"
+        );
+    }
+
+    #[test]
+    fn unset_probes_latest_but_is_not_an_explicit_latest() {
+        for raw in [None, Some(""), Some("   ")] {
+            let c = CcChannel::read(raw);
+            assert_eq!(c, CcChannel::Unset, "{raw:?}");
+            assert_eq!(
+                c.tracked(),
+                Some(Channel::Latest),
+                "absent means CC's default, which is latest"
+            );
+            assert_eq!(c.label(), "latest");
+        }
+        assert_ne!(
+            CcChannel::read(None),
+            CcChannel::read(Some("latest")),
+            "an absent key and a chosen `latest` are different facts"
+        );
+    }
+
+    #[test]
+    fn untracked_never_yields_a_channel_to_fetch() {
+        // `fetch_cli_latest` builds `{base}/{channel}`, and there is no
+        // `rc` object in that bucket — measured 404 NoSuchKey on
+        // 2026-08-24. `tracked()` returning None is what keeps the
+        // poller from making that request and filing the answer.
+        assert!(CcChannel::Untracked("rc".into()).tracked().is_none());
     }
 }

@@ -32,5 +32,5 @@ pub use state::{
     UpdateStateMutex,
 };
 pub use version::{
-    compare_versions, fetch_cli_latest, fetch_desktop_latest, Channel, DesktopRelease,
+    compare_versions, fetch_cli_latest, fetch_desktop_latest, CcChannel, Channel, DesktopRelease,
 };

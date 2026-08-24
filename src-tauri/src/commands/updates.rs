@@ -42,19 +42,48 @@ use claudepot_core::updates::{
     count_running_cli_locks, detect_cli_installs, detect_desktop_install, is_desktop_running,
     settings_bridge,
     state::{UpdateSettings, UpdateStateMutex},
-    Channel,
+    CcChannel, Channel,
 };
 use serde_json::json;
 use std::sync::Arc;
 
 /// Resolve the channel setting from CC's settings.json. CC's setting
 /// is the source of truth (see `dev-docs/auto-updates.md` mechanism
-/// callout #2). Defaults to `Latest` if unset or unparseable.
-fn resolve_channel(cc: &settings_bridge::CcUpdateSettings) -> Channel {
-    cc.auto_updates_channel
-        .as_deref()
-        .and_then(|s| s.parse::<Channel>().ok())
-        .unwrap_or(Channel::Latest)
+/// callout #2).
+///
+/// Returns the three-state [`CcChannel`], not a `Channel`. Collapsing
+/// an unrecognized value to `Latest` is what made the panel light the
+/// `latest` button for a user on `rc` and compare their install
+/// against the `latest` baseline — see `CcChannel`'s own docs.
+fn resolve_channel(cc: &settings_bridge::CcUpdateSettings) -> CcChannel {
+    CcChannel::read(cc.auto_updates_channel.as_deref())
+}
+
+/// The cached baseline for a channel, or `None` when Claudepot has no
+/// feed for it. A version comparison against the wrong channel's
+/// baseline is worse than no comparison, so `Untracked` yields
+/// nothing rather than the nearest available number.
+fn last_known_for(
+    channel: &CcChannel,
+    cli: &claudepot_core::updates::state::CliCache,
+) -> Option<String> {
+    match channel.tracked()? {
+        Channel::Latest => cli.last_known_latest.clone(),
+        Channel::Stable => cli.last_known_stable.clone(),
+    }
+}
+
+/// The `last_error` an untracked channel deserves — it explains why
+/// there is no version to compare against, instead of leaving the row
+/// blank or (worse) claiming a network failure that never happened.
+fn untracked_channel_note(channel: &CcChannel) -> Option<String> {
+    match channel {
+        CcChannel::Untracked(raw) => Some(format!(
+            "CC is on the {raw:?} update channel, which publishes no version feed — \
+             Claudepot cannot tell you whether a newer CC exists on it"
+        )),
+        _ => None,
+    }
 }
 
 /// `UpdateStateMutex` is a `std::sync::Mutex`, so a panic under it
@@ -93,15 +122,13 @@ pub async fn updates_status_get(
     let snapshot = state.0.lock().map_err(state_lock_poisoned)?.clone();
 
     let cli = CliStatusDto {
-        channel: channel.as_str().to_string(),
+        channel: channel.label().to_string(),
         installs,
         latest_remote: None, // status_get is offline; check_now refreshes
-        last_known: match channel {
-            Channel::Latest => snapshot.cache.cli.last_known_latest.clone(),
-            Channel::Stable => snapshot.cache.cli.last_known_stable.clone(),
-        },
+        last_known: last_known_for(&channel, &snapshot.cache.cli),
         last_check_unix: snapshot.cache.cli.last_check_unix,
-        last_error: snapshot.cache.cli.last_error.clone(),
+        last_error: untracked_channel_note(&channel)
+            .or_else(|| snapshot.cache.cli.last_error.clone()),
         cc_settings: cc,
         running_count,
     };
@@ -173,15 +200,13 @@ fn build_status(state: &UpdateStateMutex) -> Result<UpdatesStatusDto, ErrorDto> 
     let snapshot = state.0.lock().map_err(state_lock_poisoned)?.clone();
 
     let cli = CliStatusDto {
-        channel: channel.as_str().to_string(),
+        channel: channel.label().to_string(),
         installs,
         latest_remote: None,
-        last_known: match channel {
-            Channel::Latest => snapshot.cache.cli.last_known_latest.clone(),
-            Channel::Stable => snapshot.cache.cli.last_known_stable.clone(),
-        },
+        last_known: last_known_for(&channel, &snapshot.cache.cli),
         last_check_unix: snapshot.cache.cli.last_check_unix,
-        last_error: snapshot.cache.cli.last_error.clone(),
+        last_error: untracked_channel_note(&channel)
+            .or_else(|| snapshot.cache.cli.last_error.clone()),
         cc_settings: cc,
         running_count,
     };

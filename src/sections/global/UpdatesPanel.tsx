@@ -677,15 +677,34 @@ function ChannelToggle({
   minimumVersion: string | null;
 }) {
   const { t } = useTranslation("global");
+  // CC 2.1.241 accepts a third value, `rc` (its own UI calls it
+  // "slow"), and there is no published version feed for it. Neither
+  // button matches, so without this the pane would show two inactive
+  // buttons and nothing saying which channel the user is actually on.
+  // It is named, not offered: writing `rc` back is refused by
+  // `settings_bridge::change_channel`, and a button that reports a
+  // state it cannot set is worse than a label.
+  const untracked = value !== "latest" && value !== "stable";
   return (
-    <div style={{ display: "inline-flex", gap: "var(--sp-4)" }}>
+    <div style={{ display: "inline-flex", gap: "var(--sp-4)", alignItems: "center" }}>
+      {untracked && (
+        <Tag title={t("updates.channel.untrackedHint", { channel: value })}>
+          {value}
+        </Tag>
+      )}
       {/* "latest" / "stable" are CC's own `autoUpdatesChannel` wire
           values, rendered raw so the button reads as the value it
           writes. */}
+      {/* `active` is paint only. `aria-pressed` is what tells a screen
+          reader which channel is selected — without it the choice was
+          carried by background colour alone, which
+          .claude/rules/design.md's accessibility floor forbids. It is
+          also the only handle a test has on "which one is on". */}
       <Button
         size="sm"
         variant={value === "latest" ? "subtle" : "ghost"}
         active={value === "latest"}
+        aria-pressed={value === "latest"}
         onClick={() => onChange("latest")}
       >
         latest
@@ -694,6 +713,7 @@ function ChannelToggle({
         size="sm"
         variant={value === "stable" ? "subtle" : "ghost"}
         active={value === "stable"}
+        aria-pressed={value === "stable"}
         onClick={() => onChange("stable")}
         title={
           minimumVersion

@@ -13,7 +13,9 @@ use crate::updates::desktop_driver::install_desktop_latest;
 use crate::updates::detect::{detect_cli_installs, detect_desktop_install, is_desktop_running};
 use crate::updates::settings_bridge;
 use crate::updates::state::UpdateStateMutex;
-use crate::updates::{compare_versions, fetch_cli_latest, fetch_desktop_latest, Channel};
+use crate::updates::{
+    compare_versions, fetch_cli_latest, fetch_desktop_latest, CcChannel, Channel,
+};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::sync::Mutex;
@@ -65,15 +67,20 @@ pub struct CheckCycleOutcome {
 /// dispatch.
 pub async fn run_one_check_cycle(state: &UpdateStateMutex) -> CheckCycleOutcome {
     let cc = settings_bridge::read().unwrap_or_default();
-    let channel = cc
-        .auto_updates_channel
-        .as_deref()
-        .and_then(|s| s.parse::<Channel>().ok())
-        .unwrap_or(Channel::Latest);
+    let cc_channel = CcChannel::read(cc.auto_updates_channel.as_deref());
 
     // Probe — both endpoints. Network failure on one doesn't block
     // the other.
-    let cli_latest = fetch_cli_latest(channel).await.ok();
+    //
+    // A channel with no feed is not probed at all. Falling back to
+    // `latest` here would file someone else's version under the
+    // user's channel, which is the misreport this whole three-state
+    // read exists to stop — and it would do so in the cache, where
+    // the panel would then read it back as fact.
+    let cli_latest = match cc_channel.tracked() {
+        Some(channel) => fetch_cli_latest(channel).await.ok(),
+        None => None,
+    };
     let desktop_release = fetch_desktop_latest().await.ok();
 
     // Snapshot the settings we need; mutex held briefly.
@@ -94,10 +101,21 @@ pub async fn run_one_check_cycle(state: &UpdateStateMutex) -> CheckCycleOutcome 
         if let Some(v) = cli_latest.clone() {
             guard.cache.cli.last_check_unix = Some(now);
             guard.cache.cli.last_error = None;
-            match channel {
-                Channel::Latest => guard.cache.cli.last_known_latest = Some(v),
-                Channel::Stable => guard.cache.cli.last_known_stable = Some(v),
+            match cc_channel.tracked() {
+                Some(Channel::Latest) => guard.cache.cli.last_known_latest = Some(v),
+                Some(Channel::Stable) => guard.cache.cli.last_known_stable = Some(v),
+                // Unreachable — `cli_latest` is `None` whenever
+                // `tracked()` is, so there is no value to file.
+                None => {}
             }
+        } else if let CcChannel::Untracked(raw) = &cc_channel {
+            // Say which of the two it is. "network probe failed" over
+            // a probe that was never attempted is the shape of error
+            // that sends someone to check their wifi.
+            guard.cache.cli.last_error = Some(format!(
+                "CC is on the {raw:?} update channel, which publishes no version feed — \
+                 Claudepot cannot tell you whether a newer CC exists on it"
+            ));
         } else {
             guard.cache.cli.last_error = Some("network probe failed".into());
         }
