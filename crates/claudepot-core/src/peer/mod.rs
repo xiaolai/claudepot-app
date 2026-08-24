@@ -159,7 +159,7 @@ pub mod wire;
 pub use client::{send_prompt, Handoff, PeerTarget};
 pub use discover::{list_addressable, resolve, Addressable};
 pub use key::KeyFile;
-pub use outcome::{await_outcome, begin_watch, Outcome, Watch};
+pub use outcome::{await_outcome, begin_watch, Outcome, SendIdentity, Watch};
 pub use wire::{Priority, MAX_LINE_BYTES, PEER_PROTOCOL};
 
 /// Every way addressing a running session can fail.
@@ -188,6 +188,21 @@ pub enum PeerError {
 
     #[error("messaging socket path is not absolute: {path}")]
     RelativeSocketPath { path: String },
+
+    /// The session registry itself could not be read.
+    ///
+    /// Distinct from [`PeerError::KeyUnreadable`], which names a pid
+    /// and a key file. Discovery and the transcript watcher both used
+    /// that variant with `pid: 0`, so a permission problem on
+    /// `~/.claude/sessions` was reported as "cannot read the peer key
+    /// for session 0" — a session that does not exist, and a file that
+    /// was never involved.
+    #[error("cannot read {path}: {source}")]
+    RegistryUnreadable {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("cannot read the peer key for session {pid} at {path}: {source}")]
     KeyUnreadable {

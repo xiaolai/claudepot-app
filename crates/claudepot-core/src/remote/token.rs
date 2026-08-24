@@ -34,6 +34,7 @@
 //! Comparison is constant-time and hand-rolled: `subtle` would be a new
 //! dependency for five lines that are easier to audit than to justify.
 
+use super::ct::constant_time_eq;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -79,13 +80,19 @@ impl std::fmt::Debug for NewToken {
 }
 
 /// 256 bits of CSPRNG output, hex-encoded.
+///
+/// Through [`random_bytes`], which already skips a UUIDv4's fixed
+/// version and variant nibbles. Splicing two raw UUIDs together — what
+/// this did — gives 244 bits of randomness in 256 bits of output, and
+/// the shortfall is invisible because the token still looks random. It
+/// is the same defect the pairing code had, in the module that fixed
+/// it, one function away from the helper written for the purpose.
+///
+/// 244 bits is not a practical weakness. Saying "256 bits" while
+/// producing 244 is the part worth removing: the number in the doc is
+/// what a reader reasons with.
 pub fn new_device_token() -> NewToken {
-    // Two v4 UUIDs are 244 bits of randomness across 256 bits of
-    // output; the version/variant bits are fixed, not attacker-chosen.
-    let mut raw = Vec::with_capacity(32);
-    raw.extend_from_slice(Uuid::new_v4().as_bytes());
-    raw.extend_from_slice(Uuid::new_v4().as_bytes());
-    let plaintext = hex::encode(&raw);
+    let plaintext = hex::encode(random_bytes(32));
     let hash = hash_secret(&plaintext);
     NewToken { plaintext, hash }
 }
@@ -150,17 +157,6 @@ pub fn hash_secret(secret: &str) -> String {
 pub fn verify_secret(candidate: &str, expected_hash: &str) -> bool {
     let actual = hash_secret(candidate);
     constant_time_eq(actual.as_bytes(), expected_hash.as_bytes())
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 #[cfg(test)]
@@ -295,5 +291,31 @@ mod entropy_tests {
             "NewToken's Debug leaked the bearer token: {rendered}"
         );
         assert!(rendered.contains("redacted"));
+    }
+
+    #[test]
+    fn a_device_token_consumes_no_fixed_uuid_bits() {
+        // The token used to be two spliced UUIDv4s: 244 random bits
+        // presented as 256. Byte 6 of a UUIDv4 is always `0x4_`, so if
+        // fixed bits were being consumed, hex positions 12-13 and
+        // 44-45 would sit in `4_` every single time.
+        for _ in 0..200 {
+            let t = new_device_token().plaintext;
+            assert_eq!(t.len(), 64);
+            assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+        let stuck = |pos: usize| {
+            (0..200)
+                .map(|_| new_device_token().plaintext.as_bytes()[pos] as char)
+                .all(|c| c == '4')
+        };
+        assert!(
+            !stuck(12),
+            "hex position 12 is pinned — version bits leaked in"
+        );
+        assert!(
+            !stuck(44),
+            "hex position 44 is pinned — version bits leaked in"
+        );
     }
 }

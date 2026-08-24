@@ -270,6 +270,9 @@
   "remoteWindow": {
     "open": "remote {{minutes}}m",
     "openHint": "Remote control is open for {{minutes}} more minutes. While open, any local process that can reach a session can send it prompts without asking you. Claudepot closes this automatically.",
+    "recoveredHint": "Cross-session messages are being accepted, and the grant record that held its deadline was unreadable and has been reset — so nothing will close it automatically. Set it back to hold in Claude Code's settings, or open a time-boxed window instead.",
+    "unknown": "remote ?",
+    "unknownHint": "Claudepot could not read whether the remote-control window is open. It may be open. Check Settings, or run `claudepot session inbound status` at the machine.",
     "unmanaged": "remote open",
     "unmanagedHint": "Cross-session messages are being accepted, and no Claudepot grant is minding it — nothing will close it automatically. Set it back to hold in Claude Code's settings, or open a time-boxed window instead."
   }

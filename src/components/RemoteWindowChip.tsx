@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Glyph } from "./primitives/Glyph";
@@ -26,19 +26,39 @@ import type { PeerInboundState } from "../api/peerInbound";
  *   grant record was lost. Shown in the warning tone with no timer,
  *   because "open forever" and "open for 12 more minutes" are not the
  *   same risk and must not look the same.
+ *
+ * …and a third that is not an open state: **unknown**. A failed read
+ * renders a warning chip, not nothing. This used to set the state to
+ * `null` under a comment promising it would not "guess closed" — but
+ * closed also renders nothing, so the two were pixel-identical and the
+ * promise was only in the prose. For a security indicator, "I could not
+ * tell" has to look different from "it is shut".
  */
 export function RemoteWindowChip() {
   const { t } = useTranslation("components");
   const [state, setState] = useState<PeerInboundState | null>(null);
+  const [unreadable, setUnreadable] = useState(false);
+  // The interval, the mount read and the event read can all be in
+  // flight together; without a sequence number an older reply can land
+  // last and overwrite a newer one — including overwriting "open" with
+  // a stale "closed".
+  const seq = useRef(0);
+  const alive = useRef(true);
 
   const refresh = useCallback(async () => {
+    const mine = ++seq.current;
     try {
-      setState(await api.peerInboundState());
+      const next = await api.peerInboundState();
+      if (!alive.current || mine !== seq.current) return;
+      setState(next);
+      setUnreadable(false);
     } catch {
-      // A chip that cannot read its own state renders nothing rather
-      // than guessing "closed" — guessing closed is the one wrong
-      // answer here.
+      if (!alive.current || mine !== seq.current) return;
+      // Not "closed". The gate may well be open and we cannot see it,
+      // so say so rather than rendering the same nothing that a shut
+      // gate renders.
       setState(null);
+      setUnreadable(true);
     }
   }, []);
 
@@ -50,10 +70,20 @@ export function RemoteWindowChip() {
     const timer = window.setInterval(() => void refresh(), 30_000);
     const unlisten = listen("peer-inbound-closed", () => void refresh());
     return () => {
+      alive.current = false;
       window.clearInterval(timer);
       void unlisten.then((f) => f());
     };
   }, [refresh]);
+
+  if (unreadable) {
+    return (
+      <span className="statusbar-chip warn" title={t("remoteWindow.unknownHint")} role="status">
+        <Glyph g={NF.unlock} />
+        {t("remoteWindow.unknown")}
+      </span>
+    );
+  }
 
   if (!state?.open) return null;
 
@@ -72,7 +102,9 @@ export function RemoteWindowChip() {
       // which state this is, and the title spells out the consequence.
       title={
         unmanaged
-          ? t("remoteWindow.unmanagedHint")
+          ? state.recordRecovered
+            ? t("remoteWindow.recoveredHint")
+            : t("remoteWindow.unmanagedHint")
           : t("remoteWindow.openHint", { minutes: minutes ?? 0 })
       }
       role="status"

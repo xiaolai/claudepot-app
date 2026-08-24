@@ -113,6 +113,10 @@ pub enum Lookup {
     InFlight,
     /// The key itself is unusable.
     Rejected(&'static str),
+    /// Every slot is an in-flight reservation, so there is nothing safe
+    /// to evict. Retryable — unlike [`Lookup::Rejected`], the key is
+    /// fine and the caller should come back.
+    Saturated,
 }
 
 impl Idempotency {
@@ -138,8 +142,11 @@ impl Idempotency {
                 // whatever lock brought it here. Returning `Execute`
                 // without reserving is the race this module exists to
                 // close.
-                if self.entries.len() >= MAX_ENTRIES {
-                    self.evict_oldest();
+                if self.entries.len() >= MAX_ENTRIES && !self.evict_oldest() {
+                    // Every slot holds a live reservation. Refusing is
+                    // the only answer that cannot duplicate a mutation;
+                    // the caller turns this into a retryable status.
+                    return Lookup::Saturated;
                 }
                 self.entries.insert(
                     key.to_string(),
@@ -159,6 +166,9 @@ impl Idempotency {
         }
         self.expire(now);
         if self.entries.len() >= MAX_ENTRIES && !self.entries.contains_key(key) {
+            // Best effort: `remember` is recording a result that already
+            // happened, so dropping it is worse than going one over the
+            // cap. `expire` will bring the map back down.
             self.evict_oldest();
         }
         self.entries.insert(
@@ -189,14 +199,33 @@ impl Idempotency {
         });
     }
 
-    fn evict_oldest(&mut self) {
-        if let Some(k) = self
+    /// Make room, **never at the cost of a reservation**.
+    ///
+    /// An entry with `stored: None` is a mutation that is running right
+    /// now. Dropping it does not lose a cached answer — it loses the
+    /// record that the request is in progress, so the client's retry
+    /// sees a free key, gets `Execute`, and runs the mutation a second
+    /// time. On this surface that is a second prompt injected into a
+    /// live session, or a second account swap. Evicting by age alone
+    /// made that reachable by flooding the map with fresh keys.
+    ///
+    /// So completed responses are evicted first, oldest of those. Only
+    /// if *every* entry is in flight is there nothing safe to drop, and
+    /// then the answer is to refuse the new key rather than to sacrifice
+    /// a reservation — `false` says so.
+    fn evict_oldest(&mut self) -> bool {
+        let oldest_completed = self
             .entries
             .iter()
+            .filter(|(_, e)| e.stored.is_some())
             .min_by_key(|(_, e)| e.at)
-            .map(|(k, _)| k.clone())
-        {
-            self.entries.remove(&k);
+            .map(|(k, _)| k.clone());
+        match oldest_completed {
+            Some(k) => {
+                self.entries.remove(&k);
+                true
+            }
+            None => false,
         }
     }
 }
@@ -386,5 +415,94 @@ mod tests {
             i.remember("k1", stored(200), now);
         }
         assert_eq!(i.len(), 1);
+    }
+
+    #[test]
+    fn a_flood_of_new_keys_cannot_evict_a_live_reservation() {
+        // The bug: eviction picked the oldest entry of any kind, so an
+        // in-flight reservation could be dropped to make room. The
+        // client's retry then found a free key, got `Execute`, and the
+        // mutation ran twice — here, a second prompt into a live
+        // session.
+        let mut idem = Idempotency::new();
+        let t0 = Instant::now();
+
+        // The reservation we must not lose: oldest entry in the map.
+        assert_eq!(idem.lookup("victim", t0), Lookup::Execute);
+
+        // Fill the rest with COMPLETED responses, all newer.
+        for i in 0..MAX_ENTRIES {
+            let k = format!("done-{i}");
+            let t = t0 + Duration::from_millis(1 + i as u64);
+            idem.lookup(&k, t);
+            idem.remember(
+                &k,
+                Stored {
+                    status: 200,
+                    body: "{}".into(),
+                },
+                t,
+            );
+        }
+
+        // The reservation is still there, and still in flight.
+        assert_eq!(
+            idem.lookup("victim", t0 + Duration::from_millis(500)),
+            Lookup::InFlight,
+            "a retry must not be told to execute a second time"
+        );
+    }
+
+    #[test]
+    fn a_map_of_nothing_but_reservations_refuses_rather_than_duplicating() {
+        let mut idem = Idempotency::new();
+        let t0 = Instant::now();
+        for i in 0..MAX_ENTRIES {
+            assert_eq!(
+                idem.lookup(&format!("live-{i}"), t0 + Duration::from_millis(i as u64)),
+                Lookup::Execute
+            );
+        }
+        // Nothing safe to drop. Refuse the new key — retryable, not a
+        // client error, and above all not a silent duplicate.
+        assert_eq!(
+            idem.lookup("one-more", t0 + Duration::from_millis(999)),
+            Lookup::Saturated
+        );
+        // And every reservation survived.
+        for i in 0..MAX_ENTRIES {
+            assert_eq!(
+                idem.lookup(&format!("live-{i}"), t0 + Duration::from_millis(999)),
+                Lookup::InFlight
+            );
+        }
+    }
+
+    #[test]
+    fn completed_entries_are_evicted_oldest_first() {
+        let mut idem = Idempotency::new();
+        let t0 = Instant::now();
+        for i in 0..MAX_ENTRIES {
+            let k = format!("done-{i}");
+            let t = t0 + Duration::from_millis(i as u64);
+            idem.lookup(&k, t);
+            idem.remember(
+                &k,
+                Stored {
+                    status: 200,
+                    body: format!("{{\"n\":{i}}}"),
+                },
+                t,
+            );
+        }
+        let t = t0 + Duration::from_millis(MAX_ENTRIES as u64 + 1);
+        assert_eq!(idem.lookup("fresh", t), Lookup::Execute);
+        // The next-oldest is still replayable. Checked FIRST: a lookup
+        // that misses reserves a slot, which would itself evict the
+        // entry the following assertion is about.
+        assert!(matches!(idem.lookup("done-1", t), Lookup::Replay(_)));
+        // `done-0` was the oldest completed entry, so it is the one
+        // that made room.
+        assert_eq!(idem.lookup("done-0", t), Lookup::Execute);
     }
 }

@@ -31,6 +31,7 @@
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 
+use super::ct::constant_time_eq;
 use super::token;
 
 type HmacSha1 = Hmac<Sha1>;
@@ -87,8 +88,18 @@ impl TotpSecret {
         base32_encode(&self.0)
     }
 
+    /// Parse a stored secret, refusing anything that is not exactly
+    /// [`SECRET_LEN`] bytes.
+    ///
+    /// Length is the contract, not a formality. HMAC-SHA1 accepts a key
+    /// of any length — including an empty one — so a truncated or
+    /// blanked `totp_secret_base32` does not fail here, it produces a
+    /// *working* second factor built on a guessable key. Refusing it
+    /// makes a damaged secret look like what it is (see
+    /// `config::auth`), instead of like a weaker one nobody noticed.
     pub fn from_base32(s: &str) -> Option<Self> {
-        base32_decode(s).map(Self)
+        let bytes = base32_decode(s)?;
+        (bytes.len() == SECRET_LEN).then_some(Self(bytes))
     }
 
     /// The URI an authenticator app scans.
@@ -98,14 +109,23 @@ impl TotpSecret {
     /// parameters. Omitting either makes the entry show up unlabelled in
     /// one popular client or another.
     pub fn provisioning_uri(&self, issuer: &str, account: &str) -> String {
+        // Percent-encoding is defined over BYTES. Encoding the code
+        // point instead produced `%E9` for `é` (which decodes to a
+        // stray Latin-1 byte) and `%1F600` for an emoji, which is not
+        // a percent-escape at all — the URI simply fails to parse in
+        // the authenticator app. The account label is user-supplied, so
+        // this is reachable.
         let enc = |s: &str| {
-            s.chars()
-                .map(|c| match c {
-                    'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
-                    ' ' => "%20".to_string(),
-                    other => format!("%{:02X}", other as u32),
-                })
-                .collect::<String>()
+            let mut out = String::with_capacity(s.len());
+            for b in s.bytes() {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                        out.push(b as char)
+                    }
+                    _ => out.push_str(&format!("%{b:02X}")),
+                }
+            }
+            out
         };
         format!(
             "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm=SHA1&digits={}&period={}",
@@ -121,7 +141,17 @@ impl TotpSecret {
 
 /// The code for a given counter (`unix_seconds / PERIOD_SECS`).
 pub fn code_at_counter(secret: &TotpSecret, counter: u64) -> String {
-    let mut mac = HmacSha1::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    // `.claude/rules/rust-conventions.md`: never `expect` in core. HMAC
+    // does accept any key length, so the old `.expect` was unreachable
+    // — but "unreachable today" is a property of the current key type,
+    // and the rule exists so nobody has to re-derive that.
+    let Ok(mut mac) = HmacSha1::new_from_slice(secret.as_bytes()) else {
+        // Cannot happen for any `TotpSecret`, which is fixed-width by
+        // construction. A code that can never match is the right
+        // failure shape here: `consume` compares in constant time and
+        // will simply reject.
+        return "0".repeat(DIGITS as usize);
+    };
     mac.update(&counter.to_be_bytes());
     let digest = mac.finalize().into_bytes();
 
@@ -200,17 +230,6 @@ impl TotpState {
         self.last_used_counter = Some(counter);
         TotpVerdict::Accepted { counter }
     }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 const B32: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -391,11 +410,55 @@ mod tests {
 
     #[test]
     fn base32_round_trips() {
+        // The CODEC round-trips any length — that is a property of
+        // base32, and it is tested against the codec directly.
+        // `TotpSecret::from_base32` deliberately does not, because a
+        // secret has a contract width; see the test below.
         for len in [1usize, 5, 10, 20, 32] {
             let bytes: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
-            let s = TotpSecret::from_bytes(bytes.clone());
-            let back = TotpSecret::from_base32(&s.to_base32()).unwrap();
-            assert_eq!(&back.as_bytes()[..bytes.len()], &bytes[..], "len {len}");
+            let back = base32_decode(&base32_encode(&bytes)).unwrap();
+            assert_eq!(back, bytes, "len {len}");
+        }
+    }
+
+    #[test]
+    fn a_secret_of_the_wrong_width_is_refused() {
+        // HMAC-SHA1 takes a key of ANY length, so a truncated or
+        // emptied `totp_secret_base32` still generates codes — it just
+        // generates them from a key an attacker can guess. Nothing
+        // downstream would notice, which is why the width is checked
+        // here at the parse boundary.
+        for len in [0usize, 1, 10, 19, 21, 32] {
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
+            assert!(
+                TotpSecret::from_base32(&base32_encode(&bytes)).is_none(),
+                "a {len}-byte secret must not parse"
+            );
+        }
+        let good: Vec<u8> = (0..SECRET_LEN).map(|i| (i * 7 + 3) as u8).collect();
+        let parsed = TotpSecret::from_base32(&base32_encode(&good)).expect("exact width parses");
+        assert_eq!(parsed.as_bytes(), &good[..]);
+    }
+
+    #[test]
+    fn a_non_ascii_label_percent_encodes_its_utf8_bytes() {
+        // Encoding the CODE POINT gave `%E9` for `é` — a bare Latin-1
+        // byte — and `%1F600` for an emoji, which is not a valid escape
+        // at all, so the authenticator app fails to parse the URI.
+        let secret = TotpSecret::generate();
+        let uri = secret.provisioning_uri("Claudepot", "café@example.com");
+        assert!(uri.contains("caf%C3%A9"), "{uri}");
+        assert!(!uri.contains("%E9"), "{uri}");
+
+        let emoji = secret.provisioning_uri("Claudepot", "grin😀");
+        assert!(emoji.contains("grin%F0%9F%98%80"), "{emoji}");
+
+        // Every escape in the URI is exactly two hex digits.
+        for part in emoji.split('%').skip(1) {
+            assert!(
+                part.len() >= 2 && part[..2].bytes().all(|b| b.is_ascii_hexdigit()),
+                "malformed escape in {emoji}"
+            );
         }
     }
 

@@ -68,23 +68,80 @@ pub fn begin_watch(config_dir: &Path, session_id: &str) -> Watch {
     Watch { transcript, offset }
 }
 
+/// What a send needs to know about itself to recognise its own notice
+/// in the transcript.
+#[derive(Debug, Clone, Copy)]
+pub struct SendIdentity<'a> {
+    /// The uuid on the frame. CC echoes it on the delivered user turn.
+    pub uuid: &'a str,
+    /// Our own process id. CC reads the peer credential off the socket
+    /// and prints it as `[verified pid N]`, so this is the one field on
+    /// a held notice that is checkable rather than guessed.
+    pub pid: u32,
+    /// The text that was sent. CC may include a `preview: «...»` of it,
+    /// which is the fallback when the pid was not verified.
+    pub text: &'a str,
+}
+
+/// Does this held notice belong to *our* send?
+///
+/// CC's held record (2.1.241) is
+/// `Held peer message — from {address}[ [verified pid N]][ (peer claims
+/// name: X)][; preview: «...»] — not delivered to Claude (N held). ...`
+/// — it carries no uuid, so the delivered path's correlation is not
+/// available here. What it does carry is the verified peer pid and a
+/// preview of the text, and both are ours to check.
+fn held_is_ours(line: &str, id: &SendIdentity<'_>) -> bool {
+    if line.contains(&format!("[verified pid {}]", id.pid)) {
+        return true;
+    }
+    // `preview: «...»` — the guillemets are literal in CC's template.
+    let Some(rest) = line.split("preview: «").nth(1) else {
+        return false;
+    };
+    let Some(preview) = rest.split('»').next() else {
+        return false;
+    };
+    // CC truncates, and the transcript is JSON-escaped, so compare on a
+    // normalised prefix rather than for equality. An empty preview must
+    // never match — every text starts with "".
+    let preview = preview.trim();
+    !preview.is_empty() && id.text.starts_with(preview)
+}
+
 /// Classify the text a send appended. Pure, so the precedence between
 /// "delivered" and "held" is testable without a live session.
 ///
 /// Delivered wins when both appear: a message that was held and then
 /// approved is delivered, and that is the state the user cares about.
-pub fn classify(appended: &str, uuid: &str) -> Option<Outcome> {
-    let delivered = appended
-        .lines()
-        .filter(|l| l.contains(uuid))
-        .any(|l| l.contains(r#""type":"user""#) || l.contains(r#""type": "user""#));
-    if delivered {
-        return Some(Outcome::Delivered);
+///
+/// **A held notice must be attributable to this send.** It used to be
+/// enough for `HELD_MARKER` to appear anywhere in the appended text, so
+/// any concurrent peer message parked in the same window — from another
+/// device, or the GUI alongside the CLI — reported *this* send as Held,
+/// as a fact, on a surface whose whole job is to say what happened.
+/// Delivery was correlated by uuid all along; held was not.
+///
+/// An unattributable held notice yields `None`, not `Held`: the honest
+/// answer is that nothing conclusive about *this* send has appeared
+/// yet, which is what `Undetermined` already means.
+pub fn classify(appended: &str, id: &SendIdentity<'_>) -> Option<Outcome> {
+    let mut held = false;
+    for line in appended.lines() {
+        // Substring matching on `"type":"user"` missed any valid JSONL
+        // whose spacing or key order differed. Parse it.
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            if v.get("type").and_then(|t| t.as_str()) == Some("user")
+                && v.get("uuid").and_then(|u| u.as_str()) == Some(id.uuid)
+            {
+                return Some(Outcome::Delivered);
+            }
+        }
+        if line.contains(HELD_MARKER) && held_is_ours(line, id) {
+            held = true;
+        }
     }
-    if appended.contains(HELD_MARKER) {
-        return Some(Outcome::Held);
-    }
-    None
+    held.then_some(Outcome::Held)
 }
 
 /// Poll until the prompt is classifiable or `timeout` elapses.
@@ -92,10 +149,10 @@ pub async fn await_outcome(
     config_dir: &Path,
     watch: &Watch,
     session_id: &str,
-    uuid: &str,
+    id: SendIdentity<'_>,
     timeout: Duration,
 ) -> Result<Outcome, PeerError> {
-    let deadline = Instant::now() + timeout;
+    let start = Instant::now();
     loop {
         // Re-resolve each tick: a session with no transcript at send
         // time grows one on its first turn, and the path only exists
@@ -106,12 +163,29 @@ pub async fn await_outcome(
             .or_else(|| transcript_path(config_dir, session_id));
 
         if let Some(path) = path {
-            let body = read_from(&path, watch.offset)?;
-            if let Some(outcome) = classify(&body, uuid) {
+            // A CC transcript reaches tens of MB, and `read_from`
+            // re-reads from byte zero whenever the file shrank under
+            // us. `.claude/rules/rust-conventions.md` puts anything
+            // that large on `tokio::fs` or a blocking pool; done inline
+            // this stalls the runtime every 250 ms for as long as the
+            // caller waits.
+            let offset = watch.offset;
+            let p = path.clone();
+            let body = tokio::task::spawn_blocking(move || read_from(&p, offset))
+                .await
+                .map_err(|e| PeerError::RegistryUnreadable {
+                    path: path.display().to_string(),
+                    source: std::io::Error::other(e.to_string()),
+                })??;
+            if let Some(outcome) = classify(&body, &id) {
                 return Ok(outcome);
             }
         }
-        if Instant::now() >= deadline {
+        // `Instant::now() + timeout` panics on overflow, and `timeout`
+        // comes from `--wait <secs>` on the CLI, so a large value is
+        // caller-supplied input rather than a theoretical one. Comparing
+        // elapsed against the duration cannot overflow.
+        if start.elapsed() >= timeout {
             return Ok(Outcome::Undetermined);
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -120,8 +194,7 @@ pub async fn await_outcome(
 
 fn read_from(path: &Path, offset: u64) -> Result<String, PeerError> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(path).map_err(|source| PeerError::KeyUnreadable {
-        pid: 0,
+    let mut f = std::fs::File::open(path).map_err(|source| PeerError::RegistryUnreadable {
         path: path.display().to_string(),
         source,
     })?;
@@ -130,15 +203,13 @@ fn read_from(path: &Path, offset: u64) -> Result<String, PeerError> {
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let start = if len < offset { 0 } else { offset };
     f.seek(SeekFrom::Start(start))
-        .map_err(|source| PeerError::KeyUnreadable {
-            pid: 0,
+        .map_err(|source| PeerError::RegistryUnreadable {
             path: path.display().to_string(),
             source,
         })?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)
-        .map_err(|source| PeerError::KeyUnreadable {
-            pid: 0,
+        .map_err(|source| PeerError::RegistryUnreadable {
             path: path.display().to_string(),
             source,
         })?;
@@ -150,47 +221,125 @@ mod tests {
     use super::*;
 
     const UUID: &str = "a99d94f3-05a9-4e2d-a5c4-5d4e6d4b39c3";
+    const PID: u32 = 4242;
+    const TEXT: &str = "run the tests and report back";
+
+    fn id() -> SendIdentity<'static> {
+        SendIdentity {
+            uuid: UUID,
+            pid: PID,
+            text: TEXT,
+        }
+    }
 
     fn user_line(uuid: &str) -> String {
         format!(r#"{{"type":"user","uuid":"{uuid}","message":{{"role":"user"}}}}"#)
     }
 
-    fn held_line() -> String {
-        format!(r#"{{"type":"system","content":"{HELD_MARKER} — from an unidentified session"}}"#)
+    /// CC 2.1.241's real shape, verified against the binary:
+    /// `Held peer message — from {addr}[ [verified pid N]][ (peer claims
+    /// name: X)][; preview: «...»] — not delivered to Claude (N held).`
+    fn held_line(pid: Option<u32>, preview: Option<&str>) -> String {
+        let v = pid
+            .map(|p| format!(" [verified pid {p}]"))
+            .unwrap_or_default();
+        let p = preview
+            .map(|t| format!("; preview: «{t}»"))
+            .unwrap_or_default();
+        format!(
+            r#"{{"type":"system","content":"{HELD_MARKER} — from cc-peer{v}{p} — not delivered to Claude (1 held)."}}"#
+        )
     }
 
     #[test]
     fn a_user_record_with_our_uuid_is_delivered() {
-        assert_eq!(classify(&user_line(UUID), UUID), Some(Outcome::Delivered));
+        assert_eq!(classify(&user_line(UUID), &id()), Some(Outcome::Delivered));
     }
 
     #[test]
-    fn a_held_notice_is_held() {
-        assert_eq!(classify(&held_line(), UUID), Some(Outcome::Held));
+    fn a_delivered_record_is_recognised_whatever_the_json_spacing() {
+        // The old check was two substring probes for `"type":"user"`
+        // and `"type": "user"`, so any other valid encoding — a
+        // different key order, a tab, a newline in the object — read as
+        // "not delivered".
+        for line in [
+            format!(r#"{{ "uuid" : "{UUID}" , "type" : "user" }}"#),
+            format!("{{\n  \"type\": \"user\",\n  \"uuid\": \"{UUID}\"\n}}").replace('\n', ""),
+            format!(r#"{{"message":{{"role":"user"}},"uuid":"{UUID}","type":"user"}}"#),
+        ] {
+            assert_eq!(classify(&line, &id()), Some(Outcome::Delivered), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_user_record_for_a_different_send_is_not_ours() {
+        let other = "11111111-2222-3333-4444-555555555555";
+        assert_eq!(classify(&user_line(other), &id()), None);
+    }
+
+    #[test]
+    fn a_held_notice_with_our_verified_pid_is_held() {
+        assert_eq!(
+            classify(&held_line(Some(PID), None), &id()),
+            Some(Outcome::Held)
+        );
+    }
+
+    #[test]
+    fn a_held_notice_whose_preview_is_our_text_is_held() {
+        assert_eq!(
+            classify(&held_line(None, Some("run the tests")), &id()),
+            Some(Outcome::Held)
+        );
+    }
+
+    #[test]
+    fn a_concurrent_held_notice_is_not_reported_as_ours() {
+        // The bug: any `Held peer message` appended after the watch
+        // offset classified THIS send as held. A second device sending
+        // to the same session in the same window was enough — and the
+        // CLI printed it as fact.
+        assert_eq!(classify(&held_line(Some(9999), None), &id()), None);
+        assert_eq!(
+            classify(&held_line(None, Some("something else entirely")), &id()),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unattributable_held_notice_is_not_claimed() {
+        // Neither a verified pid nor a preview. We cannot tell, so we
+        // do not say. `Undetermined` is the honest outcome.
+        assert_eq!(classify(&held_line(None, None), &id()), None);
+    }
+
+    #[test]
+    fn an_empty_preview_matches_nothing() {
+        // Every string starts with "", so a naive prefix test would
+        // make an empty preview match every send.
+        assert_eq!(classify(&held_line(None, Some("")), &id()), None);
+    }
+
+    #[test]
+    fn delivery_still_wins_over_a_held_notice_for_the_same_send() {
+        let both = format!("{}\n{}", held_line(Some(PID), None), user_line(UUID));
+        assert_eq!(classify(&both, &id()), Some(Outcome::Delivered));
     }
 
     #[test]
     fn nothing_recognisable_is_undetermined() {
-        assert_eq!(classify(r#"{"type":"queue-operation"}"#, UUID), None);
+        assert_eq!(classify(r#"{"type":"queue-operation"}"#, &id()), None);
     }
 
     #[test]
     fn empty_input_is_undetermined() {
-        assert_eq!(classify("", UUID), None);
-    }
-
-    #[test]
-    fn delivered_wins_over_a_held_notice_for_the_same_send() {
-        // Approving a held message produces both records. The user
-        // cares that it landed, not that it waited.
-        let both = format!("{}\n{}", held_line(), user_line(UUID));
-        assert_eq!(classify(&both, UUID), Some(Outcome::Delivered));
+        assert_eq!(classify("", &id()), None);
     }
 
     #[test]
     fn another_sessions_uuid_is_not_ours() {
         let other = user_line("00000000-0000-0000-0000-000000000000");
-        assert_eq!(classify(&other, UUID), None);
+        assert_eq!(classify(&other, &id()), None);
     }
 
     #[test]
@@ -198,7 +347,7 @@ mod tests {
         // CC emits queue-operation and attachment records around a
         // delivery; only the user turn means Claude saw it.
         let line = format!(r#"{{"type":"attachment","uuid":"{UUID}"}}"#);
-        assert_eq!(classify(&line, UUID), None);
+        assert_eq!(classify(&line, &id()), None);
     }
 
     #[test]
@@ -229,14 +378,14 @@ mod tests {
         std::fs::create_dir_all(&proj).unwrap();
         let t = proj.join("sess-1.jsonl");
         // A held notice from a PREVIOUS run already in the file.
-        std::fs::write(&t, format!("{}\n", held_line())).unwrap();
+        std::fs::write(&t, format!("{}\n", held_line(Some(PID), None))).unwrap();
 
         let watch = begin_watch(dir.path(), "sess-1");
         let got = await_outcome(
             dir.path(),
             &watch,
             "sess-1",
-            UUID,
+            id(),
             Duration::from_millis(300),
         )
         .await
@@ -265,7 +414,7 @@ mod tests {
             writeln!(f, "{}", user_line(UUID)).unwrap();
         });
 
-        let got = await_outcome(dir.path(), &watch, "sess-1", UUID, Duration::from_secs(5))
+        let got = await_outcome(dir.path(), &watch, "sess-1", id(), Duration::from_secs(5))
             .await
             .unwrap();
         assert_eq!(got, Outcome::Delivered);
@@ -286,7 +435,7 @@ mod tests {
             std::fs::write(&t, format!("{}\n", user_line(UUID))).unwrap();
         });
 
-        let got = await_outcome(dir.path(), &watch, "sess-2", UUID, Duration::from_secs(5))
+        let got = await_outcome(dir.path(), &watch, "sess-2", id(), Duration::from_secs(5))
             .await
             .unwrap();
         assert_eq!(got, Outcome::Delivered);

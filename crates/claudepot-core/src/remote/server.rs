@@ -101,13 +101,52 @@ pub(super) fn err(status: StatusCode, error: &'static str) -> Response {
         .into_response()
 }
 
-#[derive(Debug, Deserialize)]
+/// The one place a plaintext admin password enters this process.
+///
+/// No `Debug`: `.claude/rules/architecture.md` puts secrets that reach
+/// Rust by paste on a zeroize-on-every-path contract, and a derived
+/// `Debug` is how the password reaches a log line instead. `Drop`
+/// zeroizes both secret-bearing fields — `Drop` alone does not scrub a
+/// `String`, which is the whole reason the `zeroize` crate is a
+/// dependency.
+#[derive(Deserialize)]
 pub struct LoginRequest {
     pub password: String,
     #[serde(default)]
     pub totp: Option<String>,
     #[serde(default)]
     pub device_label: Option<String>,
+}
+
+impl Drop for LoginRequest {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.password.zeroize();
+        if let Some(t) = self.totp.as_mut() {
+            t.zeroize();
+        }
+    }
+}
+
+/// Render a freshly-minted session token.
+///
+/// **Always through here.** The body carries a bearer token, so it must
+/// never be stored by a client, a service worker, or anything between:
+/// the transcript endpoint already says `no-store` for carrying
+/// secrets, and this response carries the credential that unlocks it.
+/// Both login paths — password and passkey — mint the same `Device`, so
+/// they get the same headers from one place rather than two that can
+/// drift.
+pub(super) fn login_ok(token: String, expires_at: Option<String>) -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::PRAGMA, "no-cache"),
+        ],
+        Json(LoginResponse { token, expires_at }),
+    )
+        .into_response()
 }
 
 #[derive(Debug, Serialize)]
@@ -320,14 +359,9 @@ async fn handle_login(State(state): State<Shared>, Json(body): Json<LoginRequest
     drop(guard);
 
     match outcome {
-        LoginOutcome::Success { token, device } => (
-            StatusCode::OK,
-            Json(LoginResponse {
-                token,
-                expires_at: device.expires_at.map(|t| t.to_rfc3339()),
-            }),
-        )
-            .into_response(),
+        LoginOutcome::Success { token, device } => {
+            login_ok(token, device.expires_at.map(|t| t.to_rfc3339()))
+        }
         LoginOutcome::NotConfigured => err(StatusCode::CONFLICT, "not_configured"),
         LoginOutcome::TotpRequired => err(StatusCode::UNAUTHORIZED, "totp_required"),
         // Wrong password and wrong code are the same status and shape;
@@ -360,7 +394,12 @@ async fn handle_login(State(state): State<Shared>, Json(body): Json<LoginRequest
 /// is what stops two concurrent duplicates from both executing, and
 /// releasing is what stops one slow prompt from blocking every other
 /// request on the appliance.
-pub(super) async fn idempotent<F, Fut>(state: &Shared, headers: &HeaderMap, run: F) -> Response
+pub(super) async fn idempotent<F, Fut>(
+    state: &Shared,
+    headers: &HeaderMap,
+    scope: &str,
+    run: F,
+) -> Response
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = (StatusCode, serde_json::Value)>,
@@ -374,6 +413,20 @@ where
     if key.is_empty() {
         return err(StatusCode::BAD_REQUEST, "idempotency_key_required");
     }
+
+    // **Namespaced by operation.** The store is a flat map keyed by the
+    // client's opaque header value, so a key reused across two
+    // different mutations replayed the FIRST one's response and the
+    // second mutation never ran — a "switched: true" body answering a
+    // prompt that was never sent. A client is only obliged to make its
+    // keys unique to itself, not unique across every endpoint, so the
+    // uniqueness the store needs has to come from the server.
+    //
+    // The scope carries the route and its path parameters, so the same
+    // key on `/prompt` and `/read` cannot collide, and the same key on
+    // two different sessions cannot either. NUL separates the parts
+    // because it cannot occur in a header value.
+    let key = format!("{scope}\u{0}{key}");
 
     let now = std::time::Instant::now();
     {
@@ -393,6 +446,21 @@ where
             // let the client retry — running the mutation again is the
             // exact outcome the key exists to prevent.
             Lookup::InFlight => return err(StatusCode::CONFLICT, "idempotency_key_in_flight"),
+            // Every slot is a live reservation, so there is nothing the
+            // store can drop without risking a duplicate mutation.
+            // 503 + Retry-After, because the key is fine and the
+            // condition clears as those requests finish.
+            Lookup::Saturated => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    [(header::RETRY_AFTER, "1")],
+                    Json(ApiError {
+                        error: "busy",
+                        retry_after_secs: Some(1),
+                    }),
+                )
+                    .into_response();
+            }
             Lookup::Execute => {}
         }
     }
@@ -970,13 +1038,18 @@ async fn send_prompt(
     Json(body): Json<PromptRequest>,
 ) -> Response {
     let headers2 = headers.clone();
-    idempotent(&state, &headers2, || async move {
-        let dir = crate::session_live::registry::default_sessions_dir();
-        match do_send(&dir, &session_id, &body).await {
-            Ok(v) => (StatusCode::ACCEPTED, v),
-            Err((s, code)) => (s, serde_json::json!({ "error": code })),
-        }
-    })
+    idempotent(
+        &state,
+        &headers2,
+        &format!("prompt:{session_id}"),
+        || async move {
+            let dir = crate::session_live::registry::default_sessions_dir();
+            match do_send(&dir, &session_id, &body).await {
+                Ok(v) => (StatusCode::ACCEPTED, v),
+                Err((s, code)) => (s, serde_json::json!({ "error": code })),
+            }
+        },
+    )
     .await
 }
 
@@ -1028,6 +1101,11 @@ async fn do_send(
 }
 
 async fn inbound_status() -> Response {
+    // Under the same guard the grant/revoke/tick paths take. This is
+    // two file reads with a writer able to land between them; a render
+    // in that window reports `unmanaged_open` — "nothing will close
+    // this" — about a window that is being opened correctly.
+    let _guard = crate::peer::inbound::file_guard();
     match crate::peer::inbound::state(Utc::now()) {
         Ok(st) => (
             StatusCode::OK,
@@ -1046,16 +1124,28 @@ async fn inbound_status() -> Response {
 }
 
 /// Closing the window is always allowed remotely; opening it is not.
-async fn inbound_revoke() -> Response {
-    match crate::peer::inbound::revoke(Utc::now()) {
-        Ok(revoked) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "revoked": revoked.is_some() })),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::warn!(error = %e, "remote: inbound revoke failed");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "internal")
+///
+/// Behind `idempotent` like every other POST. It was the one mutation
+/// outside the wrapper, which made the contract "every mutation needs
+/// an `Idempotency-Key`" false in exactly one place — and the panel was
+/// already sending a key here, so nothing but the enforcement was
+/// missing.
+async fn inbound_revoke(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    idempotent(&state, &headers, "inbound-revoke", || async {
+        let _guard = crate::peer::inbound::file_guard();
+        match crate::peer::inbound::revoke() {
+            Ok(revoked) => (
+                StatusCode::OK,
+                serde_json::json!({ "revoked": revoked.is_some() }),
+            ),
+            Err(e) => {
+                tracing::warn!(error = %e, "remote: inbound revoke failed");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({ "error": "internal" }),
+                )
+            }
         }
-    }
+    })
+    .await
 }

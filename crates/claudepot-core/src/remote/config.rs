@@ -97,6 +97,15 @@ pub struct RemoteConfigFile {
     /// has to make the process crash to get unlimited guesses.
     #[serde(default)]
     pub failed_attempts: u32,
+    /// When the most recent failure happened. Persisted *with* the
+    /// counter and for the same reason — but it is also what makes the
+    /// backoff expire at all. A counter with no timestamp cannot say how
+    /// much of the wait has been served, so it can only ever hold the
+    /// caller forever; see `password::Throttle`. Absent on files written
+    /// before this field existed, which yields no delay rather than a
+    /// permanent one.
+    #[serde(default)]
+    pub last_failed_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Registered passkeys. **Public keys only** — that is the whole
     /// reason a passkey beats both of the credentials above: reading
     /// this file gives an attacker a cracking job for the password hash,
@@ -135,6 +144,7 @@ impl Default for RemoteConfigFile {
             totp_secret_base32: None,
             totp_last_counter: None,
             failed_attempts: 0,
+            last_failed_at: None,
             passkeys: Vec::new(),
             passkey_user_handle: None,
         }
@@ -170,6 +180,7 @@ impl RemoteConfigFile {
             },
             throttle: super::password::Throttle {
                 consecutive_failures: self.failed_attempts,
+                last_failure_at: self.last_failed_at,
             },
         }
     }
@@ -181,6 +192,7 @@ impl RemoteConfigFile {
         self.totp_secret_base32 = auth.totp_secret.as_ref().map(|s| s.to_base32());
         self.totp_last_counter = auth.totp_state.last_used_counter;
         self.failed_attempts = auth.throttle.consecutive_failures;
+        self.last_failed_at = auth.throttle.last_failure_at;
     }
 }
 
@@ -258,15 +270,124 @@ mod tests {
         // Both are persisted for the same reason: if either resets when
         // the process does, an attacker only has to make it restart to
         // get unlimited guesses, or to reopen a burned code's window.
+        //
+        // The *timestamp* is part of that: without it a restart leaves
+        // failures with no recorded time, which yields no delay — the
+        // same unlimited-guesses hole, reached by crashing the process
+        // rather than by waiting.
+        let stamp = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         let mut f = RemoteConfigFile {
             failed_attempts: 7,
+            last_failed_at: Some(stamp),
             totp_last_counter: Some(1234),
             ..Default::default()
         };
         let json = serde_json::to_string(&f).unwrap();
         f = serde_json::from_str(&json).unwrap();
         assert_eq!(f.failed_attempts, 7);
+        assert_eq!(f.last_failed_at, Some(stamp));
         assert_eq!(f.totp_last_counter, Some(1234));
+    }
+
+    #[test]
+    fn a_totp_secret_that_cannot_be_parsed_is_refused_not_ignored() {
+        // The bug this guards: `auth()` resolves the secret with
+        // `and_then(from_base32)`, so an unparseable value becomes
+        // `None`, which is exactly what "TOTP was never configured"
+        // looks like. Login then passes on the password alone and
+        // `absorb()` persists the `None`, destroying the evidence.
+        // Two factors become one, silently and permanently.
+        for bad in ["", "!!!!not base32!!!!", "AAAA", &"A".repeat(64)] {
+            let f = RemoteConfigFile {
+                totp_secret_base32: Some(bad.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                matches!(f.validate(), Err(ConfigValidationError::BadTotpSecret)),
+                "{bad:?} must be refused"
+            );
+        }
+        let good = TotpSecret::generate().to_base32();
+        let f = RemoteConfigFile {
+            totp_secret_base32: Some(good),
+            ..Default::default()
+        };
+        assert!(f.validate().is_ok());
+        assert!(f.auth().totp_enabled());
+    }
+
+    #[test]
+    fn duplicate_or_empty_passkey_ids_are_refused() {
+        let mk = |id: &str| super::super::passkey::PasskeyRecord {
+            credential: super::super::webauthn::Credential {
+                id: id.to_string(),
+                public_key: "cHVibGlj".to_string(),
+                sign_count: 0,
+            },
+            label: "phone".into(),
+            created_at: chrono::Utc::now(),
+            last_used: None,
+            origin: "https://appliance.internal:8420".into(),
+        };
+        let dup = RemoteConfigFile {
+            passkeys: vec![mk("same"), mk("same")],
+            ..Default::default()
+        };
+        assert!(matches!(
+            dup.validate(),
+            Err(ConfigValidationError::DuplicatePasskeyId(_))
+        ));
+        let empty = RemoteConfigFile {
+            passkeys: vec![mk("")],
+            ..Default::default()
+        };
+        assert!(matches!(
+            empty.validate(),
+            Err(ConfigValidationError::EmptyPasskeyId)
+        ));
+        let ok = RemoteConfigFile {
+            passkeys: vec![mk("a"), mk("b")],
+            ..Default::default()
+        };
+        assert!(ok.validate().is_ok());
+    }
+
+    #[test]
+    fn the_failure_stamp_round_trips_through_auth_and_back() {
+        // `auth()` and `absorb()` are the only path between the file and
+        // the throttle. A field added to one and not the other loses the
+        // deadline on every login attempt, which is invisible: the
+        // counter still rises, so the file still looks like it is
+        // throttling.
+        let stamp = chrono::DateTime::from_timestamp(1_700_000_500, 0).unwrap();
+        let f = RemoteConfigFile {
+            failed_attempts: 9,
+            last_failed_at: Some(stamp),
+            ..Default::default()
+        };
+        let auth = f.auth();
+        assert_eq!(auth.throttle.last_failure_at, Some(stamp));
+
+        let mut back = RemoteConfigFile::default();
+        back.absorb(&auth);
+        assert_eq!(back.last_failed_at, Some(stamp));
+        assert_eq!(back.failed_attempts, 9);
+    }
+
+    #[test]
+    fn a_config_written_before_the_stamp_existed_still_loads() {
+        // Forward compatibility for the file that motivated the fix:
+        // failures recorded, no time. It must deserialize, and it must
+        // not hold the owner.
+        let json = r#"{"schema_version":1,"server":{"enabled":false,"bind":"127.0.0.1","port":8420},"failed_attempts":12}"#;
+        let f: RemoteConfigFile = serde_json::from_str(json).unwrap();
+        assert_eq!(f.failed_attempts, 12);
+        assert_eq!(f.last_failed_at, None);
+        assert_eq!(
+            f.auth().throttle.required_delay_secs(chrono::Utc::now()),
+            0,
+            "an owner locked out by the old build must be let back in"
+        );
     }
 
     #[test]
@@ -308,7 +429,19 @@ pub enum ConfigValidationError {
     ZeroPort,
     #[error("the configured bind address is refused: {0}")]
     BadBind(String),
+    #[error(
+        "the stored TOTP secret is not a valid {SECRET_LEN_HINT}-byte base32 value; \
+         2FA cannot be evaluated and the file is refused rather than treated as 2FA-off"
+    )]
+    BadTotpSecret,
+    #[error("two registered passkeys share the credential id {0}")]
+    DuplicatePasskeyId(String),
+    #[error("a registered passkey has an empty credential id")]
+    EmptyPasskeyId,
 }
+
+/// Only for the error text above; the authority is `totp::SECRET_LEN`.
+const SECRET_LEN_HINT: usize = 20;
 
 impl RemoteConfigFile {
     pub fn validate(&self) -> Result<(), ConfigValidationError> {
@@ -326,6 +459,37 @@ impl RemoteConfigFile {
         self.server
             .checked_bind()
             .map_err(|e| ConfigValidationError::BadBind(e.to_string()))?;
+
+        // A secret that is present and unparseable must NOT be read as
+        // "the second factor is off". `auth()` resolves it with
+        // `and_then(from_base32)`, so a `None` there is indistinguishable
+        // from never having configured TOTP — the login then succeeds on
+        // the password alone, and `absorb()` writes the `None` back,
+        // erasing the secret that would have proved otherwise. A silent
+        // downgrade from two factors to one, made permanent by the next
+        // login. This file fails loud on corruption precisely so that
+        // cannot happen quietly.
+        if let Some(raw) = self.totp_secret_base32.as_deref() {
+            if TotpSecret::from_base32(raw).is_none() {
+                return Err(ConfigValidationError::BadTotpSecret);
+            }
+        }
+
+        // Passkeys are the way back in. A duplicate id silently shadows
+        // one credential with another at lookup time, and an empty id
+        // matches nothing, so both are states in which a phone that
+        // still holds a working passkey is refused with no explanation.
+        let mut seen = std::collections::HashSet::new();
+        for pk in &self.passkeys {
+            if pk.credential.id.is_empty() {
+                return Err(ConfigValidationError::EmptyPasskeyId);
+            }
+            if !seen.insert(pk.credential.id.as_str()) {
+                return Err(ConfigValidationError::DuplicatePasskeyId(
+                    pk.credential.id.clone(),
+                ));
+            }
+        }
         Ok(())
     }
 }

@@ -219,25 +219,44 @@ pub(super) async fn mark_read(
     req_device: Device,
     Json(body): Json<ReadRequest>,
 ) -> Response {
-    idempotent(&state, &headers, || async move {
-        let id = req_device.id;
-        let session_id = session_id.clone();
-        let count = body.through_count;
-        match blocking("read state", move || {
-            panel::read_state::mark(id, &session_id, count)
-        })
-        .await
-        {
-            Some(settled) => (
-                StatusCode::OK,
-                serde_json::json!({ "through_count": settled }),
-            ),
-            None => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                serde_json::json!({ "error": "internal" }),
-            ),
-        }
-    })
+    idempotent(
+        &state,
+        &headers,
+        &format!("read:{session_id}"),
+        || async move {
+            let id = req_device.id;
+            let session_id = session_id.clone();
+            let count = body.through_count;
+            // A count above the ceiling is a client bug, not a server
+            // failure — and because the mark only moves forward, storing it
+            // would suppress this device's badges for this session forever.
+            // Refuse it where the client can see the refusal.
+            if count > panel::read_state::MAX_THROUGH_COUNT {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    serde_json::json!({ "error": "through_count_out_of_range" }),
+                );
+            }
+            match blocking("read state", move || {
+                panel::read_state::mark(id, &session_id, count)
+            })
+            .await
+            {
+                // `blocking` collapses the error into `None`; the range
+                // check above is what turns a bad count into a message the
+                // client can act on. The core-level guard stays as defence
+                // in depth for the Tauri and CLI callers.
+                Some(settled) => (
+                    StatusCode::OK,
+                    serde_json::json!({ "through_count": settled }),
+                ),
+                None => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({ "error": "internal" }),
+                ),
+            }
+        },
+    )
     .await
 }
 
@@ -277,59 +296,72 @@ pub(super) async fn activate_account(
     _device: Device,
     Json(body): Json<ActivateRequest>,
 ) -> Response {
-    idempotent(&state, &headers, || async move {
-        use crate::services::account_service::{self, ActivateError, Activation};
+    idempotent(
+        &state,
+        &headers,
+        &format!("activate:{email}"),
+        || async move {
+            use crate::services::account_service::{self, ActivateError, Activation};
 
-        let data_dir = crate::paths::claudepot_data_dir();
-        let Ok(store) = crate::account::AccountStore::open(&data_dir.join("accounts.db")) else {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                serde_json::json!({ "error": "internal" }),
-            );
-        };
+            let data_dir = crate::paths::claudepot_data_dir();
+            let Ok(store) = crate::account::AccountStore::open(&data_dir.join("accounts.db"))
+            else {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({ "error": "internal" }),
+                );
+            };
 
-        // One sequence, shared with `claudepot cli use`. This handler
-        // owns the HTTP mapping and nothing else — an earlier version
-        // walked the steps itself and had already lost `resolve_email`,
-        // so a prefix that worked at the keyboard was "not found" here.
-        match account_service::activate_cli(&store, &email, body.force, true).await {
-            Ok(Activation::AlreadyActive { email }) => (
-                StatusCode::OK,
-                serde_json::json!({ "already_active": true, "email": email }),
-            ),
-            Ok(Activation::Switched { from, to }) => (
-                StatusCode::OK,
-                serde_json::json!({ "switched": true, "from": from, "email": to }),
-            ),
-            Err(ActivateError::Resolve(e)) => (
-                StatusCode::NOT_FOUND,
-                serde_json::json!({ "error": e.to_string() }),
-            ),
-            Err(ActivateError::NotFound(e)) => (
-                StatusCode::NOT_FOUND,
-                serde_json::json!({ "error": format!("account not found: {e}") }),
-            ),
-            // Its own status and code: the one failure the user can act
-            // on, and the only one the panel offers an override for.
-            Err(ActivateError::Swap(crate::error::SwapError::LiveSessionConflict)) => (
-                StatusCode::CONFLICT,
-                // `requested`, not `email`: this is what the caller
-                // asked for, which may be a prefix. The resolved
-                // address is not in hand on this arm, and labelling an
-                // input as an email would be a small lie in the one
-                // response the user acts on.
-                serde_json::json!({ "error": "live_session", "requested": email }),
-            ),
-            Err(e) => (
-                StatusCode::BAD_GATEWAY,
-                // Core's text is canonical English and says something
-                // useful — an identity mismatch names both emails.
-                // Flattening it to "failed" would send the user to the
-                // machine with nothing to go on.
-                serde_json::json!({ "error": e.to_string() }),
-            ),
-        }
-    })
+            // One sequence, shared with `claudepot cli use`. This handler
+            // owns the HTTP mapping and nothing else — an earlier version
+            // walked the steps itself and had already lost `resolve_email`,
+            // so a prefix that worked at the keyboard was "not found" here.
+            match account_service::activate_cli(&store, &email, body.force, true).await {
+                Ok(Activation::AlreadyActive { email }) => (
+                    StatusCode::OK,
+                    serde_json::json!({ "already_active": true, "email": email }),
+                ),
+                Ok(Activation::Switched { from, to }) => (
+                    StatusCode::OK,
+                    serde_json::json!({ "switched": true, "from": from, "email": to }),
+                ),
+                Err(ActivateError::Resolve(e)) => (
+                    StatusCode::NOT_FOUND,
+                    serde_json::json!({ "error": e.to_string() }),
+                ),
+                Err(ActivateError::NotFound(e)) => (
+                    StatusCode::NOT_FOUND,
+                    serde_json::json!({ "error": format!("account not found: {e}") }),
+                ),
+                // Not a 404: the account may well exist. `accounts.db` is
+                // unreadable, which is the machine's problem and not the
+                // caller's, so it must not read as "check your spelling".
+                Err(ActivateError::Store(e)) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({ "error": format!("account store unavailable: {e}") }),
+                ),
+                // Its own status and code: the one failure the user can act
+                // on, and the only one the panel offers an override for.
+                Err(ActivateError::Swap(crate::error::SwapError::LiveSessionConflict)) => (
+                    StatusCode::CONFLICT,
+                    // `requested`, not `email`: this is what the caller
+                    // asked for, which may be a prefix. The resolved
+                    // address is not in hand on this arm, and labelling an
+                    // input as an email would be a small lie in the one
+                    // response the user acts on.
+                    serde_json::json!({ "error": "live_session", "requested": email }),
+                ),
+                Err(e) => (
+                    StatusCode::BAD_GATEWAY,
+                    // Core's text is canonical English and says something
+                    // useful — an identity mismatch names both emails.
+                    // Flattening it to "failed" would send the user to the
+                    // machine with nothing to go on.
+                    serde_json::json!({ "error": e.to_string() }),
+                ),
+            }
+        },
+    )
     .await
 }
 
@@ -495,7 +527,7 @@ pub(super) async fn decide_approval(
     req_device: Device,
     Json(body): Json<DecideRequest>,
 ) -> Response {
-    idempotent(&state, &headers, || async move {
+    idempotent(&state, &headers, &format!("approval:{id}"), || async move {
         let now = approval::now_ms();
         let decision = ApprovalDecision {
             decision: body.decision,
@@ -732,7 +764,7 @@ pub(super) async fn passkey_register_finish(
     Json(body): Json<passkey::RegisterResponse>,
 ) -> Response {
     let inner = state.clone();
-    idempotent(&state, &headers, || async move {
+    idempotent(&state, &headers, "passkey-register", || async move {
         let mut guard = inner.lock().await;
         let existing = guard.config.passkeys.clone();
         let record = match passkey::finish_registration(
@@ -857,14 +889,7 @@ pub(super) async fn passkey_login_finish(
     }
     drop(guard);
 
-    (
-        StatusCode::OK,
-        Json(super::server::LoginResponse {
-            token,
-            expires_at: device.expires_at.map(|t| t.to_rfc3339()),
-        }),
-    )
-        .into_response()
+    super::server::login_ok(token, device.expires_at.map(|t| t.to_rfc3339()))
 }
 
 fn base64_url(bytes: &[u8]) -> String {

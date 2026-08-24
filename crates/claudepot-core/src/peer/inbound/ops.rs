@@ -52,12 +52,22 @@ pub fn open(
         }
     }
 
-    // Refuse rather than clobber a value we could not put back.
+    // Refuse rather than clobber a value we could not put back. This
+    // preflight gives the caller the better error message; the
+    // authoritative refusal is inside `write_mode`'s mutation closure,
+    // because this read and that write take the lock separately.
     if let ModeValue::Unrecognized(raw) = settings::read_mode()? {
         return Err(GrantError::UnrecognizedExistingValue { raw });
     }
 
-    let previous = settings::write_mode(InboundMode::Accept)?;
+    let previous = match settings::write_mode(InboundMode::Accept) {
+        Ok(p) => p,
+        // Someone edited the file between the preflight and the write.
+        Err(super::InboundSettingsError::UnrecognizedExisting { raw }) => {
+            return Err(GrantError::UnrecognizedExistingValue { raw })
+        }
+        Err(e) => return Err(e.into()),
+    };
     let grant = InboundGrant {
         granted: InboundMode::Accept,
         previous: previous.valid(),
@@ -88,7 +98,13 @@ pub fn open(
 }
 
 /// Close the window now, whatever its deadline said.
-pub fn revoke(now: DateTime<Utc>) -> Result<Option<InboundGrant>, GrantError> {
+///
+/// Takes no clock, and that is the point: "now, whatever its deadline
+/// said" means the deadline is not consulted. It used to accept a `now`
+/// it never read, silenced with `let _ = now;` — a parameter four
+/// callers were computing and passing on a safety-sensitive API, which
+/// reads as if the time mattered.
+pub fn revoke() -> Result<Option<InboundGrant>, GrantError> {
     let Some(grant) = load_grant()? else {
         return Ok(None);
     };
@@ -99,7 +115,6 @@ pub fn revoke(now: DateTime<Utc>) -> Result<Option<InboundGrant>, GrantError> {
         settings::restore(grant.previous)?;
     }
     persist(None)?;
-    let _ = now;
     Ok(Some(grant))
 }
 
@@ -357,7 +372,7 @@ mod tests {
     fn revoke_closes_early_and_reports_the_grant() {
         let (_t, _l) = isolated();
         open(Duration::hours(6), None, now()).unwrap();
-        let g = revoke(now() + Duration::minutes(5)).unwrap();
+        let g = revoke().unwrap();
         assert!(g.is_some());
         assert_eq!(settings::read_mode().unwrap(), ModeValue::Absent);
         assert!(load_grant().unwrap().is_none());
@@ -366,7 +381,7 @@ mod tests {
     #[test]
     fn revoke_with_no_grant_is_a_no_op() {
         let (_t, _l) = isolated();
-        assert!(revoke(now()).unwrap().is_none());
+        assert!(revoke().unwrap().is_none());
     }
 
     #[test]

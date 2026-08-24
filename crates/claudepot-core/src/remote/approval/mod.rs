@@ -337,6 +337,23 @@ pub mod store {
     ///
     /// Refuses an id with no live request, so a decision can never be
     /// planted for a prompt that was never asked.
+    ///
+    /// **First decision wins, and that is enforced by the filesystem.**
+    /// This used to `atomic_write`, which overwrites — so two phones
+    /// answering the same prompt, or one person tapping Deny after
+    /// Allow, resolved to whichever write landed second, and both calls
+    /// returned `true`. For a route whose whole job is granting a tool
+    /// capability, "whoever was slower decides" is the wrong rule and an
+    /// unobservable one.
+    ///
+    /// `create_new` is the exclusive-create the race needs. Atomic
+    /// rename gives crash-safety, not mutual exclusion — the same
+    /// distinction the module docs draw about one writer per file — and
+    /// a process-local mutex buys nothing here because the hook and the
+    /// server are different processes.
+    ///
+    /// `Ok(false)` therefore means "not yours to answer": either no live
+    /// request, or already answered.
     pub fn put_decision(
         dir: &Path,
         id: &str,
@@ -347,8 +364,20 @@ pub mod store {
             return Ok(false);
         }
         let bytes = serde_json::to_vec_pretty(decision)?;
-        crate::fs_utils::atomic_write(&decision_path(dir, id), &bytes)?;
-        Ok(true)
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(decision_path(dir, id))
+        {
+            Ok(mut f) => {
+                use std::io::Write;
+                f.write_all(&bytes)?;
+                f.sync_all()?;
+                Ok(true)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Hook side: has it been answered?
@@ -666,5 +695,45 @@ mod serving_tests {
         assert!(store::pending(d.path(), 0).is_empty());
         store::sweep(d.path(), u64::MAX);
         assert!(store::is_serving(d.path(), 0), "sweep must not eat it");
+    }
+
+    #[test]
+    fn the_first_decision_wins_and_the_second_is_told_so() {
+        // Two phones on the same prompt, or one person changing their
+        // mind mid-tap. Overwriting made the LAST writer decide whether
+        // a tool call runs, and told both of them they had decided.
+        let d = tempfile::tempdir().unwrap();
+        let now = 1_000u64;
+        let req = ApprovalRequest {
+            id: "req-1".into(),
+            session_id: "sess-1".into(),
+            cwd: "/tmp".into(),
+            tool_name: "Bash".into(),
+            argument: Some("rm -rf /tmp/x".into()),
+            created_at_ms: now,
+        };
+        store::put_request(d.path(), &req).unwrap();
+
+        let allow = ApprovalDecision {
+            decision: Decision::Allow,
+            device_id: "phone-a".into(),
+            at_ms: now + 1,
+        };
+        let deny = ApprovalDecision {
+            decision: Decision::Deny,
+            device_id: "phone-b".into(),
+            at_ms: now + 2,
+        };
+
+        assert!(store::put_decision(d.path(), "req-1", &allow, now).unwrap());
+        assert!(
+            !store::put_decision(d.path(), "req-1", &deny, now).unwrap(),
+            "the second decision must be refused, not applied"
+        );
+        assert_eq!(
+            store::take_decision(d.path(), "req-1"),
+            Some(allow),
+            "the first decision is the one that stands"
+        );
     }
 }

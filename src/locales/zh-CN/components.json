@@ -262,6 +262,9 @@
   "remoteWindow": {
     "open": "远程 {{minutes}} 分钟",
     "openHint": "远程控制已开启，还有 {{minutes}} 分钟。开启期间，本机任何能连上会话的进程都可以直接给它发送提示词，无需你确认。Claudepot 会自动关闭。",
+    "recoveredHint": "正在接受跨会话消息，而保存其截止时间的授权记录已损坏并被重置——因此没有任何机制会自动关闭它。请在 Claude Code 设置中改回 hold，或改为开启一个限时窗口。",
+    "unknown": "远程 ?",
+    "unknownHint": "Claudepot 无法读取远程控制窗口是否处于打开状态。它可能是打开的。请检查设置，或在本机运行 `claudepot session inbound status`。",
     "unmanaged": "远程已开启",
     "unmanagedHint": "跨会话消息正在被接受，但没有任何 Claudepot 授权在管它——不会自动关闭。请在 Claude Code 设置中改回 hold，或改用限时授权。"
   }

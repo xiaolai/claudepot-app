@@ -44,11 +44,11 @@ impl Addressable {
 /// never work.
 pub fn list_addressable(sessions_dir: &Path) -> Result<Vec<Addressable>, PeerError> {
     let check = SysinfoCheck::new();
-    let outcome = poll_dir(sessions_dir, &check).map_err(|source| PeerError::KeyUnreadable {
-        pid: 0,
-        path: sessions_dir.display().to_string(),
-        source,
-    })?;
+    let outcome =
+        poll_dir(sessions_dir, &check).map_err(|source| PeerError::RegistryUnreadable {
+            path: sessions_dir.display().to_string(),
+            source,
+        })?;
 
     let mut out: Vec<Addressable> = outcome
         .live

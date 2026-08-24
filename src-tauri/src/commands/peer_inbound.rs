@@ -27,11 +27,20 @@ pub struct PeerInboundStateDto {
     /// this differently from a managed window: no timer will close it.
     pub unmanaged_open: bool,
     pub remaining_secs: Option<i64>,
-    pub expires_at: Option<String>,
     /// `accept` | `hold` | `refuse` | `absent` | `invalid`. Distinct
     /// from `open` because "absent" and "a value CC rejects" are
     /// different problems with different fixes.
     pub observed: String,
+    /// The grant record was unreadable and was reset.
+    ///
+    /// Carried because AGENTS.md calls this store fail-loud, and the
+    /// GUI could not say it: `record_recovered` reached the HTTP
+    /// surface (`server.rs`) and stopped at this DTO, so on the desktop
+    /// — where the user actually is — the deadline could be lost with
+    /// nothing naming the cause. `is_unmanaged_open()` folds it in, so
+    /// the *effect* was visible as "nothing is minding this"; this is
+    /// the reason for it.
+    pub record_recovered: bool,
 }
 
 fn observed_word(state: &InboundState) -> String {
@@ -44,16 +53,21 @@ fn observed_word(state: &InboundState) -> String {
 }
 
 fn to_dto(state: &InboundState) -> PeerInboundStateDto {
-    let (remaining_secs, expires_at) = match &state.decision {
-        Decision::Active { remaining_secs } => (Some(*remaining_secs), None),
-        _ => (None, None),
+    // `Decision::Active` carries a countdown, not a deadline, so there
+    // was never an `expires_at` to send: `to_dto` set it to `None` on
+    // every path including an active grant, and nothing in `src/` read
+    // it. A field that is always null is not an API, it is an invitation
+    // to depend on a timestamp that never arrives.
+    let remaining_secs = match &state.decision {
+        Decision::Active { remaining_secs } => Some(*remaining_secs),
+        _ => None,
     };
     PeerInboundStateDto {
         open: state.is_open(),
         unmanaged_open: state.is_unmanaged_open(),
         remaining_secs,
-        expires_at,
         observed: observed_word(state),
+        record_recovered: state.record_recovered,
     }
 }
 
@@ -66,6 +80,18 @@ fn map_err(e: impl std::fmt::Display) -> ErrorDto {
 #[tauri::command]
 pub async fn peer_inbound_state() -> Result<PeerInboundStateDto, ErrorDto> {
     tokio::task::spawn_blocking(|| {
+        // Under the same guard the grant/revoke/tick paths take. This
+        // read is two file reads — the grant record and CC's settings —
+        // and a writer sits between them for a moment: `ops::open`
+        // writes `accept` and only then persists the grant. A render
+        // landing in that window sees `accept` with no record and
+        // reports `unmanagedOpen` — "nothing will ever close this" — as
+        // a fact about a window that is being opened correctly.
+        //
+        // Serializing a read with local writers is all this buys, and
+        // that is all it claims: an external editor still races, which
+        // is what `record_recovered` and the unmanaged state exist for.
+        let _guard = inbound_file_guard();
         let state = inbound::state(Utc::now()).map_err(map_err)?;
         Ok(to_dto(&state))
     })
@@ -107,7 +133,7 @@ pub async fn peer_inbound_grant(
 pub async fn peer_inbound_revoke() -> Result<PeerInboundStateDto, ErrorDto> {
     tokio::task::spawn_blocking(|| {
         let _guard = inbound_file_guard();
-        inbound::revoke(Utc::now()).map_err(map_err)?;
+        inbound::revoke().map_err(map_err)?;
         let state = inbound::state(Utc::now()).map_err(map_err)?;
         Ok(to_dto(&state))
     })

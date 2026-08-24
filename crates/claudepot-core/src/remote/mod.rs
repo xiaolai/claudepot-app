@@ -50,6 +50,7 @@ pub mod approval;
 pub mod assets;
 pub mod bind;
 pub mod config;
+pub(crate) mod ct;
 pub mod idempotency;
 pub mod login;
 pub mod panel;

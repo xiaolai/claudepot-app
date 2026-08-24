@@ -67,6 +67,25 @@ const MAX_SESSIONS_PER_DEVICE: usize = 200;
 /// cap is what stops a long-lived install accumulating dead entries.
 const MAX_DEVICES: usize = 32;
 
+/// Ceiling on a single read mark.
+///
+/// The count arrives from the client, and the mark only ever moves
+/// forward — so one absurd value (`usize::MAX`, a units mix-up, a
+/// serialisation bug) permanently suppresses that device's badges for
+/// that session with nothing on screen saying why. Forward-only is the
+/// right rule and it is exactly what makes a bad value unrecoverable.
+///
+/// The server does **not** resolve the session's true event total to
+/// clamp against: that costs a full transcript read on every mark, on a
+/// path a phone hits per session per open. A fixed ceiling is the cheap
+/// half of the guard — it cannot catch a wrong-but-plausible count, and
+/// does not try to. It catches the unbounded ones, and it fails loud so
+/// a client bug surfaces as an error instead of as missing badges.
+///
+/// 10 million events is far past any real transcript (the largest here
+/// is ~14 MB / tens of thousands of events) and far below `usize::MAX`.
+pub const MAX_THROUGH_COUNT: usize = 10_000_000;
+
 fn default_schema_version() -> u32 {
     SCHEMA_VERSION
 }
@@ -201,7 +220,7 @@ pub fn mark(device_id: Uuid, session_id: &str, through_count: usize) -> Result<u
 /// rename is crash-safety, not concurrency-safety.
 static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Only one failure is reachable.
+/// Two failures are reachable, and neither is a read.
 ///
 /// The read side goes through `json_store::load_or_default`, which
 /// recovers from every I/O and parse failure by starting empty — the
@@ -212,6 +231,8 @@ static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub enum MarkError {
     #[error("cannot write the read-state file")]
     Write,
+    #[error("read mark {got} is above the {max} ceiling")]
+    Implausible { got: usize, max: usize },
 }
 
 pub fn mark_at(
@@ -226,6 +247,13 @@ pub fn mark_at(
     // guards is a badge cache, and refusing to record a read because
     // some other thread panicked would be a worse outcome than the
     // interleaving this guards against.
+    if through_count > MAX_THROUGH_COUNT {
+        return Err(MarkError::Implausible {
+            got: through_count,
+            max: MAX_THROUGH_COUNT,
+        });
+    }
+
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
     let mut file: ReadStateFile = json_store::load_or_default(path, STORE);
@@ -432,5 +460,33 @@ mod tests {
         std::fs::write(&p, r#"{"schema_version": 99, "devices": {}}"#).unwrap();
         let st = load_for_at(&p, Uuid::new_v4());
         assert_eq!(st.seen("s1"), None);
+    }
+
+    #[test]
+    fn an_implausible_mark_is_refused_rather_than_stored() {
+        // The mark only moves forward, so one absurd value would
+        // suppress this device's badges for this session permanently —
+        // and silently, which is the part that makes it a bug rather
+        // than a nuisance.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rs.json");
+        let dev = Uuid::new_v4();
+
+        assert!(matches!(
+            mark_at(&path, dev, "sess", usize::MAX, Utc::now()),
+            Err(MarkError::Implausible { .. })
+        ));
+        assert!(matches!(
+            mark_at(&path, dev, "sess", MAX_THROUGH_COUNT + 1, Utc::now()),
+            Err(MarkError::Implausible { .. })
+        ));
+
+        // Nothing was recorded, so a later honest mark still works.
+        assert_eq!(mark_at(&path, dev, "sess", 12, Utc::now()).unwrap(), 12);
+        // And the ceiling itself is allowed.
+        assert_eq!(
+            mark_at(&path, dev, "sess", MAX_THROUGH_COUNT, Utc::now()).unwrap(),
+            MAX_THROUGH_COUNT
+        );
     }
 }

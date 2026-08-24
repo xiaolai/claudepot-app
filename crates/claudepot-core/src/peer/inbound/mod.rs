@@ -57,6 +57,31 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub use eval::{decide, Decision};
+/// Serializes this process's readers and writers of the two files that
+/// together are the remote-control window: the grant record and CC's
+/// `crossSessionInbound` setting.
+///
+/// **In core, not in the Tauri crate**, because `remote::server`'s
+/// `/api/inbound` handlers touch the same pair and the guard used to
+/// live only beside the Tauri commands. A grant is a settings write
+/// followed by a record persist, so a read landing between the two sees
+/// `accept` with no record — which `is_unmanaged_open()` correctly
+/// reports as "nothing will close this" about a window that is being
+/// opened correctly.
+///
+/// Same limit as `settings_mutex`, stated the same way: this serializes
+/// **same-process** access. Another process — CC itself, a text editor,
+/// a second Claudepot — does not honour it, which is what
+/// `record_recovered` and the unmanaged state exist to surface.
+static INBOUND_FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Recovers from poison — a panic in one writer must not disable
+/// auto-close for the process's lifetime, which would leave the machine
+/// open with nothing minding the deadline.
+pub fn file_guard() -> std::sync::MutexGuard<'static, ()> {
+    crate::sync::recover_lock(&INBOUND_FILE_LOCK, "peer inbound grant file")
+}
+
 pub use ops::{open, revoke, state, status, tick, InboundState};
 pub use settings::{clear_mode, read_mode, write_mode, InboundSettingsError};
 pub use store::{grant_path, load, save, GRANT_FILENAME};

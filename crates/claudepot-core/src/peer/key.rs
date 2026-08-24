@@ -28,7 +28,14 @@ static PEER_TOKEN_RE: Lazy<Regex> =
 
 /// Parsed key file. `proc_start` is CC's `ps -o lstart=` snapshot of
 /// the owning process, taken when the inbox bound.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+///
+/// `Debug` is hand-written, not derived: `peer_token` is a live
+/// credential for another session's input queue, and
+/// `.claude/rules/rust-conventions.md` forbids a token reaching a log
+/// or an error message. A derived `Debug` is not a leak by itself — it
+/// is the thing that makes the next `tracing::debug!(?key)` a leak,
+/// silently and at a call site that looks harmless.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 pub struct KeyFile {
     #[serde(rename = "peerToken")]
     pub peer_token: String,
@@ -36,6 +43,15 @@ pub struct KeyFile {
     /// is Unix-only, so that field is not modelled.
     #[serde(rename = "procStart", default)]
     pub proc_start: Option<String>,
+}
+
+impl std::fmt::Debug for KeyFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyFile")
+            .field("peer_token", &"<redacted>")
+            .field("proc_start", &self.proc_start)
+            .finish()
+    }
 }
 
 /// Derive the key filename CC would have written for `(pid, socket)`.
@@ -316,5 +332,21 @@ mod tests {
         if let Some(observed) = observed {
             assert!(verify_proc_start(pid, Some(&observed)).await.is_ok());
         }
+    }
+
+    #[test]
+    fn debug_never_prints_the_peer_token() {
+        // `.claude/rules/rust-conventions.md`: a token must not reach a
+        // log or an error message. The derive that used to be here is
+        // what would have put it there.
+        let k = KeyFile {
+            peer_token: "0123456789abcdef0123456789abcdef".into(),
+            proc_start: Some("Mon Jan  1 00:00:00 2026".into()),
+        };
+        let shown = format!("{k:?}");
+        assert!(!shown.contains("0123456789abcdef"), "{shown}");
+        assert!(shown.contains("<redacted>"), "{shown}");
+        // The non-secret field is still useful for diagnosis.
+        assert!(shown.contains("Mon Jan"), "{shown}");
     }
 }

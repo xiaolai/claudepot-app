@@ -25,6 +25,12 @@ pub const INBOUND_KEY: &str = "crossSessionInbound";
 pub enum InboundSettingsError {
     #[error(transparent)]
     Mutex(#[from] SettingsMutexError),
+    /// The key held a value CC does not recognise, so writing over it
+    /// would destroy a value we could not put back on expiry.
+    ///
+    /// Raised from *inside* the mutation closure. See `write_mode`.
+    #[error("`{INBOUND_KEY}` holds an unrecognized value ({raw}) that a revert could not restore")]
+    UnrecognizedExisting { raw: String },
 }
 
 /// Three states, not two.
@@ -78,11 +84,24 @@ fn classify(value: Option<&JsonValue>) -> ModeValue {
 ///
 /// The returned value is observed under the same lock that performed
 /// the write, so it is a safe basis for a later revert.
+///
+/// **Refuses an unrecognized existing value from inside the closure.**
+/// `ops::open` also checks for one before calling, but that check reads
+/// the file under a *different* acquisition of the lock — so an edit
+/// landing between the two was written over, and `previous` came back
+/// as `Unrecognized`, which `.valid()` flattens to `None`. The grant
+/// then recorded "there was nothing here before" and expiry *removed*
+/// the user's value instead of restoring it. AGENTS.md's settings
+/// boundary says it directly: deciding from a snapshot taken outside
+/// the closure is a race by construction.
 pub fn write_mode(mode: InboundMode) -> Result<ModeValue, InboundSettingsError> {
     let mutation = settings_mutex::mutate_settings_file(
         &user_settings_path(),
         |object, _was| -> Result<Change<ModeValue>, InboundSettingsError> {
             let before = classify(object.get(INBOUND_KEY));
+            if let ModeValue::Unrecognized(raw) = &before {
+                return Err(InboundSettingsError::UnrecognizedExisting { raw: raw.clone() });
+            }
             if before == ModeValue::Valid(mode) {
                 // Already what we want. Skipping keeps the file
                 // byte-for-byte, so a no-op grant does not reformat a
@@ -249,5 +268,36 @@ mod tests {
             raw_before,
             "a redundant write must not reformat the user's file"
         );
+    }
+
+    #[test]
+    fn write_mode_refuses_an_unrecognized_value_from_inside_the_lock() {
+        // The race this closes: `ops::open` preflights with its own
+        // `read_mode`, which takes the settings lock separately. An
+        // edit landing between the two used to be written over, and the
+        // `previous` it returned was `Unrecognized`, which `.valid()`
+        // flattens to `None` — so the grant recorded "nothing was here"
+        // and expiry DELETED the user's value instead of restoring it.
+        let (_tmp, _lock) = isolated();
+        write_settings(r#"{"crossSessionInbound":"sometimes"}"#);
+
+        let err = write_mode(InboundMode::Accept).unwrap_err();
+        assert!(
+            matches!(err, InboundSettingsError::UnrecognizedExisting { .. }),
+            "got {err:?}"
+        );
+        // And the file is untouched, which is the whole point — the
+        // value has to survive for a revert to be able to restore it.
+        let after = fs::read_to_string(user_settings_path()).unwrap();
+        assert!(after.contains("sometimes"), "{after}");
+    }
+
+    #[test]
+    fn write_mode_still_writes_over_a_recognized_value() {
+        let (_tmp, _lock) = isolated();
+        write_settings(r#"{"crossSessionInbound":"hold"}"#);
+        let before = write_mode(InboundMode::Accept).unwrap();
+        assert_eq!(before, ModeValue::Valid(InboundMode::Hold));
+        assert_eq!(read_mode().unwrap(), ModeValue::Valid(InboundMode::Accept));
     }
 }

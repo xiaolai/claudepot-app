@@ -102,7 +102,38 @@ pub async fn send_prompt(
         // success and do nothing.
         return Err(PeerError::EmptyPrompt);
     }
+    send_prompt_unix(target, sessions_dir, text, priority).await
+}
 
+/// Windows CC binds a named pipe (`\\.\pipe\...`) instead of a socket,
+/// and derives the key name from a lowercased pipe name rather than the
+/// path. That is a different implementation, not a smaller one, so it
+/// is refused explicitly rather than approximated.
+///
+/// The refusal has to come **before** the key read, not after. It used
+/// to live at the write step, so a Windows caller got as far as
+/// `read_key`, which derived a Unix-shaped filename that cannot exist
+/// there and failed with `KeyUnreadable` — a missing-file error for a
+/// platform that was never supported, which reads as a broken install
+/// rather than an unimplemented feature. The explicit variant was
+/// unreachable on the only platform it described.
+#[cfg(not(unix))]
+async fn send_prompt_unix(
+    target: &PeerTarget,
+    _sessions_dir: &Path,
+    _text: &str,
+    _priority: Priority,
+) -> Result<Handoff, PeerError> {
+    Err(PeerError::UnsupportedPlatform { pid: target.pid })
+}
+
+#[cfg(unix)]
+async fn send_prompt_unix(
+    target: &PeerTarget,
+    sessions_dir: &Path,
+    text: &str,
+    priority: Priority,
+) -> Result<Handoff, PeerError> {
     let key = super::key::read_key(sessions_dir, target.pid, &target.socket_path)?;
     verify_owner(target.pid, key.proc_start.as_deref()).await?;
 
@@ -130,11 +161,6 @@ pub async fn send_prompt(
 #[cfg(unix)]
 async fn verify_owner(pid: u32, proc_start: Option<&str>) -> Result<(), PeerError> {
     super::key::verify_proc_start(pid, proc_start).await
-}
-
-#[cfg(not(unix))]
-async fn verify_owner(_pid: u32, _proc_start: Option<&str>) -> Result<(), PeerError> {
-    Ok(())
 }
 
 #[cfg(unix)]
@@ -182,15 +208,6 @@ async fn write_frames(socket: &Path, pid: u32, lines: &[Vec<u8>]) -> Result<(), 
         }),
         Ok(Ok(())) => Ok(()),
     }
-}
-
-/// Windows CC binds a named pipe (`\\.\pipe\...`) instead of a socket,
-/// and derives the key name from a lowercased pipe name rather than the
-/// path. That is a different implementation, not a smaller one, so it
-/// is refused explicitly rather than approximated.
-#[cfg(not(unix))]
-async fn write_frames(_socket: &Path, pid: u32, _lines: &[Vec<u8>]) -> Result<(), PeerError> {
-    Err(PeerError::UnsupportedPlatform { pid })
 }
 
 #[cfg(test)]

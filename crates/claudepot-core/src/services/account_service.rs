@@ -1706,6 +1706,13 @@ pub enum ActivateError {
     Resolve(#[from] crate::resolve::ResolveError),
     #[error("account not found: {0}")]
     NotFound(String),
+    /// The account store itself failed. Distinct from `NotFound`
+    /// because "we looked and it is not there" and "we could not look"
+    /// call for different answers — the first is the user's typo, the
+    /// second is a broken `accounts.db`, and collapsing them told the
+    /// user to check their spelling.
+    #[error("account store unavailable: {0}")]
+    Store(String),
     /// The swap itself. Kept as the typed variant rather than a string
     /// so each surface can react to `LiveSessionConflict` in its own
     /// idiom — the CLI prints its split-brain warning, the remote API
@@ -1747,7 +1754,7 @@ pub async fn activate_cli(
     let email = crate::resolve::resolve_email(store, email_input)?;
     let target = store
         .find_by_email(&email)
-        .map_err(|e| ActivateError::NotFound(e.to_string()))?
+        .map_err(|e| ActivateError::Store(e.to_string()))?
         .ok_or_else(|| ActivateError::NotFound(email.clone()))?;
 
     // Reconcile before comparing. Without this, a swap done outside
@@ -1755,14 +1762,21 @@ pub async fn activate_cli(
     // this reports "already active" while the keychain disagrees.
     // Best effort: a network failure falls through to the DB's view
     // rather than blocking the swap.
-    let _ = sync_from_current_cc(store).await;
+    //
+    // **But it must not fall through to `AlreadyActive`.** That answer
+    // is a claim that the keychain already holds this account, and it
+    // does no work to earn it — so returning it from an unreconciled DB
+    // pointer reports a swap that never happened, on the one path where
+    // nothing downstream will notice. The swap path is safe to take
+    // redundantly; a false "already active" is not.
+    let reconciled = sync_from_current_cc(store).await.is_ok();
 
     let current = store
         .active_cli_uuid()
         .ok()
         .flatten()
         .and_then(|s| s.parse::<Uuid>().ok());
-    if current == Some(target.uuid) {
+    if reconciled && current == Some(target.uuid) {
         return Ok(Activation::AlreadyActive {
             email: target.email,
         });

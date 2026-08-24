@@ -104,7 +104,7 @@ pub fn attempt(
     };
 
     // (1) Before any expensive work.
-    let wait = config.throttle.required_delay_secs();
+    let wait = config.throttle.required_delay_secs(now);
     if wait > 0 {
         return Ok(LoginOutcome::Throttled { wait_secs: wait });
     }
@@ -112,7 +112,7 @@ pub fn attempt(
     // (4) Always paid, even when a required code is missing.
     let password_ok = password::verify_password(password_candidate, &stored)?;
     if !password_ok {
-        config.throttle.record_failure();
+        config.throttle.record_failure(now);
         // (3) Never leaks whether a second factor exists.
         return Ok(LoginOutcome::Invalid);
     }
@@ -131,7 +131,7 @@ pub fn attempt(
             TotpVerdict::Accepted { .. } => {}
             // (2) A bad second factor is a failed attempt.
             TotpVerdict::Wrong | TotpVerdict::Replayed { .. } => {
-                config.throttle.record_failure();
+                config.throttle.record_failure(now);
                 return Ok(LoginOutcome::TotpInvalid);
             }
         }
@@ -265,6 +265,70 @@ mod tests {
             LoginOutcome::Throttled { .. }
         ));
         assert_eq!(c.throttle.consecutive_failures, before);
+    }
+
+    #[test]
+    fn a_throttled_caller_is_let_back_in_once_the_wait_has_elapsed() {
+        // The other half of the test above, and the one that was
+        // missing: turning the correct password away is only acceptable
+        // *while* the delay is being served. Without this, "throttled"
+        // and "locked out forever" are the same code path, and the
+        // module docs promise the first while shipping the second.
+        let mut c = configured();
+        for _ in 0..10 {
+            attempt(&mut c, "wrong", None, "phone", at(10)).unwrap();
+        }
+        let LoginOutcome::Throttled { wait_secs } =
+            attempt(&mut c, PW, None, "phone", at(10)).unwrap()
+        else {
+            panic!("expected the backoff to be in force");
+        };
+        assert!(wait_secs > 0);
+
+        // One second short: still held.
+        assert!(matches!(
+            attempt(
+                &mut c,
+                PW,
+                None,
+                "phone",
+                at(10) + Duration::seconds(wait_secs as i64 - 1)
+            )
+            .unwrap(),
+            LoginOutcome::Throttled { .. }
+        ));
+
+        // The wait is served — the correct password works again.
+        let out = attempt(
+            &mut c,
+            PW,
+            None,
+            "phone",
+            at(10) + Duration::seconds(wait_secs as i64),
+        )
+        .unwrap();
+        assert!(
+            matches!(out, LoginOutcome::Success { .. }),
+            "after the delay a correct password must be accepted, got {out:?}"
+        );
+        assert_eq!(c.throttle.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn a_wrong_password_during_the_wait_does_not_count_again() {
+        // The gate returns before verification, so a caller hammering
+        // the endpoint cannot inflate their own backoff — and, more to
+        // the point, cannot push the deadline out indefinitely for the
+        // owner who is waiting it out.
+        let mut c = configured();
+        for _ in 0..10 {
+            attempt(&mut c, "wrong", None, "phone", at(10)).unwrap();
+        }
+        let before = c.throttle;
+        for _ in 0..50 {
+            attempt(&mut c, "wrong", None, "phone", at(10)).unwrap();
+        }
+        assert_eq!(c.throttle, before, "throttled attempts must not accumulate");
     }
 
     #[test]

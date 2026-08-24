@@ -458,6 +458,10 @@
     "import_failed": "The sign-in finished but left no credentials to import.",
     "io": "Filesystem error: {{detail}}"
   },
+  "peer_inbound": {
+    "duration_out_of_range": "A remote-control window has to be between {{min_secs}} and {{max_secs}} seconds. You asked for {{got_secs}}.",
+    "failed": "Couldn't read or change the remote-control window. {{detail}}"
+  },
   "permission": {
     "duration_out_of_range": "Pick a duration between {{min}} and {{max}} seconds.",
     "grants_load_failed": "Couldn't load the permission grants: {{detail}}",

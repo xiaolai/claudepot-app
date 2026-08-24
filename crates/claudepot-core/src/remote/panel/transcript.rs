@@ -575,15 +575,42 @@ fn is_harness_text(text: &str) -> bool {
         "<task-notification>",
         "<system-reminder>",
     ];
-    MARKERS.iter().any(|m| text.contains(m))
+    // **Anchored to a line start, not `contains`.** A bare substring
+    // test drops any user message that so much as MENTIONS one of these
+    // — "what does `<system-reminder>` actually do?" vanished from the
+    // transcript and could never become a card title. CC always emits
+    // these as a block that opens its own line, which is the property
+    // worth matching.
+    //
+    // Line-anchored rather than text-anchored because CC appends a
+    // `<system-reminder>` block to the end of an otherwise ordinary
+    // turn as well as sending one alone; anchoring to the whole string
+    // would let that leak back into titles.
+    text.lines()
+        .any(|line| MARKERS.iter().any(|m| line.trim_start().starts_with(m)))
 }
 
-/// The containment gate. Both sides are compared as-is rather than
-/// canonicalized: `file_path` originates in a walk of
-/// `<config_dir>/projects/`, so it is already rooted there, and
-/// canonicalizing on every page read would stat the whole chain.
+/// The containment gate. Neither side is *canonicalized* — `file_path`
+/// originates in a walk of `<config_dir>/projects/`, so it is already
+/// rooted there, and canonicalizing on every page read would stat the
+/// whole chain.
+///
+/// Both sides ARE run through `simplify_windows_path` first, per
+/// `.claude/rules/paths.md`. `std::fs::canonicalize` on Windows returns
+/// the verbatim `\\?\C:\…` form, so a stored path that went through it
+/// and a `config_dir` that did not are the same directory written two
+/// ways — and `Path::starts_with` compares components, so it says no.
+/// That direction fails *closed*: a legitimate transcript is refused
+/// rather than a foreign one admitted. Still wrong, and invisible on
+/// macOS and Linux where the call is a no-op.
 fn guard_under_projects(config_dir: &Path, file_path: &Path) -> Result<(), TranscriptError> {
-    let projects = config_dir.join("projects");
+    let simplify = |p: &Path| {
+        std::path::PathBuf::from(crate::path_utils::simplify_windows_path(
+            &p.to_string_lossy(),
+        ))
+    };
+    let projects = simplify(&config_dir.join("projects"));
+    let file_path = &simplify(file_path);
     if !file_path.starts_with(&projects) {
         return Err(TranscriptError::OutsideProjects);
     }
@@ -1217,5 +1244,96 @@ mod tests {
             ],
         );
         assert_eq!(tail_summary(&p), None);
+    }
+
+    /// `Path::starts_with` splits on `\` only on Windows, so the
+    /// verbatim-prefix case can only be *exercised* there —
+    /// `.claude/rules/paths.md` puts OS-specific path behaviour behind
+    /// a cfg gate for exactly this reason, and CI runs the matrix.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_containment_gate_accepts_a_verbatim_windows_path() {
+        // `canonicalize` on Windows yields `\\?\C:\…`, so a stored path
+        // that went through it and a `config_dir` that did not are the
+        // same directory spelled two ways. Rust models the verbatim
+        // prefix as its own `Component::Prefix`, so `starts_with` says
+        // no and the guard refused a legitimate transcript.
+        let config = Path::new(r"\\?\C:\Users\dev\.claude");
+        let file = Path::new(r"C:\Users\dev\.claude\projects\-c-work\s.jsonl");
+        assert!(guard_under_projects(config, file).is_ok());
+
+        let config = Path::new(r"C:\Users\dev\.claude");
+        let file = Path::new(r"\\?\C:\Users\dev\.claude\projects\-c-work\s.jsonl");
+        assert!(guard_under_projects(config, file).is_ok());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn normalising_does_not_widen_the_windows_gate() {
+        let config = Path::new(r"\\?\C:\Users\dev\.claude");
+        for bad in [
+            r"C:\Users\dev\.claude\notprojects\s.jsonl",
+            r"\\?\UNC\server\share\projects\s.jsonl",
+            r"C:\Users\dev\.claude\projects\..\..\secrets\s.jsonl",
+            r"C:\Users\dev\.claude\projects\-c-work\s.txt",
+        ] {
+            assert!(
+                guard_under_projects(config, Path::new(bad)).is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn the_containment_gate_still_refuses_what_it_always_did() {
+        // Runs everywhere: these are the shapes the guard sees on this
+        // host, and normalising must not have widened it.
+        let cfg = Path::new("/home/dev/.claude");
+        assert!(
+            guard_under_projects(cfg, Path::new("/home/dev/.claude/projects/-work/s.jsonl"))
+                .is_ok()
+        );
+        for bad in [
+            "/etc/passwd",
+            "/home/dev/.claude/notprojects/s.jsonl",
+            "/home/dev/.claude/projects/../../secrets/s.jsonl",
+            "/home/dev/.claude/projects/-work/s.txt",
+        ] {
+            assert!(
+                guard_under_projects(cfg, Path::new(bad)).is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_user_who_mentions_a_harness_marker_is_not_erased() {
+        // The bug: `contains` meant quoting a marker deleted your own
+        // message from the transcript. Asking about the harness is an
+        // ordinary thing to do in this repo.
+        for real in [
+            "what does `<system-reminder>` actually do?",
+            "grep for <command-name> in the transcript please",
+            "the docs mention <bash-stdout> — is that ours?",
+            "I saw [Request interrupted by user] in the log, why?",
+        ] {
+            assert!(!is_harness_text(real), "{real} is a real user message");
+        }
+    }
+
+    #[test]
+    fn harness_blocks_are_still_filtered() {
+        // Both shapes CC actually emits: a block on its own, and one
+        // appended to the end of a real turn.
+        for injected in [
+            "<system-reminder>\nsomething\n</system-reminder>",
+            "<command-name>/clear</command-name>",
+            "  <local-command-caveat>Caveat: the messages below…",
+            "<task-notification>\n<task-id>abc</task-id>",
+            "[Request interrupted by user]",
+            "please do the thing\n\n<system-reminder>\ncontext\n</system-reminder>",
+        ] {
+            assert!(is_harness_text(injected), "{injected:?} is harness text");
+        }
     }
 }

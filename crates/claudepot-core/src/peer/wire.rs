@@ -60,11 +60,23 @@ pub enum Priority {
 
 /// First line on every connection. CC closes the socket on any frame
 /// that arrives before a valid one.
-#[derive(Debug, Serialize)]
+/// `Debug` is hand-written for the same reason as `KeyFile`'s: this
+/// carries the peer token, and a derive is what turns a future
+/// `?frame` into a credential in the log.
+#[derive(Serialize)]
 pub(crate) struct AuthFrame<'a> {
     #[serde(rename = "type")]
     pub kind: &'static str,
     pub token: &'a str,
+}
+
+impl std::fmt::Debug for AuthFrame<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthFrame")
+            .field("kind", &self.kind)
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 impl<'a> AuthFrame<'a> {

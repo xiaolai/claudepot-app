@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
+use claudepot_core::remote::bind::Exposure;
 use claudepot_core::remote::config::{self, RemoteConfigFile};
 use claudepot_core::remote::server::{router, AppState, Persist};
 use claudepot_core::remote::{approval, password, serve, store as device_store, DevicesFile};
@@ -153,6 +154,7 @@ pub fn enable_cmd(ctx: &AppContext, bind: Option<&str>, port: Option<u16>) -> Re
             "bind": cfg.server.bind.to_string(),
             "port": cfg.server.port,
             "requires_tls": checked.requires_tls(),
+            "exposure": exposure_word(checked.exposure()),
         }))?;
         return Ok(());
     }
@@ -160,6 +162,19 @@ pub fn enable_cmd(ctx: &AppContext, bind: Option<&str>, port: Option<u16>) -> Re
         "Remote surface enabled on {}:{}.",
         cfg.server.bind, cfg.server.port
     );
+    // `bind` accepts `0.0.0.0` deliberately, and core returns
+    // `Exposure::EveryInterface` precisely so the caller has to say so —
+    // "Accepted, never silently", in its words. This CLI printed it like
+    // any other address, which made the one bind mode that can become a
+    // public listener the one nobody was warned about.
+    if checked.exposure() == Exposure::EveryInterface {
+        println!(
+            "  Warning: this listens on EVERY interface. If this host \
+             ever gets a public address, the admin password becomes the \
+             only thing between the internet and code execution as you. \
+             Bind a specific private address unless you need this."
+        );
+    }
     if checked.requires_tls() {
         println!("TLS is required for this address. Mint a certificate first:");
         println!("  ./scripts/mint-remote-cert.sh <hostname>");
@@ -180,8 +195,31 @@ pub fn disable_cmd(ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
+/// Stable words for `--json`; the enum's `Debug` is not a wire format.
+fn exposure_word(e: Exposure) -> &'static str {
+    match e {
+        Exposure::Loopback => "loopback",
+        Exposure::PrivateNetwork => "private_network",
+        Exposure::EveryInterface => "every_interface",
+    }
+}
+
 pub fn revoke_all_cmd(ctx: &AppContext) -> Result<()> {
     let loaded = device_store::load().context("load devices")?;
+    // `remote-devices.json` IS the revocation list. If it was
+    // unreadable and recovered to empty, every `revoked_at` is gone —
+    // and saving over it now makes that loss permanent while printing
+    // "Revoked 0", which reads as "there was nothing to revoke".
+    // Refuse instead: a revoked token stays refused only because its
+    // record is still here.
+    if let Some(recovery) = &loaded.recovery {
+        anyhow::bail!(
+            "the paired-device file could not be read and was reset ({recovery:?}). \
+             Every previous revocation has been lost, so this command cannot \
+             honestly revoke anything. Re-pair the devices you still want, and \
+             treat any token from before now as live."
+        );
+    }
     let mut devices = loaded.value;
     let now = chrono::Utc::now();
     let mut n = 0;

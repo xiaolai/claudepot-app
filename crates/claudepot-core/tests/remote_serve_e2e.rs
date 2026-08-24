@@ -515,3 +515,161 @@ async fn recording_read_state_needs_an_idempotency_key_like_every_mutation() {
         "idempotency_key_required"
     );
 }
+
+#[tokio::test]
+async fn a_token_bearing_response_is_never_cacheable() {
+    // The login body carries the bearer that unlocks the transcript
+    // endpoint, which is itself `no-store` for carrying secrets. A
+    // proxy, a disk cache or a service worker holding this response
+    // holds the credential.
+    let (base, _s) = start().await;
+    let res = reqwest::Client::new()
+        .post(format!("{base}/api/login"))
+        .json(&serde_json::json!({ "password": PW }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let cc = res
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(cc.contains("no-store"), "cache-control was {cc:?}");
+    // And the body really is the thing being protected.
+    assert!(res.json::<serde_json::Value>().await.unwrap()["token"].is_string());
+}
+
+#[tokio::test]
+async fn every_post_mutation_requires_an_idempotency_key() {
+    // Asserted across the whole surface rather than on one endpoint.
+    // `/api/inbound/revoke` was outside the wrapper while the contract
+    // said every mutation was inside it, and a single-endpoint test is
+    // what let that be true for a year.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let c = reqwest::Client::new();
+
+    let mutations: &[(&str, serde_json::Value)] = &[
+        (
+            "/api/sessions/whatever/prompt",
+            serde_json::json!({ "text": "hello" }),
+        ),
+        (
+            "/api/sessions/whatever/read",
+            serde_json::json!({ "through_count": 1 }),
+        ),
+        ("/api/inbound/revoke", serde_json::json!({})),
+    ];
+
+    for (path, body) in mutations {
+        let res = c
+            .post(format!("{base}{path}"))
+            .bearer_auth(&t)
+            .json(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            400,
+            "{path} accepted a mutation with no Idempotency-Key"
+        );
+        assert_eq!(
+            res.json::<serde_json::Value>().await.unwrap()["error"],
+            "idempotency_key_required",
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn one_idempotency_key_cannot_answer_two_different_mutations() {
+    // The store is a flat map keyed by the client's opaque header
+    // value. A client is only obliged to keep its keys unique to
+    // itself, not unique across endpoints — so the same key on two
+    // routes replayed the FIRST response and the second mutation never
+    // ran. A `{"through_count":…}` body answering a prompt, or the
+    // reverse.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let c = reqwest::Client::new();
+    let key = "the-same-key-twice";
+
+    let read = c
+        .post(format!("{base}/api/sessions/{}/read", "no-such-session"))
+        .bearer_auth(&t)
+        .header("Idempotency-Key", key)
+        .json(&serde_json::json!({ "through_count": 3 }))
+        .send()
+        .await
+        .unwrap();
+    let read_status = read.status();
+    let read_body: serde_json::Value = read.json().await.unwrap();
+
+    // Same key, different route. It must be evaluated on its own
+    // merits, not answered with the read's response.
+    let prompt = c
+        .post(format!("{base}/api/sessions/{}/prompt", "no-such-session"))
+        .bearer_auth(&t)
+        .header("Idempotency-Key", key)
+        .json(&serde_json::json!({ "text": "hello" }))
+        .send()
+        .await
+        .unwrap();
+    let prompt_status = prompt.status();
+    let prompt_body: serde_json::Value = prompt.json().await.unwrap();
+
+    assert_ne!(
+        (read_status, &read_body),
+        (prompt_status, &prompt_body),
+        "the prompt was answered with the read's stored response"
+    );
+    // The prompt reached its handler: an unknown session is a 404 from
+    // the send path, never the read's success shape.
+    assert!(
+        prompt_body.get("through_count").is_none(),
+        "prompt replayed a read response: {prompt_body}"
+    );
+}
+
+#[tokio::test]
+async fn the_same_key_on_two_sessions_is_two_mutations() {
+    // Path parameters are part of the scope too — otherwise one key
+    // would let a second session's read be answered by the first's.
+    //
+    // The counts DIFFER on purpose. The first version of this test sent
+    // the same `through_count` to both and asserted only that the
+    // statuses matched — which the unscoped implementation also
+    // produces, so it would have passed against the bug it was written
+    // for. A discriminator the broken code cannot fake is the whole
+    // job of a regression test.
+    let (base, _s) = start().await;
+    let t = token(&base).await;
+    let c = reqwest::Client::new();
+    let key = "same-key-two-sessions";
+
+    let mut seen = Vec::new();
+    for (session, count) in [("session-alpha", 3u64), ("session-beta", 11u64)] {
+        let res = c
+            .post(format!("{base}/api/sessions/{session}/read"))
+            .bearer_auth(&t)
+            .header("Idempotency-Key", key)
+            .json(&serde_json::json!({ "through_count": count }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "{session}");
+        let body: serde_json::Value = res.json().await.unwrap();
+        seen.push(body["through_count"].as_u64());
+    }
+
+    assert_eq!(seen[0], Some(3), "the first read did not run");
+    assert_eq!(
+        seen[1],
+        Some(11),
+        "the second session replayed the first session's response — the \
+         idempotency key is not scoped by path parameter"
+    );
+}

@@ -458,6 +458,10 @@
     "import_failed": "登录已完成，但没有可导入的凭据。",
     "io": "文件系统出错：{{detail}}"
   },
+  "peer_inbound": {
+    "duration_out_of_range": "远程控制窗口时长必须在 {{min_secs}} 到 {{max_secs}} 秒之间，当前为 {{got_secs}} 秒。",
+    "failed": "无法读取或更改远程控制窗口。{{detail}}"
+  },
   "permission": {
     "duration_out_of_range": "请选择 {{min}} 到 {{max}} 秒之间的时长。",
     "grants_load_failed": "无法加载权限授权记录：{{detail}}",

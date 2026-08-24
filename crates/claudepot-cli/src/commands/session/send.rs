@@ -107,7 +107,13 @@ pub async fn send_cmd(
                 &config_dir,
                 &watch,
                 &session_id,
-                &handoff.uuid,
+                peer::SendIdentity {
+                    uuid: &handoff.uuid,
+                    // CC reads the peer credential off the socket, so
+                    // the pid it verifies is this process's.
+                    pid: std::process::id(),
+                    text: prompt,
+                },
                 std::time::Duration::from_secs(wait_secs),
             )
             .await?,
@@ -185,18 +191,42 @@ fn describe(d: &Decision) -> String {
 }
 
 pub fn inbound_status_cmd(ctx: &AppContext) -> Result<()> {
+    // Same guard the other inbound verbs take: this reads two files
+    // that a writer moves together.
+    let _guard = inbound::file_guard();
     let now = chrono::Utc::now();
     // Reconcile before reporting: a window whose deadline passed while
     // Claudepot was closed must not be reported as open.
     let decision = inbound::tick(now)?;
+    // **`Decision` alone cannot answer "is the gate open".** `decide`
+    // deliberately returns `Idle` for an `accept` it holds no grant for
+    // — see `ops::open`'s rollback comment — so a user who set
+    // `crossSessionInbound: accept` by hand, or whose grant record was
+    // lost, got "closed — peer messages are held for your approval"
+    // while messages were in fact delivering without asking. That is
+    // the exact inversion this surface exists to prevent, on the one
+    // security setting the CLI reports.
+    let state = inbound::state(now)?;
+    let unmanaged = state.is_unmanaged_open();
+
     if ctx.json {
         print_json(&serde_json::json!({
-            "state": match &decision {
-                Decision::Idle => "closed",
-                Decision::Active { .. } => "open",
-                Decision::Revert { .. } => "expired",
-                Decision::Superseded { .. } => "superseded",
+            "state": if unmanaged {
+                "unmanaged_open"
+            } else {
+                match &decision {
+                    Decision::Idle => "closed",
+                    Decision::Active { .. } => "open",
+                    Decision::Revert { .. } => "expired",
+                    Decision::Superseded { .. } => "superseded",
+                }
             },
+            "open": state.is_open(),
+            "unmanaged_open": unmanaged,
+            // What the settings file actually says, so a caller can
+            // tell "absent" from "a value CC rejects".
+            "observed": observed_word(&state),
+            "record_recovered": state.record_recovered,
             "remaining_secs": match &decision {
                 Decision::Active { remaining_secs } => Some(*remaining_secs),
                 _ => None,
@@ -204,8 +234,32 @@ pub fn inbound_status_cmd(ctx: &AppContext) -> Result<()> {
         }))?;
         return Ok(());
     }
+
+    if unmanaged {
+        println!(
+            "Remote-control window: OPEN, and nothing is minding it — peer messages \
+             deliver without asking and no deadline will close them."
+        );
+        if state.record_recovered {
+            println!(
+                "  The grant record was unreadable and has been reset, so its deadline is gone."
+            );
+        }
+        println!("  Close it with `claudepot session inbound revoke`.");
+        return Ok(());
+    }
     println!("Remote-control window: {}", describe(&decision));
     Ok(())
+}
+
+/// Stable words for `--json`; `ModeValue`'s `Debug` is not a wire format.
+fn observed_word(state: &claudepot_core::peer::inbound::InboundState) -> String {
+    use claudepot_core::peer::inbound::settings::ModeValue;
+    match &state.observed {
+        ModeValue::Absent => "absent".into(),
+        ModeValue::Valid(m) => m.as_wire().to_string(),
+        ModeValue::Unrecognized(_) => "invalid".into(),
+    }
 }
 
 pub fn inbound_grant_cmd(ctx: &AppContext, duration: &str, reason: Option<&str>) -> Result<()> {
@@ -241,7 +295,7 @@ pub fn inbound_grant_cmd(ctx: &AppContext, duration: &str, reason: Option<&str>)
 }
 
 pub fn inbound_revoke_cmd(ctx: &AppContext) -> Result<()> {
-    let revoked = inbound::revoke(chrono::Utc::now())?;
+    let revoked = inbound::revoke()?;
     if ctx.json {
         print_json(&serde_json::json!({ "revoked": revoked.is_some() }))?;
         return Ok(());

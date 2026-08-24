@@ -40,6 +40,7 @@
 //! because the user can always mint another from the machine. An
 //! admin locked out over the network cannot.
 
+use chrono::{DateTime, Utc};
 use scrypt::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use scrypt::Scrypt;
 use zeroize::Zeroize;
@@ -130,35 +131,78 @@ pub fn verify_password(candidate: &str, stored: &str) -> Result<bool, PasswordEr
     }
 }
 
-/// Online-guessing throttle. Pure; the caller owns the clock and the
-/// storage.
+/// Online-guessing throttle. Pure; the caller owns the storage and
+/// supplies the clock.
+///
+/// **The timestamp is the whole feature.** A counter on its own encodes
+/// "how many times you have failed", which never decreases without a
+/// success — and a success is unreachable while the gate is closed, so
+/// a count-only throttle is a permanent lockout wearing a delay's
+/// clothes. That is precisely the denial-of-service the module docs say
+/// this design refuses: anyone on the wifi trips it in four requests and
+/// the owner never gets back in. What a caller must wait is a *deadline*,
+/// so the failure has to carry when it happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Throttle {
     pub consecutive_failures: u32,
+    /// When the most recent failure was recorded. `None` means no
+    /// failure has been recorded *with a time* — see
+    /// [`Throttle::required_delay_secs`] for why that yields no delay.
+    pub last_failure_at: Option<DateTime<Utc>>,
 }
 
 impl Throttle {
-    pub fn record_failure(&mut self) {
+    pub fn record_failure(&mut self, now: DateTime<Utc>) {
         self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        self.last_failure_at = Some(now);
     }
 
     pub fn record_success(&mut self) {
         self.consecutive_failures = 0;
+        self.last_failure_at = None;
     }
 
-    /// Seconds a caller must wait after the most recent failure before
-    /// another attempt is accepted.
-    ///
-    /// Doubling from 1s after the free attempts, capped. Never
-    /// infinite — see the module docs on why lockout is the wrong shape
-    /// for something reachable by anyone on the network.
-    pub fn required_delay_secs(&self) -> u64 {
+    /// The backoff this many consecutive failures earns, ignoring how
+    /// long ago they were. Doubling from 1s after the free attempts,
+    /// capped at [`MAX_BACKOFF_SECS`].
+    pub fn backoff_secs(&self) -> u64 {
         let over = self.consecutive_failures.saturating_sub(FREE_ATTEMPTS);
         if over == 0 {
             return 0;
         }
         let shift = (over - 1).min(16);
         (1u64 << shift).min(MAX_BACKOFF_SECS)
+    }
+
+    /// Seconds a caller must **still** wait before another attempt is
+    /// accepted: the backoff minus the time already served.
+    ///
+    /// Returns 0 once the wait has elapsed, which is what makes this a
+    /// delay rather than a lockout.
+    ///
+    /// Two edge cases fail open, on purpose:
+    ///
+    /// - **No recorded failure time.** The only way to hold failures
+    ///   with no timestamp is a `remote-config.json` written by a build
+    ///   that did not persist one, and every such owner is currently
+    ///   locked out for good. Holding them further protects nobody; the
+    ///   very next failure stamps a time and re-arms the backoff.
+    /// - **A timestamp in the future.** The clock moved backwards (NTP,
+    ///   a timezone fix, a VM resume). Treating it as "wait until then"
+    ///   converts a clock correction into a lockout of unbounded length.
+    pub fn required_delay_secs(&self, now: DateTime<Utc>) -> u64 {
+        let backoff = self.backoff_secs();
+        if backoff == 0 {
+            return 0;
+        }
+        let Some(since) = self.last_failure_at else {
+            return 0;
+        };
+        let elapsed = now.signed_duration_since(since).num_seconds();
+        if elapsed < 0 {
+            return 0;
+        }
+        backoff.saturating_sub(elapsed as u64)
     }
 }
 
@@ -260,54 +304,116 @@ mod tests {
         }
     }
 
+    fn t0() -> DateTime<Utc> {
+        DateTime::from_timestamp(1_700_000_000, 0).unwrap()
+    }
+
+    fn plus(secs: i64) -> DateTime<Utc> {
+        t0() + chrono::Duration::seconds(secs)
+    }
+
     #[test]
     fn the_first_few_failures_cost_nothing() {
         let mut t = Throttle::default();
         for _ in 0..FREE_ATTEMPTS {
-            assert_eq!(t.required_delay_secs(), 0);
-            t.record_failure();
+            assert_eq!(t.required_delay_secs(t0()), 0);
+            t.record_failure(t0());
         }
         // FREE_ATTEMPTS failures are still free; the next one starts the
         // backoff.
-        assert_eq!(t.required_delay_secs(), 0);
-        t.record_failure();
-        assert_eq!(t.required_delay_secs(), 1);
+        assert_eq!(t.required_delay_secs(t0()), 0);
+        t.record_failure(t0());
+        assert_eq!(t.required_delay_secs(t0()), 1);
     }
 
     #[test]
     fn the_delay_doubles_and_then_stops() {
         let mut t = Throttle::default();
         for _ in 0..FREE_ATTEMPTS {
-            t.record_failure();
+            t.record_failure(t0());
         }
         let mut seen = Vec::new();
         for _ in 0..12 {
-            t.record_failure();
-            seen.push(t.required_delay_secs());
+            t.record_failure(t0());
+            seen.push(t.required_delay_secs(t0()));
         }
         assert_eq!(&seen[..6], &[1, 2, 4, 8, 16, MAX_BACKOFF_SECS]);
         assert!(seen.iter().all(|d| *d <= MAX_BACKOFF_SECS));
     }
 
     #[test]
+    fn the_delay_is_served_by_waiting() {
+        // The point of the whole struct. This is what the old
+        // count-only throttle could not do: the delay ran down to zero
+        // only on a success, and a success was unreachable while the
+        // gate was shut.
+        let mut t = Throttle::default();
+        for _ in 0..FREE_ATTEMPTS + 4 {
+            t.record_failure(t0());
+        }
+        let owed = t.required_delay_secs(t0());
+        assert!(owed > 0, "the backoff must have started");
+        assert_eq!(t.required_delay_secs(plus(owed as i64 - 1)), 1);
+        assert_eq!(t.required_delay_secs(plus(owed as i64)), 0);
+        assert_eq!(t.required_delay_secs(plus(owed as i64 + 600)), 0);
+    }
+
+    #[test]
     fn the_throttle_never_becomes_permanent() {
         // A hard lockout on a LAN appliance is a DoS anyone on the wifi
-        // can perform against the owner. The delay must stay finite.
+        // can perform against the owner.
+        //
+        // This test used to assert only that the delay VALUE stayed
+        // finite, which it always did — the lockout was permanent
+        // anyway, because nothing ever subtracted served time from it.
+        // A bound on the number is not a bound on the wait; assert the
+        // wait actually ends.
         let mut t = Throttle::default();
         for _ in 0..100_000 {
-            t.record_failure();
+            t.record_failure(t0());
         }
-        assert_eq!(t.required_delay_secs(), MAX_BACKOFF_SECS);
+        assert_eq!(t.required_delay_secs(t0()), MAX_BACKOFF_SECS);
+        assert_eq!(
+            t.required_delay_secs(plus(MAX_BACKOFF_SECS as i64)),
+            0,
+            "after the capped backoff has elapsed the caller must be let through"
+        );
     }
 
     #[test]
     fn a_success_clears_the_backoff() {
         let mut t = Throttle::default();
         for _ in 0..10 {
-            t.record_failure();
+            t.record_failure(t0());
         }
-        assert!(t.required_delay_secs() > 0);
+        assert!(t.required_delay_secs(t0()) > 0);
         t.record_success();
-        assert_eq!(t.required_delay_secs(), 0);
+        assert_eq!(t.required_delay_secs(t0()), 0);
+        assert_eq!(t.last_failure_at, None, "a success clears the stamp too");
+    }
+
+    #[test]
+    fn failures_carried_over_with_no_timestamp_do_not_hold_the_caller() {
+        // The shape a `remote-config.json` written before `last_failed_at`
+        // existed deserializes into. Those owners are locked out today;
+        // holding them further protects nobody.
+        let t = Throttle {
+            consecutive_failures: 50,
+            last_failure_at: None,
+        };
+        assert!(t.backoff_secs() > 0, "the counter still earns a backoff");
+        assert_eq!(t.required_delay_secs(t0()), 0);
+    }
+
+    #[test]
+    fn a_clock_that_moved_backwards_does_not_extend_the_wait() {
+        // NTP correction, timezone fix, VM resume. Reading a future
+        // stamp as "wait until then" turns a clock skew into a lockout
+        // of arbitrary length.
+        let mut t = Throttle::default();
+        for _ in 0..FREE_ATTEMPTS + 3 {
+            t.record_failure(plus(10_000));
+        }
+        assert_eq!(t.required_delay_secs(t0()), 0);
     }
 }

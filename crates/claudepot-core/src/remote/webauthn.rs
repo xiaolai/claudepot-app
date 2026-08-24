@@ -52,9 +52,24 @@ use sha2::{Digest, Sha256};
 
 /// COSE algorithm identifier for ES256.
 const ALG_ES256: i64 = -7;
+/// COSE key type: elliptic curve, two coordinates. Label 1.
+const COSE_KTY_EC2: i64 = 2;
+/// COSE curve: P-256. Label -1.
+const COSE_CRV_P256: i64 = 1;
 
 /// User Present. Bit 0 of the authenticator data flags.
 const FLAG_UP: u8 = 0x01;
+/// User Verified. Bit 2 — the authenticator checked a biometric or a
+/// PIN, not merely that someone touched it.
+///
+/// Both ceremonies ask for `userVerification: "required"`, but that is
+/// a request made *to the authenticator by the client*. Nothing about
+/// it binds a client we did not write, so the only place the policy can
+/// actually be enforced is here, against the bit the authenticator
+/// signed over. WebAuthn L2 §7.1 step 15 and §7.2 step 17 say exactly
+/// this. Without the check, "unlock with Face ID" degrades silently to
+/// "touch the key", which is the whole difference the feature sells.
+const FLAG_UV: u8 = 0x04;
 /// Attested credential data included. Bit 6.
 const FLAG_AT: u8 = 0x40;
 
@@ -74,6 +89,8 @@ pub enum WebauthnError {
     RpIdMismatch,
     #[error("the user-present flag is not set")]
     UserNotPresent,
+    #[error("the authenticator did not verify the user (no biometric or PIN)")]
+    UserNotVerified,
     #[error("no attested credential data in the registration")]
     NoAttestedCredential,
     #[error("attestation object is not valid CBOR")]
@@ -191,14 +208,16 @@ fn cose_to_sec1(cose: &[u8]) -> Result<Vec<u8>, WebauthnError> {
         ciborium::from_reader(cose).map_err(|_| WebauthnError::BadPublicKey)?;
     let map = value.as_map().ok_or(WebauthnError::BadPublicKey)?;
 
-    let mut alg: Option<i64> = None;
+    let (mut kty, mut alg, mut crv) = (None, None, None);
     let (mut x, mut y) = (None, None);
     for (k, v) in map {
         let Some(k) = k.as_integer().and_then(|i| i64::try_from(i).ok()) else {
             continue;
         };
         match k {
+            1 => kty = v.as_integer().and_then(|i| i64::try_from(i).ok()),
             3 => alg = v.as_integer().and_then(|i| i64::try_from(i).ok()),
+            -1 => crv = v.as_integer().and_then(|i| i64::try_from(i).ok()),
             -2 => x = v.as_bytes().cloned(),
             -3 => y = v.as_bytes().cloned(),
             _ => {}
@@ -209,6 +228,14 @@ fn cose_to_sec1(cose: &[u8]) -> Result<Vec<u8>, WebauthnError> {
         Some(ALG_ES256) => {}
         Some(other) => return Err(WebauthnError::UnsupportedAlgorithm(other)),
         None => return Err(WebauthnError::BadPublicKey),
+    }
+    // `alg` alone does not say what the bytes ARE. Without `kty` and
+    // `crv` an OKP/Ed25519 key labelled `-7` is accepted and its 32-byte
+    // fields are reinterpreted as a P-256 affine point — the parser
+    // would be trusting a self-declared label over the actual key type.
+    // RFC 8152 makes both mandatory for an EC2 key; require them.
+    if kty != Some(COSE_KTY_EC2) || crv != Some(COSE_CRV_P256) {
+        return Err(WebauthnError::BadPublicKey);
     }
     let (x, y) = (
         x.ok_or(WebauthnError::BadPublicKey)?,
@@ -252,6 +279,9 @@ pub fn verify_registration(
     if parsed.flags & FLAG_UP == 0 {
         return Err(WebauthnError::UserNotPresent);
     }
+    if parsed.flags & FLAG_UV == 0 {
+        return Err(WebauthnError::UserNotVerified);
+    }
     let attested = parsed.attested.ok_or(WebauthnError::NoAttestedCredential)?;
     let (cred_id, cose) = parse_attested(attested)?;
     let sec1 = cose_to_sec1(&cose)?;
@@ -277,6 +307,9 @@ pub fn verify_assertion(
     let parsed = parse_auth_data(authenticator_data, rp_id)?;
     if parsed.flags & FLAG_UP == 0 {
         return Err(WebauthnError::UserNotPresent);
+    }
+    if parsed.flags & FLAG_UV == 0 {
+        return Err(WebauthnError::UserNotVerified);
     }
 
     let sec1 = URL_SAFE_NO_PAD
@@ -401,7 +434,7 @@ mod tests {
         let sk = key(1);
         let vk = *sk.verifying_key();
         let attested = attested_blob(&vk, b"cred-1");
-        let auth = auth_data(RP, FLAG_UP | FLAG_AT, 0, Some(&attested));
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV | FLAG_AT, 0, Some(&attested));
         let att = attestation_object(&auth);
         let cred = verify_registration(
             &client_data("webauthn.create", challenge, ORIGIN),
@@ -463,7 +496,7 @@ mod tests {
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
         let ch2 = b"second-challenge-aaaaaaaaaaaaaaa";
-        let auth = auth_data(RP, FLAG_UP, 1, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 1, None);
         let client = client_data("webauthn.get", ch2, ORIGIN);
         let sig = assert_signed(&sk, &auth, &client);
         assert_eq!(
@@ -476,7 +509,7 @@ mod tests {
     fn a_tampered_signature_is_refused() {
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
-        let auth = auth_data(RP, FLAG_UP, 1, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 1, None);
         let client = client_data("webauthn.get", ch, ORIGIN);
         let mut sig = assert_signed(&sk, &auth, &client);
         let last = sig.len() - 1;
@@ -496,7 +529,7 @@ mod tests {
         let ch = b"challenge-one-two-three-four-abc";
         let (_sk, cred) = register(ch);
         let other = key(2);
-        let auth = auth_data(RP, FLAG_UP, 1, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 1, None);
         let client = client_data("webauthn.get", ch, ORIGIN);
         let sig = assert_signed(&other, &auth, &client);
         assert_eq!(
@@ -511,7 +544,7 @@ mod tests {
         // against a freshly issued challenge.
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
-        let auth = auth_data(RP, FLAG_UP, 1, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 1, None);
         let client = client_data("webauthn.get", ch, ORIGIN);
         let sig = assert_signed(&sk, &auth, &client);
         let fresh = b"a-different-challenge-zzzzzzzzzz";
@@ -525,7 +558,7 @@ mod tests {
     fn a_foreign_origin_is_refused() {
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
-        let auth = auth_data(RP, FLAG_UP, 1, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 1, None);
         let client = client_data("webauthn.get", ch, "https://evil.example");
         let sig = assert_signed(&sk, &auth, &client);
         assert!(matches!(
@@ -540,7 +573,7 @@ mod tests {
         // presented to another.
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
-        let auth = auth_data("someone-else.internal", FLAG_UP, 1, None);
+        let auth = auth_data("someone-else.internal", FLAG_UP | FLAG_UV, 1, None);
         let client = client_data("webauthn.get", ch, ORIGIN);
         let sig = assert_signed(&sk, &auth, &client);
         assert_eq!(
@@ -554,7 +587,7 @@ mod tests {
         // A registration response replayed as a login, and vice versa.
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
-        let auth = auth_data(RP, FLAG_UP, 1, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 1, None);
         let client = client_data("webauthn.create", ch, ORIGIN);
         let sig = assert_signed(&sk, &auth, &client);
         assert!(matches!(
@@ -567,7 +600,7 @@ mod tests {
     fn a_missing_user_present_flag_is_refused() {
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
-        let auth = auth_data(RP, 0, 1, None);
+        let auth = auth_data(RP, FLAG_UV, 1, None);
         let client = client_data("webauthn.get", ch, ORIGIN);
         let sig = assert_signed(&sk, &auth, &client);
         assert_eq!(
@@ -588,7 +621,7 @@ mod tests {
             let vk = sk2.verifying_key().to_encoded_point(false);
             URL_SAFE_NO_PAD.encode(vk.as_bytes())
         };
-        let auth = auth_data(RP, FLAG_UP, 5, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 5, None);
         let client = client_data("webauthn.get", ch, ORIGIN);
         let sig = assert_signed(&sk2, &auth, &client);
         assert_eq!(
@@ -605,7 +638,7 @@ mod tests {
         let ch = b"challenge-one-two-three-four-abc";
         let (sk, cred) = register(ch);
         assert_eq!(cred.sign_count, 0);
-        let auth = auth_data(RP, FLAG_UP, 0, None);
+        let auth = auth_data(RP, FLAG_UP | FLAG_UV, 0, None);
         let client = client_data("webauthn.get", ch, ORIGIN);
         let sig = assert_signed(&sk, &auth, &client);
         assert_eq!(
@@ -665,5 +698,112 @@ mod tests {
             parse_attested(&attested),
             Err(WebauthnError::AuthDataTruncated)
         );
+    }
+
+    #[test]
+    fn an_assertion_without_user_verification_is_refused() {
+        // `userVerification: "required"` is a request the client makes
+        // to the authenticator. A client we did not write can ignore it
+        // and return a UP-only assertion, so the server has to check the
+        // signed bit. Without this the Face ID login silently accepts a
+        // mere touch.
+        let ch = b"challenge-one-two-three-four-abc";
+        let (sk, cred) = register(ch);
+        let auth = auth_data(RP, FLAG_UP, 1, None);
+        let client = client_data("webauthn.get", ch, ORIGIN);
+        let sig = assert_signed(&sk, &auth, &client);
+        assert_eq!(
+            verify_assertion(&cred, &client, &auth, &sig, ch, ORIGIN, RP),
+            Err(WebauthnError::UserNotVerified)
+        );
+    }
+
+    #[test]
+    fn a_registration_without_user_verification_is_refused() {
+        // Same policy at enrolment: a credential registered without user
+        // verification cannot later produce a verified assertion, so
+        // accepting it here would enrol a passkey that can never satisfy
+        // the login check.
+        let ch = b"challenge-one-two-three-four-abc";
+        let sk = key(3);
+        let attested = attested_blob(sk.verifying_key(), b"cred-id-bytes");
+        let auth = auth_data(RP, FLAG_UP | FLAG_AT, 0, Some(&attested));
+        let client = client_data("webauthn.create", ch, ORIGIN);
+        let att = attestation_object(&auth);
+        assert_eq!(
+            verify_registration(&client, &att, ch, ORIGIN, RP),
+            Err(WebauthnError::UserNotVerified)
+        );
+    }
+
+    #[test]
+    fn a_cose_key_that_is_not_ec2_p256_is_refused() {
+        // `alg: -7` is a label, not proof of what the bytes are. An
+        // OKP/Ed25519 key wearing that label has 32-byte fields too, and
+        // would be reinterpreted as a P-256 point.
+        let sk = key(3);
+        let point = sk.verifying_key().to_encoded_point(false);
+        let build = |kty: i64, crv: i64| {
+            let mut cose = Vec::new();
+            ciborium::into_writer(
+                &ciborium::Value::Map(vec![
+                    (
+                        ciborium::Value::Integer(1.into()),
+                        ciborium::Value::Integer(kty.into()),
+                    ),
+                    (
+                        ciborium::Value::Integer(3.into()),
+                        ciborium::Value::Integer((-7).into()),
+                    ),
+                    (
+                        ciborium::Value::Integer((-1).into()),
+                        ciborium::Value::Integer(crv.into()),
+                    ),
+                    (
+                        ciborium::Value::Integer((-2).into()),
+                        ciborium::Value::Bytes(point.x().unwrap().to_vec()),
+                    ),
+                    (
+                        ciborium::Value::Integer((-3).into()),
+                        ciborium::Value::Bytes(point.y().unwrap().to_vec()),
+                    ),
+                ]),
+                &mut cose,
+            )
+            .unwrap();
+            cose
+        };
+        // OKP instead of EC2.
+        assert_eq!(cose_to_sec1(&build(1, 1)), Err(WebauthnError::BadPublicKey));
+        // EC2 but the wrong curve (P-384).
+        assert_eq!(cose_to_sec1(&build(2, 2)), Err(WebauthnError::BadPublicKey));
+        // The real thing still parses.
+        assert!(cose_to_sec1(&build(2, 1)).is_ok());
+    }
+
+    #[test]
+    fn a_cose_key_missing_kty_or_crv_is_refused() {
+        let sk = key(3);
+        let point = sk.verifying_key().to_encoded_point(false);
+        let mut cose = Vec::new();
+        ciborium::into_writer(
+            &ciborium::Value::Map(vec![
+                (
+                    ciborium::Value::Integer(3.into()),
+                    ciborium::Value::Integer((-7).into()),
+                ),
+                (
+                    ciborium::Value::Integer((-2).into()),
+                    ciborium::Value::Bytes(point.x().unwrap().to_vec()),
+                ),
+                (
+                    ciborium::Value::Integer((-3).into()),
+                    ciborium::Value::Bytes(point.y().unwrap().to_vec()),
+                ),
+            ]),
+            &mut cose,
+        )
+        .unwrap();
+        assert_eq!(cose_to_sec1(&cose), Err(WebauthnError::BadPublicKey));
     }
 }

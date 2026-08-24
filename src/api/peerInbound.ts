@@ -24,8 +24,12 @@ export type PeerInboundState = {
    *  reason. */
   unmanagedOpen: boolean;
   remainingSecs: number | null;
-  expiresAt: string | null;
   observed: PeerInboundObserved;
+  /** The grant record was unreadable and was reset, so its deadline is
+   *  gone. `unmanagedOpen` folds this in — this field is the *reason*,
+   *  which the GUI could not previously state because the DTO stopped
+   *  short of it while the HTTP surface already sent it. */
+  recordRecovered: boolean;
 };
 
 export const peerInboundApi = {

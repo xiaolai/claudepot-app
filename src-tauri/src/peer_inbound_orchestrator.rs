@@ -27,18 +27,19 @@
 
 use chrono::Utc;
 use claudepot_core::peer::inbound::{self, Decision};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tauri::{AppHandle, Emitter};
 
-/// Serializes this process's writers: [`tick`] and the
+/// Serializes this process's readers and writers: [`tick`] and the
 /// `peer_inbound_*` commands.
-static INBOUND_FILE_LOCK: Mutex<()> = Mutex::new(());
-
-/// Recovers from poison — a panic in one writer must not disable
-/// auto-close for the app's lifetime, which would leave the machine
-/// open with nothing minding the deadline.
+///
+/// **Delegates to core's lock rather than owning one.** It used to be a
+/// `static` here, which made it invisible to `remote::server`'s
+/// `/api/inbound` handlers — they touch the same two files and were not
+/// serialized against these writers at all. Two mutexes guarding one
+/// pair of files is not a lock; see `peer::inbound::file_guard`.
 pub fn inbound_file_guard() -> MutexGuard<'static, ()> {
-    claudepot_core::sync::recover_lock(&INBOUND_FILE_LOCK, "peer inbound grant file")
+    inbound::file_guard()
 }
 
 /// Payload for [`crate::events::PEER_INBOUND_CLOSED`].

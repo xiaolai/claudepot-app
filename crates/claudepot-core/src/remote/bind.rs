@@ -121,18 +121,24 @@ pub fn is_tailscale_range(ip: Ipv4Addr) -> bool {
 
 /// The gate. Every path to a listening socket goes through here.
 pub fn check(addr: IpAddr) -> Result<BindAddr, BindRefusal> {
-    if addr.is_unspecified() {
-        // Accepted, never silently: on a host with a public interface
-        // this is a public listener.
-        return Ok(BindAddr(addr, Exposure::EveryInterface));
-    }
     if addr.is_loopback() {
         return Ok(BindAddr(addr, Exposure::Loopback));
     }
     match addr {
+        // Accepted, never silently: on a host with a public interface
+        // this is a public listener.
+        IpAddr::V4(v4) if v4.is_unspecified() => Ok(BindAddr(addr, Exposure::EveryInterface)),
         IpAddr::V4(v4) if is_private_v4(v4) => Ok(BindAddr(addr, Exposure::PrivateNetwork)),
         IpAddr::V4(_) => Err(BindRefusal::PubliclyRoutable { addr }),
-        // ::1 was already accepted as loopback above.
+        // ::1 was already accepted as loopback above. Every other IPv6
+        // address is refused for want of an allowlist — and `::`
+        // most of all, since it is the *broadest* IPv6 bind there is.
+        //
+        // `is_unspecified()` is true of `::` as well as `0.0.0.0`, so
+        // testing it before the family split accepted an
+        // all-interfaces IPv6 listener while refusing every specific
+        // IPv6 address: the one bind with no allowlist behind it was
+        // the one that got through. The family check has to come first.
         IpAddr::V6(_) => Err(BindRefusal::UnsupportedFamily { addr }),
     }
 }
@@ -144,6 +150,22 @@ mod tests {
 
     fn ip(s: &str) -> IpAddr {
         IpAddr::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn the_ipv6_wildcard_is_refused_like_every_other_ipv6_address() {
+        // `::` is not on the allowlist in AGENTS.md, and it is a
+        // superset of the addresses that are refused individually.
+        assert!(matches!(
+            check(ip("::")),
+            Err(BindRefusal::UnsupportedFamily { .. })
+        ));
+        // ...while the IPv4 wildcard stays accepted, and still declares
+        // itself.
+        assert_eq!(
+            check(ip("0.0.0.0")).unwrap().exposure(),
+            Exposure::EveryInterface
+        );
     }
 
     #[test]
@@ -183,12 +205,20 @@ mod tests {
         // An appliance normally does this. It is permitted, but the
         // caller is told, because on a host that later gets a public
         // address it silently becomes a public listener.
-        for a in ["0.0.0.0", "::"] {
-            let b = check(ip(a)).unwrap();
-            assert_eq!(b.exposure(), Exposure::EveryInterface, "{a}");
-            assert!(b.requires_tls());
-            assert!(!b.is_loopback());
-        }
+        //
+        // **IPv4 only**, and the asymmetry with `::` is the whole
+        // point rather than an omission. `0.0.0.0` on a typical LAN
+        // host sits behind NAT, so "every interface" is in practice
+        // every *private* interface. IPv6 has no NAT: a dual-stack
+        // host generally holds a globally routable address, so `::`
+        // binds a listener the open internet can reach — exactly what
+        // `PubliclyRoutable` exists to refuse. This test asserted the
+        // opposite for both, which is how the broadest bind in the
+        // module became the one with no allowlist behind it.
+        let b = check(ip("0.0.0.0")).unwrap();
+        assert_eq!(b.exposure(), Exposure::EveryInterface);
+        assert!(b.requires_tls());
+        assert!(!b.is_loopback());
     }
 
     #[test]
