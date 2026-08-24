@@ -477,6 +477,7 @@ function GeneralPane({
         hint={ts("general.showBoards.hint")}
       >
         <Toggle
+          label={ts("general.showBoards.label")}
           on={boardsOn}
           onChange={(next) => {
             // Mirror what the store ACTUALLY reached, not what was
@@ -492,6 +493,7 @@ function GeneralPane({
         hint={ts("general.launchAtLogin.hint")}
       >
         <Toggle
+          label={ts("general.launchAtLogin.label")}
           on={launchAtLogin === true}
           onChange={toggleLaunchAtLogin}
         />
@@ -501,6 +503,7 @@ function GeneralPane({
         hint={ts("general.showWindow.hint")}
       >
         <Toggle
+          label={ts("general.showWindow.label")}
           on={showWindowOnStartup === true}
           onChange={toggleShowWindowOnStartup}
         />
@@ -510,7 +513,7 @@ function GeneralPane({
           label={ts("general.hideDock.label")}
           hint={ts("general.hideDock.hint")}
         >
-          <Toggle on={hideDock === true} onChange={toggleHideDock} />
+          <Toggle on={hideDock === true} onChange={toggleHideDock} label={ts("general.hideDock.label")} />
         </Row>
       )}
       {/* Developer mode: hidden from the UI on purpose. Toggle is
@@ -1012,7 +1015,7 @@ function UpdatesPane() {
         label={t("updates.auto.label")}
         hint={t("updates.auto.hint")}
       >
-        <Toggle on={autoCheckEnabled} onChange={setAutoCheckEnabled} />
+        <Toggle on={autoCheckEnabled} onChange={setAutoCheckEnabled} label={t("updates.auto.label")} />
       </Row>
 
       <Row
@@ -1663,13 +1666,14 @@ function NotificationsPane({
           label={t("notifications.enable.label")}
           hint={t("notifications.enable.hint")}
         >
-          <Toggle on={enabled} onChange={toggleEnabled} />
+          <Toggle on={enabled} onChange={toggleEnabled} label={t("notifications.enable.label")} />
         </Row>
         <Row
           label={t("notifications.hideThinking.label")}
           hint={t("notifications.hideThinking.hint")}
         >
           <Toggle
+            label={t("notifications.hideThinking.label")}
             on={hideThinking}
             onChange={toggleHideThinking}
           />
@@ -1683,6 +1687,7 @@ function NotificationsPane({
           hint={t("notifications.errorBurst.hint")}
         >
           <Toggle
+            label={t("notifications.errorBurst.label")}
             on={notifyError}
             onChange={(next) =>
               setNotifyBool("onError", setNotifyError, notifyError, next)
@@ -1694,6 +1699,7 @@ function NotificationsPane({
           hint={t("notifications.waiting.hint")}
         >
           <Toggle
+            label={t("notifications.waiting.label")}
             on={notifyWaiting}
             onChange={(next) =>
               setNotifyBool(
@@ -1710,6 +1716,7 @@ function NotificationsPane({
           hint={t("notifications.taskDone.hint")}
         >
           <Toggle
+            label={t("notifications.taskDone.label")}
             on={notifyIdleDone}
             onChange={(next) =>
               setNotifyBool(
@@ -1754,13 +1761,14 @@ function NotificationsPane({
           label={t("notifications.subWindows.label")}
           hint={t("notifications.subWindows.hint")}
         >
-          <Toggle on={notifySubWindows} onChange={toggleSubWindows} />
+          <Toggle on={notifySubWindows} onChange={toggleSubWindows} label={t("notifications.subWindows.label")} />
         </Row>
         <Row
           label={t("notifications.opDone.label")}
           hint={t("notifications.opDone.hint")}
         >
           <Toggle
+            label={t("notifications.opDone.label")}
             on={notifyOpDone}
             onChange={(next) =>
               setNotifyBool(
@@ -1976,6 +1984,7 @@ function CategoryPrefsListGroup({
                 }`}
               >
                 <Toggle
+                  label={categoryLabel(c)}
                   on={p.enabled}
                   onChange={(next) => void setEnabled(c.id, next)}
                 />
@@ -1988,7 +1997,7 @@ function CategoryPrefsListGroup({
         label={t("notifications.categories.showAll")}
         hint={t("notifications.categories.showAllHint")}
       >
-        <Toggle on={showLegacy} onChange={setShowLegacy} />
+        <Toggle on={showLegacy} onChange={setShowLegacy} label={t("notifications.categories.showAll")} />
       </Row>
     </SettingsGroup>
   );
@@ -2358,6 +2367,7 @@ function Toggle({
   on,
   onChange,
   disabled = false,
+  label,
 }: {
   on: boolean;
   onChange: (next: boolean) => void;
@@ -2368,12 +2378,26 @@ function Toggle({
    * override.
    */
   disabled?: boolean;
+  /**
+   * The accessible name, and **required**.
+   *
+   * A `<button>` with no text content and no `aria-label` has no
+   * accessible name, so every switch in this file announced as "switch,
+   * not checked" with nothing saying what it switched. The visible
+   * label lives in the `Row` beside it, which is not a label — only
+   * `aria-label`, `aria-labelledby`, or the button's own content is.
+   * Required rather than optional so a new call site cannot reopen it;
+   * `SettingToggleRow` is the canonical version of this row and has the
+   * same contract.
+   */
+  label: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
+      aria-label={label}
       aria-disabled={disabled || undefined}
       disabled={disabled}
       onClick={disabled ? undefined : () => onChange(!on)}

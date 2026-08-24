@@ -239,6 +239,14 @@ jobs:
       - name: Check CSS class coverage
         run: pnpm check:classes:self-test && pnpm check:classes
 
+      # A `<button role="switch">` with no text content and no
+      # `aria-label` has no accessible name — it announces as "switch,
+      # not checked" with nothing saying what it switches. Two shipped
+      # that way, one behind fourteen call sites. The visible text
+      # beside a switch is not a label, however obvious it looks.
+      - name: Check switch accessible names
+        run: pnpm check:a11y:self-test && pnpm check:a11y
+
       # The production vite build catches failure classes tsc and
       # vitest don't (asset resolution, CSS shard syntax errors,
       # rollup-only module issues). Without this step the first

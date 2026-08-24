@@ -67,6 +67,12 @@ typescript
 # preflight.sh and by the `check:envvar-layout` package script, so leaving it
 # out would point a committed gate at a file a fresh clone does not have.
 !/scripts/check-envvar-layout.mjs
+# Two CI gates over the renderer. Both are invoked by ci.yml through
+# `check:classes` / `check:a11y`, so an ignored copy is a workflow
+# pointing at a file a fresh clone does not have — which is exactly what
+# shipped in 37217727 and what `repo-invariants.sh` now checks for.
+!/scripts/check-classes.mjs
+!/scripts/check-a11y-names.mjs
 # Its unit tests, which vitest DOES run in CI (`scripts/**/*.test.mjs` is in
 # vitest.config.ts's include). Leaving this ignored would put a test file in
 # the working tree that no other clone has and CI never sees — the same

@@ -52,6 +52,7 @@ pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
 cd panel && pnpm check:render        # the built remote panel actually mounts
 pnpm check:classes                   # every className has a CSS rule behind it
+pnpm check:a11y                      # every role="switch" has an accessible name
 ```
 
 `panel`'s render check answers a question `vite build` cannot: whether
@@ -174,6 +175,39 @@ halves of the split: button-shaped primitives still carry `pm-focus`,
 `boxShadow`) is what changes when the inner element gains focus. Watched
 firing against the reverted state — `pm-focus` back on `Input`'s inner
 element failed the "neither carries pm-focus" assertion immediately.
+
+**A switch with no text content has no accessible name, and
+`pnpm check:a11y` is the only thing that says so.** A
+`<button role="switch">` holding one decorative `aria-hidden` span
+announces as "switch, not checked" with nothing saying what it
+switches — the visible text beside it is not a label, however obvious it
+looks on screen. Two shipped that way: `SettingsSection`'s `Toggle`,
+behind fourteen call sites, and `UpdatesPanel`'s, whose docstring
+asserted the label was *"rendered as a sibling by the caller … same a11y
+semantics"*. `SettingToggleRow` — the canonical version of the same row
+— had `aria-label` + `aria-describedby` right the whole time, which is
+what makes this mechanical rather than a matter of taste: the correct
+pattern was already in the tree.
+
+`Toggle`'s `label` is **required**, so tsc lists every call site rather
+than leaving one to be missed.
+
+The related-but-different failure is a name that is too LONG. A `<label>`
+wrapping both a control and its explanation takes its accessible name
+from all of that text, so `NetworkPane`'s probe toggle announced as
+"Probe latency on open Runs a HEAD request against each endpoint…" and
+`RouteForm`'s keychain checkbox as its label plus a `code`-laden note.
+Both use `htmlFor` for the name and `aria-describedby` for the detail
+now — different relationships, and assistive tech treats them
+differently. That one is **not** gated: what counts as description is a
+judgement call, and judgement calls make bad gates.
+
+The gate's own history is the reason it is written narrowly. The first
+version tried to accept a content-derived name, and the `<span>`'s
+inline style object satisfied its "contains an expression" test — so
+deleting `aria-label` from the real `SettingsSection` toggle still
+reported OK. Watched, on the actual file. It now requires an aria
+attribute outright, and both real regressions have been watched failing.
 
 **The wide pass declares a width, and that is the whole trick.** jsdom
 has no layout, so a real `ResizeObserver` measurement is always zero and

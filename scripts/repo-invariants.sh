@@ -201,6 +201,29 @@ if [ -d "$mcp_dir" ]; then
   fi
 fi
 
+# ── Every script a workflow runs is actually committed ───────────────
+# `/scripts/*` is gitignored with an explicit allowlist (see .gitignore),
+# so a new gate is invisible to a fresh clone unless someone remembers
+# the `!` line. `check-classes.mjs` shipped exactly that way: ci.yml ran
+# `pnpm check:classes`, the script was untracked, and CI would have gone
+# red on a clean checkout with "Cannot find module".
+#
+# Resolved through package.json rather than grepping the workflow for
+# paths — the workflow calls `pnpm <script>`, so the path only exists one
+# indirection away, which is why reading the workflow alone missed it.
+referenced=$(grep -oE 'node scripts/[A-Za-z0-9._-]+' package.json 2>/dev/null | awk '{print $2}' | sort -u || true)
+for script in $referenced; do
+  if [ ! -f "$script" ]; then
+    echo "::error::package.json runs $script, which does not exist."
+    fail=1
+  elif ! git ls-files --error-unmatch "$script" >/dev/null 2>&1; then
+    echo "::error::package.json runs $script, which is NOT tracked by git."
+    echo "  /scripts/* is gitignored; add a '!$script' line to .gitignore."
+    echo "  Untracked, a fresh clone has the gate in CI and not on disk."
+    fail=1
+  fi
+done
+
 # ─── BEGIN claudepot-generated guards ───
 # guard: no-mktemp-d-windows-ci
 # mktemp -d under Git Bash on windows-latest returns POSIX /tmp paths; Rust resolves against current drive, creating foreign-path bugs. Use ${{ runner.temp }}, which GitHub Actions expands to native OS temp path.
