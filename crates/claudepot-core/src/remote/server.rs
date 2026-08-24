@@ -845,6 +845,25 @@ mod tests {
         }
         assert_eq!(state.lock().await.config.failed_attempts, 4);
 
+        // Pin the last failure to *now* before the throttled attempt.
+        //
+        // Four failures earn a one-second backoff (`FREE_ATTEMPTS` is 3,
+        // and the curve starts at 1s), and each of the four logins above
+        // runs a scrypt verification — deliberately slow. On a machine
+        // running the whole suite in parallel those four take longer
+        // than a second, so the wait is already served by the time the
+        // fifth request lands and the correct password is accepted: this
+        // asserted 429 and got 200. Reproduced exactly that way, and
+        // green in five isolated runs, which is the signature of a
+        // wall-clock race rather than a logic error.
+        //
+        // The throttle became time-based when it stopped being a
+        // permanent lockout, so this staleness is inherent to the
+        // design, not a bug in it. Waiting less is not an option a test
+        // has; pinning the clock is. `failed_attempts` — the thing this
+        // test is named for — is asserted above and untouched by it.
+        state.lock().await.config.last_failed_at = Some(chrono::Utc::now());
+
         let res = router(state)
             .oneshot(req(
                 "POST",
