@@ -12,6 +12,7 @@ import rehypeHighlight from "rehype-highlight";
 import { i18n } from "../../lib/i18n";
 import { MermaidBlock } from "./MermaidBlock";
 import { extractCodeText } from "./extractCodeText";
+import { hasLanguage } from "../../lib/codeFence";
 
 /**
  * Markdown renderer for Config previews.
@@ -90,7 +91,7 @@ const components: Components = {
       | undefined;
 
     const className = codeChild?.props?.className ?? "";
-    if (className.includes("language-mermaid")) {
+    if (hasLanguage(className, "mermaid")) {
       return <MermaidBlock source={extractCodeText(codeChild?.props?.children)} />;
     }
 
@@ -150,15 +151,6 @@ const components: Components = {
     );
   },
 };
-
-/**
- * Pull a flat string out of a `<code>` element's children. With
- * `rehype-highlight` enabled the children are typically a single text
- * node (when the language is unknown — mermaid is) or an array of
- * `<span class="hljs-…">` elements (when it's known). For unknown
- * languages with `ignoreMissing: true`, mermaid lands in the first
- * shape, but we handle both for resilience.
- */
 
 // ---------- Frontmatter ----------------------------------------------
 

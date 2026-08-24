@@ -1,3 +1,15 @@
+/**
+ * Pull a flat string out of a `<code>` element's children.
+ *
+ * With `rehype-highlight` enabled the children are typically a single
+ * text node (when the language is unknown — mermaid is) or an array of
+ * `<span class="hljs-…">` elements (when it is known). For unknown
+ * languages with `ignoreMissing: true`, mermaid lands in the first
+ * shape, but both are handled.
+ *
+ * Moved here from `MarkdownRenderer.tsx`, which kept the comment after
+ * the function left — a doc comment attached to nothing.
+ */
 import { isValidElement, type ReactNode } from "react";
 
 /**

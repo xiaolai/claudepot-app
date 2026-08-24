@@ -4,6 +4,9 @@ import remarkGfm from "remark-gfm";
 import { ExternalLink } from "../../../components/primitives/ExternalLink";
 import { MermaidBlock } from "../../config/MermaidBlock";
 import { extractCodeText } from "../../config/extractCodeText";
+import { hasLanguage } from "../../../lib/codeFence";
+import { isSafeHref } from "../../../lib/mdLink";
+import i18n from "../../../lib/i18n";
 
 /**
  * Markdown for a transcript turn.
@@ -72,24 +75,27 @@ const components: Components = {
       | ReactElement<{ className?: string; children?: ReactNode }>
       | undefined;
 
-    if ((codeChild?.props?.className ?? "").includes("language-mermaid")) {
+    if (hasLanguage(codeChild?.props?.className, "mermaid")) {
       return <MermaidBlock source={extractCodeText(codeChild?.props?.children)} />;
     }
     return <pre {...rest}>{children}</pre>;
   },
 
+  // Only http(s) and mailto reach the OS opener. See `isSafeHref` —
+  // react-markdown's default lets `irc:`/`xmpp:`/relative through, and
+  // this renderer hands the value to `openUrl`.
   a: ({ href, children }) =>
-    href ? (
-      <ExternalLink href={href}>{children}</ExternalLink>
+    isSafeHref(href) ? (
+      <ExternalLink href={href as string}>{children}</ExternalLink>
     ) : (
-      <span>{children}</span>
+      <span title={href ?? undefined}>{children}</span>
     ),
   img: ({ alt, src }) => (
     <span
       className="md-img-alt"
       title={typeof src === "string" ? src : undefined}
     >
-      {alt || "image"}
+      {alt || i18n.t("transcript.imageAlt", { ns: "sessions" })}
     </span>
   ),
   // A wide table must scroll inside its own wrapper. Without this it

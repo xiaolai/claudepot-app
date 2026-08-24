@@ -215,6 +215,11 @@ function readThemeVariables(): Record<string, string> {
   // throwing path, which a flowchart does and a sequence diagram does
   // not. See `mermaidColor.ts`.
   const v = (name: string) => toMermaidColor(cs.getPropertyValue(name).trim());
+  // Sizes and families are NOT colours: `v` runs values through
+  // `toMermaidColor`, which is right for a paint and meaningless for
+  // `13px`.
+  const raw = (name: string, fallback: string) =>
+    cs.getPropertyValue(name).trim() || fallback;
   return {
     // Surfaces
     background: v("--bg") || "transparent",
@@ -259,7 +264,10 @@ function readThemeVariables(): Record<string, string> {
     taskBkgColor: v("--accent-soft"),
     taskBorderColor: v("--accent-border"),
     taskTextColor: v("--fg"),
-    // Misc
-    fontSize: "13px",
+    // Misc. From the token, not a literal — `.claude/rules/design.md`
+    // makes `tokens.css` the only place a size is declared, and mermaid
+    // MEASURES text to size its nodes, so a hardcoded value here also
+    // mis-sizes every box the moment the token moves.
+    fontSize: raw("--fs-base", "13px"),
   };
 }

@@ -210,5 +210,8 @@
     "filterJson": "JSON",
     "saveDialogFailed": "无法打开保存对话框，请重试。",
     "failedScope": "导出失败"
+  },
+  "transcript": {
+    "imageAlt": "图片"
   }
 }
