@@ -223,7 +223,20 @@ pub async fn refresh(ctx: &AppContext) -> Result<()> {
         .fetch_batch_detailed_verified(&ctx.store, &uuids)
         .await;
 
-    let snapshot = usage_snapshot::build(&accounts, &outcomes);
+    // Scrape the daemon like the GUI's tick does. `build` hardcodes
+    // `bg_workers: None`, so a CLI refresh used to blank whatever the
+    // desktop app had recorded — and the remote panel renders this file
+    // rather than calling anything live, so the worker count simply
+    // vanished from the phone until the GUI next ran. The same shape of
+    // bug as an older desktop build dropping a field it was compiled
+    // without.
+    let bg_workers = tokio::task::spawn_blocking(|| {
+        claudepot_core::cc_daemon::scrape_daemon_status().bg_workers
+    })
+    .await
+    .unwrap_or(None);
+
+    let snapshot = usage_snapshot::build_with_bg_workers(&accounts, &outcomes, bg_workers);
     let path = usage_snapshot::snapshot_path();
     usage_snapshot::write(&path, &snapshot)?;
 

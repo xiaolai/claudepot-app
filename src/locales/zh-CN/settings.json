@@ -681,6 +681,7 @@
     "unsaved": "有未保存的更改",
     "saveFailed": "保存失败",
     "loadFailed": "无法读取快捷提示。",
-    "count": "{{count}} / {{max}}"
+    "count": "{{count}} / {{max}}",
+    "restoreFailed": "无法加载内置提示词。"
   }
 }

@@ -70,6 +70,27 @@ export function QuickPromptsPane({
       return next;
     });
 
+  /**
+   * Restore the built-in four.
+   *
+   * `await`ed with a `catch`, not `.then(setDraft)`. Fire-and-forget
+   * turned an IPC failure into an unhandled rejection and left the user
+   * looking at an unchanged list with nothing to explain why — the same
+   * silent-tap failure the panel's send path was fixed for.
+   */
+  const restore = async () => {
+    setBusy(true);
+    try {
+      setDraft(await quickPromptApi.defaults());
+    } catch (e) {
+      const detail =
+        typeof e === "object" && e && "message" in e ? String(e.message) : String(e);
+      pushToast?.("error", `${t("quickPrompts.restoreFailed")}: ${detail}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async () => {
     if (!draft) return;
     setBusy(true);
@@ -152,7 +173,7 @@ export function QuickPromptsPane({
         >
           {t("quickPrompts.add")}
         </Button>
-        <Button variant="ghost" onClick={() => quickPromptApi.defaults().then(setDraft)}>
+        <Button variant="ghost" disabled={busy} onClick={restore}>
           {t("quickPrompts.restore")}
         </Button>
         <span className="muted">

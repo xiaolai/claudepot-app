@@ -92,7 +92,17 @@ pub struct CommandSpec {
 /// pulling in a parser to read them would let a command file's
 /// formatting decide whether a menu renders.
 fn split_front_matter(text: &str) -> (Vec<(String, String)>, &str) {
-    let Some(rest) = text.strip_prefix("---\n") else {
+    // **CRLF counts.** A command file authored on Windows, or edited by
+    // anything that writes CRLF, opens `---\r\n` — so a prefix test for
+    // `---\n` alone found no front matter at all. The consequence is not
+    // just a missing `description`: the whole YAML block stays in
+    // `body`, so it is pasted verbatim into the prompt the panel stages,
+    // and `restricts_tools` reads false for a command that does declare
+    // `allowed-tools`.
+    let rest = text
+        .strip_prefix("---\r\n")
+        .or_else(|| text.strip_prefix("---\n"));
+    let Some(rest) = rest else {
         return (Vec::new(), text);
     };
     let Some(end) = rest.find("\n---") else {
@@ -101,6 +111,7 @@ fn split_front_matter(text: &str) -> (Vec<(String, String)>, &str) {
     let (head, tail) = rest.split_at(end);
     let body = tail
         .trim_start_matches("\n---")
+        .trim_start_matches('\r')
         .trim_start_matches('\n')
         .trim_start_matches('\r');
     let mut keys = Vec::new();
@@ -112,6 +123,8 @@ fn split_front_matter(text: &str) -> (Vec<(String, String)>, &str) {
             continue; // a nested value, not a top-level key
         }
         let v = v.trim().trim_matches('"').trim_matches('\'');
+        // `str::lines` already drops a trailing `\r`; the trim above
+        // covers a value that carried one mid-line.
         keys.push((k.trim().to_string(), v.to_string()));
     }
     (keys, body)
@@ -144,20 +157,36 @@ fn substitute(body: &str, args: &str) -> String {
 fn spec_from(path: &Path, name: String, source: Source) -> Option<CommandSpec> {
     let text = std::fs::read_to_string(path).ok()?;
     let (keys, body) = split_front_matter(&text);
+    // A non-empty SCALAR — for the two fields that are rendered.
     let get = |want: &str| {
         keys.iter()
             .find(|(k, _)| k == want)
             .map(|(_, v)| v.clone())
             .filter(|v| !v.is_empty())
     };
+    // **Presence**, which is a different question. `allowed-tools` is
+    // commonly a YAML list:
+    //
+    //     allowed-tools:
+    //       - Bash
+    //       - Read
+    //
+    // …whose first line has an empty scalar. Asking `get` about it
+    // therefore answered "absent", so `restricts_tools` was false for a
+    // command that plainly does restrict tools — and that flag is the
+    // only thing telling the reader the expansion runs under the
+    // *session's* permissions rather than the command's own, which are
+    // generally narrower. Losing the warning on the commands most
+    // likely to need it is the wrong direction to fail in.
+    let has = |want: &str| keys.iter().any(|(k, _)| k == want);
     Some(CommandSpec {
         name,
         description: get("description"),
         argument_hint: get("argument-hint"),
         source,
         body_chars: body.chars().count(),
-        restricts_tools: get("allowed-tools").is_some(),
-        pins_model: get("model").is_some(),
+        restricts_tools: has("allowed-tools"),
+        pins_model: has("model"),
         path: path.to_path_buf(),
     })
 }
@@ -527,5 +556,68 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let cwd = tempfile::tempdir().unwrap();
         assert!(discover_in(cwd.path(), home.path()).is_empty());
+    }
+
+    #[test]
+    fn crlf_front_matter_is_parsed_like_lf() {
+        // A command file authored on Windows opens `---\r\n`. Testing
+        // only for `---\n` found no front matter at all, which does not
+        // merely lose `description`: the YAML block stays in the body
+        // and is pasted verbatim into the prompt the panel stages.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.md");
+        std::fs::write(
+            &path,
+            "---\r\ndescription: Audit the thing\r\nargument-hint: <path>\r\nallowed-tools: Bash, Read\r\nmodel: opus\r\n---\r\nDo the audit on $ARGUMENTS.\r\n",
+        )
+        .unwrap();
+        let spec = spec_from(&path, "audit".into(), Source::Project).expect("spec");
+        assert_eq!(spec.description.as_deref(), Some("Audit the thing"));
+        assert_eq!(spec.argument_hint.as_deref(), Some("<path>"));
+        assert!(spec.restricts_tools);
+        assert!(spec.pins_model);
+
+        // And the body no longer carries the front matter.
+        let (_, body) = split_front_matter("---\r\ndescription: x\r\n---\r\nBODY HERE\r\n");
+        assert!(
+            !body.contains("description:"),
+            "front matter leaked: {body:?}"
+        );
+        assert!(body.starts_with("BODY HERE"), "{body:?}");
+    }
+
+    #[test]
+    fn a_list_valued_allowed_tools_still_counts_as_a_restriction() {
+        // The common YAML shape. Its first line has an empty scalar, so
+        // a non-empty-value test answered "absent" and the panel
+        // dropped the warning that the expansion runs under the
+        // session's permissions rather than the command's.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scoped.md");
+        std::fs::write(
+            &path,
+            "---\ndescription: Scoped\nallowed-tools:\n  - Bash\n  - Read\nmodel:\n  - opus\n---\nBody.\n",
+        )
+        .unwrap();
+        let spec = spec_from(&path, "scoped".into(), Source::Project).expect("spec");
+        assert!(
+            spec.restricts_tools,
+            "a list-valued allowed-tools is still a restriction"
+        );
+        assert!(spec.pins_model);
+        // A scalar field with no value stays absent — presence and
+        // "has a renderable value" are different questions.
+        assert_eq!(spec.argument_hint, None);
+    }
+
+    #[test]
+    fn a_command_with_no_front_matter_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plain.md");
+        std::fs::write(&path, "Just a body, no front matter.\n").unwrap();
+        let spec = spec_from(&path, "plain".into(), Source::Project).expect("spec");
+        assert_eq!(spec.description, None);
+        assert!(!spec.restricts_tools);
+        assert!(!spec.pins_model);
     }
 }

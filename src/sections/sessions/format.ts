@@ -56,8 +56,19 @@ export const bestTimestampMs = sessionEventMs;
 
 /**
  * CC's reference-placeholder regex — kept byte-compatible with the
- * upstream definition in `claude_code_src/src/history.ts::parseReferences`
- * so a new placeholder shape added upstream trips a single fixup here.
+ * shape CC emits, so a new placeholder added upstream trips a single
+ * fixup here.
+ *
+ * Verify against the **installed binary**, never against
+ * `claude_code_src`, which this comment used to cite: that mirror is
+ * pinned at 2.1.88 and abandoned, so it confirms April's behaviour and
+ * reports success. `.claude/rules/cc-upstream-watch.md` §1 makes that a
+ * rule; the row is `reference placeholders in a prompt` in
+ * `crates/xtask/cc-upstream-watch.md`.
+ *
+ * The Rust twin is `claudepot-core::session::title::derive`, and both
+ * are locked to `testdata/session-title-vectors.json` — a change here
+ * is a change there plus a new vector.
  */
 const CC_REF_PLACEHOLDER_RE =
   /\[(?:Pasted text|Image|\.\.\.Truncated text) #\d+(?: \+\d+ lines)?\.*\]/g;

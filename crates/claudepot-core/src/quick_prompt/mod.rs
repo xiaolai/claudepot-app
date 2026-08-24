@@ -122,11 +122,38 @@ pub fn defaults() -> Vec<QuickPrompt> {
     ]
     .into_iter()
     .map(|(name, text)| QuickPrompt {
-        id: uuid::Uuid::new_v4().to_string(),
+        // **Stable, not random.** `id` is this list's identity for
+        // editing and reordering, and `defaults()` is called on every
+        // load of a machine that has never saved the file — so a fresh
+        // uuid per call meant the same four prompts arrived under
+        // different ids each time. A client that keyed anything on the
+        // id saw four deletions and four insertions on every poll, and
+        // "restore defaults" could never be a no-op.
+        //
+        // Derived from the name so the value is readable in the file
+        // and cannot silently collide.
+        id: format!("builtin-{}", slug(name)),
         name: name.to_string(),
         text: text.to_string(),
     })
     .collect()
+}
+
+/// Lowercase, non-alphanumerics to `-`. Only ever applied to the four
+/// built-in names above, which are ASCII.
+fn slug(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut prev_dash = false;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_end_matches('-').to_string()
 }
 
 pub fn path() -> PathBuf {
@@ -136,7 +163,17 @@ pub fn path() -> PathBuf {
 /// Read the list, seeding the built-ins only when the file has never
 /// existed.
 pub fn load_at(path: &Path) -> QuickPromptFile {
-    if !path.exists() {
+    // `try_exists` distinguishes "no file" from "cannot stat it".
+    // `exists()` reports both as false, so a permission error on the
+    // data directory presented as a first run and quietly re-seeded the
+    // built-ins over a list the user had edited.
+    //
+    // An error here is treated as "the file is there but unreadable",
+    // which routes into `json_store_load`'s recovery rather than into
+    // the first-run seed — losing the prompts is bad, silently
+    // resurrecting deleted ones is worse, because the file's whole
+    // contract is that empty and absent are different states.
+    if matches!(path.try_exists(), Ok(false)) {
         return QuickPromptFile {
             schema_version: default_schema_version(),
             prompts: defaults(),
@@ -338,5 +375,57 @@ mod tests {
         let path = d.path().join(FILENAME);
         std::fs::write(&path, b"{ not json").unwrap();
         assert!(load_at(&path).prompts.is_empty());
+    }
+
+    #[test]
+    fn the_built_in_ids_are_stable_across_calls() {
+        // `id` is the list's identity for editing and reordering, and
+        // `defaults()` runs on every load of a never-configured machine.
+        // Fresh uuids made two identical loads look like four deletions
+        // and four insertions.
+        let a: Vec<_> = defaults().into_iter().map(|p| p.id).collect();
+        let b: Vec<_> = defaults().into_iter().map(|p| p.id).collect();
+        assert_eq!(a, b);
+        assert_eq!(
+            a,
+            vec![
+                "builtin-continue",
+                "builtin-explain-that",
+                "builtin-run-the-tests",
+                "builtin-show-me-the-diff",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_built_in_ids_are_distinct_and_valid() {
+        let ids: std::collections::HashSet<_> = defaults().into_iter().map(|p| p.id).collect();
+        assert_eq!(ids.len(), 4, "a collision would shadow a prompt");
+        assert!(ids.iter().all(|i| !i.is_empty()));
+        // And the list still validates as a whole.
+        assert!(validate(&defaults()).is_ok());
+    }
+
+    #[test]
+    fn an_absent_file_seeds_but_an_empty_one_does_not() {
+        // The documented distinction: never configured yields the four
+        // built-ins, "I deleted them all" yields nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("quick-prompts.json");
+        assert_eq!(load_at(&path).prompts.len(), 4);
+
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&QuickPromptFile {
+                schema_version: default_schema_version(),
+                prompts: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            load_at(&path).prompts.is_empty(),
+            "an empty file must stay empty — the last delete must not undo itself"
+        );
     }
 }

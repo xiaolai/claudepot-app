@@ -688,6 +688,7 @@
     "unsaved": "Unsaved changes",
     "saveFailed": "Could not save",
     "loadFailed": "Could not read the quick prompts.",
-    "count": "{{count}} of {{max}}"
+    "count": "{{count}} of {{max}}",
+    "restoreFailed": "Could not load the built-in prompts."
   }
 }
