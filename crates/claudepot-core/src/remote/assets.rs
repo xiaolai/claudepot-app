@@ -135,6 +135,7 @@ pub const FONT_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const HTML: &str = "text/html; charset=utf-8";
 const JS: &str = "text/javascript; charset=utf-8";
 const CSS: &str = "text/css; charset=utf-8";
+const PNG: &str = "image/png";
 const WOFF2: &str = "font/woff2";
 
 /// Resolve a request path to an embedded asset.
@@ -240,6 +241,18 @@ fn get_from(path: &str, dev: Option<&std::path::Path>) -> Option<Asset> {
             "image/svg+xml",
             CACHE_CONTROL,
         ),
+        // iOS accepts PNG only for `apple-touch-icon` — an SVG there is
+        // ignored outright and the home screen shows a tile generated
+        // from the first letter of the title. See panel/index.html.
+        "/apple-touch-icon.png" => (
+            include_bytes!("assets/apple-touch-icon.png"),
+            PNG,
+            CACHE_CONTROL,
+        ),
+        // The manifest's raster icons. Android and desktop PWA installers
+        // read these; the SVG beside them is the browser-tab favicon.
+        "/icon-192.png" => (include_bytes!("assets/icon-192.png"), PNG, CACHE_CONTROL),
+        "/icon-512.png" => (include_bytes!("assets/icon-512.png"), PNG, CACHE_CONTROL),
         _ => return None,
     };
     Some(with_dev_override(
@@ -381,6 +394,9 @@ mod tests {
         "/sw.js",
         "/manifest.webmanifest",
         "/icon.svg",
+        "/apple-touch-icon.png",
+        "/icon-192.png",
+        "/icon-512.png",
     ];
 
     #[test]
@@ -502,6 +518,78 @@ mod tests {
         );
     }
 
+    /// Assets whose bytes are not text.
+    ///
+    /// Three tests decode every asset as UTF-8 to look for URLs, and
+    /// each one used to name `.woff2` itself. Adding the home-screen
+    /// PNGs meant editing all three, and missing one is a panic that
+    /// reads as "text asset is not UTF-8" from a test whose subject is
+    /// third-party requests — which is what happened. One predicate, so
+    /// the next binary asset is one edit.
+    fn is_binary(path: &str) -> bool {
+        path.ends_with(".woff2") || path.ends_with(".png")
+    }
+
+    /// iOS accepts PNG only for `apple-touch-icon`.
+    ///
+    /// Pointed at an SVG it ignores the tag and generates a tile from
+    /// the first letter of the title — which is exactly what shipped:
+    /// adding the panel to an iPhone home screen produced a plain "C".
+    /// Nothing failed anywhere. The asset was served, the HTML was
+    /// valid, `every_route_the_html_references_is_embedded` was green
+    /// because the SVG *was* embedded; the format was simply one iOS
+    /// declines to read.
+    ///
+    /// Asserted on the magic bytes rather than the extension, because a
+    /// `.png` containing SVG would satisfy the filename and fail on the
+    /// device, which is the same failure with a different disguise.
+    #[test]
+    fn the_home_screen_icon_is_a_real_png() {
+        let html = get("/").unwrap().text();
+        let at = html
+            .find("apple-touch-icon")
+            .expect("index.html declares no apple-touch-icon");
+        let tail = &html[at..];
+        let href_at = tail.find("href=\"").expect("apple-touch-icon has no href");
+        let href: String = tail[href_at + 6..]
+            .chars()
+            .take_while(|c| *c != '"')
+            .collect();
+        assert!(
+            href.ends_with(".png"),
+            "apple-touch-icon points at {href}, which iOS ignores — it accepts PNG only"
+        );
+
+        let asset = get(&href).unwrap_or_else(|| panic!("{href} is referenced but not embedded"));
+        assert_eq!(asset.content_type, PNG);
+        assert_eq!(
+            &asset.body[..8],
+            b"\x89PNG\r\n\x1a\n",
+            "{href} is not actually a PNG"
+        );
+    }
+
+    /// The manifest's raster icons exist too. An installer that cannot
+    /// fetch them falls back to whatever the platform invents, which is
+    /// the same class of silent wrong icon.
+    #[test]
+    fn every_manifest_icon_is_embedded() {
+        let manifest = get("/manifest.webmanifest").unwrap().text();
+        let mut found = 0;
+        for chunk in manifest.split("\"src\": \"").skip(1) {
+            let src: String = chunk.chars().take_while(|c| *c != '"').collect();
+            assert!(
+                get(&src).is_some(),
+                "the manifest lists {src}, which is not embedded"
+            );
+            found += 1;
+        }
+        assert!(
+            found >= 2,
+            "expected the manifest to list icons, found {found}"
+        );
+    }
+
     #[test]
     fn only_fonts_are_cacheable() {
         for p in EVERY_PATH {
@@ -602,8 +690,8 @@ mod tests {
         // URL sits in an error message. If a chunk ever did try, the
         // browser would refuse it and the diagram would fail visibly.
         for path in EVERY_PATH {
-            if path.ends_with(".woff2") {
-                continue; // binary; no URLs inside a woff2 we serve
+            if is_binary(path) {
+                continue; // no URLs inside bytes we do not decode
             }
             let mut body = get(path).unwrap().text().to_string();
             for (literal, _why) in NOT_A_REQUEST {
@@ -713,7 +801,7 @@ mod tests {
         // list has to shrink with them.
         let all: String = EVERY_PATH
             .iter()
-            .filter(|p| !p.ends_with(".woff2"))
+            .filter(|p| !is_binary(p))
             .map(|p| get(p).unwrap().text())
             .collect::<Vec<_>>()
             .join("\n");

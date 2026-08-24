@@ -7,7 +7,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="Claudepot" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<link rel="apple-touch-icon" href="/icon.svg" />
+<!-- iOS reads `apple-touch-icon` and accepts PNG ONLY. Pointed at an
+     SVG it ignores the tag entirely and generates a tile from the first
+     letter of the title instead — which is why adding this panel to an
+     iPhone home screen produced a plain "C" on a white square. The SVG
+     stays as the favicon below, where it is the better format. -->
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
 <title>Claudepot</title>
 </head>
 <body>
