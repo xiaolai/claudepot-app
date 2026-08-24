@@ -18,6 +18,8 @@ import { useTranslation } from "react-i18next";
 import { quickPromptApi } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { IconButton } from "../../components/primitives/IconButton";
+import { Input } from "../../components/primitives/Input";
+import { Textarea } from "../../components/primitives/Textarea";
 import { NF } from "../../icons";
 import {
   QUICK_PROMPT_MAX_COUNT,
@@ -123,18 +125,22 @@ export function QuickPromptsPane({
       {draft.map((p, i) => (
         <div key={p.id} className="qp-row">
           <div className="qp-fields">
-            <input
+            {/* The primitives, not bare elements. `tokens.css` gives
+                `input, textarea` only `font` and `color`, so these two
+                used to render with the user-agent border — a 2px inset
+                bevel and a 1px grey rule — in the same pane as fields
+                that went through `Input`. */}
+            <Input
               aria-label={t("quickPrompts.name")}
               placeholder={t("quickPrompts.namePlaceholder")}
               value={p.name}
               maxLength={QUICK_PROMPT_MAX_NAME}
               onChange={(e) => update(i, { name: e.target.value })}
             />
-            <textarea
+            <Textarea
               aria-label={t("quickPrompts.text")}
               placeholder={t("quickPrompts.textPlaceholder")}
               value={p.text}
-              rows={2}
               maxLength={QUICK_PROMPT_MAX_TEXT}
               onChange={(e) => update(i, { text: e.target.value })}
             />

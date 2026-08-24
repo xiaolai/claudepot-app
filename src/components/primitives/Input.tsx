@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
+import { fieldControl, fieldShell } from "./fieldChrome";
 
 /**
  * Everything a native `<input>` takes, minus the two the wrapper owns.
@@ -79,21 +80,7 @@ export function Input({
   const generatedId = useId();
   const inputId = id ?? generatedId;
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--sp-8)",
-        height: "var(--input-height)",
-        padding: "0 var(--sp-10)",
-        background: "var(--bg-raised)",
-        border: `var(--bw-hair) solid ${focused ? "var(--accent-border)" : "var(--line)"}`,
-        borderRadius: "var(--r-2)",
-        transition: "border-color var(--dur-fast) var(--ease-linear)",
-        opacity: rest.disabled ? "var(--opacity-dimmed)" : 1,
-        ...style,
-      }}
-    >
+    <div style={{ ...fieldShell({ focused, disabled: rest.disabled }), ...style }}>
       {glyph && (
         // Clicking the icon focuses the field, which is what the old
         // `<label>` wrapper gave for free. `onMouseDown` rather than
@@ -125,15 +112,7 @@ export function Input({
           setFocused(false);
           onBlur?.(e);
         }}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          border: "none",
-          outline: "none",
-          background: "transparent",
-          fontSize: "var(--fs-sm)",
-          color: "var(--fg)",
-        }}
+        style={fieldControl()}
       />
       {suffix}
     </div>

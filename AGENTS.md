@@ -115,8 +115,41 @@ Three details it needs to be honest:
 
 A class that exists only to be queried by a test is a `data-testid`, not
 a class — `MarkdownRenderer`'s `md-link` was the one such case and now
-says so. `pnpm check:classes:self-test` forces a failure so the guard is
-known to fire.
+says so.
+
+**The same script's second half asks whether a text field draws chrome
+at all.** `tokens.css` gives `input, textarea` only `font` and `color` —
+no border reset, no background, no radius — so a bare one renders with
+the user-agent border, which in WebKit is a 2px INSET bevel on an input
+and a 1px grey rule on a textarea. `QuickPromptsPane` had one of each,
+six inches from fields that went through `Input`. The panel hit this
+independently; `panel/src/controls.css` records the same measurement.
+
+The fix is `primitives/fieldChrome.ts`, which `Input` and the new
+`Textarea` both read. Copying `Input`'s style block would have fixed the
+pixels and left two chromes to drift. A **global** `input, textarea`
+rule is the obvious alternative and the wrong one: `Input` paints a
+WRAPPER and clears the inner element inline, so a global border would sit
+inside the first.
+
+Getting the check itself right took three passes, and each wrong version
+looked fine:
+
+- Written as a Vitest assertion first, reading CSS through `?raw` —
+  which Vite stubs to an empty string under Vitest. 21 files, 20 total
+  characters, every class reported undefined, and it could never have
+  passed. Hence the refusal below 100 defined / 100 used.
+- The class half filtered to `remote-*`, so renaming a class to
+  `pane-list` walked straight around it. Prefix-free now.
+- The field half scanned to the first `>`, which in JSX is the arrow in
+  `onChange={(e) => …}` — so it never reached `style=` and reported **70**
+  false positives. It is brace- and string-aware now, and
+  `checkbox`/`radio`/`file` are exempt because their chrome IS the UA's.
+
+After all three, the repo has zero of either. Verified by reverting the
+`QuickPromptsPane` fix and watching the gate name exactly those two
+fields. `pnpm check:classes:self-test` forces both halves to fail so the
+guard is known to be able to.
 
 **The wide pass declares a width, and that is the whole trick.** jsdom
 has no layout, so a real `ResizeObserver` measurement is always zero and

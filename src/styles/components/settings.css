@@ -280,10 +280,6 @@
   flex-direction: column;
   gap: var(--sp-4);
 }
-.qp-fields textarea {
-  resize: vertical;
-  min-height: calc(var(--sp-8) * 3);
-}
 .qp-actions {
   display: flex;
   gap: var(--sp-2);
