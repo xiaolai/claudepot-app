@@ -372,6 +372,7 @@
       "atPath": " at ",
       "lifetimesNote": "These are two separate facts with different lifetimes — the live documentation already lists variables absent from any given build — so neither date describes the other.",
       "officialReference": "Official reference"
-    }
+    },
+    "blockedEnvOnly": "Claude Code reads this only from the environment you start `claude` from, never from a settings file. A value written here would be saved and then ignored. Set it in your shell instead."
   }
 }

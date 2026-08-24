@@ -7,14 +7,20 @@
 import { Trans, useTranslation } from "react-i18next";
 import { Glyph } from "../../../components/primitives";
 import { NF } from "../../../icons";
-import type { EnvVarState } from "../../../types/ccEnv";
+import type { Blocked, EnvVarState } from "../../../types/ccEnv";
 import { EnvVarControl, type ControlHandlers } from "./EnvVarControl";
 import { hasUnnamedHazard, hazardWarning, namedHazards } from "./hazards";
 
+// Every `Blocked` variant needs an entry. `satisfies Record<Blocked, string>`
+// makes a new variant a compile error here rather than a row that renders a
+// raw key — the row is the only place the reason is explained, so a missing
+// one leaves a read-only field with no stated reason, which
+// `.claude/rules/design.md` calls out by name.
 const BLOCKED_TEXT_KEYS = {
   bootstrap_split_brain: "envvars.blockedBootstrap",
   host_injected: "envvars.blockedHostInjected",
-} as const;
+  env_only_not_settings: "envvars.blockedEnvOnly",
+} as const satisfies Record<Blocked, string>;
 
 export function EnvVarRow({
   state,

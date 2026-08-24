@@ -87,6 +87,16 @@ pub enum Blocked {
     /// user-set. Rendered read-only rather than hidden, so a hand-set key is
     /// never invisible in a pane that claims to show env config.
     HostInjected,
+    /// Claude Code reads it **only** from the process environment `claude`
+    /// was started with, and explicitly not from a settings `env` block —
+    /// which is the only block this pane writes.
+    ///
+    /// So the variable is perfectly real and perfectly settable; it just
+    /// cannot be set *here*. Writing it would land the key in
+    /// `settings.json`, report success, and change nothing — the same silent
+    /// no-op as writing a `cleanupPeriodDays` value CC rejects. The pane
+    /// shows it read-only and says where it does work.
+    EnvOnlyNotSettings,
 }
 
 /// Independent safety attributes — deliberately **not** exclusive tiers.
@@ -483,6 +493,31 @@ mod tests {
         let sid = lookup("CLAUDE_CODE_SESSION_ID").unwrap();
         assert_eq!(sid.safety.blocked_reason, Some(Blocked::HostInjected));
         assert!(!sid.is_editable());
+
+        // #88. CC 2.1.234 added this one, and its docs say CC "reads it
+        // only from the environment you start `claude` from, never from a
+        // settings file `env` block" — which is the only block this pane
+        // writes. Editable, it would save the key and change nothing.
+        let pdn = lookup("CLAUDE_CODE_PROJECT_DIR_NAME").unwrap();
+        assert_eq!(
+            pdn.safety.blocked_reason,
+            Some(Blocked::EnvOnlyNotSettings),
+            "a variable CC ignores from settings must not render as a field"
+        );
+        assert!(!pdn.is_editable());
+
+        // The other var 2.1.234 added is an ordinary editable number.
+        let goal = lookup("CLAUDE_CODE_GOAL_CHECKIN_MINUTES").unwrap();
+        assert_eq!(goal.safety.blocked_reason, None);
+        assert!(goal.is_editable());
+        assert_eq!(goal.default, "30", "documented default");
+
+        // And the credential 2.1.241's docs added is both host-injected
+        // and secret — the name-shaped-like-a-credential auditor in
+        // `build-cc-env-spec.py` refuses to build until it is adjudicated.
+        let tok = lookup("CLAUDE_CODE_MESSAGING_TOKEN").unwrap();
+        assert!(tok.safety.secret, "it is the peer-messaging peerToken");
+        assert_eq!(tok.safety.blocked_reason, Some(Blocked::HostInjected));
         assert!(lookup("MAX_THINKING_TOKENS").unwrap().is_editable());
     }
 

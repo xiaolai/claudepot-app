@@ -1,7 +1,9 @@
 {
- "binary_crosscheck_version": "2.1.220",
+ "binary_crosscheck_version": "2.1.241",
  "binary_env_names": [
+  "ANTHROPIC_API_HOST",
   "ANTHROPIC_API_KEY",
+  "ANTHROPIC_ASSETS_HOST",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_AWS_API_KEY",
   "ANTHROPIC_AWS_BASE_URL",
@@ -9,6 +11,7 @@
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_BEDROCK_BASE_URL",
   "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+  "ANTHROPIC_BEDROCK_REGION_PREFIX",
   "ANTHROPIC_BEDROCK_SERVICE_TIER",
   "ANTHROPIC_BETAS",
   "ANTHROPIC_CONFIG_DIR",
@@ -25,6 +28,7 @@
   "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_DEFAULT_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
   "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
@@ -45,6 +49,7 @@
   "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
   "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
   "ANTHROPIC_IDENTITY_TOKEN",
+  "ANTHROPIC_IDENTITY_TOKENP",
   "ANTHROPIC_IDENTITY_TOKEN_FILE",
   "ANTHROPIC_LOG",
   "ANTHROPIC_MODEL",
@@ -55,12 +60,15 @@
   "ANTHROPIC_SESSION_ID",
   "ANTHROPIC_SMALL_FAST_MODEL",
   "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+  "ANTHROPIC_TELEMETRY_GROUP",
+  "ANTHROPIC_TIER_NAMES",
   "ANTHROPIC_UNIX_SOCKET",
   "ANTHROPIC_VERTEX_BASE_URL",
   "ANTHROPIC_VERTEX_PROJECT_ID",
   "ANTHROPIC_WEBHOOK_SIGNING_KEY",
   "ANTHROPIC_WORKSPACE_ID",
   "ANTHROPIC_WORK_ID",
+  "ANTHROPIC_WORK_SECRET",
   "API_FORCE_IDLE_TIMEOUT",
   "API_TIMEOUT_MS",
   "AWS_BEARER_TOKEN_BEDROCK",
@@ -76,8 +84,11 @@
   "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS",
   "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
   "CLAUDE_AUTO_BACKGROUND_TASKS",
+  "CLAUDE_AX_PREPARK_MS",
   "CLAUDE_AX_SCREEN_READER",
+  "CLAUDE_AX_STARTUP_QUIET_MS",
   "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
+  "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS",
   "CLAUDE_CLIENT_PRESENCE_FILE",
   "CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT",
   "CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT",
@@ -88,6 +99,7 @@
   "CLAUDE_CODE_ACT_DONT_REDERIVE",
   "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD",
   "CLAUDE_CODE_ADDITIONAL_PROTECTION",
+  "CLAUDE_CODE_ADOPT_UNDERIVABLE_PARKED_PERMISSION",
   "CLAUDE_CODE_AGENT",
   "CLAUDE_CODE_AGENT_PROXY_GH_SHIM",
   "CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG",
@@ -102,16 +114,31 @@
   "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
   "CLAUDE_CODE_ARTIFACT",
   "CLAUDE_CODE_ARTIFACTS_API_BASE_URL",
+  "CLAUDE_CODE_ARTIFACTS_API_TOKEN",
+  "CLAUDE_CODE_ARTIFACT_ASSETS",
+  "CLAUDE_CODE_ARTIFACT_ASSET_BASE_URL",
   "CLAUDE_CODE_ARTIFACT_AUTO_OPEN",
-  "CLAUDE_CODE_ARTIFACT_DIRECT_UPLOAD",
+  "CLAUDE_CODE_ARTIFACT_COMMENTS",
+  "CLAUDE_CODE_ARTIFACT_COMMENTS_AUTOREACT",
+  "CLAUDE_CODE_ARTIFACT_COMMENT_FAST_ACK",
+  "CLAUDE_CODE_ARTIFACT_COMMENT_FAST_ACK_FIXED",
+  "CLAUDE_CODE_ARTIFACT_COMMENT_RESPONDER",
+  "CLAUDE_CODE_ARTIFACT_DB",
+  "CLAUDE_CODE_ARTIFACT_DELETE",
+  "CLAUDE_CODE_ARTIFACT_LIVE_BASE_URL",
   "CLAUDE_CODE_ARTIFACT_MCP",
+  "CLAUDE_CODE_ARTIFACT_ROOM",
+  "CLAUDE_CODE_ARTIFACT_SYNC_BASE_URL",
+  "CLAUDE_CODE_ARTIFACT_TYPES",
+  "CLAUDE_CODE_ARTIFACT_VERIFY",
+  "CLAUDE_CODE_ARTIFACT_VIEWER_BASE_URL",
   "CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
   "CLAUDE_CODE_ATTRIBUTION_HEADER",
   "CLAUDE_CODE_AUTH_FAIL_EXIT_MS",
   "CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS",
   "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
   "CLAUDE_CODE_AUTO_CONNECT_IDE",
-  "CLAUDE_CODE_AUTO_MODE_CLASSIFIER_QUEUE",
+  "CLAUDE_CODE_AUTO_MODE_CLASSIFY_ASK_USER_QUESTION",
   "CLAUDE_CODE_AUTO_MODE_CLASSIFY_EDITS",
   "CLAUDE_CODE_AUTO_MODE_EDIT_REMOVAL",
   "CLAUDE_CODE_AUTO_MODE_EDIT_REMOVAL_CAP",
@@ -123,18 +150,20 @@
   "CLAUDE_CODE_AUTO_MODE_OUTCOME_CODES",
   "CLAUDE_CODE_AUTO_MODE_PRIOR_ASSISTANT_CONTEXT",
   "CLAUDE_CODE_AUTO_MODE_REPO_VISIBILITY",
-  "CLAUDE_CODE_AUTO_MODE_SIBLING_CONTEXT",
   "CLAUDE_CODE_AUTO_MODE_TEMPERATURE",
   "CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS",
   "CLAUDE_CODE_BASALT_COVE",
   "CLAUDE_CODE_BASE_REF",
   "CLAUDE_CODE_BASE_REFS",
+  "CLAUDE_CODE_BASH_OUTPUT_AUDIENCE_NOTE",
   "CLAUDE_CODE_BASH_SANDBOX_SHOW_INDICATOR",
   "CLAUDE_CODE_BENCH_LIVE_COUNTS",
   "CLAUDE_CODE_BG_CLASSIFIER_MODEL",
   "CLAUDE_CODE_BG_TASKS_REPORT_RUNNING",
   "CLAUDE_CODE_BISON_CAIRN",
   "CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE",
+  "CLAUDE_CODE_BRIDGE_MCP_CARRIER",
+  "CLAUDE_CODE_BRIDGE_PROMPT_SHA256",
   "CLAUDE_CODE_BRIDGE_SESSION_ID",
   "CLAUDE_CODE_BRIEF",
   "CLAUDE_CODE_BRIEF_UPLOAD",
@@ -148,11 +177,11 @@
   "CLAUDE_CODE_CLIENT_KEY",
   "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
   "CLAUDE_CODE_COLD_COMPACT",
-  "CLAUDE_CODE_COMMIT_LOG",
   "CLAUDE_CODE_CONTAINER_ID",
   "CLAUDE_CODE_COORDINATOR_EXTRA_TOOLS",
   "CLAUDE_CODE_COORDINATOR_MODE",
   "CLAUDE_CODE_COORDINATOR_PROPAGATE_NESTED_MEMORY",
+  "CLAUDE_CODE_COWORK_FRAME_ARTIFACTS",
   "CLAUDE_CODE_CUSTOM_OAUTH_URL",
   "CLAUDE_CODE_DAEMON_COLD_START",
   "CLAUDE_CODE_DATADOG_FLUSH_INTERVAL_MS",
@@ -164,8 +193,13 @@
   "CLAUDE_CODE_DESIGN_OAUTH_CLIENT_ID",
   "CLAUDE_CODE_DEV_RAW_CHANGELOG_URL",
   "CLAUDE_CODE_DIAGNOSTICS_FILE",
+  "CLAUDE_CODE_DIR_SYNC_ARCHIVE",
+  "CLAUDE_CODE_DIR_SYNC_DISABLE_ANCHORING",
+  "CLAUDE_CODE_DIR_SYNC_GIT",
+  "CLAUDE_CODE_DIR_SYNC_OVERLAY",
   "CLAUDE_CODE_DISABLE_1M_CONTEXT",
   "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
+  "CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION",
   "CLAUDE_CODE_DISABLE_ADVISOR_TOOL",
   "CLAUDE_CODE_DISABLE_AGENT_VIEW",
   "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN",
@@ -173,6 +207,7 @@
   "CLAUDE_CODE_DISABLE_ATTACHMENTS",
   "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
   "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
+  "CLAUDE_CODE_DISABLE_BEDROCK_CONTENT_TYPE_DEFAULT",
   "CLAUDE_CODE_DISABLE_BEDROCK_CONTENT_TYPE_GUARD",
   "CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF",
   "CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP",
@@ -181,6 +216,7 @@
   "CLAUDE_CODE_DISABLE_CLAUDE_CODE_SKILL",
   "CLAUDE_CODE_DISABLE_CLAUDE_MDS",
   "CLAUDE_CODE_DISABLE_CRON",
+  "CLAUDE_CODE_DISABLE_DIR_SYNC",
   "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
   "CLAUDE_CODE_DISABLE_EXPLORE_INHERIT_CAP",
   "CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS",
@@ -188,6 +224,7 @@
   "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
   "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING",
   "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",
+  "CLAUDE_CODE_DISABLE_HOOK_FORWARDING",
   "CLAUDE_CODE_DISABLE_LAUNCH_COMPOSER",
   "CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP",
   "CLAUDE_CODE_DISABLE_MEMORY_BULK_INFLATE",
@@ -196,18 +233,24 @@
   "CLAUDE_CODE_DISABLE_MEMORY_STREAM_LIST",
   "CLAUDE_CODE_DISABLE_MOUSE",
   "CLAUDE_CODE_DISABLE_MOUSE_CLICKS",
+  "CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION",
   "CLAUDE_CODE_DISABLE_NESTED_CHAIN_IDLE",
+  "CLAUDE_CODE_DISABLE_NESTED_USER_REPAIR",
   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
   "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
   "CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK",
   "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL",
   "CLAUDE_CODE_DISABLE_ORG_MEMORY",
+  "CLAUDE_CODE_DISABLE_PERMISSION_PROMPT_NOTIFY_HOOKS",
+  "CLAUDE_CODE_DISABLE_PLUGIN_FORWARDING",
   "CLAUDE_CODE_DISABLE_POLICY_SKILLS",
   "CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP",
   "CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK",
   "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
   "CLAUDE_CODE_DISABLE_THINKING",
+  "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT",
   "CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL",
+  "CLAUDE_CODE_DISABLE_VITALS_EMITTER",
   "CLAUDE_CODE_DISABLE_WORKFLOWS",
   "CLAUDE_CODE_DISABLE_WORKING_SYNC",
   "CLAUDE_CODE_DISPATCH_V2S",
@@ -229,6 +272,7 @@
   "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
   "CLAUDE_CODE_ENABLE_LAUNCH_COMPOSER",
   "CLAUDE_CODE_ENABLE_MENU_KIND_LANES",
+  "CLAUDE_CODE_ENABLE_NARRATION",
   "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION",
   "CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER",
   "CLAUDE_CODE_ENABLE_REFRESH_MCP_TOOLS",
@@ -236,12 +280,17 @@
   "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
   "CLAUDE_CODE_ENABLE_TASKS",
   "CLAUDE_CODE_ENABLE_TELEMETRY",
+  "CLAUDE_CODE_ENABLE_TODO_TOOLS",
   "CLAUDE_CODE_ENABLE_TOKEN_USAGE_ATTACHMENT",
   "CLAUDE_CODE_ENABLE_XAA",
   "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
   "CLAUDE_CODE_ENTRYPOINT",
   "CLAUDE_CODE_ENVIRONMENT_KIND",
   "CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION",
+  "CLAUDE_CODE_EVAL_ALLOW_ARTIFACT_PUBLISH",
+  "CLAUDE_CODE_EVAL_ALLOW_FLAG_OVERRIDES",
+  "CLAUDE_CODE_EVAL_ARTIFACT_STUB_DIR",
+  "CLAUDE_CODE_EVAL_INTERVIEW_SESSION",
   "CLAUDE_CODE_EXECPATH",
   "CLAUDE_CODE_EXIT_AFTER_FIRST_RENDER",
   "CLAUDE_CODE_EXIT_AFTER_STOP_DELAY",
@@ -249,7 +298,6 @@
   "CLAUDE_CODE_EXPERIMENTAL_OBSERVER_AGENTS",
   "CLAUDE_CODE_EXTRA_BODY",
   "CLAUDE_CODE_EXTRA_METADATA",
-  "CLAUDE_CODE_FABLE_BRIDGE_DIALOG_TIMEOUT_MS",
   "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS",
   "CLAUDE_CODE_FLEETVIEW_SIMPLE",
   "CLAUDE_CODE_FLEET_PAST_SESSIONS",
@@ -278,18 +326,26 @@
   "CLAUDE_CODE_GLOB_HIDDEN",
   "CLAUDE_CODE_GLOB_NO_IGNORE",
   "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS",
+  "CLAUDE_CODE_GOAL_CHECKIN_MINUTES",
   "CLAUDE_CODE_GORSE_PLOVER",
   "CLAUDE_CODE_GZIP_REQUEST_BODIES",
-  "CLAUDE_CODE_HERON_TALLOW",
+  "CLAUDE_CODE_HARBOR_KITE",
+  "CLAUDE_CODE_HARBOR_KITE_CLOUD",
+  "CLAUDE_CODE_HARBOR_KITE_PACING_OFF",
   "CLAUDE_CODE_HFI_BEARER_TOKEN",
   "CLAUDE_CODE_HIDE_CWD",
   "CLAUDE_CODE_HIDE_SETTINGS_HINT",
+  "CLAUDE_CODE_HOLD_REPORT_PARK_AT_INIT",
+  "CLAUDE_CODE_HOLD_UNANSWERED_PARKED_PERMISSION",
+  "CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS",
+  "CLAUDE_CODE_HOME_SEED_VERDICT_TIMEOUT_MS",
   "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
   "CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS",
   "CLAUDE_CODE_HOST_CREDS_FILE",
   "CLAUDE_CODE_HOST_HTTP_PROXY_PORT",
   "CLAUDE_CODE_HOST_PLATFORM",
   "CLAUDE_CODE_HOST_SOCKS_PROXY_PORT",
+  "CLAUDE_CODE_HOVER_REST",
   "CLAUDE_CODE_HTTPS_PROXY",
   "CLAUDE_CODE_HTTP_PROXY",
   "CLAUDE_CODE_IDE_HOST_OVERRIDE",
@@ -298,7 +354,7 @@
   "CLAUDE_CODE_IDLE_THRESHOLD_MINUTES",
   "CLAUDE_CODE_IDLE_TOKEN_THRESHOLD",
   "CLAUDE_CODE_INCLUDE_PARTIAL_MESSAGES",
-  "CLAUDE_CODE_INVESTIGATE_FIRST",
+  "CLAUDE_CODE_INTRO_FRAME",
   "CLAUDE_CODE_INVOKED_SKILLS",
   "CLAUDE_CODE_IS_COWORK",
   "CLAUDE_CODE_JSONL_TRANSCRIPT",
@@ -309,7 +365,8 @@
   "CLAUDE_CODE_LOOP_KEEPALIVE",
   "CLAUDE_CODE_LOOP_PERSISTENT",
   "CLAUDE_CODE_MANAGED_SETTINGS_PATH",
-  "CLAUDE_CODE_MARL_CORMORANT",
+  "CLAUDE_CODE_MARKETPLACE_NAME",
+  "CLAUDE_CODE_MARKETPLACE_URL",
   "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
   "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
   "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
@@ -321,10 +378,15 @@
   "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION",
   "CLAUDE_CODE_MCP_ALLOWLIST_ENV",
   "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",
+  "CLAUDE_CODE_MCP_MEMORY_CGROUP",
   "CLAUDE_CODE_MCP_SERVER_NAME",
   "CLAUDE_CODE_MCP_SERVER_URL",
   "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT",
+  "CLAUDE_CODE_MEMORY_API_BASE_URL",
+  "CLAUDE_CODE_MEMORY_API_TOKEN",
   "CLAUDE_CODE_MEMORY_PUSH_DELETE_MODE",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_CODE_MOCK_REMOTE_SETTINGS",
   "CLAUDE_CODE_MOCK_TRIAL",
   "CLAUDE_CODE_NANKEEN_KESTREL",
@@ -346,7 +408,9 @@
   "CLAUDE_CODE_OTEL_SHUTDOWN_TIMEOUT_MS",
   "CLAUDE_CODE_OVERRIDE_DATE",
   "CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE",
+  "CLAUDE_CODE_PARCHMENT_FERN",
   "CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS",
+  "CLAUDE_CODE_PARKED_STOP_RETIRES",
   "CLAUDE_CODE_PERFETTO_TRACE",
   "CLAUDE_CODE_PERFETTO_WRITE_INTERVAL_S",
   "CLAUDE_CODE_PERFORCE_MODE",
@@ -355,21 +419,27 @@
   "CLAUDE_CODE_PLAN_MODE_REQUIRED",
   "CLAUDE_CODE_PLAN_V2_AGENT_COUNT",
   "CLAUDE_CODE_PLAN_V2_EXPLORE_AGENT_COUNT",
+  "CLAUDE_CODE_PLUGIN_ARCHIVE_URL",
   "CLAUDE_CODE_PLUGIN_BINARY_ASSETS",
   "CLAUDE_CODE_PLUGIN_CACHE_DIR",
   "CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS",
   "CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE",
+  "CLAUDE_CODE_PLUGIN_NAME",
   "CLAUDE_CODE_PLUGIN_PREFER_HTTPS",
   "CLAUDE_CODE_PLUGIN_SEED_DIR",
   "CLAUDE_CODE_PLUGIN_USE_ZIP_CACHE",
-  "CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2",
+  "CLAUDE_CODE_POLICY_HELPER_PS1_PATH",
+  "CLAUDE_CODE_POLICY_HELPER_PSMODULEPATH",
+  "CLAUDE_CODE_POLL_EVENTS",
   "CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY",
   "CLAUDE_CODE_POWERUP_ONBOARDING",
   "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS",
+  "CLAUDE_CODE_PRINT_ENGINE_LOOP",
   "CLAUDE_CODE_PROACTIVE",
   "CLAUDE_CODE_PROCESS_WRAPPER",
   "CLAUDE_CODE_PROFILE_QUERY",
   "CLAUDE_CODE_PROFILE_STARTUP",
+  "CLAUDE_CODE_PROJECT_DIR_NAME",
   "CLAUDE_CODE_PROPAGATE_TRACEPARENT",
   "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
   "CLAUDE_CODE_PROXY_AUTHENTICATE",
@@ -383,6 +453,7 @@
   "CLAUDE_CODE_RC_PERMISSION_NUDGE",
   "CLAUDE_CODE_REFUSAL_FALLBACK_CATCH_ALL",
   "CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE",
+  "CLAUDE_CODE_RELAUNCH_TERMINAL_SIZEYU",
   "CLAUDE_CODE_REMOTE",
   "CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE",
   "CLAUDE_CODE_REMOTE_HERMETIC_MODE",
@@ -391,6 +462,7 @@
   "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES",
   "CLAUDE_CODE_REMOTE_SESSION_ID",
   "CLAUDE_CODE_REMOTE_SESSION_ORIGIN",
+  "CLAUDE_CODE_REMOTE_SESSION_UUID",
   "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
   "CLAUDE_CODE_REMOTE_SETTINGS_POLL_MS",
   "CLAUDE_CODE_REPL",
@@ -403,7 +475,9 @@
   "CLAUDE_CODE_RESUME_SOURCE_ALIVE",
   "CLAUDE_CODE_RESUME_THRESHOLD_MINUTES",
   "CLAUDE_CODE_RESUME_TOKEN_THRESHOLD",
+  "CLAUDE_CODE_RETIRE_UNANSWERED_PARKED_PERMISSION",
   "CLAUDE_CODE_RETRY_WATCHDOG",
+  "CLAUDE_CODE_SABLE_THRUSH",
   "CLAUDE_CODE_SAFE_MODE",
   "CLAUDE_CODE_SANDBOXED",
   "CLAUDE_CODE_SCRIPT_CAPS",
@@ -419,10 +493,14 @@
   "CLAUDE_CODE_SESSION_NAME",
   "CLAUDE_CODE_SHELL",
   "CLAUDE_CODE_SHELL_PREFIX",
+  "CLAUDE_CODE_SILENT_TURN_REMINDER",
+  "CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT",
+  "CLAUDE_CODE_SILENT_TURN_REMINDER_TURNS",
   "CLAUDE_CODE_SIMPLE",
   "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
   "CLAUDE_CODE_SIMULATE_PROXY_USAGE",
   "CLAUDE_CODE_SKILL_NAME",
+  "CLAUDE_CODE_SKILL_PROPOSALS",
   "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
   "CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH",
   "CLAUDE_CODE_SKIP_AWS_CRED_CACHE",
@@ -438,6 +516,7 @@
   "CLAUDE_CODE_SKIP_PROMPT_HISTORY",
   "CLAUDE_CODE_SKIP_REPO_UPLOAD",
   "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+  "CLAUDE_CODE_SLACK_TAG_TOKEN",
   "CLAUDE_CODE_SLOW_OPERATION_THRESHOLD_MS",
   "CLAUDE_CODE_SPAWN_TIMESTAMP_MS",
   "CLAUDE_CODE_SSE_PORT",
@@ -470,30 +549,39 @@
   "CLAUDE_CODE_TEE_SDK_STDOUT",
   "CLAUDE_CODE_TERMINAL_MCP_TOOLS",
   "CLAUDE_CODE_TERMINAL_RECORDING",
+  "CLAUDE_CODE_TEST_ALLOW_REAL_NETWORK",
   "CLAUDE_CODE_TEST_FIXTURES_ROOT",
   "CLAUDE_CODE_TEST_FORCE_DENY",
   "CLAUDE_CODE_TEST_NO_GIT_BASH",
   "CLAUDE_CODE_TEST_NO_PWSH",
+  "CLAUDE_CODE_THINKING_DISPLAY_UPDATES",
   "CLAUDE_CODE_THISTLE_GREBE",
+  "CLAUDE_CODE_THRIFTY_SONIC",
   "CLAUDE_CODE_TMPDIR",
   "CLAUDE_CODE_TMUX_PREFIX",
   "CLAUDE_CODE_TMUX_PREFIX_CONFLICTS",
   "CLAUDE_CODE_TMUX_SESSION",
   "CLAUDE_CODE_TMUX_TRUECOLOR",
+  "CLAUDE_CODE_TOASTY_THIMBLE",
   "CLAUDE_CODE_TODO_REMINDER_MODE",
+  "CLAUDE_CODE_TOOL_MEMORY_LIMIT",
   "CLAUDE_CODE_TOTAL_TOKENS_REMINDER",
   "CLAUDE_CODE_TOTAL_TOKENS_REMINDER_AFTER_USER_TURN",
   "CLAUDE_CODE_TOTAL_TOKENS_REMINDER_BUDGET",
   "CLAUDE_CODE_TRANSCRIPT_LOCAL_GC",
   "CLAUDE_CODE_TRIGGER_ID",
   "CLAUDE_CODE_TUI_JUST_SWITCHED",
+  "CLAUDE_CODE_TUI_TRIAL",
+  "CLAUDE_CODE_TURN_UPDATES",
   "CLAUDE_CODE_TWO_STAGE_CLASSIFIER",
   "CLAUDE_CODE_ULTRAREVIEW_PREFLIGHT_FIXTURE",
+  "CLAUDE_CODE_ULTRAREVIEW_QUOTA_FIXTURE",
   "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS",
   "CLAUDE_CODE_USER_EMAIL",
   "CLAUDE_CODE_USE_ANTHROPIC_AWS",
   "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
   "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_CCR_V2",
   "CLAUDE_CODE_USE_COWORK_PLUGINS",
   "CLAUDE_CODE_USE_FOUNDRY",
   "CLAUDE_CODE_USE_GATEWAY",
@@ -504,11 +592,14 @@
   "CLAUDE_CODE_VERSION",
   "CLAUDE_CODE_VOICE_FORWARD_INTERIMS_TYPED",
   "CLAUDE_CODE_WALNUT_SPIRE",
+  "CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS",
   "CLAUDE_CODE_WEBFETCH_USE_CCR_PROXY",
   "CLAUDE_CODE_WEBSEARCH_USE_CCR_PROXY",
   "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+  "CLAUDE_CODE_WEB_FETCH_AGENT",
   "CLAUDE_CODE_WORKER_EPOCH",
   "CLAUDE_CODE_WORKFLOWS",
+  "CLAUDE_CODE_WORKFLOW_PREFIX_STAGGER_MS",
   "CLAUDE_CODE_WORKFLOW_SIZE_WARNING_AGENTS",
   "CLAUDE_CODE_WORKFLOW_SIZE_WARNING_TOKENS",
   "CLAUDE_CODE_WORKSPACE_HOST_PATHS",
@@ -522,6 +613,7 @@
   "CLAUDE_PID",
   "CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX",
   "CLAUDE_STREAM_IDLE_TIMEOUT_MS",
+  "CLAUDE_SUBAGENT_BG_SHELL_MAX_MS",
   "DEBUG",
   "DISABLE_AUTOUPDATER",
   "DISABLE_AUTO_COMPACT",
@@ -563,8 +655,14 @@
   "MCP_CLIENT_SECRET",
   "MCP_CONNECTION_NONBLOCKING",
   "MCP_CONNECT_TIMEOUT_MS",
+  "MCP_DISCOVERY_CACHE",
+  "MCP_DISCOVERY_CACHE_MAX_STALE_S",
+  "MCP_DISCOVERY_CACHE_STRIKES",
+  "MCP_DISCOVERY_CACHE_TTL_S",
   "MCP_OAUTH_CALLBACK_PORT",
+  "MCP_PROTOCOL_NEGOTIATION",
   "MCP_REMOTE_SERVER_CONNECTION_BATCH_SIZE",
+  "MCP_SDK_GENERATION",
   "MCP_SERVER_CONNECTION_BATCH_SIZE",
   "MCP_TIMEOUT",
   "MCP_TOOL_TIMEOUT",
@@ -725,8 +823,8 @@
   "VERTEX_REGION_CLAUDE_HAIKU_4_5"
  ],
  "cc_source_read_at": "2026-04-01",
- "docs_fetched_at": "2026-07-28",
- "docs_sha256": "4f4ff60363aee08ccb03bf8aa37f58d986cd4470d777a1669f9e054ce8930bf0",
+ "docs_fetched_at": "2026-08-24",
+ "docs_sha256": "a0355c4d410e46dfd5757bdce0966d99578d71d605ce7ef9804d7c103e865c28",
  "docs_url": "https://code.claude.com/docs/en/env-vars.md",
  "rows": [
   {
@@ -742,7 +840,7 @@
    "name": "ANTHROPIC_AWS_API_KEY"
   },
   {
-   "doc": "Override the [Claude Platform on AWS](/docs/en/claude-platform-on-aws) endpoint URL. Use for custom regions or when routing through an [LLM gateway](/docs/en/llm-gateway). Defaults to `https://aws-external-anthropic.{AWS_REGION}.api.aws`",
+   "doc": "Override the [Claude Platform on AWS](/docs/en/claude-platform-on-aws) endpoint URL. Use for custom regions or when routing through an [LLM gateway](/docs/en/llm-gateway). Defaults to `https://aws-external-anthropic.{region}.api.aws`. Claude Code resolves the region with the [same precedence as on Amazon Bedrock](/docs/en/amazon-bedrock#3-configure-claude-code)",
    "name": "ANTHROPIC_AWS_BASE_URL"
   },
   {
@@ -762,6 +860,10 @@
    "name": "ANTHROPIC_BEDROCK_MANTLE_BASE_URL"
   },
   {
+   "doc": "Cross-region inference profile prefix (`us`, `eu`, `apac`, `jp`, `au`, or `global`) Claude Code tries first instead of the one derived from the AWS region. Ignored in AWS GovCloud regions. Requires Claude Code v2.1.224 or later. See [Amazon Bedrock](/docs/en/amazon-bedrock#cross-region-inference-profile-prefixes)",
+   "name": "ANTHROPIC_BEDROCK_REGION_PREFIX"
+  },
+  {
    "doc": "Amazon Bedrock [service tier](https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html) (`default`, `flex`, or `priority`). Sent as the `X-Amzn-Bedrock-Service-Tier` header. See [Amazon Bedrock](/docs/en/amazon-bedrock#service-tiers)",
    "name": "ANTHROPIC_BEDROCK_SERVICE_TIER"
   },
@@ -770,7 +872,7 @@
    "name": "ANTHROPIC_BETAS"
   },
   {
-   "doc": "Custom headers to add to requests (`Name: Value` format, newline-separated for multiple headers)",
+   "doc": "Custom headers to add to requests (`Name: Value` format, newline-separated for multiple headers). If a name or value contains a character an HTTP header can't carry, such as a curly quote or a zero-width space, Claude Code fails the request with an error that identifies the pair by position. Requires Claude Code v2.1.227 or later. [Invalid request header value](/docs/en/errors#invalid-request-header-value) lists the exact character set and where the check runs",
    "name": "ANTHROPIC_CUSTOM_HEADERS"
   },
   {
@@ -786,72 +888,80 @@
    "name": "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Comma-separated list of [capabilities](/docs/en/model-config#customize-pinned-model-display-and-capabilities) the custom model supports, for example `effort,thinking`. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#environment-variables)",
+   "doc": "Model ID that the `fable` alias resolves to, and the ID Claude Code recognizes as Fable 5 for [automatic model fallback](/docs/en/model-config#automatic-model-fallback) on third-party providers. See [Model configuration](/docs/en/model-config#environment-variables)",
    "name": "ANTHROPIC_DEFAULT_FABLE_MODEL"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display description for the pinned Fable model in the `/model` picker. Defaults to `Custom Fable model` when not set. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display name for the pinned Fable model in the `/model` picker. Defaults to the model ID when not set. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Comma-separated list of [capabilities](/docs/en/model-config#customize-pinned-model-display-and-capabilities) the pinned Fable model supports, for example `effort,thinking`. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#environment-variables)",
+   "doc": "Model ID that the `haiku` alias resolves to, also used for [background functionality](/docs/en/costs#background-token-usage). See [Model configuration](/docs/en/model-config#environment-variables)",
    "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display description for the pinned Haiku model in the `/model` picker. Defaults to `Custom Haiku model` when not set. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display name for the pinned Haiku model in the `/model` picker. Defaults to the model ID when not set. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Comma-separated list of [capabilities](/docs/en/model-config#customize-pinned-model-display-and-capabilities) the pinned Haiku model supports, for example `effort,thinking`. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#environment-variables)",
+   "doc": "Model that new sessions start on by default. Requires Claude Code v2.1.236 or later. See [Set a default model for new sessions](/docs/en/model-config#set-a-default-model-for-new-sessions)",
+   "name": "ANTHROPIC_DEFAULT_MODEL"
+  },
+  {
+   "doc": "Model ID that the `opus` alias resolves to, and that `opusplan` uses while Plan Mode is active. See [Model configuration](/docs/en/model-config#environment-variables)",
    "name": "ANTHROPIC_DEFAULT_OPUS_MODEL"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display description for the pinned Opus model in the `/model` picker. When not set, defaults to `Custom Opus model`, or `Custom Opus model (1M context)` if the pinned model ID has the `[1m]` suffix and `CLAUDE_CODE_DISABLE_1M_CONTEXT` isn't turned on. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display name for the pinned Opus model in the `/model` picker. Defaults to the model ID when not set. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Comma-separated list of [capabilities](/docs/en/model-config#customize-pinned-model-display-and-capabilities) the pinned Opus model supports, for example `effort,thinking`. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#environment-variables)",
+   "doc": "Model ID that the `sonnet` alias resolves to, and that `opusplan` uses when Plan Mode is not active. See [Model configuration](/docs/en/model-config#environment-variables)",
    "name": "ANTHROPIC_DEFAULT_SONNET_MODEL"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display description for the pinned Sonnet model in the `/model` picker. When not set, defaults to `Custom Sonnet model`, or `Custom Sonnet model (1M context)` if the pinned model ID has the `[1m]` suffix and `CLAUDE_CODE_DISABLE_1M_CONTEXT` isn't turned on. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Display name for the pinned Sonnet model in the `/model` picker. Defaults to the model ID when not set. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
+   "doc": "Comma-separated list of [capabilities](/docs/en/model-config#customize-pinned-model-display-and-capabilities) the pinned Sonnet model supports, for example `effort,thinking`. See [Model configuration](/docs/en/model-config#customize-pinned-model-display-and-capabilities)",
    "name": "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES"
+  },
+  {
+   "doc": "Federation rule ID for [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation). When you set it together with `ANTHROPIC_ORGANIZATION_ID`, Claude Code selects federation credentials, which rank above your `/login` credential. See [authentication precedence](/docs/en/authentication#authentication-precedence)",
+   "name": "ANTHROPIC_FEDERATION_RULE_ID"
   },
   {
    "doc": "API key for Microsoft Foundry authentication (see [Microsoft Foundry](/docs/en/microsoft-foundry))",
@@ -874,6 +984,14 @@
    "name": "ANTHROPIC_MODEL"
   },
   {
+   "doc": "Organization ID for [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation). Set it together with `ANTHROPIC_FEDERATION_RULE_ID`. See [authentication precedence](/docs/en/authentication#authentication-precedence)",
+   "name": "ANTHROPIC_ORGANIZATION_ID"
+  },
+  {
+   "doc": "Name of the Anthropic profile to authenticate with, such as one created by [`ant auth login`](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/authentication). The named profile ranks above your `/login` credential. See [authentication precedence](/docs/en/authentication#authentication-precedence)",
+   "name": "ANTHROPIC_PROFILE"
+  },
+  {
    "doc": "\\[DEPRECATED] Name of [Haiku-class model for background tasks](/docs/en/costs)",
    "name": "ANTHROPIC_SMALL_FAST_MODEL"
   },
@@ -894,7 +1012,7 @@
    "name": "ANTHROPIC_WORKSPACE_ID"
   },
   {
-   "doc": "Override the 5-minute idle timeout that aborts a streaming model response when no bytes arrive. Set to `0` to disable the timeout, for example when a slow [gateway](/docs/en/llm-gateway) or local model pauses longer than 5 minutes between chunks. Set to `1` to keep the timeout on every provider. When unset, the timeout is inactive on direct Anthropic API and [Claude Platform on AWS](/docs/en/claude-platform-on-aws) connections, where Claude Code's own byte-level stream watchdog runs, and active on every other provider, including [Google Cloud's Agent Platform](/docs/en/google-vertex-ai), [Microsoft Foundry](/docs/en/microsoft-foundry), [Mantle](/docs/en/amazon-bedrock#use-the-mantle-endpoint), [Amazon Bedrock](/docs/en/amazon-bedrock), and gateway connections, so a stalled stream aborts instead of hanging. As of v2.1.169",
+   "doc": "Override the 5-minute body idle timeout that aborts a streaming model response when no bytes arrive. Set to `0` to turn the timeout off, for example when a slow [gateway](/docs/en/llm-gateway) or local model pauses longer than 5 minutes between chunks, or `1` to keep it on for every provider. When unset, the timeout is active on providers other than the direct Anthropic API and [Claude Platform on AWS](/docs/en/claude-platform-on-aws). The [stream watchdogs](/docs/en/network-config#streaming-idle-watchdogs) run independently of it and abort a long silent pause even when you set `0` here. Requires Claude Code v2.1.169 or later",
    "name": "API_FORCE_IDLE_TIMEOUT"
   },
   {
@@ -910,11 +1028,11 @@
    "name": "BASH_DEFAULT_TIMEOUT_MS"
   },
   {
-   "doc": "Maximum number of characters in bash outputs before the full output is saved to a file and Claude receives the path plus a short preview. See [Bash tool behavior](/docs/en/tools-reference#bash-tool-behavior)",
+   "doc": "Maximum number of characters of bash output that Claude Code reads back into a command's result (default: 30000; maximum: 150000). See [Output limits](/docs/en/tools-reference#output-limits)",
    "name": "BASH_MAX_OUTPUT_LENGTH"
   },
   {
-   "doc": "Maximum timeout the model can set for long-running bash commands (default: 600000, or 10 minutes)",
+   "doc": "Maximum timeout the model can set for long-running bash commands (default: 600000, or 10 minutes). The effective ceiling is the larger of this and `BASH_DEFAULT_TIMEOUT_MS`",
    "name": "BASH_MAX_TIMEOUT_MS"
   },
   {
@@ -926,15 +1044,15 @@
    "name": "CLAUDECODE"
   },
   {
-   "doc": "How many milliseconds before auto-continue the on-screen countdown appears on an unanswered [`AskUserQuestion`](/docs/en/tools-reference) dialog. Default `20000` (20 seconds), capped at the auto-continue timeout. Has no effect unless auto-continue is on; see the [`askUserQuestionTimeout`](/docs/en/settings#available-settings) setting and `CLAUDE_AFK_TIMEOUT_MS`. Requires Claude Code v2.1.198 or later",
+   "doc": "How many milliseconds before auto-continue the on-screen countdown appears on an unanswered [`AskUserQuestion`](/docs/en/tools-reference) dialog. Default `20000` (20 seconds), capped at the auto-continue timeout. Has no effect unless auto-continue is on; see the [`askUserQuestionTimeout`](/docs/en/settings-reference#askuserquestiontimeout) setting and `CLAUDE_AFK_TIMEOUT_MS`. Requires Claude Code v2.1.198 or later",
    "name": "CLAUDE_AFK_COUNTDOWN_MS"
   },
   {
-   "doc": "How many milliseconds of idle time before an unanswered [`AskUserQuestion`](/docs/en/tools-reference) dialog auto-continues without you. Auto-continue is off by default; opt in with the [`askUserQuestionTimeout`](/docs/en/settings#available-settings) setting. This variable is an override for demos and automated tests: when set, it takes precedence over that setting and turns auto-continue on even when the setting is unset or `never`. Setting `0` doesn't turn the timeout off; it closes the dialog immediately. In v2.1.198 and v2.1.199, auto-continue was on by default with a `60000` (60 seconds) timeout. Requires Claude Code v2.1.198 or later",
+   "doc": "How many milliseconds of idle time before an unanswered [`AskUserQuestion`](/docs/en/tools-reference) dialog auto-continues without you. Auto-continue is off by default; opt in with the [`askUserQuestionTimeout`](/docs/en/settings-reference#askuserquestiontimeout) setting. This variable is an override for demos and automated tests: when set, it takes precedence over that setting and turns auto-continue on even when the setting is unset or `never`. Setting `0` doesn't turn the timeout off; it closes the dialog immediately. In v2.1.198 and v2.1.199, auto-continue was on by default with a `60000` (60 seconds) timeout. Requires Claude Code v2.1.198 or later",
    "name": "CLAUDE_AFK_TIMEOUT_MS"
   },
   {
-   "doc": "Set to `1` to disable all built-in [subagent](/docs/en/sub-agents) types such as Explore and Plan. Only applies in non-interactive mode (the `-p` flag). Useful for SDK users who want a blank slate",
+   "doc": "Set to `1` to disable all built-in [subagent](/docs/en/sub-agents) types such as Explore and Plan. Only applies in non-interactive mode (the `-p` flag). Useful for SDK users who want a blank slate. This also removes `general-purpose`, the subagent Claude Code runs when an Agent tool call omits `subagent_type`. Such a call then fails with [`subagent_type is required`](/docs/en/errors#subagent-type-is-required)",
    "name": "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS"
   },
   {
@@ -946,7 +1064,7 @@
    "name": "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS"
   },
   {
-   "doc": "Set the percentage (1-100) of the auto-compaction window at which auto-compaction triggers. Use lower values like `50` to compact earlier. This variable only causes earlier compaction when Claude Code compacts proactively: when `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is set, in [cloud sessions](/docs/en/claude-code-on-the-web), and on Sonnet 4.6 and Opus 4.6 without [extended context](/docs/en/model-config#extended-context), which compact at the 200K boundary by default. On Sonnet 5, proactive compaction applies at the model's [default threshold](/docs/en/model-config#sonnet-5-context-window). In other cases, such as a local session on Opus 4.8, auto-compaction triggers when the conversation reaches the model's context limit. The override can only lower the threshold, so values above the default have no effect. Applies to both main conversations and subagents",
+   "doc": "Set the percentage (1-100) of the auto-compact window at which auto-compaction triggers. Use lower values like `50` to compact earlier; the variable can't raise the threshold, so values above the default percentage are ignored. It applies only in sessions that [compact before the model's context limit](/docs/en/model-config#context-window-and-auto-compaction). Applies to both main conversations and subagents",
    "name": "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
   },
   {
@@ -954,12 +1072,24 @@
    "name": "CLAUDE_AUTO_BACKGROUND_TASKS"
   },
   {
-   "doc": "Set to `1` to render screen-reader friendly output: flat text without decorative borders or animations. Set to `0` to force screen-reader mode off even when [`axScreenReader`](/docs/en/settings#available-settings) is `true`. The [`--ax-screen-reader`](/docs/en/cli-reference#cli-flags) flag takes precedence. Requires Claude Code v2.1.181 or later",
+   "doc": "In [screen reader mode](/docs/en/accessibility#what-your-screen-reader-hears), how many milliseconds Claude Code waits, with the cursor at the start of the line, before it writes a new or changed line. Default `50`. Set `0` to write immediately. Claude Code caps the wait at `5000`. Requires Claude Code v2.1.233 or later",
+   "name": "CLAUDE_AX_PREPARK_MS"
+  },
+  {
+   "doc": "Set to `1` to render screen-reader friendly output: flat text without decorative borders or animations. Set to `0` to force screen-reader mode off even when [`axScreenReader`](/docs/en/settings-reference#axscreenreader) is `true`. The [`--ax-screen-reader`](/docs/en/cli-reference#cli-flags) flag takes precedence. Requires Claude Code v2.1.181 or later",
    "name": "CLAUDE_AX_SCREEN_READER"
+  },
+  {
+   "doc": "In [screen reader mode](/docs/en/accessibility), how many milliseconds Claude Code holds the first interface render after the startup confirmation line, so your screen reader can speak the line in full before new output interrupts it. Default `3000`. Set `0` to render immediately. Claude Code caps the hold at `600000` (10 minutes). Your first keystroke ends the hold early. Requires Claude Code v2.1.217 or later",
+   "name": "CLAUDE_AX_STARTUP_QUIET_MS"
   },
   {
    "doc": "Return to the original working directory after each Bash or PowerShell command in the main session",
    "name": "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"
+  },
+  {
+   "doc": "Timeout in milliseconds for the byte-level streaming idle watchdog only; when set, it takes precedence over `CLAUDE_STREAM_IDLE_TIMEOUT_MS` for that watchdog and leaves the event-level watchdog unchanged. Claude Code clamps this variable to between 10 seconds and 30 minutes. Requires Claude Code v2.1.210 or later",
+   "name": "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"
   },
   {
    "doc": "Path to a file that an external tool, such as a screen-lock listener, creates when you unlock your screen and deletes when you lock it. While the file exists, Claude Code skips [Remote Control mobile push notifications](/docs/en/remote-control#mobile-push-notifications), so you stop getting pushes while you are actively using the computer. When the file is absent or unreadable, notifications are sent as normal. Claude Code checks the file once per push-triggering event rather than polling it. Requires Claude Code v2.1.181 or later",
@@ -982,7 +1112,7 @@
    "name": "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"
   },
   {
-   "doc": "Interval in milliseconds at which credentials should be refreshed (when using [`apiKeyHelper`](/docs/en/settings#available-settings))",
+   "doc": "Interval in milliseconds at which credentials should be refreshed (when using [`apiKeyHelper`](/docs/en/settings-reference#apikeyhelper))",
    "name": "CLAUDE_CODE_API_KEY_HELPER_TTL_MS"
   },
   {
@@ -990,15 +1120,23 @@
    "name": "CLAUDE_CODE_ARTIFACT_AUTO_OPEN"
   },
   {
-   "doc": "Set to `0` to omit the attribution block (client version and prompt fingerprint) from the start of the system prompt. Disabling it improves prompt-cache hit rates when routing through an [LLM gateway](/docs/en/llm-gateway). Caching on a direct connection to the Anthropic API is unaffected either way",
+   "doc": "Set to `1` to let Claude read and reply to [comments on an artifact](/docs/en/artifacts#collect-comments-on-an-artifact) when [feature-flag fetching](#features-that-need-feature-flag-fetching) is off. Set to `0` to turn comment reading and replying off even when fetching is on. Has no effect when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` has [turned artifacts off](/docs/en/artifacts#availability). Requires Claude Code v2.1.221 or later",
+   "name": "CLAUDE_CODE_ARTIFACT_COMMENTS"
+  },
+  {
+   "doc": "Set to `1` to let Claude [reply on its own to comments sent to it](/docs/en/artifacts#let-claude-reply-to-comments-on-its-own) when [feature-flag fetching](#features-that-need-feature-flag-fetching) is off, or `0` to turn that off even when fetching is on. Needs comment reading on as well. Requires Claude Code v2.1.228 or later",
+   "name": "CLAUDE_CODE_ARTIFACT_COMMENTS_AUTOREACT"
+  },
+  {
+   "doc": "Set to `0` to omit the [attribution block](/docs/en/llm-gateway-protocol#system-prompt-attribution-block), which carries the client version and a prompt fingerprint, from the start of the system prompt. Caching on a direct connection to the Anthropic API is unaffected either way. In some direct-connection setups, Claude Code keeps the block on [auto mode](/docs/en/permission-modes#eliminate-prompts-with-auto-mode) classifier requests even when you set `0`. In [System prompt attribution block](/docs/en/llm-gateway-protocol#system-prompt-attribution-block), check which connections and credentials this covers. Before v2.1.181 the block included a per-request token on custom base URLs and Microsoft Foundry connections, so on those versions set it to `0` when your LLM gateway caches on the request body or forwards requests to a third-party provider, or when you connect to Microsoft Foundry directly",
    "name": "CLAUDE_CODE_ATTRIBUTION_HEADER"
   },
   {
-   "doc": "Set the context capacity in tokens used for auto-compaction calculations. Defaults to the model's context window, 200K for standard models or 1M for [extended context](/docs/en/model-config#extended-context) models, except on Sonnet 5, which has its own [default threshold](/docs/en/model-config#sonnet-5-context-window). Use a lower value like `500000` on a 1M model to treat the window as 500K for compaction purposes. The value is capped at the model's actual context window. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is applied as a percentage of this value. Setting this variable decouples the compaction threshold from the status line's `used_percentage`, which always uses the model's full context window",
+   "doc": "Set the [auto-compact window](/docs/en/model-config#set-the-auto-compact-window) in tokens, from `100000` to `1000000`. Accepts a plain integer such as `500000` only: a value like `500k` reads as `500` and clamps to the 100K minimum. Takes precedence over the `/autocompact` command, the `--autocompact` flag, and the `autoCompactWindow` setting. The status line's `used_percentage` always measures against the model's full context window, so once this variable is set, that percentage no longer indicates when compaction will run",
    "name": "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
   },
   {
-   "doc": "Override automatic [IDE connection](/docs/en/vs-code). By default, Claude Code connects automatically when launched inside a supported IDE's integrated terminal. Set to `false` to prevent this. Set to `true` to force a connection attempt when auto-detection fails, such as when tmux obscures the parent terminal. Takes precedence over the [`autoConnectIde`](/docs/en/settings#global-config-settings) global config setting",
+   "doc": "Override automatic [IDE connection](/docs/en/vs-code). By default, Claude Code connects automatically when launched inside a supported IDE's integrated terminal. Set to `false` to prevent this. Set to `true` to force a connection attempt when auto-detection fails, such as when tmux obscures the parent terminal. Takes precedence over the [`autoConnectIde`](/docs/en/settings-reference#autoconnectide) global config setting",
    "name": "CLAUDE_CODE_AUTO_CONNECT_IDE"
   },
   {
@@ -1008,6 +1146,10 @@
   {
    "doc": "Set automatically in Bash tool and [hook command](/docs/en/hooks) subprocesses while the session has an active [Remote Control](/docs/en/remote-control) connection, and removed when the connection ends. The value is the session's ID in `session_` form, the same identifier that appears in the session's `claude.ai/code` URL, so a script can link back to the session that ran it. Requires Claude Code v2.1.199 or later. In [cloud sessions](/docs/en/claude-code-on-the-web), read `CLAUDE_CODE_REMOTE_SESSION_ID` instead",
    "name": "CLAUDE_CODE_BRIDGE_SESSION_ID"
+  },
+  {
+   "doc": "Set to `0` to make Claude Code read the `0x08` byte, also written `^H`, as plain Backspace, or `1` to read it as Ctrl+Backspace. Either value replaces the platform default. By default, Claude Code reads it as Ctrl+Backspace on Windows, except when `TERM_PROGRAM` is `mintty` or `TERM` is `cygwin`, and as plain Backspace on macOS and Linux. Set `0` in a Windows terminal where [Backspace deletes a whole word](/docs/en/terminal-config#fix-backspace-deleting-a-whole-word-on-windows)",
+   "name": "CLAUDE_CODE_BS_AS_CTRL_BACKSPACE"
   },
   {
    "doc": "Comma-separated list of CA certificate sources for TLS connections. `bundled` is the Mozilla CA set shipped with Claude Code. `system` is the operating system trust store, read only on runtimes with `tls.getCACertificates`: the native binary, or Node 22.15 or later for npm installs. See [CA certificate store](/docs/en/network-config#ca-certificate-store). Default is `bundled,system`",
@@ -1042,27 +1184,31 @@
    "name": "CLAUDE_CODE_DEBUG_LOG_LEVEL"
   },
   {
-   "doc": "Set to `1` to disable [1M context window](/docs/en/model-config#extended-context) support. When set, 1M model variants are unavailable in the model picker, and [Sonnet 5](/docs/en/model-config#sonnet-5-context-window) sessions are treated as having a 200K window. Useful for enterprise environments with compliance requirements",
+   "doc": "Set to `1` to disable [1M context window](/docs/en/model-config#extended-context) support. When set, 1M model variants are unavailable in the model picker, and Claude Code holds sessions on models with a native 1M window, such as [Sonnet 5](/docs/en/model-config#sonnet-5-context-window) and Fable 5, to a 200K window; see [Extended context](/docs/en/model-config#extended-context) for how the hold is enforced. Useful for enterprise environments with compliance requirements. For its role in correcting the window for an unrecognized `[1m]` model ID, see [Correct the window for a gateway or custom model ID](/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id)",
    "name": "CLAUDE_CODE_DISABLE_1M_CONTEXT"
   },
   {
-   "doc": "Set to `1` to disable [adaptive reasoning](/docs/en/model-config#adjust-effort-level) on Opus 4.6 and Sonnet 4.6 and fall back to the fixed thinking budget controlled by `MAX_THINKING_TOKENS`. From v2.1.111, has no effect on Fable 5, Sonnet 5, or Opus 4.7 and later, which always use adaptive reasoning",
+   "doc": "Set to `1` to disable [adaptive reasoning](/docs/en/model-config#adjust-effort-level) on Opus 4.6 and Sonnet 4.6 and fall back to the fixed thinking budget controlled by `MAX_THINKING_TOKENS`. Has no effect on Fable 5, Sonnet 5, or Opus 4.7 and later, which always use adaptive reasoning",
    "name": "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"
+  },
+  {
+   "doc": "Set to `1` to stop Claude Code from merging [managed settings](/docs/en/managed-settings#precedence-within-the-managed-tier) `env` blocks per key across admin sources, so only the highest-priority source's whole `env` block applies, as before v2.1.223. Set it in the environment that launches Claude Code, since Claude Code ignores a copy delivered through a settings `env` block. Requires Claude Code v2.1.223 or later",
+   "name": "CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION"
   },
   {
    "doc": "Set to `1` to disable the [advisor tool](/docs/en/advisor). The `/advisor` command becomes unavailable, any configured `advisorModel` is ignored, and the `--advisor` flag is accepted but has no effect, so existing scripts that pass it continue to work without errors",
    "name": "CLAUDE_CODE_DISABLE_ADVISOR_TOOL"
   },
   {
-   "doc": "Set to `1` to turn off [background agents and agent view](/docs/en/agent-view): `claude agents`, `--bg`, `/background`, and the on-demand supervisor. Equivalent to the [`disableAgentView`](/docs/en/settings#available-settings) setting",
+   "doc": "Set to `1` to turn off [background agents and agent view](/docs/en/agent-view): `claude agents`, `--bg`, `/background`, and the on-demand supervisor. Equivalent to the [`disableAgentView`](/docs/en/settings-reference#disableagentview) setting",
    "name": "CLAUDE_CODE_DISABLE_AGENT_VIEW"
   },
   {
-   "doc": "Set to `1` to disable [fullscreen rendering](/docs/en/fullscreen) and use the classic main-screen renderer. The conversation stays in your terminal's native scrollback so `Cmd+f` and tmux copy mode work as usual. Takes precedence over `CLAUDE_CODE_NO_FLICKER` and the [`tui`](/docs/en/settings#available-settings) setting. You can also switch with `/tui default`. Does not apply to background sessions opened from [agent view](/docs/en/agent-view), which always use fullscreen rendering",
+   "doc": "Set to `1` to disable [fullscreen rendering](/docs/en/fullscreen) and use the classic main-screen renderer. The conversation stays in your terminal's native scrollback so `Cmd+f` and tmux copy mode work as usual. Takes precedence over `CLAUDE_CODE_NO_FLICKER` and the [`tui`](/docs/en/settings-reference#tui) setting. You can also switch with `/tui default`. Does not apply to background sessions opened from [agent view](/docs/en/agent-view), which always use fullscreen rendering",
    "name": "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"
   },
   {
-   "doc": "Set to `1` to disable the [Artifact](/docs/en/artifacts) tool, which publishes session output as a private web page on claude.ai. Equivalent to the [`disableArtifact`](/docs/en/settings#available-settings) setting",
+   "doc": "Set to `1` to disable the [Artifact](/docs/en/artifacts) tool, which publishes session output as a private web page on claude.ai. Equivalent to the [`disableArtifact`](/docs/en/settings-reference#disableartifact) setting",
    "name": "CLAUDE_CODE_DISABLE_ARTIFACT"
   },
   {
@@ -1070,7 +1216,7 @@
    "name": "CLAUDE_CODE_DISABLE_ATTACHMENTS"
   },
   {
-   "doc": "Set to `1` to disable [auto memory](/docs/en/memory#auto-memory). Set to `0` to force auto memory on even when `--bare` mode or [`autoMemoryEnabled: false`](/docs/en/settings#available-settings) would otherwise disable it. When disabled, Claude does not create or load auto memory files",
+   "doc": "Set to `1` to disable [auto memory](/docs/en/memory#auto-memory). Set to `0` to force auto memory on even when `--bare` mode or [`autoMemoryEnabled: false`](/docs/en/settings-reference#automemoryenabled) would otherwise disable it. When disabled, Claude does not create or load auto memory files",
    "name": "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
   },
   {
@@ -1090,11 +1236,11 @@
    "name": "CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP"
   },
   {
-   "doc": "Set to `1` to disable the [skills](/docs/en/skills) and workflows included with Claude Code: bundled skills and workflows are removed entirely, while built-in commands like `/init` stay typable but are hidden from the model. `/doctor` stays typable like the built-in commands; hide it with `DISABLE_DOCTOR_COMMAND` instead. Skills from plugins, `.claude/skills/`, and `.claude/commands/` are unaffected. Equivalent to the [`disableBundledSkills`](/docs/en/settings#available-settings) setting; `0` doesn't override it",
+   "doc": "Set to `1` to disable the [skills](/docs/en/skills) and workflows included with Claude Code: bundled skills and workflows are removed entirely, while built-in commands like `/init` stay typable but are hidden from the model. `/doctor` stays typable like the built-in commands; hide it with `DISABLE_DOCTOR_COMMAND` instead. Skills from plugins, `.claude/skills/`, and `.claude/commands/` are unaffected. Equivalent to the [`disableBundledSkills`](/docs/en/settings-reference#disablebundledskills) setting",
    "name": "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"
   },
   {
-   "doc": "Set to `1` to prevent loading any CLAUDE.md memory files into context, including user, project, and auto-memory files",
+   "doc": "Set to `1` to prevent loading any CLAUDE.md memory files into context, including user, project, and auto memory files",
    "name": "CLAUDE_CODE_DISABLE_CLAUDE_MDS"
   },
   {
@@ -1102,7 +1248,7 @@
    "name": "CLAUDE_CODE_DISABLE_CRON"
   },
   {
-   "doc": "Set to `1` to strip Anthropic-specific `anthropic-beta` request headers and beta tool-schema fields (such as `defer_loading` and `eager_input_streaming`) from API requests. Use this when a proxy gateway rejects requests with errors like \"Unexpected value(s) for the `anthropic-beta` header\" or \"Extra inputs are not permitted\". Standard fields (`name`, `description`, `input_schema`, `cache_control`) are preserved. [MCP tool search](/docs/en/mcp#scale-with-mcp-tool-search) is disabled and all MCP tools load upfront, even when `ENABLE_TOOL_SEARCH` is set",
+   "doc": "Set to `1` to strip Anthropic-specific `anthropic-beta` request headers and beta tool-schema fields (such as `defer_loading` and `eager_input_streaming`) from API requests. Use this when a proxy gateway rejects requests with errors like \"Unexpected value(s) for the `anthropic-beta` header\" or \"Extra inputs are not permitted\". Standard fields (`name`, `description`, `input_schema`, `cache_control`) are preserved. [MCP tool search](/docs/en/mcp#scale-with-mcp-tool-search) is disabled and all MCP tools load upfront, even when you set `ENABLE_TOOL_SEARCH`. On Claude Code v2.1.227 or later, [managed settings](/docs/en/managed-settings) can keep tool search on. [Disable pre-release capabilities](/docs/en/llm-gateway-protocol#disable-pre-release-capabilities) covers where the override applies",
    "name": "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"
   },
   {
@@ -1114,15 +1260,15 @@
    "name": "CLAUDE_CODE_DISABLE_FAST_MODE"
   },
   {
-   "doc": "Set to `1` to disable the \"How is Claude doing?\" session quality surveys. Surveys are also disabled when `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set, unless `CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL` opts back in. To set a sample rate instead of disabling outright, use the [`feedbackSurveyRate`](/docs/en/settings#available-settings) setting. See [Session quality surveys](/docs/en/data-usage#session-quality-surveys)",
+   "doc": "Set to `1` to disable the \"How is Claude doing?\" session quality surveys. Surveys are also disabled when `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set, unless `CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL` opts back in. To set a sample rate instead of disabling outright, use the [`feedbackSurveyRate`](/docs/en/settings-reference#feedbacksurveyrate) setting. See [Session quality surveys](/docs/en/data-usage#session-quality-surveys)",
    "name": "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"
   },
   {
-   "doc": "Set to `1` to disable file [checkpointing](/docs/en/checkpointing). The `/rewind` command will not be able to restore code changes",
+   "doc": "Set to `1` to disable file [checkpointing](/docs/en/checkpointing). The `/rewind` command will not be able to restore code changes. Overrides the [`fileCheckpointingEnabled`](/docs/en/settings-reference#filecheckpointingenabled) setting",
    "name": "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING"
   },
   {
-   "doc": "Set to `1` to remove built-in commit and PR workflow instructions and the git status snapshot from Claude's system prompt. Useful when using your own git workflow skills. Takes precedence over the [`includeGitInstructions`](/docs/en/settings#available-settings) setting when set",
+   "doc": "Set to `1` to remove built-in commit and PR workflow instructions and the git status snapshot from Claude's system prompt. Useful when using your own git workflow skills. Takes precedence over the [`includeGitInstructions`](/docs/en/settings-reference#includegitinstructions) setting when set",
    "name": "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"
   },
   {
@@ -1138,7 +1284,11 @@
    "name": "CLAUDE_CODE_DISABLE_MOUSE_CLICKS"
   },
   {
-   "doc": "Set to any non-empty value to disable nonessential network traffic: auto-updates, telemetry, error reporting, the `/feedback` command, release notes, [gateway model discovery](/docs/en/llm-gateway-connect#add-gateway-models-to-the-model-picker) refreshes, and availability checks such as the [fast mode](/docs/en/fast-mode#use-fast-mode-behind-proxies-and-llm-gateways) check. Official plugin marketplace auto-install isn't covered; disable it with `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`",
+   "doc": "Set to `1` to stop Claude Code from re-reading the [mTLS client certificate and key](/docs/en/network-config#mtls-authentication) when an API request fails with a connection-level error, such as a connection reset or a TLS handshake error. With the reload disabled, Claude Code loads rotated files only when it next applies settings or at the next startup. Requires Claude Code v2.1.232 or later",
+   "name": "CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION"
+  },
+  {
+   "doc": "Set to any non-empty value, such as `1`, to disable nonessential network traffic: auto-updates, telemetry, error reporting, the `/feedback` command, release notes, [gateway model discovery](/docs/en/llm-gateway-connect#add-gateway-models-to-the-model-picker) refreshes, and availability checks such as the [fast mode](/docs/en/fast-mode#use-fast-mode-behind-proxies-and-llm-gateways) check. It also stops the [background runs of plugin `command` sources](/docs/en/plugin-marketplaces#when-claude-code-re-runs-the-command), which are local commands rather than network traffic, because they can trigger dependency installs. **Setting it to `0` or `false` still disables this traffic**, unlike most on/off variables; unset the variable to allow it again. Also disables feature-flag fetching, which makes [Remote Control](/docs/en/remote-control#requirements) and the other [features that need feature-flag fetching](#features-that-need-feature-flag-fetching) unavailable. Official plugin marketplace auto-install isn't covered; disable it with `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`",
    "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
   },
   {
@@ -1150,8 +1300,12 @@
    "name": "CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK"
   },
   {
-   "doc": "Set to `1` to skip automatic addition of the official plugin marketplace on first run",
+   "doc": "Set to `1` to disable automatic registration of the official plugin marketplace. Claude Code reads the variable when it is about to register the marketplace, usually during a machine's first interactive launch. If the variable is set at that point, Claude Code skips the registration permanently. Unsetting the variable later doesn't undo the skip. Run `claude plugin marketplace add anthropics/claude-plugins-official` to register the marketplace at any time",
    "name": "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"
+  },
+  {
+   "doc": "Set to `1` to stop Claude Code from running your [`Notification` hooks for unanswered permission requests](/docs/en/hooks#notification) in sessions where Claude Code sends them to the Agent SDK's `canUseTool` callback, which is how Claude Desktop and the VS Code extension host Claude Code. Has no effect in terminal sessions. Requires Claude Code v2.1.233 or later",
+   "name": "CLAUDE_CODE_DISABLE_PERMISSION_PROMPT_NOTIFY_HOOKS"
   },
   {
    "doc": "Set to `1` to skip loading skills from the system-wide managed skills directory. Useful for container or CI sessions that should not load operator-provisioned skills",
@@ -1166,11 +1320,15 @@
    "name": "CLAUDE_CODE_DISABLE_THINKING"
   },
   {
+   "doc": "Set to `1` to skip proactive [auto-compaction](/docs/en/costs#reduce-token-usage) when Claude Code doesn't recognize the model ID, such as an [LLM gateway](/docs/en/llm-gateway) alias. Without this variable, Claude Code compacts at the context window it assumes for the ID. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` can correct the assumed window instead; see [Correct the window for a gateway or custom model ID](/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id) for when each variable applies. Requires Claude Code v2.1.223 or later",
+   "name": "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"
+  },
+  {
    "doc": "Set to `1` to disable virtual scrolling in [fullscreen rendering](/docs/en/fullscreen) and render every message in the transcript. Use this if scrolling in fullscreen mode shows blank regions where messages should appear",
    "name": "CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL"
   },
   {
-   "doc": "Set to `1` to disable [workflows](/docs/en/workflows#turn-workflows-off). Equivalent to the [`disableWorkflows`](/docs/en/settings#available-settings) setting",
+   "doc": "Set to `1` to disable [workflows](/docs/en/workflows#turn-workflows-off). Equivalent to the [`disableWorkflows`](/docs/en/settings-reference#disableworkflows) setting",
    "name": "CLAUDE_CODE_DISABLE_WORKFLOWS"
   },
   {
@@ -1178,7 +1336,7 @@
    "name": "CLAUDE_CODE_EFFORT_LEVEL"
   },
   {
-   "doc": "Set to `1` to enable appending extra text to the end of every [subagent](/docs/en/sub-agents)'s system prompt. The [`--append-subagent-system-prompt`](/docs/en/cli-reference#cli-flags) flag supplies the appended text and sets this variable automatically, so you don't need to set it yourself. Requires Claude Code v2.1.205 or later",
+   "doc": "Set to `1` to enable appending extra text to the end of the system prompt of every [subagent](/docs/en/sub-agents) other than a [forked subagent](/docs/en/sub-agents#fork-the-current-conversation). The [`--append-subagent-system-prompt`](/docs/en/cli-reference#cli-flags) flag supplies the appended text and sets this variable automatically, so you don't need to set it yourself. Requires Claude Code v2.1.205 or later",
    "name": "CLAUDE_CODE_ENABLE_APPEND_SUBAGENT_PROMPT"
   },
   {
@@ -1186,7 +1344,7 @@
    "name": "CLAUDE_CODE_ENABLE_AUTO_MODE"
   },
   {
-   "doc": "Override [session recap](/docs/en/interactive-mode#session-recap) availability. Set to `0` to force recaps off regardless of the `/config` toggle. Set to `1` to force recaps on when [`awaySummaryEnabled`](/docs/en/settings#available-settings) is `false`. Takes precedence over the setting and `/config` toggle",
+   "doc": "Override [session recap](/docs/en/interactive-mode#session-recap) availability. Set to `0` to force recaps off regardless of the `/config` toggle. Set to `1` to force recaps on when [`awaySummaryEnabled`](/docs/en/settings-reference#awaysummaryenabled) is `false`. Takes precedence over the setting and `/config` toggle",
    "name": "CLAUDE_CODE_ENABLE_AWAY_SUMMARY"
   },
   {
@@ -1202,7 +1360,7 @@
    "name": "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"
   },
   {
-   "doc": "Set to `1` to populate the `/model` picker from your gateway's `/v1/models` endpoint when `ANTHROPIC_BASE_URL` points at an Anthropic-compatible gateway such as LiteLLM, Kong, or an internal proxy. Off by default because gateways backed by a shared API key would otherwise show every user every model the key can access. Discovered models are still filtered by an [`availableModels`](/docs/en/settings#available-settings) allowlist the session receives; deliver the list through [MDM or a managed settings file](/docs/en/settings#settings-files), since [server-managed delivery is not available on gateway configurations](/docs/en/server-managed-settings#platform-availability)",
+   "doc": "Set to `1` to populate the `/model` picker from your gateway's `/v1/models` endpoint when `ANTHROPIC_BASE_URL` points at an Anthropic-compatible gateway such as LiteLLM, Kong, or an internal proxy. Off by default because gateways backed by a shared API key would otherwise show every user every model the key can access. Discovered models are still filtered by an [`availableModels`](/docs/en/settings-reference#availablemodels) allowlist the session receives; deliver the list through [MDM or a managed settings file](/docs/en/managed-settings#delivery-mechanisms), since [server-managed delivery is not available on gateway configurations](/docs/en/server-managed-settings#platform-availability)",
    "name": "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
   },
   {
@@ -1210,16 +1368,20 @@
    "name": "CLAUDE_CODE_ENABLE_OPUS_4_7_FAST_MODE"
   },
   {
-   "doc": "Set to `false` to disable prompt suggestions (the \"Prompt suggestions\" toggle in `/config`). These are the grayed-out predictions that appear in your prompt input after Claude responds. See [Prompt suggestions](/docs/en/interactive-mode#prompt-suggestions)",
+   "doc": "Set to `false` to turn off prompt suggestions, the grayed-out predictions that appear in your prompt input. Takes precedence over the [`promptSuggestionEnabled`](/docs/en/settings-reference#promptsuggestionenabled) setting, which is what the **Prompt suggestions** toggle in `/config` writes. Claude Code also [pauses suggestions while your account is close to or at its usage limit](/docs/en/interactive-mode#when-claude-code-skips-suggestions). Set to `true` to keep them on until you reach the limit. Requires Claude Code v2.1.238 or later. See [Prompt suggestions](/docs/en/interactive-mode#prompt-suggestions)",
    "name": "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"
   },
   {
-   "doc": "Controls whether sessions use the structured Task tools (`TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`) or the legacy `TodoWrite` tool. As of Claude Code v2.1.142, Task tools are the default in all modes. Set to `0` to revert to `TodoWrite`. See [Task list](/docs/en/interactive-mode#task-list) and [Migrate to Task tools](/docs/en/agent-sdk/todo-tracking#migrate-to-task-tools)",
+   "doc": "Selects which task-tracking tools Claude Code provides in [sessions that have them](/docs/en/tools-reference#task-tool-availability). By default, Claude Code provides the Task tools `TaskCreate`, `TaskUpdate`, `TaskGet`, and `TaskList`. Set to `0` to get the legacy `TodoWrite` tool instead. See [Task list](/docs/en/interactive-mode#task-list)",
    "name": "CLAUDE_CODE_ENABLE_TASKS"
   },
   {
    "doc": "Set to `1` to enable OpenTelemetry data collection for metrics and logging. Required before configuring OTel exporters. See [Monitoring](/docs/en/monitoring-usage)",
    "name": "CLAUDE_CODE_ENABLE_TELEMETRY"
+  },
+  {
+   "doc": "Set to `1` to get the task-tracking tools on the models listed under [Task tool availability](/docs/en/tools-reference#task-tool-availability), where Claude Code otherwise leaves them out. `CLAUDE_CODE_ENABLE_TASKS` still selects the Task tools or `TodoWrite`. Requires Claude Code v2.1.233 or later",
+   "name": "CLAUDE_CODE_ENABLE_TODO_TOOLS"
   },
   {
    "doc": "Time in milliseconds to wait after the query loop becomes idle before automatically exiting. Useful for automated workflows and scripts using SDK mode",
@@ -1250,7 +1412,7 @@
    "name": "CLAUDE_CODE_FORCE_SYNC_OUTPUT"
   },
   {
-   "doc": "Set to `1` to let Claude spawn [forked subagents](/docs/en/sub-agents#fork-the-current-conversation), or `0` to disable them, overriding any server-side rollout. When enabled, Claude can request the `fork` subagent type to spawn a fork, a subagent that inherits the full conversation context instead of starting fresh. When Claude doesn't request a subagent type, it still gets the general-purpose subagent, and every subagent runs in the background. The explicit [`/subtask`](/docs/en/commands#all-commands) command, named `/fork` on v2.1.161 through v2.1.211, works without this variable; on v2.1.117 through v2.1.160, `/fork` is the forked-subagent command only when this variable is set to `1` or a server-side rollout enabled it. Works in interactive mode and via the SDK or `claude -p`. When [agent view is turned off](/docs/en/agent-view#turn-off-agent-view), `/subtask` isn't available and the command stays `/fork`",
+   "doc": "Controls [fork mode](/docs/en/sub-agents#turn-fork-mode-on-or-off), which lets Claude spawn [forked subagents](/docs/en/sub-agents#fork-the-current-conversation) itself and is on by default in interactive sessions only. Set to `1` to turn it on in `claude -p` and the Agent SDK as well, or `0` to turn it off in every kind of session. You can run `/subtask` whether or not fork mode is on. The interactive default requires Claude Code v2.1.232 or later; on earlier versions, set the variable to `1` to turn fork mode on",
    "name": "CLAUDE_CODE_FORK_SUBAGENT"
   },
   {
@@ -1266,12 +1428,16 @@
    "name": "CLAUDE_CODE_GLOB_HIDDEN"
   },
   {
-   "doc": "Set to `false` to make the [Glob tool](/docs/en/tools-reference#glob-tool-behavior) respect `.gitignore` patterns. By default, Glob returns all matching files including gitignored ones. Does not affect `@` file autocomplete, which has its own [`respectGitignore` setting](/docs/en/settings#available-settings)",
+   "doc": "Set to `false` to make the [Glob tool](/docs/en/tools-reference#glob-tool-behavior) respect `.gitignore` patterns. By default, Glob returns all matching files including gitignored ones. Does not affect `@` file autocomplete, which has its own [`respectGitignore` setting](/docs/en/settings-reference#respectgitignore)",
    "name": "CLAUDE_CODE_GLOB_NO_IGNORE"
   },
   {
    "doc": "Timeout in seconds for Glob tool file discovery. Defaults to 20 seconds on most platforms and 60 seconds on WSL",
    "name": "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"
+  },
+  {
+   "doc": "How many minutes background work can keep an active goal waiting before Claude Code [asks Claude to check on it](/docs/en/goal#background-work-defers-evaluation). Default `30`. Set `0` to turn check-ins off. Give whole minutes in plain digits, at most `10080`, which is one week. Claude Code treats any other value as unset and uses the default. Requires Claude Code v2.1.234 or later",
+   "name": "CLAUDE_CODE_GOAL_CHECKIN_MINUTES"
   },
   {
    "doc": "Set to `1` to hide the working directory in the startup logo. Useful for screenshares or recordings where the path exposes your OS username",
@@ -1282,7 +1448,7 @@
    "name": "CLAUDE_CODE_IDE_HOST_OVERRIDE"
   },
   {
-   "doc": "Set to `1` to skip auto-installation of IDE extensions. Equivalent to setting [`autoInstallIdeExtension`](/docs/en/settings#global-config-settings) to `false`",
+   "doc": "Set to `1` to skip auto-installation of IDE extensions. Equivalent to setting [`autoInstallIdeExtension`](/docs/en/settings-reference#autoinstallideextension) to `false`",
    "name": "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL"
   },
   {
@@ -1294,11 +1460,11 @@
    "name": "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
   },
   {
-   "doc": "Override the context window size Claude Code assumes for the active model. As of v2.1.193, applied directly for model names Claude Code does not recognize as a Claude model; for recognized Claude models it only takes effect when `DISABLE_COMPACT` is also set. Use this when routing to a model through `ANTHROPIC_BASE_URL` whose context window does not match the built-in size for its name",
+   "doc": "Override the context window size Claude Code assumes for the active model. As of v2.1.193, how it applies depends on how Claude Code resolves the model ID; see [Correct the window for a gateway or custom model ID](/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id). Use this when routing to a model through `ANTHROPIC_BASE_URL` whose context window does not match the built-in size for its name",
    "name": "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
   },
   {
-   "doc": "Set the maximum number of output tokens for most requests. Defaults and caps vary by model; see [max output tokens](https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison). Increasing this value reduces the effective context window available before [auto-compaction](/docs/en/costs#reduce-token-usage) triggers",
+   "doc": "Set the maximum number of output tokens for most requests. Defaults and caps vary by model; see [max output tokens](https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison). Claude Code defaults to 32000 for model IDs it doesn't recognize, such as gateway-specific names, and lowers values above a model's cap to the cap. Increasing this value reduces the effective context window available before [auto-compaction](/docs/en/costs#reduce-token-usage) triggers",
    "name": "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
   },
   {
@@ -1306,7 +1472,7 @@
    "name": "CLAUDE_CODE_MAX_RETRIES"
   },
   {
-   "doc": "Cap on the number of [subagents](/docs/en/sub-agents#session-subagent-limit) one session can spawn with the Agent tool (default: 200). When Claude reaches the cap, spawning another subagent fails with an error telling Claude to finish the remaining work directly. Accepts a positive whole number in plain digits with no upper bound; this variable doesn't take the scientific notation or digit-separator spellings. Anything else is ignored and the default applies, so the cap can be raised but not turned off. Requires Claude Code v2.1.212 or later",
+   "doc": "Removed in v2.1.224 and now a no-op. Previously capped the total number of [subagents](/docs/en/sub-agents) Claude could spawn with the Agent tool in one session (default: 200); spawning past the cap failed with `Subagent spawn limit reached`. The [concurrent subagent limit](/docs/en/sub-agents#concurrent-subagent-limit) and the [depth limit](/docs/en/sub-agents#let-subagents-spawn-their-own-subagents) still apply",
    "name": "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION"
   },
   {
@@ -1338,6 +1504,14 @@
    "name": "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"
   },
   {
+   "doc": "Set by Claude Code, not by you: in sessions that bind an [inbox socket](/docs/en/cross-session-messaging#the-sessions-inbox-socket), Claude Code exports that socket's path to hooks and Bash commands when it binds the socket. In a session that starts with messaging on, Claude Code binds the socket before any hook runs. Other sessions on the machine deliver messages to this path. Each session exports its own socket rather than one inherited from a parent, and messages arriving on it go through the session's [inbound controls](/docs/en/cross-session-messaging#control-inbound-messages). Settings `env` blocks can't set it. Requires Claude Code v2.1.224 or later",
+   "name": "CLAUDE_CODE_MESSAGING_SOCKET"
+  },
+  {
+   "doc": "Set by Claude Code, not by you: in sessions that bind an [inbox socket](/docs/en/cross-session-messaging#the-sessions-inbox-socket), Claude Code exports this per-session token to hooks and Bash commands alongside `CLAUDE_CODE_MESSAGING_SOCKET`. A script posting to the socket can send `{\"type\":\"auth\",\"token\":\"<token>\"}` as its first line to prove it belongs to the session. On native Windows, Claude Code requires this line and closes any connection that doesn't open with a valid one. The [own-child rules](/docs/en/cross-session-messaging#the-sessions-inbox-socket) say when Claude Code consults the token. Each session exports its own token, never one inherited from a parent session. Settings `env` blocks can't set it. Requires Claude Code v2.1.228 or later",
+   "name": "CLAUDE_CODE_MESSAGING_TOKEN"
+  },
+  {
    "doc": "Set to `1` to show the terminal's own cursor at the input caret instead of a drawn block. The cursor respects the terminal's blink, shape, and focus settings",
    "name": "CLAUDE_CODE_NATIVE_CURSOR"
   },
@@ -1346,7 +1520,7 @@
    "name": "CLAUDE_CODE_NEW_INIT"
   },
   {
-   "doc": "Set to `1` to enable [fullscreen rendering](/docs/en/fullscreen), a research preview that reduces flicker and keeps memory flat in long conversations. Equivalent to the [`tui`](/docs/en/settings#available-settings) setting; you can also switch with `/tui fullscreen`",
+   "doc": "Set to `1` to enable [fullscreen rendering](/docs/en/fullscreen), a research preview that reduces flicker and keeps memory flat in long conversations. Overrides the [`tui`](/docs/en/settings-reference#tui) setting; you can also switch with `/tui fullscreen`",
    "name": "CLAUDE_CODE_NO_FLICKER"
   },
   {
@@ -1358,7 +1532,7 @@
    "name": "CLAUDE_CODE_OAUTH_SCOPES"
   },
   {
-   "doc": "OAuth access token for Claude.ai authentication. Alternative to `/login` for SDK and automated environments. Takes precedence over keychain-stored credentials. Generate one with [`claude setup-token`](/docs/en/authentication#generate-a-long-lived-token)",
+   "doc": "OAuth access token for claude.ai authentication. Alternative to `/login` for SDK and automated environments. Takes precedence over keychain-stored credentials. Generate one with [`claude setup-token`](/docs/en/authentication#generate-a-long-lived-token). Unless you run [`/login`](/docs/en/authentication#authentication-precedence), Claude Code uses the token you set for the whole session. To replace an expired token, generate a new one and restart",
    "name": "CLAUDE_CODE_OAUTH_TOKEN"
   },
   {
@@ -1422,15 +1596,19 @@
    "name": "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"
   },
   {
-   "doc": "Launch the processes Claude Code starts from its own binary, such as the background service that hosts [agent view](/docs/en/agent-view) sessions, through a corporate launcher given as an argv prefix like `/opt/corp/launcher`. Set it in the `env` block of user or [managed settings](/docs/en/permissions#managed-settings), not as a shell export, so the detached background service inherits it; project and local settings can't set it. Equivalent to the [`processWrapper` setting](/docs/en/settings#available-settings), which requires Claude Code v2.1.210 or later; this variable takes precedence when both are set. The VS Code extension configures its own launcher separately through its `claudeProcessWrapper` setting. Ignored on Windows. See [Run Claude Code behind a corporate launcher](/docs/en/corporate-launcher) for the value format, what the launcher covers, and the contract the launcher must satisfy. Requires Claude Code v2.1.208 or later",
+   "doc": "Launch the processes Claude Code starts from its own binary, such as the background service that hosts [agent view](/docs/en/agent-view) sessions, through a corporate launcher given as an argv prefix like `/opt/corp/launcher`. Set it in the `env` block of user or [managed settings](/docs/en/managed-settings), not as a shell export, so the detached background service inherits it; project and local settings can't set it. Equivalent to the [`processWrapper` setting](/docs/en/settings-reference#processwrapper), which requires Claude Code v2.1.210 or later; this variable takes precedence when both are set. The VS Code extension configures its own launcher separately through its `claudeProcessWrapper` setting. Ignored on Windows. See [Run Claude Code behind a corporate launcher](/docs/en/corporate-launcher) for the value format, what the launcher covers, and the contract the launcher must satisfy. Requires Claude Code v2.1.208 or later",
    "name": "CLAUDE_CODE_PROCESS_WRAPPER"
+  },
+  {
+   "doc": "Set together with `CLAUDE_CONFIG_DIR` to choose the `projects/` directory name Claude Code stores that session's transcripts and auto memory under, in place of one derived from the working directory path. For example, starting Claude Code with `CLAUDE_CONFIG_DIR=/srv/tenant-a CLAUDE_CODE_PROJECT_DIR_NAME=work claude` stores them under `/srv/tenant-a/projects/work/`. Claude Code ignores this variable when `CLAUDE_CONFIG_DIR` is unset, and reads it only from the environment you start `claude` from, never from a [settings file `env` block](#in-settings-files). See [Name the project directory yourself](/docs/en/sessions#name-the-project-directory-yourself). Requires Claude Code v2.1.234 or later",
+   "name": "CLAUDE_CODE_PROJECT_DIR_NAME"
   },
   {
    "doc": "Set to `1` to propagate W3C trace context when `ANTHROPIC_BASE_URL` points at a custom proxy. Propagation covers the `traceparent` header on model and HTTP MCP requests and the `TRACEPARENT` environment variable for Bash, PowerShell, and hook subprocesses. By default, propagation is enabled only when connected directly to the Anthropic API. Added in v2.1.152. See [Traces (beta)](/docs/en/monitoring-usage#traces-beta)",
    "name": "CLAUDE_CODE_PROPAGATE_TRACEPARENT"
   },
   {
-   "doc": "Set by host platforms that embed Claude Code and manage model provider routing on its behalf. When set, provider-selection, endpoint, and authentication variables such as `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_BASE_URL`, and `ANTHROPIC_API_KEY` in settings files are ignored so user settings cannot override the host's routing. The automatic telemetry opt-out for Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry is also skipped, so telemetry follows the standard `DISABLE_TELEMETRY` opt-out. See [Default behaviors by API provider](/docs/en/data-usage#default-behaviors-by-api-provider)",
+   "doc": "Set by host platforms that embed Claude Code and manage model provider routing on its behalf. When set, Claude Code ignores provider-selection, endpoint, and authentication variables such as `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_BASE_URL`, and `ANTHROPIC_API_KEY` in settings files, so user settings can't override the host's routing. Claude Code also ignores model-selection keys such as `model`, `fallbackModel`, and `modelOverrides` in [managed settings](/docs/en/managed-settings), whichever managed source delivers them, so the host's model configuration takes precedence over an out-of-date managed model pin. Claude Code also ignores model-selection variables such as `ANTHROPIC_MODEL` and the `ANTHROPIC_DEFAULT_*_MODEL` family in a managed `env` block; an [`availableModels`](/docs/en/model-config#restrict-model-selection) allowlist in managed settings still applies unless the host supplies its own. Claude Code also skips the automatic telemetry opt-out it otherwise applies on third-party providers such as Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, and Microsoft Foundry, so telemetry follows the standard `DISABLE_TELEMETRY` opt-out. See [Default behaviors by API provider](/docs/en/data-usage#default-behaviors-by-api-provider)",
    "name": "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"
   },
   {
@@ -1438,15 +1616,15 @@
    "name": "CLAUDE_CODE_PROXY_RESOLVES_HOSTS"
   },
   {
-   "doc": "Set automatically to `true` when Claude Code is running as a [cloud session](/docs/en/claude-code-on-the-web). Read this from a hook or setup script to detect whether you are in a cloud environment",
+   "doc": "Set automatically to `true` when Claude Code is running as a [cloud session](/docs/en/claude-code-on-the-web). Read this from a hook or setup script to detect whether you are in a cloud session",
    "name": "CLAUDE_CODE_REMOTE"
   },
   {
-   "doc": "Set automatically in [cloud sessions](/docs/en/claude-code-on-the-web) to the current session's ID. Read this to construct a link back to the session transcript. See [Link output back to the session](/docs/en/claude-code-on-the-web#link-output-back-to-the-session)",
+   "doc": "Set automatically in [cloud sessions](/docs/en/claude-code-on-the-web) to the current session's ID. Read this to construct a link back to the session transcript. See [Link output back to the session](/docs/en/cloud-environments#link-output-back-to-the-session)",
    "name": "CLAUDE_CODE_REMOTE_SESSION_ID"
   },
   {
-   "doc": "Set to `1` to automatically resume if the previous session ended mid-turn. Used in SDK mode so the model continues without requiring the SDK to re-send the prompt",
+   "doc": "Set to `1` to automatically resume if the previous session ended mid-turn. Used in SDK mode so the model continues without requiring the SDK to re-send the prompt. To turn this off, unset the variable or set it to `0`. Before v2.1.221, Claude Code ignored `0` and other falsy values, so setting `0` still triggered the resume in non-interactive mode and unsetting the variable was the only way to turn it off",
    "name": "CLAUDE_CODE_RESUME_INTERRUPTED_TURN"
   },
   {
@@ -1458,11 +1636,11 @@
    "name": "CLAUDE_CODE_RESUME_PROMPT"
   },
   {
-   "doc": "Set to `1` for unattended sessions such as eval harnesses, CI jobs, or remote workers. Retries `429` and `529` capacity errors indefinitely instead of failing after `CLAUDE_CODE_MAX_RETRIES` attempts. The watchdog backs off up to 5 minutes between attempts, or until the limit resets when the response carries a rate-limit reset time, so a session that hits a usage limit waits out the remaining window. As of v2.1.199 it also raises the default retry count for other transient errors, such as server errors, timeouts, and dropped connections, to 300, roughly three hours of backoff, and removes the cap of 15 on `CLAUDE_CODE_MAX_RETRIES` if you set that variable explicitly. Requires Claude Code v2.1.186 or later",
+   "doc": "Set to `1` for unattended sessions such as eval harnesses, CI jobs, or remote workers. Retries `429` and `529` capacity errors indefinitely instead of failing after `CLAUDE_CODE_MAX_RETRIES` attempts. Claude Code fails at once on a `429` that reports a spend limit or exhausted usage credits, even one from a [gateway spend cap](/docs/en/errors#spend-limit-reached) that resets on a schedule. Before v2.1.239, the watchdog retried these indefinitely. The watchdog backs off up to 5 minutes between attempts, or until the limit resets when the response carries a rate-limit reset time, so a session that hits a usage limit waits out the remaining window. On v2.1.199 or later it also raises the default retry count for other transient errors, such as server errors, timeouts, and dropped connections, to 300, roughly three hours of backoff, and removes the cap of 15 on `CLAUDE_CODE_MAX_RETRIES` if you set that variable explicitly. Requires Claude Code v2.1.186 or later",
    "name": "CLAUDE_CODE_RETRY_WATCHDOG"
   },
   {
-   "doc": "Set to `1` to start in safe mode: CLAUDE.md, skills, plugins, hooks, MCP servers, custom commands and agents, output styles, workflows, custom themes, custom keybindings, status line and file-suggestion commands, LSP servers, and auto-memory do not load, for troubleshooting a broken configuration. Managed settings policy still applies, including policy-configured hooks, status line, and file-suggestion commands; managed plugins, managed skills, managed CLAUDE.md, and policy-configured MCP servers do not. Equivalent to passing [`--safe-mode`](/docs/en/cli-reference#cli-flags). Directly spawned child processes inherit the variable",
+   "doc": "Set to `1` to start in safe mode: CLAUDE.md, skills, plugins, hooks, MCP servers, custom commands and agents, output styles, workflows, custom themes, custom keybindings, status line and file-suggestion commands, LSP servers, and auto memory do not load, for troubleshooting a broken configuration. Managed settings policy still applies, including policy-configured hooks, status line, and file-suggestion commands; managed plugins, managed skills, managed CLAUDE.md, and policy-configured MCP servers do not. Equivalent to passing [`--safe-mode`](/docs/en/cli-reference#cli-flags). Directly spawned child processes inherit the variable",
    "name": "CLAUDE_CODE_SAFE_MODE"
   },
   {
@@ -1490,7 +1668,7 @@
    "name": "CLAUDE_CODE_SHELL_PREFIX"
   },
   {
-   "doc": "Set to `1` to run with a minimal system prompt and only the Bash, file read, and file edit tools. MCP tools from `--mcp-config` are still available. Disables auto-discovery of hooks, skills, plugins, MCP servers, auto memory, and CLAUDE.md. OAuth tokens and keychain credentials are not read, so Anthropic authentication must come from `ANTHROPIC_API_KEY` or an `apiKeyHelper` in `--settings`. Equivalent to passing [`--bare`](/docs/en/headless#start-faster-with-bare-mode)",
+   "doc": "Set to `1` to run with a minimal system prompt and only the Bash, file read, and file edit tools. MCP tools from `--mcp-config` are still available. Disables auto-discovery of hooks, skills, custom commands, subagents, plugins, MCP servers, auto memory, and CLAUDE.md. Skills in a directory you pass with `--add-dir` still load. OAuth tokens and keychain credentials are not read, so Anthropic authentication must come from `ANTHROPIC_API_KEY` or an `apiKeyHelper` in `--settings`. Equivalent to passing [`--bare`](/docs/en/headless#start-faster-with-bare-mode)",
    "name": "CLAUDE_CODE_SIMPLE"
   },
   {
@@ -1538,7 +1716,7 @@
    "name": "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP"
   },
   {
-   "doc": "See [Model configuration](/docs/en/model-config). As of v2.1.196, setting it to `inherit` is the same as leaving it unset; earlier versions treated `inherit` as an override that forced every subagent onto the main conversation's model",
+   "doc": "The model Claude Code uses for all [subagents](/docs/en/sub-agents#choose-a-model), [agent teams](/docs/en/agent-teams), and agents in a [workflow](/docs/en/workflows). Accepts an alias such as `haiku` or a full model name, and takes precedence over the per-invocation `model` parameter and the subagent definition's `model` frontmatter. See [Model configuration](/docs/en/model-config#environment-variables). Setting it to `inherit` is the same as leaving it unset; before v2.1.196, `inherit` was an override that forced every subagent onto the main conversation's model",
    "name": "CLAUDE_CODE_SUBAGENT_MODEL"
   },
   {
@@ -1554,7 +1732,7 @@
    "name": "CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS"
   },
   {
-   "doc": "Set to `1` to download your enabled claude.ai skills into `~/.claude/skills/` before the first query and resync every 10 minutes. Applies only in non-interactive mode with the `-p` flag. Requires claude.ai authentication. [Claude Code on the web](/docs/en/claude-code-on-the-web) sessions receive your enabled claude.ai skills automatically; you don't need to set this there",
+   "doc": "Set to `1` to download your enabled claude.ai skills into `~/.claude/skills/synced/` and resync every 10 minutes. Before it runs the first query, Claude Code waits up to `CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS` for the list of your skills. The downloads themselves finish in the background, and Claude waits for a skill's download when it invokes that skill. The `synced` folder name is [reserved for this download](/docs/en/skills#where-skills-live). Before v2.1.227, the skills downloaded into `~/.claude/skills/` directly. Applies only in non-interactive mode with the `-p` flag. Requires claude.ai authentication. [Claude Code on the web](/docs/en/claude-code-on-the-web) sessions receive your enabled claude.ai skills automatically; you don't need to set this there. Claude Code applies [extra rules to the downloaded skills](/docs/en/skills#how-synced-skills-behave), such as not running their `!` commands on your machine",
    "name": "CLAUDE_CODE_SYNC_SKILLS"
   },
   {
@@ -1562,15 +1740,15 @@
    "name": "CLAUDE_CODE_SYNC_SKILLS_INSTALL_TIMEOUT_MS"
   },
   {
-   "doc": "Timeout in milliseconds for the first query to wait on the initial skills sync when `CLAUDE_CODE_SYNC_SKILLS` is set (default: 5000). When exceeded, the query proceeds and remaining skill downloads continue in the background",
+   "doc": "Timeout in milliseconds for the first query to wait for the initial skill list when `CLAUDE_CODE_SYNC_SKILLS` is set (default: 5000). When exceeded, the first query runs with whichever skills have arrived. The downloads finish in the background either way, and Claude waits for a skill's download when it invokes that skill",
    "name": "CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS"
   },
   {
-   "doc": "Set to `false` to disable syntax highlighting in diff output. Useful when colors interfere with your terminal setup. To also disable highlighting in code blocks and file previews, use the [`syntaxHighlightingDisabled`](/docs/en/settings) setting",
+   "doc": "Set to `false` to disable syntax highlighting in diff output. Useful when colors interfere with your terminal setup. To also disable highlighting in code blocks and file previews, use the [`syntaxHighlightingDisabled`](/docs/en/settings-reference#syntaxhighlightingdisabled) setting",
    "name": "CLAUDE_CODE_SYNTAX_HIGHLIGHT"
   },
   {
-   "doc": "Share a task list across sessions. Set the same ID in multiple Claude Code instances to coordinate on a shared task list. See [Task list](/docs/en/interactive-mode#task-list)",
+   "doc": "Share a task list across sessions. Set the same ID in multiple Claude Code instances to coordinate on a shared task list, in [sessions that have the Task tools](/docs/en/tools-reference#task-tool-availability). See [Task list](/docs/en/interactive-mode#task-list)",
    "name": "CLAUDE_CODE_TASK_LIST_ID"
   },
   {
@@ -1582,8 +1760,16 @@
    "name": "CLAUDE_CODE_TMPDIR"
   },
   {
-   "doc": "Set to `1` to allow 24-bit truecolor output inside tmux. By default, Claude Code clamps to 256 colors when `$TMUX` is set because tmux does not pass through truecolor escape sequences unless configured to. Set this after adding `set -ga terminal-overrides ',*:Tc'` to your `~/.tmux.conf`. See [Terminal configuration](/docs/en/terminal-config) for other tmux settings",
+   "doc": "Set to any non-empty value, such as `1`, to allow 24-bit truecolor output inside tmux. **Setting it to `0` or `false` still allows truecolor**, unlike most on/off variables; unset the variable to restore the 256-color clamp. By default, Claude Code clamps to 256 colors when `$TMUX` is set because tmux does not pass through truecolor escape sequences unless configured to. Set this after adding `set -ga terminal-overrides ',*:Tc'` to your `~/.tmux.conf`. See [Terminal configuration](/docs/en/terminal-config) for other tmux settings",
    "name": "CLAUDE_CODE_TMUX_TRUECOLOR"
+  },
+  {
+   "doc": "On Linux and WSL, set to a size such as `4G` to [cap the memory that Bash and PowerShell tool commands can use](/docs/en/tools-reference#memory-limit-on-linux-and-wsl). Write the size in plain digits, alone for a number of bytes or with a `K`, `M`, `G`, or `T` suffix. Set `0` or `off` to turn the cap off. Once a tool command has turned the cap on or off, a changed value takes effect the next time you launch `claude`. Requires Claude Code v2.1.233 or later",
+   "name": "CLAUDE_CODE_TOOL_MEMORY_LIMIT"
+  },
+  {
+   "doc": "Deadline in milliseconds for dialogs Claude Code forwards to a remote client, such as a [Remote Control](/docs/en/remote-control) or SDK host, and for the approval dialog for a [held cross-session message](/docs/en/cross-session-messaging#control-inbound-messages), before Claude Code cancels them; permission prompts and `AskUserQuestion` questions use their own flows and aren't governed by it. Also bounds the mid-session [Fable 5 usage-credits consent prompt](/docs/en/model-config#fable-5-and-usage-credits) in a session that may be running unattended. [Control inbound messages](/docs/en/cross-session-messaging#control-inbound-messages) and [non-interactive sessions](/docs/en/cross-session-messaging#non-interactive-sessions) cover the full held-message expiry rules, including the cases where the deadline doesn't apply. Overrides the [`dialogExpiry`](/docs/en/settings-reference#dialogexpiry) setting; `0` or a negative value disables the deadline",
+   "name": "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
   },
   {
    "doc": "Use [Claude Platform on AWS](/docs/en/claude-platform-on-aws)",
@@ -1606,12 +1792,20 @@
    "name": "CLAUDE_CODE_USE_NATIVE_FILE_SEARCH"
   },
   {
-   "doc": "Controls the PowerShell tool. On Windows without Git Bash, the tool is enabled automatically; set to `0` to disable it. On Windows with Git Bash installed, the tool is rolling out progressively: set to `1` to opt in or `0` to opt out. On Linux, macOS, and WSL, set to `1` to enable it, which requires `pwsh` on your `PATH`. When enabled on Windows, Claude can run PowerShell commands natively instead of routing through Git Bash. See [PowerShell tool](/docs/en/tools-reference#powershell-tool)",
+   "doc": "Controls the PowerShell tool. On Windows without Git Bash, the tool is enabled automatically; set to `0` to disable it. On Windows with Git Bash installed, the tool is on by default for claude.ai and Console accounts; set to `1` to enable it in Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry sessions, or `0` to turn it off. On Linux, macOS, and WSL, set to `1` to enable it, which requires `pwsh` on your `PATH`. When enabled on Windows, Claude can run PowerShell commands natively instead of routing through Git Bash. See [PowerShell tool](/docs/en/tools-reference#powershell-tool)",
    "name": "CLAUDE_CODE_USE_POWERSHELL_TOOL"
   },
   {
    "doc": "Use [Google Cloud's Agent Platform](/docs/en/google-vertex-ai)",
    "name": "CLAUDE_CODE_USE_VERTEX"
+  },
+  {
+   "doc": "Set to the number of milliseconds [WebFetch](/docs/en/tools-reference#webfetch-tool-behavior) keeps each fetched URL's response cached. The default is `900000`, which is 15 minutes. Takes plain digits only; `0`, a decimal, or any other spelling keeps the default. Claude Code reads the value once per launch, so a change in a settings `env` block applies when you next launch `claude`. Requires Claude Code v2.1.233 or later",
+   "name": "CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS"
+  },
+  {
+   "doc": "Upper bound in milliseconds on how long a [workflow](/docs/en/workflows) agent waits for a same-prefix sibling's first response to begin before sending its own first request. When a fan-out starts several agents that share a [prompt-cache prefix](/docs/en/workflows#prompt-caching-in-a-fan-out), Claude Code holds all but the first agent for up to this long so the rest read the cached prefix instead of each processing it uncached. Default `5000`. Set to `0` to disable the wait. When `DISABLE_PROMPT_CACHING` is set, agents never wait. Requires Claude Code v2.1.229 or later",
+   "name": "CLAUDE_CODE_WORKFLOW_PREFIX_STAGGER_MS"
   },
   {
    "doc": "Override the configuration directory (default: `~/.claude`). All settings, session history, and plugins are stored under this path, as are credentials on Linux and Windows; on macOS, credentials are in the system Keychain. Useful for running multiple accounts side by side: for example, `alias claude-work='CLAUDE_CONFIG_DIR=~/.claude-work claude'`",
@@ -1626,7 +1820,7 @@
    "name": "CLAUDE_EFFORT"
   },
   {
-   "doc": "Set to `1` to force-enable the byte-level streaming idle watchdog, or set to `0` to force-disable it. When unset, the watchdog is enabled by default for direct Anthropic API and [Claude Platform on AWS](/docs/en/claude-platform-on-aws) connections. The byte watchdog aborts a connection when no bytes arrive on the wire for 180 seconds by default on direct Anthropic API connections, 300 seconds on Claude Platform on AWS and when enabled on Amazon Bedrock, or for the value of `CLAUDE_STREAM_IDLE_TIMEOUT_MS` when that is set, which is clamped to a minimum of 5 minutes, independent of the event-level watchdog",
+   "doc": "Set to `1` to force-enable the byte-level streaming idle watchdog, or set to `0` to force-disable it. When unset, the watchdog is enabled by default for direct Anthropic API and [Claude Platform on AWS](/docs/en/claude-platform-on-aws) connections, and for streaming responses on [gateway](/docs/en/gateways) connections reached through `ANTHROPIC_BASE_URL` or `ANTHROPIC_AWS_BASE_URL`; before v2.1.222 it didn't run on those gateway connections, so the event-level watchdog could report a stall there even while keep-alive pings were arriving. For timeouts and how the timers interact, see [Streaming idle watchdogs](/docs/en/network-config#streaming-idle-watchdogs)",
    "name": "CLAUDE_ENABLE_BYTE_WATCHDOG"
   },
   {
@@ -1634,7 +1828,7 @@
    "name": "CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK"
   },
   {
-   "doc": "Set to `0` to force-disable the event-level streaming idle watchdog, or set to `1` to force-enable it. When unset, the watchdog is on by default for all providers. Before v2.1.196, the unset default was server-controlled on the direct Anthropic API and off on other providers. As of v2.1.169, providers other than the direct Anthropic API and Claude Platform on AWS also have a default-on 5-minute body idle timeout independent of this variable; see `API_FORCE_IDLE_TIMEOUT`. On Amazon Bedrock, you can also enable the independent byte-level watchdog with `CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK`; the two run together when both are set. Configure the timeout with `CLAUDE_STREAM_IDLE_TIMEOUT_MS`",
+   "doc": "Set to `0` to force-disable the event-level streaming idle watchdog, or set to `1` to force-enable it. When unset, the watchdog is on by default for all providers. Before v2.1.196, the unset default was server-controlled on the direct Anthropic API and off on other providers. Configure the timeout with `CLAUDE_STREAM_IDLE_TIMEOUT_MS`; for the other stall timers that run alongside this one, see [Streaming idle watchdogs](/docs/en/network-config#streaming-idle-watchdogs)",
    "name": "CLAUDE_ENABLE_STREAM_WATCHDOG"
   },
   {
@@ -1650,8 +1844,12 @@
    "name": "CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX"
   },
   {
-   "doc": "Timeout in milliseconds before the streaming idle watchdog closes a stalled connection. When you set this variable explicitly, the minimum is `300000` (5 minutes); lower values are silently clamped to absorb extended thinking pauses and proxy buffering. When unset, the event-level watchdog defaults to 300 seconds and the byte-level watchdog defaults to 180 seconds on direct Anthropic API connections (300 seconds on Claude Platform on AWS and other providers). The unset 180-second byte-watchdog default is a separate value and is not subject to the 5-minute clamp. The body idle timeout described under `API_FORCE_IDLE_TIMEOUT` applies independently. On Amazon Bedrock, also applies when `CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK=1`",
+   "doc": "Timeout in milliseconds before the event- and byte-level streaming idle watchdogs close a stalled connection. When you set this variable explicitly, the minimum is `300000` (5 minutes); lower values are silently clamped to absorb extended thinking pauses and proxy buffering, and the byte-level watchdog caps the value at 30 minutes. `CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS` takes precedence over this variable for the byte-level watchdog. For the per-watchdog unset defaults, see [Streaming idle watchdogs](/docs/en/network-config#streaming-idle-watchdogs)",
    "name": "CLAUDE_STREAM_IDLE_TIMEOUT_MS"
+  },
+  {
+   "doc": "Maximum lifetime in milliseconds for a [background shell command](/docs/en/interactive-mode#background-bash-commands) that a [subagent](/docs/en/sub-agents) started. Default `3600000` (60 minutes). When you set `0`, Claude Code applies the default instead of removing the cap. When the subagent runs in the foreground, Claude Code also ends the command when that subagent gives its final response, regardless of this cap. See [the background command lifetime rules](/docs/en/tools-reference#background-commands). Claude Code doesn't cap main-session background commands this way. For the memory-pressure limit that covers them, see [How backgrounding works](/docs/en/interactive-mode#how-backgrounding-works)",
+   "name": "CLAUDE_SUBAGENT_BG_SHELL_MAX_MS"
   },
   {
    "doc": "Set to `1` to enable debug mode, equivalent to launching with [`--debug`](/docs/en/cli-reference#cli-flags). Debug logs are written to `~/.claude/debug/<session-id>.txt`, or to the path set by `CLAUDE_CODE_DEBUG_LOGS_DIR`. Only the truthy values `1`, `true`, `yes`, and `on` enable debug mode, so namespace patterns like `DEBUG=express:*` set for other tools do not trigger it",
@@ -1662,7 +1860,7 @@
    "name": "DISABLE_AUTOUPDATER"
   },
   {
-   "doc": "Set to `1` to disable automatic compaction when approaching the context limit. The manual `/compact` command remains available. Use when you want explicit control over when compaction occurs",
+   "doc": "Set to `1` to disable automatic compaction when approaching the context limit. The manual `/compact` command remains available. Use when you want explicit control over when compaction occurs. Overrides the [`autoCompactEnabled`](/docs/en/settings-reference#autocompactenabled) setting",
    "name": "DISABLE_AUTO_COMPACT"
   },
   {
@@ -1678,7 +1876,7 @@
    "name": "DISABLE_DOCTOR_COMMAND"
   },
   {
-   "doc": "Set to `1` to opt out of error reporting",
+   "doc": "Set to any non-empty value, such as `1`, to opt out of error reporting. **Setting it to `0` or `false` still opts out**, unlike most on/off variables; unset the variable to turn error reporting back on",
    "name": "DISABLE_ERROR_REPORTING"
   },
   {
@@ -1690,7 +1888,7 @@
    "name": "DISABLE_FEEDBACK_COMMAND"
   },
   {
-   "doc": "Set to `1` to disable GrowthBook feature-flag fetching and use code defaults for every flag. Telemetry event logging stays on unless `DISABLE_TELEMETRY` is also set",
+   "doc": "Set to `1` or `true` to disable GrowthBook feature-flag fetching and use code defaults for every flag. This makes [Remote Control](/docs/en/remote-control#requirements) and the other [features that need feature-flag fetching](#features-that-need-feature-flag-fetching) unavailable. Setting it to `0` or `false` leaves fetching on. Telemetry event logging stays on unless `DISABLE_TELEMETRY` is also set",
    "name": "DISABLE_GROWTHBOOK"
   },
   {
@@ -1734,7 +1932,7 @@
    "name": "DISABLE_PROMPT_CACHING_SONNET"
   },
   {
-   "doc": "Set to `1` to opt out of telemetry. Telemetry events do not include user data like code, file paths, or bash commands. Also disables feature-flag fetching with the same effect as `DISABLE_GROWTHBOOK`, so some flagged features may be unavailable",
+   "doc": "Set to any non-empty value, such as `1`, to opt out of telemetry. **Setting it to `0` or `false` still opts out**, unlike most on/off variables; unset the variable to turn telemetry back on. Telemetry events do not include user data like code, file paths, or bash commands. Also disables feature-flag fetching with the same effect as `DISABLE_GROWTHBOOK`, which makes [Remote Control](/docs/en/remote-control#requirements) and the other [features that need feature-flag fetching](#features-that-need-feature-flag-fetching) unavailable",
    "name": "DISABLE_TELEMETRY"
   },
   {
@@ -1746,15 +1944,15 @@
    "name": "DISABLE_UPGRADE_COMMAND"
   },
   {
-   "doc": "Set to `1` to opt out of telemetry. Equivalent to setting `DISABLE_TELEMETRY`. Claude Code honors this as the cross-tool convention recognized by many developer CLIs",
+   "doc": "Set to `1` to opt out of telemetry, with the same effect as `DISABLE_TELEMETRY`, including making [Remote Control](/docs/en/remote-control#requirements) and the other [features that need feature-flag fetching](#features-that-need-feature-flag-fetching) unavailable. Claude Code reads this variable as a standard boolean, so `0` leaves telemetry on, and honors it as the cross-tool convention recognized by many developer CLIs",
    "name": "DO_NOT_TRACK"
   },
   {
-   "doc": "Set to `false` to disable [claude.ai MCP servers](/docs/en/mcp#use-mcp-servers-from-claude-ai) in Claude Code. Enabled by default for logged-in users. To disable per-project or per-org, set [`disableClaudeAiConnectors`](/docs/en/settings#available-settings) in settings instead",
+   "doc": "Set to `false` to disable [claude.ai MCP servers](/docs/en/mcp#use-mcp-servers-from-claude-ai) in Claude Code. Enabled by default for logged-in users. To disable per-project or per-org, set [`disableClaudeAiConnectors`](/docs/en/settings-reference#disableclaudeaiconnectors) in settings instead",
    "name": "ENABLE_CLAUDEAI_MCP_SERVERS"
   },
   {
-   "doc": "Set to `1` to request a 1-hour [prompt cache TTL](/docs/en/prompt-caching#cache-lifetime) instead of the default 5 minutes. Intended for API key, [Amazon Bedrock](/docs/en/amazon-bedrock), [Google Cloud's Agent Platform](/docs/en/google-vertex-ai), [Microsoft Foundry](/docs/en/microsoft-foundry), and [Claude Platform on AWS](/docs/en/claude-platform-on-aws) users. Subscription users within included usage receive 1-hour TTL automatically. 1-hour cache writes are billed at a higher rate",
+   "doc": "Set to `1` to request a 1-hour [prompt cache TTL](/docs/en/prompt-caching#cache-lifetime) instead of the default 5 minutes. Intended for API key, [Amazon Bedrock](/docs/en/amazon-bedrock), [Google Cloud's Agent Platform](/docs/en/google-vertex-ai), [Microsoft Foundry](/docs/en/microsoft-foundry), and [Claude Platform on AWS](/docs/en/claude-platform-on-aws) users. Subscription users within included usage receive 1-hour TTL automatically. Subscription users drawing on [usage credits](https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans) can set it to keep the 1-hour TTL. 1-hour cache writes are billed at a higher rate",
    "name": "ENABLE_PROMPT_CACHING_1H"
   },
   {
@@ -1762,11 +1960,11 @@
    "name": "ENABLE_PROMPT_CACHING_1H_BEDROCK"
   },
   {
-   "doc": "Controls [MCP tool search](/docs/en/mcp#scale-with-mcp-tool-search). Unset: all MCP tools deferred by default, but loaded upfront on Google Cloud's Agent Platform or when `ANTHROPIC_BASE_URL` points to a non-first-party host. Values: `true` (always defer and send the beta header, requests fail on Google Cloud's Agent Platform models earlier than Sonnet 4.5 or Opus 4.5, or on proxies that do not support `tool_reference`), `auto` (threshold mode: load upfront if tools fit within 10% of context), `auto:N` (custom threshold, e.g., `auto:5` for 5%), `false` (load all upfront). Ignored when `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` is set, which forces all tools to load upfront",
+   "doc": "Controls [MCP tool search](/docs/en/mcp#scale-with-mcp-tool-search). Unset, Claude Code defers all MCP tools by default. It still loads them upfront on Google Cloud's Agent Platform models earlier than the Claude 4.5 generation, on a Microsoft Foundry deployment hosted on Azure, and when `ANTHROPIC_BASE_URL` points to a non-first-party host. `true` always defers and sends the beta header, except on those same Agent Platform models and Microsoft Foundry deployments; requests fail on proxies that don't support `tool_reference`. `auto` loads upfront when tool definitions fit within 10% of context. `auto:N` sets a custom threshold, such as `auto:5` for 5%. `false` loads all tools upfront. A value you set yourself is ignored when `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` is set. Before v2.1.221, Claude Code disabled tool search for all models on Google Cloud's Agent Platform unless you set this variable to `true`",
    "name": "ENABLE_TOOL_SEARCH"
   },
   {
-   "doc": "Set to any non-empty value to make all models, not only Opus, stop retrying with a repeated-overload error when no fallback model is configured. As of v2.1.160, a configured [fallback model chain](/docs/en/model-config#fallback-model-chains) triggers on repeated overload errors for any primary model, so this variable does not affect switching to a fallback model",
+   "doc": "Set to any non-empty value, such as `1`, to make every model stop retrying with a repeated-overload error when no fallback model is configured. **Setting it to `0` or `false` still enables this**, unlike most on/off variables; unset the variable to restore the default retry behavior. Without it, models Claude Code recognizes as Opus, Fable 5, or Mythos models stop retrying this way when you authenticate with an API key or a [third-party provider](/docs/en/third-party-integrations) rather than a Claude subscription. As of v2.1.160, a configured [fallback model chain](/docs/en/model-config#fallback-model-chains) triggers on repeated overload errors for any primary model, so this variable does not affect switching to a fallback model",
    "name": "FALLBACK_FOR_ALL_PRIMARY_MODELS"
   },
   {
@@ -1774,7 +1972,7 @@
    "name": "FORCE_AUTOUPDATE_PLUGINS"
   },
   {
-   "doc": "Set to `1` to enable clickable OSC 8 hyperlinks when your terminal supports them but isn't auto-detected, or `0` to disable them",
+   "doc": "Set to `1` to enable clickable OSC 8 hyperlinks when your terminal supports them but isn't auto-detected, or `0` to disable them. When unset, Claude Code enables hyperlinks only when it detects terminal support. Claude Code parses this value as a number, not a Boolean, so a value such as `false`, `no`, or `off` enables hyperlinks rather than disabling them. Claude Code renders the footer [PR or merge request badge](/docs/en/interactive-mode#pr-review-status) as a hyperlink even when it can't detect terminal support, such as over SSH. Set `0` to render the badge as plain text",
    "name": "FORCE_HYPERLINK"
   },
   {
@@ -1790,7 +1988,7 @@
    "name": "HTTPS_PROXY"
   },
   {
-   "doc": "Set to `1` to enable demo mode: hides your email and organization name from the header and `/status` output, and skips onboarding. Useful when streaming or recording a session",
+   "doc": "Set to any non-empty value, such as `1`, to enable demo mode: hides your email and organization name from the header and `/status` output, and skips onboarding. **Setting it to `0` or `false` still enables demo mode**, unlike most on/off variables; unset the variable to turn it off. Useful when streaming or recording a session",
    "name": "IS_DEMO"
   },
   {
@@ -1798,11 +1996,11 @@
    "name": "MAX_MCP_OUTPUT_TOKENS"
   },
   {
-   "doc": "Number of times to retry when the model's response fails validation against the [`--json-schema`](/docs/en/cli-reference#cli-flags) in non-interactive mode (the `-p` flag). Defaults to 5",
+   "doc": "Number of times Claude Code retries when the model's response fails validation against the [`--json-schema`](/docs/en/cli-reference#cli-flags) in non-interactive mode with the `-p` flag. The same retry count applies when a [workflow](/docs/en/workflows) subagent's structured output fails validation. Defaults to 5",
    "name": "MAX_STRUCTURED_OUTPUT_RETRIES"
   },
   {
-   "doc": "Override the [extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) token budget. The ceiling is the model's [max output tokens](https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison) minus one. Set to `0` to disable thinking on the Anthropic API except on Fable 5, which cannot have thinking turned off. On [third-party providers](/docs/en/third-party-integrations), `0` omits the `thinking` parameter instead, and models with [adaptive reasoning](/docs/en/model-config#adjust-effort-level) may still think. For nonzero values on adaptive reasoning models, the budget is ignored unless adaptive reasoning is disabled via `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING`",
+   "doc": "Fixed token budget for [extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking). Claude Code caps it at one token below the request's max output tokens and never below 1,024; see `CLAUDE_CODE_MAX_OUTPUT_TOKENS` for how that limit is set. When unset and thinking is enabled, models with [adaptive reasoning](/docs/en/model-config#adjust-effort-level) choose their own thinking depth, and other models use the cap. Set to `0` to disable thinking on the Anthropic API, except on Fable 5, which cannot have thinking turned off; on [third-party providers](/docs/en/third-party-integrations), `0` omits the `thinking` parameter instead. Nonzero values are ignored on adaptive reasoning models unless `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` is set",
    "name": "MAX_THINKING_TOKENS"
   },
   {
@@ -1810,20 +2008,44 @@
    "name": "MCP_CLIENT_SECRET"
   },
   {
-   "doc": "Controls whether startup waits for MCP servers to connect before the first query. As of Claude Code v2.1.142, MCP startup is non-blocking by default: servers connect in the background and their tools become available as they finish. Set to `0` to restore the blocking 5-second connection wait. Servers configured with [`alwaysLoad: true`](/docs/en/mcp#exempt-a-server-from-deferral) still block startup regardless, since their tools must be present when the first prompt is built",
+   "doc": "Controls whether startup waits for MCP servers to connect before the first query. MCP startup is non-blocking by default: servers connect in the background and their tools become available as they finish. Set to `0` to make Claude Code wait for servers to connect before the first query. Servers configured with [`alwaysLoad: true`](/docs/en/mcp#exempt-a-server-from-deferral) still make startup wait regardless, except when served from the [discovery cache](/docs/en/mcp#server-status-detail), since their tools must be present when the first prompt is built. In non-interactive mode (`-p`), Claude Code also waits for still-pending servers before the first turn regardless of this variable, with a longer deadline when you pass [`--mcp-config`](/docs/en/cli-reference#cli-flags) explicitly; see that flag's entry for the cached-server exception",
    "name": "MCP_CONNECTION_NONBLOCKING"
   },
   {
-   "doc": "How long blocking MCP startup waits, in milliseconds, for the connection batch before snapshotting the tool list (default: 5000). Applies when `MCP_CONNECTION_NONBLOCKING=0` or for servers marked [`alwaysLoad: true`](/docs/en/mcp#exempt-a-server-from-deferral). Servers still pending at the deadline keep connecting in the background but won't appear until the next query. Distinct from `MCP_TIMEOUT`, which bounds an individual server's connect attempt",
+   "doc": "How long blocking MCP startup waits, in milliseconds, for the connection batch before snapshotting the tool list (default: 5000). Applies when `MCP_CONNECTION_NONBLOCKING=0` or for servers marked [`alwaysLoad: true`](/docs/en/mcp#exempt-a-server-from-deferral). Servers still pending at the deadline keep connecting in the background. Distinct from `MCP_TIMEOUT`, which bounds an individual server's connect attempt",
    "name": "MCP_CONNECT_TIMEOUT_MS"
+  },
+  {
+   "doc": "Turns the [MCP discovery cache](/docs/en/mcp#server-status-detail) on or off. With the cache on, a remote HTTP or SSE server you've used before can show the [`cached` status](/docs/en/mcp#server-status-detail), and Claude Code connects it on its first tool call instead of at startup. The cache is off by default unless a gradual rollout has enabled it for your account. Set to `1` to turn it on, or `0` to keep it off even when the rollout has enabled it. Before v2.1.238, the cache was on by default. The `cached` status requires Claude Code v2.1.221 or later",
+   "name": "MCP_DISCOVERY_CACHE"
+  },
+  {
+   "doc": "Maximum age, in seconds, of a [discovery-cache](/docs/en/mcp#server-status-detail) entry (default: 14400, or 4 hours). At a start where the entry is older than that, Claude Code discards it and connects the server at startup, as it does with the cache off. Claude Code caps the value at 7 days. Before v2.1.238, the default was 86400, or 24 hours, and Claude Code didn't cap the value",
+   "name": "MCP_DISCOVERY_CACHE_MAX_STALE_S"
+  },
+  {
+   "doc": "At a start where a [discovery-cache](/docs/en/mcp#server-status-detail) entry is older than `MCP_DISCOVERY_CACHE_TTL_S`, Claude Code refreshes it in the background. This variable sets how many refreshes in a row can fail before Claude Code discards the entry and connects the server at the next start instead (default: 1). Raise it if your network connection drops occasionally, so that one failed refresh doesn't discard the entry. Requires Claude Code v2.1.238 or later",
+   "name": "MCP_DISCOVERY_CACHE_STRIKES"
+  },
+  {
+   "doc": "Seconds for which Claude Code uses a [discovery-cache](/docs/en/mcp#server-status-detail) entry without refreshing it (default: 900). At a start where the entry is older than that, Claude Code still uses it but refreshes it in the background. Once the entry is older than `MCP_DISCOVERY_CACHE_MAX_STALE_S`, Claude Code discards it instead. Claude Code caps the value at `MCP_DISCOVERY_CACHE_MAX_STALE_S`, which is 4 hours by default. Before v2.1.238, Claude Code didn't cap the value",
+   "name": "MCP_DISCOVERY_CACHE_TTL_S"
   },
   {
    "doc": "Fixed port for the OAuth redirect callback, as an alternative to `--callback-port` when adding an MCP server with [pre-configured credentials](/docs/en/mcp#use-pre-configured-oauth-credentials)",
    "name": "MCP_OAUTH_CALLBACK_PORT"
   },
   {
+   "doc": "On the [v2 MCP client runtime](/docs/en/mcp#mcp-client-runtimes) only, whether Claude Code probes servers for MCP protocol revision 2026-07-28. Set `auto` to probe HTTP, claude.ai connector, and stdio servers; a server that doesn't answer the probe connects on the earlier protocol instead, as SSE and WebSocket servers always do. Set `legacy` to skip the probe for every server. Without the variable, Claude Code probes HTTP and claude.ai connector servers on Claude Code v2.1.232 or later, with the exceptions the [MCP client runtimes](/docs/en/mcp#mcp-client-runtimes) section lists. Any other value is ignored with a warning in the debug log. Requires Claude Code v2.1.221 or later",
+   "name": "MCP_PROTOCOL_NEGOTIATION"
+  },
+  {
    "doc": "Maximum number of remote MCP servers (HTTP/SSE) to connect in parallel during startup (default: 20)",
    "name": "MCP_REMOTE_SERVER_CONNECTION_BATCH_SIZE"
+  },
+  {
+   "doc": "Pin which [MCP client runtime](/docs/en/mcp#mcp-client-runtimes) this process connects to MCP servers with: `v1`, built on MCP TypeScript SDK 1.x, or `v2`, built on [MCP TypeScript SDK 2.0](https://ts.sdk.modelcontextprotocol.io/v2/). Without the variable, Claude Code uses v2 on Claude Code v2.1.232 or later, except where that section says it uses v1. On Claude Code v2.1.221 or later, the v2 runtime checks the issuer an MCP OAuth server returns in its authorization response and fails the sign-in with an error that begins `Issuer mismatch in authorization response` when it doesn't match. The v1 runtime doesn't run this check. If you set an unrecognized value, Claude Code ignores it and writes a warning to the debug log. Claude Code reads the value once per process. Requires Claude Code v2.1.218 or later",
+   "name": "MCP_SDK_GENERATION"
   },
   {
    "doc": "Maximum number of local MCP servers (stdio) to connect in parallel during startup (default: 3)",
@@ -1938,7 +2160,7 @@
    "name": "VERTEX_REGION_CLAUDE_4_6_SONNET"
   },
   {
-   "doc": "Override region for Claude Opus 4.7 when using Google Cloud's Agent Platform. Added in v2.1.111",
+   "doc": "Override region for Claude Opus 4.7 when using Google Cloud's Agent Platform",
    "name": "VERTEX_REGION_CLAUDE_4_7_OPUS"
   },
   {

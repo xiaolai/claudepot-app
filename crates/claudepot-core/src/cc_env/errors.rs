@@ -199,6 +199,11 @@ fn describe_blocked(reason: Blocked) -> &'static str {
             "it is injected per run by whatever launched Claude Code, so a value \
              written here would be overwritten immediately"
         }
+        Blocked::EnvOnlyNotSettings => {
+            "Claude Code reads it only from the environment `claude` was started \
+             with, never from a settings file, so a value written here would be \
+             saved and then ignored — set it in your shell instead"
+        }
     }
 }
 

@@ -31,7 +31,13 @@ export type Blocked =
   /** CC reads it before settings load, so writing it splits its bootstrap. */
   | "bootstrap_split_brain"
   /** Injected per run by whatever launched CC. */
-  | "host_injected";
+  | "host_injected"
+  /**
+   * CC reads it only from the environment `claude` was started with, never
+   * from a settings `env` block — so writing it here would change nothing
+   * while reporting success.
+   */
+  | "env_only_not_settings";
 
 /**
  * Independent attributes, deliberately not exclusive tiers — CC's own

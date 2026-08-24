@@ -75,6 +75,11 @@ HOST_INJECTED = {
     "CLAUDE_CODE_ACCOUNT_UUID", "CLAUDE_CODE_ORGANIZATION_UUID",
     "CLAUDE_CODE_REMOTE", "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDE_CODE_ACCOUNT_TAGGED_ID", "CLAUDE_CODE_VERSION",
+    # "Set by Claude Code, not by you" — both are exported per session to
+    # hooks and Bash commands when the session binds its inbox socket.
+    # Editing either in a settings `env` block would overwrite a value CC
+    # derives at runtime.
+    "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_MESSAGING_SOCKET",
 }
 
 # Vars we refuse to edit here because writing them splits Claude Code's own
@@ -90,6 +95,32 @@ HOST_INJECTED = {
 # nearest neighbour, CLAUDE_ENV_FILE, is read per-Bash-command rather than at
 # bootstrap, so it is editable and carries an execute-code hazard instead.
 BOOTSTRAP_SPLIT_BRAIN = {"CLAUDE_CONFIG_DIR"}
+
+# Vars Claude Code reads ONLY from the process environment it was started
+# with, and explicitly NOT from a settings file `env` block — which is the
+# block this pane writes. Editing one here would land a key in
+# settings.json, report success, and change nothing: the same silent
+# no-op class as writing a `cleanupPeriodDays` value CC rejects.
+#
+# The docs state it outright for CLAUDE_CODE_PROJECT_DIR_NAME: Claude Code
+# "reads it only from the environment you start `claude` from, never from a
+# settings file `env` block". This set is for that sentence, and is checked
+# against the prose below so a row cannot drift out of it silently.
+ENV_ONLY_NOT_SETTINGS = {"CLAUDE_CODE_PROJECT_DIR_NAME"}
+
+# The phrasing the docs use for the rule above. Any documented row carrying
+# it must be in ENV_ONLY_NOT_SETTINGS — otherwise a variable CC ignores from
+# settings would render as an editable field. Checked at build time rather
+# than trusted, because the failure is silent by construction.
+#
+# The docs wrap the phrase in a markdown link —
+# "never from a [settings file `env` block](#in-settings-files)" — so the
+# pattern has to tolerate the brackets and backticks between the words. A
+# first version anchored on the bare words and matched nothing, which the
+# both-directions check below caught immediately.
+ENV_ONLY_PROSE_RE = re.compile(
+    r"never\s+from\s+a\s+\[?settings\s+file\s+`?env`?\s+block", re.IGNORECASE
+)
 
 NUM_SUFFIX = ("_MS", "_TOKENS", "_LENGTH", "_SECONDS", "_MAX", "_CAP",
               "_SIZE", "_DEPTH", "_BATCH_SIZE", "_TTL", "_COUNT", "_INTERVAL",
@@ -132,6 +163,13 @@ SECRET_ENV_VARS = {
     "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "MCP_CLIENT_SECRET",
+    # The peer-messaging `peerToken`. CC exports it per session to hooks and
+    # Bash commands, and a client proves session membership by opening with
+    # `{"type":"auth","token":"<token>"}` — on native Windows CC *requires*
+    # that line. So it is a bearer credential for the one channel that can
+    # inject a prompt into a running session (see AGENTS.md "Peer
+    # messaging"), and must never be serialized.
+    "CLAUDE_CODE_MESSAGING_TOKEN",
     # Not name-matched, and the whole reason CC's SAFE_ENV_VARS cannot double
     # as a disclosure judgement: CC lists this as pre-trust-safe and its
     # documented format is `Name: Value`, which happily holds
@@ -371,6 +409,8 @@ def safety_for(name: str, safe_set: set, provider_set: set,
         blocked = "bootstrap_split_brain"
     elif name in HOST_INJECTED:
         blocked = "host_injected"
+    elif name in ENV_ONLY_NOT_SETTINGS:
+        blocked = "env_only_not_settings"
 
     return {
         "secret": name in SECRET_ENV_VARS,
@@ -503,6 +543,27 @@ def assert_tables(rows: list, safe_set: set) -> None:
             problems.append(
                 f"{r['name']}: prose uses both the 1/0 and true/false toggle "
                 f"vocabularies — adjudicate which literal the pane should offer"
+            )
+
+    # A variable CC ignores from a settings `env` block must never render as
+    # an editable field here — writing it would report success and change
+    # nothing. Detect the docs' own phrasing rather than trusting the curated
+    # set to stay complete, in both directions: an unlisted row carrying the
+    # sentence fails, and a listed row that lost it fails too, so the set
+    # cannot outlive its evidence.
+    for r in rows:
+        says_env_only = bool(ENV_ONLY_PROSE_RE.search(r["doc"]))
+        listed = r["name"] in ENV_ONLY_NOT_SETTINGS
+        if says_env_only and not listed:
+            problems.append(
+                f"{r['name']}: docs say CC never reads it from a settings "
+                f"`env` block, but it is not in ENV_ONLY_NOT_SETTINGS — it "
+                f"would render as an editable field that silently does nothing"
+            )
+        if listed and not says_env_only:
+            problems.append(
+                f"{r['name']}: in ENV_ONLY_NOT_SETTINGS but the docs no longer "
+                f"say so — re-read the prose and drop it if CC now honours it"
             )
 
     leaked = sorted(n for n in CC_DERIVED_HAZARDS if n.upper() in safe_set)
