@@ -183,7 +183,13 @@
     "colCommand": "Command",
     "colApproval": "Approval",
     "blockedTitle": "blocked: {{by}}",
-    "reasonTitle": "reason: {{reason}}"
+    "reasonTitle": "reason: {{reason}}",
+    "problem": {
+      "malformed_json": "This MCP config file isn't valid JSON. Claude Code refuses it too, so none of its servers are active.",
+      "missing_servers_key": "This MCP config file has no “mcpServers” key, so Claude Code reads it as having no servers. If you meant to define servers here, they need to sit under “mcpServers”.",
+      "servers_not_object": "This MCP config file's “mcpServers” isn't an object. Claude Code refuses it too, so none of its servers are active.",
+      "unreadable": "This MCP config file exists but couldn't be read, so its servers are missing from the list below."
+    }
   },
   "hooks": {
     "loadFailed": "Couldn't load hooks: {{error}}",

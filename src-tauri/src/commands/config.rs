@@ -22,16 +22,16 @@
 
 use super::config_types::{
     auto_reason_label, render_path, ConfigTreeDto, EditorCandidateDto, EditorDefaultsDto,
-    EffectiveMcpDto, EffectiveMcpServerDto, EffectiveSettingsDto, McpSimulationModeDto,
-    PolicyErrorDto, ProvenanceLeafDto, ScopeNodeDto, SearchHitDto, SearchQueryDto,
-    SearchSummaryDto,
+    EffectiveMcpDto, EffectiveMcpServerDto, EffectiveSettingsDto, McpConfigProblemDto,
+    McpSimulationModeDto, PolicyErrorDto, ProvenanceLeafDto, ScopeNodeDto, SearchHitDto,
+    SearchQueryDto, SearchSummaryDto,
 };
 use crate::config_dto::{kind_from_str, policy_origin_label, scope_label_with_origin, FileNodeDto};
 use crate::dto_error::{codes, ErrorDto};
 use crate::preferences::PreferencesState;
 use claudepot_core::config_view::{
     discover, effective_io,
-    effective_mcp::{self, ApprovalState, BlockReason, McpSimulationMode},
+    effective_mcp::{self, ApprovalState, BlockReason, McpConfigProblemKind, McpSimulationMode},
     effective_settings,
     launcher::{self, LaunchError},
     model::{EditorCandidate, Kind},
@@ -540,9 +540,26 @@ pub async fn config_effective_mcp(
             })
             .collect();
 
+        let problems = bundle
+            .problems
+            .iter()
+            .map(|p| McpConfigProblemDto {
+                path: p.path.display().to_string(),
+                kind: match p.kind {
+                    McpConfigProblemKind::Unreadable => "unreadable",
+                    McpConfigProblemKind::MalformedJson => "malformed_json",
+                    McpConfigProblemKind::ServersNotObject => "servers_not_object",
+                    McpConfigProblemKind::MissingServersKey => "missing_servers_key",
+                }
+                .to_string(),
+                detail: p.detail.clone(),
+            })
+            .collect();
+
         EffectiveMcpDto {
             enterprise_lockout: lockout,
             servers: servers_dto,
+            problems,
         }
     })
     .await

@@ -209,6 +209,24 @@ impl From<McpSimulationModeDto> for McpSimulationMode {
 pub struct EffectiveMcpDto {
     pub enterprise_lockout: bool,
     pub servers: Vec<EffectiveMcpServerDto>,
+    /// Config files that failed to load. Empty is the normal case.
+    /// Rendered above the table — a file that failed contributes no
+    /// servers, so without this the pane says "no MCP servers" for a
+    /// project whose `.mcp.json` is simply broken.
+    pub problems: Vec<McpConfigProblemDto>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct McpConfigProblemDto {
+    /// Absolute path. Rendered per `.claude/rules/path-display.md`.
+    pub path: String,
+    /// `unreadable` | `malformed_json` | `servers_not_object` |
+    /// `missing_servers_key`. The last is a hint, not a failure — CC
+    /// itself reads that file as zero servers without complaint.
+    pub kind: String,
+    /// Parser detail. Never file contents — an `.mcp.json` carries
+    /// API keys in `env`.
+    pub detail: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

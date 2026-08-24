@@ -6,10 +6,14 @@ import { renderError } from "../../lib/i18n-error";
 import type {
   ConfigEffectiveMcpDto,
   ConfigEffectiveMcpServerDto,
+  ConfigMcpConfigProblemDto,
   McpSimulationMode,
 } from "../../types";
 import { Tag, type TagTone } from "../../components/primitives/Tag";
 import { SegmentedControl } from "../../components/SegmentedControl";
+import { CopyButton } from "../../components/CopyButton";
+import { Glyph } from "../../components/primitives/Glyph";
+import { NF } from "../../icons";
 
 // Display labels for the simulation segmented control. Kept short so
 // all three fit at any reasonable pane width (the longest, `non-int`,
@@ -72,6 +76,9 @@ export function EffectiveMcpRenderer({ cwd }: { cwd: string | null }) {
     >
       <ModeBar mode={mode} onChange={setMode} />
       {data?.enterprise_lockout && <EnterpriseBanner />}
+      {data && data.problems.length > 0 && (
+        <ConfigProblems problems={data.problems} />
+      )}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {error ? (
           <div
@@ -138,6 +145,84 @@ function ModeBar({
         {t("mcp.simulate")}
       </span>
       <SegmentedControl options={options} value={mode} onChange={onChange} />
+    </div>
+  );
+}
+
+/**
+ * Config files that failed to load.
+ *
+ * This exists because a broken `.mcp.json` and a project with no MCP
+ * servers used to render identically — the empty state below reads
+ * "no MCP servers", which is a confident wrong answer when the file
+ * simply failed to parse. CC had the same bug on `claude mcp list`
+ * and fixed it in 2.1.144.
+ *
+ * Paths are full and copyable per `.claude/rules/path-display.md`:
+ * this is state C — the path is truncated by layout, and there is no
+ * other surface in the pane that shows it.
+ */
+function ConfigProblems({
+  problems,
+}: {
+  problems: ConfigMcpConfigProblemDto[];
+}) {
+  const { t } = useTranslation("config");
+  return (
+    <div
+      role="status"
+      style={{
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        background: "var(--bg-sunken)",
+        fontSize: "var(--fs-xs)",
+      }}
+    >
+      {problems.map((p) => {
+        // `missing_servers_key` is a hint, not a failure — CC reads
+        // that file as zero servers without complaining. Colour alone
+        // must not carry that distinction, so the two also differ in
+        // wording and in the glyph.
+        const isHint = p.kind === "missing_servers_key";
+        return (
+          <div
+            key={`${p.path}:${p.kind}`}
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: "var(--sp-8)",
+              padding: "var(--sp-8) var(--sp-16)",
+              color: isHint ? "var(--fg)" : "var(--danger)",
+            }}
+          >
+            <Glyph g={isHint ? NF.info : NF.warn} />
+            <div style={{ minWidth: 0 }}>
+              <div>{t(`mcp.problem.${p.kind}`)}</div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--sp-4)",
+                  color: "var(--fg-muted)",
+                }}
+              >
+                <code
+                  className="mono selectable"
+                  title={p.path}
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {p.path}
+                </code>
+                <CopyButton text={p.path} />
+              </div>
+              <div style={{ color: "var(--fg-muted)" }}>{p.detail}</div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

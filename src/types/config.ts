@@ -145,9 +145,29 @@ export interface ConfigEffectiveMcpServerDto {
   masked: unknown;
 }
 
+/**
+ * Why one MCP config file could not be loaded.
+ *
+ * `missing_servers_key` is deliberately not an error: CC reads such a
+ * file as zero servers and says nothing. It is surfaced as a hint
+ * because the overwhelmingly likely cause is VS Code's `"servers"`
+ * spelling, and "no MCP servers" is a much worse answer than "your
+ * servers are under the wrong key".
+ */
+export interface ConfigMcpConfigProblemDto {
+  path: string;
+  kind:
+    | "unreadable"
+    | "malformed_json"
+    | "servers_not_object"
+    | "missing_servers_key";
+  detail: string;
+}
+
 export interface ConfigEffectiveMcpDto {
   enterprise_lockout: boolean;
   servers: ConfigEffectiveMcpServerDto[];
+  problems: ConfigMcpConfigProblemDto[];
 }
 
 export interface EditorCandidateDto {

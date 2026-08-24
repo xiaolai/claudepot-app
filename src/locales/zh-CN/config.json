@@ -176,7 +176,13 @@
     "colCommand": "命令",
     "colApproval": "授权",
     "blockedTitle": "被阻止：{{by}}",
-    "reasonTitle": "原因：{{reason}}"
+    "reasonTitle": "原因：{{reason}}",
+    "problem": {
+      "malformed_json": "该 MCP 配置文件不是有效的 JSON。Claude Code 同样会拒绝它，因此其中的服务器都未生效。",
+      "missing_servers_key": "该 MCP 配置文件没有 “mcpServers” 键，因此 Claude Code 认为它没有定义任何服务器。如果你想在这里定义服务器，它们需要放在 “mcpServers” 下。",
+      "servers_not_object": "该 MCP 配置文件中的 “mcpServers” 不是对象。Claude Code 同样会拒绝它，因此其中的服务器都未生效。",
+      "unreadable": "该 MCP 配置文件存在但无法读取，因此下方列表中缺少它定义的服务器。"
+    }
   },
   "hooks": {
     "loadFailed": "无法加载 hooks：{{error}}",

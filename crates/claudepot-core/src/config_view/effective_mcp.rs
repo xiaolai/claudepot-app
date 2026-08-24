@@ -19,6 +19,7 @@ use crate::config_view::model::Scope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -46,6 +47,11 @@ pub struct McpSourceBundle {
     /// Whether `projectSettings` is the enabled setting source per
     /// `isSettingSourceEnabled('projectSettings')` (plan D22).
     pub project_settings_enabled: bool,
+    /// Config files that failed to load. Empty is the normal case.
+    /// **Not** merged into the server list — a file that failed
+    /// contributes no servers, and the point is to say so rather than
+    /// to guess at what it meant.
+    pub problems: Vec<McpConfigProblem>,
 }
 
 impl Default for McpSourceBundle {
@@ -58,6 +64,7 @@ impl Default for McpSourceBundle {
             enterprise: BTreeMap::new(),
             effective_settings: Value::Object(Default::default()),
             project_settings_enabled: true,
+            problems: Vec::new(),
         }
     }
 }
@@ -66,6 +73,54 @@ impl Default for McpSourceBundle {
 pub struct McpLayer {
     pub source_scope: Scope,
     pub servers: BTreeMap<String, Value>,
+}
+
+/// Why one MCP config file could not be read the way CC reads it.
+///
+/// This type exists because a file that fails to parse and a file that
+/// simply has no servers used to be the same answer — an empty map —
+/// so a project with a broken `.mcp.json` rendered as "no MCP servers"
+/// with nothing on screen saying the file had failed. CC hit the same
+/// bug on its own `claude mcp list` and fixed it in 2.1.144.
+///
+/// It is the same three-state discipline as
+/// `settings_writer::read_i64_setting`'s `SettingValue`: absent,
+/// present-and-usable, and present-but-not-usable are three different
+/// facts, and collapsing the third into the first points the user at
+/// the wrong remedy.
+#[derive(Serialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpConfigProblemKind {
+    /// The file exists but could not be read (permissions, I/O).
+    Unreadable,
+    /// Not valid JSON. CC throws `.mcp.json is malformed (not valid
+    /// JSON, or mcpServers is not an object)` for this.
+    MalformedJson,
+    /// Parsed, but `mcpServers` is present and is not an object — the
+    /// second half of CC's own error message.
+    ServersNotObject,
+    /// Parsed into an object with entries, none of them `mcpServers`.
+    ///
+    /// **CC does not treat this as an error**: its schema defaults the
+    /// key to `{}`, so the file contributes nothing and no message is
+    /// printed. Claudepot reports it anyway because it is almost
+    /// always the VS Code `"servers"` spelling — the exact case CC's
+    /// 2.1.144 changelog names — and "you have no servers" is a much
+    /// worse answer than "your servers are under the wrong key".
+    /// Kept a distinct variant so the UI can word it as a hint rather
+    /// than as a failure.
+    MissingServersKey,
+}
+
+/// One MCP config file Claudepot could not read as CC would.
+#[derive(Serialize, Clone, Debug, Eq, PartialEq)]
+pub struct McpConfigProblem {
+    /// Absolute path to the offending file.
+    pub path: PathBuf,
+    pub kind: McpConfigProblemKind,
+    /// Parser detail, for the line under the path. Never the file's
+    /// contents — an `.mcp.json` carries API keys in `env`.
+    pub detail: String,
 }
 
 #[derive(Serialize, Clone, Debug, Eq, PartialEq)]

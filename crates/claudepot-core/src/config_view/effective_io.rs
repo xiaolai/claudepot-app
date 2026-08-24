@@ -10,7 +10,7 @@
 //! MCP resolver consumes.
 
 use crate::config_view::{
-    effective_mcp::{McpLayer, McpSourceBundle},
+    effective_mcp::{McpConfigProblem, McpConfigProblemKind, McpLayer, McpSourceBundle},
     effective_settings::EffectiveSettingsInput,
     model::{PolicyOrigin, Scope},
     plugin_base,
@@ -163,8 +163,12 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     // can still see the missing entries in the GUI's effective-MCP
     // view because they're omitted, and a later edit fixes the
     // file without an outage.
+    let mut problems: Vec<McpConfigProblem> = Vec::new();
+
     let home = claude_config_dir();
-    let enterprise = read_mcp_servers_obj(&home.join("managed-mcp.json"))
+    let (enterprise_raw, enterprise_problem) = read_mcp_servers_obj(&home.join("managed-mcp.json"));
+    problems.extend(enterprise_problem);
+    let enterprise: BTreeMap<String, Value> = enterprise_raw
         .into_iter()
         .filter(|(_, v)| v.is_object())
         .collect();
@@ -174,7 +178,8 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     // `resolve_claude_json_path` for the same logic CC's
     // `getGlobalClaudeFile` (env.ts:14-26) implements.
     let claude_json = resolve_claude_json_path();
-    let user = read_claude_json_mcp_servers(&claude_json);
+    let (user, user_problem) = read_claude_json_mcp_servers(&claude_json);
+    problems.extend(user_problem);
 
     // Local (per-project): ~/.claude.json's
     // `projects[<project-path>].mcpServers`. We use the literal `cwd`
@@ -185,7 +190,8 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     let local = read_claude_json_local_mcp(&claude_json, &project_key);
 
     // Project chain: every `.mcp.json` from cwd up to fs root (or git).
-    let project_chain = walk_project_mcp(cwd);
+    let (project_chain, chain_problems) = walk_project_mcp(cwd);
+    problems.extend(chain_problems);
 
     // Plugin MCP: each enabled plugin's `manifest.mcp_servers`.
     let plugin = collect_plugin_mcp_servers();
@@ -210,44 +216,146 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
         enterprise,
         effective_settings,
         project_settings_enabled,
+        problems,
     }
 }
 
-fn read_mcp_servers_obj(path: &Path) -> BTreeMap<String, Value> {
-    let Some(bytes) = std::fs::read(path).ok() else {
-        return BTreeMap::new();
+/// Read one JSON file, distinguishing "not there" from "there and
+/// broken".
+///
+/// `Ok(None)` is a missing file — the normal case for `.mcp.json` and
+/// `managed-mcp.json`, and never a problem. Everything else that goes
+/// wrong produces a [`McpConfigProblem`] instead of an empty map,
+/// which is the whole point: an empty map and a failed parse used to
+/// be indistinguishable downstream.
+fn read_json_file(path: &Path) -> Result<Option<Value>, McpConfigProblem> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(McpConfigProblem {
+                path: path.to_path_buf(),
+                kind: McpConfigProblemKind::Unreadable,
+                detail: e.to_string(),
+            })
+        }
     };
-    let Ok(v): Result<Value, _> = serde_json::from_slice(&bytes) else {
-        return BTreeMap::new();
-    };
-    // Accept either `{"mcpServers": {...}}` or a bare `{...}` map.
-    let map = v
-        .get("mcpServers")
-        .and_then(|x| x.as_object())
-        .or_else(|| v.as_object())
-        .cloned()
-        .unwrap_or_default();
-    map.into_iter().collect()
+    // CC treats an empty or whitespace-only `.mcp.json` as `{}` rather
+    // than as a parse error (`if(!t.trim())return{}` in its own
+    // reader), so neither do we.
+    if bytes.iter().all(|b| b.is_ascii_whitespace()) {
+        return Ok(None);
+    }
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|e| McpConfigProblem {
+            path: path.to_path_buf(),
+            kind: McpConfigProblemKind::MalformedJson,
+            // serde's message carries a line/column, which is what makes
+            // this actionable. It does not echo the file's contents.
+            detail: e.to_string(),
+        })
 }
 
-fn read_claude_json_mcp_servers(path: &Path) -> BTreeMap<String, Value> {
-    let Some(bytes) = std::fs::read(path).ok() else {
-        return BTreeMap::new();
+/// Read an `.mcp.json`-shaped file: `{"mcpServers": {...}}`.
+///
+/// There is deliberately **no bare-map fallback**. The old reader fell
+/// back to treating the whole root object as the server map when
+/// `mcpServers` was absent, which did not model CC — CC's schema is
+/// `z.object({ mcpServers: z.record(...).default({}) })` and its error
+/// says *"not valid JSON, or mcpServers is not an object"*, so a bare
+/// map is never accepted. Worse, the fallback did not merely fail to
+/// find servers for a VS Code-style `{"servers": {...}}` file: it
+/// **invented** one, a server literally named `servers` whose config
+/// was the real server map, while the real server stayed invisible.
+fn read_mcp_servers_obj(path: &Path) -> (BTreeMap<String, Value>, Option<McpConfigProblem>) {
+    let v = match read_json_file(path) {
+        Ok(Some(v)) => v,
+        Ok(None) => return (BTreeMap::new(), None),
+        Err(p) => return (BTreeMap::new(), Some(p)),
     };
-    let Ok(v): Result<Value, _> = serde_json::from_slice(&bytes) else {
-        return BTreeMap::new();
+    let Some(root) = v.as_object() else {
+        return (
+            BTreeMap::new(),
+            Some(McpConfigProblem {
+                path: path.to_path_buf(),
+                kind: McpConfigProblemKind::ServersNotObject,
+                detail: format!("top level is {}, expected an object", json_type_name(&v)),
+            }),
+        );
+    };
+    match root.get("mcpServers") {
+        Some(Value::Object(map)) => (map.clone().into_iter().collect(), None),
+        Some(other) => (
+            BTreeMap::new(),
+            Some(McpConfigProblem {
+                path: path.to_path_buf(),
+                kind: McpConfigProblemKind::ServersNotObject,
+                detail: format!(
+                    "`mcpServers` is {}, expected an object",
+                    json_type_name(other)
+                ),
+            }),
+        ),
+        // No `mcpServers` key. CC silently reads this as zero servers;
+        // we say which keys ARE there, because the overwhelmingly
+        // likely cause is the VS Code `"servers"` spelling.
+        None if !root.is_empty() => {
+            let keys: Vec<&str> = root.keys().map(String::as_str).take(5).collect();
+            (
+                BTreeMap::new(),
+                Some(McpConfigProblem {
+                    path: path.to_path_buf(),
+                    kind: McpConfigProblemKind::MissingServersKey,
+                    detail: format!("found {} instead", keys.join(", ")),
+                }),
+            )
+        }
+        None => (BTreeMap::new(), None),
+    }
+}
+
+/// Name a JSON value's type for an error message. Never its contents —
+/// an `.mcp.json` carries API keys in `env`.
+fn json_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
+}
+
+/// `mcpServers` from `~/.claude.json`.
+///
+/// Unlike `.mcp.json`, a missing `mcpServers` key here is entirely
+/// normal — that file holds dozens of unrelated keys — so there is no
+/// `MissingServersKey` arm. A malformed `~/.claude.json` still gets
+/// reported: it is CC's main config, and reading it as "no servers"
+/// is the same silent failure.
+fn read_claude_json_mcp_servers(
+    path: &Path,
+) -> (BTreeMap<String, Value>, Option<McpConfigProblem>) {
+    let v = match read_json_file(path) {
+        Ok(Some(v)) => v,
+        Ok(None) => return (BTreeMap::new(), None),
+        Err(p) => return (BTreeMap::new(), Some(p)),
     };
     let Some(obj) = v.get("mcpServers").and_then(|x| x.as_object()) else {
-        return BTreeMap::new();
+        return (BTreeMap::new(), None);
     };
-    obj.clone().into_iter().collect()
+    (obj.clone().into_iter().collect(), None)
 }
 
+/// `projects[<key>].mcpServers` from `~/.claude.json`.
+///
+/// Returns no problem of its own — the same file is read by
+/// [`read_claude_json_mcp_servers`], which reports a malformed one
+/// once. Reporting it twice would put the same path on screen twice.
 fn read_claude_json_local_mcp(claude_json: &Path, project_key: &Path) -> BTreeMap<String, Value> {
-    let Some(bytes) = std::fs::read(claude_json).ok() else {
-        return BTreeMap::new();
-    };
-    let Ok(v): Result<Value, _> = serde_json::from_slice(&bytes) else {
+    let Ok(Some(v)) = read_json_file(claude_json) else {
         return BTreeMap::new();
     };
     let Some(projects) = v.get("projects").and_then(|x| x.as_object()) else {
@@ -264,18 +372,20 @@ fn read_claude_json_local_mcp(claude_json: &Path, project_key: &Path) -> BTreeMa
     map.clone().into_iter().collect()
 }
 
-fn walk_project_mcp(cwd: &Path) -> Vec<McpLayer> {
+fn walk_project_mcp(cwd: &Path) -> (Vec<McpLayer>, Vec<McpConfigProblem>) {
     // Walk cwd → root (depth-first from cwd). Push order is cwd first,
     // then parent, ..., so `chain[0]` is the deepest dir. The ingest
     // loop in `effective_mcp::compute` applies layers in order and
     // overwrites per-name, so we must hand it the list **shallowest
     // first** — reverse before returning.
     let mut chain = Vec::new();
+    let mut problems = Vec::new();
     let mut cur: Option<PathBuf> = Some(cwd.to_path_buf());
     while let Some(dir) = cur {
         let p = dir.join(".mcp.json");
         if p.is_file() {
-            let servers = read_mcp_servers_obj(&p);
+            let (servers, problem) = read_mcp_servers_obj(&p);
+            problems.extend(problem);
             if !servers.is_empty() {
                 chain.push(McpLayer {
                     source_scope: Scope::Project,
@@ -290,7 +400,9 @@ fn walk_project_mcp(cwd: &Path) -> Vec<McpLayer> {
     }
     // Reverse → shallowest first, deepest last (deepest wins).
     chain.reverse();
-    chain
+    // Problems stay in walk order (deepest first). They are reported,
+    // not merged, so their order carries no precedence meaning.
+    (chain, problems)
 }
 
 fn collect_plugin_mcp_servers() -> BTreeMap<String, Value> {
@@ -325,28 +437,136 @@ mod tests {
         assert!(non_empty_or_none(serde_json::json!({"a": 1})).is_some());
     }
 
-    #[test]
-    fn read_mcp_servers_accepts_nested_key() {
+    /// Write `body` to a fresh `.mcp.json` and read it back.
+    fn read_mcp_fixture(body: &str) -> (BTreeMap<String, Value>, Option<McpConfigProblem>) {
         use std::io::Write;
         let td = tempfile::TempDir::new().unwrap();
-        let p = td.path().join("m.json");
+        let p = td.path().join(".mcp.json");
         let mut f = std::fs::File::create(&p).unwrap();
-        write!(f, r#"{{"mcpServers": {{"foo": {{"command": "x"}}}}}}"#).unwrap();
+        write!(f, "{body}").unwrap();
         drop(f);
-        let m = read_mcp_servers_obj(&p);
-        assert!(m.contains_key("foo"));
+        read_mcp_servers_obj(&p)
     }
 
     #[test]
-    fn read_mcp_servers_accepts_bare_object() {
-        use std::io::Write;
-        let td = tempfile::TempDir::new().unwrap();
-        let p = td.path().join("m.json");
-        let mut f = std::fs::File::create(&p).unwrap();
-        write!(f, r#"{{"foo": {{"command": "x"}}}}"#).unwrap();
-        drop(f);
-        let m = read_mcp_servers_obj(&p);
+    fn read_mcp_servers_accepts_nested_key() {
+        let (m, problem) = read_mcp_fixture(r#"{"mcpServers": {"foo": {"command": "x"}}}"#);
         assert!(m.contains_key("foo"));
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_vs_code_servers_key_does_not_fabricate_a_server() {
+        // This replaces a test that asserted the OPPOSITE — that a bare
+        // top-level map is accepted as the server map. That fallback
+        // was never CC's behaviour: CC's reader is
+        // `z.object({mcpServers: z.record(...).default({})})` and its
+        // error reads "not valid JSON, or mcpServers is not an object"
+        // (verified in the 2.1.241 binary). What the fallback actually
+        // did to the file shape CC's own 2.1.144 changelog names —
+        // VS Code's `"servers"` key — was worse than dropping it: it
+        // invented a server called `servers` whose config was the real
+        // server map, while the real server never appeared anywhere.
+        let (m, problem) = read_mcp_fixture(r#"{"servers": {"foo": {"command": "x"}}}"#);
+        assert!(
+            !m.contains_key("servers"),
+            "a top-level key must never be mistaken for a server name"
+        );
+        assert!(m.is_empty(), "and no server is invented from it either");
+        let problem = problem.expect("silence here is the bug being fixed");
+        assert_eq!(problem.kind, McpConfigProblemKind::MissingServersKey);
+        assert!(
+            problem.detail.contains("servers"),
+            "the hint has to name the key that IS there: {}",
+            problem.detail
+        );
+    }
+
+    #[test]
+    fn malformed_json_is_reported_not_read_as_empty() {
+        // The headline defect: unparseable and "no servers" were the
+        // same answer, so a broken file rendered as an empty pane.
+        let (m, problem) = read_mcp_fixture(r#"{"mcpServers": {"foo":"#);
+        assert!(m.is_empty());
+        assert_eq!(
+            problem.map(|p| p.kind),
+            Some(McpConfigProblemKind::MalformedJson)
+        );
+    }
+
+    #[test]
+    fn mcp_servers_of_the_wrong_type_is_reported() {
+        for body in [
+            r#"{"mcpServers": []}"#,
+            r#"{"mcpServers": "nope"}"#,
+            r#"{"mcpServers": 3}"#,
+            r#"{"mcpServers": null}"#,
+        ] {
+            let (m, problem) = read_mcp_fixture(body);
+            assert!(m.is_empty(), "{body}");
+            assert_eq!(
+                problem.map(|p| p.kind),
+                Some(McpConfigProblemKind::ServersNotObject),
+                "{body}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_object_root_is_reported() {
+        let (m, problem) = read_mcp_fixture("[1, 2, 3]");
+        assert!(m.is_empty());
+        assert_eq!(
+            problem.map(|p| p.kind),
+            Some(McpConfigProblemKind::ServersNotObject)
+        );
+    }
+
+    #[test]
+    fn absent_and_empty_files_are_not_problems() {
+        // CC returns `{}` for both without complaint
+        // (`if(!t.trim())return{}`), so neither may raise a warning —
+        // a pane that cried wolf on every project without an
+        // `.mcp.json` would be worse than the silence it replaced.
+        let td = tempfile::TempDir::new().unwrap();
+        let missing = td.path().join(".mcp.json");
+        let (m, problem) = read_mcp_servers_obj(&missing);
+        assert!(m.is_empty());
+        assert_eq!(problem, None, "a missing file is the normal case");
+
+        for body in ["", "   ", "\n\t "] {
+            let (m, problem) = read_mcp_fixture(body);
+            assert!(m.is_empty());
+            assert_eq!(problem, None, "empty file {body:?}");
+        }
+
+        let (m, problem) = read_mcp_fixture("{}");
+        assert!(m.is_empty());
+        assert_eq!(problem, None, "an empty object declares no servers");
+    }
+
+    #[test]
+    fn an_empty_mcp_servers_map_is_not_a_problem() {
+        let (m, problem) = read_mcp_fixture(r#"{"mcpServers": {}}"#);
+        assert!(m.is_empty());
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn problem_details_never_echo_file_contents() {
+        // An `.mcp.json` carries API keys in `env`. The detail line is
+        // rendered in the UI, so it must name types and keys, never
+        // values.
+        let secret = "sk-ant-oat01-DO-NOT-LEAK";
+        let body = format!(r#"{{"servers": {{"foo": {{"env": {{"K": "{secret}"}}}}}}}}"#);
+        let (_m, problem) = read_mcp_fixture(&body);
+        let detail = problem.expect("expected a hint").detail;
+        assert!(!detail.contains(secret), "leaked a secret: {detail}");
+
+        let bad = format!(r#"{{"mcpServers": {{"foo": {{"env": {{"K": "{secret}"}}}}}}"#);
+        let (_m, problem) = read_mcp_fixture(&bad);
+        let detail = problem.expect("expected a parse error").detail;
+        assert!(!detail.contains(secret), "leaked a secret: {detail}");
     }
 
     #[test]
@@ -416,18 +636,23 @@ mod tests {
         let sub = repo.join("a").join("b");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::create_dir_all(repo.join(".git")).unwrap();
-        // .mcp.json in sub AND at repo root.
+        // .mcp.json in sub AND at repo root. Both carry the
+        // `mcpServers` wrapper because that is the only shape CC
+        // accepts — these fixtures used to be bare maps, which passed
+        // solely because the reader had a bare-map fallback that CC
+        // never had.
         write!(
             std::fs::File::create(sub.join(".mcp.json")).unwrap(),
-            r#"{{"foo": {{"command": "x"}}}}"#
+            r#"{{"mcpServers": {{"foo": {{"command": "x"}}}}}}"#
         )
         .unwrap();
         write!(
             std::fs::File::create(repo.join(".mcp.json")).unwrap(),
-            r#"{{"bar": {{"command": "y"}}}}"#
+            r#"{{"mcpServers": {{"bar": {{"command": "y"}}}}}}"#
         )
         .unwrap();
-        let chain = walk_project_mcp(&sub);
+        let (chain, problems) = walk_project_mcp(&sub);
+        assert!(problems.is_empty(), "well-formed fixtures raise nothing");
         // Picks up both layers; stops at the git root. Ordering is
         // shallowest first so the last-wins ingest in effective_mcp
         // lets deeper dirs (the cwd) override shallower ones.
