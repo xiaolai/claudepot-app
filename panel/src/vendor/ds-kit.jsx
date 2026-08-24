@@ -200,11 +200,16 @@ const BTN_KIND = {
   danger: { bg:'transparent',    down:'var(--dg-wash)',fg:'var(--dg)',    sh:'none' },
 };
 
-function Btn({ children, onClick, kind = 'quiet', ico, full, disabled, big, style = {} }) {
+// `...rest` forwards aria-* and the like. Without it an icon-only
+// button had no accessible name at all: the caller passed
+// `aria-label="Send"`, `Btn` dropped it, and the only child was an
+// aria-hidden glyph. Vendored file, but a primitive that silently
+// discards accessibility props makes every call site wrong.
+function Btn({ children, onClick, kind = 'quiet', ico, full, disabled, big, style = {}, ...rest }) {
   const [p, ph] = usePress(!disabled);
   const K = BTN_KIND[kind] || BTN_KIND.quiet;
   return (
-    <button onClick={disabled ? undefined : onClick} disabled={disabled} {...ph}
+    <button {...rest} onClick={disabled ? undefined : onClick} disabled={disabled} {...ph}
       style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'var(--s2)',
         height:big ? 'var(--ctl-xl)' : 'var(--ctl-lg)',
         padding:big ? '0 var(--s6)' : '0 var(--s5)', width:full ? '100%' : 'auto',

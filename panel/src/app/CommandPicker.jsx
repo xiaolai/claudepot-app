@@ -11,7 +11,7 @@
 // of them dispatch subprocesses, and the last thing between a mistyped
 // filter and a 14,000-word instruction arriving in a live session
 // should be a deliberate press of Send.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { api } from './api.js';
 import { PickerSheet, PICKER_ROW_STYLE } from './PickerSheet.jsx';
@@ -36,24 +36,68 @@ export function CommandPicker({ sessionId, onStage, onClose }) {
   const [args, setArgs] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // `AbortController` alone is not enough. A fetch that resolves in the
+  // gap between the abort and the unmount still runs its `.then`, so a
+  // stale command list could be applied after the sheet closed or the
+  // session changed — the same generation guard `useTranscript` already
+  // carries, for the same reason.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  // The CURRENT session, in a ref.
+  //
+  // Comparing a captured `sessionId` against the `sessionId` from the
+  // same render closure is a tautology — both are the old value, so the
+  // guard always passed. A ref is the only thing an async continuation
+  // can read that reflects the prop as it is NOW rather than as it was
+  // when the tap happened.
+  const currentSession = useRef(sessionId);
+  useEffect(() => {
+    currentSession.current = sessionId;
+  }, [sessionId]);
+
   useEffect(() => {
     const ctrl = new AbortController();
+    let current = true;
     api
       .commands(sessionId, ctrl.signal)
-      .then((d) => setAll(d?.commands ?? []))
+      .then((d) => {
+        if (current && alive.current) setAll(d?.commands ?? []);
+      })
       .catch((e) => {
+        if (!current || !alive.current) return;
         if (e?.name !== 'AbortError') setFailed('Could not read this project\u2019s commands.');
       });
-    return () => ctrl.abort();
+    return () => {
+      current = false;
+      ctrl.abort();
+    };
   }, [sessionId]);
 
   const stage = async (cmd, withArgs) => {
     setBusy(true);
+    // The session this expansion was asked for. `alive` alone is not
+    // enough: the picker can stay mounted while `sessionId` changes
+    // underneath it, and staging a command expanded against the
+    // previous session's cwd into a different thread is worse than
+    // staging nothing.
+    const forSession = sessionId;
     try {
-      const d = await api.expandCommand(sessionId, cmd.name, withArgs);
+      const d = await api.expandCommand(forSession, cmd.name, withArgs);
+      // Expansion is not cancellable, so the guard is on the result:
+      // without it, closing the sheet mid-flight still injected the
+      // staged text into the composer afterwards — thousands of words
+      // arriving because of a tap the user had already backed out of.
+      if (!alive.current || forSession !== currentSession.current) return;
       onStage({ name: d.name, text: d.text, chars: d.text.length, restricts_tools: d.restricts_tools });
       onClose();
     } catch {
+      if (!alive.current || forSession !== currentSession.current) return;
       setFailed('Could not expand that command.');
       setBusy(false);
     }

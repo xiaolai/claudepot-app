@@ -25,12 +25,20 @@
 // ## The other copy
 //
 // `src/sections/config/mermaidColor.ts` is the same function for the
-// desktop app, which has the same palette and the same mermaid. They are
-// not pinned by shared vectors the way `session::title` is, and the
-// reason is a real difference: that one encodes *our* judgement about
-// what a title should look like, where this one implements CSS Color 4.
-// Both test against the sRGB primaries, whose oklch coordinates are
-// published and cannot drift.
+// desktop app, which has the same palette and the same mermaid. They
+// cannot import each other — this is a separate Vite build — so they
+// ARE now pinned by shared vectors, the same arrangement
+// `PriceBook::resolve` / `src/costs.ts` and `session::title` use:
+// `crates/claudepot-core/testdata/oklch-vectors.json`, run by
+// `oklchVectors.test.js` here and `oklchVectors.test.ts` there.
+//
+// The earlier note here said vectors were unnecessary because both test
+// against the sRGB primaries, whose oklch coordinates are published and
+// cannot drift. True of the primaries and not of everything else: the
+// two copies agreed on all sixteen vectors when the pin was added, but
+// nothing had been checking the alpha path, the percentage notation or
+// the `none` keyword on both sides at once. Change one, change the
+// other, add a vector.
 
 /** `oklch(…)`, with or without an alpha slash, in either notation. */
 const OKLCH = /^oklch\(\s*([^\s)]+)\s+([^\s)]+)\s+([^\s/)]+)\s*(?:\/\s*([^\s)]+)\s*)?\)$/i;

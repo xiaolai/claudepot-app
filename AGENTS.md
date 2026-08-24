@@ -55,19 +55,45 @@ cd panel && pnpm check:render        # the built remote panel actually mounts
 
 `panel`'s render check answers a question `vite build` cannot: whether
 the bundle *mounts*. It runs the committed output in jsdom and asserts
-**two** passes, because for a while it only asserted the first:
+**seven** passes, because for a while it only asserted the first:
 
 - **signed out**, with no network — the offline path a phone hits first
   — reaching the sign-in screen with zero console errors;
 - **signed in**, against a stub host, opening a session and reaching the
-  thread's composer.
+  thread's composer;
+- the **quick-prompt sheet**, which is the shared `PickerSheet` chrome;
+- the **slash-command sheet**, which is a different fetch, a different
+  row, and an argument step the other picker has no equivalent of;
+- **staging** that command — a distinct end state, since `stage()` closes
+  the sheet, so "sheet open with an args field" and "sheet closed with a
+  chip in the composer" cannot be asserted in one pass;
+- the **offline queue**, as a round trip: cut the wire, send, assert the
+  message was HELD and never reached the host, restore the wire, assert
+  it went out under the entry's own idempotency key;
+- the **wide two-pane layout**, declared at 1200px.
 
-The second exists because vite does not resolve free identifiers, so a
-missing import is a runtime `ReferenceError` in whatever code path
-touches it. Two of them shipped in one commit — `useEffect`, then `api`
-— and turned every thread into a blank screen while the signed-out
-assertion stayed green, since it never reaches `Thread`. Reverting
-either import now fails the check; verified in both directions.
+Everything after the first exists because vite does not resolve free
+identifiers, so a missing import is a runtime `ReferenceError` in
+whatever code path touches it. Two of them shipped in one commit —
+`useEffect`, then `api` — and turned every thread into a blank screen
+while the signed-out assertion stayed green, since it never reaches
+`Thread`. Reverting either import now fails the check; verified in both
+directions.
+
+The offline pass is the only end-to-end coverage the drain has — the
+store has unit tests, the loop that reads it had none — and it is the
+one path in the panel that sends a message the user is not present for.
+Watched failing against a drain that minted a fresh key instead of
+replaying the entry's.
+
+**The wide pass declares a width, and that is the whole trick.** jsdom
+has no layout, so a real `ResizeObserver` measurement is always zero and
+the stub used to be a no-op — which pinned every pass to the phone step
+and made the wide layout unreachable by any check. It is asserted
+through behaviour rather than markup (`<nav>` is true of the phone
+layout too): at ≥900px, opening a thread leaves the list on screen and
+there is therefore no Back chevron. Watched failing against the
+pre-change shell, which reported `data-bp: sm`.
 
 `pnpm check:render:self-test` forces a failure so the assertions are
 known to fire. Note the harness **defers restoring globals to process
@@ -937,6 +963,91 @@ Five decisions are worth not re-litigating:
   and the panel's inline conflict copy say the same thing in different
   registers. Registering, removing and verifying accounts
   stay at the machine — they need credentials the panel never sees.
+
+**Three steps, and only the last restructures.** `data-bp` is written
+from `useBP`'s ResizeObserver on the panel's own shell, so one
+observation drives type, gutter and layout together — and a 390px split
+view renders as a phone regardless of how wide the display is. A
+container query cannot express this: `@container` matches DESCENDANTS of
+the container and never the container element itself, and the panel *is*
+the element that steps.
+
+| | Width | Navigation | Layout |
+|---|---|---|---|
+| `sm` | ≤479px | bottom tabs | one column; the thread covers the list |
+| `md` | 480–899px | bottom tabs | one column, wider gutter and larger type |
+| `lg` | ≥900px | left icon rail | list and thread side by side |
+
+The attribute was pinned to `"sm"` for the whole of the panel's life
+before this, which left the `md` and `lg` blocks in `ds-tokens.css` as
+dead CSS — the app rendered at the phone floor on every screen it was
+ever opened on.
+
+Three consequences follow from `lg` and each was a bug at least once:
+
+- **Every branch of `Panel` returns a `Shell`.** `useBP` observes
+  `ref.current` in an effect keyed on the ref OBJECT, which is stable, so
+  the effect runs exactly once after the first commit. A boot screen
+  rendered outside the shell left `ref.current` null at that moment and
+  the observer was never attached — reproducing the pinned-to-`sm`
+  failure through a different mechanism.
+- **The thread in a pane has no Back.** It never covered the list, so a
+  chevron there would undo a navigation the user did not make. Tapping a
+  rail tab does not clear the open thread either, for the same reason it
+  does clear one on a phone: there the tab would light up under a
+  transcript still covering it, here it hides nothing.
+- **The list says which row is open.** Only at `lg` — `openId` is passed
+  as null below it, because a list nobody can see does not need a
+  selection. A history row takes the accent wash; a live card takes an
+  inset ring instead, since it may already be carrying the live glow and
+  two backgrounds on one card read as a rendering fault.
+
+**Offline holds the message; it does not refuse it.** The composer used
+to disable itself when the host stopped answering, which is honest and
+throws away the one thing a phone is good for — you thought of it on the
+train. `claudepot-core` is not involved: the queue is
+`panel/src/app/outbox.js`, localStorage, client-side.
+
+Four properties, each of which is why it is a module rather than
+component state:
+
+- **It survives leaving the thread**, and the reload. A queue held in
+  `Thread` dies on Back, which makes "sends when the Mac is back" false
+  the moment the user navigates — and an iOS home-screen app is evicted
+  from memory whenever the OS likes.
+- **The drain is gated on the SESSION, not on the host.** Live and
+  addressable, not merely reachable. A session that ended while you were
+  offline keeps its queue and waits; posting into a recycled pid is the
+  one outcome worse than not sending.
+- **The idempotency key is minted at enqueue and travels with the
+  entry.** A drain that sends and then loses the answer replays as the
+  same intent. Minting at drain time would make a retry a second
+  message, which is the only way this feature could send something
+  twice.
+- **A refused entry stops retrying and says why.** Without that a
+  permanently-refused message is re-sent on every poll — a failing
+  request every four seconds, forever, from a phone in a pocket.
+  `OfflineError` is deliberately not treated that way: "the Mac is not
+  answering" is the state the queue exists for. Every entry is
+  cancellable from the row it renders on, because otherwise the only way
+  to stop one is to be elsewhere when it fires.
+
+**What the design proposed and the panel does not do**, recorded so it is
+not rediscovered as an omission:
+
+- **Send does not become interrupt while Claude streams.** There is no
+  interrupt: CC's peer inbox takes `user` plus `rename` /
+  `notify_when_idle` / `peer_idle_notice` / `peer_message_status`, and
+  `TIOCSTI` is refused by current macOS with EACCES even on a pty the
+  caller owns. The design's prototype `interrupt` completes its own mock
+  stream. A button here would do nothing and say it did something.
+- **No Projects tab and no `+` new session.** The first was deleted
+  rather than left read-only (see below); the second means spawning an
+  interactive session, which `.claude/rules/architecture.md` puts outside
+  this product on purpose.
+- **No device-pick pairing screen and no push transport.** Pairing is
+  password + passkey, which is a different and stronger flow than the
+  design's mock; push was flagged as unbuilt by the designer too.
 
 **Two pickers, one sheet.** Slash commands sit behind `/` and quick
 prompts behind `…`, and they share `PickerSheet` — position, z-index,

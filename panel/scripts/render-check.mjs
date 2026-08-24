@@ -44,8 +44,16 @@ const args = process.argv.slice(2);
 const selfTest = args.includes('--self-test');
 const outDir = args.find((a) => !a.startsWith('-')) || DEFAULT_OUT;
 
-/** Install a jsdom window's globals so an ES module sees a browser. */
-function installGlobals(window) {
+/**
+ * Install a jsdom window's globals so an ES module sees a browser.
+ *
+ * `width`, when given, makes `ResizeObserver` report that width for
+ * anything observed. The panel's whole responsive system hangs off one
+ * observation of its own shell — see `Panel.jsx` — so a no-op observer
+ * pins every pass to the phone step and the wide layout is code no
+ * check can reach.
+ */
+function installGlobals(window, width) {
   const restore = [];
   const set = (key, value) => {
     const had = Object.prototype.hasOwnProperty.call(globalThis, key);
@@ -66,13 +74,18 @@ function installGlobals(window) {
     addListener() {},
     removeListener() {},
   });
-  if (!window.ResizeObserver) {
-    window.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
-  }
+  window.ResizeObserver = class {
+    constructor(cb) {
+      this.cb = cb;
+    }
+    observe(target) {
+      // jsdom has no layout, so a real measurement is always zero. A
+      // declared width is the only way to say "this panel is a tablet".
+      if (width) this.cb([{ target, contentRect: { width, height: 900 } }], this);
+    }
+    unobserve() {}
+    disconnect() {}
+  };
   Object.defineProperty(window, 'crypto', { value: globalThis.crypto, configurable: true });
 
   // No network. Every request the panel makes must be tolerated as a
@@ -127,12 +140,18 @@ function installGlobals(window) {
  * cover, and it should say so by failing rather than by hanging.
  */
 const SESSION_ID = 'render-check-session';
-function stubHost() {
+function stubHost(log = []) {
   const body = (o) => Promise.resolve({
     ok: true, status: 200, json: () => Promise.resolve(o), text: () => Promise.resolve(JSON.stringify(o)),
   });
-  return (input) => {
+  return (input, init) => {
     const url = String(typeof input === 'string' ? input : input?.url || '');
+    // Recorded so the outbox scenario can assert the drain actually
+    // SENT, rather than merely having dropped the entry.
+    if (url.endsWith('/prompt')) {
+      log.push({ url, key: init?.headers?.['Idempotency-Key'] ?? null });
+      return body({ ok: true });
+    }
     if (url.includes('/api/me')) return body({ device: 'render-check', passkeys: 0, server_version: '0.0.0' });
     if (url.includes('/transcript')) {
       return body({
@@ -141,6 +160,22 @@ function stubHost() {
         events: [
           { index: 0, kind: 'user', ts: '2026-08-24T00:00:00Z', text: 'hello' },
           { index: 1, kind: 'assistant', ts: '2026-08-24T00:00:01Z', text: 'hi **there**' },
+        ],
+      });
+    }
+    // The command picker's two endpoints. Its fetch, row renderer,
+    // argument step and staging are a different code path from the
+    // quick picker's, sharing only the sheet chrome.
+    if (/\/commands\/[^/]+$/.test(url)) {
+      return body({ name: 'audit-fix', text: 'Audit and fix everything.', restricts_tools: true });
+    }
+    if (url.includes('/commands')) {
+      return body({
+        commands: [
+          // `argument_hint` is what makes the picker two-step, and the
+          // two-step path — args field, then stage — is the half a
+          // single-click scenario never reaches.
+          { name: 'audit-fix', description: 'Audit then fix', argument_hint: '<scope>', source: 'project', body_chars: 14208, restricts_tools: true, pins_model: false },
         ],
       });
     }
@@ -180,12 +215,18 @@ async function render(dir, scenario = {}) {
     pretendToBeVisual: true,
     virtualConsole: vc,
   });
-  const restore = installGlobals(dom.window);
+  const restore = installGlobals(dom.window, scenario.width);
+  // A fresh outbox per pass: it is localStorage, and jsdom gives each
+  // window its own, but the scenario needs to be able to read it back.
+  const prompts = [];
   if (scenario.token) {
     dom.window.localStorage.setItem('claudepot.token', scenario.token);
-    const f = stubHost();
+    const f = stubHost(prompts);
     dom.window.fetch = f;
     globalThis.fetch = f;
+    // Handed to the scenario so it can go offline and come back.
+    dom.window.__host = f;
+    dom.window.__prompts = prompts;
   }
 
   try {
@@ -209,8 +250,41 @@ async function render(dir, scenario = {}) {
   const out = {
     hasComposer: Boolean(dom.window.document.querySelector('textarea')),
     hasSheet: Boolean(dom.window.document.querySelector('[role="dialog"]')),
+    // The command picker's ARGUMENT step. The hint is a `placeholder`,
+    // not text, so it never reaches `textContent` — an assertion on the
+    // rendered string would have looked for something that cannot be
+    // there and failed for the wrong reason.
+    hasCommandArgs: Boolean(
+      dom.window.document.querySelector('input[aria-label^="Arguments for"]'),
+    ),
+    // The staged-command chip in the composer, which is what `stage()`
+    // produces. Identified by the remove button's label so the probe
+    // does not depend on the chip's wording.
+    hasStagedCommand: Boolean(
+      dom.window.document.querySelector('button[aria-label^="Remove "]'),
+    ),
+    // The measured step, read off the element that carries it. `sm`
+    // when nothing declared a width, which is every other pass.
+    bp: dom.window.document.querySelector('.panel')?.getAttribute('data-bp') ?? null,
+    // The thread's Back chevron. Present when the thread COVERS the
+    // list, absent when it sits beside it — which is the one behaviour
+    // that distinguishes the two layouts from the outside.
+    hasBack: Boolean(dom.window.document.querySelector('button[aria-label="Back"]')),
     children: root?.children.length ?? 0,
     text: (root?.textContent || '').replace(/\s+/g, ' ').trim(),
+    // What the outbox scenario needs: whether a held row is on screen,
+    // what is actually in storage, and what reached the host.
+    hasQueuedRow: Boolean(
+      dom.window.document.querySelector('button[aria-label="Discard this queued message"]'),
+    ),
+    outbox: (() => {
+      try {
+        return JSON.parse(dom.window.localStorage.getItem('claudepot.outbox') || '{}');
+      } catch {
+        return null;
+      }
+    })(),
+    prompts,
     errors,
   };
   // Teardown is DEFERRED to process exit, not done here.
@@ -297,6 +371,116 @@ async function openTheQuickSheet(window) {
   throw new Error('the quick-prompt button never appeared');
 }
 
+/**
+ * Open a thread, then open the SLASH-command sheet from `/`.
+ *
+ * The quick sheet below proves the shared chrome mounts; it cannot
+ * prove this one does. `CommandPicker` has its own fetch, its own row,
+ * an argument step the other picker has no equivalent of, and the
+ * staging path that puts thousands of words into the composer — none of
+ * which the quick-prompt scenario touches. A render check that opens
+ * one of two pickers reports on one of two pickers.
+ */
+async function openTheCommandSheet(window) {
+  await openAThread(window);
+  const doc = window.document;
+  let opened = false;
+  for (let i = 0; i < 40 && !opened; i += 1) {
+    const btn = doc.querySelector('button[aria-label="Insert a command"]');
+    if (btn) {
+      btn.click();
+      opened = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!opened) throw new Error('the insert-a-command button never appeared');
+
+  // Then drive the ARGUMENT step and actually stage it. The stub
+  // command declares an `argument_hint`, so tapping the row opens the
+  // args field rather than staging immediately — and staging is the
+  // path that puts thousands of words into the composer, which is the
+  // whole reason this picker commits on a second press rather than the
+  // first. Stopping at the row would leave that press untested while
+  // the comment above claimed otherwise.
+  for (let i = 0; i < 40; i += 1) {
+    const row = [...doc.querySelectorAll('button, [role="button"]')].find((el) =>
+      /audit-fix/.test(el.textContent || ''),
+    );
+    if (row) {
+      row.click();
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  await new Promise((r) => setTimeout(r, 150));
+}
+
+/**
+ * …and the second press, which is a different END STATE.
+ *
+ * `stage()` calls `onClose()`, so once Insert lands the sheet is gone
+ * and the chip is in the composer. Asserting "sheet open with an args
+ * field" and "sheet closed with a staged chip" in one scenario is
+ * asserting two mutually exclusive things; the first version did
+ * exactly that and failed on its own success.
+ */
+async function stageACommand(window) {
+  await openTheCommandSheet(window);
+  const doc = window.document;
+  for (let i = 0; i < 40; i += 1) {
+    const insert = [...doc.querySelectorAll('button, [role="button"]')].find(
+      (el) => (el.textContent || '').trim() === 'Insert',
+    );
+    if (insert) {
+      insert.click();
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await new Promise((r) => setTimeout(r, 250));
+}
+
+function evaluateCommandSheet(result) {
+  const problems = [];
+  if (result.errors.length) problems.push(...result.errors.map((e) => e.slice(0, 400)));
+  if (!result.hasSheet) problems.push('the slash-command sheet did not open');
+  // The stub host serves one command named `audit-fix`.
+  if (!/audit-fix/.test(result.text)) {
+    problems.push(`the sheet rendered no command rows (text was: ${result.text.slice(0, 160)})`);
+  }
+  // The argument step, probed in the DOM: the hint is a `placeholder`
+  // and never appears in `textContent`. If this is absent after the row
+  // was tapped, only the list rendered and the two-step path — the one
+  // that ends in thousands of words landing in the composer — is still
+  // unexercised.
+  if (!result.hasCommandArgs) {
+    problems.push(
+      `the argument step did not render (text was: ${result.text.slice(0, 200)})`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * The end of the command path: Insert pressed, sheet closed, expansion
+ * in the composer as a chip.
+ */
+function evaluateStaging(result) {
+  const problems = [];
+  if (result.errors.length) problems.push(...result.errors.map((e) => e.slice(0, 400)));
+  if (result.hasSheet) {
+    problems.push('the sheet stayed open after Insert — stage() should close it');
+  }
+  if (!result.hasStagedCommand) {
+    problems.push(
+      `Insert did not stage the command (text was: ${result.text.slice(0, 200)})`,
+    );
+  }
+  return problems;
+}
+
 function evaluateSheet(result) {
   const problems = [];
   if (result.errors.length) problems.push(...result.errors.map((e) => e.slice(0, 400)));
@@ -306,6 +490,115 @@ function evaluateSheet(result) {
   if (!/Go/.test(result.text)) {
     problems.push(`the sheet rendered no rows (text was: ${result.text.slice(0, 160)})`);
   }
+  return problems;
+}
+
+/** React tracks a controlled value, so a raw `.value =` is ignored. */
+function typeInto(window, el, value) {
+  const proto = Object.getPrototypeOf(el);
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+  el.dispatchEvent(new window.Event('input', { bubbles: true }));
+}
+
+/**
+ * Type while the Mac is unreachable, then let it come back.
+ *
+ * The one path in the panel that sends a message the user is not
+ * present for, and the one nothing else exercises end to end: the store
+ * has unit tests, the drain has none. Both halves are asserted — that
+ * the composer HELD rather than refused, and that reconnecting actually
+ * put the text on the wire.
+ */
+async function queueWhileOffline(window) {
+  await openAThread(window);
+  const doc = window.document;
+
+  let ta = null;
+  for (let i = 0; i < 40 && !ta; i += 1) {
+    ta = doc.querySelector('textarea');
+    if (!ta) await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!ta) throw new Error('the composer never appeared');
+
+  // Cut the wire. `api.js` classifies a TypeError from fetch as
+  // `OfflineError`, which is what flips `conn`.
+  const dead = () => Promise.reject(new TypeError('offline (render-check)'));
+  window.fetch = dead;
+  globalThis.fetch = dead;
+  // Wait past one poll so `conn` is actually `offline` — sending before
+  // that would take the normal path and prove nothing.
+  await new Promise((r) => setTimeout(r, 4600));
+
+  typeInto(window, ta, 'thought of it on the train');
+  await new Promise((r) => setTimeout(r, 60));
+  ta.closest('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((r) => setTimeout(r, 400));
+
+  const stored = JSON.parse(window.localStorage.getItem('claudepot.outbox') || '{}');
+  const held = Object.values(stored).flat();
+  if (held.length !== 1) {
+    throw new Error(`offline send did not hold the message (outbox held ${held.length})`);
+  }
+  if (window.__prompts.length !== 0) {
+    throw new Error('the message went to the host while it was unreachable');
+  }
+  if (!doc.querySelector('button[aria-label="Discard this queued message"]')) {
+    throw new Error('the held message is not on screen — nothing says it exists');
+  }
+
+  // The Mac comes back.
+  window.fetch = window.__host;
+  globalThis.fetch = window.__host;
+  await new Promise((r) => setTimeout(r, 6000));
+
+  if (window.__prompts.length !== 1) {
+    throw new Error(`the drain did not send (${window.__prompts.length} prompts reached the host)`);
+  }
+  // The idempotency key must be the entry's own id, or a replayed drain
+  // is a second message rather than the same one.
+  if (window.__prompts[0].key !== held[0].id) {
+    throw new Error('the drain minted a new idempotency key instead of replaying the entry id');
+  }
+}
+
+/**
+ * The wide layout: rail on the left, list and thread side by side.
+ *
+ * Asserted through behaviour rather than through the rail's markup,
+ * because "there is a `<nav>`" is true of the phone layout too. What is
+ * only true at ≥900px is that opening a thread leaves the list on
+ * screen — and that there is therefore nothing to go Back from.
+ */
+function evaluateWide(result) {
+  const problems = [];
+  if (result.children === 0) problems.push('#root has no children — React never mounted');
+  if (result.errors.length) problems.push(...result.errors.map((e) => e.slice(0, 400)));
+  if (result.bp !== 'lg') {
+    problems.push(`the panel did not step to the wide layout (data-bp was ${result.bp})`);
+  }
+  if (!result.hasComposer) {
+    problems.push(`the thread did not render in its pane (text was: ${result.text.slice(0, 200)})`);
+  }
+  // Both halves on screen at once is the entire point of this step.
+  if (!/a session to open/.test(result.text)) {
+    problems.push('the list was covered by the thread instead of sitting beside it');
+  }
+  if (result.hasBack) {
+    problems.push('the thread kept its Back chevron in a pane it never covered the list from');
+  }
+  return problems;
+}
+
+/** After the round trip: nothing held, nothing on screen, one sent. */
+function evaluateOutbox(result) {
+  const problems = [];
+  // The scenario itself throws on every interesting failure, and those
+  // arrive here as `scenario: …` errors.
+  if (result.errors.length) problems.push(...result.errors.map((e) => e.slice(0, 400)));
+  if (Object.keys(result.outbox || {}).length) {
+    problems.push('the outbox still holds a message the host accepted');
+  }
+  if (result.hasQueuedRow) problems.push('a sent message is still rendered as queued');
   return problems;
 }
 
@@ -349,7 +642,7 @@ if (selfTest) {
  * can hang is worse than one that can fail: the run sits there until the
  * job's own timeout and reports nothing useful.
  */
-const DEADLINE_MS = 60_000;
+const DEADLINE_MS = 90_000;
 const deadline = setTimeout(() => {
   console.error(`panel render check FAILED — no verdict within ${DEADLINE_MS / 1000}s`);
   process.exit(1);
@@ -363,16 +656,44 @@ const threadProblems = evaluateThread(
 const sheetProblems = evaluateSheet(
   await render(outDir, { token: 'render-check-token', then: openTheQuickSheet }),
 );
+const cmdProblems = evaluateCommandSheet(
+  await render(outDir, { token: 'render-check-token', then: openTheCommandSheet }),
+);
+const stageProblems = evaluateStaging(
+  await render(outDir, { token: 'render-check-token', then: stageACommand }),
+);
+const outboxProblems = evaluateOutbox(
+  await render(outDir, { token: 'render-check-token', then: queueWhileOffline }),
+);
+const wideProblems = evaluateWide(
+  await render(outDir, { token: 'render-check-token', then: openAThread, width: 1200 }),
+);
 clearTimeout(deadline);
-if (problems.length || threadProblems.length || sheetProblems.length) {
+if (
+  problems.length ||
+  threadProblems.length ||
+  sheetProblems.length ||
+  cmdProblems.length ||
+  stageProblems.length ||
+  outboxProblems.length ||
+  wideProblems.length
+) {
   console.error('panel render check FAILED');
   for (const p of problems) console.error(`  - signed out: ${p}`);
   for (const p of threadProblems) console.error(`  - thread: ${p}`);
-  for (const p of sheetProblems) console.error(`  - sheet: ${p}`);
+  for (const p of sheetProblems) console.error(`  - quick sheet: ${p}`);
+  for (const p of cmdProblems) console.error(`  - command sheet: ${p}`);
+  for (const p of stageProblems) console.error(`  - staging: ${p}`);
+  for (const p of outboxProblems) console.error(`  - offline queue: ${p}`);
+  for (const p of wideProblems) console.error(`  - wide layout: ${p}`);
   restoreAll();
   process.exit(1);
 }
-console.log('panel render check ok — sign-in, a thread and a picker sheet all render, no console errors');
+console.log(
+  'panel render check ok — sign-in, a thread, both picker sheets, staging a command, ' +
+    'holding a message offline and draining it, and the wide two-pane layout all work, ' +
+    'no console errors',
+);
 restoreAll();
 // Explicit, so a poll timer the panel scheduled cannot outlive the
 // verdict and turn a pass into a non-zero exit.

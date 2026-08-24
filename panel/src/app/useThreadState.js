@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, explainSend, newIdempotencyKey } from './api.js';
+import { enqueue } from './outbox.js';
 
 /** px from the bottom that still counts as "following along". */
 export const AT_END_SLOP = 90;
@@ -125,8 +126,32 @@ export function useSendPrompt(session, conn, onChanged) {
   // same commitment — nothing leaves until send — without making the
   // composer unusable to get there.
   const [staged, setStaged] = useState(null);
+  // `sending` is React state, so it is still `false` on the second of
+  // two taps that land in one frame — the guard below reads a value
+  // that has not re-rendered yet. A ref updates synchronously, which is
+  // what a re-entrancy guard needs.
+  const inFlight = useRef(false);
+  // One key per *intent*, held until that intent settles. A fresh key
+  // per invocation made a double-submit two distinct mutations as far
+  // as the server was concerned, so the idempotency layer — which
+  // exists for exactly this — had nothing to match on and the prompt
+  // landed in the session twice.
+  //
+  // The key is bound to the TEXT it was minted for. Holding it across a
+  // failure is right for a retry of the same message and wrong for the
+  // next one: the server replays the stored response for a key it has
+  // already seen, so reusing it after the user edits the prompt would
+  // replay the old error and never send the new text. Different intent,
+  // different key.
+  const pendingKey = useRef(null);
+  const pendingKeyFor = useRef(null);
 
-  const canSend = Boolean(session.live && session.addressable && conn !== 'offline');
+  // Offline no longer blocks the composer, it HOLDS — see `outbox.js`.
+  // What still blocks is a session there is no point writing to at all:
+  // a queue for a conversation that has ended is a promise nothing can
+  // keep, and the entry would sit there being refused.
+  const holding = conn === 'offline';
+  const canSend = Boolean(session.live && session.addressable);
   // The warning is pointless once a command is staged — that is the
   // supported way to send one, and repeating "slash commands do not
   // run" over a staged expansion would contradict the chip above it.
@@ -138,9 +163,7 @@ export function useSendPrompt(session, conn, onChanged) {
     ? 'This session is not running — nothing to send to.'
     : !session.addressable
       ? 'This session has no message inbox — an older Claude Code, or its socket did not bind.'
-      : conn === 'offline'
-        ? 'Offline.'
-        : null;
+      : null;
 
   const send = useCallback(
     async (body) => {
@@ -148,11 +171,33 @@ export function useSendPrompt(session, conn, onChanged) {
       // The other order buries the instruction under the aside.
       const typed = (body ?? text).trim();
       const value = staged ? [staged.text, typed].filter(Boolean).join('\n\n') : typed;
-      if (!value || sending || !canSend) return;
+      if (!value || inFlight.current || sending || !canSend) return;
+
+      // Offline: hold it and clear the composer. The key is minted here
+      // and travels WITH the entry, so the drain presents the same one
+      // however many times it has to try — see `outbox.js`.
+      if (holding) {
+        enqueue(session.session_id, value, newIdempotencyKey());
+        setText('');
+        setStaged(null);
+        setNotice(null);
+        return;
+      }
+
+      inFlight.current = true;
+      // Reuse the key only for a retry of the SAME text, so the server
+      // replays its answer instead of re-executing. Any edit mints a
+      // new one.
+      if (!pendingKey.current || pendingKeyFor.current !== value) {
+        pendingKey.current = newIdempotencyKey();
+        pendingKeyFor.current = value;
+      }
       setSending(true);
       setNotice(null);
       try {
-        await api.sendPrompt(session.session_id, value, newIdempotencyKey());
+        await api.sendPrompt(session.session_id, value, pendingKey.current);
+        pendingKey.current = null;
+        pendingKeyFor.current = null;
         setText('');
         setStaged(null);
         setNotice('Handed off. Claude Code may hold it for approval at the machine.');
@@ -160,13 +205,15 @@ export function useSendPrompt(session, conn, onChanged) {
       } catch (e) {
         // Deliberately NOT cleared on failure: the expansion took a
         // round trip to fetch, and dropping it would make a retry mean
-        // finding the command again.
+        // finding the command again. The key is kept for the same
+        // reason — a retry is the same intent, not a new one.
         setNotice(explainSend(e));
       } finally {
+        inFlight.current = false;
         setSending(false);
       }
     },
-    [text, staged, sending, canSend, session.session_id, onChanged],
+    [text, staged, sending, canSend, holding, session.session_id, onChanged],
   );
 
   return {
@@ -176,6 +223,7 @@ export function useSendPrompt(session, conn, onChanged) {
     notice,
     send,
     canSend,
+    holding,
     blocked,
     warning,
     staged,

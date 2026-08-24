@@ -33,6 +33,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { toMermaidColor } from './color.js';
+import { sanitizeSvg } from './sanitizeSvg.js';
 
 /**
  * Paper-mono colours for mermaid, read from the live tokens.
@@ -46,6 +47,10 @@ function themeVariables() {
   // khroma, which throws `Unsupported color format` on it — taking the
   // whole diagram down before layout ever starts. See `color.js`.
   const v = (name, fallback = '') => toMermaidColor(cs.getPropertyValue(name).trim() || fallback);
+  // Sizes and families are NOT colours — `v` runs its value through
+  // `toMermaidColor`, which is right for a paint and meaningless for a
+  // length. `--f-sans` was going through it too.
+  const raw = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
   const surface = v('--sf2');
   // `--sf` is the CARD colour and in light mode it is pure white
   // (`oklch(100% 0 0)`). That is right for a card floating on the warm
@@ -83,8 +88,11 @@ function themeVariables() {
     signalTextColor: ink,
     // Mermaid measures text to lay out nodes, so it has to be told the
     // family the panel actually paints with or every box is mis-sized.
-    fontFamily: v('--f-sans', 'system-ui'),
-    fontSize: '13px',
+    fontFamily: raw('--f-sans', 'system-ui'),
+    // From the token: mermaid MEASURES text to size its nodes, so a
+    // literal here mis-sizes every box the moment the panel's type
+    // scale moves.
+    fontSize: raw('--t-meta', '13px'),
   };
 }
 
@@ -152,6 +160,13 @@ export function Mermaid({ source }) {
         if (el.nodeName.toLowerCase() !== 'svg') {
           throw new Error(`not an svg: ${(el.textContent || '').trim().replace(/\s+/g," ").slice(0, 400)}`);
         }
+        // Scrubbed on the way in, exactly as the desktop renderer does.
+        // Trusting mermaid's own `strict` mode is trusting one library's
+        // sanitiser as the only barrier for input that is model output;
+        // the desktop surface never did, and having one of two renderers
+        // guarded is the same defect the htmlLabels fix already found
+        // here.
+        sanitizeSvg(el);
         ref.current.replaceChildren(document.importNode(el, true));
       } catch (e) {
         if (cancelled) return;

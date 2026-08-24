@@ -23,6 +23,46 @@ import remarkGfm from 'remark-gfm';
  * immediately: node has no JSX loader, and the whole reason this module
  * is JSX-free is that its security assertions run there.
  */
+/**
+ * Is this `<code>` className tagged with `language-<name>`?
+ *
+ * `className.includes('language-mermaid')` is a substring test on a
+ * space-delimited class list, so `language-mermaidish` matched and an
+ * ordinary fence was handed to the diagram renderer. Compare whole
+ * tokens.
+ *
+ * Twin of `src/lib/codeFence.ts` — the panel is a separate Vite app and
+ * cannot import from the Tauri renderer. Change one, change the other;
+ * both carry the `mermaidish` case in their tests.
+ */
+export function hasLanguage(className, language) {
+  if (!className) return false;
+  return className.split(/\s+/).includes(`language-${language}`);
+}
+
+/**
+ * Protocols a link in model output may use.
+ *
+ * `react-markdown`'s default `urlTransform` blocks `javascript:` and
+ * friends but permits relative URLs, `irc:`, `ircs:` and `xmpp:`. The
+ * input is model output quoting arbitrary files, so it does not get to
+ * pick a protocol handler.
+ *
+ * Matched lexically, with no `new URL()`: parsing needs a base, and a
+ * base is a URL literal, which `remote::assets`'s "no third-party
+ * requests" test correctly refuses to find in this bundle. Anything
+ * that does not match the allowed prefix is refused, so the failure
+ * direction is closed.
+ *
+ * Twin of `src/lib/mdLink.ts`; change one, change the other.
+ */
+const ALLOWED_SCHEME = /^(?:https?|mailto):/i;
+
+export function isSafeHref(href) {
+  if (!href) return false;
+  return ALLOWED_SCHEME.test(String(href).trim());
+}
+
 const Mermaid = lazy(() => import('./Mermaid.jsx').then((m) => ({ default: m.Mermaid })));
 
 /**
@@ -60,7 +100,7 @@ export const MD_COMPONENTS = {
   pre: ({ children, node: _node, ...rest }) => {
     const codeChild = Children.toArray(children).find(isValidElement);
     const className = codeChild?.props?.className ?? '';
-    if (className.includes('language-mermaid')) {
+    if (hasLanguage(className, 'mermaid')) {
       const source = codeText(codeChild?.props?.children);
       // The fallback is the diagram's source, which is exactly what the
       // reader had before this existed — so a slow chunk degrades to the
@@ -85,8 +125,11 @@ export const MD_COMPONENTS = {
   // would drop an authenticated session mid-thread. react-markdown's
   // default `urlTransform` has already dropped anything outside
   // http/https/mailto/tel, so `javascript:` never reaches here.
+  // Only http(s) and mailto become a real link. See `isSafeHref`.
   a: ({ href, children }) =>
-    h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, children),
+    isSafeHref(href)
+      ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, children)
+      : h('span', { title: href || undefined }, children),
 
   // A GFM table is the one construct that reliably exceeds a phone's
   // width. It scrolls inside its own wrapper so it cannot widen the

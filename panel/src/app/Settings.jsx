@@ -12,9 +12,17 @@ import { createCredential, passkeyBlocker, passkeySupport } from './webauthn.js'
 
 const { Btn, Chip, Group, Ico, Item, List, Seg } = window;
 
-/** "in 12d", "expired", or "never" — a session token may have no expiry. */
+/**
+ * "in 12d", "expired", "never", or "—" while we do not know yet.
+ *
+ * The unknown case is the point. `me` is `null` before `/api/me`
+ * answers and after it fails, and collapsing that into `'never'` stated
+ * — as a fact, on the security pane — that this session token does not
+ * expire. A dash says nothing, which is the true thing to say.
+ */
 function expiry(me) {
-  if (!me?.expires_at) return 'never';
+  if (!me) return '—';
+  if (!me.expires_at) return 'never';
   const left = until(me.expires_at);
   return left ? `in ${left}` : 'expired';
 }
@@ -85,16 +93,21 @@ export function Settings({ theme, onTheme, tools, onTools, host, onSignOut, onRe
         { ...attestation, challenge_id: begin.challenge_id },
         newIdempotencyKey(),
       );
+      // The component has an `alive` ref precisely because these awaits
+      // are long — the WebAuthn prompt is a system dialog the user can
+      // sit on — and this path was the one that did not consult it.
+      if (!alive.current) return;
       setNotice('Passkey added. Next sign-in can use Face ID.');
       reload();
     } catch (e) {
+      if (!alive.current) return;
       if (e?.name === 'NotAllowedError' || e?.message === 'cancelled') setNotice(null);
       else if (e instanceof OfflineError) setNotice('Cannot reach this Mac.');
       else if (e instanceof ApiError && e.code === 'rp_id_unavailable')
         setNotice('This origin has no hostname — reach the panel by name, not by IP address.');
       else setNotice('Could not add a passkey.');
     } finally {
-      setBusy(false);
+      if (alive.current) setBusy(false);
     }
   };
 
@@ -158,7 +171,16 @@ export function Settings({ theme, onTheme, tools, onTools, host, onSignOut, onRe
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 'var(--t-sub)' }}>Passkey</div>
               <div style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginTop: 'var(--s1)' }}>
-                {passkeys ? `${passkeys} registered` : 'None registered'}
+                {/* `null` is "not loaded", `0` is "none". Conflating
+                    them announced "None registered" before /api/me
+                    answered — and after it failed — which is the one
+                    claim that would send someone to enrol a passkey
+                    they already have. */}
+                {passkeys === null
+                  ? 'Checking…'
+                  : passkeys > 0
+                    ? `${passkeys} registered`
+                    : 'None registered'}
               </div>
             </div>
             {support?.usable ? (
@@ -189,12 +211,20 @@ export function Settings({ theme, onTheme, tools, onTools, host, onSignOut, onRe
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 'var(--t-sub)' }}>Delivery window</div>
               <div style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginTop: 'var(--s1)' }}>
+                {/* `unmanaged_open` FIRST. Core's `is_unmanaged_open()`
+                    is `is_open() && nothing-is-minding-it`, so it
+                    implies `open` — testing `open` first made this
+                    branch unreachable and the warning it carries has
+                    never once been shown. Its own doc comment says
+                    "worth saying out loud in any UI", and "open with a
+                    deadline" and "open forever" are not the same risk;
+                    the desktop chip already draws that line. */}
                 {inbound === null
                   ? '—'
-                  : inbound.open
-                    ? 'Open — sessions accept messages without holding them'
-                    : inbound.unmanaged_open
-                      ? 'Open, but set outside Claudepot — close it at the machine'
+                  : inbound.unmanaged_open
+                    ? 'Open, but set outside Claudepot — nothing will close it'
+                    : inbound.open
+                      ? 'Open — sessions accept messages without holding them'
                       : 'Closed — messages are held for approval at the machine'}
               </div>
             </div>

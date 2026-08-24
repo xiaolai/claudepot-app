@@ -19,7 +19,7 @@ a phone. The two apps share a design language and no code.
 
 | Path | Role |
 |---|---|
-| `src/vendor/` | The delivered design system, **byte-identical**: `ds-tokens.css`, `ds-icons.jsx`, `ds-kit.jsx`. They publish onto `window` and read `React` from it. |
+| `src/vendor/` | The delivered design system: `ds-tokens.css`, `ds-icons.jsx`, `ds-kit.jsx`. They publish onto `window` and read `React` from it. Two of the three are byte-identical to the delivery; `ds-kit.jsx` carries **one local edit** — `Btn` forwards `...rest`, so an icon-only button keeps the `aria-label` the caller passes. Re-syncing from a delivery without re-applying it silently strips the accessible name from every icon-only button. The edit is commented at the call site. |
 | `src/globals.js` | Puts `React` on `window` before the vendor files load. Imported first — see its comment. |
 | `src/fonts.css` + `src/fonts/` | Self-hosted Instrument Sans / Serif and JetBrains Mono, latin + latin-ext. |
 | `src/app/` | Everything wired to the host: `api.js`, the five screens, `webauthn.js`, `format.js`. |
@@ -30,6 +30,15 @@ cannot fill (per-account usage windows, a device list, notification
 transport), and wiring components to data that does not exist is how a
 screen ends up rendering a constant. The app layer here reuses the design
 system and is written against the real endpoints.
+
+Everything the design specifies that a real host can serve is built,
+including the two pieces that were unadopted longest — the wide
+two-pane layout at ≥900px, and the offline queue in `outbox.js`. Three
+of its ideas are not, and cannot be from here: send-becomes-interrupt
+(CC's peer inbox has no interrupt verb), a Projects tab and a `+` new
+session (a deleted surface, and a spawn this product does not do), and
+push delivery (no transport). `../AGENTS.md` carries the reasoning under
+"### The panel".
 
 ## Rules that are not obvious
 

@@ -10,7 +10,7 @@ import { createElement as h, Suspense } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
 
-import { MD_COMPONENTS, REHYPE_PLUGINS, REMARK_PLUGINS } from './mdConfig.js';
+import { MD_COMPONENTS, REHYPE_PLUGINS, REMARK_PLUGINS, hasLanguage, isSafeHref } from './mdConfig.js';
 
 /** Render a transcript body exactly as the thread does. */
 function render(text) {
@@ -173,4 +173,37 @@ test('plain prose with no markdown in it is unchanged', () => {
 
 test('an empty body renders nothing rather than throwing', () => {
   assert.equal(render(''), '');
+});
+
+test('hasLanguage matches whole class tokens, not substrings', () => {
+  // Twin of `src/lib/codeFence.test.ts`. `className.includes(...)`
+  // routed `language-mermaidish` to the diagram renderer.
+  assert.equal(hasLanguage('language-mermaid', 'mermaid'), true);
+  assert.equal(hasLanguage('hljs language-mermaid extra', 'mermaid'), true);
+  assert.equal(hasLanguage('language-mermaidish', 'mermaid'), false);
+  assert.equal(hasLanguage('language-mermaid-extra', 'mermaid'), false);
+  assert.equal(hasLanguage('language-rust', 'mermaid'), false);
+  assert.equal(hasLanguage('', 'mermaid'), false);
+  assert.equal(hasLanguage(undefined, 'mermaid'), false);
+});
+
+test('isSafeHref allows only http(s) and mailto', () => {
+  // Twin of `src/lib/mdLink.test.ts`. react-markdown's default
+  // urlTransform permits irc/ircs/xmpp and relative URLs.
+  for (const good of ['https://example.com/x', 'http://example.com', 'mailto:a@b.co']) {
+    assert.equal(isSafeHref(good), true, good);
+  }
+  for (const bad of [
+    'irc://irc.example.com/chan',
+    'xmpp:someone@example.com',
+    'javascript:alert(1)',
+    'data:text/html,<script>',
+    '/etc/passwd',
+    './notes.md',
+    '//evil.example.com',
+    '',
+    undefined,
+  ]) {
+    assert.equal(isSafeHref(bad), false, String(bad));
+  }
 });

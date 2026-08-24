@@ -54,3 +54,64 @@ input:focus-visible,
 textarea:focus-visible {
   outline-offset: 0;
 }
+
+/**
+ * Text the user is meant to be able to grab.
+ *
+ * The class was already applied in two places on the strength of the
+ * desktop's `.mono.selectable`, and no stylesheet here ever defined it
+ * — so it asserted nothing. Selection happens to work anyway because
+ * the panel never disables it globally, which is exactly what makes a
+ * dead class like this survive: it is indistinguishable from a working
+ * one until someone adds a `user-select: none` and quietly breaks the
+ * one affordance a truncated path had.
+ *
+ * `-webkit-touch-callout` is the iOS half: without it, long-press on a
+ * span inside a tappable card can raise the link/image sheet instead of
+ * the selection handles, and long-press IS the copy gesture on the
+ * device this client is for (`.claude/rules/path-display.md`).
+ */
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/**
+ * Reading measure at the wide step.
+ *
+ * `data-bp="lg"` was dead CSS until the shell started measuring itself,
+ * so nothing had ever been seen above 899px. Two of the three tab roots
+ * take the full width there — Accounts and Settings have no detail pane
+ * to sit beside — and the sign-in screen has no rail either, so in a
+ * 1600px browser window a list row and a password field both stretched
+ * to 1600px. That is not a layout the design specifies; it is what
+ * `flex: 1` does when nobody has said otherwise, and the delivered
+ * prototype never saw it because it ran inside a 390px device frame.
+ *
+ * Declared here rather than in `src/vendor/ds-tokens.css`, which
+ * `panel/README.md` requires stay as delivered — and scoped to `.panel`
+ * rather than `:root` for the same reason.
+ *
+ * Two measures because they are two different things: a column of prose
+ * and rows, and a form of four fields. One value for both makes the
+ * form look abandoned in the middle of the window.
+ */
+.panel[data-bp='lg'] {
+  --read-max: 720px;
+  --form-max: 380px;
+}
+
+.panel[data-bp='lg'] .measure,
+.panel[data-bp='lg'] .measure-form {
+  width: 100%;
+  margin-inline: auto;
+}
+
+.panel[data-bp='lg'] .measure {
+  max-width: var(--read-max);
+}
+
+.panel[data-bp='lg'] .measure-form {
+  max-width: var(--form-max);
+}

@@ -23,12 +23,54 @@ export function PickerSheet({
 }) {
   const [q, setQ] = useState('');
   const filterRef = useRef(null);
+  const sheetRef = useRef(null);
 
   useEffect(() => {
     // The list runs to 168 entries on a real machine, so the filter is
     // the primary control, not an afterthought.
     filterRef.current?.focus();
   }, [items]);
+
+  // `.claude/rules/design.md` requires Esc-to-close and a focus trap on
+  // anything that declares `role="dialog"` + `aria-modal`. This declared
+  // both and had neither: Esc did nothing, and Tab walked straight out
+  // of a sheet covering the whole viewport into the thread underneath,
+  // where the focus ring is invisible because the content is not.
+  //
+  // Note there is no `window.confirm` equivalent to fall back on here —
+  // on a phone, a control you cannot dismiss with the keyboard is one
+  // you cannot dismiss.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const root = sheetRef.current;
+      if (!root) return;
+      const focusable = Array.from(
+        root.querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      // Wrap at both ends, and handle the case where focus has already
+      // escaped — pulling it back is the whole point of a trap.
+      if (e.shiftKey && (document.activeElement === first || !root.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !root.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
 
   const shown = useMemo(() => {
     if (!items) return [];
@@ -39,6 +81,7 @@ export function PickerSheet({
 
   return (
     <div
+      ref={sheetRef}
       role="dialog"
       aria-modal="true"
       aria-label={label}

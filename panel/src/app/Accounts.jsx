@@ -5,7 +5,7 @@
 // bypasses the keychain-drift guard that stops a rotated blob being
 // written under the wrong label; either needs its own check before it is
 // reachable from a phone.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { OfflineError, api, newIdempotencyKey } from './api.js';
 import { ago, resetAt, verifyChip } from './format.js';
@@ -214,15 +214,33 @@ export function Accounts() {
   const [conflict, setConflict] = useState(null);
   const [note, setNote] = useState(null);
 
-  const load = useCallback((signal) => {
-    api
-      .accounts(signal)
-      .then(setData)
-      .catch((e) => {
-        if (e?.name === 'AbortError') return;
-        setError(e instanceof OfflineError ? 'offline' : 'error');
-      });
+  // Activation and the list refresh are slow awaits — a keychain swap
+  // and a round trip — and the screen can be gone before either
+  // returns.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
   }, []);
+
+  // Returns the promise, so a caller can wait for the refreshed list.
+  // It used to return `undefined`, which made an `await load()` at the
+  // end of `activate` a no-op that read like a wait.
+  const load = useCallback(
+    (signal) =>
+      api
+        .accounts(signal)
+        .then((d) => {
+          if (alive.current) setData(d);
+        })
+        .catch((e) => {
+          if (e?.name === 'AbortError' || !alive.current) return;
+          setError(e instanceof OfflineError ? 'offline' : 'error');
+        }),
+    [],
+  );
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -236,14 +254,19 @@ export function Accounts() {
     if (!force) setConflict(null);
     try {
       const r = await api.activateAccount(email, force, newIdempotencyKey());
+      if (!alive.current) return;
       setNote(
         r.already_active
           ? `${email} was already the CLI account.`
           : `Claude Code now uses ${email}. Claude Desktop is unchanged.`,
       );
       setConflict(null);
-      load();
+      // Awaited, so `busy` clears after the refreshed list lands rather
+      // than before it — clearing first shows the OLD active account
+      // for a beat, which on this screen reads as "the switch failed".
+      await load();
     } catch (e) {
+      if (!alive.current) return;
       if (e?.status === 409) {
         // Not an error to apologise for — it is the gate doing its job,
         // and the next move belongs to the user.
@@ -252,7 +275,7 @@ export function Accounts() {
         setNote(e instanceof OfflineError ? 'Cannot reach this Mac.' : e?.message || 'Switch failed.');
       }
     } finally {
-      setBusy(null);
+      if (alive.current) setBusy(null);
     }
   };
 

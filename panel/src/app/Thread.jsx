@@ -20,6 +20,8 @@ import { useTranscript } from './useTranscript.js';
 import { CommandPicker } from './CommandPicker.jsx';
 import { QuickPicker } from './QuickPicker.jsx';
 import { useFollowTail, useSendPrompt } from './useThreadState.js';
+import { useQueued } from './useOutbox.js';
+import { cancel as cancelQueued, retry as retryQueued } from './outbox.js';
 import { CopyPath, Muted } from './views.jsx';
 
 const { Btn, Chip, Dot, Ico, Tap } = window;
@@ -49,18 +51,27 @@ function useQuickPrompts() {
   return prompts;
 }
 
-export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) {
+export function Thread({ session, onBack, onChanged, conn, tools = 'grouped', inPane = false }) {
   const [sheet, setSheet] = useState(null); // 'commands' | 'quick' | null
   const quickPrompts = useQuickPrompts();
   const id = session.session_id;
   const { events, total, loading, error, hasEarlier, loadEarlier } = useTranscript(id);
   const { scroller, onScroll } = useFollowTail(id, total, events);
-  const { text, setText, sending, notice, send, canSend, blocked, warning, staged, setStaged, hasContent } =
-    useSendPrompt(
-    session,
-    conn,
-    onChanged,
-  );
+  const queued = useQueued(id);
+  const {
+    text,
+    setText,
+    sending,
+    notice,
+    send,
+    canSend,
+    holding,
+    blocked,
+    warning,
+    staged,
+    setStaged,
+    hasContent,
+  } = useSendPrompt(session, conn, onChanged);
 
   return (
     <>
@@ -71,10 +82,14 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) 
           gap: 'var(--s2)',
           height: 'var(--bar-h-back)',
           flexShrink: 0,
-          padding: '0 var(--s3) 0 var(--chev-inset)',
+          padding: inPane ? '0 var(--s3) 0 var(--gut)' : '0 var(--s3) 0 var(--chev-inset)',
         }}
       >
-        <Tap n="chevL" onClick={onBack} label="Back" />
+        {/* In the wide layout the thread sits BESIDE the list rather
+            than over it, so there is nothing to go back from — the list
+            never left. A chevron there would undo a navigation the user
+            did not make. */}
+        {!inPane && <Tap n="chevL" onClick={onBack} label="Back" />}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
@@ -156,6 +171,17 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) 
               <Row key={r.e.index} e={r.e} />
             ),
           )}
+          {/* Held messages sit at the tail, in the position they will
+              occupy once they land. Dimmed rather than styled apart:
+              they are your turns, they are just not there yet. */}
+          {queued.map((m) => (
+            <QueuedRow
+              key={m.id}
+              m={m}
+              onCancel={() => cancelQueued(id, m.id)}
+              onRetry={() => retryQueued(id, m.id)}
+            />
+          ))}
         </div>
         <div style={{ height: 'var(--s6)' }} />
       </div>
@@ -167,10 +193,11 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped' }) 
         staged={staged}
         onStage={setStaged}
         hasContent={hasContent}
-        sessionId={session.session_id}
         sending={sending}
         notice={notice}
         disabled={!canSend}
+        holding={holding}
+        queued={queued.length}
         reason={blocked}
         warning={warning}
         onPickCommand={() => setSheet('commands')}
@@ -263,6 +290,76 @@ function Row({ e }) {
       >
         <Markdown text={e.text} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * A message typed while the Mac was unreachable.
+ *
+ * Rendered where it will land, at half opacity, with the way to take it
+ * back on the row itself. A queued message is going to be sent later by
+ * a phone nobody is looking at; without a cancel the only way to stop it
+ * is to be elsewhere when it fires.
+ *
+ * A refused entry stops retrying and says why — see `outbox.js` on the
+ * busy loop that alternative would be — and offers the two answers a
+ * person can give it.
+ */
+function QueuedRow({ m, onCancel, onRetry }) {
+  return (
+    <div style={{ padding: 'var(--s4) 0', opacity: m.failed ? 1 : 0.55 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--s2)' }}>
+        <span
+          style={{
+            fontSize: 'var(--t-micro)',
+            fontWeight: 'var(--w-bold)',
+            letterSpacing: 'var(--ls-caps)',
+            textTransform: 'uppercase',
+            color: 'var(--ac-ink)',
+          }}
+        >
+          You
+        </span>
+        {m.failed ? (
+          <Chip tone="danger" ico="alert" size="xs">
+            not sent
+          </Chip>
+        ) : (
+          <Chip tone="warn" ico="clock" size="xs">
+            queued
+          </Chip>
+        )}
+        <button
+          onClick={onCancel}
+          aria-label="Discard this queued message"
+          title="Discard"
+          style={{ marginLeft: 'auto', padding: 'var(--s1)', color: 'var(--fg4)' }}
+        >
+          <Ico n="x" s="2xs" w="reg" />
+        </button>
+      </div>
+      <p
+        style={{
+          marginTop: 'var(--s2)',
+          fontSize: 'var(--t-body)',
+          lineHeight: 'var(--lh-body)',
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'anywhere',
+        }}
+      >
+        {m.text}
+      </p>
+      {m.failed && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', marginTop: 'var(--s2)' }}>
+          <p role="alert" style={{ flex: 1, fontSize: 'var(--t-micro)', color: 'var(--dg)' }}>
+            {m.failed}
+          </p>
+          <Chip tone="quiet" size="xs" onClick={onRetry}>
+            Try again
+          </Chip>
+        </div>
+      )}
     </div>
   );
 }
@@ -379,6 +476,8 @@ function Composer({
   sending,
   notice,
   disabled,
+  holding,
+  queued,
   reason,
   warning,
   staged,
@@ -403,6 +502,25 @@ function Composer({
         boxShadow: 'inset 0 var(--bw-hair) 0 var(--hair)',
       }}
     >
+      {/* The count, not just the state. "Offline" is something the user
+          already knows by the time they have typed two messages into
+          it; how many are waiting is the part they cannot see. */}
+      {holding && queued > 0 && (
+        <p
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--s2)',
+            fontSize: 'var(--t-micro)',
+            color: 'var(--wn)',
+            marginBottom: 'var(--s2)',
+          }}
+        >
+          <Ico n="clock" s="2xs" w="bold" />
+          {queued} held — sends when this Mac is back
+        </p>
+      )}
       {notice && (
         <p
           role="status"
@@ -521,7 +639,13 @@ function Composer({
           // left the field 184px at 390 — and "Message this session…"
           // wrapped to a second line the one-row height then clipped.
           placeholder={
-            disabled ? reason || 'Unavailable' : staged ? 'Add a note…' : 'Message this session…'
+            disabled
+              ? reason || 'Unavailable'
+              : staged
+                ? 'Add a note…'
+                : holding
+                  ? 'Queue a message…'
+                  : 'Message this session…'
           }
           style={{
             flex: 1,
@@ -546,11 +670,14 @@ function Composer({
             actual test, "can the user scan the surface and know what it
             does without reading", is met. It also gives ~55px back to a
             390px row that the `/` button had taken. */}
+        {/* A clock, not an arrow, while the Mac is unreachable. The
+            glyph is the honest one: this press does not send, it holds
+            — and the label says so for anyone who cannot see it. */}
         <Btn
           kind="primary"
           disabled={disabled || sending || !hasContent}
-          ico={sending ? undefined : 'up'}
-          aria-label="Send"
+          ico={sending ? undefined : holding ? 'clock' : 'up'}
+          aria-label={holding ? 'Hold until this Mac is back' : 'Send'}
           style={{ width: 'var(--ctl-lg)', padding: 0, flexShrink: 0 }}
         >
           {sending ? '…' : ''}

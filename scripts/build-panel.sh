@@ -16,6 +16,18 @@ if [ ! -d node_modules ]; then
   pnpm install
 fi
 
+# `emptyOutDir` is false in vite.config.js so a build cannot nuke
+# siblings it does not own. The cost is that `chunks/` only ever grows:
+# mermaid renames its diagram packs on most upgrades, and the old files
+# stay on disk, get routed by the generated table below, and are
+# `include_bytes!`d into every binary forever. That directory is
+# entirely build output, so clearing just it is safe and is the one
+# place staleness accumulates.
+if [ -d "$out/chunks" ]; then
+  echo "==> clearing stale chunks"
+  rm -f "$out"/chunks/*.js
+fi
+
 echo "==> building panel"
 pnpm build
 

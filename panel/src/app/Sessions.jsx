@@ -1,6 +1,6 @@
 // The hub: a greeting, the two or three things that actually want you,
 // then history. Home is a list, not a dashboard.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { api, explainSend, newIdempotencyKey } from './api.js';
 import { ago, basename, compact, modelLabel, span } from './format.js';
@@ -48,7 +48,39 @@ const TONE_COLOR = {
   done: 'var(--fg4)',
 };
 
-export function Sessions({ sessions, approvals = [], conn, host, onOpen, onRetry, onChanged }) {
+/**
+ * The line under the greeting: what, if anything, wants you.
+ *
+ * Counts rather than a state word, because "2 running · 1 waiting on
+ * you" is the whole reason to open the app and the cards below only say
+ * it one session at a time. `null` when there is nothing to report —
+ * a subtitle reading "0 running" is the render-if-nonzero rule broken
+ * in the one place the user looks first.
+ */
+function summarize(sessions, approvals, conn) {
+  if (conn === 'offline') return 'Not connected to this Mac';
+  const live = sessions.filter((s) => s.live);
+  const waiting = approvals.length + live.filter((s) => s.status === 'waiting').length;
+  const running = live.filter((s) => s.status === 'busy').length;
+  const attached = live.length - live.filter((s) => s.status === 'waiting').length - running;
+  const parts = [
+    running && `${running} running`,
+    waiting && `${waiting} waiting on you`,
+    attached && `${attached} attached`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Nothing needs you right now';
+}
+
+export function Sessions({
+  sessions,
+  approvals = [],
+  conn,
+  host,
+  openId = null,
+  onOpen,
+  onRetry,
+  onChanged,
+}) {
   if (sessions === null) {
     return (
       <Scroll>
@@ -63,7 +95,7 @@ export function Sessions({ sessions, approvals = [], conn, host, onOpen, onRetry
 
   return (
     <Scroll>
-      <Header host={host} />
+      <Header host={host} sub={summarize(sessions, approvals, conn)} />
 
       {attention.length === 0 && history.length === 0 && (
         <Surface>
@@ -86,11 +118,33 @@ export function Sessions({ sessions, approvals = [], conn, host, onOpen, onRetry
         </Group>
       )}
 
+      {/* Nothing wants you, but this Mac has been used. Distinct from
+          the empty state above, which means "no sessions at all" — the
+          two are different answers and collapsing them told a working
+          setup it had never been used. */}
+      {attention.length === 0 && approvals.length === 0 && history.length > 0 && (
+        <Surface tone={0} pad="var(--s7) var(--s5)" style={{ boxShadow: 'none', textAlign: 'center' }}>
+          <p className="disp" style={{ fontSize: 'var(--t-title)', color: 'var(--fg3)' }}>
+            All quiet
+          </p>
+          <p style={{ fontSize: 'var(--t-sub)', color: 'var(--fg4)', marginTop: 'var(--s2)' }}>
+            Nothing is running. Start something at the machine and it shows up here.
+          </p>
+        </Surface>
+      )}
+
       {attention.length > 0 && (
         <Group title="Now">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
             {attention.map((s) => (
-              <LiveCard key={s.session_id} s={s} onOpen={onOpen} onChanged={onChanged} conn={conn} />
+              <LiveCard
+                key={s.session_id}
+                s={s}
+                selected={openId === s.session_id}
+                onOpen={onOpen}
+                onChanged={onChanged}
+                conn={conn}
+              />
             ))}
           </div>
         </Group>
@@ -100,7 +154,16 @@ export function Sessions({ sessions, approvals = [], conn, host, onOpen, onRetry
         <Group title="Earlier">
           <List>
             {history.map((s, i) => (
-              <Item key={s.session_id} first={i === 0} onClick={() => onOpen(s.session_id)}>
+              <Item
+                key={s.session_id}
+                first={i === 0}
+                onClick={() => onOpen(s.session_id)}
+                /* Only in the wide layout, where the thread sits beside
+                   this list and "which one am I reading" is a question
+                   the list has to answer. Narrow passes `openId` as null
+                   because there the thread covers the list entirely. */
+                style={openId === s.session_id ? { background: 'var(--ac-wash)' } : undefined}
+              >
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
@@ -123,6 +186,22 @@ export function Sessions({ sessions, approvals = [], conn, host, onOpen, onRetry
         </Group>
       )}
 
+      {/* The list is live sessions plus the 20 most recently touched, so
+          a session that has scrolled off is not gone — it is on the Mac.
+          Saying so is the difference between a horizon and a loss. */}
+      {history.length > 0 && (
+        <p
+          style={{
+            textAlign: 'center',
+            fontSize: 'var(--t-micro)',
+            color: 'var(--fg4)',
+            padding: 'var(--s6) 0 var(--s2)',
+          }}
+        >
+          Older sessions stay on the Mac
+        </p>
+      )}
+
       {conn === 'offline' && (
         <p style={{ marginTop: 'var(--s5)', color: 'var(--fg4)', fontSize: 'var(--t-micro)' }}>
           Showing the last list received.{' '}
@@ -135,12 +214,19 @@ export function Sessions({ sessions, approvals = [], conn, host, onOpen, onRetry
   );
 }
 
-function Header({ host }) {
+function Header({ host, sub }) {
   return (
     <header style={{ padding: 'var(--s6) 0 var(--s2)' }}>
       <h1 className="disp" style={{ fontSize: 'var(--t-hero)' }}>
         {greet()}
       </h1>
+      {/* Two lines, two registers, and the split is deliberate: the
+          sentence is prose because it is a sentence, and the host is
+          mono because it is an identifier you might have to type into a
+          browser bar. */}
+      {sub && (
+        <p style={{ fontSize: 'var(--t-sub)', color: 'var(--fg3)', marginTop: 'var(--s2)' }}>{sub}</p>
+      )}
       {host && (
         <p className="mono" style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginTop: 'var(--s1)' }}>
           {host}
@@ -229,11 +315,28 @@ function StatusMark({ s }) {
   );
 }
 
-function LiveCard({ s, onOpen, onChanged, conn }) {
+function LiveCard({ s, selected, onOpen, onChanged, conn }) {
   const [sending, setSending] = useState(null);
   const [sent, setSent] = useState(null);
   const [failed, setFailed] = useState(null);
   const t = tone(s);
+
+  // The identity of the question currently on the card. The reply state
+  // was keyed to the CARD, not to the question, so a session that asked
+  // something, got answered, and then asked something *else* kept
+  // showing "Handed off" over the new question — the user reads their
+  // previous answer as applying to the thing now being asked.
+  //
+  // `tool_use_id` is the ask's own identity: a new `AskUserQuestion`
+  // call gets a new one, and the same call keeps it across polls, which
+  // is exactly the distinction this needs. The question text is the
+  // fallback for a server too old to send it.
+  const askKey = s.ask ? (s.ask.tool_use_id ?? s.ask.question) : null;
+  useEffect(() => {
+    setSending(null);
+    setSent(null);
+    setFailed(null);
+  }, [askKey]);
 
   const reply = async (choice) => {
     if (sending || conn === 'offline') return;
@@ -256,7 +359,17 @@ function LiveCard({ s, onOpen, onChanged, conn }) {
   };
 
   return (
-    <Surface glow={t === 'live' && s.status === 'busy'}>
+    // A ring rather than a wash: the card can already be carrying the
+    // live glow, and two backgrounds fighting over one card reads as a
+    // rendering fault. Only set in the wide layout — see `openId`.
+    <Surface
+      glow={t === 'live' && s.status === 'busy'}
+      style={
+        selected
+          ? { boxShadow: 'inset 0 0 0 var(--bw-ring) var(--ac), var(--sh1)' }
+          : undefined
+      }
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', marginBottom: 'var(--s3)' }}>
         <StatusMark s={s} />
         {/* The project, where the status word used to be. "LIVE" and
@@ -438,7 +551,22 @@ function ApprovalCard({ a, conn, onSettled }) {
         <span style={{ fontSize: 'var(--t-sub)', fontWeight: 'var(--w-semi)' }}>
           {a.tool_name}
         </span>
-        <span style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginLeft: 'auto' }}>
+        {/* `.claude/rules/path-display.md` State C: truncated, and this
+            card has no detail view to carry the full value. The rule
+            makes the tooltip mandatory — the directory is part of the
+            decision being made here, and `basename` alone cannot
+            distinguish two checkouts of the same repo.
+
+            `selectable` rather than a copy button: on a phone,
+            long-press-to-select IS the copy affordance, and a copy
+            control wedged between Allow and Deny on a one-tap security
+            card is the misclick-bait `rules/icon-buttons.md` warns
+            about. */}
+        <span
+          className="selectable"
+          title={a.cwd}
+          style={{ fontSize: 'var(--t-micro)', color: 'var(--fg4)', marginLeft: 'auto' }}
+        >
           {basename(a.cwd)}
         </span>
       </div>
