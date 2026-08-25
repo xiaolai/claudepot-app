@@ -6,6 +6,63 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.1 — beta (released 2026-08-25)
+
+### Added
+
+- **The Remote pane now says who can actually reach it.** Claudepot
+  only ever listens on a private address, so out of the box your phone
+  has to be on the same network — and nothing said so. The pane opened
+  with "Reach this Mac from your phone", which reads as *from
+  anywhere*, and the only mention of Tailscale in the whole product sat
+  inside an error message you had to type something wrong to see. The
+  predictable ending was setting it up, leaving the house, and finding
+  it dead.
+
+  It is stated up front now, along with the way past it (a mesh VPN
+  such as Tailscale or Headscale) and the way not to go: forwarding a
+  port from your router puts the admin password, and code execution as
+  you, on the open internet.
+
+- `claudepot remote status` gained a **reach** line that reads your
+  actual bind address — a tailnet address says so, a LAN address says
+  this network only.
+
+### Changed
+
+- **Revoked and expired devices fold away.** They are kept — the list
+  is the record of what was let in and when you turned it off — but
+  they no longer sit between you and the one control that pane exists
+  for. On the machine this was found on, seven tombstones were burying
+  a list with nothing live in it.
+
+- **The device list is bounded.** Every pairing added a row, and so did
+  every sign-in, while revoking only marked one. Nothing ever removed
+  anything. A device you are using is never touched; a lapsed sign-in
+  goes three months after it expires; a device you deliberately revoked
+  is kept far longer, newest first, because that was a decision you
+  made and a lapse is not.
+
+### Fixed
+
+- **An expired sign-in looked live.** A session past its expiry still
+  read as "session" and still offered a Revoke button, for a token the
+  server already refuses — while the count above it correctly said none
+  were active. It reads as expired now, and offers no button, because
+  revoking something already refused does nothing.
+
+- **The Remote pane rendered as a wall of text.** It had lost its
+  section grouping entirely, so six headings and a dozen blocks stacked
+  with no rhythm and no reading width — on a wide window its warnings
+  ran the full screen. Sections are back and the text is capped at a
+  readable measure.
+
+- **Section headings across the app sat 14px right of the content they
+  named.** Retention, MCP, Knowledge, Updates and Remote were all
+  affected, and three places in the app were already correcting it by
+  hand. The sidebar's live strip was off too, by a different amount
+  again. Headings now line up with what they label.
+
 ## 0.5.0 — beta (released 2026-08-25)
 
 ### Added
