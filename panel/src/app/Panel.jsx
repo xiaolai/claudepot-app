@@ -188,14 +188,56 @@ export function Panel() {
 
   const { token, checked, signIn, signOut } = useAuth();
 
+  // ── Opening a thread is a navigation, so it takes a history entry ──
+  //
+  // The panel kept no history at all: one entry for its whole life. The
+  // OS back gesture — iOS Safari's edge swipe, Android's back — drives
+  // session history, so with nothing on the stack it left the app
+  // instead of closing the thread. That gesture is the one every phone
+  // user reaches for first, and it was pointed at the exit.
+  //
+  // Only the thread pushes. Tabs are lateral, not deeper: the chevron
+  // model already says the transcript is the one place you go *into*,
+  // and a tab bar that grew a history entry per tap would make Back
+  // walk backwards through tabs instead of leaving.
+  //
+  // The URL is deliberately unchanged (`pushState(state, '')`). The
+  // panel is served at `/` by `remote::assets` with no client router,
+  // so a path that only the client understands would 404 on reload.
+  const openThread = useCallback((id) => {
+    if (id == null) return;
+    setOpenId(id);
+    historyNav()?.history.pushState({ panelThread: id }, '');
+  }, []);
+
+  // Every way out of a thread goes through here, so the chevron, the
+  // tab bar, a swipe and the OS gesture cannot diverge. Popping is what
+  // closes it — the listener below is the single closer — because a
+  // `setOpenId(null)` that skipped the stack would leave an entry
+  // behind, and the next Back would then be silently consumed doing
+  // nothing.
+  const leaveThread = useCallback(() => {
+    const w = historyNav();
+    if (w && w.history.state?.panelThread != null) w.history.back();
+    else setOpenId(null);
+  }, []);
+
+  useEffect(() => {
+    const w = historyNav();
+    if (!w) return undefined;
+    const onPop = () => setOpenId(null);
+    w.addEventListener('popstate', onPop);
+    return () => w.removeEventListener('popstate', onPop);
+  }, []);
+
   // Routing state is reset here rather than inside `useAuth`, because
   // "which screen was open" is this component's business and the hook
   // has no opinion about it.
   const onSignOut = useCallback(() => {
     signOut();
-    setOpenId(null);
+    leaveThread();
     setView('sessions');
-  }, [signOut]);
+  }, [signOut, leaveThread]);
 
   const { sessions, approvals, conn, refresh, stale } = useSessions({
     enabled: Boolean(token) && checked,
@@ -260,7 +302,7 @@ export function Panel() {
         conn={conn}
         host={host}
         openId={wide ? openId : null}
-        onOpen={setOpenId}
+        onOpen={openThread}
         onRetry={refresh}
         onChanged={refresh}
       />
@@ -269,7 +311,7 @@ export function Panel() {
   const thread = open && (
     <Thread
       session={open}
-      onBack={() => setOpenId(null)}
+      onBack={leaveThread}
       onChanged={refresh}
       conn={conn}
       tools={tools}
@@ -374,7 +416,10 @@ export function Panel() {
         <TabBar
           view={view}
           onGo={(v) => {
-            setOpenId(null);
+            // Through `leaveThread`, not `setOpenId(null)` — otherwise
+            // the thread's history entry outlives the thread and the
+            // user's next Back is spent closing something already shut.
+            leaveThread();
             setView(v);
           }}
           badge={attention}
@@ -398,6 +443,29 @@ export function Panel() {
  * narrow layout, and the sign-in screen) the single `Column` child fills
  * the row and the direction is invisible.
  */
+/**
+ * `window`, but only where the History API is actually usable.
+ *
+ * Returns null rather than throwing, so the whole feature fails OFF:
+ * without history the thread still opens and the chevron still closes
+ * it, exactly as before this existed. A navigation nicety must not be
+ * able to take the app down.
+ *
+ * This is not hypothetical. The panel's own render check aliases
+ * `window` to Node's `globalThis` (see `scripts/render-check.mjs` on
+ * why), and Node has neither `history` nor `addEventListener` — so an
+ * unguarded `window.addEventListener('popstate', …)` threw inside the
+ * mount effect and React unmounted the entire tree. Every scenario in
+ * that check went blank, including sign-in, which never opens a thread
+ * at all.
+ */
+function historyNav() {
+  const w = typeof window === 'undefined' ? null : window;
+  if (!w || typeof w.addEventListener !== 'function') return null;
+  if (!w.history || typeof w.history.pushState !== 'function') return null;
+  return w;
+}
+
 function Shell({ theme, bp, innerRef, children }) {
   return (
     <div

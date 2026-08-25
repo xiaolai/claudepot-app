@@ -62,7 +62,10 @@ the bundle *mounts*. It runs the committed output in jsdom and asserts
 - **signed out**, with no network — the offline path a phone hits first
   — reaching the sign-in screen with zero console errors;
 - **signed in**, against a stub host, opening a session and reaching the
-  thread's composer;
+  thread's composer — and asserting that opening it pushed a history
+  entry, because the back-gesture feature guards itself and fails off,
+  so without that line the pass would stay green while exercising
+  nothing;
 - the **quick-prompt sheet**, which is the shared `PickerSheet` chrome;
 - the **slash-command sheet**, which is a different fetch, a different
   row, and an argument step the other picker has no equivalent of;
@@ -1225,6 +1228,46 @@ Three consequences follow from `lg` and each was a bug at least once:
   selection. A history row takes the accent wash; a live card takes an
   inset ring instead, since it may already be carrying the live glow and
   two backgrounds on one card read as a rendering fault.
+
+**The back gesture closes the thread; it used to leave the app.** The
+panel kept no history at all — one entry for its whole life — and iOS
+Safari's edge swipe and Android's back both drive session history, so
+the gesture every phone user reaches for first was pointed at the exit.
+Opening a thread now pushes an entry (`panel/src/app/Panel.jsx`); a
+`popstate` listener is the single closer, so the chevron, a tab tap, a
+swipe and the OS gesture cannot diverge — anything that closed the
+thread without popping would leave the entry behind and silently eat the
+next Back.
+
+Four things about it are load-bearing:
+
+- **Only the thread pushes.** Tabs are lateral, not deeper: the chevron
+  model already says the transcript is the one place you go *into*, and
+  an entry per tab tap would make Back walk backwards through tabs
+  instead of leaving.
+- **The URL never changes** (`pushState(state, '')`). `remote::assets`
+  serves the panel at `/` with no client router, so a path only the
+  client understands would 404 on reload.
+- **It fails off.** `historyNav()` returns null where the History API is
+  not usable, and the thread still opens and still closes by chevron —
+  exactly as before. That is not hypothetical: the render check aliases
+  `window` to Node's `globalThis`, which has neither `history` nor
+  `addEventListener`, so the unguarded version threw inside a mount
+  effect, React unmounted the whole tree, and **all seven** passes went
+  blank — including sign-in, which never opens a thread. The guard is
+  also why the check now asserts the entry: a feature that disables
+  itself is green either way.
+- **The in-transcript swipe is a second thing, not the same thing**
+  (`panel/src/app/gestures.js`). It complements the OS gesture rather
+  than duplicating it — the screen edge is already spoken for in a
+  browser tab, and a standalone home-screen app may have no OS gesture
+  at all. It routes through the same `onBack`, so it pops the same
+  entry. A drag that starts inside a horizontally scrollable element
+  with room left to scroll *that* way is not a swipe: a wide code block
+  or table is exactly the thing a reader drags sideways, and stealing
+  that would be worse than having no swipe. Checked against live
+  `scrollLeft`, not the mere presence of overflow, or one wide table
+  would disable the gesture for the whole conversation.
 
 **Offline holds the message; it does not refuse it.** The composer used
 to disable itself when the host stopped answering, which is honest and

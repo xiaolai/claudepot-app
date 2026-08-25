@@ -23,6 +23,7 @@ import { useFollowTail, useSendPrompt } from './useThreadState.js';
 import { useQueued } from './useOutbox.js';
 import { cancel as cancelQueued, retry as retryQueued } from './outbox.js';
 import { CopyPath, Muted } from './views.jsx';
+import { swipeHandlers } from './gestures.js';
 
 const { Btn, Chip, Dot, Ico, Tap } = window;
 
@@ -133,11 +134,18 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped', in
 
       <RawBanner />
 
+      {/* Swipe right to leave, from anywhere in the transcript.
+          Disabled in the wide layout for the same reason the chevron
+          is: the list never left, so there is nothing to go back from.
+
+          `onBack` rather than a second closing path, so the gesture,
+          the chevron and the OS back all pop the same history entry. */}
       <div
         ref={scroller}
         onScroll={onScroll}
         className="sc"
         style={{ flex: 1, minHeight: 0, padding: '0 var(--gut)' }}
+        {...swipeHandlers({ enabled: !inPane, onSwipeRight: onBack })}
       >
         {hasEarlier && (
           <div style={{ padding: 'var(--s3) 0', textAlign: 'center' }}>

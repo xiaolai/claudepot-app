@@ -118,6 +118,27 @@ function installGlobals(window, width) {
     if (key in window) set(key, window[key]);
   }
 
+  // `history` and the window-level listener pair.
+  //
+  // These cannot ride the copy loop above. `window` is about to become
+  // `globalThis`, so a bare copy of `addEventListener` would be invoked
+  // with the wrong receiver and jsdom would refuse it; and Node's
+  // `globalThis` has neither `history` nor `addEventListener` of its
+  // own, so without this every `window.addEventListener` in the bundle
+  // is a TypeError.
+  //
+  // That is not a hypothetical either. The panel's history integration
+  // (open a thread, push an entry; OS back gesture pops it) threw
+  // inside its mount effect here, React unmounted the whole tree, and
+  // all seven scenarios went blank — including sign-in, which never
+  // opens a thread. The feature now guards itself and fails off, so
+  // WITHOUT these three lines this check would pass while exercising
+  // nothing: green because the feature was disabled, which is the one
+  // kind of green worth distrusting.
+  set('history', window.history);
+  set('addEventListener', window.addEventListener.bind(window));
+  set('removeEventListener', window.removeEventListener.bind(window));
+
   // `window` must BE the global object, not merely live on it.
   //
   // The vendored design system publishes itself with
@@ -248,6 +269,12 @@ async function render(dir, scenario = {}) {
   }
   const root = dom.window.document.getElementById('root');
   const out = {
+    // Opening a thread is a navigation and takes a history entry, so
+    // the OS back gesture closes the conversation instead of leaving
+    // the app. Recorded here because it is invisible in the rendered
+    // text — and because the feature guards itself and fails off, so
+    // without this the check would pass while exercising nothing.
+    threadEntry: dom.window.history.state?.panelThread ?? null,
     hasComposer: Boolean(dom.window.document.querySelector('textarea')),
     hasSheet: Boolean(dom.window.document.querySelector('[role="dialog"]')),
     // The command picker's ARGUMENT step. The hint is a `placeholder`,
@@ -610,6 +637,14 @@ function evaluateThread(result) {
   // whole view rendered rather than throwing on the way.
   if (!result.hasComposer) {
     problems.push(`the thread did not render (text was: ${result.text.slice(0, 200)})`);
+  }
+  // The panel kept no history at all before this — one entry for its
+  // whole life — so iOS Safari's edge swipe and Android's back gesture
+  // left the app rather than closing the thread.
+  if (result.threadEntry == null) {
+    problems.push(
+      'opening a thread pushed no history entry — the OS back gesture would exit the app',
+    );
   }
   return problems;
 }
