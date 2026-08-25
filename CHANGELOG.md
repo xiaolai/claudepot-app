@@ -6,6 +6,36 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.2 — beta (released 2026-08-25)
+
+### Fixed
+
+- **The back gesture left the remote panel instead of closing the
+  conversation.** On a phone, swiping back from the edge — the gesture
+  everyone reaches for first — walked out of the app entirely. The panel
+  kept no history of its own, so there was nothing for that swipe to go
+  back to, and the only way out of a transcript was the chevron in the
+  top-left corner: the far corner of a large screen, reached with the
+  hand that is not holding the phone.
+
+  Opening a conversation is a navigation now, so back closes it. The
+  chevron still works and behaves identically; switching tabs does not
+  consume a back step, because tabs sit beside each other rather than
+  inside each other.
+
+### Added
+
+- **Swipe right anywhere in a transcript to leave it.** Not just from
+  the screen edge, which in a browser tab already belongs to the
+  browser, and in an app installed to the home screen may not be
+  anywhere at all.
+
+  A wide code block or table keeps its own sideways drag — that is how
+  you read one — and gives the gesture back once you have scrolled it to
+  its left edge. Scrolling is untouched: a swipe has to be decisively
+  horizontal and quick, so a thumb drifting sideways down a long
+  transcript never closes the conversation being read.
+
 ## 0.5.1 — beta (released 2026-08-25)
 
 ### Added
