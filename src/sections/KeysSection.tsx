@@ -400,7 +400,7 @@ function ApiKeysTable({
   const { t } = useTranslation("keys");
   return (
     <section>
-      <SectionLabel style={{ paddingLeft: 0, paddingRight: 0 }}>
+      <SectionLabel>
         {t("list.apiTitle")} {rows.length > 0 ? `· ${rows.length}` : ""}
       </SectionLabel>
       <p
@@ -552,7 +552,7 @@ function OauthTokensTable({
   const { t } = useTranslation("keys");
   return (
     <section>
-      <SectionLabel style={{ paddingLeft: 0, paddingRight: 0 }}>
+      <SectionLabel>
         {t("list.oauthTitle")} {rows.length > 0 ? `· ${rows.length}` : ""}
       </SectionLabel>
       <p

@@ -87,7 +87,13 @@ export function SidebarLiveStrip({ onOpenSession }: Props) {
 
   return (
     <>
-      <SectionLabel right={<span style={{ color: "var(--fg-faint)" }}>{count}</span>}>
+      {/* `var(--sp-8)` because the listbox below is `padding: 0 var(--sp-8)`
+          — the label matches the rows it names. It was inheriting the old
+          14px default and sitting 6px right of them. */}
+      <SectionLabel
+        inset="var(--sp-8)"
+        right={<span style={{ color: "var(--fg-faint)" }}>{count}</span>}
+      >
         {t("sidebar.live")}
       </SectionLabel>
       <div

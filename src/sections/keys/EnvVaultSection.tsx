@@ -73,7 +73,7 @@ export function EnvVaultSection() {
 
   return (
     <section>
-      <SectionLabel style={{ paddingLeft: 0, paddingRight: 0 }}>
+      <SectionLabel>
         {t("vault.title")} {secrets.length > 0 ? `· ${secrets.length}` : ""}
       </SectionLabel>
       <p
