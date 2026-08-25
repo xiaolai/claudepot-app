@@ -100,7 +100,12 @@ pub enum DesktopIdentityError {
         "Desktop's saved session was rejected by Anthropic ({0}) — sign in to Claude Desktop again"
     )]
     TokenRejected(String),
-    #[error("/profile returned error: {0}")]
+    /// Everything that is not an outright refusal, which includes a
+    /// **403** — see `oauth::profile::classify_status` for why that
+    /// status must not be promoted to a refusal. The sentence names
+    /// both live possibilities rather than asserting one, because at
+    /// this layer nothing can tell them apart.
+    #[error("couldn't confirm Desktop's account with Anthropic ({0}) — the saved session may be stale, or something between this machine and Anthropic refused the request")]
     ProfileFetch(String),
     #[error("slow-path identity probe unsupported on this platform")]
     Unsupported,

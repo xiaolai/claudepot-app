@@ -6,6 +6,34 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.4 — beta (released 2026-08-25)
+
+### Fixed
+
+- **Reverted a change in 0.5.3 that could have signed you out of an
+  account because of a network block.** 0.5.3 started treating one
+  server refusal code (`403`) as proof that a saved login was dead.
+  It is not proof: that code is what a VPN, a corporate network, or a
+  regional block returns just as readily as a genuinely expired
+  login, and there is no way to tell them apart from the code alone.
+
+  Acting on it was not merely a wrong message — confirming an account
+  consumes a one-time renewal token, and Claude Code may still be
+  holding that token. Spending it on a false alarm would have logged
+  you out of the very thing it was checking. Any account that hit a
+  network block of this shape could have been affected; that
+  behaviour existed only in 0.5.3 and is now gone, with a test to
+  keep it gone.
+
+  Claudepot goes back to treating that code as a temporary problem
+  and retrying, which is what every version before 0.5.3 did.
+
+- **A Claude Desktop check that fails now names both possibilities**
+  — that the saved session has gone stale, or that something between
+  this machine and Anthropic refused the request — rather than
+  picking one. That was the underlying complaint behind the Desktop
+  fix in 0.5.3, and the answer is a clearer sentence, not a guess.
+
 ## 0.5.3 — beta (released 2026-08-25)
 
 ### Fixed
@@ -34,12 +62,6 @@ Versioning scheme:
 
 - **A rejected Desktop sign-in now tells you to sign in again**, in
   those words, rather than showing the raw error the server returned.
-
-- **An account the server permanently refuses is no longer retried
-  forever.** One refusal code was being treated as a temporary
-  network hiccup, so the account was rechecked indefinitely and never
-  flagged as needing attention. This affects account verification
-  generally, not just Claude Desktop.
 
 ## 0.5.2 — beta (released 2026-08-25)
 

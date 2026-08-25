@@ -35,17 +35,32 @@ pub(crate) enum StatusVerdict {
     ServerTrouble,
 }
 
-/// 401 **and 403** are refusals of the token itself.
+/// **401 only.** 403 is deliberately NOT a refusal — see below.
 ///
-/// 403 used to fall into `ServerTrouble`, which made a permanently
-/// refused credential look transient: `services::identity` maps
-/// `ServerError` to `NetworkError`, so the account was retried
-/// forever and never marked `Rejected`. Surfaced by github#93, where
-/// a stale Claude Desktop token 403'd and the only thing the user was
-/// shown was the bare status line.
+/// `Refused` is not a message, it is an action: `services::identity`
+/// maps it to `ProfileCheck::Rejected`, which enters the refresh path
+/// and **spends the refresh token**. That token is single-use and a
+/// running Claude Code may still hold it in memory, so spending it on
+/// a false positive retires the token CC holds and forces the user to
+/// re-login.
+///
+/// 401 earns that risk and 403 does not. 401 means "you are not
+/// authenticated" — unambiguously the credential. 403 means "you are
+/// authenticated and still refused", which in front of a
+/// Cloudflare-fronted endpoint is as easily a WAF rule, a geo block,
+/// or a VPN exit node as it is a dead token. The reporter of
+/// github#93 chased exactly that reading first, and was right to:
+/// their 403 *did* come from a stale token, but nothing in the status
+/// said so.
+///
+/// So the asymmetry decides it. Classifying 403 transient costs a
+/// retry loop against a credential that is genuinely dead.
+/// Classifying it a refusal burns a single-use token because someone
+/// was on a VPN. A surface that wants to *say* something about a 403
+/// should improve its message, not reach for this verdict.
 pub(crate) fn classify_status(status: u16) -> StatusVerdict {
     match status {
-        401 | 403 => StatusVerdict::Refused,
+        401 => StatusVerdict::Refused,
         429 => StatusVerdict::RateLimited,
         s if (200..300).contains(&s) => StatusVerdict::Ok,
         _ => StatusVerdict::ServerTrouble,
@@ -122,11 +137,18 @@ mod tests {
     use super::{classify_status, StatusVerdict};
 
     #[test]
-    fn refusal_statuses_are_not_transient() {
-        // 403 is the github#93 case. Classifying it as ServerTrouble
-        // makes a dead credential look like a bad minute.
+    fn only_401_is_a_refusal() {
         assert_eq!(classify_status(401), StatusVerdict::Refused);
-        assert_eq!(classify_status(403), StatusVerdict::Refused);
+    }
+
+    /// Regression lock. `Refused` spends a single-use refresh token,
+    /// and a 403 from a Cloudflare-fronted endpoint is as likely to be
+    /// a WAF or geo block as a dead credential — so promoting it here
+    /// burns the token CC may still hold, over someone's VPN. Shipped
+    /// that way briefly in 0.5.3; this test is why it cannot return.
+    #[test]
+    fn forbidden_is_transient_because_refusal_spends_a_refresh_token() {
+        assert_eq!(classify_status(403), StatusVerdict::ServerTrouble);
     }
 
     #[test]
@@ -145,7 +167,7 @@ mod tests {
     fn other_failures_stay_transient() {
         // 5xx and the odd 4xx are genuinely "try again" — they must
         // NOT invalidate a credential.
-        for s in [400, 404, 418, 500, 502, 503] {
+        for s in [400, 403, 404, 418, 500, 502, 503] {
             assert_eq!(
                 classify_status(s),
                 StatusVerdict::ServerTrouble,

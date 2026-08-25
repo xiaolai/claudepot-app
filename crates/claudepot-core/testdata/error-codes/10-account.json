@@ -307,7 +307,7 @@
       "params": [
         "detail"
       ],
-      "message": "/profile returned error: OAuth server error: /profile returned 503"
+      "message": "couldn't confirm Desktop's account with Anthropic (OAuth server error: /profile returned 503) — the saved session may be stale, or something between this machine and Anthropic refused the request"
     },
     {
       "code": "desktop_identity.unsupported",

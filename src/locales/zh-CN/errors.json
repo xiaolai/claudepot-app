@@ -294,7 +294,7 @@
     "no_config": "Claude Desktop 还没有启动过。",
     "no_data_dir": "Claudepot 不知道本平台上 Claude Desktop 的数据目录位置。",
     "not_signed_in": "Claude Desktop 已退出登录。",
-    "profile_fetch": "无法向 Anthropic 确认该 Desktop 账号：{{detail}}",
+    "profile_fetch": "无法向 Anthropic 确认该 Desktop 账号：{{detail}}。可能是保存的会话已失效，也可能是本机与 Anthropic 之间有环节拒绝了该请求。",
     "token_parse": "Claude Desktop 的会话数据格式有误：{{detail}}",
     "token_rejected": "Claude Desktop 保存的会话被 Anthropic 拒绝：{{detail}}。请重新登录 Claude Desktop。",
     "unsupported": "本平台不支持验证 Desktop 账号。"

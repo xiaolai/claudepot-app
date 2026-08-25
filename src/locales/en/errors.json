@@ -294,7 +294,7 @@
     "no_config": "Claude Desktop hasn't been launched yet.",
     "no_data_dir": "Claudepot doesn't know where Claude Desktop stores data on this platform.",
     "not_signed_in": "Claude Desktop is signed out.",
-    "profile_fetch": "Couldn't confirm the Desktop account with Anthropic: {{detail}}",
+    "profile_fetch": "Couldn't confirm the Desktop account with Anthropic: {{detail}}. The saved session may be stale, or something between this machine and Anthropic refused the request.",
     "token_parse": "Claude Desktop's session data is malformed: {{detail}}",
     "token_rejected": "Claude Desktop's saved session was rejected by Anthropic: {{detail}}. Sign in to Claude Desktop again.",
     "unsupported": "Verifying the Desktop account isn't supported on this platform."
