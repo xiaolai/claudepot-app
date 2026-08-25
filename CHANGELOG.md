@@ -6,6 +6,41 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.3 — beta (released 2026-08-25)
+
+### Fixed
+
+- **Reading the Claude Desktop account stopped working after signing
+  in to Desktop.** `desktop identity --strict` and `desktop adopt`
+  failed — sometimes with a bare `403 Forbidden`, sometimes with a
+  complaint that the session data was malformed. Neither message named
+  the real cause, and the first one reads like being geo-blocked or
+  locked out of your account, which sent at least one person looking
+  in entirely the wrong place.
+
+  Claude Desktop has moved its saved sign-in to a new location and
+  left the old one behind, empty. Claudepot was still reading the old
+  one. It now reads the new location, and falls back to the old one
+  for a Desktop that has not been signed in to since the change.
+
+  The trigger is signing in to Desktop, not updating it, which is why
+  this could appear on any version and skip machines running the same
+  build. Nothing needs to be reinstalled or re-paired.
+
+- **A Desktop session that is genuinely signed out now says so**,
+  instead of reporting that the saved data is corrupt. Nothing was
+  ever wrong with the file; that is simply what Desktop leaves behind
+  when it holds no session.
+
+- **A rejected Desktop sign-in now tells you to sign in again**, in
+  those words, rather than showing the raw error the server returned.
+
+- **An account the server permanently refuses is no longer retried
+  forever.** One refusal code was being treated as a temporary
+  network hiccup, so the account was rechecked indefinitely and never
+  flagged as needing attention. This affects account verification
+  generally, not just Claude Desktop.
+
 ## 0.5.2 — beta (released 2026-08-25)
 
 ### Fixed
