@@ -687,6 +687,7 @@
   "remote": {
     "title": "远程",
     "intro": "用手机访问这台 Mac。一个管理员密码之后就是驱动 Claude Code 会话的能力——请把这个密码当作全部的安全边界。",
+    "reachability": "仅同一网络内的设备可以访问。Claudepot 只监听私有地址，因此若要从别处访问，请把两台设备接入 Tailscale 或 Headscale 这类网状 VPN，并在此绑定该地址。不要在路由器上给它做端口转发——那会把管理员密码，以及以你的身份执行代码的能力，暴露在公网上。",
     "loading": "加载中…",
     "loadFailed": "无法读取远程设置。",
     "actionFailed": "操作未成功。",
@@ -726,9 +727,11 @@
     "passwordSaved": "密码已设置。",
     "devicesHeading": "设备",
     "noDevices": "尚无设备配对。",
+    "noLiveDevices": "目前没有设备可以访问这台 Mac。下面的记录都已被吊销或过期。",
     "devicePaired": "已配对",
     "deviceSession": "会话",
     "deviceRevoked": "已吊销",
+    "deviceExpired": "已过期",
     "revoke": "吊销",
     "deviceRevokedOk": "设备已吊销。",
     "revokeAll": "全部吊销",
@@ -743,6 +746,8 @@
     "approvalsDetail": "Claude Code 在运行需要权限的工具前会询问。开启后，这个问题会先送到你的手机，你的回答会被采纳。关闭后，询问照常显示在本机——面板上的其他功能不受影响。",
     "approvalsWarning": "这是此处唯一「授予」而非「读取」的能力。批准一次工具调用等于以你的身份执行任意代码，而管理员密码是它前面唯一的屏障。",
     "approvalsOn": "已开启批准。",
-    "approvalsOff": "已关闭批准——权限询问在本机回答。"
+    "approvalsOff": "已关闭批准——权限询问在本机回答。",
+    "showPast_other": "显示 {{count}} 条已吊销或过期的记录",
+    "hidePast_other": "隐藏 {{count}} 条已吊销或过期的记录"
   }
 }

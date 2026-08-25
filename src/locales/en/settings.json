@@ -694,6 +694,7 @@
   "remote": {
     "title": "Remote",
     "intro": "Reach this Mac from your phone. Behind one admin password sits the ability to drive Claude Code sessions — treat that password as the whole boundary.",
+    "reachability": "Reachable from devices on the same network. Claudepot only listens on private addresses, so to reach it from anywhere else put both devices on a mesh VPN such as Tailscale or Headscale and bind that address here. Don't forward a port to it from your router — that puts the admin password, and code execution as you, on the open internet.",
     "loading": "Loading…",
     "loadFailed": "Could not read the remote settings.",
     "actionFailed": "That did not work.",
@@ -733,9 +734,11 @@
     "passwordSaved": "Password set.",
     "devicesHeading": "Devices",
     "noDevices": "Nothing has paired yet.",
+    "noLiveDevices": "Nothing can reach this Mac right now. Everything below has been revoked or has expired.",
     "devicePaired": "paired",
     "deviceSession": "session",
     "deviceRevoked": "revoked",
+    "deviceExpired": "expired",
     "revoke": "Revoke",
     "deviceRevokedOk": "Device revoked.",
     "revokeAll": "Revoke all",
@@ -751,6 +754,10 @@
     "approvalsDetail": "Claude Code asks before running a tool it needs permission for. With this on, the question reaches your phone first and your answer is honoured. With it off, the prompt is drawn at the machine as usual — everything else on the panel still works.",
     "approvalsWarning": "This is the one thing here that grants rather than reads. Approving a tool call is arbitrary code execution as you, so the admin password is the only thing standing in front of it.",
     "approvalsOn": "Approvals on.",
-    "approvalsOff": "Approvals off — prompts are answered at the machine."
+    "approvalsOff": "Approvals off — prompts are answered at the machine.",
+    "showPast_one": "Show {{count}} revoked or expired",
+    "showPast_other": "Show {{count}} revoked or expired",
+    "hidePast_one": "Hide {{count}} revoked or expired",
+    "hidePast_other": "Hide {{count}} revoked or expired"
   }
 }

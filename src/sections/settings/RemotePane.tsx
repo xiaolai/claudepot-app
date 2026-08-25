@@ -75,6 +75,58 @@ const FAINT = { ...NOTE, color: "var(--fg-faint)" } as const;
 const WARN = { ...NOTE, color: "var(--warn)" } as const;
 const DANGER = { ...NOTE, color: "var(--danger)" } as const;
 
+/**
+ * The pane's layout, which it did not have.
+ *
+ * It shipped as ~19 flat siblings under a bare `<div>`: six headings,
+ * twelve blocks and a child pane, with vertical rhythm left to each
+ * element's own `marginTop`. That was a regression rather than an
+ * oversight — the pane was written with a `<section class="pane-block">`
+ * per section, and when those class names turned out to have no rules
+ * behind them the classes were removed and the grouping went with them.
+ * Nothing caught it: `check:classes` asks whether a class has a rule,
+ * and markup with no classes at all answers that question fine.
+ *
+ * `gap` here replaces most of those margins, so spacing between
+ * sections is stated once instead of being the sum of whatever the last
+ * child and the next heading each asked for.
+ *
+ * The cap matters more on this pane than on its neighbours: it carries
+ * a long intro and four multi-sentence warnings, and Settings' `main`
+ * sets no width, so on a wide window those ran the full window. Every
+ * other substantial pane here already caps — `HealthPane`,
+ * `McpInstallerPane`, `RetentionPane`, `RotationPane`, `NetworkPane`.
+ */
+const PANE = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--sp-24)",
+  maxWidth: "var(--content-cap-md)",
+} as const;
+
+/** One section: its heading and the content that heading names. */
+const SECTION = {
+  display: "flex",
+  flexDirection: "column",
+} as const;
+
+/**
+ * Usable right now — the client-side mirror of `Device::is_usable_at`.
+ *
+ * The pane used to ask only whether `expiresAt` was *present*, never
+ * whether it had passed, so a session that expired days ago rendered as
+ * `SESSION` with a live Revoke button. `Status::active_device_count`
+ * has always applied both halves, so the header could read "0 active"
+ * directly above a row that looked live — a wrong answer with no error
+ * anywhere, which is the shape of bug that gets found by a user rather
+ * than by a test.
+ */
+function isLive(d: RemoteDevice, nowMs: number): boolean {
+  if (d.revokedAt) return false;
+  if (d.expiresAt) return Date.parse(d.expiresAt) > nowMs;
+  return true;
+}
+
 const STATE_LABEL = {
   off: "remote.state.off",
   idle: "remote.state.idle",
@@ -96,6 +148,7 @@ export function RemotePane({ pushToast }: Props) {
   const [bind, setBind] = useState("");
   const [port, setPort] = useState("");
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+  const [showPast, setShowPast] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -144,9 +197,28 @@ export function RemotePane({ pushToast }: Props) {
 
   const stateKey = !status.enabled ? "off" : status.serving ? "serving" : "idle";
 
+  // `now` is read once per render rather than per row, so a list cannot
+  // straddle a tick and label two rows by different clocks. The pane
+  // polls every 4s, so it re-reads often enough for an expiry to land.
+  const now = Date.now();
+  // Live means what `Status::active_device_count` means — unrevoked AND
+  // unexpired. The two must agree: the count says "0 active" and the
+  // rows have to stop showing something that looks live beside it.
+  const live = status.devices.filter((d) => isLive(d, now));
+  const past = status.devices.filter((d) => !isLive(d, now));
+
   return (
-    <div>
-      <div style={NOTE}>{t("remote.intro")}</div>
+    <div style={PANE}>
+      <div style={{ ...NOTE, marginTop: 0 }}>{t("remote.intro")}</div>
+
+      {/* Reachability, stated before the controls rather than
+          discovered from a dead phone. `remote::bind` accepts only
+          loopback, RFC1918, link-local and Tailscale's 100.64.0.0/10 —
+          every globally routable address is refused — so without a mesh
+          VPN the phone has to be on this network. Nothing said so: the
+          only mention of Tailscale in the whole product was inside a
+          bind ERROR, which you reach by typing something wrong. */}
+      <div style={NOTE}>{t("remote.reachability")}</div>
 
       {/* The two fail-loud stores. Both are refusals rather than
           warnings in core; the pane's job is to say why the buttons
@@ -162,285 +234,337 @@ export function RemotePane({ pushToast }: Props) {
         </div>
       )}
 
-      <SectionLabel>{t("remote.statusHeading")}</SectionLabel>
-      <div
-        style={{
-          fontSize: "var(--fs-md)",
-          color: STATE_COLOR[stateKey],
-          marginTop: "var(--sp-6)",
-        }}
-      >
-        {/* A map, not a template key: `t()` is typed against the English
-            catalog, so a hand-built `remote.state.${x}` would compile
-            with no entry and leak the raw key at runtime. */}
-        {t(STATE_LABEL[stateKey])}
-      </div>
-      {/* The middle state's whole point: the preference says yes and
-          nothing is listening. Without this line the user sees "enabled"
-          and assumes the phone can connect. */}
-      {stateKey === "idle" && <div style={NOTE}>{t("remote.idleHint")}</div>}
-      {status.serving && !status.runningHere && (
-        <div style={NOTE}>{t("remote.servingElsewhere")}</div>
-      )}
-      {status.url && status.runningHere && (
+      <section style={SECTION}>
+        <SectionLabel>{t("remote.statusHeading")}</SectionLabel>
         <div
-          className="mono selectable"
-          style={{ fontSize: "var(--fs-sm)", marginTop: "var(--sp-6)" }}
+          style={{
+            fontSize: "var(--fs-md)",
+            color: STATE_COLOR[stateKey],
+            marginTop: "var(--sp-6)",
+          }}
         >
-          {status.url}
+          {/* A map, not a template key: `t()` is typed against the English
+              catalog, so a hand-built `remote.state.${x}` would compile
+              with no entry and leak the raw key at runtime. */}
+          {t(STATE_LABEL[stateKey])}
         </div>
-      )}
-      {status.lastError && (
-        <div style={DANGER} role="alert">
-          {status.lastError}
-        </div>
-      )}
-      {/* Approval-from-the-phone is off while these are present, and
-          everything else still works — so it has to be said here rather
-          than discovered by tapping Allow and waiting. */}
-      {status.warnings.map((w) => (
-        <div key={w} style={WARN} role="alert">
-          <Glyph g={NF.warn} /> {w}
-        </div>
-      ))}
-
-      <div className="remote-actions">
-        {status.runningHere ? (
-          <Button
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() => run("stop", () => remoteApi.remoteStop(), t("remote.stopped"))}
+        {/* The middle state's whole point: the preference says yes and
+            nothing is listening. Without this line the user sees "enabled"
+            and assumes the phone can connect. */}
+        {stateKey === "idle" && <div style={NOTE}>{t("remote.idleHint")}</div>}
+        {status.serving && !status.runningHere && (
+          <div style={NOTE}>{t("remote.servingElsewhere")}</div>
+        )}
+        {status.url && status.runningHere && (
+          <div
+            className="mono selectable"
+            style={{ fontSize: "var(--fs-sm)", marginTop: "var(--sp-6)" }}
           >
-            {t("remote.stop")}
-          </Button>
-        ) : (
+            {status.url}
+          </div>
+        )}
+        {status.lastError && (
+          <div style={DANGER} role="alert">
+            {status.lastError}
+          </div>
+        )}
+        {/* Approval-from-the-phone is off while these are present, and
+            everything else still works — so it has to be said here rather
+            than discovered by tapping Allow and waiting. */}
+        {status.warnings.map((w) => (
+          <div key={w} style={WARN} role="alert">
+            <Glyph g={NF.warn} /> {w}
+          </div>
+        ))}
+
+        <div className="remote-actions">
+          {status.runningHere ? (
+            <Button
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => run("stop", () => remoteApi.remoteStop(), t("remote.stopped"))}
+            >
+              {t("remote.stop")}
+            </Button>
+          ) : (
+            <Button
+              variant="solid"
+              glyph={NF.play}
+              disabled={busy !== null || !status.enabled || !status.passwordSet}
+              onClick={() => run("start", () => remoteApi.remoteStart(), t("remote.started"))}
+            >
+              {t("remote.start")}
+            </Button>
+          )}
+          {/* `rules/design.md`: a disabled button states its reason inline,
+              next to the button, never in a tooltip. */}
+          {!status.runningHere && !status.enabled && (
+            <span style={FAINT}>{t("remote.cannotStartDisabled")}</span>
+          )}
+          {!status.runningHere && status.enabled && !status.passwordSet && (
+            <span style={FAINT}>{t("remote.cannotStartNoPassword")}</span>
+          )}
+        </div>
+
+        {/* The trade in-process hosting makes, disclosed rather than
+            discovered. See `remote_server`'s module docs. */}
+        <div style={FAINT}>{t("remote.quitStops")}</div>
+
+      </section>
+
+      <section style={SECTION}>
+        <SectionLabel>{t("remote.addressHeading")}</SectionLabel>
+        <div className="remote-fields">
+          <Field label={t("remote.bind")}>
+            <Input
+              value={bind}
+              onChange={(e) => setBind(e.target.value)}
+              spellCheck={false}
+              aria-label={t("remote.bind")}
+            />
+          </Field>
+          <Field label={t("remote.port")}>
+            <Input
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              inputMode="numeric"
+              aria-label={t("remote.port")}
+              style={{ width: "var(--sp-96)" }}
+            />
+          </Field>
+        </div>
+
+        {status.bindError && (
+          <div style={DANGER} role="alert">
+            {status.bindError}
+          </div>
+        )}
+        {/* `0.0.0.0` is accepted deliberately and returned as
+            `every_interface` precisely so a caller has to say so —
+            "Accepted, never silently", in core's words. The CLI prints a
+            paragraph; this is the same thing in this register. */}
+        {status.exposure === "every_interface" && (
+          <div style={WARN} role="alert">
+            <Glyph g={NF.warn} /> {t("remote.everyInterface")}
+          </div>
+        )}
+        {status.requiresTls && <div style={FAINT}>{t("remote.tlsRequired")}</div>}
+
+        <div className="remote-actions">
+          {status.enabled ? (
+            <Button
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => run("disable", () => remoteApi.remoteDisable(), t("remote.disabled"))}
+            >
+              {t("remote.disable")}
+            </Button>
+          ) : (
+            <Button
+              variant="solid"
+              disabled={busy !== null || !status.passwordSet}
+              onClick={() =>
+                run(
+                  "enable",
+                  () =>
+                    remoteApi.remoteEnable(
+                      bind.trim() || undefined,
+                      port.trim() ? Number(port.trim()) : undefined,
+                    ),
+                  t("remote.enabled"),
+                )
+              }
+            >
+              {t("remote.enable")}
+            </Button>
+          )}
+          {!status.enabled && !status.passwordSet && (
+            <span style={FAINT}>{t("remote.cannotEnableNoPassword")}</span>
+          )}
+        </div>
+
+        {/* The one capability here that GRANTS rather than reads, and
+            therefore the one that gets its own section rather than a line
+            in the status block. Placed above the password because the
+            password is what guards it. */}
+      </section>
+
+      <section style={SECTION}>
+        <SectionLabel>{t("remote.approvalsHeading")}</SectionLabel>
+        {/* `htmlFor` + `aria-describedby` rather than wrapping the input
+            in the label. A wrapping label takes its accessible name from
+            ALL its text, so the control announced as "Let a paired device
+            answer permission prompts Claude Code asks before running a
+            tool…" — the whole explanatory paragraph read out as the
+            control's name. The description is a separate relationship;
+            assistive tech reads it after the name, or on request. */}
+        <div className="remote-toggle">
+          <input
+            id="remote-approvals"
+            type="checkbox"
+            checked={status.approvalsEnabled}
+            disabled={busy !== null}
+            aria-describedby="remote-approvals-detail"
+            onChange={(e) =>
+              run(
+                "approvals",
+                () => remoteApi.remoteSetApprovals(e.target.checked),
+                e.target.checked ? t("remote.approvalsOn") : t("remote.approvalsOff"),
+              )
+            }
+            style={{ marginTop: "var(--sp-3)", flexShrink: 0, accentColor: "var(--accent)" }}
+          />
+          <span>
+            <label htmlFor="remote-approvals" style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+              {t("remote.approvalsLabel")}
+            </label>
+            <span
+              id="remote-approvals-detail"
+              style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}
+            >
+              {t("remote.approvalsDetail")}
+            </span>
+          </span>
+        </div>
+        {/* Stated at the control, not in a doc: this is arbitrary code
+            execution as this user, behind the admin password. */}
+        {status.approvalsEnabled && <div style={WARN}>{t("remote.approvalsWarning")}</div>}
+
+      </section>
+
+      <section style={SECTION}>
+        <SectionLabel>{t("remote.passwordHeading")}</SectionLabel>
+        <div style={NOTE}>
+          {status.passwordSet ? t("remote.passwordSet") : t("remote.passwordUnset")}
+        </div>
+        <div style={FAINT}>{t("remote.passwordWhy")}</div>
+        <div className="remote-fields">
+          <Field label={t("remote.newPassword")}>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              aria-label={t("remote.newPassword")}
+            />
+          </Field>
+        </div>
+        <div className="remote-actions">
           <Button
             variant="solid"
-            glyph={NF.play}
-            disabled={busy !== null || !status.enabled || !status.passwordSet}
-            onClick={() => run("start", () => remoteApi.remoteStart(), t("remote.started"))}
-          >
-            {t("remote.start")}
-          </Button>
-        )}
-        {/* `rules/design.md`: a disabled button states its reason inline,
-            next to the button, never in a tooltip. */}
-        {!status.runningHere && !status.enabled && (
-          <span style={FAINT}>{t("remote.cannotStartDisabled")}</span>
-        )}
-        {!status.runningHere && status.enabled && !status.passwordSet && (
-          <span style={FAINT}>{t("remote.cannotStartNoPassword")}</span>
-        )}
-      </div>
-
-      {/* The trade in-process hosting makes, disclosed rather than
-          discovered. See `remote_server`'s module docs. */}
-      <div style={FAINT}>{t("remote.quitStops")}</div>
-
-      <SectionLabel>{t("remote.addressHeading")}</SectionLabel>
-      <div className="remote-fields">
-        <Field label={t("remote.bind")}>
-          <Input
-            value={bind}
-            onChange={(e) => setBind(e.target.value)}
-            spellCheck={false}
-            aria-label={t("remote.bind")}
-          />
-        </Field>
-        <Field label={t("remote.port")}>
-          <Input
-            value={port}
-            onChange={(e) => setPort(e.target.value)}
-            inputMode="numeric"
-            aria-label={t("remote.port")}
-            style={{ width: "var(--sp-96)" }}
-          />
-        </Field>
-      </div>
-
-      {status.bindError && (
-        <div style={DANGER} role="alert">
-          {status.bindError}
-        </div>
-      )}
-      {/* `0.0.0.0` is accepted deliberately and returned as
-          `every_interface` precisely so a caller has to say so —
-          "Accepted, never silently", in core's words. The CLI prints a
-          paragraph; this is the same thing in this register. */}
-      {status.exposure === "every_interface" && (
-        <div style={WARN} role="alert">
-          <Glyph g={NF.warn} /> {t("remote.everyInterface")}
-        </div>
-      )}
-      {status.requiresTls && <div style={FAINT}>{t("remote.tlsRequired")}</div>}
-
-      <div className="remote-actions">
-        {status.enabled ? (
-          <Button
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() => run("disable", () => remoteApi.remoteDisable(), t("remote.disabled"))}
-          >
-            {t("remote.disable")}
-          </Button>
-        ) : (
-          <Button
-            variant="solid"
-            disabled={busy !== null || !status.passwordSet}
+            disabled={busy !== null || password.length === 0}
             onClick={() =>
               run(
-                "enable",
-                () =>
-                  remoteApi.remoteEnable(
-                    bind.trim() || undefined,
-                    port.trim() ? Number(port.trim()) : undefined,
-                  ),
-                t("remote.enabled"),
+                "password",
+                async () => {
+                  await remoteApi.remoteSetPassword(password);
+                  // Cleared in the same tick the call resolves, so React
+                  // state does not outlive the single bridge call —
+                  // `rules/architecture.md` requires it of every Add modal
+                  // and this is the same shape.
+                  setPassword("");
+                },
+                t("remote.passwordSaved"),
               )
             }
           >
-            {t("remote.enable")}
+            {t("remote.setPassword")}
           </Button>
-        )}
-        {!status.enabled && !status.passwordSet && (
-          <span style={FAINT}>{t("remote.cannotEnableNoPassword")}</span>
-        )}
-      </div>
+        </div>
 
-      {/* The one capability here that GRANTS rather than reads, and
-          therefore the one that gets its own section rather than a line
-          in the status block. Placed above the password because the
-          password is what guards it. */}
-      <SectionLabel>{t("remote.approvalsHeading")}</SectionLabel>
-      {/* `htmlFor` + `aria-describedby` rather than wrapping the input
-          in the label. A wrapping label takes its accessible name from
-          ALL its text, so the control announced as "Let a paired device
-          answer permission prompts Claude Code asks before running a
-          tool…" — the whole explanatory paragraph read out as the
-          control's name. The description is a separate relationship;
-          assistive tech reads it after the name, or on request. */}
-      <div className="remote-toggle">
-        <input
-          id="remote-approvals"
-          type="checkbox"
-          checked={status.approvalsEnabled}
-          disabled={busy !== null}
-          aria-describedby="remote-approvals-detail"
-          onChange={(e) =>
-            run(
-              "approvals",
-              () => remoteApi.remoteSetApprovals(e.target.checked),
-              e.target.checked ? t("remote.approvalsOn") : t("remote.approvalsOff"),
-            )
+      </section>
+
+      <section style={SECTION}>
+        <SectionLabel
+          right={
+            // render-if-nonzero: never ship "0 devices".
+            status.activeDevices > 0 ? (
+              <span className="mono-cap" style={{ color: "var(--fg-faint)" }}>
+                {t("remote.activeCount", { count: status.activeDevices })}
+              </span>
+            ) : undefined
           }
-          style={{ marginTop: "var(--sp-3)", flexShrink: 0, accentColor: "var(--accent)" }}
-        />
-        <span>
-          <label htmlFor="remote-approvals" style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-            {t("remote.approvalsLabel")}
-          </label>
-          <span
-            id="remote-approvals-detail"
-            style={{ fontSize: "var(--fs-xs)", color: "var(--fg-faint)" }}
+        >
+          {t("remote.devicesHeading")}
+        </SectionLabel>
+        {status.devices.length === 0 ? (
+          <div style={FAINT}>{t("remote.noDevices")}</div>
+        ) : (
+          <>
+            {live.length === 0 ? (
+              <div style={FAINT}>{t("remote.noLiveDevices")}</div>
+            ) : (
+              <ul className="remote-devices">
+                {live.map((d) => (
+                  <DeviceRow
+                    key={d.id}
+                    d={d}
+                    now={now}
+                    disabled={busy !== null || status.devicesRecovered}
+                    onRevoke={() =>
+                      run(
+                        `revoke-${d.id}`,
+                        () => remoteApi.remoteRevokeDevice(d.id),
+                        t("remote.deviceRevokedOk"),
+                      )
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+            {/* History, folded away. The records stay — `remote/mod.rs`
+                keeps a revoked token on file rather than forgetting it,
+                and every password login mints a row — so this list only
+                grows. Leaving it expanded buries the one control this
+                pane exists for (revoke a lost phone) under a column of
+                tombstones: seven of them, zero live, on the machine
+                this was found on. Folded, not hidden: the audit trail
+                is the reason the rows are kept at all. */}
+            {past.length > 0 && (
+              <div className="remote-actions">
+                <Button
+                  variant="ghost"
+                  aria-expanded={showPast}
+                  onClick={() => setShowPast((v) => !v)}
+                >
+                  {showPast
+                    ? t("remote.hidePast", { count: past.length })
+                    : t("remote.showPast", { count: past.length })}
+                </Button>
+              </div>
+            )}
+            {showPast && (
+              <ul className="remote-devices">
+                {past.map((d) => (
+                  <DeviceRow key={d.id} d={d} now={now} disabled onRevoke={() => {}} />
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+        <div className="remote-actions">
+          <Button
+            variant="ghost"
+            danger
+            disabled={busy !== null || status.devicesRecovered || status.activeDevices === 0}
+            onClick={() => setConfirmRevokeAll(true)}
           >
-            {t("remote.approvalsDetail")}
-          </span>
-        </span>
-      </div>
-      {/* Stated at the control, not in a doc: this is arbitrary code
-          execution as this user, behind the admin password. */}
-      {status.approvalsEnabled && <div style={WARN}>{t("remote.approvalsWarning")}</div>}
+            {t("remote.revokeAll")}
+          </Button>
+          {status.devicesRecovered && (
+            <span style={FAINT}>{t("remote.cannotRevokeRecovered")}</span>
+          )}
+        </div>
 
-      <SectionLabel>{t("remote.passwordHeading")}</SectionLabel>
-      <div style={NOTE}>
-        {status.passwordSet ? t("remote.passwordSet") : t("remote.passwordUnset")}
-      </div>
-      <div style={FAINT}>{t("remote.passwordWhy")}</div>
-      <div className="remote-fields">
-        <Field label={t("remote.newPassword")}>
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            aria-label={t("remote.newPassword")}
-          />
-        </Field>
-      </div>
-      <div className="remote-actions">
-        <Button
-          variant="solid"
-          disabled={busy !== null || password.length === 0}
-          onClick={() =>
-            run(
-              "password",
-              async () => {
-                await remoteApi.remoteSetPassword(password);
-                // Cleared in the same tick the call resolves, so React
-                // state does not outlive the single bridge call —
-                // `rules/architecture.md` requires it of every Add modal
-                // and this is the same shape.
-                setPassword("");
-              },
-              t("remote.passwordSaved"),
-            )
-          }
-        >
-          {t("remote.setPassword")}
-        </Button>
-      </div>
+        {/* The chips above the remote panel's composer. Here rather than
+            in a pane of their own — they mean nothing outside this
+            surface. */}
+      </section>
 
-      <SectionLabel
-        right={
-          // render-if-nonzero: never ship "0 devices".
-          status.activeDevices > 0 ? (
-            <span className="mono-cap" style={{ color: "var(--fg-faint)" }}>
-              {t("remote.activeCount", { count: status.activeDevices })}
-            </span>
-          ) : undefined
-        }
-      >
-        {t("remote.devicesHeading")}
-      </SectionLabel>
-      {status.devices.length === 0 ? (
-        <div style={FAINT}>{t("remote.noDevices")}</div>
-      ) : (
-        <ul className="remote-devices">
-          {status.devices.map((d) => (
-            <DeviceRow
-              key={d.id}
-              d={d}
-              disabled={busy !== null || status.devicesRecovered}
-              onRevoke={() =>
-                run(
-                  `revoke-${d.id}`,
-                  () => remoteApi.remoteRevokeDevice(d.id),
-                  t("remote.deviceRevokedOk"),
-                )
-              }
-            />
-          ))}
-        </ul>
-      )}
-      <div className="remote-actions">
-        <Button
-          variant="ghost"
-          danger
-          disabled={busy !== null || status.devicesRecovered || status.activeDevices === 0}
-          onClick={() => setConfirmRevokeAll(true)}
-        >
-          {t("remote.revokeAll")}
-        </Button>
-        {status.devicesRecovered && (
-          <span style={FAINT}>{t("remote.cannotRevokeRecovered")}</span>
-        )}
-      </div>
-
-      {/* The chips above the remote panel's composer. Here rather than
-          in a pane of their own — they mean nothing outside this
-          surface. */}
-      <SectionLabel>{t("remote.promptsHeading")}</SectionLabel>
-      <QuickPromptsPane pushToast={pushToast} />
+      <section style={SECTION}>
+        <SectionLabel>{t("remote.promptsHeading")}</SectionLabel>
+          <QuickPromptsPane pushToast={pushToast} />
+      </section>
 
       {confirmRevokeAll && (
         <ConfirmDialog
@@ -483,28 +607,37 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  */
 function DeviceRow({
   d,
+  now,
   disabled,
   onRevoke,
 }: {
   d: RemoteDevice;
+  now: number;
   disabled: boolean;
   onRevoke: () => void;
 }) {
   const { t } = useTranslation("settings");
+  const spent = !isLive(d, now);
+  // Four states, not three. `EXPIRED` used to be absent entirely: a
+  // session past its expiry took the `SESSION` label, which reads as
+  // live, and kept a Revoke button for a token that already refuses
+  // every request.
   const kind = d.revokedAt
     ? t("remote.deviceRevoked")
     : d.expiresAt
-      ? t("remote.deviceSession")
+      ? spent
+        ? t("remote.deviceExpired")
+        : t("remote.deviceSession")
       : t("remote.devicePaired");
   return (
     <li>
-      <span style={{ fontSize: "var(--fs-sm)", opacity: d.revokedAt ? 0.55 : 1 }}>
-        {d.name}
-      </span>
+      <span style={{ fontSize: "var(--fs-sm)", opacity: spent ? 0.55 : 1 }}>{d.name}</span>
       <span className="mono-cap" style={{ color: "var(--fg-faint)" }}>
         {kind}
       </span>
-      {!d.revokedAt && (
+      {/* No Revoke on a spent row. Revoking something already refused is
+          a no-op wearing the costume of an action. */}
+      {!spent && (
         <Button variant="ghost" danger disabled={disabled} onClick={onRevoke}>
           {t("remote.revoke")}
         </Button>

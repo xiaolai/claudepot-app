@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { RemoteStatus } from "../../api/remote";
+import type { RemoteDevice, RemoteStatus } from "../../api/remote";
 import { i18n } from "../../lib/i18n";
 import SOURCE from "./RemotePane.tsx?raw";
 
@@ -103,9 +103,30 @@ afterEach(() => {
  * tsconfig (no node types) and Vite stubs `?raw` on CSS under Vitest.
  * What stays is the file-local lock: these particular names, by name,
  * so the specific mistake cannot come back quietly.
+ *
+ * It reads the pane's `className` VALUES, not its raw text. Scanning
+ * the whole file made the comment explaining a name's removal
+ * indistinguishable from the name's use — the identical trap
+ * `check-classes.mjs` hit and fixed by stripping comments first, and
+ * that `ProtectedPathsPane` carries a note about. Comment-stripping
+ * would work here too; reading the attributes is narrower, and narrower
+ * is what a lock wants.
  */
+
+/** Every `className` value in the pane — literals and template heads. */
+function classNamesIn(src: string): string {
+  return [...src.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\}|\{"([^"]*)"\})/g)]
+    .map((m) => m[1] ?? m[2] ?? m[3] ?? "")
+    .join(" ");
+}
+
 describe("RemotePane — the design system is actually wired", () => {
   it("uses none of the class names the first version invented", () => {
+    const classes = classNamesIn(SOURCE);
+    // The scan must actually find something — an empty corpus would
+    // pass every assertion below while proving nothing, which is the
+    // failure mode `check:classes` guards with its own floor.
+    expect(classes.length).toBeGreaterThan(0);
     for (const dead of [
       "pane-block",
       "pane-intro",
@@ -114,8 +135,63 @@ describe("RemotePane — the design system is actually wired", () => {
       "pane-actions",
       "status-chip",
     ]) {
-      expect(SOURCE).not.toContain(dead);
+      expect(classes).not.toContain(dead);
     }
+  });
+
+  // The regression this pane actually shipped with. Removing the dead
+  // class names above was correct, but the pane had been built as a
+  // `<section>` per block and the grouping was removed with them,
+  // leaving ~19 flat siblings under a bare `<div>`. No check saw it:
+  // `check:classes` asks whether a class has a rule and markup with no
+  // classes answers that fine, `tsc` has no opinion on layout, and
+  // every other test here asserts on text.
+  //
+  // jsdom cannot measure any of this — it has no layout engine, so
+  // there is no pixel here to assert on. What it CAN hold is the
+  // structural contract: that each heading is grouped with the content
+  // it names, and that the root carries a layout at all. That is the
+  // part that regressed, so that is the part locked.
+  it("groups each heading with the content it labels", async () => {
+    remoteStatusMock.mockResolvedValue(status({ enabled: true }));
+    const { container } = render(<RemotePane />);
+    await screen.findByText(t("remote.statusHeading"));
+
+    const pane = container.querySelector("div > section")?.parentElement;
+    expect(pane).not.toBeNull();
+
+    const sections = pane!.querySelectorAll(":scope > section");
+    // Status, Address, Approvals, Password, Devices, Quick prompts.
+    expect(sections.length).toBe(6);
+
+    // Every section LEADS with its own heading, rather than the heading
+    // being a sibling that happens to sit above it.
+    //
+    // Deliberately checks the first child, not `querySelector`. A bare
+    // `.mono-cap` search passes even when the heading has been pulled
+    // out of the section entirely, because `Field` renders its own
+    // label with that class — watched, on this file, against exactly
+    // that mutation. The whole claim is about position, so position is
+    // what gets asserted.
+    for (const sec of sections) {
+      const lead = sec.firstElementChild;
+      expect(lead).not.toBeNull();
+      expect(lead!.querySelector(":scope > .mono-cap")).not.toBeNull();
+    }
+  });
+
+  it("gives the pane a layout and a reading width", async () => {
+    remoteStatusMock.mockResolvedValue(status({ enabled: true }));
+    const { container } = render(<RemotePane />);
+    await screen.findByText(t("remote.statusHeading"));
+    const pane = container.querySelector("div > section")!.parentElement as HTMLElement;
+    // Spacing stated once, not summed from each child's own margin.
+    expect(pane.style.display).toBe("flex");
+    expect(pane.style.flexDirection).toBe("column");
+    expect(pane.style.gap).not.toBe("");
+    // Settings' `main` sets no width, and this pane carries the longest
+    // prose in it — an uncapped measure ran the full window.
+    expect(pane.style.maxWidth).not.toBe("");
   });
 
   it("renders through the primitives rather than hand-rolled markup", () => {
@@ -387,5 +463,111 @@ describe("RemotePane — the in-process trade is disclosed", () => {
     remoteStatusMock.mockResolvedValue(status());
     render(<RemotePane />);
     expect(await screen.findByText(t("remote.quitStops"))).toBeInTheDocument();
+  });
+});
+
+/**
+ * A device row has four states, and one of them did not exist.
+ *
+ * `expiresAt` was tested for PRESENCE and never against the clock, so a
+ * session that expired days ago rendered as `session` — the live label
+ * — and kept a Revoke button for a token the server already refuses.
+ * `Status::active_device_count` has always applied both halves, so the
+ * heading could read "0 active" directly above a row that looked live.
+ *
+ * No error, no crash, and every existing test in this file passed
+ * through it: they assert on names and on the revoked case.
+ */
+describe("RemotePane — devices, live vs spent", () => {
+  const DAY = 86_400_000;
+  const device = (over: Partial<RemoteDevice> = {}): RemoteDevice => ({
+    id: crypto.randomUUID(),
+    name: "iPhone",
+    createdAt: new Date(Date.now() - 30 * DAY).toISOString(),
+    lastSeen: null,
+    revokedAt: null,
+    expiresAt: null,
+    ...over,
+  });
+
+  it("an expired session reads as expired, not as a live session", async () => {
+    const expired = device({
+      name: "OldPhone",
+      expiresAt: new Date(Date.now() - DAY).toISOString(),
+    });
+    remoteStatusMock.mockResolvedValue(status({ devices: [expired], activeDevices: 0 }));
+    render(<RemotePane />);
+
+    // It is folded into history, so open that first.
+    const toggle = await screen.findByRole("button", { name: /Show 1 revoked or expired/ });
+    await userEvent.click(toggle);
+
+    expect(screen.getByText("OldPhone")).toBeInTheDocument();
+    expect(screen.getByText(t("remote.deviceExpired"))).toBeInTheDocument();
+    expect(screen.queryByText(t("remote.deviceSession"))).not.toBeInTheDocument();
+  });
+
+  it("offers no Revoke on a token the server already refuses", async () => {
+    const expired = device({ expiresAt: new Date(Date.now() - DAY).toISOString() });
+    const revoked = device({ name: "Mac", revokedAt: new Date(Date.now() - DAY).toISOString() });
+    remoteStatusMock.mockResolvedValue(
+      status({ devices: [expired, revoked], activeDevices: 0 }),
+    );
+    render(<RemotePane />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Show 2 revoked or expired/ }),
+    );
+    // Revoking something already refused is a no-op wearing the costume
+    // of an action.
+    expect(screen.queryByRole("button", { name: t("remote.revoke") })).not.toBeInTheDocument();
+  });
+
+  it("a session still inside its window stays live and revocable", async () => {
+    const liveSession = device({
+      name: "Laptop",
+      expiresAt: new Date(Date.now() + 7 * DAY).toISOString(),
+    });
+    remoteStatusMock.mockResolvedValue(
+      status({ devices: [liveSession], activeDevices: 1 }),
+    );
+    render(<RemotePane />);
+    expect(await screen.findByText("Laptop")).toBeInTheDocument();
+    expect(screen.getByText(t("remote.deviceSession"))).toBeInTheDocument();
+    // Live rows are never folded — no disclosure at all when nothing is spent.
+    expect(screen.queryByRole("button", { name: /revoked or expired/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("remote.revoke") })).toBeInTheDocument();
+  });
+
+  it("folds history away so the live list is what you see", async () => {
+    const spent = Array.from({ length: 7 }, (_, i) =>
+      device({ name: `Old${i}`, revokedAt: new Date(Date.now() - DAY).toISOString() }),
+    );
+    const alive = device({ name: "MyPhone" });
+    remoteStatusMock.mockResolvedValue(
+      status({ devices: [...spent, alive], activeDevices: 1 }),
+    );
+    render(<RemotePane />);
+
+    // The one device that can reach this Mac is visible without a click;
+    // the seven tombstones are not.
+    expect(await screen.findByText("MyPhone")).toBeInTheDocument();
+    expect(screen.queryByText("Old0")).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole("button", { name: /Show 7 revoked or expired/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await userEvent.click(toggle);
+    // Folded, not dropped — the records are the audit trail.
+    expect(screen.getByText("Old0")).toBeInTheDocument();
+    expect(screen.getByText("Old6")).toBeInTheDocument();
+  });
+
+  it("says so when every device is spent, rather than looking empty", async () => {
+    const spent = [device({ revokedAt: new Date(Date.now() - DAY).toISOString() })];
+    remoteStatusMock.mockResolvedValue(status({ devices: spent, activeDevices: 0 }));
+    render(<RemotePane />);
+    // Distinct from `noDevices` — "nothing has paired yet" and "you
+    // revoked them all" are different facts with different next steps.
+    expect(await screen.findByText(t("remote.noLiveDevices"))).toBeInTheDocument();
+    expect(screen.queryByText(t("remote.noDevices"))).not.toBeInTheDocument();
   });
 });

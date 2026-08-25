@@ -79,6 +79,12 @@ pub fn status_cmd(ctx: &AppContext) -> Result<()> {
         }
     );
     println!("  bind      {}:{}", st.bind, st.port);
+    // Who can actually reach that address. The line above names a
+    // number; on its own it does not tell a reader whether their phone
+    // will work from the office, and `bind`'s allowlist means the
+    // answer is usually no. Stated here rather than left to be found
+    // out from a phone that cannot connect.
+    println!("  reach     {}", reach_line(&st.bind));
     match (&st.bind_error, st.exposure) {
         (Some(e), _) => println!("  bind      REFUSED: {e}"),
         (None, Some(Exposure::EveryInterface)) => {
@@ -119,6 +125,39 @@ pub fn status_cmd(ctx: &AppContext) -> Result<()> {
         st.active_device_count(chrono::Utc::now())
     );
     Ok(())
+}
+
+/// One line describing who can reach a bound address.
+///
+/// `remote::bind` refuses every globally routable address, so the
+/// honest answer is "this network" unless the user has put their
+/// devices on a mesh VPN — which the Tailscale CGNAT range is the
+/// detectable case of. Nothing in the product said this: the only
+/// mention of Tailscale was inside a bind *error*, reachable by typing
+/// something wrong.
+///
+/// The port-forwarding warning is here rather than in the docs because
+/// the user who wants access from anywhere and is told they cannot have
+/// it is exactly the user who reaches for their router. The allowlist
+/// stops Claudepot *binding* a public address; it cannot stop a router
+/// forwarding a port to a private one, and that path puts the admin
+/// password on the open internet.
+fn reach_line(bind: &std::net::IpAddr) -> String {
+    use claudepot_core::remote::bind::is_tailscale_range;
+    use std::net::IpAddr;
+
+    if bind.is_loopback() {
+        return "this machine only".to_string();
+    }
+    if let IpAddr::V4(v4) = bind {
+        if is_tailscale_range(*v4) {
+            return "your tailnet, from anywhere — plus this network".to_string();
+        }
+    }
+    "devices on this network only; for access from elsewhere join both \
+     to a mesh VPN (Tailscale/Headscale) and bind that address. Never \
+     port-forward this."
+        .to_string()
 }
 
 pub fn set_password_cmd(ctx: &AppContext) -> Result<()> {
@@ -320,5 +359,57 @@ async fn shutdown_signal() -> &'static str {
         // close and shutdown events that reach a foreground process.
         let _ = tokio::signal::ctrl_c().await;
         "Interrupted"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reach_line;
+    use std::net::IpAddr;
+
+    fn line(s: &str) -> String {
+        reach_line(&s.parse::<IpAddr>().unwrap())
+    }
+
+    #[test]
+    fn loopback_reaches_only_this_machine() {
+        for a in ["127.0.0.1", "::1"] {
+            assert_eq!(line(a), "this machine only", "{a}");
+        }
+    }
+
+    #[test]
+    fn a_tailnet_address_says_from_anywhere() {
+        // 100.64.0.0/10 — the range `bind` allows precisely so a mesh
+        // VPN works. This is the one case where "from anywhere" is true.
+        for a in ["100.64.0.1", "100.96.0.1", "100.127.255.255"] {
+            let l = line(a);
+            assert!(l.contains("tailnet"), "{a}: {l}");
+            assert!(l.contains("anywhere"), "{a}: {l}");
+        }
+    }
+
+    #[test]
+    fn a_lan_address_says_this_network_and_warns_off_port_forwarding() {
+        // The default case, and the one nothing in the product stated.
+        for a in ["192.168.1.10", "10.0.0.1", "172.16.4.2", "169.254.1.1"] {
+            let l = line(a);
+            assert!(l.contains("this network only"), "{a}: {l}");
+            assert!(l.contains("Tailscale"), "{a}: {l}");
+            assert!(
+                l.contains("port-forward"),
+                "the router path is the one the allowlist cannot close — {a}: {l}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tailscale_range_boundaries_are_not_off_by_one() {
+        // 100.63.255.255 and 100.128.0.0 are ordinary public space, so
+        // treating them as tailnet would promise reachability the
+        // allowlist would in fact have refused outright.
+        for a in ["100.63.255.255", "100.128.0.1"] {
+            assert!(!line(a).contains("tailnet"), "{a}");
+        }
     }
 }
