@@ -22,6 +22,36 @@ pub struct Profile {
     pub display_name: Option<String>,
 }
 
+/// What an HTTP status from `/profile` means. Split out of [`fetch`]
+/// so the judgement is unit-testable without a live server — the I/O
+/// needs a network, the classification never does.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum StatusVerdict {
+    Ok,
+    /// The server refused *this token*. Actionable: re-authenticate.
+    Refused,
+    RateLimited,
+    /// Transient — callers retry rather than invalidating credentials.
+    ServerTrouble,
+}
+
+/// 401 **and 403** are refusals of the token itself.
+///
+/// 403 used to fall into `ServerTrouble`, which made a permanently
+/// refused credential look transient: `services::identity` maps
+/// `ServerError` to `NetworkError`, so the account was retried
+/// forever and never marked `Rejected`. Surfaced by github#93, where
+/// a stale Claude Desktop token 403'd and the only thing the user was
+/// shown was the bare status line.
+pub(crate) fn classify_status(status: u16) -> StatusVerdict {
+    match status {
+        401 | 403 => StatusVerdict::Refused,
+        429 => StatusVerdict::RateLimited,
+        s if (200..300).contains(&s) => StatusVerdict::Ok,
+        _ => StatusVerdict::ServerTrouble,
+    }
+}
+
 pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
     let client = http_client()?;
     let resp = client
@@ -37,21 +67,24 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
         .await?;
 
     let status = resp.status();
-    if status == 401 {
-        return Err(OAuthError::AuthFailed(
-            "access token rejected by /api/oauth/profile".into(),
-        ));
-    }
-    if status == 429 {
-        return Err(OAuthError::RateLimited {
-            retry_after_secs: crate::oauth::retry_after_secs(resp.headers()),
-        });
-    }
-    if !status.is_success() {
-        let _ = resp.text().await; // consume body without exposing it
-        return Err(OAuthError::ServerError(format!(
-            "profile API returned {status}"
-        )));
+    match classify_status(status.as_u16()) {
+        StatusVerdict::Ok => {}
+        StatusVerdict::Refused => {
+            return Err(OAuthError::AuthFailed(format!(
+                "access token rejected by /api/oauth/profile ({status})"
+            )));
+        }
+        StatusVerdict::RateLimited => {
+            return Err(OAuthError::RateLimited {
+                retry_after_secs: crate::oauth::retry_after_secs(resp.headers()),
+            });
+        }
+        StatusVerdict::ServerTrouble => {
+            let _ = resp.text().await; // consume body without exposing it
+            return Err(OAuthError::ServerError(format!(
+                "profile API returned {status}"
+            )));
+        }
     }
 
     let body: serde_json::Value = resp.json().await?;
@@ -82,4 +115,42 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
             .replace("claude_", ""),
         rate_limit_tier: org["rate_limit_tier"].as_str().map(String::from),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_status, StatusVerdict};
+
+    #[test]
+    fn refusal_statuses_are_not_transient() {
+        // 403 is the github#93 case. Classifying it as ServerTrouble
+        // makes a dead credential look like a bad minute.
+        assert_eq!(classify_status(401), StatusVerdict::Refused);
+        assert_eq!(classify_status(403), StatusVerdict::Refused);
+    }
+
+    #[test]
+    fn rate_limit_is_its_own_verdict() {
+        assert_eq!(classify_status(429), StatusVerdict::RateLimited);
+    }
+
+    #[test]
+    fn success_range_is_ok() {
+        for s in [200, 201, 204, 299] {
+            assert_eq!(classify_status(s), StatusVerdict::Ok, "status {s}");
+        }
+    }
+
+    #[test]
+    fn other_failures_stay_transient() {
+        // 5xx and the odd 4xx are genuinely "try again" — they must
+        // NOT invalidate a credential.
+        for s in [400, 404, 418, 500, 502, 503] {
+            assert_eq!(
+                classify_status(s),
+                StatusVerdict::ServerTrouble,
+                "status {s}"
+            );
+        }
+    }
 }

@@ -20,7 +20,10 @@
 //! result — see [`VerifiedIdentity`].
 //!
 //! ## Slow path — decrypted + `/profile`
-//! Reads the `oauth:tokenCache` ciphertext from `config.json`, pulls
+//! Reads the token-cache ciphertext from `config.json` — via
+//! [`crate::desktop_backend::token_cache::read_token_cache_b64`], which
+//! prefers `oauth:tokenCacheV2` and falls back to the legacy
+//! `oauth:tokenCache`; never name either key here — pulls
 //! the OS-specific key via `DesktopPlatform::safe_storage_secret`,
 //! decrypts with [`crate::desktop_backend::crypto`], parses the
 //! plaintext as [`DecryptedTokenCache`], and calls `/api/oauth/profile`
@@ -55,8 +58,8 @@ pub enum ProbeMethod {
     /// UUID in the live `config.json`. Cheap but NOT verified — do
     /// not drive mutation from this alone.
     OrgUuidCandidate,
-    /// Decrypted `oauth:tokenCache` + successful `/profile` round-trip
-    /// returned an email. Fully verified. Phase 2+.
+    /// Decrypted token cache + successful `/profile` round-trip
+    /// returned an email. Fully verified.
     Decrypted,
 }
 
@@ -64,8 +67,8 @@ pub enum ProbeMethod {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ProbeOptions {
     /// Force the slow path even when a unique fast-path candidate
-    /// exists. Phase 2+ — in Phase 1 this flag causes the probe to
-    /// return `Unimplemented` instead of the candidate.
+    /// exists. The slow path is wired: it decrypts the token cache and
+    /// performs the `/profile` round-trip.
     pub strict: bool,
 }
 
@@ -79,7 +82,7 @@ pub enum DesktopIdentityError {
     NoConfig,
     #[error("config.json is not valid JSON: {0}")]
     ConfigParse(String),
-    #[error("no oauth:tokenCache present — Desktop is signed out")]
+    #[error("no OAuth token cache present — Desktop is signed out")]
     NotSignedIn,
     #[error("key retrieval failed: {0}")]
     Key(#[from] crate::desktop_backend::DesktopKeyError),
@@ -87,6 +90,16 @@ pub enum DesktopIdentityError {
     Decrypt(#[from] crate::desktop_backend::crypto::DecryptError),
     #[error("decrypted token cache is malformed: {0}")]
     TokenParse(String),
+    /// The token decrypted and parsed, and the server refused it.
+    /// Split from [`Self::ProfileFetch`] because the two want opposite
+    /// actions: this one means the credential is not current, while a
+    /// transport failure says nothing about the credential at all.
+    /// Reported as a bare `403` before this variant existed, which
+    /// reads as geo-blocking or an account problem — see github#93.
+    #[error(
+        "Desktop's saved session was rejected by Anthropic ({0}) — sign in to Claude Desktop again"
+    )]
+    TokenRejected(String),
     #[error("/profile returned error: {0}")]
     ProfileFetch(String),
     #[error("slow-path identity probe unsupported on this platform")]
@@ -106,6 +119,7 @@ impl crate::error_code::ErrorCode for DesktopIdentityError {
             DesktopIdentityError::Key(_) => "desktop_identity.key",
             DesktopIdentityError::Decrypt(_) => "desktop_identity.decrypt",
             DesktopIdentityError::TokenParse(_) => "desktop_identity.token_parse",
+            DesktopIdentityError::TokenRejected(_) => "desktop_identity.token_rejected",
             DesktopIdentityError::ProfileFetch(_) => "desktop_identity.profile_fetch",
             DesktopIdentityError::Unsupported => "desktop_identity.unsupported",
         }
@@ -131,6 +145,7 @@ impl crate::error_code::ErrorCode for DesktopIdentityError {
             // Status lines from `/profile`, never a bearer token — the
             // probe sends the token in a header and reads only the
             // status and the email field back.
+            DesktopIdentityError::TokenRejected(detail) => serde_json::json!({ "detail": detail }),
             DesktopIdentityError::ProfileFetch(detail) => serde_json::json!({ "detail": detail }),
             DesktopIdentityError::Unsupported => serde_json::json!({}),
         }
@@ -247,15 +262,24 @@ where
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        let tc = DecryptedTokenCache::from_json(&plaintext)
-            .map_err(|e| DesktopIdentityError::TokenParse(e.to_string()))?;
-        let access = tc.pick_access_token().ok_or_else(|| {
-            DesktopIdentityError::TokenParse("no access token found in decrypted bundles".into())
+        use crate::desktop_backend::token_cache::TokenParseError;
+        let tc = DecryptedTokenCache::from_json(&plaintext).map_err(|e| match e {
+            // A cache that decrypts cleanly to an empty bundle map is
+            // Desktop telling us it holds no session — that is signed
+            // out, not malformed. Sign-in migration leaves the legacy
+            // key in exactly this state (a valid envelope around `{}`),
+            // so calling it "malformed" pointed the user at corruption
+            // that was not there. Measured on Desktop 1.34493.1.
+            TokenParseError::Empty => DesktopIdentityError::NotSignedIn,
+            other => DesktopIdentityError::TokenParse(other.to_string()),
         })?;
-        let prof = fetch_profile
-            .fetch(access)
-            .await
-            .map_err(|e| DesktopIdentityError::ProfileFetch(e.to_string()))?;
+        let access = tc
+            .pick_access_token()
+            .ok_or(DesktopIdentityError::NotSignedIn)?;
+        let prof = fetch_profile.fetch(access).await.map_err(|e| match e {
+            ProfileFetchError::Rejected(m) => DesktopIdentityError::TokenRejected(m),
+            ProfileFetchError::Transport(m) => DesktopIdentityError::ProfileFetch(m),
+        })?;
         Ok(Some(LiveDesktopIdentity {
             email: prof.email,
             org_uuid: prof.org_uuid,
@@ -282,9 +306,32 @@ pub async fn verify_live_identity(
 
 /// Trait for fetching an OAuth profile — enables testing without
 /// network. Mirrors the CLI-side `ProfileFetcher` pattern.
+/// Why a `/profile` round-trip failed.
+///
+/// The split is the point: [`Self::Rejected`] means the token we read
+/// is not the one the server accepts — the credential is stale, or we
+/// read the wrong key — whereas [`Self::Transport`] says nothing about
+/// the credential at all. Collapsing them into one string is what made
+/// github#93 present as a bare `403`, which reads as geo-blocking.
+#[derive(Debug)]
+pub enum ProfileFetchError {
+    /// The server refused this specific token (401/403).
+    Rejected(String),
+    /// Transport failure, rate limit, or a malformed response.
+    Transport(String),
+}
+
+impl std::fmt::Display for ProfileFetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProfileFetchError::Rejected(m) | ProfileFetchError::Transport(m) => f.write_str(m),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait ProfileFetcher: Send + Sync {
-    async fn fetch(&self, access_token: &str) -> Result<ProfileResponse, String>;
+    async fn fetch(&self, access_token: &str) -> Result<ProfileResponse, ProfileFetchError>;
 }
 
 pub struct ProfileResponse {
@@ -297,10 +344,15 @@ pub struct DefaultProfileFetcher;
 
 #[async_trait::async_trait]
 impl ProfileFetcher for DefaultProfileFetcher {
-    async fn fetch(&self, access_token: &str) -> Result<ProfileResponse, String> {
+    async fn fetch(&self, access_token: &str) -> Result<ProfileResponse, ProfileFetchError> {
         let p = crate::oauth::profile::fetch(access_token)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| match e {
+                // `oauth::profile` maps both 401 and 403 here — the
+                // two statuses that refuse the token itself.
+                crate::error::OAuthError::AuthFailed(m) => ProfileFetchError::Rejected(m),
+                other => ProfileFetchError::Transport(other.to_string()),
+            })?;
         Ok(ProfileResponse {
             email: p.email,
             org_uuid: p.org_uuid,
@@ -325,10 +377,8 @@ fn load_config(platform: &dyn DesktopPlatform) -> Result<ConfigPieces, DesktopId
     }
     let cfg = parse_config_json(&cfg_path)?;
     let org_uuids = extract_org_uuids(&cfg);
-    let token_cache_b64 = cfg
-        .get("oauth:tokenCache")
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let token_cache_b64 =
+        crate::desktop_backend::token_cache::read_token_cache_b64(&cfg).map(String::from);
     // Neither signal means Desktop is signed out.
     if org_uuids.is_empty() && token_cache_b64.is_none() {
         return Err(DesktopIdentityError::NotSignedIn);
@@ -668,7 +718,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[async_trait::async_trait]
     impl super::ProfileFetcher for FixedFetcher {
-        async fn fetch(&self, _: &str) -> Result<super::ProfileResponse, String> {
+        async fn fetch(&self, _: &str) -> Result<super::ProfileResponse, super::ProfileFetchError> {
             Ok(super::ProfileResponse {
                 email: self.email.clone(),
                 org_uuid: self.org_uuid.clone(),
@@ -716,9 +766,6 @@ mod tests {
         // Encrypt a synthetic tokenCache with a known secret, drop
         // it in a fake config.json, verify the async probe decrypts
         // + fetches profile + returns ProbeMethod::Decrypted.
-        use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
-        type Enc = cbc::Encryptor<aes::Aes128>;
-
         let secret = b"test-keychain-secret".to_vec();
         // Shape must match DecryptedTokenCache's real layout: a
         // keyed map of bundle-keys → token envelopes.
@@ -729,15 +776,7 @@ mod tests {
                 "expiresAt": 1735689600000
             }
         }"#;
-        let key = crate::desktop_backend::crypto::macos::derive_key(&secret).expect("kdf");
-        let iv = [b' '; 16];
-        let ct = Enc::new_from_slices(&key, &iv)
-            .unwrap()
-            .encrypt_padded_vec_mut::<Pkcs7>(tc_json);
-        let mut envelope = b"v10".to_vec();
-        envelope.extend_from_slice(&ct);
-        use base64::Engine as _;
-        let token_b64 = base64::engine::general_purpose::STANDARD.encode(envelope);
+        let token_b64 = seal(&secret, tc_json);
 
         let tmp = tempfile::tempdir().unwrap();
         write_cfg(
@@ -792,5 +831,153 @@ mod tests {
         assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
             .unwrap()
             .is_none());
+    }
+
+    /// Build a Desktop-shaped `v10` envelope around `plaintext`.
+    /// Mirrors what Chromium's OSCrypt writes on macOS.
+    #[cfg(target_os = "macos")]
+    fn seal(secret: &[u8], plaintext: &[u8]) -> String {
+        use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+        use base64::Engine as _;
+        type Enc = cbc::Encryptor<aes::Aes128>;
+        let key = crate::desktop_backend::crypto::macos::derive_key(secret).expect("kdf");
+        let ct = Enc::new_from_slices(&key, &[b' '; 16])
+            .unwrap()
+            .encrypt_padded_vec_mut::<Pkcs7>(plaintext);
+        let mut envelope = b"v10".to_vec();
+        envelope.extend_from_slice(&ct);
+        base64::engine::general_purpose::STANDARD.encode(envelope)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn bundle(token: &str) -> Vec<u8> {
+        format!(r#"{{"uid:org:https://api.anthropic.com:user:profile":{{"token":"{token}"}}}}"#)
+            .into_bytes()
+    }
+
+    /// github#93. Desktop migrates the live token to
+    /// `oauth:tokenCacheV2` on sign-in and leaves the legacy key
+    /// behind, so a reader that names `oauth:tokenCache` picks up a
+    /// credential the server no longer accepts. Both keys are present
+    /// here, holding *different* tokens, and the fetcher accepts only
+    /// the V2 one — so a probe that reads V1 fails this test.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn slow_path_prefers_token_cache_v2_over_legacy_key() {
+        let secret = b"test-keychain-secret".to_vec();
+        let tmp = tempfile::tempdir().unwrap();
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({
+                "oauth:tokenCache":   seal(&secret, &bundle("sk-ant-oat01-STALE-V1")),
+                "oauth:tokenCacheV2": seal(&secret, &bundle("sk-ant-oat01-LIVE-V2")),
+            }),
+        );
+
+        let (store, _s) = store();
+        let platform = SlowPathFake {
+            data_dir: tmp.path().to_path_buf(),
+            secret,
+        };
+        let fetcher = OnlyAcceptsFetcher {
+            accepted: "sk-ant-oat01-LIVE-V2".into(),
+        };
+
+        let id =
+            probe_live_identity_async(&platform, &store, ProbeOptions { strict: true }, &fetcher)
+                .await
+                .expect("V2 token must be the one sent to /profile")
+                .expect("identity");
+        assert_eq!(id.probe_method, ProbeMethod::Decrypted);
+    }
+
+    /// The legacy key survives migration as a valid envelope around
+    /// `{}` — measured, not hypothesised. That is Desktop saying it
+    /// holds no session there, so it must read as signed out rather
+    /// than as corruption.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn emptied_token_cache_reads_as_signed_out_not_malformed() {
+        let secret = b"test-keychain-secret".to_vec();
+        let tmp = tempfile::tempdir().unwrap();
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({ "oauth:tokenCache": seal(&secret, b"{}") }),
+        );
+        let (store, _s) = store();
+        let platform = SlowPathFake {
+            data_dir: tmp.path().to_path_buf(),
+            secret,
+        };
+        let fetcher = FixedFetcher {
+            email: "unused@example.com".into(),
+            org_uuid: Uuid::new_v4().to_string(),
+        };
+        let err =
+            probe_live_identity_async(&platform, &store, ProbeOptions { strict: true }, &fetcher)
+                .await
+                .expect_err("empty bundle map must be an error");
+        assert!(
+            matches!(err, DesktopIdentityError::NotSignedIn),
+            "expected NotSignedIn, got {err:?}"
+        );
+    }
+
+    /// A refused token must not surface as a bare transport failure.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn refused_token_is_token_rejected_not_profile_fetch() {
+        let secret = b"test-keychain-secret".to_vec();
+        let tmp = tempfile::tempdir().unwrap();
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({ "oauth:tokenCacheV2": seal(&secret, &bundle("sk-ant-oat01-X")) }),
+        );
+        let (store, _s) = store();
+        let platform = SlowPathFake {
+            data_dir: tmp.path().to_path_buf(),
+            secret,
+        };
+        // Accepts nothing, so the probe's token is refused.
+        let fetcher = OnlyAcceptsFetcher {
+            accepted: "sk-ant-oat01-SOMETHING-ELSE".into(),
+        };
+        let err =
+            probe_live_identity_async(&platform, &store, ProbeOptions { strict: true }, &fetcher)
+                .await
+                .expect_err("refused token must error");
+        assert!(
+            matches!(err, DesktopIdentityError::TokenRejected(_)),
+            "expected TokenRejected, got {err:?}"
+        );
+        // The sentence must name the remedy, not just a status.
+        assert!(err.to_string().contains("sign in to Claude Desktop again"));
+    }
+
+    /// Fetcher that models the server: one token works, everything
+    /// else is refused the way `/profile` refuses a stale credential.
+    #[cfg(target_os = "macos")]
+    struct OnlyAcceptsFetcher {
+        accepted: String,
+    }
+
+    #[cfg(target_os = "macos")]
+    #[async_trait::async_trait]
+    impl super::ProfileFetcher for OnlyAcceptsFetcher {
+        async fn fetch(
+            &self,
+            token: &str,
+        ) -> Result<super::ProfileResponse, super::ProfileFetchError> {
+            if token == self.accepted {
+                Ok(super::ProfileResponse {
+                    email: "verified@example.com".into(),
+                    org_uuid: Uuid::new_v4().to_string(),
+                })
+            } else {
+                Err(super::ProfileFetchError::Rejected(
+                    "access token rejected by /api/oauth/profile (403 Forbidden)".into(),
+                ))
+            }
+        }
     }
 }

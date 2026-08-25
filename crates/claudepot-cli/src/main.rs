@@ -1181,14 +1181,13 @@ enum DesktopAction {
     },
     /// Probe the live Desktop session identity.
     ///
-    /// Phase 1 uses a fast, non-verifying org-UUID match against
+    /// The default is a fast, non-verifying org-UUID match against
     /// `~/Library/Application Support/Claude/config.json`. The result
     /// is labeled "org_uuid_candidate" so callers know not to trust it
-    /// for mutation. Phase 2 will add a `--strict` path that decrypts
-    /// `oauth:tokenCache` and verifies via `/profile`.
+    /// for mutation. `--strict` decrypts the OAuth token cache and
+    /// verifies via `/profile`.
     Identity {
         /// Force the authoritative slow path (decrypt + /profile).
-        /// Phase 1: returns an error since crypto isn't wired yet.
         #[arg(long)]
         strict: bool,
     },

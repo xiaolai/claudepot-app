@@ -757,6 +757,9 @@ mod tests {
                 E::Key(crate::desktop_backend::DesktopKeyError::Unsupported),
                 E::Decrypt(crate::desktop_backend::crypto::DecryptError::Aes),
                 E::TokenParse("no access token found in decrypted bundles".to_string()),
+                E::TokenRejected(
+                    "access token rejected by /api/oauth/profile (403 Forbidden)".to_string(),
+                ),
                 E::ProfileFetch("OAuth server error: /profile returned 503".to_string()),
                 E::Unsupported,
             ];
@@ -770,6 +773,7 @@ mod tests {
                     | E::Key(_)
                     | E::Decrypt(_)
                     | E::TokenParse(_)
+                    | E::TokenRejected(_)
                     | E::ProfileFetch(_)
                     | E::Unsupported => {}
                 }

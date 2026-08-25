@@ -296,6 +296,7 @@
     "not_signed_in": "Claude Desktop 已退出登录。",
     "profile_fetch": "无法向 Anthropic 确认该 Desktop 账号：{{detail}}",
     "token_parse": "Claude Desktop 的会话数据格式有误：{{detail}}",
+    "token_rejected": "Claude Desktop 保存的会话被 Anthropic 拒绝：{{detail}}。请重新登录 Claude Desktop。",
     "unsupported": "本平台不支持验证 Desktop 账号。"
   },
   "desktop_key": {

@@ -267,7 +267,7 @@
       "code": "desktop_identity.not_signed_in",
       "owner": "core",
       "params": [],
-      "message": "no oauth:tokenCache present — Desktop is signed out"
+      "message": "no OAuth token cache present — Desktop is signed out"
     },
     {
       "code": "desktop_identity.key",
@@ -292,6 +292,14 @@
         "detail"
       ],
       "message": "decrypted token cache is malformed: no access token found in decrypted bundles"
+    },
+    {
+      "code": "desktop_identity.token_rejected",
+      "owner": "core",
+      "params": [
+        "detail"
+      ],
+      "message": "Desktop's saved session was rejected by Anthropic (access token rejected by /api/oauth/profile (403 Forbidden)) — sign in to Claude Desktop again"
     },
     {
       "code": "desktop_identity.profile_fetch",

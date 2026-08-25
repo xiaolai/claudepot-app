@@ -8,7 +8,7 @@ use super::*;
 /// Probe the live Desktop session identity.
 ///
 /// Fast path (default): org-UUID candidate match against the live
-/// `config.json`. Slow path (`--strict`): decrypts `oauth:tokenCache`
+/// `config.json`. Slow path (`--strict`): decrypts the token cache
 /// via the OS keychain + calls `/api/oauth/profile` for an
 /// authoritative identity.
 pub async fn identity(ctx: &AppContext, strict: bool) -> Result<()> {

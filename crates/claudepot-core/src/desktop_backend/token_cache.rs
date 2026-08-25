@@ -1,5 +1,33 @@
-//! Parser for the plaintext produced by decrypting
-//! `config.json → oauth:tokenCache`.
+//! Parser for the plaintext produced by decrypting Claude Desktop's
+//! OAuth token cache out of `config.json`.
+//!
+//! # Which key holds it — read [`TOKEN_CACHE_KEYS`], never a literal
+//!
+//! Desktop has migrated the live cache from `oauth:tokenCache` to
+//! `oauth:tokenCacheV2`. The migration is triggered by a **sign-in**,
+//! not by a version upgrade: an install that has not re-authenticated
+//! since the change still carries only the legacy key, which is why
+//! this reads as version-independent from the outside.
+//!
+//! What a re-authentication does, measured on Desktop `1.34493.1`
+//! (macOS, 2026-08-25) by capturing `config.json` either side of a
+//! sign-in:
+//!
+//! | key | before sign-in | after sign-in |
+//! |---|---|---|
+//! | `oauth:tokenCache`   | 1776 b, live token | **28 b, decrypts to `{}`** |
+//! | `oauth:tokenCacheV2` | absent             | 708 b, live token |
+//!
+//! So the legacy key is not merely stale after migration — it is
+//! emptied to a valid envelope around an empty object. Both failure
+//! shapes have been seen in the wild and both trace to reading V1:
+//! an install whose legacy key still holds an old token sends it and
+//! gets a bare `403` (github#93), while one that has migrated decrypts
+//! to `{}` and fails as "no bundle entries". Same cause, two faces.
+//!
+//! **The V2 payload is the same schema** — verified by decrypting it:
+//! the keyed scope-bundle map documented below, parsed by this module
+//! with no change. The two keys differ in freshness, not in format.
 //!
 //! # Real shape (empirically verified 2026-04-23 against live
 //! Claude Desktop on macOS)
@@ -40,6 +68,33 @@
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
+
+/// The `config.json` keys Desktop stores the OAuth token cache under,
+/// **most-preferred first**.
+///
+/// Ordering is the whole contract: `oauth:tokenCacheV2` is the key a
+/// current Desktop refreshes, and `oauth:tokenCache` is kept only so
+/// an install that has not re-authenticated since the migration still
+/// works. See the module docs for the measurement behind that.
+pub const TOKEN_CACHE_KEYS: [&str; 2] = ["oauth:tokenCacheV2", "oauth:tokenCache"];
+
+/// Pick the live token-cache ciphertext out of a parsed `config.json`.
+///
+/// Every reader of that file must go through this rather than naming
+/// a key inline — there were two such call sites and both named the
+/// legacy key, so a Desktop migration broke both at once.
+pub fn read_token_cache_b64(cfg: &serde_json::Value) -> Option<&str> {
+    // The emptiness check belongs INSIDE the search, not after it:
+    // applied afterwards, an empty `oauth:tokenCacheV2` ends the
+    // search and returns None instead of falling through to the
+    // legacy key. Caught by
+    // `read_token_cache_skips_empty_string_and_falls_through`.
+    TOKEN_CACHE_KEYS.iter().find_map(|k| {
+        cfg.get(*k)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+    })
+}
 
 #[derive(Deserialize, Clone)]
 pub struct TokenEnvelope {
@@ -223,6 +278,41 @@ impl crate::error_code::ErrorCode for TokenParseError {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn read_token_cache_prefers_v2_over_legacy() {
+        // Both present is the normal post-migration state, and the
+        // legacy value is the one that gets a 403 (github#93).
+        let cfg = json!({ "oauth:tokenCache": "LEGACY", "oauth:tokenCacheV2": "LIVE" });
+        assert_eq!(super::read_token_cache_b64(&cfg), Some("LIVE"));
+    }
+
+    #[test]
+    fn read_token_cache_falls_back_to_legacy_when_v2_absent() {
+        // An install that has not re-authenticated since the migration.
+        let cfg = json!({ "oauth:tokenCache": "LEGACY" });
+        assert_eq!(super::read_token_cache_b64(&cfg), Some("LEGACY"));
+    }
+
+    #[test]
+    fn read_token_cache_skips_empty_string_and_falls_through() {
+        let cfg = json!({ "oauth:tokenCacheV2": "", "oauth:tokenCache": "LEGACY" });
+        assert_eq!(super::read_token_cache_b64(&cfg), Some("LEGACY"));
+    }
+
+    #[test]
+    fn read_token_cache_none_when_neither_key_present() {
+        let cfg = json!({ "locale": "en-US" });
+        assert_eq!(super::read_token_cache_b64(&cfg), None);
+    }
+
+    #[test]
+    fn read_token_cache_ignores_non_string_values() {
+        let cfg = json!({ "oauth:tokenCacheV2": 42, "oauth:tokenCache": "LEGACY" });
+        assert_eq!(super::read_token_cache_b64(&cfg), Some("LEGACY"));
+    }
+
     use super::*;
 
     fn sample() -> &'static [u8] {

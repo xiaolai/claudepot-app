@@ -16,9 +16,8 @@ pub enum DesktopProbeMethod {
     /// one registered account. Cheap, but NOT verified — users with
     /// multiple accounts in the same org produce wrong matches.
     OrgUuidCandidate,
-    /// Slow path: decrypted `oauth:tokenCache` + successful `/profile`
-    /// round-trip. Trusted. (Phase 2+ — returns `None` with an
-    /// `Unimplemented` error in Phase 1.)
+    /// Slow path: decrypted OAuth token cache + successful `/profile`
+    /// round-trip. Trusted.
     Decrypted,
     /// Probe ran successfully but produced no identity (signed out,
     /// ambiguous org, or no registered account matches).

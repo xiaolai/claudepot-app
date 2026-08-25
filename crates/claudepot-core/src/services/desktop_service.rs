@@ -792,8 +792,10 @@ pub(crate) async fn desktop_prelude<'a>(
 ///
 /// 1. If no `profile_dir/config.json` exists → Ok(true). Nothing to
 ///    validate; the snapshot is empty or signed-out.
-/// 2. Read `oauth:tokenCache` from that file. Missing → Ok(true)
-///    (the snapshot was captured from a signed-out Desktop).
+/// 2. Read the token cache from that file, via
+///    `token_cache::read_token_cache_b64` so the V2/V1 preference is
+///    shared with the live-identity probe rather than restated.
+///    Missing → Ok(true) (snapshot of a signed-out Desktop).
 /// 3. Fetch the live `safe_storage_secret` (current DPAPI master key).
 /// 4. Attempt AES-GCM decrypt of the stored ciphertext with the
 ///    current key. Success → Ok(true). AES failure → Ok(false): the
@@ -827,7 +829,12 @@ pub async fn check_profile_dpapi_valid(
         let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&raw) else {
             return Ok(true); // malformed stored snapshot — not a DPAPI issue
         };
-        let Some(token_b64) = cfg.get("oauth:tokenCache").and_then(|v| v.as_str()) else {
+        // Snapshots span the migration: one captured before Desktop
+        // moved to `oauth:tokenCacheV2` carries only the legacy key,
+        // one captured after carries both. The shared selector picks
+        // whichever is live in that snapshot.
+        let Some(token_b64) = crate::desktop_backend::token_cache::read_token_cache_b64(&cfg)
+        else {
             return Ok(true); // snapshot of a signed-out Desktop
         };
 

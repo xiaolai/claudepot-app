@@ -1,7 +1,9 @@
 //! Chromium OSCrypt / Electron safeStorage decryption for Claude Desktop.
 //!
-//! Desktop stores `oauth:tokenCache` inside `config.json` as a base64
-//! string with a three-byte version prefix. The envelope is the same
+//! Desktop stores its OAuth token cache inside `config.json` as a
+//! base64 string with a three-byte version prefix. Which key holds it
+//! is [`super::token_cache::TOKEN_CACHE_KEYS`]' business, not this
+//! module's — this decrypts whatever ciphertext it is handed. The envelope is the same
 //! format Chromium's cookie store uses — we reuse the well-documented
 //! algorithms here.
 //!
