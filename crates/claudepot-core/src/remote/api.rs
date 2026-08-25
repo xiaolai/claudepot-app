@@ -877,7 +877,16 @@ pub(super) async fn passkey_login_finish(
     // revoke.
     let label = guard.config.passkeys[index].label.clone();
     let (token, device) = super::login::issue_session(&label, now);
-    guard.devices.devices.push(device.clone());
+    // `admit` bounds the list on the way in — see `remote::prune`. Every
+    // login used to append a row that nothing ever removed.
+    let pruned = guard.devices.admit(device.clone(), now);
+    if !pruned.is_empty() {
+        tracing::info!(
+            expired_sessions = pruned.expired_sessions,
+            revoked_over_cap = pruned.revoked_over_cap,
+            "remote: pruned spent device records"
+        );
+    }
 
     let (config, devices) = (guard.config.clone(), guard.devices.clone());
     if let Err(e) = guard.persist.save(&config, &devices) {

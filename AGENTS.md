@@ -371,11 +371,31 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     revocation list**, which is why the store fails loud on corruption:
     a silent reset would not just lose the device list (that fails
     closed, safely — nothing authenticates until re-paired) but erase
-    `revoked_at` for every device that was turned off, and a revoked
-    token stays refused *only* because its record is still here. At
-    most one `pending` pairing window: two live codes double the
-    guessing surface for no benefit. Empty file = no paired devices.
-    See "## Remote control".
+    `revoked_at` for every device that was turned off — losing the
+    record of what was let in and when it was turned off. (The refusal
+    itself does not depend on the record: `authenticate` filters to
+    `is_usable_at` and only then matches the hash, so an unknown token
+    and a revoked one are the same answer. An earlier version of this
+    note said the record was what kept a revoked token refused; that
+    overstated it.) At most one `pending` pairing window: two live codes
+    double the guessing surface for no benefit. Empty file = no paired
+    devices.
+
+    **Bounded on the way in, by `remote::prune`.** Every pairing appends
+    a `Device`, and so does every password login — a session and a
+    paired device are deliberately the same row — while revocation only
+    *marks*. So the file grew monotonically and nothing ever removed
+    anything. `DevicesFile::admit` is now the single append path and
+    prunes before it pushes, so the arriving device can never be what a
+    cap evicts. The policy, and the judgement in it: a **live** device
+    is never pruned; a lapsed **session** goes 90 days after it expires
+    (machine-issued and self-expiring, so nobody decided anything by
+    letting it lapse); a **revoked** device is kept up to 200, newest
+    first by `revoked_at` (revoking is a decision a human made about a
+    specific device, and is worth more than a lapsed session). Both are
+    equally refused by `authenticate` and are *not* equally interesting
+    to a person reading the list later — that asymmetry is the whole
+    policy. See "## Remote control".
   - `remote-config.json` — the remote surface's server settings and
     persisted auth state. `{schema_version, server: {enabled, bind,
     port}, password_hash, totp_secret_base32, totp_last_counter,

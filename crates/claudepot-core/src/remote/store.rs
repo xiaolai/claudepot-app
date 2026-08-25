@@ -3,10 +3,16 @@
 //! **Fails loud on corruption**, and for a sharper reason than the
 //! other stores that do: this file is the *revocation list*. Recovering
 //! it silently to empty would not merely lose settings — it would erase
-//! `revoked_at` for every device that had been turned off, and the only
-//! reason a revoked token stays refused is that its record is still
-//! here. A silent reset is how a revoked phone quietly becomes
-//! unknown-again rather than denied.
+//! `revoked_at` for every device that had been turned off, losing the
+//! record of what was let in and when it was withdrawn.
+//!
+//! Be exact about what that costs, because an earlier version of this
+//! note was not: the *refusal* does not depend on the record.
+//! [`super::authenticate`] filters to `is_usable_at` and only then
+//! matches the hash, so an unknown token and a revoked one are the same
+//! answer. What a silent reset destroys is the history — which is the
+//! entire reason these rows are kept, and why `remote::prune` spends it
+//! as slowly as a bounded file allows.
 //!
 //! It also loses the device list itself, which fails *closed* (nothing
 //! authenticates until re-paired). That half is safe; the revocation

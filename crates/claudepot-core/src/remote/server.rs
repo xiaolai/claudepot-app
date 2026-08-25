@@ -346,7 +346,16 @@ async fn handle_login(State(state): State<Shared>, Json(body): Json<LoginRequest
     // Persist regardless of outcome — the throttle counter lives here.
     guard.config.absorb(&auth);
     if let LoginOutcome::Success { device, .. } = &outcome {
-        guard.devices.devices.push(device.clone());
+        // `admit` rather than `push`: this is the busiest way the list
+        // grows, and nothing used to remove anything. See `remote::prune`.
+        let pruned = guard.devices.admit(device.clone(), Utc::now());
+        if !pruned.is_empty() {
+            tracing::info!(
+                expired_sessions = pruned.expired_sessions,
+                revoked_over_cap = pruned.revoked_over_cap,
+                "remote: pruned spent device records"
+            );
+        }
     }
     let (config, devices) = (guard.config.clone(), guard.devices.clone());
     if let Err(e) = guard.persist.save(&config, &devices) {

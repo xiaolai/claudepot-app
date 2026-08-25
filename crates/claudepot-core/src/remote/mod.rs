@@ -56,6 +56,7 @@ pub mod login;
 pub mod panel;
 pub mod passkey;
 pub mod password;
+pub mod prune;
 pub mod serve;
 pub mod server;
 pub mod service;
@@ -219,6 +220,23 @@ pub fn judge_pairing(
         return Err((PairingRejection::Burned, None));
     }
     Err((PairingRejection::Wrong, Some(next)))
+}
+
+impl DevicesFile {
+    /// Add a newly issued device, bounding the list on the way in.
+    ///
+    /// Every pairing and every password login lands here, so this is the
+    /// only moment the list grows — which makes it the one place worth
+    /// bounding it. Pruning happens BEFORE the push so a brand-new
+    /// device can never be the row a cap evicts.
+    ///
+    /// Returns what was dropped; see [`prune`] for the policy and for
+    /// why removing a spent row cannot let a token back in.
+    pub fn admit(&mut self, device: Device, now: DateTime<Utc>) -> prune::Pruned {
+        let pruned = prune::prune(&mut self.devices, now);
+        self.devices.push(device);
+        pruned
+    }
 }
 
 /// Find the active device a bearer token belongs to.
