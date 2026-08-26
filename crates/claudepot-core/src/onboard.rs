@@ -118,6 +118,105 @@ pub const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60
 /// memory or render unreadable. Issue #16: the previous behaviour
 /// dropped stderr entirely on failure, leaving users with only the
 /// exit code.
+/// Where the browser is sent to drop its `claude.ai` session before a
+/// login begins. See [`clear_browser_session`].
+pub const LOGOUT_URL: &str = "https://claude.ai/logout";
+
+/// How long to let the logout land before `claude auth login` opens the
+/// authorize URL in the same browser.
+///
+/// This is a fixed wait because there is nothing to observe: the cookie
+/// lives in the user's browser and Claudepot drives it through the OS
+/// handler, with no channel back. Too short and the authorize page may
+/// load against a session the logout has not dropped yet — which is the
+/// state this exists to prevent; too long and every login pays for it.
+/// Three seconds covers a redirect on a normal connection.
+const LOGOUT_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The platform command that hands a URL to the user's default browser.
+///
+/// Split from [`clear_browser_session`] so the platform choice is
+/// testable without spawning anything — the judgement never needs a
+/// browser, only the I/O does.
+fn browser_open_command(url: &str) -> (&'static str, Vec<String>) {
+    #[cfg(target_os = "macos")]
+    {
+        ("/usr/bin/open", vec![url.to_string()])
+    }
+    #[cfg(target_os = "linux")]
+    {
+        ("xdg-open", vec![url.to_string()])
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `start` needs an empty title argument first, or it treats the
+        // URL as the window title and opens nothing.
+        (
+            "cmd",
+            vec![
+                "/C".to_string(),
+                "start".to_string(),
+                String::new(),
+                url.to_string(),
+            ],
+        )
+    }
+}
+
+/// Send the browser to `claude.ai/logout` and give it a moment to land.
+///
+/// **Why this runs at all.** `claude auth login` opens an authorize URL
+/// in the user's default browser. The Google session and the `claude.ai`
+/// session are different cookies, so a browser already signed in to
+/// `claude.ai` authorizes *that* account — the account chooser either
+/// never appears or is ignored. Adding a second account then silently
+/// re-authorizes the first, and the result looks like success: a
+/// credential blob lands, `/profile` agrees with it, and the only sign
+/// anything went wrong is the email.
+///
+/// **The side effect is real and intended.** This signs the user out of
+/// `claude.ai` in their everyday browser. That is a visible cost, taken
+/// deliberately: signing back in is one click, whereas a silently wrong
+/// account propagates into a stored credential.
+///
+/// **Best-effort, never fatal.** Every failure — no handler, a spawn
+/// error, a browser that ignores the URL — leaves the previous
+/// behaviour, which is exactly what shipped before this existed. A login
+/// must not fail because a logout page did not open.
+pub async fn clear_browser_session() {
+    let (program, args) = browser_open_command(LOGOUT_URL);
+    tracing::info!(
+        url = LOGOUT_URL,
+        "clearing browser claude.ai session before login"
+    );
+
+    match tokio::process::Command::new(program)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .no_window()
+        .spawn()
+    {
+        Ok(mut child) => {
+            // Reap it. The handler exits immediately once it has handed
+            // the URL off; not waiting leaves a zombie on Unix.
+            let _ = child.wait().await;
+        }
+        Err(e) => {
+            // Deliberately not an error return — see the contract above.
+            tracing::warn!(
+                error = %e,
+                "could not open the logout URL; continuing. If this login \
+                 authorizes the wrong account, a stale claude.ai session is why"
+            );
+            return;
+        }
+    }
+
+    tokio::time::sleep(LOGOUT_SETTLE).await;
+}
+
 const STDERR_TAIL_LINES: usize = 12;
 
 /// Bounded grace window for the stderr drain task to flush remaining
@@ -159,6 +258,10 @@ pub async fn run_auth_login_in_place_cancellable(
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<(), OnboardError> {
     let claude_path = which_claude()?;
+    // Before the browser opens, not after — see `clear_browser_session`.
+    // Resolving the binary first means a missing `claude` fails without
+    // having signed the user out of anything.
+    clear_browser_session().await;
     run_auth_login_in_place_cancellable_with_binary(&claude_path, cancel).await
 }
 
@@ -309,6 +412,8 @@ pub async fn run_auth_login_cancellable(
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<PathBuf, OnboardError> {
     let claude_path = which_claude()?;
+    // See the sibling call in `run_auth_login_in_place_cancellable`.
+    clear_browser_session().await;
     run_auth_login_cancellable_with_binary(&claude_path, cancel).await
 }
 
@@ -477,6 +582,46 @@ fn which_claude() -> Result<PathBuf, OnboardError> {
 
 #[cfg(test)]
 mod tests {
+    /// The URL is the whole feature — a typo here silently does
+    /// nothing, because the open is best-effort and a bad URL fails the
+    /// same way as no handler.
+    #[test]
+    fn logout_url_is_the_claude_ai_logout_endpoint() {
+        assert_eq!(super::LOGOUT_URL, "https://claude.ai/logout");
+    }
+
+    #[test]
+    fn browser_open_command_passes_the_url_through() {
+        let (program, args) = super::browser_open_command(super::LOGOUT_URL);
+        assert!(!program.is_empty());
+        assert!(
+            args.iter().any(|a| a == super::LOGOUT_URL),
+            "the URL must reach the handler; got {args:?}"
+        );
+    }
+
+    /// On Windows `start` consumes the first quoted argument as the
+    /// window title, so the empty placeholder is load-bearing: without
+    /// it the URL becomes the title and no browser opens.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_start_keeps_its_empty_title_placeholder() {
+        let (program, args) = super::browser_open_command(super::LOGOUT_URL);
+        assert_eq!(program, "cmd");
+        assert_eq!(args[0], "/C");
+        assert_eq!(args[1], "start");
+        assert_eq!(args[2], "", "empty title placeholder must precede the URL");
+        assert_eq!(args[3], super::LOGOUT_URL);
+    }
+
+    /// The wait exists because nothing can be observed; if it is ever
+    /// zeroed the authorize page can load against the session the
+    /// logout has not dropped yet, which is the bug this prevents.
+    #[test]
+    fn logout_settle_is_nonzero() {
+        assert!(super::LOGOUT_SETTLE > std::time::Duration::ZERO);
+    }
+
     use super::*;
 
     /// The -2 sentinel for "timed out" must render a clear, actionable

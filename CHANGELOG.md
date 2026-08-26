@@ -6,6 +6,28 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.5 — beta (released 2026-08-26)
+
+### Fixed
+
+- **Adding an account could silently re-add the one you were already
+  signed in as.** Logging in opens your browser, and if that browser
+  already had an active claude.ai session, the login used it — the
+  account picker either never appeared or made no difference. The
+  result looked like a success: a credential was saved and confirmed
+  with Anthropic, and the only clue anything was wrong was the email
+  on the account.
+
+  Claudepot now signs the browser out of claude.ai first, so the login
+  always starts from a clean slate and the account you pick is the
+  account you get.
+
+  **This does sign you out of claude.ai in your browser.** That is
+  deliberate: signing back in takes one click, whereas the wrong
+  account saved under the right name is quiet and lasts. If the
+  sign-out cannot be performed for any reason, logging in still
+  proceeds exactly as it did before.
+
 ## 0.5.4 — beta (released 2026-08-25)
 
 ### Fixed
