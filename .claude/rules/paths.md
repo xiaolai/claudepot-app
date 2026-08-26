@@ -80,6 +80,35 @@ exceptions.
   wrong name, path and arity. It does not prove the *platform* behaviour
   — only CI does that — but it removes the class of failure that is pure
   spelling.
+- **A `#[cfg]` arm does not only need to compile — its absence must not
+  orphan anything.** Typechecking the gated arm answers "does this
+  build on that platform"; it does not answer "what becomes dead when
+  this arm vanishes". A helper called only from a `macos` arm is
+  `dead_code` on Linux, and CI's `Format / Clippy (Linux)` runs
+  `-D warnings`, so that is a hard failure — invisible to macOS-local
+  clippy, which sees the helper used.
+
+  Simulate the other platform in place. Rewrite the target in the file
+  under test so the gates flip, run clippy, then restore:
+
+  ```bash
+  sed -i '' 's/target_os = "macos"/target_os = "linux"/g' <file>
+  cargo clippy --all-targets -p claudepot-core -- -D warnings
+  ```
+
+  On macOS the `macos` items now compile out and the `not(macos)`
+  fallbacks compile in — exactly the Linux shape. Use a **real**
+  `target_os` value: an invented one (`"nope"`) trips
+  `unexpected_cfgs` and the run fails before it has tested anything,
+  which reads as a caught bug and is not one.
+
+  This is not hypothetical. `login_browser::parse_https_handler` is
+  called only from the `macos` `default_browser_id`, shipped in the
+  0.5.6 commit, and turned `main` red on a gate the validator hosts
+  would have caught had they been up. The simulation above reproduces
+  that error locally in one command, and was watched failing against
+  the ungated version before the gate was accepted.
+
 - **Red → green, never green first.** Before changing path-processing
   behavior:
   1. Write the failing test with the expected Windows form.

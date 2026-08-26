@@ -168,6 +168,7 @@ pub async fn default_browser_id() -> Option<String> {
 /// nested inside `LSHandlerPreferredVersions` with a junk value. Taking
 /// the first match in the block yields `"-"`, so this takes the last
 /// one before the scheme line, which is the real handler.
+#[cfg(target_os = "macos")]
 pub(crate) fn parse_https_handler(text: &str) -> Option<String> {
     let mut candidate: Option<String> = None;
     for raw in text.lines() {
@@ -276,6 +277,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn parses_the_https_handler_from_launchservices_output() {
         let sample = r#"(
@@ -303,6 +305,7 @@ mod tests {
     /// The nested `LSHandlerPreferredVersions` dict carries its own
     /// `LSHandlerRoleAll = "-"`. Taking the first match in a block
     /// yields that placeholder instead of the browser.
+    #[cfg(target_os = "macos")]
     #[test]
     fn placeholder_inside_preferred_versions_is_not_mistaken_for_a_handler() {
         let sample = r#"{
@@ -320,6 +323,7 @@ mod tests {
 
     /// No https block at all — a real state on a fresh machine, and it
     /// must degrade rather than guess.
+    #[cfg(target_os = "macos")]
     #[test]
     fn absent_https_handler_is_none() {
         let sample = r#"{
@@ -332,6 +336,7 @@ mod tests {
 
     /// A handler belonging to a different scheme must not leak into a
     /// later block that has no handler line of its own.
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_handler_does_not_leak_across_scheme_blocks() {
         let sample = r#"{
