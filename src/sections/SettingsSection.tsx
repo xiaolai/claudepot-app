@@ -275,7 +275,7 @@ function SettingsNav({
 /*                       General pane                          */
 /* ──────────────────────────────────────────────────────────── */
 
-function GeneralPane({
+export function GeneralPane({
   pushToast,
 }: {
   pushToast: (t: "info" | "error", msg: string) => void;
@@ -295,6 +295,9 @@ function GeneralPane({
   >(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [isMac, setIsMac] = useState<boolean>(false);
+  // null until `appStatus` answers, so a dev build never flashes a
+  // control it must not offer.
+  const [isDevBuild, setIsDevBuild] = useState<boolean | null>(null);
   // null = follow system; undefined = not yet loaded.
   const [localePref, setLocalePref] = useState<string | null | undefined>(
     undefined,
@@ -337,10 +340,18 @@ function GeneralPane({
         setShowWindowOnStartup(prefs.show_window_on_startup);
         setLocalePref(prefs.locale ?? null);
         setIsMac(status.platform === "macos");
-        try {
-          setLaunchAtLogin(await isEnabled());
-        } catch {
+        setIsDevBuild(status.dev_build);
+        if (status.dev_build) {
+          // The autostart plugin is release-only (lib.rs): a dev build
+          // must never register its `target/debug` path as a login
+          // item. The row is hidden below; the query would only reject.
           setLaunchAtLogin(false);
+        } else {
+          try {
+            setLaunchAtLogin(await isEnabled());
+          } catch {
+            setLaunchAtLogin(false);
+          }
         }
       } catch (e) {
         if (!cancelled)
@@ -488,16 +499,18 @@ function GeneralPane({
           }}
         />
       </Row>
-      <Row
-        label={ts("general.launchAtLogin.label")}
-        hint={ts("general.launchAtLogin.hint")}
-      >
-        <Toggle
+      {isDevBuild === false && (
+        <Row
           label={ts("general.launchAtLogin.label")}
-          on={launchAtLogin === true}
-          onChange={toggleLaunchAtLogin}
-        />
-      </Row>
+          hint={ts("general.launchAtLogin.hint")}
+        >
+          <Toggle
+            label={ts("general.launchAtLogin.label")}
+            on={launchAtLogin === true}
+            onChange={toggleLaunchAtLogin}
+          />
+        </Row>
+      )}
       <Row
         label={ts("general.showWindow.label")}
         hint={ts("general.showWindow.hint")}

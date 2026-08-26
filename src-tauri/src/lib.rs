@@ -433,9 +433,6 @@ pub fn run() {
         rotation_orchestrator::RotationOrchestrator::new(rotation_audit.clone()),
     );
 
-    // `mut` is only consumed by the debug-only plugin block below;
-    // release builds don't touch it. Silence the release warning here.
-    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut builder = tauri::Builder::default()
         // MUST be the first plugin. On a second launch the new process
         // forwards its argv to the already-running instance and exits;
@@ -473,10 +470,6 @@ pub fn run() {
         // permission is required so the 30s self-clear can verify the
         // clipboard still holds our payload before clobbering it.
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
         .setup(move |app| {
             use tauri::{
                 image::Image,
@@ -491,6 +484,31 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if hide_dock {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
+            // Re-register launch-at-login on every release launch. The
+            // login item stores an absolute executable path, so it goes
+            // stale whenever the bundle moves or is reinstalled — and it
+            // was poisoned outright by dev builds before the plugin
+            // became release-only (see the registration below). Not a
+            // second `launchctl`/login-item registration: on every
+            // platform `enable()` is a plain file or registry rewrite
+            // of the same entry, so it is idempotent and cannot start a
+            // second instance. Logged, never fatal — a stale login item
+            // must not keep the app from starting.
+            #[cfg(not(debug_assertions))]
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let autolaunch = app.autolaunch();
+                match autolaunch.is_enabled() {
+                    Ok(true) => {
+                        if let Err(e) = autolaunch.enable() {
+                            tracing::warn!("launch-at-login re-registration failed: {e}");
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(e) => tracing::warn!("launch-at-login state unreadable: {e}"),
+                }
             }
 
             // Force the Dock icon through Cocoa's NSImage pipeline
@@ -1034,6 +1052,23 @@ pub fn run() {
     // Memory change-log state. Always managed — `memory_log` is now
     // unconditionally `Arc<MemoryLog>` per audit 2026-05 #2.
     builder = builder.manage(commands::memory::MemoryLogState::new(memory_log.clone()));
+
+    // Launch-at-login is release-only. The plugin registers
+    // `current_exe()` verbatim as the login item's program, so a dev
+    // build that flipped the toggle installed
+    // `target/debug/claudepot-tauri` as the login item — and every
+    // login after that started a bare debug binary whose `devUrl` had
+    // no Vite behind it: a blank window, indistinguishable from a
+    // webview or proxy fault (2026-08-26). Leaving the plugin
+    // unregistered is the fail-closed shape — a dev build has nothing
+    // to call; `GeneralPane` hides the row via `AppStatus.dev_build`.
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
+    }
 
     #[cfg(debug_assertions)]
     {

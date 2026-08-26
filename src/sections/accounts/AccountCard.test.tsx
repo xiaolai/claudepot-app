@@ -38,6 +38,7 @@ function mkStatus(overrides: Partial<AppStatus> = {}): AppStatus {
     account_count: 1,
     data_dir: "/tmp/claudepot",
     cc_config_dir: "/tmp/.claude",
+    dev_build: false,
     ...overrides,
   };
 }

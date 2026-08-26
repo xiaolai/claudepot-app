@@ -258,6 +258,7 @@ pub async fn app_status() -> Result<AppStatus, ErrorDto> {
         data_dir: paths::claudepot_data_dir().display().to_string(),
         cc_config_dir: paths::claude_config_dir().display().to_string(),
         account_count: accounts.len(),
+        dev_build: cfg!(debug_assertions),
     })
 }
 

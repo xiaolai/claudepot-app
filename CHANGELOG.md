@@ -6,6 +6,22 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.7 — beta (unreleased)
+
+### Fixed
+
+- **A blank window at every login, after "Launch at login" had been
+  switched on inside a development build.** The login item records the
+  path of whichever binary flipped the switch, so a `tauri dev` build
+  registered `target/debug/claudepot-tauri` — and every login after that
+  started a bare debug binary with no dev server behind its page. It
+  looked like a webview or proxy fault and was blamed on one for a while.
+
+  Launch-at-login is now release-only: a development build has no way to
+  register itself. And a release build re-registers the login item on
+  every launch, so an existing stale entry — a dev path, a moved bundle —
+  heals itself the next time Claudepot starts, with no toggling required.
+
 ## 0.5.6 — beta (released 2026-08-26)
 
 ### Changed

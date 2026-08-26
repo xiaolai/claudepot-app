@@ -146,6 +146,9 @@ export interface AppStatus {
    * for Reveal-in-Finder without the webview guessing the home dir. */
   cc_config_dir: string;
   account_count: number;
+  /** True for a debug (`tauri dev`) binary. Release-only features —
+   * launch-at-login — are hidden when set. */
+  dev_build: boolean;
 }
 
 export interface RegisterOutcome {

@@ -504,6 +504,21 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     `CLAUDEPOT_DATA_DIR` override and the test-isolation guard, which
     let a test write into the developer's live data root.
 
+**Launch-at-login is release-only, and a release launch re-registers it
+every time.** `tauri-plugin-autostart` writes `current_exe()` verbatim
+into `~/Library/LaunchAgents/Claudepot.plist`, so flipping the toggle
+inside a `tauri dev` build installed `target/debug/claudepot-tauri` as
+the login item; every login after that started a bare debug binary whose
+`devUrl` had no Vite behind it — a blank window that looked like a
+webview or proxy fault, and was blamed on one for a while (2026-08-26).
+Two halves, both in `lib.rs`: the plugin is registered under
+`#[cfg(not(debug_assertions))]` only, so a dev build has nothing to call
+(`GeneralPane` hides the row via `AppStatus.dev_build`); and a release
+build calls `enable()` again at setup whenever `is_enabled()`, which is a
+plain plist rewrite — no `launchctl` — so a moved bundle or a stale dev
+registration heals itself on the next launch instead of persisting until
+someone toggles the switch twice.
+
 ## Pricing (Activities → Cost, and every "on API" figure)
 
 Cost figures answer "what would pay-per-call have cost me". Rates are

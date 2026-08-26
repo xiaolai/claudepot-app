@@ -13,6 +13,7 @@ export const sampleStatus = (overrides?: Partial<AppStatus>): AppStatus => ({
   data_dir: "/tmp/claudepot-test",
   cc_config_dir: "/tmp/claudepot-test/.claude",
   account_count: 0,
+  dev_build: false,
   ...overrides,
 });
 

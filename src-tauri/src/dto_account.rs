@@ -278,6 +278,10 @@ pub struct AppStatus {
     /// JS side never has to guess the home directory.
     pub cc_config_dir: String,
     pub account_count: usize,
+    /// `cfg!(debug_assertions)` of the running binary. Release-only
+    /// features (launch-at-login) key off this so a `tauri dev` build
+    /// cannot register `target/debug/...` paths with the OS.
+    pub dev_build: bool,
 }
 
 #[derive(Serialize)]
