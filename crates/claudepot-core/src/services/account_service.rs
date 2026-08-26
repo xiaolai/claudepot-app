@@ -1141,7 +1141,7 @@ pub(crate) async fn login_and_reimport_with_progress_test_binary(
 
     progress.phase(LoginPhase::WaitingForBrowser);
     if let Err(e) =
-        onboard::run_auth_login_in_place_cancellable_with_binary(claude_binary, cancel).await
+        onboard::run_auth_login_in_place_cancellable_with_binary(claude_binary, cancel, None).await
     {
         let msg = e.to_string();
         progress.error(LoginPhase::WaitingForBrowser, &msg);

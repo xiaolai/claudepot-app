@@ -6,6 +6,31 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.6 — beta (released 2026-08-26)
+
+### Changed
+
+- **Logging in no longer signs you out of claude.ai.** 0.5.5 fixed a
+  real problem — your browser's existing session could quietly decide
+  which account got added — but it fixed it bluntly, by signing the
+  browser out first. Adding an account had no business ending the
+  reading session you had open.
+
+  The login now opens in a **private window** instead. There is no
+  existing session for it to pick up, so the account you choose is the
+  account you get, and your own session is never touched.
+
+  Supported for Chrome, Edge, Brave, Vivaldi, Opera, Arc and Firefox.
+  **Safari has no way to open a private window from outside the app**,
+  so a Safari default keeps 0.5.5's behaviour and is still signed out
+  first — correctness is the same either way, only the side effect
+  differs. The same applies on Windows and Linux, where the browser is
+  not yet detected.
+
+  If anything about this fails — an unrecognised browser, a browser
+  that will not launch — logging in continues to work exactly as it
+  did before.
+
 ## 0.5.5 — beta (released 2026-08-26)
 
 ### Fixed
