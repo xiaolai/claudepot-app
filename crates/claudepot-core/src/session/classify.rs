@@ -10,8 +10,9 @@
 //!
 //! 1. `Summary` event         → `Compact`    (conversation boundary)
 //! 2. `FileHistorySnapshot`   → `HardNoise`  (CC-internal bookkeeping)
-//! 3. `Other` with raw type
-//!    `queue-operation`       → `HardNoise`
+//! 3. `Other` with a bookkeeping raw type (`queue-operation`,
+//!    `file-history-delta`, `atis-latch`, `bridge-session`,
+//!    `cost-state`, …)         → `HardNoise`
 //! 4. `System`                → `HardNoise`  (level=info / turn_duration)
 //! 5. `UserText` whose payload is **only** noise tags
 //!    (`<local-command-caveat>`, `<system-reminder>`,
@@ -89,10 +90,43 @@ pub fn classify_all(events: &[SessionEvent]) -> Vec<(MessageCategory, usize)> {
 // Noise heuristics
 // ---------------------------------------------------------------------------
 
+/// Top-level record `type`s CC writes purely as session bookkeeping.
+///
+/// **The default for an unlisted type is `Ai`** (see `unknown_other_is_ai`),
+/// which is deliberate — a genuinely new *content* type must not vanish —
+/// but it means every bookkeeping type CC adds is rendered as assistant
+/// prose until it is named here. That is not hypothetical: the four added
+/// on 2026-08-28 accounted for **504 records across the 40 newest
+/// transcripts** on the reference machine, every one of them counted as
+/// AI output.
+///
+/// Verified against Claude Code **2.1.250**; the `transcript JSONL schema`
+/// row in `crates/xtask/cc-upstream-watch.md` re-checks the list. When
+/// adding one, prefer evidence from a real transcript over the changelog —
+/// none of these four were announced.
 fn is_hard_noise_raw_type(raw: &str) -> bool {
     matches!(
         raw,
-        "queue-operation" | "file-history-snapshot" | "turn_duration" | "init"
+        "queue-operation"
+            | "file-history-snapshot"
+            // The delta half of the pair whose snapshot half is directly
+            // above. Reading one and not the other is how this class of
+            // record went unnoticed for as long as it did.
+            | "file-history-delta"
+            | "turn_duration"
+            | "init"
+            // Session-metadata latch; carries only `atis` + `sessionId`.
+            | "atis-latch"
+            // Remote-bridge plumbing: `bridgeSessionId`, `lastSequenceNum`,
+            // owner account/org uuids. Never conversation content.
+            | "bridge-session"
+            // CC's own running cost tally (`totalCostUSD`, `modelUsage`,
+            // `hasUnknownModelCost`). Not renderable as a message. Nothing
+            // reads it yet; note that its `modelUsage` keys carry a context
+            // qualifier the assistant-turn `model` field does not — e.g.
+            // `claude-opus-5[1m]` — so a future reader must normalise before
+            // handing a key to `PriceBook::resolve`.
+            | "cost-state"
     )
 }
 
@@ -280,6 +314,34 @@ mod tests {
             raw_type: "queue-operation".into(),
         };
         assert_eq!(classify_event(&e), MessageCategory::HardNoise);
+    }
+
+    /// Every bookkeeping type CC writes must be filtered, not rendered.
+    /// Watched failing against the pre-2026-08-28 list, where all four
+    /// classified as `Ai`.
+    #[test]
+    fn cc_bookkeeping_types_are_hard_noise() {
+        for raw in [
+            "queue-operation",
+            "file-history-snapshot",
+            "file-history-delta",
+            "turn_duration",
+            "init",
+            "atis-latch",
+            "bridge-session",
+            "cost-state",
+        ] {
+            let e = SessionEvent::Other {
+                ts: None,
+                uuid: None,
+                raw_type: raw.into(),
+            };
+            assert_eq!(
+                classify_event(&e),
+                MessageCategory::HardNoise,
+                "{raw} must not render as assistant output"
+            );
+        }
     }
 
     #[test]
