@@ -6,6 +6,66 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.8 — beta (released 2026-08-29)
+
+### Changed
+
+- **Signing in uses your normal browser again.** 0.5.5 logged the
+  browser out first; 0.5.6 replaced that with a private window. Both
+  cost you something real every time — a logout ends the claude.ai
+  session you had open, and a private window has none of your passkeys,
+  saved passwords or extensions — to prevent a problem that is
+  occasional and easy to recover from.
+
+  The sign-in now just opens where you normally browse.
+
+  The reason those versions existed has not gone away, so Claudepot
+  tells you about it instead of working around it. Claude Code's
+  sign-in link carries no "choose an account" instruction, so the page
+  reuses whichever account your browser is already signed in to. If that
+  turns out to be an account you have already added, Claudepot now says
+  exactly that, and what to do: sign out at claude.ai, or use a
+  different browser profile, then try again.
+
+  You find out after the sign-in rather than being offered a picker.
+  Given the alternatives, that seemed the better trade.
+
+### Fixed
+
+- **Transcript retention could tell you deletion was armed when Claude
+  Code had in fact switched it off.** CC 2.1.248 added a second
+  retention setting, and a bad value in *either* one makes CC skip
+  cleanup entirely. Claudepot only knew about the first, so a broken
+  second setting read as a running 30-day timer — and the advice that
+  follows from that reading ("restore the default") is the one thing
+  that clears the error and starts real deletion. It now reads both,
+  and names which one is the problem when it can prove it.
+
+- **The retention pane said nested files are never deleted. They are.**
+  Subagent runs, workflows and tool results live inside a session folder,
+  and Claude Code removes that whole folder along with the transcript
+  beside it. That was true of older CC and stopped being true; the pane
+  had been telling you those files survive a cleanup that takes them.
+
+- **Internal Claude Code bookkeeping was showing up as Claude's output.**
+  Four record types CC writes into transcripts — cost tallies, bridge
+  and latch records, file-history deltas — were being treated as
+  assistant messages. On the reference machine that was 504 records
+  across the 40 most recent sessions.
+
+- **Global → Config → Env Variables had silently stopped marking which
+  variables exist in your build.** That section switches itself off when
+  its snapshot does not match the Claude Code you are running, which is
+  correct — but it does so with no message, and the snapshot had fallen
+  nine releases behind. It is current again, and 6 newly documented
+  variables came with it.
+
+  The same pane now says where its "safe to display" markings come
+  from: a Claude Code source snapshot pinned at 2.1.88. Unlike the
+  build check, those markings cannot detect their own staleness, so the
+  pane states the source rather than leaving you to assume it is
+  current.
+
 ## 0.5.7 — beta (released 2026-08-26)
 
 ### Fixed
