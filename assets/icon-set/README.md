@@ -25,11 +25,19 @@ lit from upper left. Every coordinate is a multiple of 16 on a 1024 grid.
     macos/layer-1-plate-dark.svg
     macos/layer-2-glyph.svg    macOS 26 foreground layer (transparent)
     windows/icon-glyph.svg     plateless, cropped to the block
+                               also the source for the README mark
     linux/claudepot.svg        128 canvas, base shape in the artwork
     linux/claudepot-symbolic.svg  16 symbolic
     tray/tray-template.svg     macOS menu bar template
     tray/tray-alert-template.svg
     png/                       rasters, see below
+
+Outside this directory, `scripts/regen-icons.sh` also writes
+`assets/claudepot-icon.png` — the 480 README mark. It is the one raster
+with **no plate**: it sits in a Markdown page whose background belongs
+to the reader's theme, so a plate renders as an opaque light box on a
+dark one. Every other raster keeps the plate because the OS draws it
+against chrome it controls.
 
 ## macOS 26
 

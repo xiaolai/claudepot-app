@@ -265,6 +265,21 @@ if [[ -d "$LAYERS_DIR" ]]; then
   echo "  NOTE: run scripts/build-macos-glass-icon.sh to recompile Assets.car"
 fi
 
+# 7. The README / docs mark.
+#
+#    Plateless on purpose. Every other raster here keeps the plate,
+#    because the OS draws them against chrome it controls. This one is
+#    embedded in a Markdown page whose background is the reader's
+#    theme, so a plate is an opaque light box on GitHub's dark theme —
+#    which is what shipped until 2026-08-28.
+#
+#    Generated here rather than exported by hand, because by hand is
+#    how the previous one lost its alpha and then had no way to be
+#    reproduced: it was a committed PNG that no script mentioned, so
+#    the only record of how it was made was that it existed.
+render 480 "$WIN_SVG" assets/claudepot-icon.png
+echo "  wrote assets/claudepot-icon.png (480x480, transparent)"
+
 echo ""
 echo "Done. Verify with:"
 echo "  file $ICONS_DIR/icon.ico"
